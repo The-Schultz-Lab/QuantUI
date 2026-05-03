@@ -571,6 +571,14 @@ def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
         app.perf_estimate_html.value = ""
         return
     try:
+        calc_type = {
+            "Single Point": "single_point",
+            "Geometry Opt": "geometry_opt",
+            "Frequency": "frequency",
+            "UV-Vis (TD-DFT)": "tddft",
+            "NMR Shielding": "nmr",
+            "PES Scan": "pes_scan",
+        }.get(app.calc_type_dd.value, "single_point")
         n_basis = calc_log_mod.count_basis_functions(
             app._molecule.atoms, app.basis_dd.value
         )
@@ -580,6 +588,7 @@ def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
             method=app.method_dd.value,
             basis=app.basis_dd.value,
             n_basis=n_basis,
+            calc_type=calc_type,
         )
         app.perf_estimate_html.value = calc_log_mod.format_estimate(est)
     except Exception:

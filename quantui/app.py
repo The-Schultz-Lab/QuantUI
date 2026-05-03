@@ -21,7 +21,7 @@ import time
 import uuid as _uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, List, Literal, Optional
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, List, Literal, Optional
 
 import ipywidgets as widgets
 from IPython import get_ipython
@@ -547,6 +547,7 @@ _RE_CYCLE = re.compile(
     r"cycle=\s*(\d+)\s+E=\s*([\-\d\.]+)\s+delta_E=\s*([\-\d\.Ee+\-]+)"
 )
 _RE_CONV = re.compile(r"converged SCF energy\s*=\s*([\-\d\.]+)")
+_RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
 
 
 # ══ LOG CAPTURE ══════════════════════════════════════════════════════════════
@@ -559,11 +560,14 @@ class _LogCapture:
         self,
         output_widget: widgets.Output,
         status_label: Optional[widgets.Label] = None,
+        on_scf_converged: Optional[Callable[[], None]] = None,
     ) -> None:
         self._w = output_widget
         self._buf = io.StringIO()
         self._line_buf = ""
         self._status = status_label
+        self._on_scf_converged = on_scf_converged
+        self._scf_converged_seen = False
 
     def write(self, text: str) -> None:
         if not text:
@@ -573,6 +577,10 @@ class _LogCapture:
         self._line_buf += text
         while "\n" in self._line_buf:
             line, self._line_buf = self._line_buf.split("\n", 1)
+            m = _RE_Q_STATUS.search(line)
+            if m and self._status is not None:
+                self._status.value = m.group(1).strip()
+                continue
             m = _RE_CYCLE.search(line)
             if m and self._status is not None:
                 n, delta = m.group(1), m.group(3)
@@ -582,8 +590,15 @@ class _LogCapture:
                     self._status.value = f"SCF cycle {n}"
                 continue
             m = _RE_CONV.search(line)
-            if m and self._status is not None:
-                self._status.value = "SCF converged ✓"
+            if m:
+                if self._status is not None:
+                    self._status.value = "SCF converged ✓"
+                if not self._scf_converged_seen and self._on_scf_converged is not None:
+                    self._scf_converged_seen = True
+                    try:
+                        self._on_scf_converged()
+                    except Exception:
+                        pass
 
     def flush(self) -> None:
         pass
@@ -1951,7 +1966,27 @@ class QuantUIApp:
         )
         _run_wall_t = time.perf_counter()
         _run_cpu_t = time.process_time()
-        log = _LogCapture(self.run_output, self.run_status)
+        _scf_converged_t: Optional[float] = None
+        _tail_marks: dict[str, float] = {}
+
+        def _mark(stage: str) -> None:
+            _tail_marks[stage] = time.perf_counter()
+
+        def _span(stage_a: str, stage_b: str) -> Optional[float]:
+            if stage_a not in _tail_marks or stage_b not in _tail_marks:
+                return None
+            return round(_tail_marks[stage_b] - _tail_marks[stage_a], 3)
+
+        def _on_scf_converged() -> None:
+            nonlocal _scf_converged_t
+            if _scf_converged_t is None:
+                _scf_converged_t = time.perf_counter()
+
+        log = _LogCapture(
+            self.run_output,
+            self.run_status,
+            on_scf_converged=_on_scf_converged,
+        )
 
         # Write structured log header immediately so it appears at the top of output
         try:
@@ -2191,6 +2226,7 @@ class QuantUIApp:
                 result_html = self._format_result(result)
                 save_spectra, save_type = {}, "single_point"
 
+            _mark("result_ready")
             _elapsed = time.perf_counter() - _run_wall_t
             _elapsed_cpu = time.process_time() - _run_cpu_t
             self._last_result = result
@@ -2198,7 +2234,7 @@ class QuantUIApp:
             self.accumulate_btn.disabled = False
 
             self.result_output.append_display_data(HTML(result_html))
-            self.run_status.value = f"Done in {_elapsed:.1f} s."
+            self.run_status.value = "Finalizing results..."
 
             # Show 3D structure in the result panel and mirrored in Analysis tab
             _viz_mol = result.molecule if ct == "Geometry Opt" else calc_mol
@@ -2209,6 +2245,7 @@ class QuantUIApp:
                 )
                 self._viz_label.layout.display = ""
             self._show_result_3d(_viz_mol, extra_output=self._analysis_mol_output)
+            _mark("viz_done")
 
             # Populate Analysis panels via the unified registry
             _ana_ctx = _AnalysisContext(
@@ -2233,6 +2270,7 @@ class QuantUIApp:
                 f"{_mol_label}</span>"
             )
             self._completion_banner.layout.display = ""
+            _mark("banner_ready")
 
             # Write structured log footer
             try:
@@ -2251,6 +2289,7 @@ class QuantUIApp:
                 pass
 
             # Persist to disk
+            _mark("persist_begin")
             try:
                 from quantui import load_result, save_result
                 from quantui.results_storage import (
@@ -2308,16 +2347,21 @@ class QuantUIApp:
                     )
                 except Exception:
                     pass
+            _mark("persist_done")
 
             # Activate analysis panels AFTER saving/refreshing the results browser.
             # _refresh_results_browser (above) sets past_dd.options, which fires its
             # observer and calls _deactivate_all_ana_panels.  Placing this call here
             # means that observer has already run (harmlessly, panels not yet active)
             # by the time we activate them.
+            _mark("analysis_begin")
             self._apply_analysis_context(_ana_ctx)
+            _mark("analysis_done")
 
             # Log performance
+            _mark("perf_begin")
             try:
+                _elapsed_for_est = time.perf_counter() - _run_wall_t
                 _calc_log.log_calculation(
                     formula=result.formula,
                     n_atoms=len(calc_mol.atoms),
@@ -2325,20 +2369,53 @@ class QuantUIApp:
                     method=result.method,
                     basis=result.basis,
                     n_iterations=getattr(result, "n_iterations", None),
-                    elapsed_s=_elapsed,
+                    elapsed_s=_elapsed_for_est,
                     converged=result.converged,
                     n_basis=_calc_log.count_basis_functions(
                         calc_mol.atoms, result.basis
                     ),
                     n_cores=1,
+                    calc_type=save_type,
                 )
                 _calc_log.log_event(
                     "calc_done",
                     f"{result.method}/{result.basis} on {result.formula}",
-                    elapsed_s=round(_elapsed, 2),
+                    elapsed_s=round(_elapsed_for_est, 2),
                     converged=result.converged,
                 )
                 self._update_estimate()
+            except Exception:
+                pass
+            _mark("perf_done")
+
+            _mark("success_done")
+            _elapsed_total = _tail_marks["success_done"] - _run_wall_t
+            self.run_status.value = f"Done in {_elapsed_total:.1f} s."
+
+            try:
+                _tail_end = _tail_marks.get("success_done")
+                _post_scf_to_done: Optional[float] = None
+                if _tail_end is not None and _scf_converged_t is not None:
+                    _post_scf_to_done = round(_tail_end - _scf_converged_t, 3)
+                _post_result_to_done = _span("result_ready", "success_done")
+                _calc_log.log_event(
+                    "calc_tail_timing",
+                    "Post-SCF completion timing checkpoint",
+                    session_id=self._session_id,
+                    formula=result.formula,
+                    method=result.method,
+                    basis=result.basis,
+                    calc_type=save_type,
+                    scf_converged_seen=_scf_converged_t is not None,
+                    post_scf_to_done_s=_post_scf_to_done,
+                    post_result_to_done_s=_post_result_to_done,
+                    result_to_viz_s=_span("result_ready", "viz_done"),
+                    result_to_banner_s=_span("result_ready", "banner_ready"),
+                    persist_block_s=_span("persist_begin", "persist_done"),
+                    analysis_apply_s=_span("analysis_begin", "analysis_done"),
+                    perf_block_s=_span("perf_begin", "perf_done"),
+                    banner_to_done_s=_span("banner_ready", "success_done"),
+                )
             except Exception:
                 pass
 

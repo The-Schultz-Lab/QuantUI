@@ -333,6 +333,7 @@ def log_calculation(
     converged: bool,
     n_basis: Optional[int] = None,
     n_cores: Optional[int] = None,
+    calc_type: Optional[str] = None,
 ) -> None:
     """Append one performance record to ``perf_log.jsonl``."""
     record: dict = {
@@ -350,6 +351,8 @@ def log_calculation(
         record["n_basis"] = n_basis
     if n_cores is not None:
         record["n_cores"] = n_cores
+    if calc_type is not None:
+        record["calc_type"] = calc_type
     _append(_perf_path(), record)
 
 
@@ -360,6 +363,7 @@ def estimate_time(
     basis: str,
     n_basis: Optional[int] = None,
     n_cores: Optional[int] = None,
+    calc_type: Optional[str] = None,
 ) -> Optional[dict]:
     """
     Return a time estimate dict, or ``None`` if there is insufficient data.
@@ -391,12 +395,32 @@ def estimate_time(
     4. **Same basis, any method, electron-count fallback** (≥ 2 records):
        Same as the original strategy 2.  Confidence: low.
 
+    ``calc_type`` narrows the candidate pool so that expensive workflows
+    (for example, Frequency) are not predicted from cheap workflows
+    (for example, Single Point). Legacy records without ``calc_type`` are
+    only included when estimating ``single_point``.
+
     Returns ``None`` when fewer than 2 converged records are available for
-    any strategy.
+    the scoped candidate pool.
     """
     records = _read_all(_perf_path())
     converged = [r for r in records if r.get("converged")]
     if not converged:
+        return None
+
+    if calc_type is None:
+        scoped = converged
+    elif calc_type == "single_point":
+        # Back-compat bridge: older records did not store calc_type.
+        scoped = [
+            r
+            for r in converged
+            if r.get("calc_type") == "single_point" or r.get("calc_type") is None
+        ]
+    else:
+        scoped = [r for r in converged if r.get("calc_type") == calc_type]
+
+    if len(scoped) < 2:
         return None
 
     beta_new = _METHOD_SCALE_EXP.get(method, 3.5)
@@ -417,7 +441,7 @@ def estimate_time(
     if n_basis is not None:
         exact_nb = [
             r
-            for r in converged
+            for r in scoped
             if r.get("method") == method
             and r.get("basis") == basis
             and r.get("n_basis") is not None
@@ -432,9 +456,7 @@ def estimate_time(
             }
 
     # ── Strategy 2: exact method + basis, electron-count fallback ────────────
-    exact = [
-        r for r in converged if r.get("method") == method and r.get("basis") == basis
-    ]
+    exact = [r for r in scoped if r.get("method") == method and r.get("basis") == basis]
     if len(exact) >= 2:
         median_ne = statistics.median(r["n_electrons"] for r in exact)
         median_t = statistics.median(r["elapsed_s"] for r in exact)
@@ -449,7 +471,7 @@ def estimate_time(
     if n_basis is not None:
         same_basis_nb = [
             r
-            for r in converged
+            for r in scoped
             if r.get("basis") == basis and r.get("n_basis") is not None
         ]
         effs = [e for r in same_basis_nb for e in [_eff(r)] if e is not None]
@@ -472,7 +494,7 @@ def estimate_time(
             }
 
     # ── Strategy 4: same basis, any method, electron-count fallback ───────────
-    same_basis = [r for r in converged if r.get("basis") == basis]
+    same_basis = [r for r in scoped if r.get("basis") == basis]
     if len(same_basis) >= 2:
         median_ne = statistics.median(r["n_electrons"] for r in same_basis)
         median_t = statistics.median(r["elapsed_s"] for r in same_basis)

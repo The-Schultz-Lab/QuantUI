@@ -261,6 +261,29 @@ class TestLogCapture:
         cap.write("converged SCF energy = -76.031234\n")
         assert "converged" in status.value.lower()
 
+    def test_status_marker_updates_status_label(self):
+        cap, status = self._make_capture()
+        cap.write(
+            "[QuantUI_STATUS] Numerical IR intensities: "
+            "4/24 extra SCF solves complete (20 remaining)\n"
+        )
+        assert "4/24" in status.value
+        assert "remaining" in status.value
+
+    def test_scf_converged_callback_fires_once(self):
+        out = widgets.Output()
+        status = widgets.Label()
+        called = 0
+
+        def _on_conv() -> None:
+            nonlocal called
+            called += 1
+
+        cap = _LogCapture(out, status, on_scf_converged=_on_conv)
+        cap.write("converged SCF energy = -76.031234\n")
+        cap.write("converged SCF energy = -76.031230\n")
+        assert called == 1
+
     def test_flush_is_noop(self):
         cap, _ = self._make_capture()
         cap.flush()  # Must not raise
