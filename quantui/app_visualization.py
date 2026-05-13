@@ -42,6 +42,8 @@ def on_traj_expand(app: Any, change: dict[str, Any]) -> None:
     if result is None:
         return
     app._pending_traj_result = None
+    app._traj_render_token = int(getattr(app, "_traj_render_token", 0)) + 1
+    render_token = app._traj_render_token
 
     from IPython.display import HTML as _H
     from IPython.display import display as _d
@@ -54,29 +56,55 @@ def on_traj_expand(app: Any, change: dict[str, Any]) -> None:
             )
         )
 
-    def _render() -> None:
-        try:
-            app._show_opt_trajectory(result)
-        except Exception as exc:
-            from IPython.display import HTML as _H2
-            from IPython.display import display as _d2
+    try:
+        app._show_opt_trajectory(result, render_token=render_token)
+    except Exception as exc:
+        if render_token != int(getattr(app, "_traj_render_token", 0)):
+            return
+        from IPython.display import HTML as _H2
+        from IPython.display import display as _d2
 
-            app.traj_output.clear_output()
-            with app.traj_output:
-                _d2(
-                    _H2(
-                        f'<p style="color:#b91c1c;padding:8px">⚠ Trajectory rendering failed: {exc}</p>'
-                    )
+        app.traj_output.clear_output()
+        with app.traj_output:
+            _d2(
+                _H2(
+                    f'<p style="color:#b91c1c;padding:8px">⚠ Trajectory rendering failed: {exc}</p>'
                 )
+            )
 
-    threading.Thread(target=_render, daemon=True).start()
 
-
-def show_opt_trajectory(app: Any, opt_result: Any, *, layout_fn: Any) -> None:
+def show_opt_trajectory(
+    app: Any,
+    opt_result: Any,
+    *,
+    layout_fn: Any,
+    render_token: int | None = None,
+) -> None:
     """Build trajectory carousel and energy chart in trajectory panel."""
     import concurrent.futures
 
     from IPython.display import display as _ipy_display
+
+    def _is_stale() -> bool:
+        return render_token is not None and render_token != int(
+            getattr(app, "_traj_render_token", 0)
+        )
+
+    def _set_cache_label(value: str) -> None:
+        if _is_stale():
+            return
+        cache_label.value = value
+
+    def _show_frame_error(message: str) -> None:
+        if _is_stale():
+            return
+        frame_out.clear_output()
+        with frame_out:
+            _ipy_display(
+                HTML(
+                    f'<p style="color:#b91c1c;padding:8px">Frame render failed: {message}</p>'
+                )
+            )
 
     # Support both OptimizationResult (.trajectory) and PESScanResult (.coordinates_list)
     traj = getattr(opt_result, "trajectory", None) or getattr(
@@ -244,6 +272,8 @@ def show_opt_trajectory(app: Any, opt_result: Any, *, layout_fn: Any) -> None:
     )
 
     def _display_frame(idx: int) -> None:
+        if _is_stale():
+            return
         kind, obj = frame_cache[idx]
         frame_out.clear_output()
         with frame_out:
@@ -257,6 +287,8 @@ def show_opt_trajectory(app: Any, opt_result: Any, *, layout_fn: Any) -> None:
                 _ipy_display(obj)
 
     def _update_frame(change: dict[str, Any]) -> None:
+        if _is_stale():
+            return
         idx = change["new"]
         step_info.value = app._traj_step_html(idx, traj, energies, rel_e)
         if idx in frame_cache:
@@ -273,15 +305,11 @@ def show_opt_trajectory(app: Any, opt_result: Any, *, layout_fn: Any) -> None:
         def _on_demand() -> None:
             try:
                 frame_cache[idx] = _build_fig(idx)
-                _display_frame(idx)
+                app._queue_main_thread_callback(_display_frame, idx)
             except Exception as exc:
-                frame_out.clear_output()
-                with frame_out:
-                    _ipy_display(
-                        HTML(
-                            f'<p style="color:#b91c1c;padding:8px">Frame render failed: {exc}</p>'
-                        )
-                    )
+                if _is_stale():
+                    return
+                app._queue_main_thread_callback(_show_frame_error, str(exc))
 
         threading.Thread(target=_on_demand, daemon=True).start()
 
@@ -322,16 +350,24 @@ def show_opt_trajectory(app: Any, opt_result: Any, *, layout_fn: Any) -> None:
                     else Path.home() / f"{opt_result.formula}_trajectory.html"
                 )
                 anim_fig.write_html(str(out_path))
-                export_status.value = (
-                    f'<span style="color:#16a34a;font-size:12px">'
-                    f"✓ Saved: {out_path}</span>"
+                app._queue_main_thread_callback(
+                    setattr,
+                    export_status,
+                    "value",
+                    (
+                        f'<span style="color:#16a34a;font-size:12px">'
+                        f"✓ Saved: {out_path}</span>"
+                    ),
                 )
             except Exception as exc:
-                export_status.value = (
-                    f'<span style="color:#b91c1c">Export failed: {exc}</span>'
+                app._queue_main_thread_callback(
+                    setattr,
+                    export_status,
+                    "value",
+                    f'<span style="color:#b91c1c">Export failed: {exc}</span>',
                 )
             finally:
-                _btn.disabled = False
+                app._queue_main_thread_callback(setattr, _btn, "disabled", False)
 
         threading.Thread(target=_do_export, daemon=True).start()
 
@@ -345,6 +381,8 @@ def show_opt_trajectory(app: Any, opt_result: Any, *, layout_fn: Any) -> None:
     panel = widgets.VBox([header, step_info, cache_label, frame_out, export_status])
 
     # Display panel immediately.
+    if _is_stale():
+        return
     app.traj_output.clear_output()
     with app.traj_output:
         if has_plotly and rel_e:
@@ -352,6 +390,8 @@ def show_opt_trajectory(app: Any, opt_result: Any, *, layout_fn: Any) -> None:
         _ipy_display(panel)
 
     # Show placeholder while frame 0 renders in the background.
+    if _is_stale():
+        return
     frame_out.clear_output()
     with frame_out:
         _ipy_display(
@@ -363,33 +403,40 @@ def show_opt_trajectory(app: Any, opt_result: Any, *, layout_fn: Any) -> None:
 
     def _prerender_all() -> None:
         """Render all frames (0 first, then 1+) in a background thread."""
+        if _is_stale():
+            return
         try:
             frame_cache[0] = _build_fig(0)
-            _display_frame(0)
-            cache_label.value = (
+            app._queue_main_thread_callback(_display_frame, 0)
+            app._queue_main_thread_callback(
+                _set_cache_label,
                 f'<span style="color:#888;font-size:11px;font-style:italic">'
-                f"Pre-rendering frames… 1 / {n}</span>"
+                f"Pre-rendering frames… 1 / {n}</span>",
             )
             if n > 1:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
                     futures = {pool.submit(_build_fig, i): i for i in range(1, n)}
                     done = 1
                     for fut in concurrent.futures.as_completed(futures):
+                        if _is_stale():
+                            return
                         i = futures[fut]
                         try:
                             frame_cache[i] = fut.result()
                         except Exception:
                             pass
                         done += 1
-                        cache_label.value = (
+                        app._queue_main_thread_callback(
+                            _set_cache_label,
                             f'<span style="color:#888;font-size:11px;font-style:italic">'
-                            f"Pre-rendering frames… {done} / {n}</span>"
+                            f"Pre-rendering frames… {done} / {n}</span>",
                         )
         except Exception:
             pass
-        cache_label.value = (
+        app._queue_main_thread_callback(
+            _set_cache_label,
             f'<span style="color:#16a34a;font-size:11px">'
-            f"✓ All {n} frames ready</span>"
+            f"✓ All {n} frames ready</span>",
         )
 
     threading.Thread(target=_prerender_all, daemon=True).start()
@@ -791,8 +838,16 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
 def on_iso_generate(app: Any, btn: Any) -> None:
     """Generate orbital isosurface for currently selected orbital."""
     orbital_label = app._orb_toggle.value
+    app._iso_render_token = int(getattr(app, "_iso_render_token", 0)) + 1
+    render_token = app._iso_render_token
     btn.disabled = True
     btn.description = "Generating…"
+    try:
+        from quantui import calc_log as _clog
+
+        _clog.log_event("iso_render_start", orbital_label)
+    except Exception:
+        pass
     app._orb_iso_output.clear_output()
     with app._orb_iso_output:
         display(
@@ -803,14 +858,50 @@ def on_iso_generate(app: Any, btn: Any) -> None:
             )
         )
 
+    done = threading.Event()
+
+    def _reset_button() -> None:
+        if render_token != int(getattr(app, "_iso_render_token", 0)):
+            return
+        btn.disabled = False
+        btn.description = "Generate Isosurface"
+
     def _run() -> None:
         try:
-            app._render_orbital_isosurface(orbital_label)
+            app._render_orbital_isosurface(orbital_label, render_token=render_token)
         finally:
+            done.set()
+            app._queue_main_thread_callback(_reset_button)
+
+    def _watchdog() -> None:
+        if done.wait(timeout=180):
+            return
+
+        def _show_timeout() -> None:
+            if render_token != int(getattr(app, "_iso_render_token", 0)):
+                return
+            try:
+                from quantui import calc_log as _clog
+
+                _clog.log_event("iso_render_timeout", orbital_label)
+            except Exception:
+                pass
             btn.disabled = False
             btn.description = "Generate Isosurface"
+            app._orb_iso_output.clear_output()
+            with app._orb_iso_output:
+                display(
+                    HTML(
+                        '<p style="color:#b91c1c;padding:8px">'
+                        "⚠ Orbital isosurface timed out after 180 s. "
+                        "Try a smaller basis set or a smaller molecule.</p>"
+                    )
+                )
+
+        app._queue_main_thread_callback(_show_timeout)
 
     threading.Thread(target=_run, daemon=True).start()
+    threading.Thread(target=_watchdog, daemon=True).start()
 
 
 def on_orb_range_changed(app: Any, _change: Any = None) -> None:
@@ -846,9 +937,16 @@ def on_orb_range_changed(app: Any, _change: Any = None) -> None:
         pass
 
 
-def render_orbital_isosurface(app: Any, orbital_label: str) -> None:
+def render_orbital_isosurface(
+    app: Any, orbital_label: str, render_token: int | None = None
+) -> None:
     """Generate cube file and render orbital isosurface (Linux/WSL only)."""
     import tempfile
+
+    def _is_stale() -> bool:
+        return render_token is not None and render_token != int(
+            getattr(app, "_iso_render_token", 0)
+        )
 
     orb_info = getattr(app, "_last_orb_info", None)
     if orb_info is None:
@@ -873,6 +971,8 @@ def render_orbital_isosurface(app: Any, orbital_label: str) -> None:
         return
 
     try:
+        import plotly.io as _pio
+
         from quantui.orbital_visualization import (
             generate_cube_from_arrays,
             plot_cube_isosurface,
@@ -881,25 +981,64 @@ def render_orbital_isosurface(app: Any, orbital_label: str) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             cube_path = Path(tmpdir) / f"orbital_{orbital_label}.cube"
             generate_cube_from_arrays(mol_atom, mol_basis, mo_coeff, orb_idx, cube_path)
-            fig = plot_cube_isosurface(cube_path, title=f"{orbital_label} Isosurface")
-    except Exception as exc:
-        from IPython.display import HTML as _H
-        from IPython.display import display as _d
-
-        app._orb_iso_output.clear_output()
-        with app._orb_iso_output:
-            _d(
-                _H(
-                    f'<p style="color:#b91c1c;padding:8px">⚠ Orbital isosurface failed: {exc}</p>'
-                )
+            is_dark = app.theme_btn.value == "Dark"
+            axis_color = "#dbeafe" if is_dark else "#1f2937"
+            bond_color = "#cbd5e1" if is_dark else "#4b5563"
+            fig = plot_cube_isosurface(
+                cube_path,
+                title=f"{orbital_label} Isosurface",
+                show_molecule=True,
+                show_grid=False,
+                scene_bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+                axis_color=axis_color,
+                bond_color=bond_color,
             )
+            html_str = _pio.to_html(
+                fig,
+                include_plotlyjs="require",
+                full_html=False,
+                config={"responsive": True},
+            )
+    except Exception as exc:
+        if _is_stale():
+            return
+        err_msg = f"{type(exc).__name__}: {exc}"
+        try:
+            from quantui import calc_log as _clog
+
+            _clog.log_event(
+                "iso_render_error",
+                f"{orbital_label}: {err_msg}"[:300],
+            )
+        except Exception:
+            pass
+
+        def _show_err(msg: str = err_msg) -> None:
+            app._orb_iso_output.clear_output()
+            with app._orb_iso_output:
+                display(
+                    HTML(
+                        f'<p style="color:#b91c1c;padding:8px">'
+                        f"⚠ Orbital isosurface failed: {msg}</p>"
+                    )
+                )
+
+        app._queue_main_thread_callback(_show_err)
         return
+    if _is_stale():
+        return
+    try:
+        from quantui import calc_log as _clog
 
-    from IPython.display import display as _ipy_display
+        _clog.log_event("iso_render_done", orbital_label)
+    except Exception:
+        pass
 
-    app._orb_iso_output.clear_output()
-    with app._orb_iso_output:
-        _ipy_display(fig)
+    app._queue_main_thread_callback(
+        app._set_html_output,
+        app._orb_iso_output,
+        html_str,
+    )
 
 
 def render_vib_mode(app: Any, vib_data: Any, molecule: Any, mode_number: int) -> None:

@@ -10,6 +10,17 @@ import ipywidgets as widgets
 from IPython.display import HTML, Javascript, display
 
 
+def _calc_type_badge(calc_type: str) -> str:
+    return {
+        "single_point": "SP",
+        "geometry_opt": "GeoOpt",
+        "frequency": "Freq",
+        "tddft": "UV-Vis",
+        "nmr": "NMR",
+        "pes_scan": "PES",
+    }.get(calc_type, calc_type or "Unknown")
+
+
 def on_run_clicked(app: Any, btn: Any) -> None:
     """Reset result panes and start the background run thread."""
     app.run_output.clear_output()
@@ -34,6 +45,15 @@ def on_run_clicked(app: Any, btn: Any) -> None:
 def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     """Update extra options panel based on selected calculation type."""
     ct = change["new"]
+
+    # QM pre-optimization is meaningful for all workflows except Geometry Opt,
+    # which is itself an optimization workflow.
+    if ct == "Geometry Opt":
+        app._freq_preopt_cb.value = False
+        app._freq_preopt_cb.layout.display = "none"
+    else:
+        app._freq_preopt_cb.layout.display = ""
+
     if ct == "Geometry Opt":
         app.calc_extra_opts.children = [
             widgets.HBox(
@@ -46,9 +66,8 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
         app.calc_extra_opts.children = [
             widgets.HBox(
                 [app._freq_seed_dd, app._freq_seed_refresh_btn],
-                layout=layout_fn(align_items="center", gap="6px"),
+                layout=layout_fn(align_items="center", gap="6px", width="100%"),
             ),
-            app._freq_preopt_cb,
             app._freq_seed_note,
         ]
     elif ct == "UV-Vis (TD-DFT)":
@@ -614,7 +633,11 @@ def refresh_results_browser(app: Any) -> None:
         try:
             data = load_result(d)
             ts = data.get("timestamp", d.name)
-            label = f"{ts}  ·  {data['formula']}  {data['method']}/{data['basis']}"
+            calc_badge = _calc_type_badge(data.get("calc_type", ""))
+            label = (
+                f"{ts}  ·  [{calc_badge}]  "
+                f"{data['formula']}  {data['method']}/{data['basis']}"
+            )
             options.append((label, str(d)))
         except Exception:
             pass
@@ -656,7 +679,11 @@ def populate_compare_list(app: Any) -> None:
         try:
             data = load_result(d)
             ts = data.get("timestamp", d.name[:19])
-            label = f"{ts}  {data['formula']}  {data['method']}/{data['basis']}"
+            calc_badge = _calc_type_badge(data.get("calc_type", ""))
+            label = (
+                f"{ts}  [{calc_badge}]  "
+                f"{data['formula']}  {data['method']}/{data['basis']}"
+            )
             options.append((label, str(d)))
         except Exception:
             options.append((d.name, str(d)))

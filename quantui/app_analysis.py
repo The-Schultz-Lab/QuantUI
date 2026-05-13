@@ -2,10 +2,64 @@
 
 from __future__ import annotations
 
+import html as _html_mod
 import types as _types_mod
 from typing import Any
 
 import ipywidgets as widgets
+
+_PANEL_UNAVAILABLE_STYLE = (
+    "padding:12px 16px;color:#6b7280;font-size:13px;font-style:italic"
+)
+
+_CALC_TYPE_LABELS = {
+    "single_point": "Single Point",
+    "geometry_opt": "Geometry Opt",
+    "frequency": "Frequency",
+    "tddft": "UV-Vis (TD-DFT)",
+    "nmr": "NMR Shielding",
+    "pes_scan": "PES Scan",
+}
+
+
+def _panel_unavailable_html(message: str) -> str:
+    return f'<div style="{_PANEL_UNAVAILABLE_STYLE}">{_html_mod.escape(message)}</div>'
+
+
+def _set_panel_unavailable_message(app: Any, panel_name: str, message: str) -> None:
+    panel = app._ana_unavail_msgs.get(panel_name)
+    if panel is not None:
+        panel.value = _panel_unavailable_html(message)
+
+
+def _reset_unavailable_messages_for_context(app: Any, ctx: Any) -> None:
+    expected_panels = {
+        panel_name
+        for panel_name, _method_name, _auto in app._PANEL_REGISTRY.get(
+            ctx.calc_type, []
+        )
+    }
+    calc_label = _CALC_TYPE_LABELS.get(
+        ctx.calc_type,
+        str(ctx.calc_type).replace("_", " ").title(),
+    )
+    for panel_name in app._ana_panel_names:
+        if panel_name in expected_panels:
+            _set_panel_unavailable_message(
+                app,
+                panel_name,
+                (
+                    f"Not available for this {calc_label} result: "
+                    "required data is missing or could not be loaded."
+                ),
+            )
+            continue
+        when = app._ana_when_map.get(panel_name, "relevant")
+        _set_panel_unavailable_message(
+            app,
+            panel_name,
+            f"Not available - run a {when} calculation first.",
+        )
 
 
 def build_ana_switcher(app: Any, *, layout_fn: Any) -> None:
@@ -13,6 +67,7 @@ def build_ana_switcher(app: Any, *, layout_fn: Any) -> None:
     panel_meta = [
         (name, getattr(app, attr), when) for name, attr, when in app._PANEL_META
     ]
+    app._ana_when_map = {name: when for name, _acc, when in panel_meta}
     app._ana_panel_names = [m[0] for m in panel_meta]
     app._ana_accordions = [m[1] for m in panel_meta]
     app._ana_available = set()
@@ -27,10 +82,8 @@ def build_ana_switcher(app: Any, *, layout_fn: Any) -> None:
     app._ana_content_boxes = {}
     for name, acc, when in panel_meta:
         unavail = widgets.HTML(
-            value=(
-                f'<div style="padding:12px 16px;color:#6b7280;font-size:13px;'
-                f'font-style:italic">Not available — run a {when} '
-                f"calculation first.</div>"
+            value=_panel_unavailable_html(
+                f"Not available - run a {when} calculation first."
             ),
             layout=layout_fn(display=""),
         )
@@ -84,10 +137,21 @@ def deactivate_all_ana_panels(app: Any) -> None:
 def apply_analysis_context(app: Any, ctx: Any) -> None:
     """Populate Analysis panels from context and activate panels with data."""
     app._deactivate_all_ana_panels()
+    _reset_unavailable_messages_for_context(app, ctx)
     app._pending_traj_result = None
+    app._traj_render_token = int(getattr(app, "_traj_render_token", 0)) + 1
+    app._iso_render_token = int(getattr(app, "_iso_render_token", 0)) + 1
     app.traj_accordion.set_title(0, "Trajectory Viewer")
+    app.traj_output.clear_output()
+    app._orb_iso_output.clear_output()
 
     first_auto_selected = False
+    expected_panels = {
+        panel_name
+        for panel_name, _method_name, _want_auto in app._PANEL_REGISTRY.get(
+            ctx.calc_type, []
+        )
+    }
     for panel_name, method_name, want_auto in app._PANEL_REGISTRY.get(
         ctx.calc_type, []
     ):
@@ -109,6 +173,21 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
             app._activate_ana_panel(panel_name, auto_select=do_auto)
             if do_auto:
                 first_auto_selected = True
+
+    missing_expected = sorted(expected_panels - app._ana_available)
+    if missing_expected:
+        try:
+            from quantui import calc_log as _clog
+
+            _clog.log_event(
+                "ana_expected_panel_missing",
+                f"{ctx.calc_type}: {', '.join(missing_expected)}"[:300],
+                calc_type=ctx.calc_type,
+                source=ctx.source,
+                missing_panels=missing_expected,
+            )
+        except Exception:
+            pass
 
     source_suffix = " (from History)" if ctx.source == "history" else ""
     app._analysis_context_lbl.value = (
@@ -153,14 +232,39 @@ def pop_geo_trajectory(app: Any, ctx: Any) -> bool:
         energies = list(getattr(ctx.live_result, "energies_hartree", []))
     elif ctx.result_dir is not None:
         traj_file = ctx.result_dir / "trajectory.json"
-        if traj_file.exists():
-            try:
-                from quantui.results_storage import load_trajectory
+        if not traj_file.exists():
+            _set_panel_unavailable_message(
+                app,
+                "Trajectory",
+                (
+                    "Not available for this Geometry Opt history result: "
+                    "trajectory.json is missing."
+                ),
+            )
+            return False
+        try:
+            from quantui.results_storage import load_trajectory
 
-                traj, energies = load_trajectory(ctx.result_dir)
-            except Exception:
-                return False
+            traj, energies = load_trajectory(ctx.result_dir)
+        except Exception as exc:
+            _set_panel_unavailable_message(
+                app,
+                "Trajectory",
+                (
+                    "Not available for this Geometry Opt history result: "
+                    f"failed to load trajectory data ({type(exc).__name__})."
+                ),
+            )
+            return False
     if not traj or len(traj) < 2:
+        _set_panel_unavailable_message(
+            app,
+            "Trajectory",
+            (
+                "Not available for this Geometry Opt result: "
+                "trajectory data has fewer than 2 frames."
+            ),
+        )
         return False
     stub = _types_mod.SimpleNamespace(
         trajectory=traj,
@@ -184,6 +288,14 @@ def pop_preopt_trajectory(app: Any, ctx: Any) -> bool:
             return False
         preopt_path = ctx.result_dir / "preopt_trajectory.json"
         if not preopt_path.exists():
+            _set_panel_unavailable_message(
+                app,
+                "Trajectory",
+                (
+                    "Not available for this Frequency history result: "
+                    "preopt_trajectory.json is missing (pre-opt may have been disabled)."
+                ),
+            )
             return False
         try:
             from quantui.results_storage import load_trajectory
@@ -198,8 +310,24 @@ def pop_preopt_trajectory(app: Any, ctx: Any) -> bool:
                 "pop_preopt_trajectory_error",
                 f"{type(exc).__name__}: {exc}"[:300],
             )
+            _set_panel_unavailable_message(
+                app,
+                "Trajectory",
+                (
+                    "Not available for this Frequency history result: "
+                    f"failed to load preopt trajectory ({type(exc).__name__})."
+                ),
+            )
             return False
     if not traj or len(traj) < 2:
+        _set_panel_unavailable_message(
+            app,
+            "Trajectory",
+            (
+                "Not available for this Frequency result: "
+                "pre-optimization trajectory has fewer than 2 frames."
+            ),
+        )
         return False
     stub = _types_mod.SimpleNamespace(
         trajectory=traj,
@@ -430,14 +558,39 @@ def pop_pes_trajectory(app: Any, ctx: Any) -> bool:
         energies = list(getattr(ctx.live_result, "energies_hartree", []))
     elif ctx.result_dir is not None:
         traj_file = ctx.result_dir / "trajectory.json"
-        if traj_file.exists():
-            try:
-                from quantui.results_storage import load_trajectory
+        if not traj_file.exists():
+            _set_panel_unavailable_message(
+                app,
+                "Trajectory",
+                (
+                    "Not available for this PES Scan history result: "
+                    "trajectory.json is missing."
+                ),
+            )
+            return False
+        try:
+            from quantui.results_storage import load_trajectory
 
-                traj, energies = load_trajectory(ctx.result_dir)
-            except Exception:
-                return False
+            traj, energies = load_trajectory(ctx.result_dir)
+        except Exception as exc:
+            _set_panel_unavailable_message(
+                app,
+                "Trajectory",
+                (
+                    "Not available for this PES Scan history result: "
+                    f"failed to load trajectory data ({type(exc).__name__})."
+                ),
+            )
+            return False
     if not traj or len(traj) < 2:
+        _set_panel_unavailable_message(
+            app,
+            "Trajectory",
+            (
+                "Not available for this PES Scan result: "
+                "trajectory data has fewer than 2 frames."
+            ),
+        )
         return False
     stub = _types_mod.SimpleNamespace(
         coordinates_list=traj,

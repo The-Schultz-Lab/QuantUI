@@ -437,9 +437,9 @@ def build_shared_widgets(
     )
     app.preopt_cb = widgets.Checkbox(
         value=False,
-        description="Pre-optimize geometry (for a crude starting point)",
+        description="Classical pre-optimize geometry (fast, crude starting point)",
         disabled=not preopt_available,
-        layout=layout_fn(width="400px"),
+        layout=layout_fn(width="100%"),
     )
 
     from quantui.config import SOLVENT_OPTIONS as _SOLVENT_OPTS
@@ -501,7 +501,7 @@ def build_shared_widgets(
         options=[("(use current molecule)", "")],
         description="Seed geometry:",
         style={"description_width": "110px"},
-        layout=layout_fn(width="420px"),
+        layout=layout_fn(width="auto", flex="1 1 auto", min_width="260px"),
         tooltip="Optionally load the final optimised geometry from a previous Geo Opt result",
     )
     app._freq_seed_refresh_btn = widgets.Button(
@@ -512,7 +512,7 @@ def build_shared_widgets(
     )
     app._freq_preopt_cb = widgets.Checkbox(
         value=False,
-        description="Geometry optimization (recommended for unoptimized inputs)",
+        description="Geometry optimization before calculation (QM, slower)",
         style={"description_width": "initial"},
         layout=layout_fn(width="100%"),
     )
@@ -889,6 +889,7 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
             app.calc_type_dd,
             app.calc_extra_opts,
             app.preopt_cb,
+            app._freq_preopt_cb,
             widgets.HBox(
                 [app.solvent_cb, app.solvent_dd],
                 layout=layout_fn(align_items="center", gap="4px"),
@@ -1089,7 +1090,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         ],
         layout=layout_fn(display="none", margin="8px 0"),
     )
-    app._orb_accordion.set_title(0, "Orbital Diagram")
+    app._orb_accordion.set_title(0, "Energy-level Diagram")
     app._orb_accordion.selected_index = None
 
     app._iso_generate_btn = widgets.Button(

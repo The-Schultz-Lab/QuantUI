@@ -28,6 +28,51 @@ logger = logging.getLogger(__name__)
 
 # Conversion factor — PySCF stores MO energies in Hartree
 HARTREE_TO_EV: float = 27.211386245988
+BOHR_PER_ANGSTROM: float = 1.8897261254578281
+
+# Light-weight chemistry tables for drawing atom/bond overlays on cube plots.
+_COVALENT_RADII_ANGSTROM = {
+    1: 0.31,
+    5: 0.84,
+    6: 0.76,
+    7: 0.71,
+    8: 0.66,
+    9: 0.57,
+    14: 1.11,
+    15: 1.07,
+    16: 1.05,
+    17: 1.02,
+    35: 1.20,
+    53: 1.39,
+}
+_CPK_COLORS = {
+    1: "#f8fafc",  # H
+    5: "#f59e0b",  # B
+    6: "#374151",  # C
+    7: "#2563eb",  # N
+    8: "#dc2626",  # O
+    9: "#22c55e",  # F
+    14: "#f59e0b",  # Si
+    15: "#f97316",  # P
+    16: "#facc15",  # S
+    17: "#16a34a",  # Cl
+    35: "#b45309",  # Br
+    53: "#7c3aed",  # I
+}
+_ATOMIC_SYMBOLS = {
+    1: "H",
+    5: "B",
+    6: "C",
+    7: "N",
+    8: "O",
+    9: "F",
+    14: "Si",
+    15: "P",
+    16: "S",
+    17: "Cl",
+    35: "Br",
+    53: "I",
+}
 
 
 # ============================================================================
@@ -708,6 +753,52 @@ def parse_cube_file(cube_path: Path) -> dict:
     }
 
 
+def _build_molecule_overlay_data(atoms: list[tuple[int, float, float, float]]) -> dict:
+    """Build marker and bond segments from cube atom records."""
+    atom_x: List[float] = []
+    atom_y: List[float] = []
+    atom_z: List[float] = []
+    atom_colors: List[str] = []
+    atom_sizes: List[float] = []
+    atom_labels: List[str] = []
+
+    for z_num, x, y, z in atoms:
+        atom_x.append(x)
+        atom_y.append(y)
+        atom_z.append(z)
+        atom_colors.append(_CPK_COLORS.get(z_num, "#9ca3af"))
+        atom_sizes.append(max(6.0, 15.0 * _COVALENT_RADII_ANGSTROM.get(z_num, 0.75)))
+        atom_labels.append(_ATOMIC_SYMBOLS.get(z_num, str(z_num)))
+
+    bond_x: List[float] = []
+    bond_y: List[float] = []
+    bond_z: List[float] = []
+    for i, (zi, xi, yi, zi_pos) in enumerate(atoms):
+        for zj, xj, yj, zj_pos in atoms[i + 1 :]:
+            ri = _COVALENT_RADII_ANGSTROM.get(zi, 0.75)
+            rj = _COVALENT_RADII_ANGSTROM.get(zj, 0.75)
+            cutoff = (ri + rj) * 1.25 * BOHR_PER_ANGSTROM
+            dist = float(
+                np.sqrt((xi - xj) ** 2 + (yi - yj) ** 2 + (zi_pos - zj_pos) ** 2)
+            )
+            if dist <= cutoff:
+                bond_x.extend([xi, xj, None])
+                bond_y.extend([yi, yj, None])
+                bond_z.extend([zi_pos, zj_pos, None])
+
+    return {
+        "atom_x": atom_x,
+        "atom_y": atom_y,
+        "atom_z": atom_z,
+        "atom_colors": atom_colors,
+        "atom_sizes": atom_sizes,
+        "atom_labels": atom_labels,
+        "bond_x": bond_x,
+        "bond_y": bond_y,
+        "bond_z": bond_z,
+    }
+
+
 def plot_cube_isosurface(
     cube_path: Path,
     *,
@@ -716,6 +807,11 @@ def plot_cube_isosurface(
     width: int = 650,
     height: int = 550,
     title: Optional[str] = None,
+    show_molecule: bool = False,
+    show_grid: bool = True,
+    scene_bgcolor: str = "white",
+    axis_color: str = "#111827",
+    bond_color: str = "#6b7280",
 ):
     """
     Render an orbital isosurface from a cube file using Plotly.
@@ -770,6 +866,7 @@ def plot_cube_isosurface(
             colorscale=[[0, "rgb(49,130,189)"], [1, "rgb(49,130,189)"]],
             showscale=False,
             name=f"+{isovalue}",
+            caps=dict(x_show=False, y_show=False, z_show=False),
         )
     )
 
@@ -787,17 +884,75 @@ def plot_cube_isosurface(
             colorscale=[[0, "rgb(222,45,38)"], [1, "rgb(222,45,38)"]],
             showscale=False,
             name=f"-{isovalue}",
+            caps=dict(x_show=False, y_show=False, z_show=False),
         )
     )
+
+    if show_molecule and cube["atoms"]:
+        overlay = _build_molecule_overlay_data(cube["atoms"])
+        if overlay["bond_x"]:
+            fig.add_trace(
+                go.Scatter3d(
+                    x=overlay["bond_x"],
+                    y=overlay["bond_y"],
+                    z=overlay["bond_z"],
+                    mode="lines",
+                    line=dict(color=bond_color, width=6),
+                    name="Bonds",
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
+        fig.add_trace(
+            go.Scatter3d(
+                x=overlay["atom_x"],
+                y=overlay["atom_y"],
+                z=overlay["atom_z"],
+                mode="markers",
+                marker=dict(
+                    size=overlay["atom_sizes"],
+                    color=overlay["atom_colors"],
+                    opacity=1.0,
+                    line=dict(color=bond_color, width=1),
+                ),
+                text=overlay["atom_labels"],
+                hovertemplate="%{text}<extra></extra>",
+                name="Atoms",
+                showlegend=False,
+            )
+        )
 
     fig.update_layout(
         width=width,
         height=height,
-        title=title or "Molecular Orbital Isosurface",
+        title=dict(
+            text=title or "Molecular Orbital Isosurface", font=dict(color=axis_color)
+        ),
+        paper_bgcolor=scene_bgcolor,
+        font=dict(color=axis_color),
         scene=dict(
-            xaxis_title="X (Bohr)",
-            yaxis_title="Y (Bohr)",
-            zaxis_title="Z (Bohr)",
+            xaxis=dict(
+                title="X (Bohr)",
+                showgrid=show_grid,
+                showbackground=show_grid,
+                zeroline=False,
+                color=axis_color,
+            ),
+            yaxis=dict(
+                title="Y (Bohr)",
+                showgrid=show_grid,
+                showbackground=show_grid,
+                zeroline=False,
+                color=axis_color,
+            ),
+            zaxis=dict(
+                title="Z (Bohr)",
+                showgrid=show_grid,
+                showbackground=show_grid,
+                zeroline=False,
+                color=axis_color,
+            ),
+            bgcolor=scene_bgcolor,
             aspectmode="data",
         ),
     )

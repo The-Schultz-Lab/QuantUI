@@ -303,6 +303,16 @@ class TestPlotCubeIsosurface:
         fig = plot_cube_isosurface(minimal_cube_file)
         assert "Bohr" in fig.layout.scene.xaxis.title.text
 
+    def test_show_molecule_adds_overlay_traces(self, minimal_cube_file):
+        fig = plot_cube_isosurface(minimal_cube_file, show_molecule=True)
+        assert len(fig.data) >= 3
+
+    def test_show_grid_false_hides_scene_grid(self, minimal_cube_file):
+        fig = plot_cube_isosurface(minimal_cube_file, show_grid=False)
+        assert fig.layout.scene.xaxis.showgrid is False
+        assert fig.layout.scene.yaxis.showgrid is False
+        assert fig.layout.scene.zaxis.showgrid is False
+
 
 # ---------------------------------------------------------------------------
 # generate_cube_from_arrays — M6.2 acceptance criteria

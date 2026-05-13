@@ -826,6 +826,8 @@ class QuantUIApp:
         self._last_calc_type: Optional[str] = None  # e.g. "frequency", "single_point"
         self._results: List = []
         self._pending_traj_result: Any = None
+        self._traj_render_token: int = 0
+        self._iso_render_token: int = 0
         self.root_tab: widgets.Tab
         self._session_id: str = _uuid.uuid4().hex[:12]
 
@@ -1334,6 +1336,12 @@ class QuantUIApp:
         assigned to widgets.HTML.value (innerHTML path), which leads to blank
         figure panels. Rendering through Output display_data executes the JS.
         """
+        if threading.current_thread() is not threading.main_thread():
+            ip = get_ipython()
+            io_loop = getattr(getattr(ip, "kernel", None), "io_loop", None)
+            if io_loop is not None:
+                io_loop.add_callback(self._set_html_output, out, html)
+                return
         self._clear_output_widget(out)
         out.append_display_data(HTML(html))
 
@@ -1892,8 +1900,15 @@ class QuantUIApp:
     def _on_traj_expand(self, change) -> None:
         _viz_on_traj_expand(self, change)
 
-    def _show_opt_trajectory(self, opt_result) -> None:
-        _viz_show_opt_trajectory(self, opt_result, layout_fn=_layout)
+    def _show_opt_trajectory(
+        self, opt_result, render_token: Optional[int] = None
+    ) -> None:
+        _viz_show_opt_trajectory(
+            self,
+            opt_result,
+            layout_fn=_layout,
+            render_token=render_token,
+        )
 
     def _traj_step_html(self, step: int, traj, energies, rel_e) -> str:
         return _viz_traj_step_html(self, step, traj, energies, rel_e)
@@ -1938,8 +1953,14 @@ class QuantUIApp:
     def _on_orb_range_changed(self, _change=None) -> None:
         _viz_on_orb_range_changed(self, _change)
 
-    def _render_orbital_isosurface(self, orbital_label: str) -> None:
-        _viz_render_orbital_isosurface(self, orbital_label)
+    def _render_orbital_isosurface(
+        self, orbital_label: str, render_token: Optional[int] = None
+    ) -> None:
+        _viz_render_orbital_isosurface(
+            self,
+            orbital_label,
+            render_token=render_token,
+        )
 
     def _render_vib_mode(self, vib_data, molecule, mode_number: int) -> None:
         _viz_render_vib_mode(self, vib_data, molecule, mode_number)
@@ -2026,6 +2047,37 @@ class QuantUIApp:
             save_spectra: dict = {}
             save_type: str = "single_point"
             _pre_opt: Any = None  # OptimizationResult from Frequency pre-opt step
+
+            # Optional QM geometry optimization before non-frequency workflows.
+            # Frequency has dedicated seed/pre-opt handling in its own branch.
+            if self._freq_preopt_cb.value and ct not in ("Geometry Opt", "Frequency"):
+                from quantui import optimize_geometry
+
+                self.run_status.value = f"Pre-optimizing geometry before {ct}…"
+                log.write(
+                    f"\n── Pre-optimisation (before {ct}) "
+                    f"────────────────────────────────────\n"
+                )
+                _pre_opt = optimize_geometry(
+                    molecule=calc_mol,
+                    method=self.method_dd.value,
+                    basis=self.basis_dd.value,
+                    progress_stream=log,  # type: ignore[arg-type]
+                )
+                calc_mol = _pre_opt.molecule
+                _conv_str = (
+                    "converged" if _pre_opt.converged else "did NOT fully converge"
+                )
+                log.write(
+                    f"\nPre-optimisation {_conv_str} in {_pre_opt.n_steps} steps."
+                    f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
+                )
+                if not _pre_opt.converged:
+                    log.write(
+                        "⚠ Pre-optimisation did not fully converge — "
+                        "proceeding with best available geometry.\n\n"
+                    )
+
             if ct == "Geometry Opt":
                 self.run_status.value = "Optimizing geometry..."
                 from quantui import optimize_geometry

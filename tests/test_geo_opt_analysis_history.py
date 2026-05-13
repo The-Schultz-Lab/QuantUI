@@ -224,6 +224,24 @@ class TestGeoOptPanelActivation:
         app._apply_analysis_context(ctx)
         assert "Trajectory" not in app._ana_available
 
+    def test_missing_geo_opt_trajectory_message_is_context_aware(
+        self, tmp_path, app, geo_opt_result
+    ):
+        saved = save_result(
+            geo_opt_result,
+            results_dir=tmp_path,
+            calc_type="geometry_opt",
+            spectra={},
+        )
+        save_orbitals(saved, geo_opt_result)
+        ctx = app._build_history_context(saved)
+        app._apply_analysis_context(ctx)
+
+        msg = app._ana_unavail_msgs["Trajectory"].value
+        assert "Not available for this Geometry Opt history result" in msg
+        assert "trajectory.json is missing" in msg
+        assert "run a Geometry Opt / PES Scan / Frequency pre-opt" not in msg
+
     def test_no_panels_when_calc_type_wrong(self, tmp_path, app, geo_opt_result):
         saved = save_result(
             geo_opt_result, results_dir=tmp_path, calc_type="", spectra={}
