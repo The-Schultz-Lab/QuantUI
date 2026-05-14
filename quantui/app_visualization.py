@@ -750,6 +750,167 @@ def update_ir_figure(app: Any, mode: str, fwhm: float) -> None:
             pass
 
 
+def show_uv_vis_spectrum(
+    app: Any,
+    energies_ev: List[float],
+    oscillator_strengths: List[float],
+    wavelengths_nm: List[float],
+) -> bool:
+    """Populate UV-Vis spectrum data and render the default stick plot."""
+    wl = list(wavelengths_nm or [])
+    if not wl:
+        wl = [1240.0 / e for e in energies_ev if e and e > 0]
+
+    peaks: list[tuple[float, float]] = []
+    for x0, amp in zip(wl, oscillator_strengths):
+        try:
+            x_val = float(x0)
+            a_val = float(amp)
+        except Exception:
+            continue
+        if x_val <= 0:
+            continue
+        peaks.append((x_val, max(a_val, 0.0)))
+
+    if not peaks:
+        return False
+
+    peaks.sort(key=lambda p: p[0])
+    app._last_uv_wavelengths_nm = [p[0] for p in peaks]
+    app._last_uv_oscillator_strengths = [p[1] for p in peaks]
+
+    app._update_uv_vis_figure("Stick", 20.0)
+
+    # _show_uv_vis_spectrum may run from _do_run background thread.
+    app._queue_main_thread_callback(app._wire_uv_controls)
+    return True
+
+
+def wire_uv_controls(app: Any) -> None:
+    """Rebind UV-Vis controls and reset defaults on the main thread."""
+    app._uv_mode_toggle.unobserve_all()
+    app._uv_fwhm_slider.unobserve_all()
+    app._uv_mode_toggle.observe(app._safe_cb(app._on_uv_mode_changed), names="value")
+    app._uv_fwhm_slider.observe(app._safe_cb(app._on_uv_fwhm_changed), names="value")
+
+    app._uv_mode_toggle.value = "Stick"
+    app._uv_fwhm_slider.value = 20.0
+    app._uv_fwhm_slider.layout.display = "none"
+
+
+def on_uv_mode_changed(app: Any, change: dict[str, Any]) -> None:
+    """Handle Stick/Broadened mode changes for UV-Vis panel."""
+    mode = change["new"]
+    app._uv_fwhm_slider.layout.display = "" if mode == "Broadened" else "none"
+    app._update_uv_vis_figure(mode, app._uv_fwhm_slider.value)
+
+
+def on_uv_fwhm_changed(app: Any, change: dict[str, Any]) -> None:
+    """Re-render broadened UV-Vis trace when line width slider changes."""
+    if app._uv_mode_toggle.value == "Broadened":
+        app._update_uv_vis_figure("Broadened", change["new"])
+
+
+def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
+    """Re-render UV-Vis spectrum chart for mode and FWHM settings."""
+    wl = list(getattr(app, "_last_uv_wavelengths_nm", []) or [])
+    osc = list(getattr(app, "_last_uv_oscillator_strengths", []) or [])
+    if not wl or not osc:
+        return
+
+    try:
+        import numpy as _np
+        import plotly.graph_objects as _go
+        import plotly.io as _pio
+
+        mode_name = str(mode or "Stick")
+        mode_norm = mode_name.strip().lower()
+        fig = _go.Figure()
+
+        if mode_norm == "broadened":
+            gamma = max(float(fwhm), 1.0) / 2.0
+            x_min = max(100.0, min(wl) - 80.0)
+            x_max = max(wl) + 80.0
+            n_points = max(600, int((x_max - x_min) * 2.0))
+            x_grid = _np.linspace(x_min, x_max, n_points)
+            y_grid = _np.zeros_like(x_grid)
+            for x0, amp in zip(wl, osc):
+                y_grid += amp * (gamma**2 / ((x_grid - x0) ** 2 + gamma**2))
+            fig.add_trace(
+                _go.Scatter(
+                    x=x_grid.tolist(),
+                    y=y_grid.tolist(),
+                    mode="lines",
+                    line=dict(color="#2563eb", width=2),
+                    name="Broadened",
+                )
+            )
+        else:
+            stick_x: list[float | None] = []
+            stick_y: list[float | None] = []
+            for x0, amp in zip(wl, osc):
+                stick_x.extend([x0, x0, None])
+                stick_y.extend([0.0, amp, None])
+            fig.add_trace(
+                _go.Scatter(
+                    x=stick_x,
+                    y=stick_y,
+                    mode="lines",
+                    line=dict(color="#2563eb", width=2),
+                    name="Stick",
+                )
+            )
+            fig.add_trace(
+                _go.Scatter(
+                    x=wl,
+                    y=osc,
+                    mode="markers",
+                    marker=dict(color="#1d4ed8", size=6),
+                    showlegend=False,
+                    hovertemplate=(
+                        "Wavelength: %{x:.2f} nm"
+                        "<br>Oscillator strength: %{y:.3f}<extra></extra>"
+                    ),
+                )
+            )
+
+        tc = app._plotly_theme_colors()
+        fig.update_layout(
+            xaxis_title="Wavelength (nm)",
+            yaxis_title="Oscillator strength",
+            height=320,
+            margin=dict(l=60, r=20, t=30, b=50),
+            showlegend=False,
+            plot_bgcolor=tc["plot_bgcolor"],
+            paper_bgcolor=tc["paper_bgcolor"],
+            font=dict(color=tc["font_color"]),
+        )
+        fig.update_xaxes(showgrid=True, gridcolor=tc["grid_color"], zeroline=False)
+        fig.update_yaxes(
+            showgrid=True,
+            gridcolor=tc["grid_color"],
+            rangemode="tozero",
+        )
+
+        app._apply_plotly_theme(fig)
+        app._set_html_output(
+            app._tddft_fig,
+            _pio.to_html(
+                fig,
+                include_plotlyjs="require",
+                full_html=False,
+                config={"responsive": True},
+            ),
+        )
+    except Exception as exc:
+        try:
+            from quantui import calc_log as _clog
+
+            _clog.log_event("uv_fig_error", f"{type(exc).__name__}: {exc}"[:300])
+        except Exception:
+            pass
+
+
 def show_orbital_diagram(app: Any, result: Any) -> bool:
     """Build and reveal interactive orbital diagram accordion."""
     mo_energy = getattr(result, "mo_energy_hartree", None)

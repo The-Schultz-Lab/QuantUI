@@ -304,6 +304,12 @@ from quantui.app_visualization import (
     on_traj_expand as _viz_on_traj_expand,
 )
 from quantui.app_visualization import (
+    on_uv_fwhm_changed as _viz_on_uv_fwhm_changed,
+)
+from quantui.app_visualization import (
+    on_uv_mode_changed as _viz_on_uv_mode_changed,
+)
+from quantui.app_visualization import (
     on_vib_mode_changed as _viz_on_vib_mode_changed,
 )
 from quantui.app_visualization import (
@@ -331,6 +337,9 @@ from quantui.app_visualization import (
     show_result_3d as _viz_show_result_3d,
 )
 from quantui.app_visualization import (
+    show_uv_vis_spectrum as _viz_show_uv_vis_spectrum,
+)
+from quantui.app_visualization import (
     show_vib_animation as _viz_show_vib_animation,
 )
 from quantui.app_visualization import (
@@ -340,7 +349,13 @@ from quantui.app_visualization import (
     update_ir_figure as _viz_update_ir_figure,
 )
 from quantui.app_visualization import (
+    update_uv_vis_figure as _viz_update_uv_vis_figure,
+)
+from quantui.app_visualization import (
     wire_ir_controls as _viz_wire_ir_controls,
+)
+from quantui.app_visualization import (
+    wire_uv_controls as _viz_wire_uv_controls,
 )
 
 # Import directly from submodules to avoid circular-import issues.
@@ -772,6 +787,8 @@ class QuantUIApp:
         _scan_unit_lbl: Any
         _tddft_accordion: Any
         _tddft_fig: Any
+        _uv_fwhm_slider: Any
+        _uv_mode_toggle: Any
         _to_analysis_btn: Any
         _viz_backend: Any
         _viz_label: Any
@@ -828,6 +845,8 @@ class QuantUIApp:
         self._pending_traj_result: Any = None
         self._traj_render_token: int = 0
         self._iso_render_token: int = 0
+        self._last_uv_wavelengths_nm: list[float] = []
+        self._last_uv_oscillator_strengths: list[float] = []
         self.root_tab: widgets.Tab
         self._session_id: str = _uuid.uuid4().hex[:12]
 
@@ -992,6 +1011,13 @@ class QuantUIApp:
         if change["new"] == 0 and getattr(self, "_last_ir_freqs", None):
             self._update_ir_figure(
                 self._ir_mode_toggle.value, self._ir_fwhm_slider.value
+            )
+
+    def _on_tddft_accordion_show(self, change) -> None:
+        if change["new"] == 0 and getattr(self, "_last_uv_wavelengths_nm", None):
+            self._update_uv_vis_figure(
+                self._uv_mode_toggle.value,
+                self._uv_fwhm_slider.value,
             )
 
     def _on_orb_accordion_show(self, change) -> None:
@@ -1378,6 +1404,11 @@ class QuantUIApp:
             self._update_ir_figure(
                 self._ir_mode_toggle.value,
                 self._ir_fwhm_slider.value,
+            )
+        if getattr(self, "_last_uv_wavelengths_nm", None):
+            self._update_uv_vis_figure(
+                self._uv_mode_toggle.value,
+                self._uv_fwhm_slider.value,
             )
         _last_pes = getattr(self, "_last_pes_result", None)
         if _last_pes is not None:
@@ -1943,6 +1974,31 @@ class QuantUIApp:
 
     def _update_ir_figure(self, mode: str, fwhm: float) -> None:
         _viz_update_ir_figure(self, mode, fwhm)
+
+    def _show_uv_vis_spectrum(
+        self,
+        energies_ev: list[float],
+        oscillator_strengths: list[float],
+        wavelengths_nm: list[float],
+    ) -> bool:
+        return _viz_show_uv_vis_spectrum(
+            self,
+            energies_ev,
+            oscillator_strengths,
+            wavelengths_nm,
+        )
+
+    def _wire_uv_controls(self) -> None:
+        _viz_wire_uv_controls(self)
+
+    def _on_uv_mode_changed(self, change) -> None:
+        _viz_on_uv_mode_changed(self, change)
+
+    def _on_uv_fwhm_changed(self, change) -> None:
+        _viz_on_uv_fwhm_changed(self, change)
+
+    def _update_uv_vis_figure(self, mode: str, fwhm: float) -> None:
+        _viz_update_uv_vis_figure(self, mode, fwhm)
 
     def _show_orbital_diagram(self, result) -> bool:
         return _viz_show_orbital_diagram(self, result)

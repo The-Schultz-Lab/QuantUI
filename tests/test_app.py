@@ -961,6 +961,70 @@ class TestShowIRSpectrum:
 
 
 # ---------------------------------------------------------------------------
+# M-UV — UV-Vis Spectrum accordion widgets
+# ---------------------------------------------------------------------------
+
+
+class TestUVVisSpectrumWidgets:
+    """UV-Vis accordion and controls exist in correct initial state."""
+
+    def test_uv_accordion_exists(self):
+        app = QuantUIApp()
+        assert hasattr(app, "_tddft_accordion")
+        assert isinstance(app._tddft_accordion, widgets.Accordion)
+
+    def test_uv_mode_toggle_exists(self):
+        app = QuantUIApp()
+        assert isinstance(app._uv_mode_toggle, widgets.ToggleButtons)
+
+    def test_uv_mode_toggle_default_stick(self):
+        app = QuantUIApp()
+        assert app._uv_mode_toggle.value == "Stick"
+
+    def test_uv_mode_toggle_has_two_options(self):
+        app = QuantUIApp()
+        assert set(app._uv_mode_toggle.options) == {"Stick", "Broadened"}
+
+    def test_uv_fwhm_slider_hidden_initially(self):
+        app = QuantUIApp()
+        assert app._uv_fwhm_slider.layout.display == "none"
+
+
+class TestShowUVVisSpectrum:
+    """_show_uv_vis_spectrum stores data and wires controls."""
+
+    def test_show_uv_vis_spectrum_returns_true_with_data(self):
+        app = QuantUIApp()
+        ok = app._show_uv_vis_spectrum(
+            [3.0, 4.2, 5.5],
+            [0.12, 0.08, 0.05],
+            [413.3, 295.2, 225.5],
+        )
+        assert ok is True
+
+    def test_uv_fwhm_slider_shown_when_broadened(self):
+        app = QuantUIApp()
+        app._show_uv_vis_spectrum(
+            [3.0, 4.2, 5.5],
+            [0.12, 0.08, 0.05],
+            [413.3, 295.2, 225.5],
+        )
+        app._uv_mode_toggle.value = "Broadened"
+        assert app._uv_fwhm_slider.layout.display == ""
+
+    def test_uv_fwhm_slider_hidden_when_stick(self):
+        app = QuantUIApp()
+        app._show_uv_vis_spectrum(
+            [3.0, 4.2, 5.5],
+            [0.12, 0.08, 0.05],
+            [413.3, 295.2, 225.5],
+        )
+        app._uv_mode_toggle.value = "Broadened"
+        app._uv_mode_toggle.value = "Stick"
+        assert app._uv_fwhm_slider.layout.display == "none"
+
+
+# ---------------------------------------------------------------------------
 # M6 — Orbital Diagram accordion
 # ---------------------------------------------------------------------------
 

@@ -1124,11 +1124,30 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._iso_accordion.set_title(0, "Orbital Isosurface")
     app._iso_accordion.selected_index = None
 
+    app._uv_mode_toggle = widgets.ToggleButtons(
+        options=["Stick", "Broadened"],
+        value="Stick",
+        style={"button_width": "80px"},
+        layout=layout_fn(margin="0 8px 0 0"),
+    )
+    app._uv_fwhm_slider = widgets.FloatSlider(
+        value=20.0,
+        min=5.0,
+        max=100.0,
+        step=5.0,
+        description="Line width:",
+        style={"description_width": "80px"},
+        layout=layout_fn(width="260px", display="none"),
+    )
     app._tddft_fig = widgets.Output(layout=layout_fn(width="100%"))
+    uv_controls = widgets.HBox(
+        [app._uv_mode_toggle, app._uv_fwhm_slider],
+        layout=layout_fn(align_items="center", margin="0 0 6px 0"),
+    )
     app._tddft_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
-                [app._tddft_fig],
+                [uv_controls, app._tddft_fig],
                 layout=layout_fn(padding="8px"),
             )
         ],

@@ -99,6 +99,9 @@ def build_ana_switcher(app: Any, *, layout_fn: Any) -> None:
     app._ir_accordion.observe(
         app._safe_cb(app._on_ir_accordion_show), names=["selected_index"]
     )
+    app._tddft_accordion.observe(
+        app._safe_cb(app._on_tddft_accordion_show), names=["selected_index"]
+    )
     app._orb_accordion.observe(
         app._safe_cb(app._on_orb_accordion_show), names=["selected_index"]
     )
@@ -395,50 +398,12 @@ def pop_uv_vis(app: Any, ctx: Any) -> bool:
             wl = [1240.0 / e for e in energies_ev if e > 0]
     else:
         uv = ctx.spectra_data.get("uv_vis", {})
-        energies_ev = uv.get("excitation_energies_ev", [])
-        osc = uv.get("oscillator_strengths", [])
-        wl = uv.get("wavelengths_nm", [])
+        energies_ev = list(uv.get("excitation_energies_ev") or [])
+        osc = list(uv.get("oscillator_strengths") or [])
+        wl = list(uv.get("wavelengths_nm") or [])
     if not energies_ev or not osc:
         return False
-    try:
-        import plotly.graph_objects as _go
-        import plotly.io as _pio
-
-        fig = _go.Figure()
-        fig.add_trace(
-            _go.Bar(
-                x=wl,
-                y=osc,
-                name="Osc. strength",
-                marker_color="#2563eb",
-                width=[4.0] * len(wl),
-            )
-        )
-        tc = app._plotly_theme_colors()
-        fig.update_layout(
-            xaxis_title="Wavelength (nm)",
-            yaxis_title="Oscillator strength",
-            height=320,
-            margin=dict(l=60, r=20, t=30, b=50),
-            plot_bgcolor=tc["plot_bgcolor"],
-            paper_bgcolor=tc["paper_bgcolor"],
-            font=dict(color=tc["font_color"]),
-            xaxis=dict(showgrid=True, gridcolor=tc["grid_color"]),
-            yaxis=dict(showgrid=True, gridcolor=tc["grid_color"]),
-        )
-        app._apply_plotly_theme(fig)
-        app._set_html_output(
-            app._tddft_fig,
-            _pio.to_html(
-                fig,
-                include_plotlyjs="require",
-                full_html=False,
-                config={"responsive": True},
-            ),
-        )
-        return True
-    except Exception:
-        return False
+    return bool(app._show_uv_vis_spectrum(energies_ev, osc, wl))
 
 
 def pop_nmr_shielding(app: Any, ctx: Any) -> bool:
