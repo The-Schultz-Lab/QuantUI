@@ -14,6 +14,7 @@ module in tests or tutorials does not pollute the IPython display.
 from __future__ import annotations
 
 import asyncio
+import html as _html
 import io
 import re
 import threading
@@ -80,6 +81,9 @@ from quantui.app_builders import (
 )
 from quantui.app_builders import (
     build_compare_section as _bld_build_compare_section,
+)
+from quantui.app_builders import (
+    build_files_tab as _bld_build_files_tab,
 )
 from quantui.app_builders import (
     build_help_section as _bld_build_help_section,
@@ -643,6 +647,7 @@ class _AnalysisContext:
     molecule: Optional[Any] = None  # molecule used for the calculation
     spectra_data: dict = field(default_factory=dict)  # from save_spectra / disk
     preopt_result: Optional[Any] = None  # OptimizationResult from pre-opt step
+    timestamp: str = ""  # result timestamp shown in history dropdown labels
     source: str = "live"  # "live" | "history"
 
     @property
@@ -701,6 +706,7 @@ class QuantUIApp:
         _status_tab_panel: Any
         _theme_style: Any
         _welcome_html: Any
+        _activity_btn: Any
         advanced_accordion: Any
         calc_setup_panel: Any
         change_mol_btn: Any
@@ -711,6 +717,15 @@ class QuantUIApp:
         compare_panel: Any
         compare_refresh_btn: Any
         compare_select: Any
+        files_tab_panel: Any
+        _files_entries: Any
+        _files_open_btn: Any
+        _files_path_html: Any
+        _files_preview_output: Any
+        _files_refresh_btn: Any
+        _files_root_dd: Any
+        _files_status_html: Any
+        _files_up_btn: Any
         help_content_html: Any
         help_tab_panel: Any
         help_topic_dd: Any
@@ -864,6 +879,12 @@ class QuantUIApp:
         self._last_orb_fig: Any = None
         self._last_pes_fig: Any = None
         self._run_output_scroll_guard_installed: bool = False
+        self._files_current_dir: Optional[Path] = None
+        self._files_selected_path: Optional[Path] = None
+        self._files_updating: bool = False
+        self._activity_count: int = 0
+        self._activity_compute_count: int = 0
+        self._activity_lock = threading.Lock()
         self.root_tab: widgets.Tab
         self._session_id: str = _uuid.uuid4().hex[:12]
 
@@ -891,6 +912,7 @@ class QuantUIApp:
                     self._welcome_html,
                     widgets.HBox(
                         [
+                            self._activity_btn,
                             self.theme_btn,
                             self._help_btn,
                             self._issue_btn,
@@ -927,6 +949,7 @@ class QuantUIApp:
         self._build_history_section()
         self._build_compare_section()
         self._build_output_tab()
+        self._build_files_tab()
         self._build_help_section()
         self._build_issue_widgets()
 
@@ -947,6 +970,80 @@ class QuantUIApp:
             f"{{ filter: invert(1) hue-rotate({deg}deg) !important; }}"
             "</style>"
         )
+
+    def _set_activity_indicator(self, state: str = "idle", message: str = "") -> None:
+        """Update the toolbar activity light state and tooltip."""
+        if state == "compute":
+            self._activity_btn.description = "Computing"
+            self._activity_btn.icon = "cog"
+            self._activity_btn.button_style = "warning"
+            self._activity_btn.tooltip = message or "Running compute operations..."
+            return
+        if state == "ui":
+            self._activity_btn.description = "UI Active"
+            self._activity_btn.icon = "bolt"
+            self._activity_btn.button_style = "info"
+            self._activity_btn.tooltip = message or "Running UI operations..."
+            return
+
+        self._activity_btn.description = "Idle"
+        self._activity_btn.icon = "circle-o"
+        self._activity_btn.button_style = "success"
+        self._activity_btn.tooltip = "No active operations."
+
+    def _refresh_activity_indicator(self, message: str = "") -> None:
+        """Recompute activity light state from active operation counters."""
+        if self._activity_count <= 0:
+            self._set_activity_indicator("idle")
+            return
+        if self._activity_compute_count > 0:
+            self._set_activity_indicator("compute", message)
+            return
+        self._set_activity_indicator("ui", message)
+
+    def _activity_begin(self, message: str = "", kind: str = "ui") -> None:
+        """Mark one operation as active."""
+        with self._activity_lock:
+            self._activity_count += 1
+            if kind == "compute":
+                self._activity_compute_count += 1
+        self._refresh_activity_indicator(message)
+
+    def _activity_end(self, kind: str = "ui") -> None:
+        """Mark one operation as finished."""
+        with self._activity_lock:
+            if self._activity_count > 0:
+                self._activity_count -= 1
+            if kind == "compute" and self._activity_compute_count > 0:
+                self._activity_compute_count -= 1
+        self._refresh_activity_indicator()
+
+    def _activity_pulse(
+        self, message: str, hold_s: float = 0.18, kind: str = "ui"
+    ) -> None:
+        """Briefly light the activity indicator for quick operations."""
+        self._activity_begin(message, kind=kind)
+        timer = threading.Timer(
+            max(0.05, hold_s),
+            self._activity_end,
+            kwargs={"kind": kind},
+        )
+        timer.daemon = True
+        timer.start()
+
+    def _on_root_tab_changed(self, _change) -> None:
+        """Pulse the activity light on tab navigation actions."""
+        self._activity_pulse("Switching tabs...", hold_s=0.16, kind="ui")
+
+    def _go_to_results_tab(self, _btn) -> None:
+        """Navigate to Results tab with a visible activity pulse."""
+        self._activity_pulse("Navigating to Results tab...", hold_s=0.16, kind="ui")
+        self.root_tab.selected_index = 1
+
+    def _go_to_analysis_tab(self, _btn) -> None:
+        """Navigate to Analysis tab with a visible activity pulse."""
+        self._activity_pulse("Navigating to Analysis tab...", hold_s=0.16, kind="ui")
+        self.root_tab.selected_index = 2
 
     # ── Status panel ──────────────────────────────────────────────────────
 
@@ -1169,7 +1266,13 @@ class QuantUIApp:
     def _build_output_tab(self) -> None:
         _bld_build_output_tab(self, layout_fn=_layout)
 
-    # ── Help section (Cell 10) ────────────────────────────────────────────
+    # ── Files tab (Cell 11) ───────────────────────────────────────────────
+
+    def _build_files_tab(self) -> None:
+        _bld_build_files_tab(self, layout_fn=_layout)
+        self._refresh_file_browser()
+
+    # ── Help section (Cell 12) ────────────────────────────────────────────
 
     def _build_help_section(self) -> None:
         _bld_build_help_section(self, layout_fn=_layout)
@@ -1206,6 +1309,7 @@ class QuantUIApp:
                 self.history_panel,
                 self.compare_panel,
                 self.log_tab_panel,
+                self.files_tab_panel,
                 self._status_tab_panel,
             ]
         )
@@ -1215,7 +1319,11 @@ class QuantUIApp:
         self.root_tab.set_title(3, "History")
         self.root_tab.set_title(4, "Compare")
         self.root_tab.set_title(5, "Log")
-        self.root_tab.set_title(6, "Status")
+        self.root_tab.set_title(6, "Files")
+        self.root_tab.set_title(7, "Status")
+        self.root_tab.observe(
+            self._safe_cb(self._on_root_tab_changed), names="selected_index"
+        )
 
     # ══ CALLBACK WIRING ══════════════════════════════════════════════════════
 
@@ -1310,6 +1418,16 @@ class QuantUIApp:
         # Clear log cache (event_log.jsonl)
         self._clear_log_cache_btn.on_click(self._on_clear_log_cache)
         self._clear_log_cache_confirm_btn.on_click(self._on_clear_log_cache_confirm)
+        # Files tab
+        self._files_root_dd.observe(
+            self._safe_cb(self._on_files_root_changed), names="value"
+        )
+        self._files_entries.observe(
+            self._safe_cb(self._on_files_entry_changed), names="value"
+        )
+        self._files_open_btn.on_click(self._on_files_open)
+        self._files_up_btn.on_click(self._on_files_up)
+        self._files_refresh_btn.on_click(self._on_files_refresh)
         # Issue reporting
         self._issue_btn.on_click(self._on_issue_btn)
         self._issue_submit_btn.on_click(self._on_issue_submit)
@@ -1322,15 +1440,9 @@ class QuantUIApp:
             self._safe_cb(self._on_help_topic_changed), names="value"
         )
         # Tab navigation buttons
-        self._go_results_btn.on_click(
-            lambda _: setattr(self.root_tab, "selected_index", 1)
-        )
-        self._go_analysis_btn.on_click(
-            lambda _: setattr(self.root_tab, "selected_index", 2)
-        )
-        self._to_analysis_btn.on_click(
-            lambda _: setattr(self.root_tab, "selected_index", 2)
-        )
+        self._go_results_btn.on_click(self._go_to_results_tab)
+        self._go_analysis_btn.on_click(self._go_to_analysis_tab)
+        self._to_analysis_btn.on_click(self._go_to_analysis_tab)
         # Vibrational mode selector
         self.vib_mode_dd.observe(
             self._safe_cb(self._on_vib_mode_changed), names="value"
@@ -1347,6 +1459,372 @@ class QuantUIApp:
         )
         # Orbital isosurface generate button
         self._iso_generate_btn.on_click(self._on_iso_generate)
+
+    # ── Files tab ────────────────────────────────────────────────────────
+
+    def _files_allowed_roots(self) -> list[Path]:
+        """Return the approved filesystem roots for the Files tab."""
+        roots: list[Path] = []
+        candidates: list[Optional[Path]] = [self._get_results_dir(), Path.cwd()]
+        _last_dir = getattr(self, "_last_result_dir", None)
+        if isinstance(_last_dir, Path):
+            candidates.append(_last_dir)
+
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            try:
+                resolved = candidate.resolve()
+            except OSError:
+                continue
+            if resolved not in roots:
+                roots.append(resolved)
+
+        return roots
+
+    def _is_path_in_allowed_roots(self, path: Path, roots: list[Path]) -> bool:
+        """True when *path* is inside any configured Files-tab root."""
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return False
+        for root in roots:
+            try:
+                resolved.relative_to(root)
+                return True
+            except ValueError:
+                continue
+        return False
+
+    def _format_file_size(self, size_bytes: int) -> str:
+        """Return a compact human-readable size label."""
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        if size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+    def _set_files_status(self, message: str, color: str = "#64748b") -> None:
+        """Update Files tab status text."""
+        self._files_status_html.value = (
+            f'<span style="font-size:12px;color:{color}">'
+            f"{_html.escape(message)}</span>"
+        )
+
+    def _format_files_root_label(self, root: Path) -> str:
+        """Return a readable dropdown label for a root path."""
+        labels: list[tuple[str, Path]] = []
+        try:
+            labels.append(("Results", self._get_results_dir().resolve()))
+        except OSError:
+            pass
+        try:
+            labels.append(("Workspace CWD", Path.cwd().resolve()))
+        except OSError:
+            pass
+        _last_dir = getattr(self, "_last_result_dir", None)
+        if isinstance(_last_dir, Path):
+            try:
+                labels.append(("Current Result", _last_dir.resolve()))
+            except OSError:
+                pass
+
+        for prefix, known_root in labels:
+            if root == known_root:
+                return f"{prefix} ({root})"
+        return str(root)
+
+    def _refresh_file_browser(self) -> None:
+        """Refresh root options and the current directory listing."""
+        roots = self._files_allowed_roots()
+        try:
+            results_root = self._get_results_dir().resolve()
+        except OSError:
+            results_root = None
+        for root in roots:
+            if results_root is not None and root == results_root:
+                try:
+                    root.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    pass
+
+        if not roots:
+            self._files_updating = True
+            try:
+                self._files_root_dd.options = [("(no roots)", "")]
+                self._files_root_dd.value = ""
+                self._files_entries.options = [("(no files)", "")]
+                self._files_entries.value = ""
+            finally:
+                self._files_updating = False
+            self._files_current_dir = None
+            self._files_selected_path = None
+            self._files_path_html.value = (
+                '<span style="font-size:12px;color:#64748b">'
+                "Current folder: unavailable</span>"
+            )
+            self._files_open_btn.disabled = True
+            self._files_up_btn.disabled = True
+            self._set_files_status("No readable roots available.", "#b91c1c")
+            self._files_preview_output.clear_output(wait=True)
+            return
+
+        old_root_value = str(self._files_root_dd.value or "")
+        root_options = [
+            (self._format_files_root_label(root), str(root)) for root in roots
+        ]
+        valid_root_values = {value for _, value in root_options}
+        selected_root = old_root_value if old_root_value in valid_root_values else ""
+        if not selected_root:
+            selected_root = root_options[0][1]
+
+        self._files_updating = True
+        try:
+            self._files_root_dd.options = root_options
+            self._files_root_dd.value = selected_root
+        finally:
+            self._files_updating = False
+
+        selected_root_path = Path(selected_root)
+        if (
+            self._files_current_dir is None
+            or not self._is_path_in_allowed_roots(self._files_current_dir, roots)
+            or not self._files_current_dir.exists()
+            or not self._files_current_dir.is_dir()
+        ):
+            self._files_current_dir = selected_root_path
+
+        self._update_files_entries()
+        self._set_files_status("File list refreshed.")
+
+    def _update_files_entries(self) -> None:
+        """Rebuild the directory listing for the current folder."""
+        roots = self._files_allowed_roots()
+        if not roots:
+            self._files_entries.options = [("(no files)", "")]
+            self._files_entries.value = ""
+            self._files_selected_path = None
+            self._files_open_btn.disabled = True
+            self._files_up_btn.disabled = True
+            self._files_preview_output.clear_output(wait=True)
+            return
+
+        current = self._files_current_dir or roots[0]
+        if not self._is_path_in_allowed_roots(current, roots):
+            current = Path(self._files_root_dd.value)
+        if not current.exists() or not current.is_dir():
+            current = Path(self._files_root_dd.value)
+
+        self._files_current_dir = current
+        self._files_path_html.value = (
+            '<span style="font-size:12px;color:#475569">Current folder: '
+            f"{_html.escape(str(current))}</span>"
+        )
+
+        try:
+            children = list(current.iterdir())
+        except OSError as exc:
+            self._files_entries.options = [("(unreadable folder)", "")]
+            self._files_entries.value = ""
+            self._files_selected_path = None
+            self._files_open_btn.disabled = True
+            self._files_up_btn.disabled = True
+            self._files_preview_output.clear_output(wait=True)
+            self._set_files_status(f"Cannot list folder: {exc}", "#b91c1c")
+            return
+
+        children.sort(key=lambda p: (not p.is_dir(), p.name.lower()))
+        options: list[tuple[str, str]] = []
+        for child in children:
+            if child.is_dir():
+                options.append((f"[DIR] {child.name}", str(child)))
+                continue
+            try:
+                size_label = self._format_file_size(child.stat().st_size)
+            except OSError:
+                size_label = "?"
+            options.append((f"{child.name} ({size_label})", str(child)))
+
+        if not options:
+            options = [("(empty directory)", "")]
+
+        old_selection = str(self._files_entries.value or "")
+        valid_values = {value for _, value in options if value}
+        new_selection = old_selection if old_selection in valid_values else ""
+        if not new_selection and valid_values:
+            new_selection = next(iter(valid_values))
+
+        self._files_updating = True
+        try:
+            self._files_entries.options = options
+            self._files_entries.value = new_selection
+        finally:
+            self._files_updating = False
+
+        self._files_selected_path = Path(new_selection) if new_selection else None
+        self._files_open_btn.disabled = self._files_selected_path is None
+
+        _parent = current.parent
+        self._files_up_btn.disabled = (
+            _parent == current or not self._is_path_in_allowed_roots(_parent, roots)
+        )
+
+        self._files_preview_output.clear_output(wait=True)
+
+    def _preview_file_path(self, path: Path) -> None:
+        """Render a safe preview for a selected file path."""
+        roots = self._files_allowed_roots()
+        if not self._is_path_in_allowed_roots(path, roots):
+            self._set_files_status("Selected path is outside allowed roots.", "#b91c1c")
+            return
+        if not path.exists() or not path.is_file():
+            self._set_files_status("Selected file no longer exists.", "#b91c1c")
+            return
+
+        self._files_preview_output.clear_output(wait=True)
+        suffix = path.suffix.lower()
+
+        image_ext = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+        text_ext = {
+            ".txt",
+            ".log",
+            ".json",
+            ".md",
+            ".py",
+            ".csv",
+            ".yaml",
+            ".yml",
+            ".xyz",
+            ".cube",
+        }
+
+        if suffix in image_ext:
+            from IPython.display import Image as _Image
+
+            with self._files_preview_output:
+                display(_Image(filename=str(path)))
+            self._set_files_status(f"Previewing image: {path.name}")
+            return
+
+        is_text = suffix in text_ext
+        if not is_text:
+            try:
+                sample = path.read_bytes()[:512]
+            except OSError as exc:
+                self._set_files_status(f"Cannot read file: {exc}", "#b91c1c")
+                return
+            is_text = b"\x00" not in sample
+
+        if not is_text:
+            with self._files_preview_output:
+                display(
+                    HTML(
+                        "<p style='font-size:12px;color:#475569;margin:4px 0'>"
+                        "Binary preview is not available for this file type."
+                        "</p>"
+                    )
+                )
+            self._set_files_status(f"Binary file selected: {path.name}")
+            return
+
+        max_bytes = 200_000
+        try:
+            raw = path.read_bytes()
+        except OSError as exc:
+            self._set_files_status(f"Cannot read file: {exc}", "#b91c1c")
+            return
+
+        truncated = len(raw) > max_bytes
+        raw = raw[:max_bytes]
+        text = raw.decode("utf-8", errors="replace")
+        if truncated:
+            text += "\n\n[Preview truncated to 200 KB]"
+
+        with self._files_preview_output:
+            display(
+                HTML(
+                    "<pre style='white-space:pre-wrap;word-break:break-word;"
+                    "font-size:12px;line-height:1.35;margin:0'>"
+                    f"{_html.escape(text)}"
+                    "</pre>"
+                )
+            )
+        self._set_files_status(f"Previewing text file: {path.name}")
+
+    def _on_files_root_changed(self, change) -> None:
+        if self._files_updating:
+            return
+        new_value = str(change.get("new") or "")
+        if not new_value:
+            return
+
+        new_root = Path(new_value)
+        roots = self._files_allowed_roots()
+        if not self._is_path_in_allowed_roots(new_root, roots):
+            self._set_files_status("Selected root is not allowed.", "#b91c1c")
+            return
+
+        self._files_current_dir = new_root
+        self._update_files_entries()
+        self._set_files_status(f"Root changed to: {new_root}")
+
+    def _on_files_entry_changed(self, change) -> None:
+        if self._files_updating:
+            return
+        new_value = str(change.get("new") or "")
+        self._files_selected_path = Path(new_value) if new_value else None
+        self._files_open_btn.disabled = self._files_selected_path is None
+        if self._files_selected_path is None:
+            self._set_files_status("Select a folder or file.")
+            return
+        if self._files_selected_path.is_dir():
+            self._set_files_status(f"Folder selected: {self._files_selected_path.name}")
+        else:
+            self._set_files_status(f"File selected: {self._files_selected_path.name}")
+
+    def _on_files_open(self, _btn) -> None:
+        self._activity_begin("Opening selected path...")
+        try:
+            selected = self._files_selected_path
+            if selected is None:
+                self._set_files_status("Select a folder or file first.")
+                return
+            if selected.is_dir():
+                self._files_current_dir = selected
+                self._update_files_entries()
+                self._set_files_status(f"Opened folder: {selected}")
+                return
+            self._preview_file_path(selected)
+        finally:
+            self._activity_end()
+
+    def _on_files_up(self, _btn) -> None:
+        self._activity_begin("Moving to parent folder...")
+        try:
+            if self._files_current_dir is None:
+                self._set_files_status("No current folder selected.", "#b91c1c")
+                return
+
+            parent = self._files_current_dir.parent
+            roots = self._files_allowed_roots()
+            if parent == self._files_current_dir or not self._is_path_in_allowed_roots(
+                parent, roots
+            ):
+                self._set_files_status("Already at the top of the selected root.")
+                return
+
+            self._files_current_dir = parent
+            self._update_files_entries()
+            self._set_files_status(f"Moved to parent folder: {parent}")
+        finally:
+            self._activity_end()
+
+    def _on_files_refresh(self, _btn) -> None:
+        self._activity_begin("Refreshing files browser...")
+        try:
+            self._refresh_file_browser()
+        finally:
+            self._activity_end()
 
     # ══ CALLBACK METHODS ═════════════════════════════════════════════════════
 
@@ -1621,6 +2099,11 @@ class QuantUIApp:
     # ── Run ───────────────────────────────────────────────────────────────
 
     def _on_run_clicked(self, btn) -> None:
+        self._activity_pulse(
+            "Queueing calculation...",
+            hold_s=0.18,
+            kind="compute",
+        )
         _run_on_run_clicked(self, btn)
 
     def _on_solvent_cb_changed(self, change) -> None:
@@ -1751,13 +2234,25 @@ class QuantUIApp:
     # ── Compare ───────────────────────────────────────────────────────────
 
     def _on_compare_refresh(self, btn) -> None:
-        _run_on_compare_refresh(self, btn)
+        self._activity_begin("Refreshing comparison choices...")
+        try:
+            _run_on_compare_refresh(self, btn)
+        finally:
+            self._activity_end()
 
     def _on_compare(self, btn) -> None:
-        _run_on_compare(self, btn, layout_fn=_layout)
+        self._activity_begin("Building comparison view...")
+        try:
+            _run_on_compare(self, btn, layout_fn=_layout)
+        finally:
+            self._activity_end()
 
     def _on_compare_clear(self, btn) -> None:
-        _run_on_compare_clear(self, btn)
+        self._activity_begin("Clearing comparison output...")
+        try:
+            _run_on_compare_clear(self, btn)
+        finally:
+            self._activity_end()
 
     # ── History ───────────────────────────────────────────────────────────
 
@@ -1765,22 +2260,45 @@ class QuantUIApp:
         _hist_on_past_dd_changed(self, change, layout_fn=_layout)
 
     def _on_past_refresh(self, btn) -> None:
-        _run_on_past_refresh(self, btn)
+        self._activity_begin("Refreshing history list...")
+        try:
+            _run_on_past_refresh(self, btn)
+        finally:
+            self._activity_end()
 
     def _on_copy_results_path(self, btn) -> None:
-        _run_on_copy_results_path(self, btn)
+        self._activity_begin("Copying results path...")
+        try:
+            _run_on_copy_results_path(self, btn)
+        finally:
+            self._activity_end()
 
     def _on_view_log(self, btn) -> None:
-        _hist_on_view_log(self, btn)
+        self._activity_begin("Loading history log...")
+        try:
+            _hist_on_view_log(self, btn)
+            self._refresh_file_browser()
+        finally:
+            self._activity_end()
 
     def _mol_from_result_dir(self, result_dir: Path, data: dict):
         return _hist_mol_from_result_dir(result_dir, data)
 
     def _history_load_results(self, data: dict, result_dir: Path) -> None:
-        _hist_history_load_results(self, data, result_dir)
+        self._activity_begin("Loading history result...")
+        try:
+            _hist_history_load_results(self, data, result_dir)
+            self._refresh_file_browser()
+        finally:
+            self._activity_end()
 
     def _history_load_analysis(self, result_dir: Path) -> None:
-        _hist_history_load_analysis(self, result_dir)
+        self._activity_begin("Loading history analysis...")
+        try:
+            _hist_history_load_analysis(self, result_dir)
+            self._refresh_file_browser()
+        finally:
+            self._activity_end()
 
     def _build_history_context(self, result_dir: Path) -> Optional[_AnalysisContext]:
         return _hist_build_history_context(result_dir, context_cls=_AnalysisContext)
@@ -2247,6 +2765,10 @@ class QuantUIApp:
         if mol is None:
             self.run_status.value = "Load a molecule first."
             return
+        self._activity_begin(
+            "Running compute operations...",
+            kind="compute",
+        )
         self.run_btn.disabled = True
         self.run_status.value = "Starting..."
 
@@ -2275,6 +2797,32 @@ class QuantUIApp:
             nonlocal _scf_converged_t
             if _scf_converged_t is None:
                 _scf_converged_t = time.perf_counter()
+
+        def _run_required_final_single_point(target_mol, reason: str):
+            """Run a required post-optimization single point on target geometry."""
+            from quantui import run_in_session
+
+            _solvent = self.solvent_dd.value if self.solvent_cb.value else None
+            self.run_status.value = (
+                "Running required single-point on optimized geometry..."
+            )
+            log.write(
+                f"\n-- Required single-point ({reason}) "
+                "on optimized geometry --------------------------------\n"
+            )
+            sp_result = run_in_session(
+                molecule=target_mol,
+                method=self.method_dd.value,
+                basis=self.basis_dd.value,
+                progress_stream=log,  # type: ignore[arg-type]
+                solvent=_solvent,
+            )
+            if not bool(getattr(sp_result, "converged", False)):
+                raise RuntimeError(
+                    "Required post-optimization single-point did not converge."
+                )
+            log.write("Required single-point converged on optimized geometry.\n")
+            return sp_result
 
         log = _LogCapture(
             self.run_output,
@@ -2350,6 +2898,11 @@ class QuantUIApp:
                         "⚠ Pre-optimisation did not fully converge — "
                         "proceeding with best available geometry.\n\n"
                     )
+                if ct != "Single Point":
+                    _run_required_final_single_point(
+                        calc_mol,
+                        f"after pre-optimisation before {ct}",
+                    )
 
             if ct == "Geometry Opt":
                 self.run_status.value = "Optimizing geometry..."
@@ -2362,6 +2915,37 @@ class QuantUIApp:
                     fmax=self.fmax_fi.value,
                     steps=self.max_steps_si.value,
                     progress_stream=log,  # type: ignore[arg-type]
+                )
+                _sp_result = _run_required_final_single_point(
+                    result.molecule,
+                    "after geometry optimisation",
+                )
+                _sp_energy = getattr(_sp_result, "energy_hartree", None)
+                if (
+                    isinstance(getattr(result, "energies_hartree", None), list)
+                    and result.energies_hartree
+                    and isinstance(_sp_energy, (int, float))
+                ):
+                    result.energies_hartree[-1] = float(_sp_energy)
+                result.converged = bool(result.converged) and bool(
+                    getattr(_sp_result, "converged", False)
+                )
+                result.mo_energy_hartree = getattr(
+                    _sp_result,
+                    "mo_energy_hartree",
+                    result.mo_energy_hartree,
+                )
+                result.mo_occ = getattr(_sp_result, "mo_occ", result.mo_occ)
+                result.mo_coeff = getattr(_sp_result, "mo_coeff", result.mo_coeff)
+                result.pyscf_mol_atom = getattr(
+                    _sp_result,
+                    "pyscf_mol_atom",
+                    result.pyscf_mol_atom,
+                )
+                result.pyscf_mol_basis = getattr(
+                    _sp_result,
+                    "pyscf_mol_basis",
+                    result.pyscf_mol_basis,
                 )
                 result_html = self._format_opt_result(result)
                 save_spectra, save_type = {}, "geometry_opt"
@@ -2409,6 +2993,10 @@ class QuantUIApp:
                             "⚠ Pre-optimisation did not fully converge — "
                             "proceeding with best available geometry.\n\n"
                         )
+                    _run_required_final_single_point(
+                        calc_mol,
+                        "after frequency pre-optimisation",
+                    )
 
                 # ── Step 3: frequency analysis ────────────────────────────────
                 self.run_status.value = "Computing frequencies (SCF + Hessian)…"
@@ -2630,7 +3218,10 @@ class QuantUIApp:
                     spectra=save_spectra,
                 )
                 self._last_result_dir = _saved_dir
-                save_thumbnail(_saved_dir, load_result(_saved_dir))
+                _saved_data = load_result(_saved_dir)
+                save_thumbnail(_saved_dir, _saved_data)
+                _ana_ctx.result_dir = _saved_dir
+                _ana_ctx.timestamp = str(_saved_data.get("timestamp", ""))
                 # Persist trajectory so history viewer can replay it.
                 if ct in ("Geometry Opt", "PES Scan"):
                     _traj = getattr(
@@ -2836,6 +3427,7 @@ class QuantUIApp:
 
         finally:
             self.run_btn.disabled = False
+            self._activity_end(kind="compute")
 
     def _update_notes(self, change=None) -> None:
         _run_update_notes(self, change)
@@ -2864,6 +3456,10 @@ class QuantUIApp:
         """Wrap an .observe() handler so exceptions are logged instead of silently dropped."""
 
         def _wrapper(change):
+            self._activity_begin(
+                f"Running {getattr(fn, '__name__', 'callback')}...",
+                kind="ui",
+            )
             try:
                 fn(change)
             except Exception as _e:
@@ -2879,6 +3475,8 @@ class QuantUIApp:
                     )
                 except Exception:
                     pass
+            finally:
+                self._activity_end(kind="ui")
 
         return _wrapper
 

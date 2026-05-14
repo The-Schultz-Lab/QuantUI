@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 import ipywidgets as widgets
 import pytest
 
-from quantui.app import _RE_CONV, _RE_CYCLE, QuantUIApp, _LogCapture
+from quantui.app import _RE_CONV, _RE_CYCLE, QuantUIApp, _AnalysisContext, _LogCapture
 from quantui.molecule import Molecule
 
 # ---------------------------------------------------------------------------
@@ -58,6 +58,25 @@ class TestInstantiation:
     def test_initial_molecule_is_none(self):
         app = QuantUIApp()
         assert app._molecule is None
+
+    def test_activity_indicator_defaults_idle(self):
+        app = QuantUIApp()
+        assert hasattr(app, "_activity_btn")
+        assert app._activity_btn.description == "Idle"
+
+    def test_activity_indicator_compute_state(self):
+        app = QuantUIApp()
+        app._activity_begin("Running compute operations...", kind="compute")
+        assert app._activity_btn.description == "Computing"
+        app._activity_end(kind="compute")
+        assert app._activity_btn.description == "Idle"
+
+    def test_activity_indicator_ui_state(self):
+        app = QuantUIApp()
+        app._activity_begin("Switching tabs...", kind="ui")
+        assert app._activity_btn.description == "UI Active"
+        app._activity_end(kind="ui")
+        assert app._activity_btn.description == "Idle"
 
     def test_run_btn_initially_disabled(self):
         app = QuantUIApp()
@@ -126,9 +145,9 @@ class TestDefaultWidgetValues:
 class TestTabStructure:
     """root_tab has the correct number and titles of tabs."""
 
-    def test_seven_tabs(self):
+    def test_eight_tabs(self):
         app = QuantUIApp()
-        assert len(app.root_tab.children) == 7
+        assert len(app.root_tab.children) == 8
 
     def test_tab_titles(self):
         app = QuantUIApp()
@@ -139,10 +158,26 @@ class TestTabStructure:
             "History",
             "Compare",
             "Log",
+            "Files",
             "Status",
         ]
         for i, title in enumerate(expected):
             assert app.root_tab.get_title(i) == title
+
+
+class TestFilesTab:
+    """Files tab widgets are available and initialized."""
+
+    def test_files_tab_widgets_exist(self):
+        app = QuantUIApp()
+        assert hasattr(app, "files_tab_panel")
+        assert hasattr(app, "_files_root_dd")
+        assert hasattr(app, "_files_entries")
+        assert hasattr(app, "_files_preview_output")
+
+    def test_files_root_dropdown_has_options(self):
+        app = QuantUIApp()
+        assert len(app._files_root_dd.options) >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -342,17 +377,35 @@ class TestDoRunDispatch:
         mock_result.energy_hartree = -75.0
         mock_result.converged = True
         mock_result.n_iterations = 5
+        mock_result.energies_hartree = [-75.0]
         mock_result.trajectory = []
         mock_result.formula = "H2O"
         mock_result.method = "RHF"
         mock_result.basis = "STO-3G"
-        mock_result.final_molecule = _water()
+        mock_result.molecule = _water()
+        mock_result.mo_energy_hartree = None
+        mock_result.mo_occ = None
+        mock_result.mo_coeff = None
+        mock_result.pyscf_mol_atom = None
+        mock_result.pyscf_mol_basis = None
+        mock_sp = MagicMock()
+        mock_sp.converged = True
+        mock_sp.energy_hartree = -75.1
+        mock_sp.mo_energy_hartree = [0.0]
+        mock_sp.mo_occ = [2.0]
+        mock_sp.mo_coeff = [[0.0]]
+        mock_sp.pyscf_mol_atom = [("O", [0.0, 0.0, 0.0])]
+        mock_sp.pyscf_mol_basis = "STO-3G"
         with patch(
             "quantui.optimize_geometry", return_value=mock_result, create=True
         ) as mock_opt:
-            with patch("quantui.save_result"):
-                app._do_run()
+            with patch(
+                "quantui.run_in_session", return_value=mock_sp, create=True
+            ) as mock_sp_run:
+                with patch("quantui.save_result"):
+                    app._do_run()
         mock_opt.assert_called_once()
+        mock_sp_run.assert_called_once()
 
     def test_pyscf_unavailable_shows_error(self, app_with_molecule):
         app = app_with_molecule
@@ -1312,6 +1365,26 @@ class TestAnalysisTab:
     def test_ir_accordion_in_analysis_tab(self):
         app = QuantUIApp()
         assert app._ir_accordion in app.analysis_tab_panel.children
+
+    def test_analysis_heading_matches_history_label_shape(self):
+        app = QuantUIApp()
+        ctx = _AnalysisContext(
+            calc_type="frequency",
+            formula="H2O",
+            method="B3LYP",
+            basis="6-31G",
+            timestamp="2026-05-14_10-11-12-123456",
+            source="history",
+        )
+
+        app._apply_analysis_context(ctx)
+
+        heading = app._analysis_context_lbl.value
+        assert "Analysing:" in heading
+        assert "2026-05-14_10-11-12-123456" in heading
+        assert "[Frequency Analysis]" in heading
+        assert "H2O  B3LYP/6-31G" in heading
+        assert "(from History)" in heading
 
 
 # ---------------------------------------------------------------------------

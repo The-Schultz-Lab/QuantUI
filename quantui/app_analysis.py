@@ -21,6 +21,15 @@ _CALC_TYPE_LABELS = {
     "pes_scan": "PES Scan",
 }
 
+_CALC_TYPE_BADGES = {
+    "single_point": "Single Point",
+    "geometry_opt": "Geometry Optimization",
+    "frequency": "Frequency Analysis",
+    "tddft": "UV-Vis (TD-DFT)",
+    "nmr": "NMR Shielding",
+    "pes_scan": "PES Scan",
+}
+
 
 def _panel_unavailable_html(message: str) -> str:
     return f'<div style="{_PANEL_UNAVAILABLE_STYLE}">{_html_mod.escape(message)}</div>'
@@ -60,6 +69,14 @@ def _reset_unavailable_messages_for_context(app: Any, ctx: Any) -> None:
             panel_name,
             f"Not available - run a {when} calculation first.",
         )
+
+
+def _analysis_heading_label(ctx: Any) -> str:
+    """Return the analysis heading text aligned with history dropdown labels."""
+    badge = _CALC_TYPE_BADGES.get(ctx.calc_type, str(ctx.calc_type or "Unknown"))
+    core = f"[{badge}] {ctx.label}"
+    ts = str(getattr(ctx, "timestamp", "") or "").strip()
+    return f"{ts}  ·  {core}" if ts else core
 
 
 def build_ana_switcher(app: Any, *, layout_fn: Any) -> None:
@@ -193,9 +210,10 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
             pass
 
     source_suffix = " (from History)" if ctx.source == "history" else ""
+    heading = _analysis_heading_label(ctx)
     app._analysis_context_lbl.value = (
         f'<p style="color:#555;font-size:13px;margin:4px 0 12px">'
-        f"Analysing: {ctx.label}{source_suffix}</p>"
+        f"Analysing: {_html_mod.escape(heading)}{source_suffix}</p>"
     )
     has_any = bool(app._ana_available)
     app._to_analysis_btn.layout.display = "" if has_any else "none"

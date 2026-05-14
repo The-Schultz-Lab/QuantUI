@@ -678,6 +678,13 @@ def build_theme_selector(app: Any, *, layout_fn: Any) -> None:
     app._theme_style = widgets.Output(
         layout=layout_fn(height="0px", overflow="hidden", margin="0", padding="0")
     )
+    app._activity_btn = widgets.Button(
+        description="Idle",
+        icon="circle-o",
+        tooltip="No active operations.",
+        button_style="success",
+        layout=layout_fn(width="118px", margin="0 8px 0 0"),
+    )
     app.theme_btn = widgets.ToggleButtons(
         options=["Light", "Dark"],
         value="Dark",
@@ -1446,6 +1453,83 @@ def build_output_tab(app: Any, *, layout_fn: Any) -> None:
                 [app._clear_log_cache_btn, app._clear_log_cache_confirm_btn],
                 layout=layout_fn(align_items="center", gap="8px"),
             ),
+        ],
+        layout=layout_fn(padding="8px 0"),
+    )
+
+
+def build_files_tab(app: Any, *, layout_fn: Any) -> None:
+    """Build the read-only Files tab widgets."""
+    app._files_root_dd = widgets.Dropdown(
+        options=[("(loading)", "")],
+        value="",
+        description="Root:",
+        style={"description_width": "40px"},
+        layout=layout_fn(width="520px"),
+    )
+    app._files_path_html = widgets.HTML(
+        value=(
+            '<span style="font-size:12px;color:#64748b">'
+            "Current folder: (not set)</span>"
+        )
+    )
+    app._files_entries = widgets.Select(
+        options=[("(no files)", "")],
+        rows=12,
+        description="",
+        layout=layout_fn(width="100%"),
+    )
+    app._files_up_btn = widgets.Button(
+        description="Up",
+        icon="arrow-up",
+        layout=layout_fn(width="80px"),
+        tooltip="Go to parent folder",
+    )
+    app._files_open_btn = widgets.Button(
+        description="Open",
+        button_style="primary",
+        icon="folder-open",
+        layout=layout_fn(width="100px"),
+        tooltip="Open selected folder or preview selected file",
+    )
+    app._files_refresh_btn = widgets.Button(
+        description="Refresh",
+        icon="refresh",
+        layout=layout_fn(width="100px"),
+        tooltip="Refresh roots, folder contents, and preview",
+    )
+    app._files_status_html = widgets.HTML(
+        value=(
+            '<span style="font-size:12px;color:#94a3b8">'
+            "Select a file and click Open to preview.</span>"
+        )
+    )
+    app._files_preview_output = widgets.Output(
+        layout=layout_fn(
+            border="1px solid #cbd5e1",
+            min_height="220px",
+            max_height="420px",
+            overflow="auto",
+            padding="6px",
+        )
+    )
+
+    app.files_tab_panel = widgets.VBox(
+        [
+            widgets.HTML(
+                '<p style="color:#555;font-size:13px;margin:4px 0 8px">'
+                "Read-only file browser for result artifacts and logs. "
+                "Browsing is limited to approved roots.</p>"
+            ),
+            app._files_root_dd,
+            app._files_path_html,
+            widgets.HBox(
+                [app._files_up_btn, app._files_open_btn, app._files_refresh_btn],
+                layout=layout_fn(gap="8px", margin="6px 0"),
+            ),
+            app._files_entries,
+            app._files_status_html,
+            app._files_preview_output,
         ],
         layout=layout_fn(padding="8px 0"),
     )

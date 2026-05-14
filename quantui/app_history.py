@@ -220,5 +220,6 @@ def build_history_context(result_dir: Path, *, context_cls: Any) -> Optional[Any
         basis=data.get("basis", ""),
         result_dir=result_dir,
         spectra_data=data.get("spectra", {}),
+        timestamp=data.get("timestamp", ""),
         source="history",
     )
