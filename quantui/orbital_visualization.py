@@ -804,13 +804,14 @@ def plot_cube_isosurface(
     *,
     isovalue: float = 0.02,
     opacity: float = 0.4,
-    width: int = 650,
-    height: int = 550,
+    width: int = 760,
+    height: int = 620,
     title: Optional[str] = None,
     show_molecule: bool = False,
     show_grid: bool = True,
     scene_bgcolor: str = "white",
     axis_color: str = "#111827",
+    title_color: Optional[str] = None,
     bond_color: str = "#6b7280",
 ):
     """
@@ -926,9 +927,11 @@ def plot_cube_isosurface(
         width=width,
         height=height,
         title=dict(
-            text=title or "Molecular Orbital Isosurface", font=dict(color=axis_color)
+            text=title or "Molecular Orbital Isosurface",
+            font=dict(color=title_color or axis_color),
         ),
-        paper_bgcolor=scene_bgcolor,
+        paper_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=0, r=0, t=48, b=0),
         font=dict(color=axis_color),
         scene=dict(
             xaxis=dict(

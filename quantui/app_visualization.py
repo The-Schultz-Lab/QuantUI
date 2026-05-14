@@ -1166,6 +1166,7 @@ def render_orbital_isosurface(
         is_dark = app.theme_btn.value == "Dark"
         axis_color = "#dbeafe" if is_dark else "#1f2937"
         bond_color = "#cbd5e1" if is_dark else "#4b5563"
+        title_color = app._plotly_theme_colors()["font_color"]
         fig = plot_cube_isosurface(
             cube_path,
             title=f"{orbital_label} Isosurface",
@@ -1173,6 +1174,7 @@ def render_orbital_isosurface(
             show_grid=False,
             scene_bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
             axis_color=axis_color,
+            title_color=title_color,
             bond_color=bond_color,
         )
         html_str = _pio.to_html(
