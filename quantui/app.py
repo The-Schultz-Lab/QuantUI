@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, Callable, ClassVar, List, Literal, Option
 
 import ipywidgets as widgets
 from IPython import get_ipython
-from IPython.display import HTML, display
+from IPython.display import HTML, Javascript, display
 
 import quantui
 import quantui.calc_log as _calc_log
@@ -847,6 +847,7 @@ class QuantUIApp:
         self._iso_render_token: int = 0
         self._last_uv_wavelengths_nm: list[float] = []
         self._last_uv_oscillator_strengths: list[float] = []
+        self._run_output_scroll_guard_installed: bool = False
         self.root_tab: widgets.Tab
         self._session_id: str = _uuid.uuid4().hex[:12]
 
@@ -889,6 +890,7 @@ class QuantUIApp:
                 ]
             )
         )
+        self._install_run_output_scroll_guard()
 
     @property
     def widget(self) -> widgets.Tab:
@@ -1871,6 +1873,97 @@ class QuantUIApp:
         # is available. This preserves existing behaviour, but the normal
         # notebook path above keeps rendering off the worker thread.
         callback(*args, **kwargs)
+
+        def _install_run_output_scroll_guard(self) -> None:
+            """Install a JS guard that preserves live-log scroll behavior.
+
+            The Output widget can reset scroll position during high-frequency
+            append_stdout updates in notebook/Voila frontends. This observer keeps
+            the log pinned to the bottom while the user is already at the bottom,
+            and preserves manual scrolling when the user scrolls up.
+            """
+            if self._run_output_scroll_guard_installed:
+                return
+
+            js_code = r"""
+(() => {
+    const ROOT_CLASS = "quantui-run-output";
+    const ROOT_MARK = "data-quantui-run-scroll-guard";
+
+    function selectScroller(root) {
+        const candidates = [
+            root,
+            ...root.querySelectorAll(
+                ".jp-OutputArea-output, .output_scroll, .jupyter-widgets-output-area, .output_subarea"
+            ),
+        ];
+        for (const el of candidates) {
+            const style = window.getComputedStyle(el);
+            const overflowY = (style && style.overflowY) || "";
+            const canScroll = /auto|scroll/.test(overflowY);
+            if (canScroll || el.scrollHeight > el.clientHeight + 2) {
+                return el;
+            }
+        }
+        return root;
+    }
+
+    function installForRoot(root) {
+        if (!root || root.getAttribute(ROOT_MARK) === "1") {
+            return;
+        }
+
+        const scroller = selectScroller(root);
+        if (!scroller) {
+            return;
+        }
+
+        root.setAttribute(ROOT_MARK, "1");
+
+        const thresholdPx = 24;
+        let stickToBottom = true;
+
+        const updateStickFlag = () => {
+            const dist = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+            stickToBottom = dist <= thresholdPx;
+        };
+
+        const pinIfNeeded = () => {
+            if (stickToBottom) {
+                scroller.scrollTop = scroller.scrollHeight;
+            }
+        };
+
+        scroller.addEventListener("scroll", updateStickFlag, { passive: true });
+
+        const obs = new MutationObserver(pinIfNeeded);
+        obs.observe(root, { childList: true, subtree: true, characterData: true });
+
+        updateStickFlag();
+        pinIfNeeded();
+    }
+
+    function scanAndInstall() {
+        const roots = document.querySelectorAll(`.${ROOT_CLASS}`);
+        roots.forEach(installForRoot);
+    }
+
+    scanAndInstall();
+
+    const bodyObserver = new MutationObserver(() => {
+        scanAndInstall();
+    });
+    bodyObserver.observe(document.body, { childList: true, subtree: true });
+})();
+"""
+
+            try:
+                with self._exit_output:
+                    display(Javascript(js_code))
+                self._run_output_scroll_guard_installed = True
+            except Exception:
+                # Non-notebook contexts may not support JS display; fail silently.
+                self._run_output_scroll_guard_installed = False
 
     def _set_molecule_state_only(self, mol) -> None:
         """Apply only thread-safe molecule state updates."""

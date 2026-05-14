@@ -82,6 +82,10 @@ class TestDefaultWidgetValues:
         app = QuantUIApp()
         assert app.method_dd.value == DEFAULT_METHOD
 
+    def test_run_output_has_scroll_guard_class(self):
+        app = QuantUIApp()
+        assert "quantui-run-output" in tuple(app.run_output._dom_classes)
+
     def test_basis_default(self):
         from quantui.config import DEFAULT_BASIS
 

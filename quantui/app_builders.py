@@ -347,6 +347,7 @@ def build_shared_widgets(
             overflow_y="auto",
         )
     )
+    app.run_output.add_class("quantui-run-output")
     with app.run_output:
         display(
             HTML(
