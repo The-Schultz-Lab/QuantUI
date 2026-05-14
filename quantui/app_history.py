@@ -65,6 +65,7 @@ def on_view_log(app: Any, btn: Any) -> None:
     if not path_str:
         return
     result_dir = Path(path_str)
+    app._last_result_dir = result_dir
     try:
         import quantui.calc_log as _calc_log
 
@@ -164,6 +165,7 @@ def mol_from_result_dir(result_dir: Path, data: dict[str, Any]) -> Any:
 
 def history_load_results(app: Any, data: dict[str, Any], result_dir: Path) -> None:
     """Display a history result card in the Results tab and navigate there."""
+    app._last_result_dir = result_dir
     app.result_output.clear_output()
     with app.result_output:
         display(HTML(app._format_past_result(data, result_dir=result_dir)))
@@ -177,6 +179,7 @@ def history_load_results(app: Any, data: dict[str, Any], result_dir: Path) -> No
 
 def history_load_analysis(app: Any, result_dir: Path) -> None:
     """Load analysis panels for a history result and navigate to Analysis tab."""
+    app._last_result_dir = result_dir
     log_path = result_dir / "pyscf.log"
     text = (
         log_path.read_text(encoding="utf-8", errors="replace")

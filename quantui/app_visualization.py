@@ -678,11 +678,8 @@ def show_ir_spectrum(app: Any, freq_result: Any) -> bool:
 
 def wire_ir_controls(app: Any) -> None:
     """Rebind IR controls and reset defaults on the main thread."""
-    app._ir_mode_toggle.unobserve_all()
-    app._ir_fwhm_slider.unobserve_all()
-    app._ir_mode_toggle.observe(app._safe_cb(app._on_ir_mode_changed), names="value")
-    app._ir_fwhm_slider.observe(app._safe_cb(app._on_ir_fwhm_changed), names="value")
-
+    # Observers are wired once in QuantUIApp._wire_callbacks. Avoid unobserve_all()
+    # here because it can remove unrelated trait observers in some frontends.
     app._ir_mode_toggle.value = "Stick"
     app._ir_fwhm_slider.value = 20.0
     app._ir_fwhm_slider.layout.display = "none"
@@ -732,6 +729,7 @@ def update_ir_figure(app: Any, mode: str, fwhm: float) -> None:
             yaxis_title=y_title,
         )
         app._apply_plotly_theme(fig)
+        app._last_ir_fig = fig
         app._set_html_output(
             app._ir_fig,
             _pio.to_html(
@@ -742,6 +740,7 @@ def update_ir_figure(app: Any, mode: str, fwhm: float) -> None:
             ),
         )
     except Exception as exc:
+        app._last_ir_fig = None
         try:
             from quantui import calc_log as _clog
 
@@ -788,11 +787,8 @@ def show_uv_vis_spectrum(
 
 def wire_uv_controls(app: Any) -> None:
     """Rebind UV-Vis controls and reset defaults on the main thread."""
-    app._uv_mode_toggle.unobserve_all()
-    app._uv_fwhm_slider.unobserve_all()
-    app._uv_mode_toggle.observe(app._safe_cb(app._on_uv_mode_changed), names="value")
-    app._uv_fwhm_slider.observe(app._safe_cb(app._on_uv_fwhm_changed), names="value")
-
+    # Observers are wired once in QuantUIApp._wire_callbacks. Avoid unobserve_all()
+    # here because it can remove unrelated trait observers in some frontends.
     app._uv_mode_toggle.value = "Stick"
     app._uv_fwhm_slider.value = 20.0
     app._uv_fwhm_slider.layout.display = "none"
@@ -893,6 +889,7 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
         )
 
         app._apply_plotly_theme(fig)
+        app._last_uv_fig = fig
         app._set_html_output(
             app._tddft_fig,
             _pio.to_html(
@@ -903,6 +900,7 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
             ),
         )
     except Exception as exc:
+        app._last_uv_fig = None
         try:
             from quantui import calc_log as _clog
 
@@ -942,6 +940,7 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
             app._orb_ymin_input.value = round(float(yr[0]), 2)
             app._orb_ymax_input.value = round(float(yr[1]), 2)
         app._apply_plotly_theme(fig)
+        app._last_orb_fig = fig
         html_str = _pio.to_html(
             fig,
             include_plotlyjs="require",
@@ -954,6 +953,7 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
         pass
 
     if not plotly_rendered:
+        app._last_orb_fig = None
         import base64
         import io as _io
 
@@ -1085,6 +1085,7 @@ def on_orb_range_changed(app: Any, _change: Any = None) -> None:
             yrange=(ymin, ymax),
         )
         app._apply_plotly_theme(fig)
+        app._last_orb_fig = fig
         app._set_html_output(
             app._orb_diagram_html,
             _pio.to_html(
@@ -1095,6 +1096,7 @@ def on_orb_range_changed(app: Any, _change: Any = None) -> None:
             ),
         )
     except Exception:
+        app._last_orb_fig = None
         pass
 
 
@@ -1102,7 +1104,8 @@ def render_orbital_isosurface(
     app: Any, orbital_label: str, render_token: int | None = None
 ) -> None:
     """Generate cube file and render orbital isosurface (Linux/WSL only)."""
-    import tempfile
+    import re as _re
+    from datetime import datetime as _dt
 
     def _is_stale() -> bool:
         return render_token is not None and render_token != int(
@@ -1139,27 +1142,45 @@ def render_orbital_isosurface(
             plot_cube_isosurface,
         )
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cube_path = Path(tmpdir) / f"orbital_{orbital_label}.cube"
-            generate_cube_from_arrays(mol_atom, mol_basis, mo_coeff, orb_idx, cube_path)
-            is_dark = app.theme_btn.value == "Dark"
-            axis_color = "#dbeafe" if is_dark else "#1f2937"
-            bond_color = "#cbd5e1" if is_dark else "#4b5563"
-            fig = plot_cube_isosurface(
-                cube_path,
-                title=f"{orbital_label} Isosurface",
-                show_molecule=True,
-                show_grid=False,
-                scene_bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
-                axis_color=axis_color,
-                bond_color=bond_color,
-            )
-            html_str = _pio.to_html(
-                fig,
-                include_plotlyjs="require",
-                full_html=False,
-                config={"responsive": True},
-            )
+        result_dir = getattr(app, "_last_result_dir", None)
+        if not isinstance(result_dir, Path):
+            try:
+                result_dir = app._get_results_dir()
+            except Exception:
+                result_dir = Path.cwd()
+
+        cube_dir = Path(result_dir) / "isosurfaces"
+        cube_dir.mkdir(parents=True, exist_ok=True)
+
+        formula = str(getattr(orb_info, "formula", "") or "molecule")
+        safe_formula = _re.sub(r"[^A-Za-z0-9_.-]+", "_", formula).strip("._")
+        if not safe_formula:
+            safe_formula = "molecule"
+        safe_orb = _re.sub(r"[^A-Za-z0-9_.-]+", "_", orbital_label).strip("._")
+        if not safe_orb:
+            safe_orb = "orbital"
+        ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
+        cube_path = cube_dir / f"{safe_formula}_{safe_orb}_{ts}.cube"
+
+        generate_cube_from_arrays(mol_atom, mol_basis, mo_coeff, orb_idx, cube_path)
+        is_dark = app.theme_btn.value == "Dark"
+        axis_color = "#dbeafe" if is_dark else "#1f2937"
+        bond_color = "#cbd5e1" if is_dark else "#4b5563"
+        fig = plot_cube_isosurface(
+            cube_path,
+            title=f"{orbital_label} Isosurface",
+            show_molecule=True,
+            show_grid=False,
+            scene_bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+            axis_color=axis_color,
+            bond_color=bond_color,
+        )
+        html_str = _pio.to_html(
+            fig,
+            include_plotlyjs="require",
+            full_html=False,
+            config={"responsive": True},
+        )
     except Exception as exc:
         if _is_stale():
             return
@@ -1191,6 +1212,13 @@ def render_orbital_isosurface(
     try:
         from quantui import calc_log as _clog
 
+        _clog.log_event(
+            "iso_cube_saved",
+            cube_path.name,
+            cube_path=str(cube_path),
+            orbital=orbital_label,
+            session_id=app._session_id,
+        )
         _clog.log_event("iso_render_done", orbital_label)
     except Exception:
         pass
@@ -1346,6 +1374,7 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
             yaxis=dict(showgrid=True, gridcolor=tc["grid_color"]),
             hovermode="closest",
         )
+        app._last_pes_fig = fig
         app._set_html_output(
             app._pes_plot_html,
             pio.to_html(
@@ -1356,6 +1385,7 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
             ),
         )
     except Exception:
+        app._last_pes_fig = None
         pass
 
     return True

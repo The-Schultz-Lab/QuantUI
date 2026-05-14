@@ -67,6 +67,11 @@ class TestInstantiation:
         app = QuantUIApp()
         assert app.export_btn.disabled is True
 
+    def test_scroll_guard_installer_method_exists(self):
+        app = QuantUIApp()
+        assert hasattr(app, "_install_run_output_scroll_guard")
+        assert callable(app._install_run_output_scroll_guard)
+
 
 # ---------------------------------------------------------------------------
 # Default widget values
@@ -923,6 +928,12 @@ class TestIRSpectrumWidgets:
         assert app._ir_fwhm_slider.min == 5.0
         assert app._ir_fwhm_slider.max == 100.0
 
+    def test_ir_export_controls_exist(self):
+        app = QuantUIApp()
+        assert isinstance(app._ir_export_btn, widgets.Button)
+        assert isinstance(app._ir_export_fmt_dd, widgets.Dropdown)
+        assert app._ir_export_fmt_dd.value == "html"
+
 
 class TestShowIRSpectrum:
     """_show_ir_spectrum reveals accordion and wires mode toggle."""
@@ -963,6 +974,13 @@ class TestShowIRSpectrum:
         app._ir_mode_toggle.value = "Stick"
         assert app._ir_fwhm_slider.layout.display == "none"
 
+    def test_broadened_toggle_triggers_ir_figure_update(self):
+        app = QuantUIApp()
+        app._show_ir_spectrum(self._make_freq_result())
+        with patch.object(app, "_update_ir_figure") as mock_update:
+            app._ir_mode_toggle.value = "Broadened"
+        mock_update.assert_called_once_with("Broadened", app._ir_fwhm_slider.value)
+
 
 # ---------------------------------------------------------------------------
 # M-UV — UV-Vis Spectrum accordion widgets
@@ -992,6 +1010,20 @@ class TestUVVisSpectrumWidgets:
     def test_uv_fwhm_slider_hidden_initially(self):
         app = QuantUIApp()
         assert app._uv_fwhm_slider.layout.display == "none"
+
+    def test_uv_export_controls_exist(self):
+        app = QuantUIApp()
+        assert isinstance(app._uv_export_btn, widgets.Button)
+        assert isinstance(app._uv_export_fmt_dd, widgets.Dropdown)
+        assert app._uv_export_fmt_dd.value == "html"
+
+
+class TestPESExportWidgets:
+    def test_pes_export_controls_exist(self):
+        app = QuantUIApp()
+        assert isinstance(app._pes_export_btn, widgets.Button)
+        assert isinstance(app._pes_export_fmt_dd, widgets.Dropdown)
+        assert app._pes_export_fmt_dd.value == "html"
 
 
 class TestShowUVVisSpectrum:
@@ -1027,6 +1059,17 @@ class TestShowUVVisSpectrum:
         app._uv_mode_toggle.value = "Stick"
         assert app._uv_fwhm_slider.layout.display == "none"
 
+    def test_broadened_toggle_triggers_uv_figure_update(self):
+        app = QuantUIApp()
+        app._show_uv_vis_spectrum(
+            [3.0, 4.2, 5.5],
+            [0.12, 0.08, 0.05],
+            [413.3, 295.2, 225.5],
+        )
+        with patch.object(app, "_update_uv_vis_figure") as mock_update:
+            app._uv_mode_toggle.value = "Broadened"
+        mock_update.assert_called_once_with("Broadened", app._uv_fwhm_slider.value)
+
 
 # ---------------------------------------------------------------------------
 # M6 — Orbital Diagram accordion
@@ -1049,6 +1092,12 @@ class TestOrbitalAccordionWidgets:
         app = QuantUIApp()
         assert hasattr(app, "_orb_diagram_html")
 
+    def test_orb_export_controls_exist(self):
+        app = QuantUIApp()
+        assert isinstance(app._orb_export_btn, widgets.Button)
+        assert isinstance(app._orb_export_fmt_dd, widgets.Dropdown)
+        assert app._orb_export_fmt_dd.value == "html"
+
     def test_orb_toggle_has_four_options(self):
         app = QuantUIApp()
         assert set(app._orb_toggle.options) == {"HOMO-1", "HOMO", "LUMO", "LUMO+1"}
@@ -1069,6 +1118,25 @@ class TestOrbitalAccordionWidgets:
 
 
 class TestShowOrbitalDiagram:
+
+    class TestPlotExportHelper:
+        def test_export_plot_figure_html_writes_file(self, tmp_path):
+            app = QuantUIApp()
+            app._last_result_dir = tmp_path
+
+            fig = MagicMock()
+            with patch("plotly.io.to_html", return_value="<html>ok</html>"):
+                app._export_plot_figure(
+                    fig=fig,
+                    stem="ir_spectrum",
+                    fmt="html",
+                    status_widget=app._ir_export_status,
+                )
+
+            saved = list(tmp_path.glob("ir_spectrum_*.html"))
+            assert len(saved) == 1
+            assert "Saved:" in app._ir_export_status.value
+
     """_show_orbital_diagram reveals accordion when MO data is present."""
 
     def _make_result_with_mo(self):
@@ -1126,6 +1194,50 @@ class TestShowOrbitalDiagram:
         app._show_orbital_diagram(self._make_result_with_mo())
         # mo_coeff is None in mock → iso controls stay hidden
         assert app._orb_iso_controls.layout.display == "none"
+
+
+class TestIsosurfacePersistence:
+    def test_render_orbital_isosurface_saves_cube_to_disk(self, tmp_path):
+        app = QuantUIApp()
+        app._last_result_dir = tmp_path
+        app._last_orb_info = MagicMock()
+        app._last_orb_info.n_occupied = 1
+        app._last_orb_info.mo_energies_ev = [-10.0, 2.0]
+        app._last_orb_info.formula = "H2O"
+        app._last_orb_mo_coeff = [[1.0, 0.0], [0.0, 1.0]]
+        app._last_orb_mol_atom = [["H", [0.0, 0.0, 0.0]]]
+        app._last_orb_mol_basis = "sto-3g"
+
+        captured: dict[str, object] = {}
+
+        def _fake_generate(_atom, _basis, _coeff, _idx, out_path):
+            captured["path"] = out_path
+            out_path.write_text("cube", encoding="utf-8")
+            return out_path
+
+        with (
+            patch(
+                "quantui.orbital_visualization.generate_cube_from_arrays",
+                side_effect=_fake_generate,
+            ) as mock_gen,
+            patch(
+                "quantui.orbital_visualization.plot_cube_isosurface",
+                return_value=MagicMock(),
+            ) as mock_plot,
+            patch(
+                "plotly.io.to_html",
+                return_value="<div>iso</div>",
+            ),
+        ):
+            app._render_orbital_isosurface("HOMO")
+
+        saved_path = captured.get("path")
+        assert saved_path is not None
+        assert saved_path.parent == tmp_path / "isosurfaces"
+        assert saved_path.suffix == ".cube"
+        assert saved_path.exists()
+        mock_gen.assert_called_once()
+        mock_plot.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

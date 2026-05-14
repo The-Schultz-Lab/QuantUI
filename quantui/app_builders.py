@@ -934,11 +934,36 @@ def build_run_section(app: Any, *, layout_fn: Any) -> None:
 
 def build_results_section(app: Any, *, layout_fn: Any) -> None:
     """Build results and analysis tab panels/widgets."""
+
+    def _plot_export_row(prefix: str) -> widgets.HBox:
+        fmt_dd = widgets.Dropdown(
+            options=[("HTML", "html"), ("PNG", "png")],
+            value="html",
+            description="Export:",
+            style={"description_width": "55px"},
+            layout=layout_fn(width="170px"),
+        )
+        btn = widgets.Button(
+            description="Save Plot",
+            icon="download",
+            layout=layout_fn(width="130px"),
+            tooltip="Export the current plot",
+        )
+        status = widgets.HTML(value="", layout=layout_fn(margin="0 0 0 8px"))
+        setattr(app, f"_{prefix}_export_fmt_dd", fmt_dd)
+        setattr(app, f"_{prefix}_export_btn", btn)
+        setattr(app, f"_{prefix}_export_status", status)
+        return widgets.HBox(
+            [fmt_dd, btn, status],
+            layout=layout_fn(align_items="center", margin="0 0 6px 0", gap="6px"),
+        )
+
+    pes_export_row = _plot_export_row("pes")
     app._pes_plot_html = widgets.Output(layout=layout_fn(width="100%"))
     app._pes_scan_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
-                [app._pes_plot_html],
+                [pes_export_row, app._pes_plot_html],
                 layout=layout_fn(padding="8px"),
             )
         ],
@@ -993,12 +1018,13 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="260px", display="none"),
     )
     app._ir_fig = widgets.Output(layout=layout_fn(width="100%"))
+    ir_export_row = _plot_export_row("ir")
 
     ir_controls = widgets.HBox(
         [app._ir_mode_toggle, app._ir_fwhm_slider],
         layout=layout_fn(align_items="center", margin="0 0 6px 0"),
     )
-    ir_body_children = [ir_controls, app._ir_fig]
+    ir_body_children = [ir_controls, ir_export_row, app._ir_fig]
     app._ir_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
@@ -1059,7 +1085,12 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         ),
     )
     app._orb_diagram_html = widgets.Output(layout=layout_fn(width="100%"))
-    orb_diagram_content: list[Any] = [orb_controls_row, app._orb_diagram_html]
+    orb_export_row = _plot_export_row("orb")
+    orb_diagram_content: list[Any] = [
+        orb_controls_row,
+        orb_export_row,
+        app._orb_diagram_html,
+    ]
     app._orb_diagram_box = widgets.VBox(
         orb_diagram_content,
         layout=layout_fn(width="100%"),
@@ -1141,6 +1172,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="260px", display="none"),
     )
     app._tddft_fig = widgets.Output(layout=layout_fn(width="100%"))
+    uv_export_row = _plot_export_row("uv")
     uv_controls = widgets.HBox(
         [app._uv_mode_toggle, app._uv_fwhm_slider],
         layout=layout_fn(align_items="center", margin="0 0 6px 0"),
@@ -1148,7 +1180,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._tddft_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
-                [uv_controls, app._tddft_fig],
+                [uv_controls, uv_export_row, app._tddft_fig],
                 layout=layout_fn(padding="8px"),
             )
         ],

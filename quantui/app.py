@@ -752,6 +752,9 @@ class QuantUIApp:
         _freq_seed_refresh_btn: Any
         _go_analysis_btn: Any
         _go_results_btn: Any
+        _ir_export_btn: Any
+        _ir_export_fmt_dd: Any
+        _ir_export_status: Any
         _ir_fig: Any
         _ir_fwhm_slider: Any
         _ir_mode_toggle: Any
@@ -764,12 +767,18 @@ class QuantUIApp:
         _orb_accordion: Any
         _orb_diagram_box: Any
         _orb_diagram_html: Any
+        _orb_export_btn: Any
+        _orb_export_fmt_dd: Any
+        _orb_export_status: Any
         _orb_iso_controls: Any
         _orb_iso_output: Any
         _orb_n_orb_input: Any
         _orb_toggle: Any
         _orb_ymax_input: Any
         _orb_ymin_input: Any
+        _pes_export_btn: Any
+        _pes_export_fmt_dd: Any
+        _pes_export_status: Any
         _pes_plot_html: Any
         _pes_scan_accordion: Any
         _result_dir_label: Any
@@ -787,6 +796,9 @@ class QuantUIApp:
         _scan_unit_lbl: Any
         _tddft_accordion: Any
         _tddft_fig: Any
+        _uv_export_btn: Any
+        _uv_export_fmt_dd: Any
+        _uv_export_status: Any
         _uv_fwhm_slider: Any
         _uv_mode_toggle: Any
         _to_analysis_btn: Any
@@ -847,6 +859,10 @@ class QuantUIApp:
         self._iso_render_token: int = 0
         self._last_uv_wavelengths_nm: list[float] = []
         self._last_uv_oscillator_strengths: list[float] = []
+        self._last_ir_fig: Any = None
+        self._last_uv_fig: Any = None
+        self._last_orb_fig: Any = None
+        self._last_pes_fig: Any = None
         self._run_output_scroll_guard_installed: bool = False
         self.root_tab: widgets.Tab
         self._session_id: str = _uuid.uuid4().hex[:12]
@@ -1248,6 +1264,22 @@ class QuantUIApp:
         # Run
         self.run_btn.on_click(self._on_run_clicked)
         self.log_clear_btn.on_click(self._on_clear_log)
+        self._ir_mode_toggle.observe(
+            self._safe_cb(self._on_ir_mode_changed), names="value"
+        )
+        self._ir_fwhm_slider.observe(
+            self._safe_cb(self._on_ir_fwhm_changed), names="value"
+        )
+        self._uv_mode_toggle.observe(
+            self._safe_cb(self._on_uv_mode_changed), names="value"
+        )
+        self._uv_fwhm_slider.observe(
+            self._safe_cb(self._on_uv_fwhm_changed), names="value"
+        )
+        self._ir_export_btn.on_click(self._on_ir_export_plot)
+        self._uv_export_btn.on_click(self._on_uv_export_plot)
+        self._orb_export_btn.on_click(self._on_orb_export_plot)
+        self._pes_export_btn.on_click(self._on_pes_export_plot)
         # Accumulate / export
         self.accumulate_btn.on_click(self._on_accumulate)
         self.clear_btn.on_click(self._on_clear)
@@ -1617,6 +1649,98 @@ class QuantUIApp:
     def _on_export_pdb(self, btn) -> None:
         _exp_on_export_pdb(self, btn)
 
+    def _on_ir_export_plot(self, btn) -> None:
+        self._export_plot_figure(
+            fig=getattr(self, "_last_ir_fig", None),
+            stem="ir_spectrum",
+            fmt=self._ir_export_fmt_dd.value,
+            status_widget=self._ir_export_status,
+        )
+
+    def _on_uv_export_plot(self, btn) -> None:
+        self._export_plot_figure(
+            fig=getattr(self, "_last_uv_fig", None),
+            stem="uv_vis_spectrum",
+            fmt=self._uv_export_fmt_dd.value,
+            status_widget=self._uv_export_status,
+        )
+
+    def _on_orb_export_plot(self, btn) -> None:
+        self._export_plot_figure(
+            fig=getattr(self, "_last_orb_fig", None),
+            stem="orbital_energy_diagram",
+            fmt=self._orb_export_fmt_dd.value,
+            status_widget=self._orb_export_status,
+        )
+
+    def _on_pes_export_plot(self, btn) -> None:
+        self._export_plot_figure(
+            fig=getattr(self, "_last_pes_fig", None),
+            stem="pes_scan_profile",
+            fmt=self._pes_export_fmt_dd.value,
+            status_widget=self._pes_export_status,
+        )
+
+    def _export_plot_figure(
+        self,
+        *,
+        fig: Any,
+        stem: str,
+        fmt: str,
+        status_widget: widgets.HTML,
+    ) -> None:
+        """Export a plotly figure to HTML or PNG in the current result folder."""
+        if fig is None:
+            status_widget.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                "No plot available to export yet.</span>"
+            )
+            return
+
+        import re as _re
+        from datetime import datetime as _dt
+
+        import plotly.io as _pio
+
+        target_dir = (
+            self._last_result_dir
+            if isinstance(self._last_result_dir, Path)
+            else self._get_results_dir()
+        )
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        safe_stem = _re.sub(r"[^A-Za-z0-9_.-]+", "_", stem.strip()) or "plot"
+        ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S")
+        ext = "png" if fmt == "png" else "html"
+        dest = target_dir / f"{safe_stem}_{ts}.{ext}"
+
+        try:
+            if fmt == "png":
+                # Requires kaleido for static image export.
+                fig.write_image(str(dest), scale=2)
+            else:
+                html_str = _pio.to_html(
+                    fig,
+                    include_plotlyjs=True,
+                    full_html=True,
+                    config={"responsive": True},
+                )
+                dest.write_text(html_str, encoding="utf-8")
+
+            status_widget.value = (
+                '<span style="color:#16a34a;font-size:12px">' f"Saved: {dest}</span>"
+            )
+        except Exception as exc:
+            msg = str(exc)
+            if fmt == "png" and "kaleido" in msg.lower():
+                msg = (
+                    "PNG export requires kaleido. " "Install with: pip install kaleido"
+                )
+            status_widget.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                f"Export failed: {msg}</span>"
+            )
+
     def _export_molecule_and_label(self):
         return _exp_export_molecule_and_label(self)
 
@@ -1874,18 +1998,18 @@ class QuantUIApp:
         # notebook path above keeps rendering off the worker thread.
         callback(*args, **kwargs)
 
-        def _install_run_output_scroll_guard(self) -> None:
-            """Install a JS guard that preserves live-log scroll behavior.
+    def _install_run_output_scroll_guard(self) -> None:
+        """Install a JS guard that preserves live-log scroll behavior.
 
-            The Output widget can reset scroll position during high-frequency
-            append_stdout updates in notebook/Voila frontends. This observer keeps
-            the log pinned to the bottom while the user is already at the bottom,
-            and preserves manual scrolling when the user scrolls up.
-            """
-            if self._run_output_scroll_guard_installed:
-                return
+        The Output widget can reset scroll position during high-frequency
+        append_stdout updates in notebook/Voila frontends. This observer keeps
+        the log pinned to the bottom while the user is already at the bottom,
+        and preserves manual scrolling when the user scrolls up.
+        """
+        if self._run_output_scroll_guard_installed:
+            return
 
-            js_code = r"""
+        js_code = r"""
 (() => {
     const ROOT_CLASS = "quantui-run-output";
     const ROOT_MARK = "data-quantui-run-scroll-guard";
@@ -1957,13 +2081,13 @@ class QuantUIApp:
 })();
 """
 
-            try:
-                with self._exit_output:
-                    display(Javascript(js_code))
-                self._run_output_scroll_guard_installed = True
-            except Exception:
-                # Non-notebook contexts may not support JS display; fail silently.
-                self._run_output_scroll_guard_installed = False
+        try:
+            with self._exit_output:
+                display(Javascript(js_code))
+            self._run_output_scroll_guard_installed = True
+        except Exception:
+            # Non-notebook contexts may not support JS display; fail silently.
+            self._run_output_scroll_guard_installed = False
 
     def _set_molecule_state_only(self, mol) -> None:
         """Apply only thread-safe molecule state updates."""
