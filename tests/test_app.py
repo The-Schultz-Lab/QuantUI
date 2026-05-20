@@ -8,6 +8,7 @@ not).  PySCF is unavailable on Windows; calculations are skipped accordingly.
 
 from __future__ import annotations
 
+import threading
 from unittest.mock import MagicMock, patch
 
 import ipywidgets as widgets
@@ -135,6 +136,52 @@ class TestDefaultWidgetValues:
 
         app = QuantUIApp()
         assert app.mult_si.value == DEFAULT_MULTIPLICITY
+
+
+# ---------------------------------------------------------------------------
+# Worker-thread callback scheduling
+# ---------------------------------------------------------------------------
+
+
+class TestMainThreadCallbackQueue:
+    """_queue_main_thread_callback uses cached kernel io_loop from workers."""
+
+    def test_uses_cached_io_loop_from_worker_thread(self):
+        app = QuantUIApp()
+        cb = MagicMock()
+        io_loop = MagicMock()
+        app._kernel_io_loop = io_loop
+
+        t = threading.Thread(
+            target=lambda: app._queue_main_thread_callback(cb, "ok"),
+            daemon=True,
+        )
+        t.start()
+        t.join(timeout=2)
+
+        io_loop.add_callback.assert_called_once()
+        called_cb, called_arg = io_loop.add_callback.call_args[0][:2]
+        assert called_cb is cb
+        assert called_arg == "ok"
+        cb.assert_not_called()
+
+    def test_falls_back_to_direct_call_without_io_loop(self):
+        app = QuantUIApp()
+        app._kernel_io_loop = None
+        called = []
+
+        def _cb() -> None:
+            called.append(True)
+
+        with patch("quantui.app.get_ipython", return_value=None):
+            t = threading.Thread(
+                target=lambda: app._queue_main_thread_callback(_cb),
+                daemon=True,
+            )
+            t.start()
+            t.join(timeout=2)
+
+        assert called == [True]
 
 
 # ---------------------------------------------------------------------------

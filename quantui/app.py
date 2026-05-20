@@ -885,6 +885,11 @@ class QuantUIApp:
         self._activity_count: int = 0
         self._activity_compute_count: int = 0
         self._activity_lock = threading.Lock()
+        # Cache kernel io_loop once on the main thread so worker threads can
+        # reliably schedule UI callbacks even when get_ipython() is thread-local.
+        self._kernel_io_loop: Any = getattr(
+            getattr(get_ipython(), "kernel", None), "io_loop", None
+        )
         self.root_tab: widgets.Tab
         self._session_id: str = _uuid.uuid4().hex[:12]
 
@@ -1875,13 +1880,23 @@ class QuantUIApp:
         figure panels. Rendering through Output display_data executes the JS.
         """
         if threading.current_thread() is not threading.main_thread():
-            ip = get_ipython()
-            io_loop = getattr(getattr(ip, "kernel", None), "io_loop", None)
+            io_loop = self._get_kernel_io_loop()
             if io_loop is not None:
                 io_loop.add_callback(self._set_html_output, out, html)
                 return
         self._clear_output_widget(out)
         out.append_display_data(HTML(html))
+
+    def _get_kernel_io_loop(self) -> Any:
+        """Return a cached kernel io_loop, resolving it lazily when needed."""
+        io_loop = getattr(self, "_kernel_io_loop", None)
+        if io_loop is not None:
+            return io_loop
+        ip = get_ipython()
+        io_loop = getattr(getattr(ip, "kernel", None), "io_loop", None)
+        if io_loop is not None:
+            self._kernel_io_loop = io_loop
+        return io_loop
 
     def _render_plotly_figure(self, out: widgets.Output, fig) -> None:
         """Render a Plotly figure through display() in an Output widget."""
@@ -2505,8 +2520,7 @@ class QuantUIApp:
             callback(*args, **kwargs)
             return
 
-        ip = get_ipython()
-        io_loop = getattr(getattr(ip, "kernel", None), "io_loop", None)
+        io_loop = self._get_kernel_io_loop()
         if io_loop is not None:
             io_loop.add_callback(callback, *args, **kwargs)
             return
@@ -3157,7 +3171,11 @@ class QuantUIApp:
                     'margin:6px 0 2px">Optimized geometry</p>'
                 )
                 self._viz_label.layout.display = ""
-            self._show_result_3d(_viz_mol, extra_output=self._analysis_mol_output)
+            self._queue_main_thread_callback(
+                self._show_result_3d,
+                _viz_mol,
+                self._analysis_mol_output,
+            )
             _mark("viz_done")
 
             # Populate Analysis panels via the unified registry
@@ -3246,13 +3264,18 @@ class QuantUIApp:
                 # Persist MO data for orbital diagram + isosurface replay.
                 if ct in ("Single Point", "Geometry Opt", "Frequency"):
                     save_orbitals(_saved_dir, result)
-                self._refresh_results_browser()
-                self._populate_compare_list()
-                self._update_log_panel(
+                self._queue_main_thread_callback(self._refresh_results_browser)
+                self._queue_main_thread_callback(self._populate_compare_list)
+                self._queue_main_thread_callback(
+                    self._update_log_panel,
                     log.getvalue(),
                     f"{result.formula}  {self.method_dd.value}/{self.basis_dd.value}",
                 )
-                self._show_result_log(_saved_dir, log.getvalue())
+                self._queue_main_thread_callback(
+                    self._show_result_log,
+                    _saved_dir,
+                    log.getvalue(),
+                )
             except Exception as _save_exc:
                 try:
                     from quantui import calc_log as _clog
@@ -3265,13 +3288,12 @@ class QuantUIApp:
                     pass
             _mark("persist_done")
 
-            # Activate analysis panels AFTER saving/refreshing the results browser.
-            # _refresh_results_browser (above) sets past_dd.options, which fires its
-            # observer and calls _deactivate_all_ana_panels.  Placing this call here
-            # means that observer has already run (harmlessly, panels not yet active)
-            # by the time we activate them.
+            # Activate analysis panels after scheduling refresh/update callbacks.
+            # Refreshing the history browser may fire past_dd observers that clear
+            # analysis state; queueing this callback after refresh keeps ordering
+            # deterministic on the kernel UI loop.
             _mark("analysis_begin")
-            self._apply_analysis_context(_ana_ctx)
+            self._queue_main_thread_callback(self._apply_analysis_context, _ana_ctx)
             _mark("analysis_done")
 
             # Log performance

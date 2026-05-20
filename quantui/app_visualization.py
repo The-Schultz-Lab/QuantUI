@@ -275,16 +275,21 @@ def show_opt_trajectory(
         if _is_stale():
             return
         kind, obj = frame_cache[idx]
-        frame_out.clear_output()
-        with frame_out:
-            if kind == "error":
+        if kind == "error":
+            frame_out.clear_output()
+            with frame_out:
                 _ipy_display(
                     HTML(
                         f'<p style="color:#b91c1c;padding:8px">Frame render failed: {obj}</p>'
                     )
                 )
-            else:
-                _ipy_display(obj)
+            return
+        if kind == "plotly":
+            app._set_plotly_figure_output(frame_out, obj)
+            return
+        frame_out.clear_output()
+        with frame_out:
+            _ipy_display(obj)
 
     def _update_frame(change: dict[str, Any]) -> None:
         if _is_stale():
