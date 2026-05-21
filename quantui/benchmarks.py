@@ -470,6 +470,7 @@ def run_calibration(
                         converged=res.converged,
                         n_basis=step.n_basis,
                         n_cores=1,
+                        calc_type="single_point",
                     )
                 except concurrent.futures.TimeoutError:
                     step.status = _STATUS_TIMEOUT

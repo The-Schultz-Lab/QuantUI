@@ -8,12 +8,13 @@ not).  PySCF is unavailable on Windows; calculations are skipped accordingly.
 
 from __future__ import annotations
 
+import threading
 from unittest.mock import MagicMock, patch
 
 import ipywidgets as widgets
 import pytest
 
-from quantui.app import _RE_CONV, _RE_CYCLE, QuantUIApp, _LogCapture
+from quantui.app import _RE_CONV, _RE_CYCLE, QuantUIApp, _AnalysisContext, _LogCapture
 from quantui.molecule import Molecule
 
 # ---------------------------------------------------------------------------
@@ -59,6 +60,25 @@ class TestInstantiation:
         app = QuantUIApp()
         assert app._molecule is None
 
+    def test_activity_indicator_defaults_idle(self):
+        app = QuantUIApp()
+        assert hasattr(app, "_activity_btn")
+        assert app._activity_btn.description == "Idle"
+
+    def test_activity_indicator_compute_state(self):
+        app = QuantUIApp()
+        app._activity_begin("Running compute operations...", kind="compute")
+        assert app._activity_btn.description == "Computing"
+        app._activity_end(kind="compute")
+        assert app._activity_btn.description == "Idle"
+
+    def test_activity_indicator_ui_state(self):
+        app = QuantUIApp()
+        app._activity_begin("Switching tabs...", kind="ui")
+        assert app._activity_btn.description == "UI Active"
+        app._activity_end(kind="ui")
+        assert app._activity_btn.description == "Idle"
+
     def test_run_btn_initially_disabled(self):
         app = QuantUIApp()
         assert app.run_btn.disabled is True
@@ -66,6 +86,11 @@ class TestInstantiation:
     def test_export_btn_initially_disabled(self):
         app = QuantUIApp()
         assert app.export_btn.disabled is True
+
+    def test_scroll_guard_installer_method_exists(self):
+        app = QuantUIApp()
+        assert hasattr(app, "_install_run_output_scroll_guard")
+        assert callable(app._install_run_output_scroll_guard)
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +106,10 @@ class TestDefaultWidgetValues:
 
         app = QuantUIApp()
         assert app.method_dd.value == DEFAULT_METHOD
+
+    def test_run_output_has_scroll_guard_class(self):
+        app = QuantUIApp()
+        assert "quantui-run-output" in tuple(app.run_output._dom_classes)
 
     def test_basis_default(self):
         from quantui.config import DEFAULT_BASIS
@@ -110,6 +139,52 @@ class TestDefaultWidgetValues:
 
 
 # ---------------------------------------------------------------------------
+# Worker-thread callback scheduling
+# ---------------------------------------------------------------------------
+
+
+class TestMainThreadCallbackQueue:
+    """_queue_main_thread_callback uses cached kernel io_loop from workers."""
+
+    def test_uses_cached_io_loop_from_worker_thread(self):
+        app = QuantUIApp()
+        cb = MagicMock()
+        io_loop = MagicMock()
+        app._kernel_io_loop = io_loop
+
+        t = threading.Thread(
+            target=lambda: app._queue_main_thread_callback(cb, "ok"),
+            daemon=True,
+        )
+        t.start()
+        t.join(timeout=2)
+
+        io_loop.add_callback.assert_called_once()
+        called_cb, called_arg = io_loop.add_callback.call_args[0][:2]
+        assert called_cb is cb
+        assert called_arg == "ok"
+        cb.assert_not_called()
+
+    def test_falls_back_to_direct_call_without_io_loop(self):
+        app = QuantUIApp()
+        app._kernel_io_loop = None
+        called = []
+
+        def _cb() -> None:
+            called.append(True)
+
+        with patch("quantui.app.get_ipython", return_value=None):
+            t = threading.Thread(
+                target=lambda: app._queue_main_thread_callback(_cb),
+                daemon=True,
+            )
+            t.start()
+            t.join(timeout=2)
+
+        assert called == [True]
+
+
+# ---------------------------------------------------------------------------
 # Tab structure
 # ---------------------------------------------------------------------------
 
@@ -117,9 +192,9 @@ class TestDefaultWidgetValues:
 class TestTabStructure:
     """root_tab has the correct number and titles of tabs."""
 
-    def test_seven_tabs(self):
+    def test_eight_tabs(self):
         app = QuantUIApp()
-        assert len(app.root_tab.children) == 7
+        assert len(app.root_tab.children) == 8
 
     def test_tab_titles(self):
         app = QuantUIApp()
@@ -130,10 +205,26 @@ class TestTabStructure:
             "History",
             "Compare",
             "Log",
+            "Files",
             "Status",
         ]
         for i, title in enumerate(expected):
             assert app.root_tab.get_title(i) == title
+
+
+class TestFilesTab:
+    """Files tab widgets are available and initialized."""
+
+    def test_files_tab_widgets_exist(self):
+        app = QuantUIApp()
+        assert hasattr(app, "files_tab_panel")
+        assert hasattr(app, "_files_root_dd")
+        assert hasattr(app, "_files_entries")
+        assert hasattr(app, "_files_preview_output")
+
+    def test_files_root_dropdown_has_options(self):
+        app = QuantUIApp()
+        assert len(app._files_root_dd.options) >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +352,29 @@ class TestLogCapture:
         cap.write("converged SCF energy = -76.031234\n")
         assert "converged" in status.value.lower()
 
+    def test_status_marker_updates_status_label(self):
+        cap, status = self._make_capture()
+        cap.write(
+            "[QuantUI_STATUS] Numerical IR intensities: "
+            "4/24 extra SCF solves complete (20 remaining)\n"
+        )
+        assert "4/24" in status.value
+        assert "remaining" in status.value
+
+    def test_scf_converged_callback_fires_once(self):
+        out = widgets.Output()
+        status = widgets.Label()
+        called = 0
+
+        def _on_conv() -> None:
+            nonlocal called
+            called += 1
+
+        cap = _LogCapture(out, status, on_scf_converged=_on_conv)
+        cap.write("converged SCF energy = -76.031234\n")
+        cap.write("converged SCF energy = -76.031230\n")
+        assert called == 1
+
     def test_flush_is_noop(self):
         cap, _ = self._make_capture()
         cap.flush()  # Must not raise
@@ -310,17 +424,35 @@ class TestDoRunDispatch:
         mock_result.energy_hartree = -75.0
         mock_result.converged = True
         mock_result.n_iterations = 5
+        mock_result.energies_hartree = [-75.0]
         mock_result.trajectory = []
         mock_result.formula = "H2O"
         mock_result.method = "RHF"
         mock_result.basis = "STO-3G"
-        mock_result.final_molecule = _water()
+        mock_result.molecule = _water()
+        mock_result.mo_energy_hartree = None
+        mock_result.mo_occ = None
+        mock_result.mo_coeff = None
+        mock_result.pyscf_mol_atom = None
+        mock_result.pyscf_mol_basis = None
+        mock_sp = MagicMock()
+        mock_sp.converged = True
+        mock_sp.energy_hartree = -75.1
+        mock_sp.mo_energy_hartree = [0.0]
+        mock_sp.mo_occ = [2.0]
+        mock_sp.mo_coeff = [[0.0]]
+        mock_sp.pyscf_mol_atom = [("O", [0.0, 0.0, 0.0])]
+        mock_sp.pyscf_mol_basis = "STO-3G"
         with patch(
             "quantui.optimize_geometry", return_value=mock_result, create=True
         ) as mock_opt:
-            with patch("quantui.save_result"):
-                app._do_run()
+            with patch(
+                "quantui.run_in_session", return_value=mock_sp, create=True
+            ) as mock_sp_run:
+                with patch("quantui.save_result"):
+                    app._do_run()
         mock_opt.assert_called_once()
+        mock_sp_run.assert_called_once()
 
     def test_pyscf_unavailable_shows_error(self, app_with_molecule):
         app = app_with_molecule
@@ -896,6 +1028,12 @@ class TestIRSpectrumWidgets:
         assert app._ir_fwhm_slider.min == 5.0
         assert app._ir_fwhm_slider.max == 100.0
 
+    def test_ir_export_controls_exist(self):
+        app = QuantUIApp()
+        assert isinstance(app._ir_export_btn, widgets.Button)
+        assert isinstance(app._ir_export_fmt_dd, widgets.Dropdown)
+        assert app._ir_export_fmt_dd.value == "html"
+
 
 class TestShowIRSpectrum:
     """_show_ir_spectrum reveals accordion and wires mode toggle."""
@@ -936,6 +1074,102 @@ class TestShowIRSpectrum:
         app._ir_mode_toggle.value = "Stick"
         assert app._ir_fwhm_slider.layout.display == "none"
 
+    def test_broadened_toggle_triggers_ir_figure_update(self):
+        app = QuantUIApp()
+        app._show_ir_spectrum(self._make_freq_result())
+        with patch.object(app, "_update_ir_figure") as mock_update:
+            app._ir_mode_toggle.value = "Broadened"
+        mock_update.assert_called_once_with("Broadened", app._ir_fwhm_slider.value)
+
+
+# ---------------------------------------------------------------------------
+# M-UV — UV-Vis Spectrum accordion widgets
+# ---------------------------------------------------------------------------
+
+
+class TestUVVisSpectrumWidgets:
+    """UV-Vis accordion and controls exist in correct initial state."""
+
+    def test_uv_accordion_exists(self):
+        app = QuantUIApp()
+        assert hasattr(app, "_tddft_accordion")
+        assert isinstance(app._tddft_accordion, widgets.Accordion)
+
+    def test_uv_mode_toggle_exists(self):
+        app = QuantUIApp()
+        assert isinstance(app._uv_mode_toggle, widgets.ToggleButtons)
+
+    def test_uv_mode_toggle_default_stick(self):
+        app = QuantUIApp()
+        assert app._uv_mode_toggle.value == "Stick"
+
+    def test_uv_mode_toggle_has_two_options(self):
+        app = QuantUIApp()
+        assert set(app._uv_mode_toggle.options) == {"Stick", "Broadened"}
+
+    def test_uv_fwhm_slider_hidden_initially(self):
+        app = QuantUIApp()
+        assert app._uv_fwhm_slider.layout.display == "none"
+
+    def test_uv_export_controls_exist(self):
+        app = QuantUIApp()
+        assert isinstance(app._uv_export_btn, widgets.Button)
+        assert isinstance(app._uv_export_fmt_dd, widgets.Dropdown)
+        assert app._uv_export_fmt_dd.value == "html"
+
+
+class TestPESExportWidgets:
+    def test_pes_export_controls_exist(self):
+        app = QuantUIApp()
+        assert isinstance(app._pes_export_btn, widgets.Button)
+        assert isinstance(app._pes_export_fmt_dd, widgets.Dropdown)
+        assert app._pes_export_fmt_dd.value == "html"
+
+
+class TestShowUVVisSpectrum:
+    """_show_uv_vis_spectrum stores data and wires controls."""
+
+    def test_show_uv_vis_spectrum_returns_true_with_data(self):
+        app = QuantUIApp()
+        ok = app._show_uv_vis_spectrum(
+            [3.0, 4.2, 5.5],
+            [0.12, 0.08, 0.05],
+            [413.3, 295.2, 225.5],
+        )
+        assert ok is True
+
+    def test_uv_fwhm_slider_shown_when_broadened(self):
+        app = QuantUIApp()
+        app._show_uv_vis_spectrum(
+            [3.0, 4.2, 5.5],
+            [0.12, 0.08, 0.05],
+            [413.3, 295.2, 225.5],
+        )
+        app._uv_mode_toggle.value = "Broadened"
+        assert app._uv_fwhm_slider.layout.display == ""
+
+    def test_uv_fwhm_slider_hidden_when_stick(self):
+        app = QuantUIApp()
+        app._show_uv_vis_spectrum(
+            [3.0, 4.2, 5.5],
+            [0.12, 0.08, 0.05],
+            [413.3, 295.2, 225.5],
+        )
+        app._uv_mode_toggle.value = "Broadened"
+        app._uv_mode_toggle.value = "Stick"
+        assert app._uv_fwhm_slider.layout.display == "none"
+
+    def test_broadened_toggle_triggers_uv_figure_update(self):
+        app = QuantUIApp()
+        app._show_uv_vis_spectrum(
+            [3.0, 4.2, 5.5],
+            [0.12, 0.08, 0.05],
+            [413.3, 295.2, 225.5],
+        )
+        with patch.object(app, "_update_uv_vis_figure") as mock_update:
+            app._uv_mode_toggle.value = "Broadened"
+        mock_update.assert_called_once_with("Broadened", app._uv_fwhm_slider.value)
+
 
 # ---------------------------------------------------------------------------
 # M6 — Orbital Diagram accordion
@@ -958,6 +1192,12 @@ class TestOrbitalAccordionWidgets:
         app = QuantUIApp()
         assert hasattr(app, "_orb_diagram_html")
 
+    def test_orb_export_controls_exist(self):
+        app = QuantUIApp()
+        assert isinstance(app._orb_export_btn, widgets.Button)
+        assert isinstance(app._orb_export_fmt_dd, widgets.Dropdown)
+        assert app._orb_export_fmt_dd.value == "html"
+
     def test_orb_toggle_has_four_options(self):
         app = QuantUIApp()
         assert set(app._orb_toggle.options) == {"HOMO-1", "HOMO", "LUMO", "LUMO+1"}
@@ -978,6 +1218,25 @@ class TestOrbitalAccordionWidgets:
 
 
 class TestShowOrbitalDiagram:
+
+    class TestPlotExportHelper:
+        def test_export_plot_figure_html_writes_file(self, tmp_path):
+            app = QuantUIApp()
+            app._last_result_dir = tmp_path
+
+            fig = MagicMock()
+            with patch("plotly.io.to_html", return_value="<html>ok</html>"):
+                app._export_plot_figure(
+                    fig=fig,
+                    stem="ir_spectrum",
+                    fmt="html",
+                    status_widget=app._ir_export_status,
+                )
+
+            saved = list(tmp_path.glob("ir_spectrum_*.html"))
+            assert len(saved) == 1
+            assert "Saved:" in app._ir_export_status.value
+
     """_show_orbital_diagram reveals accordion when MO data is present."""
 
     def _make_result_with_mo(self):
@@ -1035,6 +1294,50 @@ class TestShowOrbitalDiagram:
         app._show_orbital_diagram(self._make_result_with_mo())
         # mo_coeff is None in mock → iso controls stay hidden
         assert app._orb_iso_controls.layout.display == "none"
+
+
+class TestIsosurfacePersistence:
+    def test_render_orbital_isosurface_saves_cube_to_disk(self, tmp_path):
+        app = QuantUIApp()
+        app._last_result_dir = tmp_path
+        app._last_orb_info = MagicMock()
+        app._last_orb_info.n_occupied = 1
+        app._last_orb_info.mo_energies_ev = [-10.0, 2.0]
+        app._last_orb_info.formula = "H2O"
+        app._last_orb_mo_coeff = [[1.0, 0.0], [0.0, 1.0]]
+        app._last_orb_mol_atom = [["H", [0.0, 0.0, 0.0]]]
+        app._last_orb_mol_basis = "sto-3g"
+
+        captured: dict[str, object] = {}
+
+        def _fake_generate(_atom, _basis, _coeff, _idx, out_path):
+            captured["path"] = out_path
+            out_path.write_text("cube", encoding="utf-8")
+            return out_path
+
+        with (
+            patch(
+                "quantui.orbital_visualization.generate_cube_from_arrays",
+                side_effect=_fake_generate,
+            ) as mock_gen,
+            patch(
+                "quantui.orbital_visualization.plot_cube_isosurface",
+                return_value=MagicMock(),
+            ) as mock_plot,
+            patch(
+                "plotly.io.to_html",
+                return_value="<div>iso</div>",
+            ),
+        ):
+            app._render_orbital_isosurface("HOMO")
+
+        saved_path = captured.get("path")
+        assert saved_path is not None
+        assert saved_path.parent == tmp_path / "isosurfaces"
+        assert saved_path.suffix == ".cube"
+        assert saved_path.exists()
+        mock_gen.assert_called_once()
+        mock_plot.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -1109,6 +1412,26 @@ class TestAnalysisTab:
     def test_ir_accordion_in_analysis_tab(self):
         app = QuantUIApp()
         assert app._ir_accordion in app.analysis_tab_panel.children
+
+    def test_analysis_heading_matches_history_label_shape(self):
+        app = QuantUIApp()
+        ctx = _AnalysisContext(
+            calc_type="frequency",
+            formula="H2O",
+            method="B3LYP",
+            basis="6-31G",
+            timestamp="2026-05-14_10-11-12-123456",
+            source="history",
+        )
+
+        app._apply_analysis_context(ctx)
+
+        heading = app._analysis_context_lbl.value
+        assert "Analysing:" in heading
+        assert "2026-05-14_10-11-12-123456" in heading
+        assert "[Frequency Analysis]" in heading
+        assert "H2O  B3LYP/6-31G" in heading
+        assert "(from History)" in heading
 
 
 # ---------------------------------------------------------------------------

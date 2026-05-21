@@ -169,6 +169,13 @@ def run_freq_calc(
 
     stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
 
+    def _status(msg: str) -> None:
+        """Emit a status marker line consumable by QuantUI's log capture."""
+        try:
+            stream.write(f"\n[QuantUI_STATUS] {msg}\n")
+        except Exception:
+            pass
+
     # ── Build Mole object ────────────────────────────────────────────────────
     mol = gto.Mole()
     mol.atom = molecule.to_pyscf_format()
@@ -195,6 +202,8 @@ def run_freq_calc(
         raise RuntimeError(
             f"SCF failed for {molecule.get_formula()} ({method}/{basis}): {exc}"
         ) from exc
+
+    _status("SCF converged. Computing analytical Hessian...")
 
     converged = bool(getattr(mf, "converged", False))
     n_iterations = int(getattr(mf, "cycles", -1))
@@ -251,6 +260,8 @@ def run_freq_calc(
 
         h = hess_obj.kernel()
 
+        _status("Analytical Hessian complete. Running harmonic analysis...")
+
         freq_info = pyscf_thermo.harmonic_analysis(mol, h)
 
         # freq_wavenumber entries may be complex numbers when PySCF uses a
@@ -300,10 +311,18 @@ def run_freq_calc(
                 _KM_MOL_FAC = 42.255  # (D/Å)²/amu → km/mol
 
                 _n_ir = mol.natm
+                _ir_total_solves = _n_ir * 3 * 2
+                _ir_done_solves = 0
                 _coords0 = mol.atom_coords().copy()
                 _dm0 = mf.make_rdm1()
                 _dpdx = _np_ir.zeros((_n_ir * 3, 3))
                 _xc = getattr(mf, "xc", None)
+
+                _status(
+                    "Numerical IR intensities: "
+                    f"{_ir_done_solves}/{_ir_total_solves} extra SCF solves complete "
+                    f"({_ir_total_solves - _ir_done_solves} remaining)"
+                )
 
                 _mol_v = mol.verbose
                 mol.verbose = 0
@@ -321,6 +340,12 @@ def run_freq_calc(
                             _mf_d.verbose = 0
                             _mf_d.stdout = stream
                             _mf_d.kernel(dm0=_dm0)
+                            _ir_done_solves += 1
+                            _status(
+                                "Numerical IR intensities: "
+                                f"{_ir_done_solves}/{_ir_total_solves} extra SCF solves complete "
+                                f"({_ir_total_solves - _ir_done_solves} remaining)"
+                            )
                             _mu_p = _np_ir.array(_mf_d.dip_moment(verbose=0))
 
                             _cm = _coords0.copy()
@@ -334,6 +359,12 @@ def run_freq_calc(
                             _mf_d.verbose = 0
                             _mf_d.stdout = stream
                             _mf_d.kernel(dm0=_dm0)
+                            _ir_done_solves += 1
+                            _status(
+                                "Numerical IR intensities: "
+                                f"{_ir_done_solves}/{_ir_total_solves} extra SCF solves complete "
+                                f"({_ir_total_solves - _ir_done_solves} remaining)"
+                            )
                             _mu_m = _np_ir.array(_mf_d.dip_moment(verbose=0))
 
                             _dpdx[3 * _I + _ax] = (_mu_p - _mu_m) / (2 * _DELTA)
@@ -347,12 +378,20 @@ def run_freq_calc(
                 _ir = (_KM_MOL_FAC * (_dpdQ**2).sum(axis=1)).tolist()
                 if len(_ir) == len(frequencies_cm1):
                     ir_intensities = _ir
+                _status(
+                    "Numerical IR intensities complete. Computing thermochemistry..."
+                )
             except Exception as _ir_exc:
                 logger.warning("Numerical IR intensities failed: %s", _ir_exc)
+                _status(
+                    "Numerical IR intensities failed; continuing without IR intensities."
+                )
 
         # Thermochemistry at 298.15 K / 1 atm — best-effort
         try:
             import numpy as _np
+
+            _status("Computing thermochemistry...")
 
             _freq_au = freq_info.get("freq_au")
             if _freq_au is None:
@@ -407,11 +446,14 @@ def run_freq_calc(
                 S_jmol=_S,
                 G_hartree=_G,
             )
+            _status("Frequency backend complete.")
         except Exception as _exc:
             logger.warning("Thermochemistry failed: %s", _exc)
+            _status("Thermochemistry failed; frequency backend complete.")
 
     except Exception as exc:
         logger.warning("Hessian/frequency computation failed: %s", exc)
+        _status("Hessian/frequency step failed.")
         if progress_stream is not None:
             try:
                 progress_stream.write(f"\n⚠ Hessian failed: {exc}\n")

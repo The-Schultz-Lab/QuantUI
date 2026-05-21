@@ -303,6 +303,33 @@ class TestPlotCubeIsosurface:
         fig = plot_cube_isosurface(minimal_cube_file)
         assert "Bohr" in fig.layout.scene.xaxis.title.text
 
+    def test_show_molecule_adds_overlay_traces(self, minimal_cube_file):
+        fig = plot_cube_isosurface(minimal_cube_file, show_molecule=True)
+        assert len(fig.data) >= 3
+
+    def test_show_grid_false_hides_scene_grid(self, minimal_cube_file):
+        fig = plot_cube_isosurface(minimal_cube_file, show_grid=False)
+        assert fig.layout.scene.xaxis.showgrid is False
+        assert fig.layout.scene.yaxis.showgrid is False
+        assert fig.layout.scene.zaxis.showgrid is False
+
+    def test_default_view_window_is_larger(self, minimal_cube_file):
+        fig = plot_cube_isosurface(minimal_cube_file)
+        assert fig.layout.width == 760
+        assert fig.layout.height == 620
+
+    def test_paper_background_transparent(self, minimal_cube_file):
+        fig = plot_cube_isosurface(minimal_cube_file)
+        assert fig.layout.paper_bgcolor == "rgba(0,0,0,0)"
+
+    def test_title_color_override(self, minimal_cube_file):
+        fig = plot_cube_isosurface(
+            minimal_cube_file,
+            title="LUMO Isosurface",
+            title_color="#123456",
+        )
+        assert fig.layout.title.font.color == "#123456"
+
 
 # ---------------------------------------------------------------------------
 # generate_cube_from_arrays — M6.2 acceptance criteria

@@ -14,17 +14,15 @@ module in tests or tutorials does not pollute the IPython display.
 from __future__ import annotations
 
 import asyncio
+import html as _html
 import io
-import os
 import re
-import sys
 import threading
 import time
-import types as _types_mod
 import uuid as _uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, List, Literal, Optional
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, List, Literal, Optional
 
 import ipywidgets as widgets
 from IPython import get_ipython
@@ -33,6 +31,336 @@ from IPython.display import HTML, Javascript, display
 import quantui
 import quantui.calc_log as _calc_log
 import quantui.issue_tracker as _issue_tracker
+from quantui.app_analysis import (
+    activate_ana_panel as _ana_activate_ana_panel,
+)
+from quantui.app_analysis import (
+    apply_analysis_context as _ana_apply_analysis_context,
+)
+from quantui.app_analysis import (
+    build_ana_switcher as _ana_build_ana_switcher,
+)
+from quantui.app_analysis import (
+    deactivate_all_ana_panels as _ana_deactivate_all_ana_panels,
+)
+from quantui.app_analysis import (
+    pop_energies as _ana_pop_energies,
+)
+from quantui.app_analysis import (
+    pop_geo_trajectory as _ana_pop_geo_trajectory,
+)
+from quantui.app_analysis import (
+    pop_ir_spectrum as _ana_pop_ir_spectrum,
+)
+from quantui.app_analysis import (
+    pop_isosurface as _ana_pop_isosurface,
+)
+from quantui.app_analysis import (
+    pop_nmr_shielding as _ana_pop_nmr_shielding,
+)
+from quantui.app_analysis import (
+    pop_pes_plot as _ana_pop_pes_plot,
+)
+from quantui.app_analysis import (
+    pop_pes_trajectory as _ana_pop_pes_trajectory,
+)
+from quantui.app_analysis import (
+    pop_preopt_trajectory as _ana_pop_preopt_trajectory,
+)
+from quantui.app_analysis import (
+    pop_uv_vis as _ana_pop_uv_vis,
+)
+from quantui.app_analysis import (
+    pop_vibrational as _ana_pop_vibrational,
+)
+from quantui.app_analysis import (
+    select_ana_panel as _ana_select_ana_panel,
+)
+from quantui.app_builders import (
+    build_calc_setup as _bld_build_calc_setup,
+)
+from quantui.app_builders import (
+    build_compare_section as _bld_build_compare_section,
+)
+from quantui.app_builders import (
+    build_files_tab as _bld_build_files_tab,
+)
+from quantui.app_builders import (
+    build_help_section as _bld_build_help_section,
+)
+from quantui.app_builders import (
+    build_history_section as _bld_build_history_section,
+)
+from quantui.app_builders import (
+    build_issue_widgets as _bld_build_issue_widgets,
+)
+from quantui.app_builders import (
+    build_molecule_section as _bld_build_molecule_section,
+)
+from quantui.app_builders import (
+    build_output_tab as _bld_build_output_tab,
+)
+from quantui.app_builders import (
+    build_results_section as _bld_build_results_section,
+)
+from quantui.app_builders import (
+    build_run_section as _bld_build_run_section,
+)
+from quantui.app_builders import (
+    build_shared_widgets as _bld_build_shared_widgets,
+)
+from quantui.app_builders import (
+    build_status_panel as _bld_build_status_panel,
+)
+from quantui.app_builders import (
+    build_theme_selector as _bld_build_theme_selector,
+)
+from quantui.app_builders import (
+    build_welcome_header as _bld_build_welcome_header,
+)
+from quantui.app_exports import (
+    export_molecule_and_label as _exp_export_molecule_and_label,
+)
+from quantui.app_exports import (
+    molecule_to_rdkit as _exp_molecule_to_rdkit,
+)
+from quantui.app_exports import (
+    on_export as _exp_on_export,
+)
+from quantui.app_exports import (
+    on_export_mol as _exp_on_export_mol,
+)
+from quantui.app_exports import (
+    on_export_pdb as _exp_on_export_pdb,
+)
+from quantui.app_exports import (
+    on_export_xyz as _exp_on_export_xyz,
+)
+from quantui.app_formatters import (
+    format_freq_result as _fmt_freq_result,
+)
+from quantui.app_formatters import (
+    format_nmr_result as _fmt_nmr_result,
+)
+from quantui.app_formatters import (
+    format_opt_result as _fmt_opt_result,
+)
+from quantui.app_formatters import (
+    format_past_result as _fmt_past_result,
+)
+from quantui.app_formatters import (
+    format_pes_scan_result as _fmt_pes_scan_result,
+)
+from quantui.app_formatters import (
+    format_result as _fmt_result,
+)
+from quantui.app_formatters import (
+    format_tddft_result as _fmt_tddft_result,
+)
+from quantui.app_history import (
+    build_history_context as _hist_build_history_context,
+)
+from quantui.app_history import (
+    history_load_analysis as _hist_history_load_analysis,
+)
+from quantui.app_history import (
+    history_load_results as _hist_history_load_results,
+)
+from quantui.app_history import (
+    mol_from_result_dir as _hist_mol_from_result_dir,
+)
+from quantui.app_history import (
+    on_past_dd_changed as _hist_on_past_dd_changed,
+)
+from quantui.app_history import (
+    on_view_log as _hist_on_view_log,
+)
+from quantui.app_runflow import (
+    do_calibration as _run_do_calibration,
+)
+from quantui.app_runflow import (
+    on_accumulate as _run_on_accumulate,
+)
+from quantui.app_runflow import (
+    on_basis_help as _run_on_basis_help,
+)
+from quantui.app_runflow import (
+    on_cal_run as _run_on_cal_run,
+)
+from quantui.app_runflow import (
+    on_cal_stop as _run_on_cal_stop,
+)
+from quantui.app_runflow import (
+    on_calc_type_changed as _run_on_calc_type_changed,
+)
+from quantui.app_runflow import (
+    on_clear as _run_on_clear,
+)
+from quantui.app_runflow import (
+    on_clear_log as _run_on_clear_log,
+)
+from quantui.app_runflow import (
+    on_clear_log_cache as _run_on_clear_log_cache,
+)
+from quantui.app_runflow import (
+    on_clear_log_cache_confirm as _run_on_clear_log_cache_confirm,
+)
+from quantui.app_runflow import (
+    on_compare as _run_on_compare,
+)
+from quantui.app_runflow import (
+    on_compare_clear as _run_on_compare_clear,
+)
+from quantui.app_runflow import (
+    on_compare_refresh as _run_on_compare_refresh,
+)
+from quantui.app_runflow import (
+    on_confirm_no as _run_on_confirm_no,
+)
+from quantui.app_runflow import (
+    on_confirm_yes as _run_on_confirm_yes,
+)
+from quantui.app_runflow import (
+    on_copy_results_path as _run_on_copy_results_path,
+)
+from quantui.app_runflow import (
+    on_exit_clicked as _run_on_exit_clicked,
+)
+from quantui.app_runflow import (
+    on_expand_mol_input as _run_on_expand_mol_input,
+)
+from quantui.app_runflow import (
+    on_freq_seed_changed as _run_on_freq_seed_changed,
+)
+from quantui.app_runflow import (
+    on_help_toggle as _run_on_help_toggle,
+)
+from quantui.app_runflow import (
+    on_help_topic_changed as _run_on_help_topic_changed,
+)
+from quantui.app_runflow import (
+    on_issue_btn as _run_on_issue_btn,
+)
+from quantui.app_runflow import (
+    on_issue_cancel as _run_on_issue_cancel,
+)
+from quantui.app_runflow import (
+    on_issue_submit as _run_on_issue_submit,
+)
+from quantui.app_runflow import (
+    on_log_clear as _run_on_log_clear,
+)
+from quantui.app_runflow import (
+    on_method_help as _run_on_method_help,
+)
+from quantui.app_runflow import (
+    on_past_refresh as _run_on_past_refresh,
+)
+from quantui.app_runflow import (
+    on_reset_click as _run_on_reset_click,
+)
+from quantui.app_runflow import (
+    on_run_clicked as _run_on_run_clicked,
+)
+from quantui.app_runflow import (
+    on_solvent_cb_changed as _run_on_solvent_cb_changed,
+)
+from quantui.app_runflow import (
+    populate_compare_list as _run_populate_compare_list,
+)
+from quantui.app_runflow import (
+    refresh_comparison as _run_refresh_comparison,
+)
+from quantui.app_runflow import (
+    refresh_freq_seed_options as _run_refresh_freq_seed_options,
+)
+from quantui.app_runflow import (
+    refresh_results_browser as _run_refresh_results_browser,
+)
+from quantui.app_runflow import (
+    update_estimate as _run_update_estimate,
+)
+from quantui.app_runflow import (
+    update_notes as _run_update_notes,
+)
+from quantui.app_runflow import (
+    update_scan_widgets as _run_update_scan_widgets,
+)
+from quantui.app_visualization import (
+    build_vib_data_from_freq_result as _viz_build_vib_data_from_freq_result,
+)
+from quantui.app_visualization import (
+    build_vib_data_inner as _viz_build_vib_data_inner,
+)
+from quantui.app_visualization import (
+    on_ir_fwhm_changed as _viz_on_ir_fwhm_changed,
+)
+from quantui.app_visualization import (
+    on_ir_mode_changed as _viz_on_ir_mode_changed,
+)
+from quantui.app_visualization import (
+    on_iso_generate as _viz_on_iso_generate,
+)
+from quantui.app_visualization import (
+    on_orb_range_changed as _viz_on_orb_range_changed,
+)
+from quantui.app_visualization import (
+    on_traj_expand as _viz_on_traj_expand,
+)
+from quantui.app_visualization import (
+    on_uv_fwhm_changed as _viz_on_uv_fwhm_changed,
+)
+from quantui.app_visualization import (
+    on_uv_mode_changed as _viz_on_uv_mode_changed,
+)
+from quantui.app_visualization import (
+    on_vib_mode_changed as _viz_on_vib_mode_changed,
+)
+from quantui.app_visualization import (
+    render_orbital_isosurface as _viz_render_orbital_isosurface,
+)
+from quantui.app_visualization import (
+    render_traj_frame as _viz_render_traj_frame,
+)
+from quantui.app_visualization import (
+    render_vib_mode as _viz_render_vib_mode,
+)
+from quantui.app_visualization import (
+    show_ir_spectrum as _viz_show_ir_spectrum,
+)
+from quantui.app_visualization import (
+    show_opt_trajectory as _viz_show_opt_trajectory,
+)
+from quantui.app_visualization import (
+    show_orbital_diagram as _viz_show_orbital_diagram,
+)
+from quantui.app_visualization import (
+    show_pes_scan_result as _viz_show_pes_scan_result,
+)
+from quantui.app_visualization import (
+    show_result_3d as _viz_show_result_3d,
+)
+from quantui.app_visualization import (
+    show_uv_vis_spectrum as _viz_show_uv_vis_spectrum,
+)
+from quantui.app_visualization import (
+    show_vib_animation as _viz_show_vib_animation,
+)
+from quantui.app_visualization import (
+    traj_step_html as _viz_traj_step_html,
+)
+from quantui.app_visualization import (
+    update_ir_figure as _viz_update_ir_figure,
+)
+from quantui.app_visualization import (
+    update_uv_vis_figure as _viz_update_uv_vis_figure,
+)
+from quantui.app_visualization import (
+    wire_ir_controls as _viz_wire_ir_controls,
+)
+from quantui.app_visualization import (
+    wire_uv_controls as _viz_wire_uv_controls,
+)
 
 # Import directly from submodules to avoid circular-import issues.
 # quantui/__init__.py imports this module (app.py), so using
@@ -238,6 +566,7 @@ _RE_CYCLE = re.compile(
     r"cycle=\s*(\d+)\s+E=\s*([\-\d\.]+)\s+delta_E=\s*([\-\d\.Ee+\-]+)"
 )
 _RE_CONV = re.compile(r"converged SCF energy\s*=\s*([\-\d\.]+)")
+_RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
 
 
 # ══ LOG CAPTURE ══════════════════════════════════════════════════════════════
@@ -250,11 +579,14 @@ class _LogCapture:
         self,
         output_widget: widgets.Output,
         status_label: Optional[widgets.Label] = None,
+        on_scf_converged: Optional[Callable[[], None]] = None,
     ) -> None:
         self._w = output_widget
         self._buf = io.StringIO()
         self._line_buf = ""
         self._status = status_label
+        self._on_scf_converged = on_scf_converged
+        self._scf_converged_seen = False
 
     def write(self, text: str) -> None:
         if not text:
@@ -264,6 +596,10 @@ class _LogCapture:
         self._line_buf += text
         while "\n" in self._line_buf:
             line, self._line_buf = self._line_buf.split("\n", 1)
+            m = _RE_Q_STATUS.search(line)
+            if m and self._status is not None:
+                self._status.value = m.group(1).strip()
+                continue
             m = _RE_CYCLE.search(line)
             if m and self._status is not None:
                 n, delta = m.group(1), m.group(3)
@@ -273,8 +609,15 @@ class _LogCapture:
                     self._status.value = f"SCF cycle {n}"
                 continue
             m = _RE_CONV.search(line)
-            if m and self._status is not None:
-                self._status.value = "SCF converged ✓"
+            if m:
+                if self._status is not None:
+                    self._status.value = "SCF converged ✓"
+                if not self._scf_converged_seen and self._on_scf_converged is not None:
+                    self._scf_converged_seen = True
+                    try:
+                        self._on_scf_converged()
+                    except Exception:
+                        pass
 
     def flush(self) -> None:
         pass
@@ -304,6 +647,7 @@ class _AnalysisContext:
     molecule: Optional[Any] = None  # molecule used for the calculation
     spectra_data: dict = field(default_factory=dict)  # from save_spectra / disk
     preopt_result: Optional[Any] = None  # OptimizationResult from pre-opt step
+    timestamp: str = ""  # result timestamp shown in history dropdown labels
     source: str = "live"  # "live" | "history"
 
     @property
@@ -326,6 +670,199 @@ class QuantUIApp:
         app.display()
     """
 
+    if TYPE_CHECKING:
+        # Attributes initialized in companion builder modules. Keeping these
+        # declarations here avoids attr-defined churn during phased extraction.
+        _clear_log_cache_btn: Any
+        _clear_log_cache_confirm_btn: Any
+        _exit_btn: Any
+        _exit_output: Any
+        _help_btn: Any
+        _issue_btn: Any
+        _issue_cancel_btn: Any
+        _issue_overlay: Any
+        _issue_status_html: Any
+        _issue_submit_btn: Any
+        _issue_textarea: Any
+        _cal_accordion: Any
+        _cal_mode_toggle: Any
+        _cal_progress: Any
+        _cal_results_html: Any
+        _cal_run_btn: Any
+        _cal_step_label: Any
+        _cal_stop_btn: Any
+        _log_clear_btn: Any
+        _log_output_html: Any
+        _log_source_lbl: Any
+        _perf_accordion: Any
+        _perf_events_html: Any
+        _perf_stats_html: Any
+        _reset_btn: Any
+        _reset_confirm_box: Any
+        _reset_confirm_html: Any
+        _reset_confirm_no: Any
+        _reset_confirm_yes: Any
+        _status_html: Any
+        _status_tab_panel: Any
+        _theme_style: Any
+        _welcome_html: Any
+        _activity_btn: Any
+        advanced_accordion: Any
+        calc_setup_panel: Any
+        change_mol_btn: Any
+        copy_path_btn: Any
+        compare_btn: Any
+        compare_clear_btn: Any
+        compare_output: Any
+        compare_panel: Any
+        compare_refresh_btn: Any
+        compare_select: Any
+        files_tab_panel: Any
+        _files_entries: Any
+        _files_open_btn: Any
+        _files_path_html: Any
+        _files_preview_output: Any
+        _files_refresh_btn: Any
+        _files_root_dd: Any
+        _files_status_html: Any
+        _files_up_btn: Any
+        help_content_html: Any
+        help_tab_panel: Any
+        help_topic_dd: Any
+        history_panel: Any
+        log_tab_panel: Any
+        mol_input_collapsed: Any
+        mol_input_container: Any
+        mol_input_expanded: Any
+        past_dd: Any
+        past_output: Any
+        past_refresh_btn: Any
+        preset_dd: Any
+        pubchem_btn: Any
+        pubchem_msg: Any
+        pubchem_txt: Any
+        result_output: Any
+        result_viz_output: Any
+        results_path_lbl: Any
+        run_btn: Any
+        run_output: Any
+        run_panel: Any
+        run_status: Any
+        solvent_cb: Any
+        solvent_dd: Any
+        step_progress: Any
+        theme_btn: Any
+        viz_backend_toggle: Any
+        viz_controls_box: Any
+        viz_lighting_dd: Any
+        viz_output: Any
+        viz_style_dd: Any
+        view_log_btn: Any
+        xyz_area: Any
+        xyz_btn: Any
+        xyz_msg: Any
+        _freq_preopt_cb: Any
+        _freq_seed_dd: Any
+        _freq_seed_note: Any
+        _freq_seed_refresh_btn: Any
+        _go_analysis_btn: Any
+        _go_results_btn: Any
+        _ir_export_btn: Any
+        _ir_export_fmt_dd: Any
+        _ir_export_status: Any
+        _ir_fig: Any
+        _ir_fwhm_slider: Any
+        _ir_mode_toggle: Any
+        _ir_accordion: Any
+        _iso_accordion: Any
+        _iso_generate_btn: Any
+        _last_result_dir: Any
+        _nmr_accordion: Any
+        _nmr_output: Any
+        _orb_accordion: Any
+        _orb_diagram_box: Any
+        _orb_diagram_html: Any
+        _orb_export_btn: Any
+        _orb_export_fmt_dd: Any
+        _orb_export_status: Any
+        _orb_iso_controls: Any
+        _orb_iso_output: Any
+        _orb_n_orb_input: Any
+        _orb_toggle: Any
+        _orb_ymax_input: Any
+        _orb_ymin_input: Any
+        _pes_export_btn: Any
+        _pes_export_fmt_dd: Any
+        _pes_export_status: Any
+        _pes_plot_html: Any
+        _pes_scan_accordion: Any
+        _result_dir_label: Any
+        _result_log_accordion: Any
+        _result_log_output: Any
+        _scan_atom1: Any
+        _scan_atom2: Any
+        _scan_atom3: Any
+        _scan_atom34_box: Any
+        _scan_atom4: Any
+        _scan_start: Any
+        _scan_steps: Any
+        _scan_stop: Any
+        _scan_type_dd: Any
+        _scan_unit_lbl: Any
+        _tddft_accordion: Any
+        _tddft_fig: Any
+        _uv_export_btn: Any
+        _uv_export_fmt_dd: Any
+        _uv_export_status: Any
+        _uv_fwhm_slider: Any
+        _uv_mode_toggle: Any
+        _to_analysis_btn: Any
+        _viz_backend: Any
+        _viz_label: Any
+        _viz_lighting: Any
+        _viz_style: Any
+        _analysis_context_lbl: Any
+        _analysis_empty_html: Any
+        _analysis_mol_output: Any
+        _ana_unavail_html: Any
+        accumulate_btn: Any
+        analysis_tab_panel: Any
+        basis_dd: Any
+        basis_help_btn: Any
+        calc_extra_opts: Any
+        calc_type_dd: Any
+        charge_si: Any
+        clear_btn: Any
+        _completion_banner: Any
+        _completion_mol_lbl: Any
+        comparison_output: Any
+        export_btn: Any
+        export_mol_btn: Any
+        export_pdb_btn: Any
+        export_status: Any
+        export_xyz_btn: Any
+        fmax_fi: Any
+        log_clear_btn: Any
+        max_steps_si: Any
+        method_dd: Any
+        method_help_btn: Any
+        mol_info_html: Any
+        mol_summary_compact: Any
+        mult_si: Any
+        notes_output: Any
+        nstates_si: Any
+        perf_estimate_html: Any
+        post_calc_panel: Any
+        preopt_cb: Any
+        results_panel: Any
+        results_tab_panel: Any
+        struct_export_status: Any
+        traj_accordion: Any
+        traj_output: Any
+        vib_accordion: Any
+        vib_mode_dd: Any
+        vib_output: Any
+
     def __init__(self) -> None:
         # ── Instance state ────────────────────────────────────────────────
         self._molecule: Optional[Molecule] = None
@@ -333,6 +870,26 @@ class QuantUIApp:
         self._last_calc_type: Optional[str] = None  # e.g. "frequency", "single_point"
         self._results: List = []
         self._pending_traj_result: Any = None
+        self._traj_render_token: int = 0
+        self._iso_render_token: int = 0
+        self._last_uv_wavelengths_nm: list[float] = []
+        self._last_uv_oscillator_strengths: list[float] = []
+        self._last_ir_fig: Any = None
+        self._last_uv_fig: Any = None
+        self._last_orb_fig: Any = None
+        self._last_pes_fig: Any = None
+        self._run_output_scroll_guard_installed: bool = False
+        self._files_current_dir: Optional[Path] = None
+        self._files_selected_path: Optional[Path] = None
+        self._files_updating: bool = False
+        self._activity_count: int = 0
+        self._activity_compute_count: int = 0
+        self._activity_lock = threading.Lock()
+        # Cache kernel io_loop once on the main thread so worker threads can
+        # reliably schedule UI callbacks even when get_ipython() is thread-local.
+        self._kernel_io_loop: Any = getattr(
+            getattr(get_ipython(), "kernel", None), "io_loop", None
+        )
         self.root_tab: widgets.Tab
         self._session_id: str = _uuid.uuid4().hex[:12]
 
@@ -360,6 +917,7 @@ class QuantUIApp:
                     self._welcome_html,
                     widgets.HBox(
                         [
+                            self._activity_btn,
                             self.theme_btn,
                             self._help_btn,
                             self._issue_btn,
@@ -375,6 +933,7 @@ class QuantUIApp:
                 ]
             )
         )
+        self._install_run_output_scroll_guard()
 
     @property
     def widget(self) -> widgets.Tab:
@@ -395,25 +954,14 @@ class QuantUIApp:
         self._build_history_section()
         self._build_compare_section()
         self._build_output_tab()
+        self._build_files_tab()
         self._build_help_section()
         self._build_issue_widgets()
 
     # ── Theme selector ────────────────────────────────────────────────────
 
     def _build_theme_selector(self) -> None:
-        self._theme_style = widgets.Output(
-            layout=_layout(height="0px", overflow="hidden", margin="0", padding="0")
-        )
-        self.theme_btn = widgets.ToggleButtons(
-            options=["Light", "Dark"],
-            value="Dark",
-            description="Theme:",
-            style={"description_width": "48px", "button_width": "90px"},
-            layout=_layout(margin="0"),
-        )
-        # Apply Dark theme immediately
-        with self._theme_style:
-            display(HTML(self._theme_css("Dark")))
+        _bld_build_theme_selector(self, layout_fn=_layout)
 
     def _theme_css(self, theme: str) -> str:
         """Return the CSS filter block for *theme*, or '' for Light."""
@@ -428,1086 +976,156 @@ class QuantUIApp:
             "</style>"
         )
 
+    def _set_activity_indicator(self, state: str = "idle", message: str = "") -> None:
+        """Update the toolbar activity light state and tooltip."""
+        if state == "compute":
+            self._activity_btn.description = "Computing"
+            self._activity_btn.icon = "cog"
+            self._activity_btn.button_style = "warning"
+            self._activity_btn.tooltip = message or "Running compute operations..."
+            return
+        if state == "ui":
+            self._activity_btn.description = "UI Active"
+            self._activity_btn.icon = "bolt"
+            self._activity_btn.button_style = "info"
+            self._activity_btn.tooltip = message or "Running UI operations..."
+            return
+
+        self._activity_btn.description = "Idle"
+        self._activity_btn.icon = "circle-o"
+        self._activity_btn.button_style = "success"
+        self._activity_btn.tooltip = "No active operations."
+
+    def _refresh_activity_indicator(self, message: str = "") -> None:
+        """Recompute activity light state from active operation counters."""
+        if self._activity_count <= 0:
+            self._set_activity_indicator("idle")
+            return
+        if self._activity_compute_count > 0:
+            self._set_activity_indicator("compute", message)
+            return
+        self._set_activity_indicator("ui", message)
+
+    def _activity_begin(self, message: str = "", kind: str = "ui") -> None:
+        """Mark one operation as active."""
+        with self._activity_lock:
+            self._activity_count += 1
+            if kind == "compute":
+                self._activity_compute_count += 1
+        self._refresh_activity_indicator(message)
+
+    def _activity_end(self, kind: str = "ui") -> None:
+        """Mark one operation as finished."""
+        with self._activity_lock:
+            if self._activity_count > 0:
+                self._activity_count -= 1
+            if kind == "compute" and self._activity_compute_count > 0:
+                self._activity_compute_count -= 1
+        self._refresh_activity_indicator()
+
+    def _activity_pulse(
+        self, message: str, hold_s: float = 0.18, kind: str = "ui"
+    ) -> None:
+        """Briefly light the activity indicator for quick operations."""
+        self._activity_begin(message, kind=kind)
+        timer = threading.Timer(
+            max(0.05, hold_s),
+            self._activity_end,
+            kwargs={"kind": kind},
+        )
+        timer.daemon = True
+        timer.start()
+
+    def _on_root_tab_changed(self, _change) -> None:
+        """Pulse the activity light on tab navigation actions."""
+        self._activity_pulse("Switching tabs...", hold_s=0.16, kind="ui")
+
+    def _go_to_results_tab(self, _btn) -> None:
+        """Navigate to Results tab with a visible activity pulse."""
+        self._activity_pulse("Navigating to Results tab...", hold_s=0.16, kind="ui")
+        self.root_tab.selected_index = 1
+
+    def _go_to_analysis_tab(self, _btn) -> None:
+        """Navigate to Analysis tab with a visible activity pulse."""
+        self._activity_pulse("Navigating to Analysis tab...", hold_s=0.16, kind="ui")
+        self.root_tab.selected_index = 2
+
     # ── Status panel ──────────────────────────────────────────────────────
 
     def _build_status_panel(self) -> None:
-        _cores, _mem_gb = get_session_resources()
-        _mem = f"{_mem_gb} GB" if _mem_gb is not None else "unknown"
-        _py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-        _env = os.environ.get("CONDA_DEFAULT_ENV", "") or os.path.basename(
-            os.environ.get("VIRTUAL_ENV", "")
-        )
-        _cal_label = _load_last_calibration_label()
-
-        def _ok(flag: bool, extra: str = "") -> str:
-            tick = '<span style="color:#22c55e">&#10003;</span>'
-            cross = '<span style="color:#ef4444">&#10007;</span>'
-            return (tick if flag else cross) + (" " + extra if extra else "")
-
-        _items = [
-            (
-                "PySCF (calculations)",
-                _ok(
-                    _PYSCF_AVAILABLE,
-                    "" if _PYSCF_AVAILABLE else "&mdash; Linux / macOS / WSL required",
-                ),
-            ),
-            ("ASE (structure I/O, opt.)", _ok(ASE_AVAILABLE)),
-            ("PubChem search", _ok(PUBCHEM_AVAILABLE)),
-            ("3D viewer (py3Dmol)", _ok(VISUALIZATION_AVAILABLE)),
-            ("CPU cores / Memory", f"<b>{_cores}</b> cores / <b>{_mem}</b>"),
-        ]
-        _rows = "".join(
-            f'<tr><td style="padding:3px 16px 3px 0;color:#64748b;font-size:13px">{k}</td>'
-            f'<td style="font-size:13px">{v}</td></tr>'
-            for k, v in _items
-        )
-
-        _env_badge = (
-            f'&nbsp;&nbsp;<code style="font-size:11px;background:#e0e7ef;'
-            f'padding:1px 5px;border-radius:3px;color:#334155">{_env}</code>'
-            if _env and _env not in ("base", "")
-            else ""
-        )
-        _cal_line = (
-            f'<div style="margin-top:6px;font-size:12px;color:#94a3b8">'
-            f"Timing calibration: {_cal_label}</div>"
-            if _cal_label
-            else '<div style="margin-top:6px;font-size:12px;color:#94a3b8">'
-            "Timing calibration: not yet run &mdash; use the Calibrate panel in History</div>"
-        )
-
-        self._status_html = widgets.HTML(
-            f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid #3b82f6;'
-            f'padding:12px 16px;border-radius:6px;margin:4px 0 8px">'
-            f'<div style="font-weight:600;font-size:14px;color:#1e293b">'
-            f"QuantUI {quantui.__version__}"
-            f'<span style="font-weight:400;font-size:12px;color:#94a3b8;margin-left:10px">'
-            f"Python {_py_ver}{_env_badge}</span></div>"
-            f'<table style="margin-top:10px;border-collapse:collapse">{_rows}</table>'
-            f"{_cal_line}"
-            f"</div>"
-        )
-
-        _steps = [
-            "Select a molecule &mdash; library dropdown, XYZ paste, or PubChem search",
-            "Choose a <b>method</b> (RHF / DFT / MP2) and <b>basis set</b> in the Calculate tab",
-            "Click <b>Run Calculation</b> &mdash; SCF progress appears in real time",
-            "Explore results in the <b>Results</b> and <b>Analysis</b> tabs",
-            "Browse past calculations in <b>History</b>; compare them in <b>Compare</b>",
-        ]
-        _steps_html = "".join(
-            f'<li style="margin:5px 0;font-size:13px;color:#475569">{s}</li>'
-            for s in _steps
-        )
-        _guide_html = widgets.HTML(
-            f'<div style="background:#f8fafc;border:1px solid #e2e8f0;'
-            f'padding:12px 16px;border-radius:6px;margin:8px 0">'
-            f'<div style="font-weight:600;font-size:13px;color:#1e293b;margin-bottom:8px">'
-            f"Quick start</div>"
-            f'<ol style="margin:0;padding-left:20px">{_steps_html}</ol>'
-            f"</div>"
-        )
-
-        self._status_tab_panel = widgets.VBox(
-            [self._status_html, _guide_html],
-            layout=_layout(padding="8px 0"),
+        _bld_build_status_panel(
+            self,
+            layout_fn=_layout,
+            get_session_resources_fn=get_session_resources,
+            load_last_calibration_label_fn=_load_last_calibration_label,
+            pyscf_available=_PYSCF_AVAILABLE,
+            ase_available=ASE_AVAILABLE,
+            pubchem_available=PUBCHEM_AVAILABLE,
+            visualization_available=VISUALIZATION_AVAILABLE,
         )
 
     # ── Welcome header ────────────────────────────────────────────────────
 
     def _build_welcome_header(self) -> None:
-        _logo_svg = (
-            '<svg width="120" height="120" viewBox="0 0 280 280"'
-            ' xmlns="http://www.w3.org/2000/svg">'
-            "<defs>"
-            '<filter id="q-glow" x="-50%" y="-50%" width="200%" height="200%">'
-            '<feGaussianBlur stdDeviation="7" result="blur"/>'
-            "<feMerge>"
-            '<feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/>'
-            "</feMerge></filter>"
-            '<filter id="q-halo" x="-80%" y="-80%" width="260%" height="260%">'
-            '<feGaussianBlur stdDeviation="22" result="blur"/>'
-            "<feMerge>"
-            '<feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/>'
-            "</feMerge></filter>"
-            "</defs>"
-            '<circle cx="140" cy="140" r="48"'
-            ' fill="rgba(37,99,235,0.20)" filter="url(#q-halo)"/>'
-            '<g transform="rotate(0,140,140)">'
-            '<ellipse cx="140" cy="140" rx="115" ry="33" fill="none"'
-            ' stroke="#0891b2" stroke-width="1.4" opacity="0.70"/>'
-            '<circle cx="255" cy="140" r="5.5" fill="#67e8f9"/>'
-            "</g>"
-            '<g transform="rotate(60,140,140)">'
-            '<ellipse cx="140" cy="140" rx="115" ry="33" fill="none"'
-            ' stroke="#0891b2" stroke-width="1.4" opacity="0.55"/>'
-            '<circle cx="255" cy="140" r="4.5" fill="#93c5fd"/>'
-            "</g>"
-            '<g transform="rotate(120,140,140)">'
-            '<ellipse cx="140" cy="140" rx="115" ry="33" fill="none"'
-            ' stroke="#3b82f6" stroke-width="1.4" opacity="0.42"/>'
-            '<circle cx="255" cy="140" r="4" fill="#60a5fa"/>'
-            "</g>"
-            '<circle cx="140" cy="140" r="20"'
-            ' fill="rgba(37,99,235,0.25)" filter="url(#q-glow)"/>'
-            '<circle cx="140" cy="140" r="14"'
-            ' fill="#2563eb" filter="url(#q-glow)"/>'
-            '<circle cx="140" cy="140" r="8" fill="#60a5fa"/>'
-            '<circle cx="137" cy="137" r="3" fill="rgba(255,255,255,0.45)"/>'
-            "</svg>"
-        )
-        _html = (
-            f'<div style="display:flex;align-items:center;gap:28px;'
-            f"padding:22px 4px 18px;margin-bottom:4px;"
-            f'border-bottom:1px solid #e2e8f0">'
-            f"{_logo_svg}"
-            f"<div>"
-            f'<div style="font-size:44px;font-weight:700;letter-spacing:-0.8px;'
-            f'color:#0f172a;line-height:1.05">QuantUI</div>'
-            f'<div style="font-size:20px;color:#475569;margin-top:7px">'
-            f"Quantum chemistry calculations, right on your device</div>"
-            f'<div style="font-size:13px;color:#94a3b8;margin-top:5px">'
-            f"v{quantui.__version__} &nbsp;&middot;&nbsp; "
-            f"<b>Help</b> tab for instructions &nbsp;&middot;&nbsp; "
-            f"<b>Status</b> tab for system info</div>"
-            f"</div>"
-            f"</div>"
-        )
-        self._welcome_html = widgets.HTML(value=_html)
+        _bld_build_welcome_header(self)
 
     # ── Shared widgets (Cell 3) ───────────────────────────────────────────
 
     def _build_shared_widgets(self) -> None:
-        # Output widgets
-        self.mol_info_html = widgets.HTML(
-            value='<i style="color:#888">No molecule loaded yet.</i>'
+        _bld_build_shared_widgets(
+            self,
+            layout_fn=_layout,
+            step_progress_cls=StepProgress,
+            supported_methods=SUPPORTED_METHODS,
+            supported_basis_sets=SUPPORTED_BASIS_SETS,
+            default_method=DEFAULT_METHOD,
+            default_basis=DEFAULT_BASIS,
+            default_charge=DEFAULT_CHARGE,
+            default_multiplicity=DEFAULT_MULTIPLICITY,
+            default_fmax=DEFAULT_FMAX,
+            default_opt_steps=DEFAULT_OPT_STEPS,
+            preopt_available=_PREOPT_AVAILABLE,
+            visualization_available=VISUALIZATION_AVAILABLE,
+            both_viz_available=_BOTH_VIZ_AVAILABLE,
+            default_viz_backend=_DEFAULT_VIZ_BACKEND,
+            default_viz_style=_DEFAULT_VIZ_STYLE,
+            default_lighting=_DEFAULT_LIGHTING,
+            viz_style_options=_VIZ_STYLE_OPTIONS,
+            plotlymol_viz=_PLOTLYMOL_VIZ,
+            lighting_options=_LIGHTING_OPTIONS,
+            rdkit_available=_RDKIT_AVAILABLE,
         )
-        self.mol_summary_compact = widgets.HTML(value="")
-        self.viz_output = widgets.Output(layout=_layout(min_height="50px"))
-        self.run_output = widgets.Output(
-            layout=_layout(
-                border="1px solid #c0ccd8",
-                min_height="80px",
-                max_height="400px",
-                padding="8px",
-                overflow_y="auto",
-            )
-        )
-        with self.run_output:
-            display(
-                HTML(
-                    '<p style="color:#999;font-style:italic;font-size:13px;margin:2px 0">'
-                    "No calculation run yet. PySCF output and any errors will appear here."
-                    "</p>"
-                )
-            )
-        self.result_output = widgets.Output()
-        self.result_viz_output = widgets.Output()
-        self.comparison_output = widgets.Output()
-        self._last_result_dir: Optional[Path] = None
-
-        # 3D viewer backend selector — shown only when both backends are installed
-        self._viz_backend: _VizBackend = _DEFAULT_VIZ_BACKEND
-        if _BOTH_VIZ_AVAILABLE:
-            self.viz_backend_toggle = widgets.ToggleButtons(
-                options=[("PlotlyMol", "plotlymol"), ("py3Dmol", "py3dmol")],
-                value=_DEFAULT_VIZ_BACKEND,
-                tooltips=["Plotly-based interactive viewer", "WebGL viewer (py3Dmol)"],
-                style={"button_width": "90px"},
-                layout=_layout(margin="2px 0 0 0"),
-            )
-        else:
-            self.viz_backend_toggle = None  # type: ignore[assignment]
-
-        # 3D viewer style and lighting controls
-        self._viz_style: str = _DEFAULT_VIZ_STYLE
-        self._viz_lighting: str = _DEFAULT_LIGHTING
-        self.viz_style_dd = widgets.Dropdown(
-            options=_VIZ_STYLE_OPTIONS,
-            value=_DEFAULT_VIZ_STYLE,
-            description="Style:",
-            style={"description_width": "40px"},
-            layout=_layout(width="180px"),
-            disabled=not VISUALIZATION_AVAILABLE,
-        )
-        # Lighting only applies to the PlotlyMol backend
-        _lighting_available = VISUALIZATION_AVAILABLE and _PLOTLYMOL_VIZ
-        self.viz_lighting_dd = widgets.Dropdown(
-            options=_LIGHTING_OPTIONS,
-            value=_DEFAULT_LIGHTING,
-            description="Lighting:",
-            style={"description_width": "58px"},
-            layout=_layout(width="170px"),
-            disabled=not _lighting_available,
-        )
-        if not _lighting_available:
-            self.viz_lighting_dd.layout.visibility = "hidden"
-        self.viz_controls_box = widgets.HBox(
-            [self.viz_style_dd, self.viz_lighting_dd],
-            layout=_layout(gap="8px", margin="2px 0 0 0", align_items="center"),
-        )
-        self.notes_output = widgets.Output()
-        self.perf_estimate_html = widgets.HTML()
-
-        # Step indicator
-        self.step_progress = StepProgress(
-            ["Choose molecule", "Set method", "Run", "Results"]
-        )
-        self.step_progress.start(0)
-
-        # Calculation setup dropdowns
-        self.method_dd = widgets.Dropdown(
-            options=SUPPORTED_METHODS,
-            value=DEFAULT_METHOD,
-            description="Method:",
-            style={"description_width": "100px"},
-            layout=_layout(width="260px"),
-        )
-        self.basis_dd = widgets.Dropdown(
-            options=SUPPORTED_BASIS_SETS,
-            value=DEFAULT_BASIS,
-            description="Basis Set:",
-            style={"description_width": "100px"},
-            layout=_layout(width="260px"),
-        )
-        self.charge_si = widgets.BoundedIntText(
-            value=DEFAULT_CHARGE,
-            min=-10,
-            max=10,
-            description="Charge:",
-            style={"description_width": "100px"},
-            layout=_layout(width="190px"),
-        )
-        self.mult_si = widgets.BoundedIntText(
-            value=DEFAULT_MULTIPLICITY,
-            min=1,
-            max=10,
-            description="Multiplicity:",
-            style={"description_width": "100px"},
-            layout=_layout(width="190px"),
-        )
-        self.preopt_cb = widgets.Checkbox(
-            value=False,
-            description="Pre-optimize geometry (for a crude starting point)",
-            disabled=not _PREOPT_AVAILABLE,
-            layout=_layout(width="400px"),
-        )
-
-        # Implicit solvent (PCM)
-        from quantui.config import SOLVENT_OPTIONS as _SOLVENT_OPTS
-
-        self.solvent_cb = widgets.Checkbox(
-            value=False,
-            description="Implicit solvent (PCM)",
-            layout=_layout(width="240px"),
-        )
-        self.solvent_dd = widgets.Dropdown(
-            options=list(_SOLVENT_OPTS.keys()),
-            value="Water",
-            description="Solvent:",
-            style={"description_width": "70px"},
-            layout=_layout(width="200px", display="none"),
-        )
-
-        # Calculation type + extra options
-        self.calc_type_dd = widgets.Dropdown(
-            options=[
-                "Single Point",
-                "Geometry Opt",
-                "Frequency",
-                "UV-Vis (TD-DFT)",
-                "NMR Shielding",
-                "PES Scan",
-            ],
-            value="Single Point",
-            description="Calc. Type:",
-            style={"description_width": "100px"},
-            layout=_layout(width="310px"),
-        )
-        self.fmax_fi = widgets.BoundedFloatText(
-            value=DEFAULT_FMAX,
-            min=0.001,
-            max=1.0,
-            step=0.005,
-            description="Force thr. (eV/Å):",
-            style={"description_width": "130px"},
-            layout=_layout(width="270px"),
-        )
-        self.max_steps_si = widgets.BoundedIntText(
-            value=DEFAULT_OPT_STEPS,
-            min=10,
-            max=1000,
-            description="Max steps:",
-            style={"description_width": "100px"},
-            layout=_layout(width="200px"),
-        )
-        self.nstates_si = widgets.BoundedIntText(
-            value=10,
-            min=1,
-            max=50,
-            description="# states:",
-            style={"description_width": "100px"},
-            layout=_layout(width="180px"),
-        )
-
-        # ── Frequency calc extra widgets ──────────────────────────────────────
-        self._freq_seed_dd = widgets.Dropdown(
-            options=[("(use current molecule)", "")],
-            description="Seed geometry:",
-            style={"description_width": "110px"},
-            layout=_layout(width="420px"),
-            tooltip="Optionally load the final optimised geometry from a previous Geo Opt result",
-        )
-        self._freq_seed_refresh_btn = widgets.Button(
-            description="",
-            icon="refresh",
-            layout=_layout(width="32px", height="32px"),
-            tooltip="Refresh the list of saved geometry optimisations",
-        )
-        self._freq_preopt_cb = widgets.Checkbox(
-            value=False,
-            description="Geometry optimization (recommended for unoptimized inputs)",
-            style={"description_width": "initial"},
-            layout=_layout(width="100%"),
-        )
-        self._freq_seed_note = widgets.HTML("")
-
-        # ── PES scan extra widgets ────────────────────────────────────────────
-        self._scan_type_dd = widgets.Dropdown(
-            options=["Bond", "Angle", "Dihedral"],
-            value="Bond",
-            description="Scan type:",
-            style={"description_width": "80px"},
-            layout=_layout(width="220px"),
-        )
-        _atom_idx_layout = _layout(width="95px")
-        _atom_idx_style = {"description_width": "50px"}
-        self._scan_atom1 = widgets.BoundedIntText(
-            value=1,
-            min=1,
-            max=999,
-            description="Atom 1:",
-            style=_atom_idx_style,
-            layout=_atom_idx_layout,
-        )
-        self._scan_atom2 = widgets.BoundedIntText(
-            value=2,
-            min=1,
-            max=999,
-            description="Atom 2:",
-            style=_atom_idx_style,
-            layout=_atom_idx_layout,
-        )
-        self._scan_atom3 = widgets.BoundedIntText(
-            value=3,
-            min=1,
-            max=999,
-            description="Atom 3:",
-            style=_atom_idx_style,
-            layout=_atom_idx_layout,
-        )
-        self._scan_atom4 = widgets.BoundedIntText(
-            value=4,
-            min=1,
-            max=999,
-            description="Atom 4:",
-            style=_atom_idx_style,
-            layout=_atom_idx_layout,
-        )
-        self._scan_atom34_box = widgets.HBox(
-            [self._scan_atom3, self._scan_atom4],
-            layout=_layout(gap="4px"),
-        )
-        self._scan_start = widgets.BoundedFloatText(
-            value=0.5,
-            min=0.01,
-            max=1000.0,
-            step=0.1,
-            description="Start:",
-            style={"description_width": "40px"},
-            layout=_layout(width="140px"),
-        )
-        self._scan_stop = widgets.BoundedFloatText(
-            value=2.0,
-            min=0.01,
-            max=1000.0,
-            step=0.1,
-            description="Stop:",
-            style={"description_width": "40px"},
-            layout=_layout(width="140px"),
-        )
-        self._scan_steps = widgets.BoundedIntText(
-            value=10,
-            min=2,
-            max=100,
-            description="Points:",
-            style={"description_width": "50px"},
-            layout=_layout(width="120px"),
-        )
-        self._scan_unit_lbl = widgets.HTML(
-            '<span style="font-size:12px;color:#555">Å</span>'
-        )
-
-        self.calc_extra_opts = widgets.VBox([])
-
-        # Context-help buttons
-        self.method_help_btn = widgets.Button(
-            description="?",
-            button_style="",
-            layout=_layout(width="28px", height="28px"),
-            tooltip="RHF vs UHF — opens Help tab",
-        )
-        self.basis_help_btn = widgets.Button(
-            description="?",
-            button_style="",
-            layout=_layout(width="28px", height="28px"),
-            tooltip="Choosing a basis set — opens Help tab",
-        )
-
-        # Run widgets
-        self.run_btn = widgets.Button(
-            description="Run Calculation",
-            button_style="success",
-            icon="play",
-            disabled=True,
-            layout=_layout(width="200px", height="36px"),
-        )
-        self.run_status = widgets.Label()
-
-        # Log clear button (in run panel)
-        self.log_clear_btn = widgets.Button(
-            description="Clear",
-            button_style="",
-            icon="times",
-            layout=_layout(width="90px", height="26px"),
-            tooltip="Clear calculation output",
-        )
-
-        # Comparison / export widgets
-        self.accumulate_btn = widgets.Button(
-            description="Add to Comparison",
-            button_style="info",
-            icon="plus",
-            disabled=True,
-            layout=_layout(width="190px"),
-        )
-        self.clear_btn = widgets.Button(
-            description="Clear",
-            button_style="warning",
-            icon="trash",
-            layout=_layout(width="100px"),
-        )
-        self.export_btn = widgets.Button(
-            description="Export Script",
-            button_style="",
-            icon="download",
-            disabled=True,
-            layout=_layout(width="160px"),
-        )
-        self.export_status = widgets.Label()
-        _rdkit_tip = (
-            ""
-            if _RDKIT_AVAILABLE
-            else "Requires RDKit (conda install -c conda-forge rdkit)"
-        )
-        self.export_xyz_btn = widgets.Button(
-            description="Export XYZ",
-            icon="download",
-            disabled=True,
-            layout=_layout(width="130px"),
-        )
-        self.export_mol_btn = widgets.Button(
-            description="Export MOL",
-            icon="download",
-            disabled=True,
-            tooltip=_rdkit_tip,
-            layout=_layout(width="130px"),
-        )
-        self.export_pdb_btn = widgets.Button(
-            description="Export PDB",
-            icon="download",
-            disabled=True,
-            tooltip=_rdkit_tip,
-            layout=_layout(width="130px"),
-        )
-        self.struct_export_status = widgets.Label()
 
     # ── Molecule section (Cell 4) ─────────────────────────────────────────
 
     def _build_molecule_section(self) -> None:
-        # Preset dropdown
-        _preset_opts = ["(select a molecule)"] + list(MOLECULE_LIBRARY.keys())
-        self.preset_dd = widgets.Dropdown(
-            options=_preset_opts,
-            value="(select a molecule)",
-            description="Molecule:",
-            style={"description_width": "90px"},
-            layout=_layout(width="320px"),
-        )
-
-        # XYZ input
-        self.xyz_area = widgets.Textarea(
-            placeholder=(
-                "Paste XYZ coordinates (symbol  x  y  z):\n"
-                "O  0.000  0.000  0.000\n"
-                "H  0.757  0.587  0.000\n"
-                "H -0.757  0.587  0.000"
-            ),
-            layout=_layout(width="440px", height="130px"),
-        )
-        self.xyz_btn = widgets.Button(
-            description="Load XYZ", button_style="info", icon="upload"
-        )
-        self.xyz_msg = widgets.Label()
-
-        # PubChem search
-        self.pubchem_txt = widgets.Text(
-            placeholder="name or SMILES  (e.g. aspirin, caffeine, CC(=O)O)",
-            layout=_layout(width="380px"),
-        )
-        self.pubchem_btn = widgets.Button(
-            description="Search",
-            button_style="info",
-            icon="search",
-            disabled=not PUBCHEM_AVAILABLE,
-            layout=_layout(width="100px"),
-        )
-        self.pubchem_msg = widgets.Label(
-            value=(
-                ""
-                if PUBCHEM_AVAILABLE
-                else "PubChem unavailable — check internet connection"
-            )
-        )
-
-        # Assemble input tab
-        _hint = '<p style="margin:4px 0 8px;color:#666;font-size:13px">'
-        tab_preset = widgets.VBox(
-            [
-                widgets.HTML(
-                    _hint + "Choose from 20+ curated educational molecules.</p>"
-                ),
-                self.preset_dd,
-            ]
-        )
-        tab_xyz = widgets.VBox(
-            [
-                widgets.HTML(
-                    _hint
-                    + "Paste XYZ coordinates (element x y z, one atom per line).</p>"
-                ),
-                self.xyz_area,
-                widgets.HBox([self.xyz_btn, self.xyz_msg]),
-            ]
-        )
-        tab_pubchem = widgets.VBox(
-            [
-                widgets.HTML(
-                    _hint
-                    + "Search by name or SMILES. Requires internet connection.</p>"
-                ),
-                widgets.HBox([self.pubchem_txt, self.pubchem_btn]),
-                self.pubchem_msg,
-            ]
-        )
-        input_tab = widgets.Tab(children=[tab_preset, tab_xyz, tab_pubchem])
-        for _i, _t in enumerate(["Preset Library", "XYZ Input", "PubChem Search"]):
-            input_tab.set_title(_i, _t)
-
-        # Collapsible container
-        self.mol_input_expanded = widgets.VBox(
-            [
-                widgets.HTML('<h3 style="margin:8px 0 6px">Molecule Input</h3>'),
-                input_tab,
-            ]
-        )
-        self.change_mol_btn = widgets.Button(
-            description="Change",
-            button_style="",
-            icon="pencil",
-            layout=_layout(width="100px", height="32px"),
-            tooltip="Re-expand the molecule input panel",
-        )
-        self.mol_input_collapsed = widgets.HBox(
-            [self.mol_summary_compact, self.change_mol_btn],
-            layout=_layout(align_items="center", gap="12px", padding="6px 0"),
-        )
-        _mol_container_children = [
-            self.mol_input_expanded,
-            self.mol_info_html,
-            self.viz_output,
-        ]
-        if self.viz_backend_toggle is not None:
-            _mol_container_children.append(self.viz_backend_toggle)
-        if VISUALIZATION_AVAILABLE:
-            _mol_container_children.append(self.viz_controls_box)
-        self.mol_input_container = widgets.VBox(
-            _mol_container_children,
-            layout=_layout(margin="0 0 4px 0"),
+        _bld_build_molecule_section(
+            self,
+            layout_fn=_layout,
+            molecule_library=MOLECULE_LIBRARY,
+            pubchem_available=PUBCHEM_AVAILABLE,
+            visualization_available=VISUALIZATION_AVAILABLE,
         )
 
     # ── Calculation setup panel (Cell 5) ──────────────────────────────────
 
     def _build_calc_setup(self) -> None:
-        self.calc_setup_panel = widgets.VBox(
-            [
-                widgets.HTML('<h3 style="margin:14px 0 6px">Calculation Setup</h3>'),
-                widgets.HBox(
-                    [
-                        widgets.VBox(
-                            [
-                                widgets.HBox(
-                                    [self.method_dd, self.method_help_btn],
-                                    layout=_layout(align_items="center", gap="4px"),
-                                ),
-                                widgets.HBox(
-                                    [self.basis_dd, self.basis_help_btn],
-                                    layout=_layout(align_items="center", gap="4px"),
-                                ),
-                            ]
-                        ),
-                        widgets.HTML("&ensp;&ensp;"),
-                        widgets.VBox([self.charge_si, self.mult_si]),
-                    ]
-                ),
-                self.calc_type_dd,
-                self.calc_extra_opts,
-                self.preopt_cb,
-                widgets.HBox(
-                    [self.solvent_cb, self.solvent_dd],
-                    layout=_layout(align_items="center", gap="4px"),
-                ),
-                self.notes_output,
-            ]
-        )
+        _bld_build_calc_setup(self, layout_fn=_layout)
 
     # ── Run panel (Cell 6) ────────────────────────────────────────────────
 
     def _build_run_section(self) -> None:
-        self.run_panel = widgets.VBox(
-            [
-                widgets.HTML(
-                    '<h3 style="margin:14px 0 6px">Run Calculation</h3>'
-                    '<p style="color:#555;font-size:13px;margin:0 0 8px">PySCF runs in this '
-                    "kernel. Output appears live below. Large molecules or high-accuracy basis "
-                    "sets may take several minutes on a laptop.</p>"
-                ),
-                self.perf_estimate_html,
-                widgets.HBox([self.run_btn, self.run_status]),
-                widgets.HBox(
-                    [
-                        widgets.HTML(
-                            '<span style="font-size:13px;font-weight:600;color:#444">'
-                            "Calculation Output</span>"
-                        ),
-                        self.log_clear_btn,
-                    ],
-                    layout=_layout(
-                        align_items="center",
-                        justify_content="space-between",
-                        margin="10px 0 4px",
-                        max_width="460px",
-                    ),
-                ),
-                self.run_output,
-            ]
-        )
+        _bld_build_run_section(self, layout_fn=_layout)
 
     # ── Results panel (Cell 7) ────────────────────────────────────────────
 
     def _build_results_section(self) -> None:
-        # PES scan energy plot accordion (hidden until a PES Scan completes)
-        self._pes_plot_html = widgets.Output(layout=_layout(width="100%"))
-        self._pes_scan_accordion = widgets.Accordion(
-            children=[
-                widgets.VBox(
-                    [self._pes_plot_html],
-                    layout=_layout(padding="8px"),
-                )
-            ],
-            layout=_layout(display="none", margin="8px 0"),
-        )
-        self._pes_scan_accordion.set_title(0, "PES Energy Profile")
-        self._pes_scan_accordion.selected_index = None
-
-        # Trajectory accordion (Geo Opt / PES Scan — hidden until result completes)
-        self.traj_output = widgets.Output()
-        self.traj_accordion = widgets.Accordion(
-            children=[self.traj_output],
-            layout=_layout(display="none", margin="8px 0"),
-        )
-        self.traj_accordion.set_title(0, "Trajectory Viewer")
-        self.traj_accordion.selected_index = None  # collapsed by default
-        self.traj_accordion.observe(
-            self._safe_cb(self._on_traj_expand), names=["selected_index"]
-        )
-
-        # Vibrational animation accordion (Frequency only — hidden until Freq completes)
-        self.vib_mode_dd = widgets.Dropdown(
-            description="Mode:",
-            options=[],
-            style={"description_width": "50px"},
-            layout=_layout(width="360px"),
-        )
-        self.vib_output = widgets.Output()
-        self.vib_accordion = widgets.Accordion(
-            children=[
-                widgets.VBox(
-                    [self.vib_mode_dd, self.vib_output],
-                    layout=_layout(padding="8px"),
-                )
-            ],
-            layout=_layout(display="none", margin="8px 0"),
-        )
-        self.vib_accordion.set_title(0, "Vibrational Mode Viewer")
-        self.vib_accordion.selected_index = None  # collapsed by default
-
-        # IR Spectrum accordion (hidden until a Frequency result is available)
-        self._ir_mode_toggle = widgets.ToggleButtons(
-            options=["Stick", "Broadened"],
-            value="Stick",
-            style={"button_width": "80px"},
-            layout=_layout(margin="0 8px 0 0"),
-        )
-        self._ir_fwhm_slider = widgets.FloatSlider(
-            value=20.0,
-            min=5.0,
-            max=100.0,
-            step=5.0,
-            description="Line width:",
-            style={"description_width": "80px"},
-            layout=_layout(width="260px", display="none"),
-        )
-        self._ir_fig = widgets.Output(layout=_layout(width="100%"))
-
-        _ir_controls = widgets.HBox(
-            [self._ir_mode_toggle, self._ir_fwhm_slider],
-            layout=_layout(align_items="center", margin="0 0 6px 0"),
-        )
-        _ir_body_children = [_ir_controls, self._ir_fig]
-        self._ir_accordion = widgets.Accordion(
-            children=[
-                widgets.VBox(
-                    _ir_body_children,
-                    layout=_layout(padding="8px"),
-                )
-            ],
-            layout=_layout(display="none", margin="8px 0"),
-        )
-        self._ir_accordion.set_title(0, "IR Spectrum")
-        self._ir_accordion.selected_index = None
-
-        # Orbital energy diagram + isosurface accordion (Single Point / Geo Opt)
-        # Use plotly.io.to_html so FigureWidget / anywidget dependency is not needed.
-
-        self._orb_ymin_input = widgets.BoundedFloatText(
-            value=-30.0,
-            min=-500.0,
-            max=200.0,
-            step=1.0,
-            description="Y min:",
-            layout=_layout(width="140px"),
-            style={"description_width": "45px"},
-        )
-        self._orb_ymax_input = widgets.BoundedFloatText(
-            value=5.0,
-            min=-500.0,
-            max=500.0,
-            step=1.0,
-            description="Y max:",
-            layout=_layout(width="140px"),
-            style={"description_width": "45px"},
-        )
-        self._orb_n_orb_input = widgets.BoundedIntText(
-            value=20,
-            min=4,
-            max=200,
-            step=2,
-            description="Show N:",
-            layout=_layout(width="120px"),
-            style={"description_width": "50px"},
-        )
-        _orb_controls_row = widgets.HBox(
-            [
-                widgets.HTML(
-                    '<span style="font-size:11px;color:#555;font-weight:600">Y range:</span>'
-                ),
-                self._orb_ymin_input,
-                self._orb_ymax_input,
-                widgets.HTML(
-                    '<span style="font-size:11px;color:#555;font-weight:600;margin-left:8px">'
-                    "Orbitals shown:</span>"
-                ),
-                self._orb_n_orb_input,
-            ],
-            layout=_layout(
-                align_items="center",
-                flex_wrap="wrap",
-                gap="4px",
-                margin="0 0 6px 0",
-            ),
-        )
-        self._orb_diagram_html = widgets.Output(layout=_layout(width="100%"))
-        _orb_diagram_content: list = [_orb_controls_row, self._orb_diagram_html]
-        self._orb_diagram_box = widgets.VBox(
-            _orb_diagram_content,
-            layout=_layout(width="100%"),
-        )
-        self._orb_toggle = widgets.ToggleButtons(
-            options=["HOMO-1", "HOMO", "LUMO", "LUMO+1"],
-            value="HOMO",
-            style={"button_width": "70px"},
-            layout=_layout(margin="8px 0 4px 0"),
-        )
-        self._orb_iso_output = widgets.Output()
-        self._orb_iso_controls = widgets.VBox(
-            [
-                widgets.HTML(
-                    '<span style="font-size:12px;color:#555;font-weight:bold">'
-                    "Orbital isosurface:</span>"
-                ),
-                self._orb_toggle,
-                self._orb_iso_output,
-            ],
-            layout=_layout(display="none", margin="8px 0 0 0"),
-        )
-        self._orb_accordion = widgets.Accordion(
-            children=[
-                widgets.VBox(
-                    [self._orb_diagram_box],
-                    layout=_layout(padding="8px"),
-                )
-            ],
-            layout=_layout(display="none", margin="8px 0"),
-        )
-        self._orb_accordion.set_title(0, "Orbital Diagram")
-        self._orb_accordion.selected_index = None
-
-        # Post-calculate panel — isosurface and other heavy on-demand analyses
-        self._iso_generate_btn = widgets.Button(
-            description="Generate Isosurface",
-            button_style="primary",
-            icon="flask",
-            disabled=True,
-            tooltip=(
-                "Generate a 3D orbital isosurface. "
-                "Available after running or loading a Single Point or Geometry Optimization."
-            ),
-            layout=_layout(width="200px", margin="8px 0 4px 0"),
-        )
-        _iso_body = widgets.VBox(
-            [
-                widgets.HTML(
-                    '<p style="color:#555;font-size:12px;margin:0 0 8px">'
-                    "Visualise a molecular orbital as a 3D isosurface (Linux / WSL only — "
-                    "requires PySCF and RDKit). Run or load a Single Point or Geometry "
-                    "Optimization first, then click <b>Generate</b>.</p>"
-                ),
-                self._orb_iso_controls,
-                self._iso_generate_btn,
-            ],
-            layout=_layout(padding="8px"),
-        )
-        self._iso_accordion = widgets.Accordion(
-            children=[_iso_body],
-            layout=_layout(display="none", margin="8px 0"),
-        )
-        self._iso_accordion.set_title(0, "Orbital Isosurface")
-        self._iso_accordion.selected_index = None
-
-        # ── UV-Vis spectrum accordion (TD-DFT only — hidden until result) ──
-        self._tddft_fig = widgets.Output(layout=_layout(width="100%"))
-        self._tddft_accordion = widgets.Accordion(
-            children=[
-                widgets.VBox(
-                    [self._tddft_fig],
-                    layout=_layout(padding="8px"),
-                )
-            ],
-            layout=_layout(display="none", margin="8px 0"),
-        )
-        self._tddft_accordion.set_title(0, "UV-Vis Absorption Spectrum")
-        self._tddft_accordion.selected_index = None
-
-        # ── NMR shielding accordion (NMR only — hidden until result) ────────
-        self._nmr_output = widgets.HTML(value="", layout=_layout(width="100%"))
-        self._nmr_accordion = widgets.Accordion(
-            children=[
-                widgets.VBox(
-                    [self._nmr_output],
-                    layout=_layout(padding="8px"),
-                )
-            ],
-            layout=_layout(display="none", margin="8px 0"),
-        )
-        self._nmr_accordion.set_title(0, "NMR Chemical Shifts")
-        self._nmr_accordion.selected_index = None
-
-        # ── Result directory path label (hidden until a calculation saves) ──
-        self._result_dir_label = widgets.HTML(
-            value="",
-            layout=_layout(display="none", margin="4px 0 0 0"),
-        )
-
-        # ── Full output log accordion (hidden until a calculation saves) ────
-        self._result_log_output = widgets.Output()
-        self._result_log_accordion = widgets.Accordion(
-            children=[self._result_log_output],
-            layout=_layout(display="none", margin="8px 0 0 0"),
-        )
-        self._result_log_accordion.set_title(0, "Full output log (pyscf.log)")
-        self._result_log_accordion.selected_index = None
-
-        # ── Completion banner (Calculate tab — hidden until run finishes) ───
-        self._go_results_btn = widgets.Button(
-            description="→ View Results",
-            button_style="success",
-            layout=_layout(width="130px"),
-        )
-        self._go_analysis_btn = widgets.Button(
-            description="→ View Analysis",
-            button_style="info",
-            layout=_layout(width="140px"),
-        )
-        self._completion_mol_lbl = widgets.HTML(value="")
-        self._completion_banner = widgets.HBox(
-            [
-                widgets.HTML(
-                    '<span style="color:#22c55e;font-weight:600;font-size:13px">'
-                    "✓ Calculation complete — </span>"
-                ),
-                self._completion_mol_lbl,
-                self._go_results_btn,
-                self._go_analysis_btn,
-            ],
-            layout=_layout(
-                display="none",
-                align_items="center",
-                gap="8px",
-                padding="10px 12px",
-                border="1px solid #bbf7d0",
-                border_radius="6px",
-                background_color="#f0fdf4",
-                margin="8px 0",
-            ),
-        )
-
-        # ── Results tab panel (Tab 1) ─────────────────────────────────────
-        self._to_analysis_btn = widgets.Button(
-            description="→ View Analysis",
-            button_style="",
-            icon="bar-chart",
-            layout=_layout(display="none", width="160px", margin="8px 0 0 0"),
-        )
-        # Label above the 3D viewer — updated by _do_run to say "Optimized geometry"
-        # for Geometry Opt, or hidden for other calc types that don't change geometry.
-        self._viz_label = widgets.HTML(
-            value="",
-            layout=_layout(display="none"),
-        )
-        self.results_tab_panel = widgets.VBox(
-            [
-                widgets.HTML('<h3 style="margin:14px 0 6px">Results</h3>'),
-                self.result_output,
-                self._viz_label,
-                self.result_viz_output,
-                self._result_dir_label,
-                # advanced_accordion appended in _assemble_tabs (built later in
-                # _build_compare_section — must run before it can be referenced here)
-                self._to_analysis_btn,
-            ],
-            layout=_layout(padding="8px 0"),
-        )
-        # Backward-compat alias — existing methods that reference results_panel still work
-        self.results_panel = self.results_tab_panel
-
-        # ── Analysis tab: molecule viewer (shown for all calc types) ─────
-        self._analysis_mol_output = widgets.Output()
-
-        # ── Analysis tab panel (Tab 2) ────────────────────────────────────
-        self._analysis_context_lbl = widgets.HTML(
-            value=(
-                '<p style="color:#555;font-size:13px;margin:4px 0 12px">'
-                "No result loaded yet. Run a calculation or load one from History.</p>"
-            )
-        )
-        self._analysis_empty_html = widgets.HTML(
-            value=(
-                '<p style="color:#888;font-size:13px;font-style:italic;margin:8px 0">'
-                "No interactive analysis is available for this calculation type.<br>"
-                "Run a Single Point, Geo Opt, or Frequency calculation to see "
-                "orbital diagrams, trajectory animations, and spectra here.</p>"
-            ),
-            layout=_layout(display="none"),
-        )
-        self._build_ana_switcher()
-        self.analysis_tab_panel = widgets.VBox(
-            [
-                self._analysis_context_lbl,
-                self._analysis_mol_output,
-                self._analysis_empty_html,
-                self._ana_unavail_html,
-                self._orb_accordion,
-                self._pes_scan_accordion,
-                self.traj_accordion,
-                self.vib_accordion,
-                self._ir_accordion,
-                self._iso_accordion,
-                self._tddft_accordion,
-                self._nmr_accordion,
-            ],
-            layout=_layout(padding="8px 0"),
-        )
-        # Backward-compat alias for post_calc_panel references in tests
-        self.post_calc_panel = self.analysis_tab_panel
+        _bld_build_results_section(self, layout_fn=_layout)
 
     # ── Analysis panel switcher ───────────────────────────────────────────
 
     def _build_ana_switcher(self) -> None:
-        """Initialise analysis panel state; wire accordion re-render observers."""
-        panel_meta = [
-            (name, getattr(self, attr), when) for name, attr, when in self._PANEL_META
-        ]
-        self._ana_panel_names: list = [m[0] for m in panel_meta]
-        self._ana_accordions: list = [m[1] for m in panel_meta]
-        self._ana_available: set = set()
-        self._ana_active: str = ""
-        self._ana_unavail_html = widgets.HTML(
-            value="",
-            layout=_layout(display="none", margin="4px 0 8px"),
-        )
-
-        # Wrap each accordion's child so it holds both an "unavailable" message
-        # and the real content.  Real content starts hidden; the unavailable
-        # message is shown until _activate_ana_panel() is called.
-        self._ana_unavail_msgs: dict = {}
-        self._ana_content_boxes: dict = {}
-        for name, acc, when in panel_meta:
-            unavail = widgets.HTML(
-                value=(
-                    f'<div style="padding:12px 16px;color:#6b7280;font-size:13px;'
-                    f'font-style:italic">Not available — run a {when} '
-                    f"calculation first.</div>"
-                ),
-                layout=_layout(display=""),
-            )
-            content = acc.children[0]
-            self._ana_unavail_msgs[name] = unavail
-            self._ana_content_boxes[name] = content
-            content.layout.display = "none"
-            acc.children = (widgets.VBox([unavail, content]),)
-            acc.layout.display = ""  # always in the DOM
-            acc.selected_index = None  # collapsed until activated
-
-        # Re-render Plotly charts when their accordion is expanded by clicking
-        # the header directly (charts rendered into a hidden container have 0 size).
-        self._ir_accordion.observe(
-            self._safe_cb(self._on_ir_accordion_show), names=["selected_index"]
-        )
-        self._orb_accordion.observe(
-            self._safe_cb(self._on_orb_accordion_show), names=["selected_index"]
-        )
+        _ana_build_ana_switcher(self, layout_fn=_layout)
 
     def _on_ir_accordion_show(self, change) -> None:
         if change["new"] == 0 and getattr(self, "_last_ir_freqs", None):
@@ -1515,38 +1133,25 @@ class QuantUIApp:
                 self._ir_mode_toggle.value, self._ir_fwhm_slider.value
             )
 
+    def _on_tddft_accordion_show(self, change) -> None:
+        if change["new"] == 0 and getattr(self, "_last_uv_wavelengths_nm", None):
+            self._update_uv_vis_figure(
+                self._uv_mode_toggle.value,
+                self._uv_fwhm_slider.value,
+            )
+
     def _on_orb_accordion_show(self, change) -> None:
         if change["new"] == 0 and getattr(self, "_last_orb_info", None) is not None:
             self._on_orb_range_changed()
 
     def _select_ana_panel(self, name: str) -> None:
-        """Expand the named panel and collapse all others."""
-        self._ana_active = name
-        self._ana_unavail_html.layout.display = "none"
-        for pname, acc in zip(self._ana_panel_names, self._ana_accordions):
-            acc.selected_index = 0 if pname == name else None
+        _ana_select_ana_panel(self, name)
 
     def _activate_ana_panel(self, name: str, auto_select: bool = True) -> None:
-        """Mark a panel as available: reveal its content."""
-        self._ana_available.add(name)
-        # Swap unavailable placeholder for real content.
-        if name in self._ana_unavail_msgs:
-            self._ana_unavail_msgs[name].layout.display = "none"
-            self._ana_content_boxes[name].layout.display = ""
-        if auto_select:
-            self._select_ana_panel(name)
+        _ana_activate_ana_panel(self, name, auto_select=auto_select)
 
     def _deactivate_all_ana_panels(self) -> None:
-        """Reset all panels to collapsed/unavailable; used at start of each new run."""
-        self._ana_available.clear()
-        self._ana_active = ""
-        self._ana_unavail_html.layout.display = "none"
-        for name, acc in zip(self._ana_panel_names, self._ana_accordions):
-            # Show the "not available" placeholder; hide real content.
-            if name in self._ana_unavail_msgs:
-                self._ana_unavail_msgs[name].layout.display = ""
-                self._ana_content_boxes[name].layout.display = "none"
-            acc.selected_index = None
+        _ana_deactivate_all_ana_panels(self)
 
     # ── Panel registry and unified applier ───────────────────────────────────
     #
@@ -1605,814 +1210,80 @@ class QuantUIApp:
     }
 
     def _apply_analysis_context(self, ctx: _AnalysisContext) -> None:
-        """Populate Analysis panels from *ctx* and activate those that have data.
-
-        Uses ``_PANEL_REGISTRY`` so that live-run and history-replay follow the
-        exact same code path.  The first registry entry that succeeds and has
-        ``auto_select=True`` becomes the visible panel; all others are activated
-        (full opacity, clickable) but not auto-shown.
-        """
-        self._deactivate_all_ana_panels()
-        self._pending_traj_result = None
-        # Reset trajectory accordion title to default
-        self.traj_accordion.set_title(0, "Trajectory Viewer")
-
-        first_auto_selected = False
-        for panel_name, method_name, want_auto in self._PANEL_REGISTRY.get(
-            ctx.calc_type, []
-        ):
-            try:
-                ok = bool(getattr(self, method_name)(ctx))
-            except Exception as _panel_exc:
-                ok = False
-                try:
-                    from quantui import calc_log as _clog
-
-                    _clog.log_event(
-                        "ana_panel_error",
-                        f"{method_name}: {type(_panel_exc).__name__}: {_panel_exc}"[
-                            :300
-                        ],
-                    )
-                except Exception:
-                    pass
-            if ok:
-                do_auto = want_auto and not first_auto_selected
-                self._activate_ana_panel(panel_name, auto_select=do_auto)
-                if do_auto:
-                    first_auto_selected = True
-
-        _src = " (from History)" if ctx.source == "history" else ""
-        self._analysis_context_lbl.value = (
-            f'<p style="color:#555;font-size:13px;margin:4px 0 12px">'
-            f"Analysing: {ctx.label}{_src}</p>"
-        )
-        _has = bool(self._ana_available)
-        self._to_analysis_btn.layout.display = "" if _has else "none"
-        self._analysis_empty_html.layout.display = "none" if _has else ""
+        _ana_apply_analysis_context(self, ctx)
 
     # ── Panel populate methods ────────────────────────────────────────────────
     # Each receives an _AnalysisContext and returns True if data was rendered.
 
     def _pop_energies(self, ctx: _AnalysisContext) -> bool:
-        result = ctx.live_result
-        if result is None and ctx.result_dir is not None:
-            try:
-                from quantui.results_storage import load_orbitals
-
-                orb = load_orbitals(ctx.result_dir)
-                orb.formula = ctx.formula
-                result = orb
-            except Exception:
-                return False
-        return self._show_orbital_diagram(result)
+        return _ana_pop_energies(self, ctx)
 
     def _pop_isosurface(self, ctx: _AnalysisContext) -> bool:
-        # Isosurface controls are enabled by _show_orbital_diagram when MO data
-        # is present; just check whether that data was stashed.
-        return (
-            self._last_orb_mo_coeff is not None
-            and self._last_orb_mol_atom is not None
-            and self._last_orb_mol_basis is not None
-        )
+        return _ana_pop_isosurface(self, ctx)
 
     def _pop_geo_trajectory(self, ctx: _AnalysisContext) -> bool:
-        traj = None
-        energies: list = []
-        if ctx.live_result is not None:
-            traj = getattr(ctx.live_result, "trajectory", None)
-            energies = list(getattr(ctx.live_result, "energies_hartree", []))
-        elif ctx.result_dir is not None:
-            traj_file = ctx.result_dir / "trajectory.json"
-            if traj_file.exists():
-                try:
-                    from quantui.results_storage import load_trajectory
-
-                    traj, energies = load_trajectory(ctx.result_dir)
-                except Exception:
-                    return False
-        if not traj or len(traj) < 2:
-            return False
-        stub = _types_mod.SimpleNamespace(
-            trajectory=traj,
-            energies_hartree=energies,
-            formula=ctx.formula,
-        )
-        self._pending_traj_result = stub
-        return True
+        return _ana_pop_geo_trajectory(self, ctx)
 
     def _pop_preopt_trajectory(self, ctx: _AnalysisContext) -> bool:
-        if ctx.source == "live":
-            pre = ctx.preopt_result
-            if pre is None:
-                return False
-            traj = getattr(pre, "trajectory", None)
-            energies = list(getattr(pre, "energies_hartree", []))
-        else:
-            if ctx.result_dir is None:
-                return False
-            preopt_path = ctx.result_dir / "preopt_trajectory.json"
-            if not preopt_path.exists():
-                return False
-            try:
-                from quantui.results_storage import load_trajectory
-
-                traj, energies = load_trajectory(
-                    ctx.result_dir, filename="preopt_trajectory.json"
-                )
-            except Exception as _exc:
-                from quantui import calc_log as _clog
-
-                _clog.log_event(
-                    "pop_preopt_trajectory_error",
-                    f"{type(_exc).__name__}: {_exc}"[:300],
-                )
-                return False
-        if not traj or len(traj) < 2:
-            return False
-        stub = _types_mod.SimpleNamespace(
-            trajectory=traj,
-            energies_hartree=energies,
-            formula=ctx.formula,
-        )
-        self._pending_traj_result = stub
-        self.traj_accordion.set_title(0, "Pre-optimization Trajectory")
-        return True
+        return _ana_pop_preopt_trajectory(self, ctx)
 
     def _pop_vibrational(self, ctx: _AnalysisContext) -> bool:
-        if ctx.live_result is not None:
-            freq_stub = ctx.live_result
-            mol = ctx.molecule
-        else:
-            ir = ctx.spectra_data.get("ir", {})
-            mol_data = ctx.spectra_data.get("molecule", {})
-            freqs = ir.get("frequencies_cm1")
-            ints = ir.get("ir_intensities")
-            disps = ir.get("displacements")
-            if not (freqs and disps and mol_data.get("atoms")):
-                return False
-            from quantui.molecule import Molecule as _Mol
-
-            mol = _Mol(
-                atoms=mol_data["atoms"],
-                coordinates=mol_data["coords"],
-                charge=mol_data.get("charge", 0),
-                multiplicity=mol_data.get("multiplicity", 1),
-            )
-            freq_stub = _types_mod.SimpleNamespace(
-                frequencies_cm1=freqs,
-                ir_intensities=ints,
-                displacements=disps,
-            )
-        return self._show_vib_animation(freq_stub, mol)
+        return _ana_pop_vibrational(self, ctx)
 
     def _pop_ir_spectrum(self, ctx: _AnalysisContext) -> bool:
-        if ctx.live_result is not None:
-            freq_stub = ctx.live_result
-        else:
-            ir = ctx.spectra_data.get("ir", {})
-            freqs = ir.get("frequencies_cm1")
-            if not freqs:
-                return False
-            freq_stub = _types_mod.SimpleNamespace(
-                frequencies_cm1=freqs,
-                ir_intensities=ir.get("ir_intensities") or [],
-            )
-        return self._show_ir_spectrum(freq_stub)
+        return _ana_pop_ir_spectrum(self, ctx)
 
     def _pop_uv_vis(self, ctx: _AnalysisContext) -> bool:
-        if ctx.live_result is not None:
-            energies_ev = list(getattr(ctx.live_result, "excitation_energies_ev", []))
-            osc = list(getattr(ctx.live_result, "oscillator_strengths", []))
-            try:
-                wl = list(ctx.live_result.wavelengths_nm())
-            except Exception:
-                wl = [1240.0 / e for e in energies_ev if e > 0]
-        else:
-            uv = ctx.spectra_data.get("uv_vis", {})
-            energies_ev = uv.get("excitation_energies_ev", [])
-            osc = uv.get("oscillator_strengths", [])
-            wl = uv.get("wavelengths_nm", [])
-        if not energies_ev or not osc:
-            return False
-        try:
-            import plotly.graph_objects as _go
-            import plotly.io as _pio
-
-            _fig = _go.Figure()
-            _fig.add_trace(
-                _go.Bar(
-                    x=wl,
-                    y=osc,
-                    name="Osc. strength",
-                    marker_color="#2563eb",
-                    width=[4.0] * len(wl),
-                )
-            )
-            tc = self._plotly_theme_colors()
-            _fig.update_layout(
-                xaxis_title="Wavelength (nm)",
-                yaxis_title="Oscillator strength",
-                height=320,
-                margin=dict(l=60, r=20, t=30, b=50),
-                plot_bgcolor=tc["plot_bgcolor"],
-                paper_bgcolor=tc["paper_bgcolor"],
-                font=dict(color=tc["font_color"]),
-                xaxis=dict(showgrid=True, gridcolor=tc["grid_color"]),
-                yaxis=dict(showgrid=True, gridcolor=tc["grid_color"]),
-            )
-            self._apply_plotly_theme(_fig)
-            self._set_html_output(
-                self._tddft_fig,
-                _pio.to_html(
-                    _fig,
-                    include_plotlyjs="require",
-                    full_html=False,
-                    config={"responsive": True},
-                ),
-            )
-            return True
-        except Exception:
-            return False
+        return _ana_pop_uv_vis(self, ctx)
 
     def _pop_nmr_shielding(self, ctx: _AnalysisContext) -> bool:
-        if ctx.live_result is not None:
-            r = ctx.live_result
-            atom_symbols = list(getattr(r, "atom_symbols", []))
-            shielding = list(getattr(r, "shielding_iso_ppm", []))
-            try:
-                h_shifts = r.h_shifts()
-                c_shifts = r.c_shifts()
-            except Exception:
-                h_shifts, c_shifts = [], []
-            ref = getattr(r, "reference_compound", "TMS")
-        else:
-            nmr = ctx.spectra_data.get("nmr", {})
-            atom_symbols = nmr.get("atom_symbols", [])
-            shielding = nmr.get("shielding_iso_ppm", [])
-            chem = nmr.get("chemical_shifts_ppm", {})
-            ref = nmr.get("reference_compound", "TMS")
-            # Reconstruct h/c shifts from stored chemical_shifts_ppm dict
-            h_shifts = [
-                (int(i), d)
-                for i, d in chem.items()
-                if int(i) < len(atom_symbols) and atom_symbols[int(i)] == "H"
-            ]
-            c_shifts = [
-                (int(i), d)
-                for i, d in chem.items()
-                if int(i) < len(atom_symbols) and atom_symbols[int(i)] == "C"
-            ]
-        if not atom_symbols:
-            return False
-
-        def _shift_table(label: str, shifts: list, sym: str) -> str:
-            if not shifts:
-                return ""
-            rows = "".join(
-                f'<tr><td style="padding:2px 14px 2px 0;color:#555">{sym}-{n}</td>'
-                f'<td style="color:#000">{d:.2f} ppm</td></tr>'
-                for n, (_i, d) in enumerate(sorted(shifts, key=lambda x: x[0]), 1)
-            )
-            return (
-                f'<tr><td colspan="2" style="padding:8px 0 2px;font-weight:600">'
-                f"{label} shifts (vs. {ref}):</td></tr>"
-                f'<tr><th style="text-align:left;color:#555;font-size:12px;padding:2px 14px 2px 0">Atom</th>'
-                f'<th style="text-align:left;color:#555;font-size:12px">δ (ppm)</th></tr>'
-                + rows
-            )
-
-        shielding_rows = "".join(
-            f'<tr><td style="padding:2px 10px 2px 0;color:#555">{sym}{i + 1}</td>'
-            f'<td style="color:#000">{s:.2f}</td></tr>'
-            for i, (sym, s) in enumerate(zip(atom_symbols, shielding))
-        )
-        html = (
-            f'<div style="font-size:13px">'
-            f'<table style="border-collapse:collapse;margin-bottom:8px">'
-            f'<tr><th style="text-align:left;color:#555;font-size:12px;padding:2px 10px 2px 0">Atom</th>'
-            f'<th style="text-align:left;color:#555;font-size:12px">σ (ppm)</th></tr>'
-            f"{shielding_rows}</table>"
-            f'<table style="border-collapse:collapse">'
-            f"{_shift_table('¹H', h_shifts, 'H')}"
-            f"{_shift_table('¹³C', c_shifts, 'C')}"
-            f"</table></div>"
-        )
-        self._nmr_output.value = html
-        return True
+        return _ana_pop_nmr_shielding(self, ctx)
 
     def _pop_pes_plot(self, ctx: _AnalysisContext) -> bool:
-        result = ctx.live_result
-        if result is None:
-            scan = ctx.spectra_data.get("pes_scan", {})
-            if not scan or not scan.get("energies_hartree"):
-                return False
-            energies_ha = scan["energies_hartree"]
-            atom_indices = scan.get("atom_indices", [])
-            scan_type = scan.get("scan_type", "bond")
-            x_vals = scan.get("scan_parameter_values", [])
-            e_min = min(energies_ha)
-            _HARTREE_TO_KCAL = 627.5094740631
-            e_rel = [(e - e_min) * _HARTREE_TO_KCAL for e in energies_ha]
-            idx = [i + 1 for i in atom_indices]
-            if scan_type == "bond":
-                label = f"Bond {idx[0]}–{idx[1]} / Å" if len(idx) >= 2 else "Bond / Å"
-            elif scan_type == "angle":
-                label = (
-                    f"Angle {idx[0]}–{idx[1]}–{idx[2]} / °"
-                    if len(idx) >= 3
-                    else "Angle / °"
-                )
-            else:
-                label = (
-                    f"Dihedral {idx[0]}–{idx[1]}–{idx[2]}–{idx[3]} / °"
-                    if len(idx) >= 4
-                    else "Dihedral / °"
-                )
-            result = _types_mod.SimpleNamespace(
-                scan_type=scan_type,
-                atom_indices=atom_indices,
-                scan_parameter_values=x_vals,
-                energies_hartree=energies_ha,
-                energies_relative_kcal=e_rel,
-                scan_coordinate_label=label,
-                converged_all=True,
-            )
-        return self._show_pes_scan_result(result)
+        return _ana_pop_pes_plot(self, ctx)
 
     def _pop_pes_trajectory(self, ctx: _AnalysisContext) -> bool:
-        traj: list = []
-        energies: list = []
-        if ctx.live_result is not None:
-            traj = list(getattr(ctx.live_result, "coordinates_list", []))
-            energies = list(getattr(ctx.live_result, "energies_hartree", []))
-        elif ctx.result_dir is not None:
-            traj_file = ctx.result_dir / "trajectory.json"
-            if traj_file.exists():
-                try:
-                    from quantui.results_storage import load_trajectory
-
-                    traj, energies = load_trajectory(ctx.result_dir)
-                except Exception:
-                    return False
-        if not traj or len(traj) < 2:
-            return False
-        stub = _types_mod.SimpleNamespace(
-            coordinates_list=traj,
-            energies_hartree=energies,
-            trajectory=None,
-            formula=ctx.formula,
-        )
-        self._pending_traj_result = stub
-        self.traj_accordion.set_title(0, "Geometry at Each Scan Point")
-        return True
+        return _ana_pop_pes_trajectory(self, ctx)
 
     # ── History panel (Cell 8) ────────────────────────────────────────────
 
     def _build_history_section(self) -> None:
-        self.past_dd = widgets.Dropdown(
-            description="Load:",
-            options=[("(no saved results)", "")],
-            style={"description_width": "50px"},
-            layout=_layout(width="500px"),
+        _bld_build_history_section(
+            self,
+            layout_fn=_layout,
+            pyscf_available=_PYSCF_AVAILABLE,
+            benchmark_suite=_BENCHMARK_SUITE,
+            benchmark_suite_long=_BENCHMARK_SUITE_LONG,
+            load_last_calibration_label_fn=_load_last_calibration_label,
         )
-        self.past_refresh_btn = widgets.Button(
-            description="Refresh",
-            button_style="",
-            icon="refresh",
-            layout=_layout(width="100px"),
-            tooltip="Rescan the results directory",
-        )
-        self.copy_path_btn = widgets.Button(
-            description="Copy path",
-            button_style="",
-            icon="clipboard",
-            layout=_layout(width="120px"),
-            tooltip="Copy the results directory path to clipboard",
-        )
-        self.results_path_lbl = widgets.HTML()
-        self.past_output = widgets.Output()
-        self.view_log_btn = widgets.Button(
-            description="View log",
-            button_style="",
-            icon="file-text-o",
-            layout=_layout(width="110px"),
-            tooltip="Open the full PySCF output log in the Output tab",
-        )
-
-        # Calibration widgets
-        self._cal_mode_toggle = widgets.ToggleButtons(
-            options=[("Quick (~10 s)", "short"), ("Full (~5 min)", "long")],
-            value="short",
-            description="",
-            button_style="",
-            style={"description_width": "0px", "button_width": "140px"},
-            layout=_layout(margin="0 0 8px"),
-        )
-        self._cal_run_btn = widgets.Button(
-            description="Run Calibration",
-            button_style="primary",
-            icon="play",
-            disabled=not _PYSCF_AVAILABLE,
-            tooltip=(
-                "Run the benchmark suite to calibrate time estimates"
-                if _PYSCF_AVAILABLE
-                else "PySCF required (Linux / macOS / WSL)"
-            ),
-            layout=_layout(width="180px"),
-        )
-        self._cal_stop_btn = widgets.Button(
-            description="Stop",
-            button_style="warning",
-            icon="stop",
-            layout=_layout(width="90px", display="none"),
-        )
-        self._cal_progress = widgets.IntProgress(
-            min=0,
-            max=len(_BENCHMARK_SUITE),
-            value=0,
-            description="",
-            bar_style="info",
-            layout=_layout(width="300px", display="none"),
-        )
-        self._cal_step_label = widgets.HTML(
-            value="",
-            layout=_layout(display="none"),
-        )
-        self._cal_results_html = widgets.HTML(value="")
-
-        # Performance stats widgets
-        self._perf_stats_html = widgets.HTML()
-        self._perf_events_html = widgets.HTML()
-        self._reset_btn = widgets.Button(
-            description="Reset performance database",
-            button_style="danger",
-            icon="trash",
-            layout=_layout(width="230px"),
-        )
-        self._reset_confirm_html = widgets.HTML(
-            '<span style="color:#dc2626;font-size:13px">'
-            "<b>Warning:</b> This will permanently delete all performance records. "
-            "Time estimates will reset to &ldquo;no data&rdquo;.</span>"
-        )
-        self._reset_confirm_yes = widgets.Button(
-            description="Yes, delete all records",
-            button_style="danger",
-            icon="check",
-            layout=_layout(width="190px"),
-        )
-        self._reset_confirm_no = widgets.Button(
-            description="Cancel",
-            button_style="",
-            icon="times",
-            layout=_layout(width="90px"),
-        )
-        self._reset_confirm_box = widgets.VBox(
-            [
-                self._reset_confirm_html,
-                widgets.HBox(
-                    [self._reset_confirm_yes, self._reset_confirm_no],
-                    layout=_layout(gap="8px", margin="4px 0 0"),
-                ),
-            ],
-            layout=_layout(
-                display="none",
-                border="1px solid #fca5a5",
-                padding="8px 10px",
-                margin="6px 0 0",
-            ),
-        )
-
-        _perf_stats_panel = widgets.VBox(
-            [
-                self._perf_stats_html,
-                widgets.HTML(
-                    '<p style="margin:10px 0 4px;color:#475569;font-size:13px;font-weight:600">'
-                    "Recent events (last 20)</p>"
-                ),
-                self._perf_events_html,
-                widgets.HBox(
-                    [self._reset_btn],
-                    layout=_layout(margin="14px 0 4px"),
-                ),
-                self._reset_confirm_box,
-            ]
-        )
-        self._perf_accordion = widgets.Accordion(
-            children=[_perf_stats_panel], selected_index=None
-        )
-        self._perf_accordion.set_title(0, "Performance stats")
-
-        # Calibration accordion
-        _cal_last = _load_last_calibration_label()
-        _cal_note = (
-            f'<p style="color:#64748b;font-size:12px;margin:0 0 6px">'
-            f"Last run: {_cal_last}</p>"
-            if _cal_last
-            else ""
-        )
-        _cal_panel = widgets.VBox(
-            [
-                widgets.HTML(
-                    f'<p style="color:#555;font-size:13px;margin:0 0 6px">'
-                    f"Benchmark this machine so the time estimator uses basis-function "
-                    f"scaling (N<sup>β</sup>) rather than generic defaults. "
-                    f"<b>Quick</b> runs {len(_BENCHMARK_SUITE)} small calculations (~10 s). "
-                    f"<b>Full</b> runs {len(_BENCHMARK_SUITE_LONG)} calculations spanning "
-                    f"all common molecule sizes and methods (~5 min).</p>" + _cal_note
-                ),
-                self._cal_mode_toggle,
-                widgets.HBox(
-                    [self._cal_run_btn, self._cal_stop_btn],
-                    layout=_layout(gap="6px", align_items="center"),
-                ),
-                self._cal_progress,
-                self._cal_step_label,
-                self._cal_results_html,
-            ],
-            layout=_layout(padding="4px 0"),
-        )
-        self._cal_accordion = widgets.Accordion(
-            children=[_cal_panel], selected_index=None
-        )
-        self._cal_accordion.set_title(0, "Calibrate time estimates")
-
-        self.history_panel = widgets.VBox(
-            [
-                widgets.HTML(
-                    '<p style="color:#555;font-size:13px;margin:0 0 8px">'
-                    "Calculations are saved automatically. Select one below to view its results.</p>"
-                ),
-                widgets.HBox(
-                    [
-                        self.past_dd,
-                        self.past_refresh_btn,
-                        self.copy_path_btn,
-                        self.view_log_btn,
-                    ],
-                    layout=_layout(align_items="center", gap="8px"),
-                ),
-                self.results_path_lbl,
-                self.past_output,
-                self._perf_accordion,
-                self._cal_accordion,
-            ]
-        )
-
-        # Populate on startup
-        self._refresh_results_browser()
-        self._refresh_perf_stats()
 
     # ── Compare panel (Cell 9) ────────────────────────────────────────────
 
     def _build_compare_section(self) -> None:
-        self.compare_select = widgets.SelectMultiple(
-            options=[("(no saved results)", "")],
-            rows=8,
-            description="",
-            layout=_layout(width="100%"),
+        _bld_build_compare_section(
+            self,
+            layout_fn=_layout,
+            rdkit_available=_RDKIT_AVAILABLE,
         )
-        self.compare_refresh_btn = widgets.Button(
-            description="Refresh",
-            button_style="",
-            icon="refresh",
-            layout=_layout(width="100px"),
-        )
-        self.compare_btn = widgets.Button(
-            description="Compare selected",
-            button_style="primary",
-            icon="bar-chart",
-            disabled=True,
-            layout=_layout(width="180px"),
-        )
-        self.compare_clear_btn = widgets.Button(
-            description="Clear",
-            button_style="warning",
-            icon="times",
-            layout=_layout(width="90px"),
-        )
-        self.compare_output = widgets.Output()
-
-        self.compare_panel = widgets.VBox(
-            [
-                widgets.HTML(
-                    '<h3 style="margin:14px 0 6px">Compare Calculations</h3>'
-                    '<p style="color:#555;font-size:13px;margin:0 0 8px">'
-                    "Select two or more saved calculations to compare side-by-side. "
-                    "Hold Ctrl (or ⌘) to select multiple entries.</p>"
-                ),
-                widgets.HBox([self.compare_refresh_btn]),
-                self.compare_select,
-                widgets.HBox(
-                    [self.compare_btn, self.compare_clear_btn],
-                    layout=_layout(gap="8px", margin="6px 0"),
-                ),
-                self.compare_output,
-            ],
-            layout=_layout(padding="8px 0"),
-        )
-
-        # Export accordion (Advanced)
-        _rdkit_note = (
-            ""
-            if _RDKIT_AVAILABLE
-            else '<p style="color:#888;font-size:12px;margin:4px 0 0">MOL/PDB export requires RDKit '
-            "(<code>conda install -c conda-forge rdkit</code>).</p>"
-        )
-        _export_content = widgets.VBox(
-            [
-                widgets.HTML(
-                    '<p style="color:#555;font-size:13px;margin:0 0 8px">'
-                    "Download a self-contained PySCF script you can study or run outside the notebook.</p>"
-                ),
-                widgets.HBox([self.export_btn, self.export_status]),
-                widgets.HTML('<hr style="margin:10px 0 8px">'),
-                widgets.HTML(
-                    '<p style="color:#555;font-size:13px;margin:0 0 6px">'
-                    "Download the molecular structure in a standard chemistry file format.</p>"
-                    + _rdkit_note
-                ),
-                widgets.HBox(
-                    [self.export_xyz_btn, self.export_mol_btn, self.export_pdb_btn],
-                    layout=_layout(flex_flow="row wrap", gap="6px"),
-                ),
-                self.struct_export_status,
-            ]
-        )
-        self.advanced_accordion = widgets.Accordion(children=[_export_content])
-        self.advanced_accordion.set_title(0, "Export")
-        self.advanced_accordion.selected_index = None
-
-        # Populate on startup
-        self._populate_compare_list()
 
     # ── Output log tab (Cell 10) ──────────────────────────────────────────
 
     def _build_output_tab(self) -> None:
-        self._log_output_html = widgets.HTML(
-            '<span style="color:#94a3b8;font-size:13px">'
-            "No log yet — run a calculation first, or use "
-            "<b>View log</b> in the History tab.</span>"
-        )
-        self._log_source_lbl = widgets.HTML()
-        self._log_clear_btn = widgets.Button(
-            description="Clear",
-            button_style="",
-            icon="times",
-            layout=_layout(width="80px"),
-        )
-        self._clear_log_cache_btn = widgets.Button(
-            description="Clear Log Cache",
-            button_style="",
-            icon="trash",
-            tooltip=(
-                "Delete the session event log (event_log.jsonl). "
-                "Calculation performance data is preserved."
-            ),
-            layout=_layout(width="160px"),
-        )
-        self._clear_log_cache_confirm_btn = widgets.Button(
-            description="Confirm clear?",
-            button_style="danger",
-            layout=_layout(width="140px", display="none"),
-        )
-        self.log_tab_panel = widgets.VBox(
-            [
-                widgets.HTML(
-                    '<p style="color:#555;font-size:13px;margin:4px 0 8px">'
-                    "Raw PySCF output for the most recent calculation. "
-                    "Use <b>View log</b> in the History tab to load a saved result's log. "
-                    "Orbital diagrams, trajectories, and spectra are in the "
-                    "<b>Analysis</b> tab.</p>"
-                ),
-                widgets.HBox(
-                    [self._log_clear_btn],
-                    layout=_layout(margin="0 0 8px"),
-                ),
-                self._log_source_lbl,
-                self._log_output_html,
-                self._result_log_accordion,
-                widgets.HTML(
-                    '<hr style="border:none;border-top:1px solid #e2e8f0;margin:16px 0 10px"/>'
-                    '<p style="color:#94a3b8;font-size:12px;margin:0 0 6px">'
-                    "Session event log — records molecule loads, calculations, "
-                    "and issue reports across this session.</p>"
-                ),
-                widgets.HBox(
-                    [self._clear_log_cache_btn, self._clear_log_cache_confirm_btn],
-                    layout=_layout(align_items="center", gap="8px"),
-                ),
-            ],
-            layout=_layout(padding="8px 0"),
-        )
+        _bld_build_output_tab(self, layout_fn=_layout)
 
-    # ── Help section (Cell 10) ────────────────────────────────────────────
+    # ── Files tab (Cell 11) ───────────────────────────────────────────────
+
+    def _build_files_tab(self) -> None:
+        _bld_build_files_tab(self, layout_fn=_layout)
+        self._refresh_file_browser()
+
+    # ── Help section (Cell 12) ────────────────────────────────────────────
 
     def _build_help_section(self) -> None:
-        _help_keys = list(HELP_TOPICS.keys())
-        _help_labels = [HELP_TOPICS[k]["title"] for k in _help_keys]
-        self.help_topic_dd = widgets.Dropdown(
-            options=list(zip(_help_labels, _help_keys)),
-            description="Topic:",
-            style={"description_width": "60px"},
-            layout=_layout(width="460px"),
-        )
-        self.help_content_html = widgets.HTML()
-        self._render_help_topic()  # render first topic immediately
-
-        # [?] toggle button shown in the top bar
-        self._help_btn = widgets.Button(
-            description="?",
-            button_style="",
-            tooltip="Help topics",
-            layout=_layout(width="34px", margin="0 0 0 8px"),
-        )
-
-        # Exit button shown in the top bar
-        self._exit_btn = widgets.Button(
-            description="Exit",
-            button_style="danger",
-            tooltip="Shut down the QuantUI server and close this session",
-            layout=_layout(width="64px", margin="0 0 0 8px"),
-        )
-        self._exit_output = widgets.Output(
-            layout=_layout(height="0px", overflow="hidden")
-        )
-
-        self.help_tab_panel = widgets.VBox(
-            [
-                widgets.HTML(
-                    '<p style="color:#555;font-size:13px;margin:4px 0 12px">'
-                    "Browse help topics below. Click <b>?</b> next to the Method or Basis Set "
-                    "dropdown in the Calculate tab to jump directly to a relevant topic.</p>"
-                ),
-                self.help_topic_dd,
-                self.help_content_html,
-            ],
-            layout=_layout(
-                display="none",
-                padding="8px 0",
-                border="1px solid #e2e8f0",
-                border_radius="6px",
-                padding_left="12px",
-                margin="0 0 8px",
-            ),
-        )
+        _bld_build_help_section(self, layout_fn=_layout)
 
     def _build_issue_widgets(self) -> None:
-        """Build the Issue report button, overlay, and related widgets."""
-        # ── Issue button (shown in the top bar) ───────────────────────────
-        self._issue_btn = widgets.Button(
-            description="Report Issue",
-            button_style="warning",
-            icon="flag",
-            tooltip="Report a bug or unexpected behaviour observed in this session",
-            layout=_layout(width="140px", margin="0 0 0 8px"),
-        )
-        # ── Issue overlay (hidden until button is clicked) ────────────────
-        self._issue_textarea = widgets.Textarea(
-            placeholder=(
-                "Describe what you observed — what you did, what you expected, "
-                "and what actually happened."
-            ),
-            layout=_layout(width="100%", height="90px"),
-        )
-        self._issue_submit_btn = widgets.Button(
-            description="Submit",
-            button_style="success",
-            layout=_layout(width="90px"),
-        )
-        self._issue_cancel_btn = widgets.Button(
-            description="Cancel",
-            button_style="",
-            layout=_layout(width="80px"),
-        )
-        self._issue_status_html = widgets.HTML()
-        self._issue_overlay = widgets.VBox(
-            [
-                widgets.HTML(
-                    '<p style="font-size:13px;font-weight:600;margin:0 0 6px;color:#92400e">'
-                    "&#9872; Report Issue</p>"
-                    '<p style="font-size:12px;color:#78350f;margin:0 0 8px">'
-                    "Your report (and a snapshot of the current session state) will be "
-                    "saved to <code>issues.db</code> and the session event log.</p>"
-                ),
-                self._issue_textarea,
-                widgets.HBox(
-                    [self._issue_submit_btn, self._issue_cancel_btn],
-                    layout=_layout(margin="6px 0 0", gap="8px"),
-                ),
-                self._issue_status_html,
-            ],
-            layout=_layout(
-                display="none",
-                border="1px solid #f59e0b",
-                border_radius="6px",
-                padding="12px 14px",
-                margin="0 0 6px",
-                background_color="#fffbeb",
-            ),
-        )
+        _bld_build_issue_widgets(self, layout_fn=_layout)
 
     # ── Tab assembly (Cell 10) ────────────────────────────────────────────
 
@@ -2443,6 +1314,7 @@ class QuantUIApp:
                 self.history_panel,
                 self.compare_panel,
                 self.log_tab_panel,
+                self.files_tab_panel,
                 self._status_tab_panel,
             ]
         )
@@ -2452,7 +1324,11 @@ class QuantUIApp:
         self.root_tab.set_title(3, "History")
         self.root_tab.set_title(4, "Compare")
         self.root_tab.set_title(5, "Log")
-        self.root_tab.set_title(6, "Status")
+        self.root_tab.set_title(6, "Files")
+        self.root_tab.set_title(7, "Status")
+        self.root_tab.observe(
+            self._safe_cb(self._on_root_tab_changed), names="selected_index"
+        )
 
     # ══ CALLBACK WIRING ══════════════════════════════════════════════════════
 
@@ -2501,6 +1377,22 @@ class QuantUIApp:
         # Run
         self.run_btn.on_click(self._on_run_clicked)
         self.log_clear_btn.on_click(self._on_clear_log)
+        self._ir_mode_toggle.observe(
+            self._safe_cb(self._on_ir_mode_changed), names="value"
+        )
+        self._ir_fwhm_slider.observe(
+            self._safe_cb(self._on_ir_fwhm_changed), names="value"
+        )
+        self._uv_mode_toggle.observe(
+            self._safe_cb(self._on_uv_mode_changed), names="value"
+        )
+        self._uv_fwhm_slider.observe(
+            self._safe_cb(self._on_uv_fwhm_changed), names="value"
+        )
+        self._ir_export_btn.on_click(self._on_ir_export_plot)
+        self._uv_export_btn.on_click(self._on_uv_export_plot)
+        self._orb_export_btn.on_click(self._on_orb_export_plot)
+        self._pes_export_btn.on_click(self._on_pes_export_plot)
         # Accumulate / export
         self.accumulate_btn.on_click(self._on_accumulate)
         self.clear_btn.on_click(self._on_clear)
@@ -2531,6 +1423,16 @@ class QuantUIApp:
         # Clear log cache (event_log.jsonl)
         self._clear_log_cache_btn.on_click(self._on_clear_log_cache)
         self._clear_log_cache_confirm_btn.on_click(self._on_clear_log_cache_confirm)
+        # Files tab
+        self._files_root_dd.observe(
+            self._safe_cb(self._on_files_root_changed), names="value"
+        )
+        self._files_entries.observe(
+            self._safe_cb(self._on_files_entry_changed), names="value"
+        )
+        self._files_open_btn.on_click(self._on_files_open)
+        self._files_up_btn.on_click(self._on_files_up)
+        self._files_refresh_btn.on_click(self._on_files_refresh)
         # Issue reporting
         self._issue_btn.on_click(self._on_issue_btn)
         self._issue_submit_btn.on_click(self._on_issue_submit)
@@ -2543,15 +1445,9 @@ class QuantUIApp:
             self._safe_cb(self._on_help_topic_changed), names="value"
         )
         # Tab navigation buttons
-        self._go_results_btn.on_click(
-            lambda _: setattr(self.root_tab, "selected_index", 1)
-        )
-        self._go_analysis_btn.on_click(
-            lambda _: setattr(self.root_tab, "selected_index", 2)
-        )
-        self._to_analysis_btn.on_click(
-            lambda _: setattr(self.root_tab, "selected_index", 2)
-        )
+        self._go_results_btn.on_click(self._go_to_results_tab)
+        self._go_analysis_btn.on_click(self._go_to_analysis_tab)
+        self._to_analysis_btn.on_click(self._go_to_analysis_tab)
         # Vibrational mode selector
         self.vib_mode_dd.observe(
             self._safe_cb(self._on_vib_mode_changed), names="value"
@@ -2568,6 +1464,372 @@ class QuantUIApp:
         )
         # Orbital isosurface generate button
         self._iso_generate_btn.on_click(self._on_iso_generate)
+
+    # ── Files tab ────────────────────────────────────────────────────────
+
+    def _files_allowed_roots(self) -> list[Path]:
+        """Return the approved filesystem roots for the Files tab."""
+        roots: list[Path] = []
+        candidates: list[Optional[Path]] = [self._get_results_dir(), Path.cwd()]
+        _last_dir = getattr(self, "_last_result_dir", None)
+        if isinstance(_last_dir, Path):
+            candidates.append(_last_dir)
+
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            try:
+                resolved = candidate.resolve()
+            except OSError:
+                continue
+            if resolved not in roots:
+                roots.append(resolved)
+
+        return roots
+
+    def _is_path_in_allowed_roots(self, path: Path, roots: list[Path]) -> bool:
+        """True when *path* is inside any configured Files-tab root."""
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return False
+        for root in roots:
+            try:
+                resolved.relative_to(root)
+                return True
+            except ValueError:
+                continue
+        return False
+
+    def _format_file_size(self, size_bytes: int) -> str:
+        """Return a compact human-readable size label."""
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        if size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+    def _set_files_status(self, message: str, color: str = "#64748b") -> None:
+        """Update Files tab status text."""
+        self._files_status_html.value = (
+            f'<span style="font-size:12px;color:{color}">'
+            f"{_html.escape(message)}</span>"
+        )
+
+    def _format_files_root_label(self, root: Path) -> str:
+        """Return a readable dropdown label for a root path."""
+        labels: list[tuple[str, Path]] = []
+        try:
+            labels.append(("Results", self._get_results_dir().resolve()))
+        except OSError:
+            pass
+        try:
+            labels.append(("Workspace CWD", Path.cwd().resolve()))
+        except OSError:
+            pass
+        _last_dir = getattr(self, "_last_result_dir", None)
+        if isinstance(_last_dir, Path):
+            try:
+                labels.append(("Current Result", _last_dir.resolve()))
+            except OSError:
+                pass
+
+        for prefix, known_root in labels:
+            if root == known_root:
+                return f"{prefix} ({root})"
+        return str(root)
+
+    def _refresh_file_browser(self) -> None:
+        """Refresh root options and the current directory listing."""
+        roots = self._files_allowed_roots()
+        try:
+            results_root = self._get_results_dir().resolve()
+        except OSError:
+            results_root = None
+        for root in roots:
+            if results_root is not None and root == results_root:
+                try:
+                    root.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    pass
+
+        if not roots:
+            self._files_updating = True
+            try:
+                self._files_root_dd.options = [("(no roots)", "")]
+                self._files_root_dd.value = ""
+                self._files_entries.options = [("(no files)", "")]
+                self._files_entries.value = ""
+            finally:
+                self._files_updating = False
+            self._files_current_dir = None
+            self._files_selected_path = None
+            self._files_path_html.value = (
+                '<span style="font-size:12px;color:#64748b">'
+                "Current folder: unavailable</span>"
+            )
+            self._files_open_btn.disabled = True
+            self._files_up_btn.disabled = True
+            self._set_files_status("No readable roots available.", "#b91c1c")
+            self._files_preview_output.clear_output(wait=True)
+            return
+
+        old_root_value = str(self._files_root_dd.value or "")
+        root_options = [
+            (self._format_files_root_label(root), str(root)) for root in roots
+        ]
+        valid_root_values = {value for _, value in root_options}
+        selected_root = old_root_value if old_root_value in valid_root_values else ""
+        if not selected_root:
+            selected_root = root_options[0][1]
+
+        self._files_updating = True
+        try:
+            self._files_root_dd.options = root_options
+            self._files_root_dd.value = selected_root
+        finally:
+            self._files_updating = False
+
+        selected_root_path = Path(selected_root)
+        if (
+            self._files_current_dir is None
+            or not self._is_path_in_allowed_roots(self._files_current_dir, roots)
+            or not self._files_current_dir.exists()
+            or not self._files_current_dir.is_dir()
+        ):
+            self._files_current_dir = selected_root_path
+
+        self._update_files_entries()
+        self._set_files_status("File list refreshed.")
+
+    def _update_files_entries(self) -> None:
+        """Rebuild the directory listing for the current folder."""
+        roots = self._files_allowed_roots()
+        if not roots:
+            self._files_entries.options = [("(no files)", "")]
+            self._files_entries.value = ""
+            self._files_selected_path = None
+            self._files_open_btn.disabled = True
+            self._files_up_btn.disabled = True
+            self._files_preview_output.clear_output(wait=True)
+            return
+
+        current = self._files_current_dir or roots[0]
+        if not self._is_path_in_allowed_roots(current, roots):
+            current = Path(self._files_root_dd.value)
+        if not current.exists() or not current.is_dir():
+            current = Path(self._files_root_dd.value)
+
+        self._files_current_dir = current
+        self._files_path_html.value = (
+            '<span style="font-size:12px;color:#475569">Current folder: '
+            f"{_html.escape(str(current))}</span>"
+        )
+
+        try:
+            children = list(current.iterdir())
+        except OSError as exc:
+            self._files_entries.options = [("(unreadable folder)", "")]
+            self._files_entries.value = ""
+            self._files_selected_path = None
+            self._files_open_btn.disabled = True
+            self._files_up_btn.disabled = True
+            self._files_preview_output.clear_output(wait=True)
+            self._set_files_status(f"Cannot list folder: {exc}", "#b91c1c")
+            return
+
+        children.sort(key=lambda p: (not p.is_dir(), p.name.lower()))
+        options: list[tuple[str, str]] = []
+        for child in children:
+            if child.is_dir():
+                options.append((f"[DIR] {child.name}", str(child)))
+                continue
+            try:
+                size_label = self._format_file_size(child.stat().st_size)
+            except OSError:
+                size_label = "?"
+            options.append((f"{child.name} ({size_label})", str(child)))
+
+        if not options:
+            options = [("(empty directory)", "")]
+
+        old_selection = str(self._files_entries.value or "")
+        valid_values = {value for _, value in options if value}
+        new_selection = old_selection if old_selection in valid_values else ""
+        if not new_selection and valid_values:
+            new_selection = next(iter(valid_values))
+
+        self._files_updating = True
+        try:
+            self._files_entries.options = options
+            self._files_entries.value = new_selection
+        finally:
+            self._files_updating = False
+
+        self._files_selected_path = Path(new_selection) if new_selection else None
+        self._files_open_btn.disabled = self._files_selected_path is None
+
+        _parent = current.parent
+        self._files_up_btn.disabled = (
+            _parent == current or not self._is_path_in_allowed_roots(_parent, roots)
+        )
+
+        self._files_preview_output.clear_output(wait=True)
+
+    def _preview_file_path(self, path: Path) -> None:
+        """Render a safe preview for a selected file path."""
+        roots = self._files_allowed_roots()
+        if not self._is_path_in_allowed_roots(path, roots):
+            self._set_files_status("Selected path is outside allowed roots.", "#b91c1c")
+            return
+        if not path.exists() or not path.is_file():
+            self._set_files_status("Selected file no longer exists.", "#b91c1c")
+            return
+
+        self._files_preview_output.clear_output(wait=True)
+        suffix = path.suffix.lower()
+
+        image_ext = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+        text_ext = {
+            ".txt",
+            ".log",
+            ".json",
+            ".md",
+            ".py",
+            ".csv",
+            ".yaml",
+            ".yml",
+            ".xyz",
+            ".cube",
+        }
+
+        if suffix in image_ext:
+            from IPython.display import Image as _Image
+
+            with self._files_preview_output:
+                display(_Image(filename=str(path)))
+            self._set_files_status(f"Previewing image: {path.name}")
+            return
+
+        is_text = suffix in text_ext
+        if not is_text:
+            try:
+                sample = path.read_bytes()[:512]
+            except OSError as exc:
+                self._set_files_status(f"Cannot read file: {exc}", "#b91c1c")
+                return
+            is_text = b"\x00" not in sample
+
+        if not is_text:
+            with self._files_preview_output:
+                display(
+                    HTML(
+                        "<p style='font-size:12px;color:#475569;margin:4px 0'>"
+                        "Binary preview is not available for this file type."
+                        "</p>"
+                    )
+                )
+            self._set_files_status(f"Binary file selected: {path.name}")
+            return
+
+        max_bytes = 200_000
+        try:
+            raw = path.read_bytes()
+        except OSError as exc:
+            self._set_files_status(f"Cannot read file: {exc}", "#b91c1c")
+            return
+
+        truncated = len(raw) > max_bytes
+        raw = raw[:max_bytes]
+        text = raw.decode("utf-8", errors="replace")
+        if truncated:
+            text += "\n\n[Preview truncated to 200 KB]"
+
+        with self._files_preview_output:
+            display(
+                HTML(
+                    "<pre style='white-space:pre-wrap;word-break:break-word;"
+                    "font-size:12px;line-height:1.35;margin:0'>"
+                    f"{_html.escape(text)}"
+                    "</pre>"
+                )
+            )
+        self._set_files_status(f"Previewing text file: {path.name}")
+
+    def _on_files_root_changed(self, change) -> None:
+        if self._files_updating:
+            return
+        new_value = str(change.get("new") or "")
+        if not new_value:
+            return
+
+        new_root = Path(new_value)
+        roots = self._files_allowed_roots()
+        if not self._is_path_in_allowed_roots(new_root, roots):
+            self._set_files_status("Selected root is not allowed.", "#b91c1c")
+            return
+
+        self._files_current_dir = new_root
+        self._update_files_entries()
+        self._set_files_status(f"Root changed to: {new_root}")
+
+    def _on_files_entry_changed(self, change) -> None:
+        if self._files_updating:
+            return
+        new_value = str(change.get("new") or "")
+        self._files_selected_path = Path(new_value) if new_value else None
+        self._files_open_btn.disabled = self._files_selected_path is None
+        if self._files_selected_path is None:
+            self._set_files_status("Select a folder or file.")
+            return
+        if self._files_selected_path.is_dir():
+            self._set_files_status(f"Folder selected: {self._files_selected_path.name}")
+        else:
+            self._set_files_status(f"File selected: {self._files_selected_path.name}")
+
+    def _on_files_open(self, _btn) -> None:
+        self._activity_begin("Opening selected path...")
+        try:
+            selected = self._files_selected_path
+            if selected is None:
+                self._set_files_status("Select a folder or file first.")
+                return
+            if selected.is_dir():
+                self._files_current_dir = selected
+                self._update_files_entries()
+                self._set_files_status(f"Opened folder: {selected}")
+                return
+            self._preview_file_path(selected)
+        finally:
+            self._activity_end()
+
+    def _on_files_up(self, _btn) -> None:
+        self._activity_begin("Moving to parent folder...")
+        try:
+            if self._files_current_dir is None:
+                self._set_files_status("No current folder selected.", "#b91c1c")
+                return
+
+            parent = self._files_current_dir.parent
+            roots = self._files_allowed_roots()
+            if parent == self._files_current_dir or not self._is_path_in_allowed_roots(
+                parent, roots
+            ):
+                self._set_files_status("Already at the top of the selected root.")
+                return
+
+            self._files_current_dir = parent
+            self._update_files_entries()
+            self._set_files_status(f"Moved to parent folder: {parent}")
+        finally:
+            self._activity_end()
+
+    def _on_files_refresh(self, _btn) -> None:
+        self._activity_begin("Refreshing files browser...")
+        try:
+            self._refresh_file_browser()
+        finally:
+            self._activity_end()
 
     # ══ CALLBACK METHODS ═════════════════════════════════════════════════════
 
@@ -2617,8 +1879,24 @@ class QuantUIApp:
         assigned to widgets.HTML.value (innerHTML path), which leads to blank
         figure panels. Rendering through Output display_data executes the JS.
         """
+        if threading.current_thread() is not threading.main_thread():
+            io_loop = self._get_kernel_io_loop()
+            if io_loop is not None:
+                io_loop.add_callback(self._set_html_output, out, html)
+                return
         self._clear_output_widget(out)
         out.append_display_data(HTML(html))
+
+    def _get_kernel_io_loop(self) -> Any:
+        """Return a cached kernel io_loop, resolving it lazily when needed."""
+        io_loop = getattr(self, "_kernel_io_loop", None)
+        if io_loop is not None:
+            return io_loop
+        ip = get_ipython()
+        io_loop = getattr(getattr(ip, "kernel", None), "io_loop", None)
+        if io_loop is not None:
+            self._kernel_io_loop = io_loop
+        return io_loop
 
     def _render_plotly_figure(self, out: widgets.Output, fig) -> None:
         """Render a Plotly figure through display() in an Output widget."""
@@ -2654,8 +1932,14 @@ class QuantUIApp:
                 self._ir_mode_toggle.value,
                 self._ir_fwhm_slider.value,
             )
-        if getattr(self, "_last_pes_result", None) is not None:
-            self._show_pes_scan_result(self._last_pes_result)
+        if getattr(self, "_last_uv_wavelengths_nm", None):
+            self._update_uv_vis_figure(
+                self._uv_mode_toggle.value,
+                self._uv_fwhm_slider.value,
+            )
+        _last_pes = getattr(self, "_last_pes_result", None)
+        if _last_pes is not None:
+            self._show_pes_scan_result(_last_pes)
         # Re-render 3D molecule viewer so scene_bgcolor updates immediately.
         if self._molecule is not None and _display_molecule is not None:
             self.viz_output.clear_output()
@@ -2799,778 +2083,283 @@ class QuantUIApp:
         threading.Thread(target=_do, daemon=True).start()
 
     def _on_expand_mol_input(self, btn) -> None:
-        _children = [self.mol_input_expanded, self.mol_info_html, self.viz_output]
-        if self.viz_backend_toggle is not None:
-            _children.append(self.viz_backend_toggle)
-        if VISUALIZATION_AVAILABLE:
-            _children.append(self.viz_controls_box)
-        self.mol_input_container.children = _children
+        _run_on_expand_mol_input(
+            self,
+            btn,
+            visualization_available=VISUALIZATION_AVAILABLE,
+        )
 
     # ── Calc type ─────────────────────────────────────────────────────────
 
     def _on_calc_type_changed(self, change) -> None:
-        ct = change["new"]
-        if ct == "Geometry Opt":
-            self.calc_extra_opts.children = [
-                widgets.HBox(
-                    [self.fmax_fi, self.max_steps_si],
-                    layout=_layout(gap="8px"),
-                ),
-            ]
-        elif ct == "Frequency":
-            self._refresh_freq_seed_options()
-            self.calc_extra_opts.children = [
-                widgets.HBox(
-                    [self._freq_seed_dd, self._freq_seed_refresh_btn],
-                    layout=_layout(align_items="center", gap="6px"),
-                ),
-                self._freq_preopt_cb,
-                self._freq_seed_note,
-            ]
-        elif ct == "UV-Vis (TD-DFT)":
-            self.calc_extra_opts.children = [
-                self.nstates_si,
-                widgets.HTML(
-                    '<span style="color:#b45309;font-size:12px">⚠ Requires a DFT '
-                    "functional (e.g. B3LYP, PBE0). RHF/UHF will run TDHF (CIS) "
-                    "instead.</span>"
-                ),
-            ]
-        elif ct == "NMR Shielding":
-            self.calc_extra_opts.children = [
-                widgets.HTML(
-                    '<span style="color:#b45309;font-size:12px">'
-                    "⚠ Recommended: B3LYP/6-31G* or better. "
-                    "STO-3G and 3-21G give qualitative results only. "
-                    "Start from an optimised geometry for best accuracy.</span>"
-                ),
-            ]
-        elif ct == "PES Scan":
-            self._update_scan_widgets()
-            self.calc_extra_opts.children = [
-                widgets.HBox(
-                    [self._scan_type_dd],
-                    layout=_layout(margin="0 0 4px 0"),
-                ),
-                widgets.HBox(
-                    [self._scan_atom1, self._scan_atom2],
-                    layout=_layout(gap="4px"),
-                ),
-                self._scan_atom34_box,
-                widgets.HBox(
-                    [
-                        self._scan_start,
-                        self._scan_stop,
-                        self._scan_steps,
-                        self._scan_unit_lbl,
-                    ],
-                    layout=_layout(gap="4px", align_items="center"),
-                ),
-            ]
-        else:
-            self.calc_extra_opts.children = []
+        _run_on_calc_type_changed(self, change, layout_fn=_layout)
 
     def _update_scan_widgets(self, _change=None) -> None:
-        """Show/hide atom3/4 inputs and update unit label based on scan type."""
-        st = self._scan_type_dd.value
-        if st == "Bond":
-            self._scan_atom34_box.layout.display = "none"
-            self._scan_unit_lbl.value = (
-                '<span style="font-size:12px;color:#555">Å</span>'
-            )
-        elif st == "Angle":
-            self._scan_atom4.layout.display = "none"
-            self._scan_atom3.layout.display = ""
-            self._scan_atom34_box.layout.display = ""
-            self._scan_unit_lbl.value = (
-                '<span style="font-size:12px;color:#555">°</span>'
-            )
-        else:  # Dihedral
-            self._scan_atom3.layout.display = ""
-            self._scan_atom4.layout.display = ""
-            self._scan_atom34_box.layout.display = ""
-            self._scan_unit_lbl.value = (
-                '<span style="font-size:12px;color:#555">°</span>'
-            )
+        _run_update_scan_widgets(self, _change)
 
     def _refresh_freq_seed_options(self) -> None:
-        """Populate _freq_seed_dd with saved geometry-opt results."""
-        from quantui.results_storage import list_results, load_result
-
-        options = [("(use current molecule)", "")]
-        for d in list_results():
-            try:
-                data = load_result(d)
-                if data.get("calc_type") != "geometry_opt":
-                    continue
-                traj_file = d / "trajectory.json"
-                if not traj_file.exists():
-                    continue
-                ts = data.get("timestamp", d.name[:19])
-                label = (
-                    f"{data['formula']}  {data['method']}/{data['basis']}" f"  —  {ts}"
-                )
-                options.append((label, str(d)))
-            except Exception:
-                continue
-        self._freq_seed_dd.options = options
+        _run_refresh_freq_seed_options(self)
 
     def _on_freq_seed_changed(self, change) -> None:
-        """Enable/disable pre-opt checkbox and update the seed note."""
-        path_str = change["new"]
-        if path_str:
-            # A history geometry is selected — pre-optimize makes no sense.
-            self._freq_preopt_cb.value = False
-            self._freq_preopt_cb.disabled = True
-            self._freq_seed_note.value = (
-                '<span style="font-size:12px;color:#16a34a">'
-                "✓ Final optimised geometry will be loaded from the selected result."
-                "</span>"
-            )
-        else:
-            self._freq_preopt_cb.disabled = False
-            self._freq_seed_note.value = ""
+        _run_on_freq_seed_changed(self, change)
 
     # ── Help buttons ──────────────────────────────────────────────────────
 
     def _on_method_help(self, btn) -> None:
-        self._show_help_topic("method")
+        _run_on_method_help(self, btn)
 
     def _on_basis_help(self, btn) -> None:
-        self._show_help_topic("basis_set")
+        _run_on_basis_help(self, btn)
 
     # ── Run ───────────────────────────────────────────────────────────────
 
     def _on_run_clicked(self, btn) -> None:
-        self.run_output.clear_output()
-        self.result_output.clear_output()
-        self.result_viz_output.clear_output()
-        self._analysis_mol_output.clear_output()
-        self._viz_label.layout.display = "none"
-        self._viz_label.value = ""
-        self._deactivate_all_ana_panels()
-        self._clear_output_widget(self._pes_plot_html)
-        self._result_dir_label.value = ""
-        self._result_dir_label.layout.display = "none"
-        self._result_log_accordion.layout.display = "none"
-        self._result_log_accordion.selected_index = None
-        self._result_log_output.clear_output()
-        self._completion_banner.layout.display = "none"
-        self._to_analysis_btn.layout.display = "none"
-        self._analysis_empty_html.layout.display = "none"
-        threading.Thread(target=self._do_run, daemon=True).start()
+        self._activity_pulse(
+            "Queueing calculation...",
+            hold_s=0.18,
+            kind="compute",
+        )
+        _run_on_run_clicked(self, btn)
 
     def _on_solvent_cb_changed(self, change) -> None:
-        self.solvent_dd.layout.display = "" if change["new"] else "none"
+        _run_on_solvent_cb_changed(self, change)
 
     def _on_clear_log(self, btn) -> None:
-        self.run_output.clear_output()
+        _run_on_clear_log(self, btn)
 
     # ── Accumulate / export ───────────────────────────────────────────────
 
     def _on_accumulate(self, btn) -> None:
-        r = self._last_result
-        if r is None:
-            return
-        self._results.append(r)
-        self._refresh_comparison()
+        _run_on_accumulate(self, btn)
 
     def _on_clear(self, btn) -> None:
-        self._results.clear()
-        self.comparison_output.clear_output()
+        _run_on_clear(self, btn)
 
     def _on_export(self, btn) -> None:
-        if self._molecule is None:
-            self.export_status.value = "Load a molecule first."
-            return
-        try:
-            from quantui import PySCFCalculation
-
-            calc = PySCFCalculation(
-                self._molecule,
-                method=self.method_dd.value,
-                basis=self.basis_dd.value,
-            )
-            fname = (
-                f"{self._molecule.get_formula()}"
-                f"_{self.method_dd.value}_{self.basis_dd.value}.py"
-            )
-            calc.generate_calculation_script(Path(fname))
-            self.export_status.value = f"Saved: {fname}"
-        except Exception as exc:
-            self.export_status.value = f"Error: {exc}"
+        _exp_on_export(self, btn)
 
     def _on_export_xyz(self, btn) -> None:
-        if self._molecule is None:
-            self.struct_export_status.value = "Load a molecule first."
-            return
-        try:
-            mol, method, basis = self._export_molecule_and_label()
-            fname = f"{mol.get_formula()}_{method}_{basis}.xyz"
-            xyz_body = mol.to_xyz_string()
-            full_xyz = (
-                f"{len(mol.atoms)}\n{mol.get_formula()} {method}/{basis}\n{xyz_body}\n"
-            )
-            dest = (
-                (self._last_result_dir / fname)
-                if self._last_result_dir
-                else Path(fname)
-            )
-            dest.write_text(full_xyz, encoding="utf-8")
-            self.struct_export_status.value = f"Saved: {dest}"
-        except Exception as exc:
-            self.struct_export_status.value = f"Error: {exc}"
+        _exp_on_export_xyz(self, btn)
 
     def _on_export_mol(self, btn) -> None:
-        if self._molecule is None:
-            self.struct_export_status.value = "Load a molecule first."
-            return
-        try:
-            from rdkit import Chem
-
-            mol, method, basis = self._export_molecule_and_label()
-            fname = f"{mol.get_formula()}_{method}_{basis}.mol"
-            rdmol = self._molecule_to_rdkit(mol)
-            if rdmol is None:
-                self.struct_export_status.value = "RDKit could not parse the structure."
-                return
-            mol_block = Chem.MolToMolBlock(rdmol)
-            dest = (
-                (self._last_result_dir / fname)
-                if self._last_result_dir
-                else Path(fname)
-            )
-            dest.write_text(mol_block, encoding="utf-8")
-            self.struct_export_status.value = f"Saved: {dest}"
-        except Exception as exc:
-            self.struct_export_status.value = f"Error: {exc}"
+        _exp_on_export_mol(self, btn)
 
     def _on_export_pdb(self, btn) -> None:
-        if self._molecule is None:
-            self.struct_export_status.value = "Load a molecule first."
-            return
-        try:
-            from rdkit import Chem
+        _exp_on_export_pdb(self, btn)
 
-            mol, method, basis = self._export_molecule_and_label()
-            fname = f"{mol.get_formula()}_{method}_{basis}.pdb"
-            rdmol = self._molecule_to_rdkit(mol)
-            if rdmol is None:
-                self.struct_export_status.value = "RDKit could not parse the structure."
-                return
-            pdb_block = Chem.MolToPDBBlock(rdmol)
-            dest = (
-                (self._last_result_dir / fname)
-                if self._last_result_dir
-                else Path(fname)
+    def _on_ir_export_plot(self, btn) -> None:
+        self._export_plot_figure(
+            fig=getattr(self, "_last_ir_fig", None),
+            stem="ir_spectrum",
+            fmt=self._ir_export_fmt_dd.value,
+            status_widget=self._ir_export_status,
+        )
+
+    def _on_uv_export_plot(self, btn) -> None:
+        self._export_plot_figure(
+            fig=getattr(self, "_last_uv_fig", None),
+            stem="uv_vis_spectrum",
+            fmt=self._uv_export_fmt_dd.value,
+            status_widget=self._uv_export_status,
+        )
+
+    def _on_orb_export_plot(self, btn) -> None:
+        self._export_plot_figure(
+            fig=getattr(self, "_last_orb_fig", None),
+            stem="orbital_energy_diagram",
+            fmt=self._orb_export_fmt_dd.value,
+            status_widget=self._orb_export_status,
+        )
+
+    def _on_pes_export_plot(self, btn) -> None:
+        self._export_plot_figure(
+            fig=getattr(self, "_last_pes_fig", None),
+            stem="pes_scan_profile",
+            fmt=self._pes_export_fmt_dd.value,
+            status_widget=self._pes_export_status,
+        )
+
+    def _export_plot_figure(
+        self,
+        *,
+        fig: Any,
+        stem: str,
+        fmt: str,
+        status_widget: widgets.HTML,
+    ) -> None:
+        """Export a plotly figure to HTML or PNG in the current result folder."""
+        if fig is None:
+            status_widget.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                "No plot available to export yet.</span>"
             )
-            dest.write_text(pdb_block, encoding="utf-8")
-            self.struct_export_status.value = f"Saved: {dest}"
+            return
+
+        import re as _re
+        from datetime import datetime as _dt
+
+        import plotly.io as _pio
+
+        target_dir = (
+            self._last_result_dir
+            if isinstance(self._last_result_dir, Path)
+            else self._get_results_dir()
+        )
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        safe_stem = _re.sub(r"[^A-Za-z0-9_.-]+", "_", stem.strip()) or "plot"
+        ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S")
+        ext = "png" if fmt == "png" else "html"
+        dest = target_dir / f"{safe_stem}_{ts}.{ext}"
+
+        try:
+            if fmt == "png":
+                # Requires kaleido for static image export.
+                fig.write_image(str(dest), scale=2)
+            else:
+                html_str = _pio.to_html(
+                    fig,
+                    include_plotlyjs=True,
+                    full_html=True,
+                    config={"responsive": True},
+                )
+                dest.write_text(html_str, encoding="utf-8")
+
+            status_widget.value = (
+                '<span style="color:#16a34a;font-size:12px">' f"Saved: {dest}</span>"
+            )
         except Exception as exc:
-            self.struct_export_status.value = f"Error: {exc}"
+            msg = str(exc)
+            if fmt == "png" and "kaleido" in msg.lower():
+                msg = (
+                    "PNG export requires kaleido. " "Install with: pip install kaleido"
+                )
+            status_widget.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                f"Export failed: {msg}</span>"
+            )
 
     def _export_molecule_and_label(self):
-        """Return (molecule, method, basis) for structure export.
-
-        For geo opt results, returns the final optimised geometry.
-        Falls back to the currently loaded molecule for all other calc types.
-        """
-        from quantui.optimizer import OptimizationResult
-
-        r = self._last_result
-        if isinstance(r, OptimizationResult):
-            mol = r.molecule
-        else:
-            assert self._molecule is not None
-            mol = self._molecule
-        method = (
-            getattr(r, "method", self.method_dd.value)
-            if r is not None
-            else self.method_dd.value
-        )
-        basis = (
-            getattr(r, "basis", self.basis_dd.value)
-            if r is not None
-            else self.basis_dd.value
-        )
-        return mol, method, basis
+        return _exp_export_molecule_and_label(self)
 
     @staticmethod
     def _molecule_to_rdkit(mol):
-        """Convert a Molecule to an RDKit Mol with inferred bonds (best-effort)."""
-        try:
-            from rdkit import Chem
-
-            xyz_block = (
-                f"{len(mol.atoms)}\n{mol.get_formula()}\n{mol.to_xyz_string()}\n"
-            )
-            rdmol = Chem.MolFromXYZBlock(xyz_block)
-            if rdmol is None:
-                return None
-            try:
-                from rdkit.Chem import rdDetermineBonds
-
-                rdDetermineBonds.DetermineBonds(rdmol, charge=mol.charge)
-            except Exception:
-                pass
-            return rdmol
-        except Exception:
-            return None
+        return _exp_molecule_to_rdkit(mol)
 
     # ── Compare ───────────────────────────────────────────────────────────
 
     def _on_compare_refresh(self, btn) -> None:
-        self._populate_compare_list()
+        self._activity_begin("Refreshing comparison choices...")
+        try:
+            _run_on_compare_refresh(self, btn)
+        finally:
+            self._activity_end()
 
     def _on_compare(self, btn) -> None:
-        selected = self.compare_select.value
-        if not selected or selected == ("",):
-            return
-        self.compare_output.clear_output(wait=True)
-        from quantui import (
-            comparison_table_html,
-            plot_comparison,
-            summary_from_saved_result,
-        )
-        from quantui.results_storage import load_result
-
-        summaries = []
-        valid_dirs: list = []
-        for path_str in selected:
-            if not path_str:
-                continue
-            try:
-                data = load_result(Path(path_str))
-                summaries.append(summary_from_saved_result(data))
-                valid_dirs.append(Path(path_str))
-            except Exception as exc:
-                with self.compare_output:
-                    display(
-                        HTML(
-                            f'<p style="color:#ef4444">Error loading result: {exc}</p>'
-                        )
-                    )
-        if not summaries:
-            return
-        with self.compare_output:
-            display(HTML(comparison_table_html(summaries)))
-            if len(summaries) > 1:
-                try:
-                    import matplotlib.pyplot as plt
-
-                    fig = plot_comparison(summaries)
-                    display(fig)
-                    plt.close(fig)
-                except Exception:
-                    pass
-            # Per-row → Analyse buttons
-            if valid_dirs:
-                _btns = []
-                for s, rdir in zip(summaries, valid_dirs):
-                    _short = f"{s.formula} {s.method}/{s.basis}"
-                    _btn = widgets.Button(
-                        description=f"→ Analyse  {_short}"[:48],
-                        button_style="info",
-                        layout=_layout(width="auto", max_width="340px"),
-                        tooltip=f"Load {_short} into the Analysis tab",
-                    )
-                    _btn.on_click(lambda _, rd=rdir: self._history_load_analysis(rd))
-                    _btns.append(_btn)
-                display(
-                    widgets.HTML(
-                        '<p style="margin:12px 0 4px;color:#475569;'
-                        'font-size:13px;font-weight:600">Analyse a result:</p>'
-                    )
-                )
-                display(widgets.VBox(_btns, layout=_layout(gap="4px")))
+        self._activity_begin("Building comparison view...")
+        try:
+            _run_on_compare(self, btn, layout_fn=_layout)
+        finally:
+            self._activity_end()
 
     def _on_compare_clear(self, btn) -> None:
-        self.compare_select.value = ()
-        self.compare_output.clear_output()
+        self._activity_begin("Clearing comparison output...")
+        try:
+            _run_on_compare_clear(self, btn)
+        finally:
+            self._activity_end()
 
     # ── History ───────────────────────────────────────────────────────────
 
     def _on_past_dd_changed(self, change) -> None:
-        path_str = change["new"]
-        # Hide result-specific panels whenever the selection changes so stale
-        # content from a previous "View log" click doesn't persist.
-        self._deactivate_all_ana_panels()
-        self._pending_traj_result = None
-        self._result_log_accordion.layout.display = "none"
-        self._result_dir_label.layout.display = "none"
-        self._iso_generate_btn.disabled = True
-        if not path_str:
-            self.past_output.clear_output()
-            return
-        self.past_output.clear_output()
-        with self.past_output:
-            try:
-                from quantui import load_result
-
-                _result_dir = Path(path_str)
-                data = load_result(_result_dir)
-                display(HTML(self._format_past_result(data, result_dir=_result_dir)))
-                _btn_res = widgets.Button(
-                    description="→ View Results",
-                    button_style="success",
-                    layout=_layout(width="130px"),
-                    tooltip="Show this result in the Results tab",
-                )
-                _btn_ana = widgets.Button(
-                    description="→ View Analysis",
-                    button_style="info",
-                    layout=_layout(width="140px"),
-                    tooltip="Load analysis panels and navigate to the Analysis tab",
-                )
-                _btn_res.on_click(
-                    lambda _, d=data, rd=_result_dir: self._history_load_results(d, rd)
-                )
-                _btn_ana.on_click(
-                    lambda _, rd=_result_dir: self._history_load_analysis(rd)
-                )
-                display(
-                    widgets.HBox(
-                        [_btn_res, _btn_ana],
-                        layout=_layout(gap="8px", margin="6px 0 0"),
-                    )
-                )
-            except Exception as exc:
-                print(f"Could not load result: {exc}")
+        _hist_on_past_dd_changed(self, change, layout_fn=_layout)
 
     def _on_past_refresh(self, btn) -> None:
-        self._refresh_results_browser()
+        self._activity_begin("Refreshing history list...")
+        try:
+            _run_on_past_refresh(self, btn)
+        finally:
+            self._activity_end()
 
     def _on_copy_results_path(self, btn) -> None:
-        p = self._get_results_dir()
-        p.mkdir(parents=True, exist_ok=True)
-        path_str = str(p).replace("\\", "\\\\").replace("'", "\\'")
-        display(Javascript(f"navigator.clipboard.writeText('{path_str}')"))
-        self.results_path_lbl.value = (
-            f'<span style="color:#22c55e;font-size:13px">Copied: {p}</span>'
-        )
-
-        def _reset():
-            time.sleep(3)
-            self.results_path_lbl.value = (
-                f'<span style="font-size:13px;color:#64748b">{p}</span>'
-            )
-
-        threading.Thread(target=_reset, daemon=True).start()
+        self._activity_begin("Copying results path...")
+        try:
+            _run_on_copy_results_path(self, btn)
+        finally:
+            self._activity_end()
 
     def _on_view_log(self, btn) -> None:
-        path_str = self.past_dd.value
-        if not path_str:
-            return
-        result_dir = Path(path_str)
+        self._activity_begin("Loading history log...")
         try:
-            _calc_log.log_event(
-                "history_view",
-                result_dir.name,
-                result_dir=result_dir.name,
-                session_id=self._session_id,
-            )
-        except Exception:
-            pass
-
-        # Read log text and populate log panel
-        log_path = result_dir / "pyscf.log"
-        if log_path.exists():
-            text = log_path.read_text(encoding="utf-8", errors="replace")
-            label = result_dir.name
-        else:
-            text = "(No pyscf.log found for this result.)"
-            label = ""
-        self._update_log_panel(text, label)
-        self._show_result_log(result_dir, text)
-
-        # Build analysis context from disk and apply via registry
-        ctx = self._build_history_context(result_dir)
-        if ctx is not None:
-            _data_stub = {"calc_type": ctx.calc_type, "spectra": ctx.spectra_data}
-            try:
-                _mol = self._mol_from_result_dir(result_dir, _data_stub)
-                if _mol is not None:
-                    self._show_result_3d(_mol, extra_output=self._analysis_mol_output)
-                else:
-                    self._analysis_mol_output.clear_output()
-            except Exception:
-                pass
-            self._apply_analysis_context(ctx)
-
-        self._goto_output_tab()
+            _hist_on_view_log(self, btn)
+            self._refresh_file_browser()
+        finally:
+            self._activity_end()
 
     def _mol_from_result_dir(self, result_dir: Path, data: dict):
-        """Try to reconstruct a displayable Molecule from a saved result directory.
-
-        Returns a Molecule or None if geometry data is not available.
-        Tries sources in order: frequency spectra → orbitals_meta → trajectory.
-        """
-        import json as _json
-
-        from quantui.molecule import Molecule
-
-        ct = data.get("calc_type", "")
-
-        # Frequency: geometry stored inside spectra.molecule
-        if ct == "frequency":
-            mol_data = data.get("spectra", {}).get("molecule", {})
-            if mol_data.get("atoms") and mol_data.get("coords"):
-                try:
-                    return Molecule(
-                        atoms=mol_data["atoms"],
-                        coordinates=mol_data["coords"],
-                        charge=mol_data.get("charge", 0),
-                        multiplicity=mol_data.get("multiplicity", 1),
-                    )
-                except Exception:
-                    pass
-
-        # Single point / Geo opt: atom list from orbitals_meta.json
-        meta_path = result_dir / "orbitals_meta.json"
-        if meta_path.exists():
-            try:
-                meta = _json.loads(meta_path.read_text())
-                mol_atom = meta.get("mol_atom")
-                if mol_atom:
-                    atoms = [sym for sym, _ in mol_atom]
-                    coords = [c for _, c in mol_atom]
-                    return Molecule(atoms=atoms, coordinates=coords)
-            except Exception:
-                pass
-
-        # Geo opt fallback: last step of trajectory.json
-        if ct == "geometry_opt":
-            traj_path = result_dir / "trajectory.json"
-            if traj_path.exists():
-                try:
-                    traj_data = _json.loads(traj_path.read_text())
-                    steps = traj_data.get("steps", [])
-                    if steps:
-                        return Molecule(
-                            atoms=traj_data["atoms"],
-                            coordinates=steps[-1]["coords"],
-                            charge=traj_data.get("charge", 0),
-                            multiplicity=traj_data.get("multiplicity", 1),
-                        )
-                except Exception:
-                    pass
-
-        return None
+        return _hist_mol_from_result_dir(result_dir, data)
 
     def _history_load_results(self, data: dict, result_dir: Path) -> None:
-        """Display a history result card in the Results tab and navigate there."""
-        self.result_output.clear_output()
-        with self.result_output:
-            display(HTML(self._format_past_result(data, result_dir=result_dir)))
-        self._result_dir_label.layout.display = "none"
-        # Also show 3D structure if geometry is recoverable
-        mol = self._mol_from_result_dir(result_dir, data)
-        if mol is not None:
-            self._show_result_3d(mol)
-        self.root_tab.selected_index = 1
+        self._activity_begin("Loading history result...")
+        try:
+            _hist_history_load_results(self, data, result_dir)
+            self._refresh_file_browser()
+        finally:
+            self._activity_end()
 
     def _history_load_analysis(self, result_dir: Path) -> None:
-        """Load analysis panels for a history result and navigate to Analysis tab."""
-        log_path = result_dir / "pyscf.log"
-        text = (
-            log_path.read_text(encoding="utf-8", errors="replace")
-            if log_path.exists()
-            else "(No pyscf.log found for this result.)"
-        )
-        self._update_log_panel(result_dir.name if log_path.exists() else "", text)
-        self._show_result_log(result_dir, text)
-
-        ctx = self._build_history_context(result_dir)
-        if ctx is not None:
-            _data_stub = {"calc_type": ctx.calc_type, "spectra": ctx.spectra_data}
-            try:
-                _mol = self._mol_from_result_dir(result_dir, _data_stub)
-                if _mol is not None:
-                    self._show_result_3d(_mol, extra_output=self._analysis_mol_output)
-                else:
-                    self._analysis_mol_output.clear_output()
-            except Exception:
-                pass
-            self._apply_analysis_context(ctx)
-
-        self.root_tab.selected_index = 2
+        self._activity_begin("Loading history analysis...")
+        try:
+            _hist_history_load_analysis(self, result_dir)
+            self._refresh_file_browser()
+        finally:
+            self._activity_end()
 
     def _build_history_context(self, result_dir: Path) -> Optional[_AnalysisContext]:
-        """Load result.json from *result_dir* and return an ``_AnalysisContext``.
-
-        Returns ``None`` if result.json cannot be read.
-        """
-        try:
-            from quantui import load_result
-
-            data = load_result(result_dir)
-        except Exception:
-            return None
-        return _AnalysisContext(
-            calc_type=data.get("calc_type", ""),
-            formula=data.get("formula", result_dir.name),
-            method=data.get("method", ""),
-            basis=data.get("basis", ""),
-            result_dir=result_dir,
-            spectra_data=data.get("spectra", {}),
-            source="history",
-        )
+        return _hist_build_history_context(result_dir, context_cls=_AnalysisContext)
 
     # ── Perf stats reset ──────────────────────────────────────────────────
 
     def _on_reset_click(self, btn) -> None:
-        self._reset_confirm_box.layout.display = ""
+        _run_on_reset_click(self, btn)
 
     def _on_confirm_yes(self, btn) -> None:
-        from quantui.calc_log import reset_perf_log
-
-        reset_perf_log()
-        self._reset_confirm_box.layout.display = "none"
-        self._refresh_perf_stats()
+        _run_on_confirm_yes(self, btn, reset_perf_log_fn=_calc_log.reset_perf_log)
 
     def _on_confirm_no(self, btn) -> None:
-        self._reset_confirm_box.layout.display = "none"
+        _run_on_confirm_no(self, btn)
 
     # ── Calibration ───────────────────────────────────────────────────────
 
     def _on_cal_run(self, btn) -> None:
-        import threading as _threading
-
-        mode = self._cal_mode_toggle.value
-        suite = _BENCHMARK_SUITE if mode == "short" else _BENCHMARK_SUITE_LONG
-        self._cal_stop_event = _threading.Event()
-        self._cal_run_btn.disabled = True
-        self._cal_mode_toggle.disabled = True
-        self._cal_stop_btn.layout.display = ""
-        self._cal_progress.max = len(suite)
-        self._cal_progress.value = 0
-        self._cal_progress.layout.display = ""
-        self._cal_step_label.layout.display = ""
-        self._cal_step_label.value = (
-            '<span style="font-size:12px;color:#475569">Starting…</span>'
+        _run_on_cal_run(
+            self,
+            btn,
+            benchmark_suite=_BENCHMARK_SUITE,
+            benchmark_suite_long=_BENCHMARK_SUITE_LONG,
         )
-        self._cal_results_html.value = ""
-
-        _threading.Thread(target=self._do_calibration, daemon=True).start()
 
     def _on_cal_stop(self, btn) -> None:
-        if hasattr(self, "_cal_stop_event"):
-            self._cal_stop_event.set()
+        _run_on_cal_stop(self, btn)
 
     def _do_calibration(self) -> None:
-        from quantui.benchmarks import run_calibration
-
-        mode = self._cal_mode_toggle.value
-
-        def _progress(
-            step_n: int, total: int, label: str, status: str, elapsed: float
-        ) -> None:
-            _icon = {"ok": "✓", "timed_out": "⏱", "stopped": "⛔", "error": "✗"}.get(
-                status, "?"
-            )
-            self._cal_progress.value = step_n
-            self._cal_step_label.value = (
-                f'<span style="font-size:12px;color:#475569">'
-                f"Step {step_n} / {total} — {label} "
-                f"[{_icon} {elapsed:.1f} s]</span>"
-            )
-
-        result = run_calibration(
-            progress_cb=_progress,
-            stop_event=self._cal_stop_event,
-            timeout_per_step=300.0 if mode == "long" else 120.0,
-            mode=mode,
-        )
-
-        # Render results table
-        _rows = "".join(
-            f"<tr>"
-            f'<td style="padding:2px 12px 2px 0;font-size:12px">{s.label}</td>'
-            f'<td style="padding:2px 8px 2px 0;font-size:12px;text-align:right">'
-            f"{s.n_electrons}</td>"
-            f'<td style="padding:2px 8px 2px 0;font-size:12px;text-align:right">'
-            f"{s.n_basis if s.n_basis is not None else '—'}</td>"
-            f'<td style="padding:2px 8px 2px 0;font-size:12px;text-align:right">'
-            f"{s.elapsed_s:.2f} s</td>"
-            f'<td style="padding:2px 0;font-size:12px">'
-            f'{"✓" if s.status == "ok" else ("⏱ timed out" if s.status == "timed_out" else ("⛔ stopped" if s.status == "stopped" else "✗ error"))}'
-            f"</td>"
-            f"</tr>"
-            for s in result.steps
-        )
-        _summary = f"Completed {result.n_completed} / {result.n_total} steps." + (
-            " (stopped early)" if result.stopped_early else ""
-        )
-        self._cal_results_html.value = (
-            f'<div style="margin-top:8px">'
-            f'<p style="font-size:13px;color:#374151;margin:0 0 6px">{_summary}</p>'
-            f'<table style="border-collapse:collapse">'
-            f"<tr>"
-            f'<th style="padding:2px 12px 2px 0;font-size:12px;text-align:left">Calculation</th>'
-            f'<th style="padding:2px 8px 2px 0;font-size:12px;text-align:right">e⁻</th>'
-            f'<th style="padding:2px 8px 2px 0;font-size:12px;text-align:right">Basis fns</th>'
-            f'<th style="padding:2px 8px 2px 0;font-size:12px;text-align:right">Wall time</th>'
-            f'<th style="padding:2px 0;font-size:12px">Status</th>'
-            f"</tr>"
-            f"{_rows}</table></div>"
-        )
-
-        self._cal_step_label.value = (
-            '<span style="font-size:12px;color:#16a34a"><b>Calibration complete.</b> '
-            "Time estimates are now active.</span>"
-            if result.n_completed > 0
-            else '<span style="font-size:12px;color:#dc2626">No steps completed.</span>'
-        )
-        self._cal_stop_btn.layout.display = "none"
-        self._cal_run_btn.disabled = not _PYSCF_AVAILABLE
-        self._cal_mode_toggle.disabled = False
-        self._refresh_perf_stats()
+        _run_do_calibration(self, pyscf_available=_PYSCF_AVAILABLE)
 
     # ── Output log ────────────────────────────────────────────────────────
 
     def _on_log_clear(self, btn) -> None:
-        self._log_output_html.value = (
-            '<span style="color:#94a3b8;font-size:13px">Log cleared.</span>'
-        )
-        self._log_source_lbl.value = ""
+        _run_on_log_clear(self, btn)
 
     # ── Issue reporting ───────────────────────────────────────────────────
 
     def _on_issue_btn(self, _=None) -> None:
-        """Show the issue report overlay."""
-        self._issue_textarea.value = ""
-        self._issue_status_html.value = ""
-        self._issue_overlay.layout.display = ""
+        _run_on_issue_btn(self, _)
 
     def _on_issue_cancel(self, _=None) -> None:
-        self._issue_overlay.layout.display = "none"
+        _run_on_issue_cancel(self, _)
 
     def _on_issue_submit(self, _=None) -> None:
-        text = self._issue_textarea.value.strip()
-        if not text:
-            self._issue_status_html.value = (
-                '<span style="color:#b91c1c;font-size:12px">'
-                "Please describe the issue before submitting.</span>"
-            )
-            return
-        self._issue_submit_btn.disabled = True
-        try:
-            issue_id = _issue_tracker.log_issue(
-                description=text,
-                context=self._build_issue_context(),
-                session_id=self._session_id,
-            )
-            self._issue_status_html.value = (
-                f'<span style="color:#16a34a;font-size:12px">'
-                f"&#10003; Issue #{issue_id} saved. Thank you!</span>"
-            )
-            self._issue_overlay.layout.display = "none"
-        except Exception as exc:
-            self._issue_status_html.value = (
-                f'<span style="color:#b91c1c;font-size:12px">Save failed: {exc}</span>'
-            )
-        finally:
-            self._issue_submit_btn.disabled = False
+        _run_on_issue_submit(self, issue_tracker_mod=_issue_tracker)
 
     def _build_issue_context(self) -> dict:
         """Snapshot the current app state to attach to an issue report."""
@@ -3625,65 +2414,23 @@ class QuantUIApp:
     # ── Clear log cache ───────────────────────────────────────────────────
 
     def _on_clear_log_cache(self, _=None) -> None:
-        """First click: reveal the confirmation button."""
-        self._clear_log_cache_confirm_btn.layout.display = ""
-        self._clear_log_cache_btn.disabled = True
+        _run_on_clear_log_cache(self, _)
 
     def _on_clear_log_cache_confirm(self, _=None) -> None:
-        """Second click: clear event_log.jsonl and reset the UI."""
-        try:
-            _calc_log.log_event(
-                "log_cleared",
-                "Session event log cleared by user",
-                session_id=self._session_id,
-            )
-            _calc_log.clear_event_log()
-        except Exception:
-            pass
-        self._clear_log_cache_confirm_btn.layout.display = "none"
-        self._clear_log_cache_btn.disabled = False
+        _run_on_clear_log_cache_confirm(self, calc_log_mod=_calc_log)
 
     # ── Exit ──────────────────────────────────────────────────────────────
 
     def _on_exit_clicked(self, _=None) -> None:
-        self._exit_btn.description = "Exiting…"
-        self._exit_btn.disabled = True
-        self._welcome_html.value = (
-            '<div style="display:flex;align-items:center;justify-content:center;'
-            'padding:32px;gap:16px">'
-            '<svg width="40" height="40" viewBox="0 0 280 280" xmlns="http://www.w3.org/2000/svg">'
-            '<circle cx="140" cy="140" r="48" fill="rgba(37,99,235,0.15)"/>'
-            '<circle cx="140" cy="140" r="14" fill="#2563eb"/>'
-            '<circle cx="140" cy="140" r="8" fill="#60a5fa"/>'
-            "</svg>"
-            '<div style="font-size:20px;color:#475569">'
-            "QuantUI has shut down. You may close this tab.</div>"
-            "</div>"
-        )
-
-        def _do_exit() -> None:
-            import signal
-            import time
-
-            time.sleep(0.6)
-            try:
-                # Signal the Voilà/Jupyter server process (our parent) to exit cleanly.
-                os.kill(os.getppid(), signal.SIGTERM)
-            except Exception:
-                pass
-            # Terminate the kernel process regardless.
-            os._exit(0)
-
-        threading.Thread(target=_do_exit, daemon=True).start()
+        _run_on_exit_clicked(self, _)
 
     # ── Help ──────────────────────────────────────────────────────────────
 
     def _on_help_toggle(self, _=None) -> None:
-        visible = self.help_tab_panel.layout.display != "none"
-        self.help_tab_panel.layout.display = "none" if visible else ""
+        _run_on_help_toggle(self, _)
 
     def _on_help_topic_changed(self, change=None) -> None:
-        self._render_help_topic()
+        _run_on_help_topic_changed(self, change)
 
     # ══ LOGIC METHODS ════════════════════════════════════════════════════════
 
@@ -3773,8 +2520,7 @@ class QuantUIApp:
             callback(*args, **kwargs)
             return
 
-        ip = get_ipython()
-        io_loop = getattr(getattr(ip, "kernel", None), "io_loop", None)
+        io_loop = self._get_kernel_io_loop()
         if io_loop is not None:
             io_loop.add_callback(callback, *args, **kwargs)
             return
@@ -3783,6 +2529,97 @@ class QuantUIApp:
         # is available. This preserves existing behaviour, but the normal
         # notebook path above keeps rendering off the worker thread.
         callback(*args, **kwargs)
+
+    def _install_run_output_scroll_guard(self) -> None:
+        """Install a JS guard that preserves live-log scroll behavior.
+
+        The Output widget can reset scroll position during high-frequency
+        append_stdout updates in notebook/Voila frontends. This observer keeps
+        the log pinned to the bottom while the user is already at the bottom,
+        and preserves manual scrolling when the user scrolls up.
+        """
+        if self._run_output_scroll_guard_installed:
+            return
+
+        js_code = r"""
+(() => {
+    const ROOT_CLASS = "quantui-run-output";
+    const ROOT_MARK = "data-quantui-run-scroll-guard";
+
+    function selectScroller(root) {
+        const candidates = [
+            root,
+            ...root.querySelectorAll(
+                ".jp-OutputArea-output, .output_scroll, .jupyter-widgets-output-area, .output_subarea"
+            ),
+        ];
+        for (const el of candidates) {
+            const style = window.getComputedStyle(el);
+            const overflowY = (style && style.overflowY) || "";
+            const canScroll = /auto|scroll/.test(overflowY);
+            if (canScroll || el.scrollHeight > el.clientHeight + 2) {
+                return el;
+            }
+        }
+        return root;
+    }
+
+    function installForRoot(root) {
+        if (!root || root.getAttribute(ROOT_MARK) === "1") {
+            return;
+        }
+
+        const scroller = selectScroller(root);
+        if (!scroller) {
+            return;
+        }
+
+        root.setAttribute(ROOT_MARK, "1");
+
+        const thresholdPx = 24;
+        let stickToBottom = true;
+
+        const updateStickFlag = () => {
+            const dist = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+            stickToBottom = dist <= thresholdPx;
+        };
+
+        const pinIfNeeded = () => {
+            if (stickToBottom) {
+                scroller.scrollTop = scroller.scrollHeight;
+            }
+        };
+
+        scroller.addEventListener("scroll", updateStickFlag, { passive: true });
+
+        const obs = new MutationObserver(pinIfNeeded);
+        obs.observe(root, { childList: true, subtree: true, characterData: true });
+
+        updateStickFlag();
+        pinIfNeeded();
+    }
+
+    function scanAndInstall() {
+        const roots = document.querySelectorAll(`.${ROOT_CLASS}`);
+        roots.forEach(installForRoot);
+    }
+
+    scanAndInstall();
+
+    const bodyObserver = new MutationObserver(() => {
+        scanAndInstall();
+    });
+    bodyObserver.observe(document.body, { childList: true, subtree: true });
+})();
+"""
+
+        try:
+            with self._exit_output:
+                display(Javascript(js_code))
+            self._run_output_scroll_guard_installed = True
+        except Exception:
+            # Non-notebook contexts may not support JS display; fail silently.
+            self._run_output_scroll_guard_installed = False
 
     def _set_molecule_state_only(self, mol) -> None:
         """Apply only thread-safe molecule state updates."""
@@ -3798,26 +2635,12 @@ class QuantUIApp:
         self._queue_main_thread_callback(self._set_molecule, mol, status_message)
 
     def _show_result_3d(self, molecule, extra_output=None) -> None:
-        """Render molecule 3D structure in the result visualization panel.
-
-        Renders into ``result_viz_output`` and, if supplied, into *extra_output*
-        as well (used to mirror the structure into the Analysis tab viewer).
-        Safe to call from a background thread — uses ``with output:`` context.
-        """
-        if _display_molecule is None or molecule is None:
-            return
-        for _out in [self.result_viz_output, extra_output]:
-            if _out is None:
-                continue
-            _out.clear_output()
-            with _out:
-                _display_molecule(
-                    molecule,
-                    backend=self._viz_backend,
-                    style=self._viz_style,
-                    lighting=self._viz_lighting,
-                    bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
-                )
+        _viz_show_result_3d(
+            self,
+            molecule,
+            extra_output,
+            display_molecule_fn=_display_molecule,
+        )
 
     def _show_result_log(self, saved_dir: Path, log_text: str) -> None:
         """Populate the result-directory label and output-log accordion.
@@ -3855,1018 +2678,100 @@ class QuantUIApp:
         self._result_log_accordion.layout.display = ""
 
     def _on_traj_expand(self, change) -> None:
-        """Lazily generate the trajectory animation when the accordion is first opened."""
-        if change["new"] != 0:
-            return
-        result = self._pending_traj_result
-        if result is None:
-            return
-        self._pending_traj_result = None
+        _viz_on_traj_expand(self, change)
 
-        from IPython.display import HTML as _H
-        from IPython.display import display as _d
-
-        self.traj_output.clear_output()
-        with self.traj_output:
-            _d(
-                _H(
-                    '<p style="color:#555;font-style:italic;padding:8px">Loading trajectory viewer…</p>'
-                )
-            )
-
-        def _render():
-            try:
-                self._show_opt_trajectory(result)
-            except Exception as exc:
-                from IPython.display import HTML as _H2
-                from IPython.display import display as _d2
-
-                self.traj_output.clear_output()
-                with self.traj_output:
-                    _d2(
-                        _H2(
-                            f'<p style="color:#b91c1c;padding:8px">⚠ Trajectory rendering failed: {exc}</p>'
-                        )
-                    )
-
-        threading.Thread(target=_render, daemon=True).start()
-
-    def _show_opt_trajectory(self, opt_result) -> None:
-        """Build the trajectory carousel and energy chart in the trajectory panel.
-
-        Shows a step slider for flipping through frames and an energy-convergence
-        chart.  An Export button generates a standalone HTML animation file on demand.
-        Safe to call from a background thread.
-
-        When plotlymol is available:
-        - Bond perception runs once on frame 0 (RDKit DetermineConnectivity is slow).
-        - All remaining frames are pre-rendered in a background thread pool so
-          slider navigation is instant after a few seconds.
-        """
-        import concurrent.futures
-
-        from IPython.display import display as _ipy_display
-
-        # Support both OptimizationResult (.trajectory) and PESScanResult (.coordinates_list)
-        traj = getattr(opt_result, "trajectory", None) or getattr(
-            opt_result, "coordinates_list", []
+    def _show_opt_trajectory(
+        self, opt_result, render_token: Optional[int] = None
+    ) -> None:
+        _viz_show_opt_trajectory(
+            self,
+            opt_result,
+            layout_fn=_layout,
+            render_token=render_token,
         )
-        energies = opt_result.energies_hartree
-        n = len(traj)
-        if n < 2:
-            self.traj_output.clear_output()
-            with self.traj_output:
-                _ipy_display(
-                    HTML(
-                        '<p style="color:#666;padding:8px">'
-                        "No trajectory data available (single-frame result).</p>"
-                    )
-                )
-            return
-
-        _HARTREE_TO_KCAL = 627.5094740631
-        e0 = energies[0] if energies else 0.0
-        rel_e = [(e - e0) * _HARTREE_TO_KCAL for e in energies] if energies else []
-
-        # --- Energy convergence chart ---
-        _has_plotly = False
-        try:
-            import plotly.graph_objects as go
-
-            energy_fig = go.Figure(
-                go.Scatter(
-                    x=list(range(n)),
-                    y=rel_e,
-                    mode="lines+markers",
-                    name="ΔE",
-                    line=dict(color="#2563eb", width=2),
-                    marker=dict(size=6),
-                )
-            )
-            energy_fig.update_layout(
-                title="Energy Convergence",
-                xaxis_title="Step",
-                yaxis_title="ΔE (kcal/mol)",
-                height=220,
-                margin=dict(l=60, r=20, t=40, b=40),
-            )
-            _has_plotly = True
-        except ImportError:
-            pass
-
-        # --- Pre-build XYZ blocks (reused by carousel, fast path, and export) ---
-        _charge = traj[0].charge
-        _xyzblocks = [
-            f"{len(m.atoms)}\n{m.get_formula()}\n{m.to_xyz_string()}" for m in traj
-        ]
-        _FRAME_W, _FRAME_H, _FRAME_RES = 460, 340, 8
-
-        # --- Attempt to set up fast-path: bond perception once on frame 0 ---
-        # draw_3D_mol accepts a pre-parsed RDKit mol and skips bond perception,
-        # so we only pay that cost for the first frame instead of every frame.
-        _ref_mol = None
-        _plotlymol_fast = False
-        try:
-            from plotlymol3d import (
-                draw_3D_mol as _draw_3D_mol,
-            )
-            from plotlymol3d import (
-                format_figure as _fmt_fig,
-            )
-            from plotlymol3d import (
-                format_lighting as _fmt_light,
-            )
-            from plotlymol3d import (
-                make_subplots as _make_subplots,
-            )
-            from plotlymol3d import (
-                xyzblock_to_rdkitmol as _xyz_to_rdkit,
-            )
-            from rdkit import Chem as _Chem
-
-            from quantui.visualization_py3dmol import LIGHTING_PRESETS as _LP
-
-            _ref_mol = _xyz_to_rdkit(_xyzblocks[0], charge=_charge)
-            _plotlymol_fast = _ref_mol is not None
-        except Exception:
-            pass
-
-        def _build_fig_fast(idx: int):
-            """Reuse frame-0 bond topology; only swap in new atom positions."""
-            mol_xyz = _Chem.MolFromXYZBlock(_xyzblocks[idx] + "\n")
-            if mol_xyz is None:
-                return None
-            rw = _Chem.RWMol(_ref_mol)
-            conf_src = mol_xyz.GetConformer()
-            conf_dst = rw.GetConformer()
-            for atom_idx in range(rw.GetNumAtoms()):
-                conf_dst.SetAtomPosition(atom_idx, conf_src.GetAtomPosition(atom_idx))
-            fig = _make_subplots(rows=1, cols=1, specs=[[{"type": "scene"}]])
-            _draw_3D_mol(fig, rw.GetMol(), _FRAME_RES, "ball+stick")
-            fig = _fmt_fig(fig)
-            fig = _fmt_light(fig, **_LP.get("soft", _LP["soft"]))
-            _scene_bg = self._plotly_theme_colors()["scene_bgcolor"]
-            fig.update_layout(
-                width=_FRAME_W,
-                height=_FRAME_H,
-                paper_bgcolor="white",
-                scene=dict(bgcolor=_scene_bg),
-                margin=dict(l=0, r=0, t=0, b=0),
-            )
-            return fig
-
-        def _build_fig(idx: int):
-            """Return (kind, obj) for frame idx; fast path when bonds are cached."""
-            if _plotlymol_fast:
-                try:
-                    fig = _build_fig_fast(idx)
-                    if fig is not None:
-                        return ("plotly", fig)
-                except Exception:
-                    pass
-            # Slow fallback: full plotlymol pipeline
-            try:
-                from quantui.visualization_py3dmol import visualize_molecule_plotlymol
-
-                fig = visualize_molecule_plotlymol(
-                    traj[idx],
-                    mode="ball+stick",
-                    resolution=_FRAME_RES,
-                    width=_FRAME_W,
-                    height=_FRAME_H,
-                )
-                _scene_bg = self._plotly_theme_colors()["scene_bgcolor"]
-                fig.update_layout(paper_bgcolor="white", scene=dict(bgcolor=_scene_bg))
-                return ("plotly", fig)
-            except ImportError:
-                pass
-            # Last resort: py3Dmol
-            try:
-                import py3Dmol as _p3d
-
-                view = _p3d.view(width=_FRAME_W, height=_FRAME_H)
-                view.addModel(_xyzblocks[idx], "xyz")
-                view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
-                view.setBackgroundColor(
-                    "white" if self.theme_btn.value == "Light" else "#1e1e1e"
-                )
-                view.zoomTo()
-                return ("py3dmol", view)
-            except Exception as exc:
-                return ("error", str(exc))
-
-        _frame_cache: dict = {}
-
-        # --- Carousel controls ---
-        _step_slider = widgets.IntSlider(
-            value=0,
-            min=0,
-            max=n - 1,
-            description="Step:",
-            continuous_update=False,
-            style={"description_width": "40px"},
-            layout=_layout(width="360px"),
-        )
-        _step_info = widgets.HTML(value=self._traj_step_html(0, traj, energies, rel_e))
-        _frame_out = widgets.Output(layout=_layout(min_height="340px"))
-        _cache_label = widgets.HTML(
-            value=f'<span style="color:#888;font-size:11px;font-style:italic">'
-            f"Pre-rendering frames… 0 / {n}</span>"
-        )
-
-        def _display_frame(idx: int) -> None:
-            kind, obj = _frame_cache[idx]
-            _frame_out.clear_output()
-            with _frame_out:
-                if kind == "error":
-                    _ipy_display(
-                        HTML(
-                            f'<p style="color:#b91c1c;padding:8px">Frame render failed: {obj}</p>'
-                        )
-                    )
-                else:
-                    _ipy_display(obj)
-
-        def _update_frame(change) -> None:
-            idx = change["new"]
-            _step_info.value = self._traj_step_html(idx, traj, energies, rel_e)
-            if idx in _frame_cache:
-                _display_frame(idx)
-                return
-            _frame_out.clear_output()
-            with _frame_out:
-                _ipy_display(
-                    HTML(
-                        '<p style="color:#555;font-style:italic;padding:8px">Rendering…</p>'
-                    )
-                )
-
-            def _on_demand():
-                try:
-                    _frame_cache[idx] = _build_fig(idx)
-                    _display_frame(idx)
-                except Exception as exc:
-                    _frame_out.clear_output()
-                    with _frame_out:
-                        _ipy_display(
-                            HTML(
-                                f'<p style="color:#b91c1c;padding:8px">Frame render failed: {exc}</p>'
-                            )
-                        )
-
-            threading.Thread(target=_on_demand, daemon=True).start()
-
-        _step_slider.observe(self._safe_cb(_update_frame), names="value")
-
-        # --- Export button ---
-        _export_btn = widgets.Button(
-            description="Export Animation",
-            icon="download",
-            layout=_layout(width="160px", margin="0 0 0 12px"),
-            tooltip="Generate a standalone HTML animation file (may take a minute)",
-        )
-        _export_status = widgets.HTML()
-
-        def _on_export(_btn):
-            _btn.disabled = True
-            _export_status.value = (
-                f'<span style="color:#555;font-style:italic">'
-                f"Generating {n}-frame animation, please wait…</span>"
-            )
-
-            def _do_export():
-                try:
-                    from plotlymol3d import create_trajectory_animation
-
-                    anim_fig = create_trajectory_animation(
-                        xyzblocks=_xyzblocks,
-                        energies_hartree=energies if energies else None,
-                        charge=_charge,
-                        mode="ball+stick",
-                        resolution=12,
-                        title=f"Geo Opt: {opt_result.formula}",
-                    )
-                    _result_dir = getattr(self, "_last_result_dir", None)
-                    out_path = (
-                        _result_dir / "trajectory_animation.html"
-                        if _result_dir is not None
-                        else Path.home() / f"{opt_result.formula}_trajectory.html"
-                    )
-                    anim_fig.write_html(str(out_path))
-                    _export_status.value = (
-                        f'<span style="color:#16a34a;font-size:12px">'
-                        f"✓ Saved: {out_path}</span>"
-                    )
-                except Exception as exc:
-                    _export_status.value = (
-                        f'<span style="color:#b91c1c">Export failed: {exc}</span>'
-                    )
-                finally:
-                    _btn.disabled = False
-
-            threading.Thread(target=_do_export, daemon=True).start()
-
-        _export_btn.on_click(_on_export)
-
-        # --- Assemble layout ---
-        _header = widgets.HBox(
-            [_step_slider, _export_btn],
-            layout=_layout(align_items="center", margin="4px 0"),
-        )
-        _panel = widgets.VBox(
-            [_header, _step_info, _cache_label, _frame_out, _export_status]
-        )
-
-        # Display panel immediately — clears the “Loading…” message right away.
-        self.traj_output.clear_output()
-        with self.traj_output:
-            if _has_plotly and rel_e:
-                _ipy_display(energy_fig)
-            _ipy_display(_panel)
-
-        # Show placeholder while frame 0 renders in the background.
-        _frame_out.clear_output()
-        with _frame_out:
-            _ipy_display(
-                HTML(
-                    '<p style="color:#555;font-style:italic;padding:8px">'
-                    "Rendering frame 0…</p>"
-                )
-            )
-
-        # Render all frames (0 first, then 1+) in a background thread.
-        def _prerender_all() -> None:
-            try:
-                _frame_cache[0] = _build_fig(0)
-                _display_frame(0)
-                _cache_label.value = (
-                    f'<span style="color:#888;font-size:11px;font-style:italic">'
-                    f"Pre-rendering frames… 1 / {n}</span>"
-                )
-                if n > 1:
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-                        futures = {pool.submit(_build_fig, i): i for i in range(1, n)}
-                        done = 1
-                        for fut in concurrent.futures.as_completed(futures):
-                            i = futures[fut]
-                            try:
-                                _frame_cache[i] = fut.result()
-                            except Exception:
-                                pass
-                            done += 1
-                            _cache_label.value = (
-                                f'<span style="color:#888;font-size:11px;font-style:italic">'
-                                f"Pre-rendering frames… {done} / {n}</span>"
-                            )
-            except Exception:
-                pass
-            _cache_label.value = (
-                f'<span style="color:#16a34a;font-size:11px">'
-                f"✓ All {n} frames ready</span>"
-            )
-
-        threading.Thread(target=_prerender_all, daemon=True).start()
 
     def _traj_step_html(self, step: int, traj, energies, rel_e) -> str:
-        """One-line info label for the given trajectory step index."""
-        n = len(traj)
-        mol = traj[step]
-        e_abs = f"{energies[step]:.8f} Ha" if energies and step < len(energies) else "—"
-        delta = (
-            f" &nbsp;·&nbsp; ΔE = {rel_e[step]:+.3f} kcal/mol"
-            if rel_e and step < len(rel_e)
-            else ""
-        )
-        return (
-            f'<span style="font-size:12px;color:#666">'
-            f"Step {step} / {n - 1} &nbsp;·&nbsp; {mol.get_formula()}"
-            f" &nbsp;·&nbsp; E = {e_abs}{delta}</span>"
-        )
+        return _viz_traj_step_html(self, step, traj, energies, rel_e)
 
     def _render_traj_frame(self, molecule, output_widget) -> None:
-        """Render a single trajectory frame into output_widget (thread-safe).
-
-        Tries plotlymol first, falls back to py3Dmol.
-        """
-        try:
-            from quantui.visualization_py3dmol import visualize_molecule_plotlymol
-
-            fig = visualize_molecule_plotlymol(
-                molecule, mode="ball+stick", resolution=8, width=460, height=340
-            )
-            _scene_bg = self._plotly_theme_colors()["scene_bgcolor"]
-            fig.update_layout(paper_bgcolor="white", scene=dict(bgcolor=_scene_bg))
-            output_widget.clear_output()
-            with output_widget:
-                display(fig)
-            return
-        except ImportError:
-            pass
-
-        # Fallback: py3Dmol
-        try:
-            import py3Dmol as _p3d
-
-            xyz = (
-                f"{len(molecule.atoms)}\n"
-                f"{molecule.get_formula()}\n"
-                f"{molecule.to_xyz_string()}"
-            )
-            view = _p3d.view(width=460, height=340)
-            view.addModel(xyz, "xyz")
-            view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
-            view.setBackgroundColor("white")
-            view.zoomTo()
-            output_widget.clear_output()
-            with output_widget:
-                display(view)
-        except Exception as exc:
-            output_widget.clear_output()
-            with output_widget:
-                display(
-                    HTML(
-                        f'<p style="color:#b91c1c;padding:8px">Frame render failed: {exc}</p>'
-                    )
-                )
+        _viz_render_traj_frame(self, molecule, output_widget)
 
     def _build_vib_data_from_freq_result(self, freq_result, molecule):
-        """Construct a ``plotlymol3d.VibrationalData`` from a FreqResult.
-
-        Args:
-            freq_result: ``FreqResult`` with ``displacements`` populated.
-            molecule: The ``Molecule`` used for the frequency calculation.
-
-        Returns:
-            ``VibrationalData`` or ``None`` if prerequisites are missing.
-        """
-        try:
-            import numpy as np
-            from plotlymol3d import VibrationalData, VibrationalMode
-        except ImportError:
-            return None
-
-        try:
-            return self._build_vib_data_inner(
-                freq_result, molecule, np, VibrationalData, VibrationalMode
-            )
-        except Exception as _e:
-            try:
-                from quantui import calc_log as _clog
-
-                _clog.log_event("vib_data_error", f"{type(_e).__name__}: {_e}"[:300])
-            except Exception:
-                pass
-            return None
+        return _viz_build_vib_data_from_freq_result(self, freq_result, molecule)
 
     def _build_vib_data_inner(
         self, freq_result, molecule, np, VibrationalData, VibrationalMode
     ):
-        displacements = getattr(freq_result, "displacements", None)
-        if displacements is None:
-            return None
-
-        freqs = freq_result.frequencies_cm1
-        intensities = freq_result.ir_intensities
-        n_modes = len(freqs)
-
-        coords = np.array(molecule.coordinates, dtype=float)
-
-        # Map element symbols to atomic numbers using a common-elements table.
-        # ASE is not required — this covers all elements students will encounter.
-        _Z = {
-            "H": 1,
-            "He": 2,
-            "Li": 3,
-            "Be": 4,
-            "B": 5,
-            "C": 6,
-            "N": 7,
-            "O": 8,
-            "F": 9,
-            "Ne": 10,
-            "Na": 11,
-            "Mg": 12,
-            "Al": 13,
-            "Si": 14,
-            "P": 15,
-            "S": 16,
-            "Cl": 17,
-            "Ar": 18,
-            "K": 19,
-            "Ca": 20,
-            "Br": 35,
-            "I": 53,
-        }
-        atomic_numbers: List[int] = [_Z.get(sym, 0) for sym in molecule.atoms]
-
-        modes = []
-        for i in range(n_modes):
-            freq = freqs[i]
-            ir_inten = intensities[i] if i < len(intensities) else None
-            displ = np.array(displacements[i], dtype=float)
-            modes.append(
-                VibrationalMode(
-                    mode_number=i + 1,
-                    frequency=float(freq),
-                    ir_intensity=ir_inten,
-                    displacement_vectors=displ,
-                    is_imaginary=freq < 0,
-                )
-            )
-
-        return VibrationalData(
-            coordinates=coords,
-            atomic_numbers=atomic_numbers,
-            modes=modes,
-            source_file="quantui_freq_calc",
-            program="pyscf",
+        return _viz_build_vib_data_inner(
+            self, freq_result, molecule, np, VibrationalData, VibrationalMode
         )
 
     def _show_vib_animation(self, freq_result, molecule) -> bool:
-        """Populate the vibrational animation accordion after a Frequency result.
-
-        Builds a ``VibrationalData`` from the result, populates the mode selector
-        dropdown, and renders the animation for the first non-trivial mode.
-        Returns True if populated, False if data is missing or plotlyMol unavailable.
-        Does NOT call ``_activate_ana_panel``; that is handled by the registry.
-        """
-        vib_data = self._build_vib_data_from_freq_result(freq_result, molecule)
-        if vib_data is None:
-            return False
-
-        freqs = freq_result.frequencies_cm1
-        if not freqs:
-            return False
-
-        # Build dropdown options: one entry per mode with frequency label.
-        # Skip near-zero translation/rotation modes (|ν| < 10 cm⁻¹).
-        options = []
-        for m in vib_data.modes:
-            freq_val = m.frequency
-            if abs(freq_val) < 10:
-                continue
-            label = (
-                f"Mode {m.mode_number}: {freq_val:.1f} cm⁻¹"
-                if freq_val >= 0
-                else f"Mode {m.mode_number}: {freq_val:.1f} cm⁻¹ (imaginary, TS?)"
-            )
-            options.append((label, m.mode_number))
-
-        if not options:
-            return False
-
-        self.vib_mode_dd.options = options
-        self.vib_mode_dd.value = options[0][1]
-
-        # Store vib_data for callback use.
-        self._last_vib_data = vib_data
-        self._last_vib_molecule = molecule
-
-        # Show loading indicator and render in a background thread so _do_run
-        # is not blocked while the animation is generated (can take several seconds).
-        # append_display_data is used instead of display() because this method is
-        # called from the _do_run background thread; display(HTML(...)) is not
-        # thread-safe for plain HTML but append_display_data is.
-        _first_label, _first_mode = options[0]
-        self.vib_output.clear_output()
-        self.vib_output.append_display_data(
-            HTML(
-                f'<p style="color:#555;font-style:italic;padding:8px">'
-                f"⏳ Rendering vibrational animation ({_first_label})…</p>"
-            )
-        )
-        threading.Thread(
-            target=self._render_vib_mode,
-            args=(vib_data, molecule, _first_mode),
-            daemon=True,
-        ).start()
-
-        return True
+        return _viz_show_vib_animation(self, freq_result, molecule)
 
     def _show_ir_spectrum(self, freq_result) -> bool:
-        """Populate the IR Spectrum accordion after a Frequency result.
-
-        Returns True if populated, False if no frequency data at all.
-        When IR intensities are unavailable, falls back to unit weights so the
-        panel still activates showing frequency positions.
-        Does NOT call ``_activate_ana_panel``; that is handled by the registry.
-        """
-        freqs = list(freq_result.frequencies_cm1 or [])
-        ints = list(getattr(freq_result, "ir_intensities", None) or [])
-        if not freqs:
-            return False
-
-        # When intensities are missing, substitute unit weights so the stick
-        # plot still shows frequency positions; accordion title reflects this.
-        self._ir_intensities_real = bool(ints)
-        if not ints:
-            ints = [1.0] * len(freqs)
-        self._ir_accordion.set_title(
-            0,
-            (
-                "IR Spectrum"
-                if self._ir_intensities_real
-                else "IR Spectrum (positions only — intensities unavailable)"
-            ),
-        )
-
-        # Store for callbacks
-        self._last_ir_freqs = freqs
-        self._last_ir_ints = ints
-
-        self._update_ir_figure("Stick", 20.0)
-
-        # _show_ir_spectrum may run from the _do_run background thread.
-        # Wire observers and set widget state on the main thread.
-        self._queue_main_thread_callback(self._wire_ir_controls)
-
-        return True
+        return _viz_show_ir_spectrum(self, freq_result)
 
     def _wire_ir_controls(self) -> None:
-        """(Re)bind IR controls and reset defaults on the main thread."""
-        self._ir_mode_toggle.unobserve_all()
-        self._ir_fwhm_slider.unobserve_all()
-        self._ir_mode_toggle.observe(
-            self._safe_cb(self._on_ir_mode_changed), names="value"
-        )
-        self._ir_fwhm_slider.observe(
-            self._safe_cb(self._on_ir_fwhm_changed), names="value"
-        )
-
-        # Reset toggle/slider to defaults
-        self._ir_mode_toggle.value = "Stick"
-        self._ir_fwhm_slider.value = 20.0
-        self._ir_fwhm_slider.layout.display = "none"
+        _viz_wire_ir_controls(self)
 
     def _on_ir_mode_changed(self, change) -> None:
-        """Handle Stick/Broadened mode changes for IR panel."""
-        mode = change["new"]
-        try:
-            _calc_log.log_event(
-                "ir_mode_change",
-                mode,
-                mode=mode,
-                session_id=self._session_id,
-            )
-        except Exception:
-            pass
-        self._ir_fwhm_slider.layout.display = "" if mode == "Broadened" else "none"
-        self._update_ir_figure(mode, self._ir_fwhm_slider.value)
+        _viz_on_ir_mode_changed(self, change)
 
     def _on_ir_fwhm_changed(self, change) -> None:
-        """Re-render broadened IR trace when line width slider changes."""
-        if self._ir_mode_toggle.value == "Broadened":
-            self._update_ir_figure("Broadened", change["new"])
+        _viz_on_ir_fwhm_changed(self, change)
 
     def _update_ir_figure(self, mode: str, fwhm: float) -> None:
-        """Re-render the IR spectrum chart for the given mode and FWHM."""
-        try:
-            import plotly.io as _pio
+        _viz_update_ir_figure(self, mode, fwhm)
 
-            from quantui.ir_plot import plot_ir_spectrum
+    def _show_uv_vis_spectrum(
+        self,
+        energies_ev: list[float],
+        oscillator_strengths: list[float],
+        wavelengths_nm: list[float],
+    ) -> bool:
+        return _viz_show_uv_vis_spectrum(
+            self,
+            energies_ev,
+            oscillator_strengths,
+            wavelengths_nm,
+        )
 
-            _ytitle = (
-                "IR Intensity (km/mol)"
-                if getattr(self, "_ir_intensities_real", True)
-                else "Relative intensity (a.u.)"
-            )
-            fig = plot_ir_spectrum(
-                self._last_ir_freqs,
-                self._last_ir_ints,
-                mode=mode.lower(),
-                fwhm=fwhm,
-                yaxis_title=_ytitle,
-            )
-            self._apply_plotly_theme(fig)
-            self._set_html_output(
-                self._ir_fig,
-                _pio.to_html(
-                    fig,
-                    include_plotlyjs="require",
-                    full_html=False,
-                    config={"responsive": True},
-                ),
-            )
-        except Exception as _e:
-            try:
-                from quantui import calc_log as _clog
+    def _wire_uv_controls(self) -> None:
+        _viz_wire_uv_controls(self)
 
-                _clog.log_event("ir_fig_error", f"{type(_e).__name__}: {_e}"[:300])
-            except Exception:
-                pass
+    def _on_uv_mode_changed(self, change) -> None:
+        _viz_on_uv_mode_changed(self, change)
+
+    def _on_uv_fwhm_changed(self, change) -> None:
+        _viz_on_uv_fwhm_changed(self, change)
+
+    def _update_uv_vis_figure(self, mode: str, fwhm: float) -> None:
+        _viz_update_uv_vis_figure(self, mode, fwhm)
 
     def _show_orbital_diagram(self, result) -> bool:
-        """Build and reveal the interactive orbital diagram accordion.
-
-        Returns True if the diagram was populated, False if data is missing.
-        Does NOT call ``_activate_ana_panel``; that is handled by the registry.
-        """
-        mo_energy = getattr(result, "mo_energy_hartree", None)
-        mo_occ = getattr(result, "mo_occ", None)
-        if mo_energy is None or mo_occ is None:
-            return False
-
-        try:
-            from quantui.orbital_visualization import orbital_info_from_arrays
-
-            info = orbital_info_from_arrays(mo_energy, mo_occ, formula=result.formula)
-        except Exception:
-            return False
-
-        self._last_orb_info = info
-        self._last_orb_mo_coeff = getattr(result, "mo_coeff", None)
-        self._last_orb_mol_atom = getattr(result, "pyscf_mol_atom", None)
-        self._last_orb_mol_basis = getattr(result, "pyscf_mol_basis", None)
-
-        _plotly_rendered = False
-        try:
-            import plotly.io as _pio
-
-            from quantui.orbital_visualization import plot_orbital_diagram_plotly
-
-            fig = plot_orbital_diagram_plotly(
-                info, max_orbitals=self._orb_n_orb_input.value
-            )
-            # Sync axis limit controls to auto-computed range
-            yr = fig.layout.yaxis.range
-            if yr is not None:
-                self._orb_ymin_input.value = round(float(yr[0]), 2)
-                self._orb_ymax_input.value = round(float(yr[1]), 2)
-            self._apply_plotly_theme(fig)
-            html_str = _pio.to_html(
-                fig,
-                include_plotlyjs="require",
-                full_html=False,
-                config={"responsive": True},
-            )
-            self._set_html_output(self._orb_diagram_html, html_str)
-            _plotly_rendered = True
-        except Exception:
-            pass
-
-        if not _plotly_rendered:
-            # Fallback: static matplotlib PNG (plotly not installed)
-            import base64
-            import io as _io
-
-            try:
-                from matplotlib.backends.backend_agg import (
-                    FigureCanvasAgg as _AggCanvas,
-                )
-
-                from quantui.orbital_visualization import plot_orbital_diagram
-
-                mpl_fig = plot_orbital_diagram(info)
-                _AggCanvas(mpl_fig)
-                buf = _io.BytesIO()
-                mpl_fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
-                buf.seek(0)
-                img_b64 = base64.b64encode(buf.read()).decode()
-                self._set_html_output(
-                    self._orb_diagram_html,
-                    (
-                        f'<img src="data:image/png;base64,{img_b64}" '
-                        'style="max-width:100%;height:auto" />'
-                    ),
-                )
-            except Exception:
-                pass
-
-        if (
-            self._last_orb_mo_coeff is not None
-            and self._last_orb_mol_atom is not None
-            and self._last_orb_mol_basis is not None
-        ):
-            self._orb_iso_output.clear_output()
-            self._orb_toggle.value = "HOMO"
-            self._orb_iso_controls.layout.display = ""
-            self._iso_generate_btn.disabled = False
-        else:
-            self._orb_iso_controls.layout.display = "none"
-            self._iso_generate_btn.disabled = True
-
-        return True
+        return _viz_show_orbital_diagram(self, result)
 
     def _on_iso_generate(self, btn) -> None:
-        """Generate an orbital isosurface for the currently selected orbital."""
-        orbital_label = self._orb_toggle.value
-        btn.disabled = True
-        btn.description = "Generating…"
-        self._orb_iso_output.clear_output()
-        with self._orb_iso_output:
-            display(
-                HTML(
-                    f'<p style="color:#555;font-style:italic;padding:4px 0">'
-                    f"⏳ Generating {orbital_label} cube file and rendering isosurface"
-                    f" — this may take 15–30 s…</p>"
-                )
-            )
-
-        def _run():
-            try:
-                self._render_orbital_isosurface(orbital_label)
-            finally:
-                btn.disabled = False
-                btn.description = "Generate Isosurface"
-
-        threading.Thread(target=_run, daemon=True).start()
+        _viz_on_iso_generate(self, btn)
 
     def _on_orb_range_changed(self, _change=None) -> None:
-        """Live-update the orbital diagram when axis limits or orbital count changes."""
-        info = getattr(self, "_last_orb_info", None)
-        if info is None:
-            return
-        ymin = self._orb_ymin_input.value
-        ymax = self._orb_ymax_input.value
-        if ymin >= ymax:
-            return
-        try:
-            import plotly.io as _pio
+        _viz_on_orb_range_changed(self, _change)
 
-            from quantui.orbital_visualization import plot_orbital_diagram_plotly
-
-            fig = plot_orbital_diagram_plotly(
-                info,
-                max_orbitals=self._orb_n_orb_input.value,
-                yrange=(ymin, ymax),
-            )
-            self._apply_plotly_theme(fig)
-            self._set_html_output(
-                self._orb_diagram_html,
-                _pio.to_html(
-                    fig,
-                    include_plotlyjs="require",
-                    full_html=False,
-                    config={"responsive": True},
-                ),
-            )
-        except Exception:
-            pass
-
-    def _render_orbital_isosurface(self, orbital_label: str) -> None:
-        """Generate a cube file and render an orbital isosurface (Linux/WSL only)."""
-        import tempfile
-
-        orb_info = getattr(self, "_last_orb_info", None)
-        if orb_info is None:
-            return
-
-        n_occ = orb_info.n_occupied
-        n_total = len(orb_info.mo_energies_ev)
-        _idx_map = {
-            "HOMO-1": n_occ - 2,
-            "HOMO": n_occ - 1,
-            "LUMO": n_occ,
-            "LUMO+1": n_occ + 1,
-        }
-        orb_idx = _idx_map.get(orbital_label)
-        if orb_idx is None or orb_idx < 0 or orb_idx >= n_total:
-            return
-
-        mo_coeff = getattr(self, "_last_orb_mo_coeff", None)
-        mol_atom = getattr(self, "_last_orb_mol_atom", None)
-        mol_basis = getattr(self, "_last_orb_mol_basis", None)
-        if mo_coeff is None or mol_atom is None or mol_basis is None:
-            return
-
-        try:
-            from quantui.orbital_visualization import (
-                generate_cube_from_arrays,
-                plot_cube_isosurface,
-            )
-
-            with tempfile.TemporaryDirectory() as tmpdir:
-                cube_path = Path(tmpdir) / f"orbital_{orbital_label}.cube"
-                generate_cube_from_arrays(
-                    mol_atom, mol_basis, mo_coeff, orb_idx, cube_path
-                )
-                fig = plot_cube_isosurface(
-                    cube_path, title=f"{orbital_label} Isosurface"
-                )
-        except Exception as _exc:
-            from IPython.display import HTML as _H
-            from IPython.display import display as _d
-
-            self._orb_iso_output.clear_output()
-            with self._orb_iso_output:
-                _d(
-                    _H(
-                        f'<p style="color:#b91c1c;padding:8px">⚠ Orbital isosurface failed: {_exc}</p>'
-                    )
-                )
-            return
-
-        from IPython.display import display as _ipy_display
-
-        self._orb_iso_output.clear_output()
-        with self._orb_iso_output:
-            _ipy_display(fig)
+    def _render_orbital_isosurface(
+        self, orbital_label: str, render_token: Optional[int] = None
+    ) -> None:
+        _viz_render_orbital_isosurface(
+            self,
+            orbital_label,
+            render_token=render_token,
+        )
 
     def _render_vib_mode(self, vib_data, molecule, mode_number: int) -> None:
-        """Render vibrational animation for the given mode into ``vib_output``.
-
-        Safe to call from background thread via ``with output:`` context.
-        """
-        from IPython.display import HTML as _H
-
-        def _err(msg: str) -> None:
-            self.vib_output.clear_output()
-            self.vib_output.append_display_data(
-                _H(f'<p style="color:#b91c1c;padding:8px">⚠ {msg}</p>')
-            )
-
-        try:
-            from plotlymol3d import create_vibration_animation, xyzblock_to_rdkitmol
-        except ImportError as exc:
-            _err(
-                f"Vibrational animation requires plotlymol3d "
-                f"(<code>pip install plotlymol3d</code>): {exc}"
-            )
-            return
-
-        # Build an RDKit mol for bond connectivity (required by animation function).
-        xyzblock = (
-            f"{len(molecule.atoms)}\n{molecule.get_formula()}\n"
-            f"{molecule.to_xyz_string()}"
-        )
-        try:
-            rdmol = xyzblock_to_rdkitmol(xyzblock, charge=molecule.charge)
-        except Exception as exc:
-            _err(f"Could not parse molecule for bond connectivity: {exc}")
-            return
-
-        try:
-            from quantui import calc_log as _clog_anim
-
-            _clog_anim.log_event("vib_render_start", f"mode {mode_number}")
-        except Exception:
-            pass
-        try:
-            anim_fig = create_vibration_animation(
-                vib_data=vib_data,
-                mode_number=mode_number,
-                mol=rdmol,
-                amplitude=0.4,
-                n_frames=20,
-                mode="ball+stick",
-                resolution=12,
-            )
-            anim_fig.update_layout(height=420)
-        except Exception as exc:
-            try:
-                from quantui import calc_log as _clog_anim
-
-                _clog_anim.log_event(
-                    "vib_render_error",
-                    f"mode {mode_number}: {type(exc).__name__}: {exc}"[:300],
-                )
-            except Exception:
-                pass
-            _err(f"Animation generation failed: {exc}")
-            return
-        try:
-            from quantui import calc_log as _clog_anim
-
-            _clog_anim.log_event("vib_render_done", f"mode {mode_number}")
-        except Exception:
-            pass
-
-        import plotly.io as _pio
-
-        _anim_html = _pio.to_html(
-            anim_fig,
-            full_html=False,
-            include_plotlyjs="require",
-            config={"responsive": True},
-        )
-        self.vib_output.clear_output()
-        self.vib_output.append_display_data(_H(_anim_html))
+        _viz_render_vib_mode(self, vib_data, molecule, mode_number)
 
     def _on_vib_mode_changed(self, change) -> None:
-        """Re-render vib animation when the mode dropdown changes."""
-        mode_number = change["new"]
-        vib_data = getattr(self, "_last_vib_data", None)
-        molecule = getattr(self, "_last_vib_molecule", None)
-        if vib_data is None or molecule is None:
-            return
-        # Show a loading indicator immediately so the user gets feedback while
-        # the animation generates in the background.
-        _label = next(
-            (lbl for lbl, num in self.vib_mode_dd.options if num == mode_number),
-            f"mode {mode_number}",
-        )
-        self.vib_output.clear_output()
-        self.vib_output.append_display_data(
-            HTML(
-                f'<p style="color:#555;font-style:italic;padding:8px">'
-                f"⏳ Rendering vibrational animation ({_label})…</p>"
-            )
-        )
-        threading.Thread(
-            target=self._render_vib_mode,
-            args=(vib_data, molecule, mode_number),
-            daemon=True,
-        ).start()
+        _viz_on_vib_mode_changed(self, change)
 
     def _do_run(self) -> None:
         """Main calculation dispatch — runs in a background thread."""
@@ -4874,6 +2779,10 @@ class QuantUIApp:
         if mol is None:
             self.run_status.value = "Load a molecule first."
             return
+        self._activity_begin(
+            "Running compute operations...",
+            kind="compute",
+        )
         self.run_btn.disabled = True
         self.run_status.value = "Starting..."
 
@@ -4887,7 +2796,53 @@ class QuantUIApp:
         )
         _run_wall_t = time.perf_counter()
         _run_cpu_t = time.process_time()
-        log = _LogCapture(self.run_output, self.run_status)
+        _scf_converged_t: Optional[float] = None
+        _tail_marks: dict[str, float] = {}
+
+        def _mark(stage: str) -> None:
+            _tail_marks[stage] = time.perf_counter()
+
+        def _span(stage_a: str, stage_b: str) -> Optional[float]:
+            if stage_a not in _tail_marks or stage_b not in _tail_marks:
+                return None
+            return round(_tail_marks[stage_b] - _tail_marks[stage_a], 3)
+
+        def _on_scf_converged() -> None:
+            nonlocal _scf_converged_t
+            if _scf_converged_t is None:
+                _scf_converged_t = time.perf_counter()
+
+        def _run_required_final_single_point(target_mol, reason: str):
+            """Run a required post-optimization single point on target geometry."""
+            from quantui import run_in_session
+
+            _solvent = self.solvent_dd.value if self.solvent_cb.value else None
+            self.run_status.value = (
+                "Running required single-point on optimized geometry..."
+            )
+            log.write(
+                f"\n-- Required single-point ({reason}) "
+                "on optimized geometry --------------------------------\n"
+            )
+            sp_result = run_in_session(
+                molecule=target_mol,
+                method=self.method_dd.value,
+                basis=self.basis_dd.value,
+                progress_stream=log,  # type: ignore[arg-type]
+                solvent=_solvent,
+            )
+            if not bool(getattr(sp_result, "converged", False)):
+                raise RuntimeError(
+                    "Required post-optimization single-point did not converge."
+                )
+            log.write("Required single-point converged on optimized geometry.\n")
+            return sp_result
+
+        log = _LogCapture(
+            self.run_output,
+            self.run_status,
+            on_scf_converged=_on_scf_converged,
+        )
 
         # Write structured log header immediately so it appears at the top of output
         try:
@@ -4927,6 +2882,42 @@ class QuantUIApp:
             save_spectra: dict = {}
             save_type: str = "single_point"
             _pre_opt: Any = None  # OptimizationResult from Frequency pre-opt step
+
+            # Optional QM geometry optimization before non-frequency workflows.
+            # Frequency has dedicated seed/pre-opt handling in its own branch.
+            if self._freq_preopt_cb.value and ct not in ("Geometry Opt", "Frequency"):
+                from quantui import optimize_geometry
+
+                self.run_status.value = f"Pre-optimizing geometry before {ct}…"
+                log.write(
+                    f"\n── Pre-optimisation (before {ct}) "
+                    f"────────────────────────────────────\n"
+                )
+                _pre_opt = optimize_geometry(
+                    molecule=calc_mol,
+                    method=self.method_dd.value,
+                    basis=self.basis_dd.value,
+                    progress_stream=log,  # type: ignore[arg-type]
+                )
+                calc_mol = _pre_opt.molecule
+                _conv_str = (
+                    "converged" if _pre_opt.converged else "did NOT fully converge"
+                )
+                log.write(
+                    f"\nPre-optimisation {_conv_str} in {_pre_opt.n_steps} steps."
+                    f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
+                )
+                if not _pre_opt.converged:
+                    log.write(
+                        "⚠ Pre-optimisation did not fully converge — "
+                        "proceeding with best available geometry.\n\n"
+                    )
+                if ct != "Single Point":
+                    _run_required_final_single_point(
+                        calc_mol,
+                        f"after pre-optimisation before {ct}",
+                    )
+
             if ct == "Geometry Opt":
                 self.run_status.value = "Optimizing geometry..."
                 from quantui import optimize_geometry
@@ -4938,6 +2929,37 @@ class QuantUIApp:
                     fmax=self.fmax_fi.value,
                     steps=self.max_steps_si.value,
                     progress_stream=log,  # type: ignore[arg-type]
+                )
+                _sp_result = _run_required_final_single_point(
+                    result.molecule,
+                    "after geometry optimisation",
+                )
+                _sp_energy = getattr(_sp_result, "energy_hartree", None)
+                if (
+                    isinstance(getattr(result, "energies_hartree", None), list)
+                    and result.energies_hartree
+                    and isinstance(_sp_energy, (int, float))
+                ):
+                    result.energies_hartree[-1] = float(_sp_energy)
+                result.converged = bool(result.converged) and bool(
+                    getattr(_sp_result, "converged", False)
+                )
+                result.mo_energy_hartree = getattr(
+                    _sp_result,
+                    "mo_energy_hartree",
+                    result.mo_energy_hartree,
+                )
+                result.mo_occ = getattr(_sp_result, "mo_occ", result.mo_occ)
+                result.mo_coeff = getattr(_sp_result, "mo_coeff", result.mo_coeff)
+                result.pyscf_mol_atom = getattr(
+                    _sp_result,
+                    "pyscf_mol_atom",
+                    result.pyscf_mol_atom,
+                )
+                result.pyscf_mol_basis = getattr(
+                    _sp_result,
+                    "pyscf_mol_basis",
+                    result.pyscf_mol_basis,
                 )
                 result_html = self._format_opt_result(result)
                 save_spectra, save_type = {}, "geometry_opt"
@@ -4985,6 +3007,10 @@ class QuantUIApp:
                             "⚠ Pre-optimisation did not fully converge — "
                             "proceeding with best available geometry.\n\n"
                         )
+                    _run_required_final_single_point(
+                        calc_mol,
+                        "after frequency pre-optimisation",
+                    )
 
                 # ── Step 3: frequency analysis ────────────────────────────────
                 self.run_status.value = "Computing frequencies (SCF + Hessian)…"
@@ -5127,6 +3153,7 @@ class QuantUIApp:
                 result_html = self._format_result(result)
                 save_spectra, save_type = {}, "single_point"
 
+            _mark("result_ready")
             _elapsed = time.perf_counter() - _run_wall_t
             _elapsed_cpu = time.process_time() - _run_cpu_t
             self._last_result = result
@@ -5134,7 +3161,7 @@ class QuantUIApp:
             self.accumulate_btn.disabled = False
 
             self.result_output.append_display_data(HTML(result_html))
-            self.run_status.value = f"Done in {_elapsed:.1f} s."
+            self.run_status.value = "Finalizing results..."
 
             # Show 3D structure in the result panel and mirrored in Analysis tab
             _viz_mol = result.molecule if ct == "Geometry Opt" else calc_mol
@@ -5144,7 +3171,12 @@ class QuantUIApp:
                     'margin:6px 0 2px">Optimized geometry</p>'
                 )
                 self._viz_label.layout.display = ""
-            self._show_result_3d(_viz_mol, extra_output=self._analysis_mol_output)
+            self._queue_main_thread_callback(
+                self._show_result_3d,
+                _viz_mol,
+                self._analysis_mol_output,
+            )
+            _mark("viz_done")
 
             # Populate Analysis panels via the unified registry
             _ana_ctx = _AnalysisContext(
@@ -5169,6 +3201,7 @@ class QuantUIApp:
                 f"{_mol_label}</span>"
             )
             self._completion_banner.layout.display = ""
+            _mark("banner_ready")
 
             # Write structured log footer
             try:
@@ -5187,6 +3220,7 @@ class QuantUIApp:
                 pass
 
             # Persist to disk
+            _mark("persist_begin")
             try:
                 from quantui import load_result, save_result
                 from quantui.results_storage import (
@@ -5202,7 +3236,10 @@ class QuantUIApp:
                     spectra=save_spectra,
                 )
                 self._last_result_dir = _saved_dir
-                save_thumbnail(_saved_dir, load_result(_saved_dir))
+                _saved_data = load_result(_saved_dir)
+                save_thumbnail(_saved_dir, _saved_data)
+                _ana_ctx.result_dir = _saved_dir
+                _ana_ctx.timestamp = str(_saved_data.get("timestamp", ""))
                 # Persist trajectory so history viewer can replay it.
                 if ct in ("Geometry Opt", "PES Scan"):
                     _traj = getattr(
@@ -5227,13 +3264,18 @@ class QuantUIApp:
                 # Persist MO data for orbital diagram + isosurface replay.
                 if ct in ("Single Point", "Geometry Opt", "Frequency"):
                     save_orbitals(_saved_dir, result)
-                self._refresh_results_browser()
-                self._populate_compare_list()
-                self._update_log_panel(
+                self._queue_main_thread_callback(self._refresh_results_browser)
+                self._queue_main_thread_callback(self._populate_compare_list)
+                self._queue_main_thread_callback(
+                    self._update_log_panel,
                     log.getvalue(),
                     f"{result.formula}  {self.method_dd.value}/{self.basis_dd.value}",
                 )
-                self._show_result_log(_saved_dir, log.getvalue())
+                self._queue_main_thread_callback(
+                    self._show_result_log,
+                    _saved_dir,
+                    log.getvalue(),
+                )
             except Exception as _save_exc:
                 try:
                     from quantui import calc_log as _clog
@@ -5244,16 +3286,20 @@ class QuantUIApp:
                     )
                 except Exception:
                     pass
+            _mark("persist_done")
 
-            # Activate analysis panels AFTER saving/refreshing the results browser.
-            # _refresh_results_browser (above) sets past_dd.options, which fires its
-            # observer and calls _deactivate_all_ana_panels.  Placing this call here
-            # means that observer has already run (harmlessly, panels not yet active)
-            # by the time we activate them.
-            self._apply_analysis_context(_ana_ctx)
+            # Activate analysis panels after scheduling refresh/update callbacks.
+            # Refreshing the history browser may fire past_dd observers that clear
+            # analysis state; queueing this callback after refresh keeps ordering
+            # deterministic on the kernel UI loop.
+            _mark("analysis_begin")
+            self._queue_main_thread_callback(self._apply_analysis_context, _ana_ctx)
+            _mark("analysis_done")
 
             # Log performance
+            _mark("perf_begin")
             try:
+                _elapsed_for_est = time.perf_counter() - _run_wall_t
                 _calc_log.log_calculation(
                     formula=result.formula,
                     n_atoms=len(calc_mol.atoms),
@@ -5261,20 +3307,53 @@ class QuantUIApp:
                     method=result.method,
                     basis=result.basis,
                     n_iterations=getattr(result, "n_iterations", None),
-                    elapsed_s=_elapsed,
+                    elapsed_s=_elapsed_for_est,
                     converged=result.converged,
                     n_basis=_calc_log.count_basis_functions(
                         calc_mol.atoms, result.basis
                     ),
                     n_cores=1,
+                    calc_type=save_type,
                 )
                 _calc_log.log_event(
                     "calc_done",
                     f"{result.method}/{result.basis} on {result.formula}",
-                    elapsed_s=round(_elapsed, 2),
+                    elapsed_s=round(_elapsed_for_est, 2),
                     converged=result.converged,
                 )
                 self._update_estimate()
+            except Exception:
+                pass
+            _mark("perf_done")
+
+            _mark("success_done")
+            _elapsed_total = _tail_marks["success_done"] - _run_wall_t
+            self.run_status.value = f"Done in {_elapsed_total:.1f} s."
+
+            try:
+                _tail_end = _tail_marks.get("success_done")
+                _post_scf_to_done: Optional[float] = None
+                if _tail_end is not None and _scf_converged_t is not None:
+                    _post_scf_to_done = round(_tail_end - _scf_converged_t, 3)
+                _post_result_to_done = _span("result_ready", "success_done")
+                _calc_log.log_event(
+                    "calc_tail_timing",
+                    "Post-SCF completion timing checkpoint",
+                    session_id=self._session_id,
+                    formula=result.formula,
+                    method=result.method,
+                    basis=result.basis,
+                    calc_type=save_type,
+                    scf_converged_seen=_scf_converged_t is not None,
+                    post_scf_to_done_s=_post_scf_to_done,
+                    post_result_to_done_s=_post_result_to_done,
+                    result_to_viz_s=_span("result_ready", "viz_done"),
+                    result_to_banner_s=_span("result_ready", "banner_ready"),
+                    persist_block_s=_span("persist_begin", "persist_done"),
+                    analysis_apply_s=_span("analysis_begin", "analysis_done"),
+                    perf_block_s=_span("perf_begin", "perf_done"),
+                    banner_to_done_s=_span("banner_ready", "success_done"),
+                )
             except Exception:
                 pass
 
@@ -5370,120 +3449,22 @@ class QuantUIApp:
 
         finally:
             self.run_btn.disabled = False
+            self._activity_end(kind="compute")
 
     def _update_notes(self, change=None) -> None:
-        self.notes_output.clear_output(wait=True)
-        if self._molecule is None:
-            return
-        try:
-            from quantui import PySCFCalculation
-
-            calc = PySCFCalculation(
-                self._molecule,
-                method=self.method_dd.value,
-                basis=self.basis_dd.value,
-            )
-            notes = calc.get_educational_notes()
-            if notes:
-                safe = (
-                    notes.replace("**", "<b>", 1)
-                    .replace("**", "</b>", 1)
-                    .replace("\n\n", "<br><br>")
-                )
-                with self.notes_output:
-                    display(
-                        HTML(
-                            '<div style="background:#fffbf0;padding:8px 12px;'
-                            'border-radius:4px;font-size:13px;margin-top:6px">'
-                            + safe
-                            + "</div>"
-                        )
-                    )
-        except Exception:
-            pass
+        _run_update_notes(self, change)
 
     def _update_estimate(self, change=None) -> None:
-        if self._molecule is None:
-            self.perf_estimate_html.value = ""
-            return
-        try:
-            n_basis = _calc_log.count_basis_functions(
-                self._molecule.atoms, self.basis_dd.value
-            )
-            est = _calc_log.estimate_time(
-                n_atoms=len(self._molecule.atoms),
-                n_electrons=self._molecule.get_electron_count(),
-                method=self.method_dd.value,
-                basis=self.basis_dd.value,
-                n_basis=n_basis,
-            )
-            self.perf_estimate_html.value = _calc_log.format_estimate(est)
-        except Exception:
-            self.perf_estimate_html.value = ""
+        _run_update_estimate(self, calc_log_mod=_calc_log, change=change)
 
     def _refresh_results_browser(self) -> None:
-        try:
-            from quantui import list_results, load_result
-        except ImportError:
-            return
-        self.results_path_lbl.value = (
-            f'<span style="font-size:13px;color:#64748b">'
-            f"{self._get_results_dir()}</span>"
-        )
-        dirs = list_results()
-        if not dirs:
-            self.past_dd.options = [("(no saved results)", "")]
-            return
-        options = []
-        for d in dirs:
-            try:
-                data = load_result(d)
-                ts = data.get("timestamp", d.name)
-                label = f"{ts}  ·  {data['formula']}  {data['method']}/{data['basis']}"
-                options.append((label, str(d)))
-            except Exception:
-                pass
-        self.past_dd.options = options if options else [("(no saved results)", "")]
-        # Keep frequency seed dropdown in sync if it's currently visible.
-        if self.calc_type_dd.value == "Frequency":
-            self._refresh_freq_seed_options()
+        _run_refresh_results_browser(self)
 
     def _refresh_comparison(self) -> None:
-        from quantui import comparison_table_html, summary_from_session_result
-
-        self.comparison_output.clear_output(wait=True)
-        if not self._results:
-            return
-        summaries = [summary_from_session_result(r) for r in self._results]
-        with self.comparison_output:
-            display(HTML(comparison_table_html(summaries)))
-            if len(summaries) > 1:
-                try:
-                    from quantui import plot_comparison
-
-                    plot_comparison(summaries)
-                except Exception:
-                    pass
+        _run_refresh_comparison(self)
 
     def _populate_compare_list(self) -> None:
-        from quantui.results_storage import list_results, load_result
-
-        dirs = list_results()
-        if not dirs:
-            self.compare_select.options = [("(no saved results)", "")]
-            self.compare_btn.disabled = True
-            return
-        options = []
-        for d in dirs:
-            try:
-                data = load_result(d)
-                ts = data.get("timestamp", d.name[:19])
-                label = f"{ts}  {data['formula']}  {data['method']}/{data['basis']}"
-                options.append((label, str(d)))
-            except Exception:
-                options.append((d.name, str(d)))
-        self.compare_select.options = options
-        self.compare_btn.disabled = False
+        _run_populate_compare_list(self)
 
     def _show_help_topic(self, topic: str) -> None:
         if topic in HELP_TOPICS:
@@ -5497,6 +3478,10 @@ class QuantUIApp:
         """Wrap an .observe() handler so exceptions are logged instead of silently dropped."""
 
         def _wrapper(change):
+            self._activity_begin(
+                f"Running {getattr(fn, '__name__', 'callback')}...",
+                kind="ui",
+            )
             try:
                 fn(change)
             except Exception as _e:
@@ -5512,6 +3497,8 @@ class QuantUIApp:
                     )
                 except Exception:
                     pass
+            finally:
+                self._activity_end(kind="ui")
 
         return _wrapper
 
@@ -5717,433 +3704,28 @@ class QuantUIApp:
     # ══ RESULT FORMATTERS ════════════════════════════════════════════════════
 
     def _format_result(self, r) -> str:
-        _conv = "Yes" if r.converged else "No (treat results with caution)"
-        _cc = "green" if r.converged else "#c00"
-        _gap = (
-            f"{r.homo_lumo_gap_ev:.4f} eV" if r.homo_lumo_gap_ev is not None else "N/A"
-        )
-        _rows = "".join(
-            f"<tr>"
-            f'<td style="padding:3px 18px 3px 0;color:#444">{k}</td>'
-            f'<td style="color:{vc}">{v}</td>'
-            f"</tr>"
-            for k, v, vc in [
-                (
-                    "Total energy",
-                    f"{r.energy_hartree:.8f} Ha &ensp;({r.energy_ev:.4f} eV)",
-                    "#000",
-                ),
-                ("HOMO-LUMO gap", _gap, "#000"),
-                ("SCF converged", _conv, _cc),
-                (
-                    "SCF iterations",
-                    (
-                        "—"
-                        if getattr(r, "n_iterations", None) in (None, -1)
-                        else str(r.n_iterations)
-                    ),
-                    "#000",
-                ),
-            ]
-        )
-        _extra = ""
-        # MP2: show HF reference energy separately
-        _mp2_corr = getattr(r, "mp2_correlation_hartree", None)
-        if _mp2_corr is not None:
-            _hf_e = r.energy_hartree - _mp2_corr
-            _extra += (
-                f'<tr><td style="padding:3px 18px 3px 0;color:#444">HF reference</td>'
-                f'<td style="color:#000">{_hf_e:.8f} Ha</td></tr>'
-                f'<tr><td style="padding:3px 18px 3px 0;color:#444">MP2 correlation</td>'
-                f'<td style="color:#000">{_mp2_corr:.8f} Ha</td></tr>'
-            )
-        _solvent = getattr(r, "solvent", None)
-        if _solvent is not None:
-            _extra += (
-                f'<tr><td style="padding:3px 18px 3px 0;color:#444">Solvent (PCM)</td>'
-                f'<td style="color:#000">{_solvent}</td></tr>'
-            )
-        _dip = getattr(r, "dipole_moment_debye", None)
-        if _dip is not None:
-            _extra += (
-                f'<tr><td style="padding:3px 18px 3px 0;color:#444">Dipole moment</td>'
-                f'<td style="color:#000">{_dip:.4f} D</td></tr>'
-            )
-        _chg = getattr(r, "mulliken_charges", None)
-        _syms = getattr(r, "atom_symbols", None)
-        if _chg is not None and _syms is not None:
-            _charge_str = "  ".join(f"{sym}:{c:+.3f}" for sym, c in zip(_syms, _chg))
-            _extra += (
-                f'<tr><td style="padding:3px 18px 3px 0;color:#444;vertical-align:top">'
-                f"Mulliken charges</td>"
-                f'<td style="color:#000;font-family:monospace;font-size:12px;'
-                f'word-break:break-all">{_charge_str}</td></tr>'
-            )
-        return (
-            f'<div style="background:#f0fff0;border-left:4px solid #4CAF50;'
-            f'padding:10px 14px;border-radius:4px;margin:6px 0">'
-            f"<b>{r.formula} &mdash; {r.method}/{r.basis}</b>"
-            f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-            f"{_rows}{_extra}</table></div>"
-        )
+        return _fmt_result(r)
 
     def _format_opt_result(self, r) -> str:
-        _conv = "Yes" if r.converged else "No (max steps reached)"
-        _cc = "green" if r.converged else "#c00"
-        _rows = "".join(
-            f"<tr>"
-            f'<td style="padding:3px 18px 3px 0;color:#444">{k}</td>'
-            f'<td style="color:{vc}">{v}</td>'
-            f"</tr>"
-            for k, v, vc in [
-                ("Final energy", f"{r.energy_hartree:.8f} Ha", "#000"),
-                ("Energy change", f"{r.energy_change_hartree:+.6f} Ha", "#000"),
-                ("Opt converged", _conv, _cc),
-                ("Steps taken", str(r.n_steps), "#000"),
-                ("Geometry RMSD", f"{r.rmsd_angstrom:.4f} Å", "#000"),
-            ]
-        )
-        return (
-            f'<div style="background:#f0fff0;border-left:4px solid #4CAF50;'
-            f'padding:10px 14px;border-radius:4px;margin:6px 0">'
-            f"<b>Geometry Optimisation &mdash; {r.formula} ({r.method}/{r.basis})</b>"
-            f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-            f"{_rows}</table></div>"
-        )
+        return _fmt_opt_result(r)
 
     def _format_freq_result(self, r) -> str:
-        _conv = "Yes" if r.converged else "No (treat with caution)"
-        _cc = "green" if r.converged else "#c00"
-        n_real = r.n_real_modes()
-        n_imag = r.n_imaginary_modes()
-        real_freqs = sorted(f for f in r.frequencies_cm1 if f > 0)[:6]
-        freq_str = "  ".join(f"{f:.1f}" for f in real_freqs)
-        if len([f for f in r.frequencies_cm1 if f > 0]) > 6:
-            freq_str += " …"
-        imag_note = ""
-        if n_imag > 0:
-            imag_note = (
-                f'<tr><td style="padding:3px 18px 3px 0;color:#444">Imaginary modes</td>'
-                f'<td style="color:#c00">{n_imag} — geometry may not be a minimum</td></tr>'
-            )
-        _rows = (
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">SCF energy</td>'
-            f'<td style="color:#000">{r.energy_hartree:.8f} Ha</td></tr>'
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">SCF converged</td>'
-            f'<td style="color:{_cc}">{_conv}</td></tr>'
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">Real modes</td>'
-            f'<td style="color:#000">{n_real}</td></tr>'
-            + imag_note
-            + (
-                f'<tr><td style="padding:3px 18px 3px 0;color:#444">Frequencies (cm⁻¹)</td>'
-                f'<td style="color:#000;font-family:monospace">{freq_str or "none"}</td></tr>'
-                if real_freqs
-                else ""
-            )
-            + f'<tr><td style="padding:3px 18px 3px 0;color:#444">ZPVE</td>'
-            f'<td style="color:#000">{r.zpve_hartree:.6f} Ha '
-            f"({r.zpve_hartree * 27.211386245988:.4f} eV)</td></tr>"
-        )
-        _thermo_rows = ""
-        _thermo = getattr(r, "thermo", None)
-        if _thermo is not None:
-            _kj = 2625.5  # kJ/mol per Hartree
-            _thermo_rows = (
-                f'<tr><td colspan="2" style="padding:6px 0 2px 0;color:#666;'
-                f'font-size:12px;font-style:italic">'
-                f"&#8212; Thermochemistry at {_thermo.temperature_k:.0f} K / 1 atm &#8212;"
-                f"</td></tr>"
-                f'<tr><td style="padding:3px 18px 3px 0;color:#444">H (298 K)</td>'
-                f'<td style="color:#000">{_thermo.H_hartree:.6f} Ha</td></tr>'
-                f'<tr><td style="padding:3px 18px 3px 0;color:#444">S (298 K)</td>'
-                f'<td style="color:#000">{_thermo.S_jmol:.2f} J/(mol·K)</td></tr>'
-                f'<tr><td style="padding:3px 18px 3px 0;color:#444">G (298 K)</td>'
-                f'<td style="color:#000">{_thermo.G_hartree:.6f} Ha'
-                f" ({_thermo.G_hartree * _kj:.2f} kJ/mol)</td></tr>"
-            )
-        return (
-            f'<div style="background:#f0fff0;border-left:4px solid #4CAF50;'
-            f'padding:10px 14px;border-radius:4px;margin:6px 0">'
-            f"<b>Frequency Analysis &mdash; {r.formula} ({r.method}/{r.basis})</b>"
-            f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-            f"{_rows}{_thermo_rows}</table></div>"
-        )
+        return _fmt_freq_result(r)
 
     def _format_tddft_result(self, r) -> str:
-        _conv = "Yes" if r.converged else "No (treat with caution)"
-        _cc = "green" if r.converged else "#c00"
-        header_rows = (
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">Ground-state energy</td>'
-            f'<td style="color:#000">{r.energy_hartree:.8f} Ha</td></tr>'
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">SCF converged</td>'
-            f'<td style="color:{_cc}">{_conv}</td></tr>'
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">States computed</td>'
-            f'<td style="color:#000">{len(r.excitation_energies_ev)}</td></tr>'
-        )
-        exc_table = ""
-        if r.excitation_energies_ev:
-            wl = r.wavelengths_nm()
-            exc_rows = []
-            for i, (e_ev, f_osc) in enumerate(
-                zip(r.excitation_energies_ev[:8], r.oscillator_strengths[:8]), 1
-            ):
-                bold = "font-weight:bold" if f_osc > 0.05 else ""
-                exc_rows.append(
-                    f'<tr style="{bold}">'
-                    f'<td style="padding:2px 12px 2px 0;color:#555">S{i}</td>'
-                    f'<td style="padding:2px 12px 2px 0;color:#000">{e_ev:.3f} eV</td>'
-                    f'<td style="padding:2px 12px 2px 0;color:#000">{wl[i - 1]:.1f} nm</td>'
-                    f'<td style="padding:2px 4px 2px 0;color:#000">f = {f_osc:.4f}</td>'
-                    f"</tr>"
-                )
-            if len(r.excitation_energies_ev) > 8:
-                exc_rows.append(
-                    f'<tr><td colspan="4" style="color:#888;font-size:12px">… '
-                    f"and {len(r.excitation_energies_ev) - 8} more states</td></tr>"
-                )
-            exc_table = (
-                '<tr><td colspan="2" style="padding:8px 0 2px;color:#444;font-weight:bold">'
-                "Vertical excitations:</td></tr>"
-                "<tr>"
-                '<th style="text-align:left;color:#555;font-size:12px;padding:2px 12px 2px 0">State</th>'
-                '<th style="text-align:left;color:#555;font-size:12px;padding:2px 12px 2px 0">Energy</th>'
-                '<th style="text-align:left;color:#555;font-size:12px;padding:2px 12px 2px 0">λ</th>'
-                '<th style="text-align:left;color:#555;font-size:12px">Osc. str.</th></tr>'
-                + "".join(exc_rows)
-            )
-        return (
-            f'<div style="background:#f0fff0;border-left:4px solid #4CAF50;'
-            f'padding:10px 14px;border-radius:4px;margin:6px 0">'
-            f"<b>TD-DFT / UV-Vis &mdash; {r.formula} ({r.method}/{r.basis})</b>"
-            f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-            f"{header_rows}{exc_table}</table></div>"
-        )
+        return _fmt_tddft_result(r)
 
     def _format_nmr_result(self, r) -> str:
-        _conv = "Yes" if r.converged else "No (treat with caution)"
-        _cc = "green" if r.converged else "#c00"
-        header_rows = (
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">SCF converged</td>'
-            f'<td style="color:{_cc}">{_conv}</td></tr>'
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">Reference</td>'
-            f'<td style="color:#000">{r.reference_compound} ({r.method}/{r.basis})</td></tr>'
-        )
-
-        def _nmr_table(label: str, shifts: list, sym: str) -> str:
-            if not shifts:
-                return ""
-            rows = "".join(
-                f"<tr>"
-                f'<td style="padding:2px 14px 2px 0;color:#555">{sym}-{n}</td>'
-                f'<td style="color:#000">{d:.2f} ppm</td>'
-                f"</tr>"
-                for n, (_i, d) in enumerate(shifts, 1)
-            )
-            return (
-                f'<tr><td colspan="2" style="padding:8px 0 2px;color:#444;font-weight:bold">'
-                f"{label} shifts (vs. TMS):</td></tr>"
-                f"<tr>"
-                f'<th style="text-align:left;color:#555;font-size:12px;padding:2px 14px 2px 0">Atom</th>'
-                f'<th style="text-align:left;color:#555;font-size:12px">δ (ppm)</th></tr>'
-                + rows
-            )
-
-        h_table = _nmr_table("¹H", r.h_shifts(), "H")
-        c_table = _nmr_table("¹³C", r.c_shifts(), "C")
-
-        _basis_warn = ""
-        if r.basis.upper() in ("STO-3G", "3-21G"):
-            _basis_warn = (
-                '<tr><td colspan="2" style="padding:6px 0 0">'
-                '<span style="color:#b45309;font-size:12px">'
-                f"⚠ {r.basis} gives qualitative NMR only — use 6-31G* or better.</span>"
-                "</td></tr>"
-            )
-
-        _empty = ""
-        if not r.h_shifts() and not r.c_shifts():
-            _empty = (
-                '<tr><td colspan="2" style="color:#888;font-size:12px">'
-                "No ¹H or ¹³C atoms found in this molecule.</td></tr>"
-            )
-
-        return (
-            f'<div style="background:#f0fff0;border-left:4px solid #4CAF50;'
-            f'padding:10px 14px;border-radius:4px;margin:6px 0">'
-            f"<b>NMR Shielding &mdash; {r.formula} ({r.method}/{r.basis})</b>"
-            f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-            f"{header_rows}{h_table}{c_table}{_empty}{_basis_warn}</table></div>"
-        )
+        return _fmt_nmr_result(r)
 
     def _format_pes_scan_result(self, r) -> str:
-        """Format a PESScanResult as an HTML result card."""
-        _conv = "Yes" if r.converged_all else "No (some points did not converge)"
-        _cc = "green" if r.converged_all else "#c00"
-        if r.energies_hartree:
-            e_min = min(r.energies_hartree)
-            e_max = max(r.energies_hartree)
-            barrier_kcal = (e_max - e_min) * 627.509474
-            _e_row = (
-                f'<tr><td style="padding:3px 18px 3px 0;color:#444">Min energy</td>'
-                f'<td style="color:#000">{e_min:.8f} Ha</td></tr>'
-                f'<tr><td style="padding:3px 18px 3px 0;color:#444">Energy range</td>'
-                f'<td style="color:#000">{barrier_kcal:.2f} kcal/mol</td></tr>'
-            )
-        else:
-            _e_row = ""
-        _idx_str = "–".join(str(i + 1) for i in r.atom_indices)
-        return (
-            f'<div style="background:#f0fff0;border-left:4px solid #4CAF50;'
-            f'padding:10px 14px;border-radius:4px;margin:6px 0">'
-            f"<b>PES Scan &mdash; {r.formula} ({r.method}/{r.basis})</b>"
-            f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">Scan type</td>'
-            f'<td style="color:#000">{r.scan_type.capitalize()} ({_idx_str})</td></tr>'
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">Range</td>'
-            f'<td style="color:#000">{r.scan_parameter_values[0]:.3f} → '
-            f"{r.scan_parameter_values[-1]:.3f} {r.scan_unit} "
-            f"({r.n_steps} points)</td></tr>"
-            f"{_e_row}"
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">All converged</td>'
-            f'<td style="color:{_cc}">{_conv}</td></tr>'
-            f"</table></div>"
-        )
+        return _fmt_pes_scan_result(r)
 
     def _show_pes_scan_result(self, result) -> bool:
-        """Render the PES energy profile chart.
-
-        Returns True if the chart was rendered, False if plotly is unavailable.
-        Does NOT call ``_activate_ana_panel`` or set up trajectory; those are
-        handled by ``_pop_pes_plot`` and ``_pop_pes_trajectory`` in the registry.
-        """
-        self._last_pes_result = result
-        try:
-            import plotly.graph_objects as go
-            import plotly.io as pio
-
-            e_rel = result.energies_relative_kcal
-            x_vals = result.scan_parameter_values
-
-            hover_text = [
-                f"{result.scan_coordinate_label}: {x:.4f}<br>"
-                f"ΔE = {de:.3f} kcal/mol<br>"
-                f"E = {e:.8f} Ha"
-                for x, de, e in zip(x_vals, e_rel, result.energies_hartree)
-            ]
-
-            fig = go.Figure(
-                go.Scatter(
-                    x=x_vals,
-                    y=e_rel,
-                    mode="lines+markers",
-                    line=dict(color="#2563eb", width=2),
-                    marker=dict(size=8, color="#2563eb"),
-                    hovertext=hover_text,
-                    hoverinfo="text",
-                )
-            )
-            tc = self._plotly_theme_colors()
-            fig.update_layout(
-                xaxis_title=result.scan_coordinate_label,
-                yaxis_title="Relative energy / kcal mol⁻¹",
-                height=380,
-                margin=dict(l=60, r=20, t=30, b=50),
-                plot_bgcolor=tc["plot_bgcolor"],
-                paper_bgcolor=tc["paper_bgcolor"],
-                font=dict(color=tc["font_color"]),
-                xaxis=dict(showgrid=True, gridcolor=tc["grid_color"]),
-                yaxis=dict(showgrid=True, gridcolor=tc["grid_color"]),
-                hovermode="closest",
-            )
-            self._set_html_output(
-                self._pes_plot_html,
-                pio.to_html(
-                    fig,
-                    include_plotlyjs="require",
-                    full_html=False,
-                    config={"responsive": True},
-                ),
-            )
-        except Exception:
-            pass
-
-        return True
+        return _viz_show_pes_scan_result(self, result)
 
     def _format_past_result(self, data: dict, result_dir: Optional[Path] = None) -> str:
-        import base64 as _b64
-
-        _ct_labels = {
-            "single_point": ("Single Point", "#2563eb", "#dbeafe"),
-            "geometry_opt": ("Geometry Optimization", "#7c3aed", "#ede9fe"),
-            "frequency": ("Frequency Analysis", "#15803d", "#dcfce7"),
-            "tddft": ("TD-DFT", "#b45309", "#fef3c7"),
-            "nmr": ("NMR", "#0d9488", "#ccfbf1"),
-            "pes_scan": ("PES Scan", "#c2410c", "#ffedd5"),
-        }
-        ct = data.get("calc_type", "")
-        _ct_label, _ct_fg, _ct_bg = _ct_labels.get(
-            ct, (ct.replace("_", " ").title(), "#555", "#f3f4f6")
-        )
-        _ct_badge = (
-            f'<span style="display:inline-block;padding:2px 10px;border-radius:12px;'
-            f"background:{_ct_bg};color:{_ct_fg};font-size:12px;font-weight:700;"
-            f'letter-spacing:0.03em;margin-bottom:6px">{_ct_label}</span>'
-        )
-        _conv = "Yes" if data.get("converged") else "No (treat results with caution)"
-        _cc = "green" if data.get("converged") else "#c00"
-        _gap = (
-            f"{data['homo_lumo_gap_ev']:.4f} eV"
-            if data.get("homo_lumo_gap_ev") is not None
-            else "N/A"
-        )
-        _rows = "".join(
-            f"<tr>"
-            f'<td style="padding:3px 18px 3px 0;color:#444">{k}</td>'
-            f'<td style="color:{vc}">{v}</td>'
-            f"</tr>"
-            for k, v, vc in [
-                (
-                    "Total energy",
-                    f"{data['energy_hartree']:.8f} Ha &ensp;({data['energy_ev']:.4f} eV)",
-                    "#000",
-                ),
-                ("HOMO-LUMO gap", _gap, "#000"),
-                ("SCF converged", _conv, _cc),
-                (
-                    "SCF iterations",
-                    (
-                        "—"
-                        if data.get("n_iterations") in (None, -1)
-                        else str(data.get("n_iterations"))
-                    ),
-                    "#000",
-                ),
-            ]
-        )
-        ts = data.get("timestamp", "")
-
-        # Embed thumbnail if saved
-        _thumb_html = ""
-        if result_dir is not None:
-            _thumb_path = Path(result_dir) / "thumbnail.png"
-            if _thumb_path.exists():
-                _img_b64 = _b64.b64encode(_thumb_path.read_bytes()).decode()
-                _thumb_html = (
-                    f'<img src="data:image/png;base64,{_img_b64}" '
-                    f'style="float:right;margin:0 0 6px 14px;border-radius:4px;'
-                    f'border:1px solid #e2e8f0" width="173" height="108" />'
-                )
-
-        return (
-            f'<div style="background:#f0fff0;border-left:4px solid #4CAF50;'
-            f'padding:10px 14px;border-radius:4px;margin:6px 0;overflow:hidden">'
-            f"{_thumb_html}"
-            f"{_ct_badge}<br>"
-            f'<b>{data["formula"]} &mdash; {data["method"]}/{data["basis"]}</b>'
-            f'&ensp;<small style="color:#777">{ts}</small>'
-            f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-            f"{_rows}</table></div>"
-        )
+        return _fmt_past_result(data, result_dir=result_dir)
 
     # ══ HELPERS ══════════════════════════════════════════════════════════════
 

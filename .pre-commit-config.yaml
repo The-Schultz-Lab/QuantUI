@@ -1,3 +1,5 @@
+fail_fast: true
+
 repos:
   # ── Standard file hygiene ─────────────────────────────────────────────────
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -42,6 +44,7 @@ repos:
     rev: v1.10.0
     hooks:
       - id: mypy
+        stages: [pre-push]
         files: ^quantui/        # type-check the package only, not tests
         args: ["--ignore-missing-imports", "--no-error-summary"]
         additional_dependencies:

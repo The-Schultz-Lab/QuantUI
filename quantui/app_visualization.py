@@ -1,0 +1,1471 @@
+"""Visualization and rendering helpers used by QuantUIApp."""
+
+from __future__ import annotations
+
+import threading
+from pathlib import Path
+from typing import Any, List
+
+import ipywidgets as widgets
+from IPython.display import HTML, display
+
+
+def show_result_3d(
+    app: Any,
+    molecule: Any,
+    extra_output: Any = None,
+    *,
+    display_molecule_fn: Any,
+) -> None:
+    """Render molecule 3D structure in result and optional extra output panels."""
+    if display_molecule_fn is None or molecule is None:
+        return
+    for out_widget in [app.result_viz_output, extra_output]:
+        if out_widget is None:
+            continue
+        out_widget.clear_output()
+        with out_widget:
+            display_molecule_fn(
+                molecule,
+                backend=app._viz_backend,
+                style=app._viz_style,
+                lighting=app._viz_lighting,
+                bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+            )
+
+
+def on_traj_expand(app: Any, change: dict[str, Any]) -> None:
+    """Lazily generate trajectory animation when accordion first opens."""
+    if change["new"] != 0:
+        return
+    result = app._pending_traj_result
+    try:
+        from quantui import calc_log as _clog_te
+
+        _clog_te.log_event("traj_expand", f"pending={result is not None}")
+    except Exception:
+        pass
+    if result is None:
+        return
+    app._pending_traj_result = None
+    app._traj_render_token = int(getattr(app, "_traj_render_token", 0)) + 1
+    render_token = app._traj_render_token
+
+    from IPython.display import HTML as _H
+    from IPython.display import display as _d
+
+    app.traj_output.clear_output()
+    with app.traj_output:
+        _d(
+            _H(
+                '<p style="color:#555;font-style:italic;padding:8px">Loading trajectory viewer…</p>'
+            )
+        )
+
+    try:
+        app._show_opt_trajectory(result, render_token=render_token)
+    except Exception as exc:
+        try:
+            from quantui import calc_log as _clog_te2
+
+            _clog_te2.log_event(
+                "traj_expand_error",
+                f"{type(exc).__name__}: {exc}"[:300],
+            )
+        except Exception:
+            pass
+        if render_token != int(getattr(app, "_traj_render_token", 0)):
+            return
+        from IPython.display import HTML as _H2
+        from IPython.display import display as _d2
+
+        app.traj_output.clear_output()
+        with app.traj_output:
+            _d2(
+                _H2(
+                    f'<p style="color:#b91c1c;padding:8px">⚠ Trajectory rendering failed: {exc}</p>'
+                )
+            )
+
+
+def show_opt_trajectory(
+    app: Any,
+    opt_result: Any,
+    *,
+    layout_fn: Any,
+    render_token: int | None = None,
+) -> None:
+    """Build trajectory carousel and energy chart in trajectory panel."""
+    import concurrent.futures
+
+    from IPython.display import display as _ipy_display
+
+    def _is_stale() -> bool:
+        return render_token is not None and render_token != int(
+            getattr(app, "_traj_render_token", 0)
+        )
+
+    def _set_cache_label(value: str) -> None:
+        if _is_stale():
+            return
+        cache_label.value = value
+
+    def _show_frame_error(message: str) -> None:
+        if _is_stale():
+            return
+        frame_out.clear_output()
+        with frame_out:
+            _ipy_display(
+                HTML(
+                    f'<p style="color:#b91c1c;padding:8px">Frame render failed: {message}</p>'
+                )
+            )
+
+    # Support both OptimizationResult (.trajectory) and PESScanResult (.coordinates_list)
+    traj = getattr(opt_result, "trajectory", None) or getattr(
+        opt_result, "coordinates_list", []
+    )
+    energies = opt_result.energies_hartree
+    n = len(traj)
+    if n < 2:
+        app.traj_output.clear_output()
+        with app.traj_output:
+            _ipy_display(
+                HTML(
+                    '<p style="color:#666;padding:8px">'
+                    "No trajectory data available (single-frame result).</p>"
+                )
+            )
+        return
+
+    hartree_to_kcal = 627.5094740631
+    e0 = energies[0] if energies else 0.0
+    rel_e = [(e - e0) * hartree_to_kcal for e in energies] if energies else []
+
+    # --- Energy convergence chart ---
+    has_plotly = False
+    try:
+        import plotly.graph_objects as go
+
+        energy_fig = go.Figure(
+            go.Scatter(
+                x=list(range(n)),
+                y=rel_e,
+                mode="lines+markers",
+                name="ΔE",
+                line=dict(color="#2563eb", width=2),
+                marker=dict(size=6),
+            )
+        )
+        energy_fig.update_layout(
+            title="Energy Convergence",
+            xaxis_title="Step",
+            yaxis_title="ΔE (kcal/mol)",
+            height=220,
+            margin=dict(l=60, r=20, t=40, b=40),
+        )
+        has_plotly = True
+    except ImportError:
+        pass
+
+    # --- Pre-build XYZ blocks (reused by carousel, fast path, and export) ---
+    charge = traj[0].charge
+    xyzblocks = [
+        f"{len(m.atoms)}\n{m.get_formula()}\n{m.to_xyz_string()}" for m in traj
+    ]
+    frame_w, frame_h, frame_res = 460, 340, 8
+
+    # --- Attempt fast-path: bond perception once on frame 0 ---
+    ref_mol = None
+    plotlymol_fast = False
+    try:
+        from plotlymol3d import (
+            draw_3D_mol as _draw_3D_mol,
+        )
+        from plotlymol3d import (
+            format_figure as _fmt_fig,
+        )
+        from plotlymol3d import (
+            format_lighting as _fmt_light,
+        )
+        from plotlymol3d import (
+            make_subplots as _make_subplots,
+        )
+        from plotlymol3d import (
+            xyzblock_to_rdkitmol as _xyz_to_rdkit,
+        )
+        from rdkit import Chem as _Chem
+
+        from quantui.visualization_py3dmol import LIGHTING_PRESETS as _LP
+
+        ref_mol = _xyz_to_rdkit(xyzblocks[0], charge=charge)
+        plotlymol_fast = ref_mol is not None
+    except Exception:
+        pass
+
+    def _build_fig_fast(idx: int):
+        """Reuse frame-0 bond topology; only swap in new atom positions."""
+        mol_xyz = _Chem.MolFromXYZBlock(xyzblocks[idx] + "\n")
+        if mol_xyz is None:
+            return None
+        rw = _Chem.RWMol(ref_mol)
+        conf_src = mol_xyz.GetConformer()
+        conf_dst = rw.GetConformer()
+        for atom_idx in range(rw.GetNumAtoms()):
+            conf_dst.SetAtomPosition(atom_idx, conf_src.GetAtomPosition(atom_idx))
+        fig = _make_subplots(rows=1, cols=1, specs=[[{"type": "scene"}]])
+        _draw_3D_mol(fig, rw.GetMol(), frame_res, "ball+stick")
+        fig = _fmt_fig(fig)
+        fig = _fmt_light(fig, **_LP.get("soft", _LP["soft"]))
+        scene_bg = app._plotly_theme_colors()["scene_bgcolor"]
+        fig.update_layout(
+            width=frame_w,
+            height=frame_h,
+            paper_bgcolor="white",
+            scene=dict(bgcolor=scene_bg),
+            margin=dict(l=0, r=0, t=0, b=0),
+        )
+        return fig
+
+    def _build_fig(idx: int):
+        """Return (kind, obj) for frame idx; fast path when bonds are cached."""
+        if plotlymol_fast:
+            try:
+                fig = _build_fig_fast(idx)
+                if fig is not None:
+                    return ("plotly", fig)
+            except Exception:
+                pass
+        # Slow fallback: full plotlymol pipeline
+        try:
+            from quantui.visualization_py3dmol import visualize_molecule_plotlymol
+
+            fig = visualize_molecule_plotlymol(
+                traj[idx],
+                mode="ball+stick",
+                resolution=frame_res,
+                width=frame_w,
+                height=frame_h,
+            )
+            scene_bg = app._plotly_theme_colors()["scene_bgcolor"]
+            fig.update_layout(paper_bgcolor="white", scene=dict(bgcolor=scene_bg))
+            return ("plotly", fig)
+        except ImportError:
+            pass
+        # Last resort: py3Dmol
+        try:
+            import py3Dmol as _p3d
+
+            view = _p3d.view(width=frame_w, height=frame_h)
+            view.addModel(xyzblocks[idx], "xyz")
+            view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
+            view.setBackgroundColor(
+                "white" if app.theme_btn.value == "Light" else "#1e1e1e"
+            )
+            view.zoomTo()
+            return ("py3dmol", view)
+        except Exception as exc:
+            return ("error", str(exc))
+
+    frame_cache: dict[int, Any] = {}
+
+    # --- Carousel controls ---
+    step_slider = widgets.IntSlider(
+        value=0,
+        min=0,
+        max=n - 1,
+        description="Step:",
+        continuous_update=False,
+        style={"description_width": "40px"},
+        layout=layout_fn(width="360px"),
+    )
+    step_info = widgets.HTML(value=app._traj_step_html(0, traj, energies, rel_e))
+    frame_out = widgets.Output(layout=layout_fn(min_height="340px"))
+    cache_label = widgets.HTML(
+        value=f'<span style="color:#888;font-size:11px;font-style:italic">'
+        f"Pre-rendering frames… 0 / {n}</span>"
+    )
+
+    def _display_frame(idx: int) -> None:
+        if _is_stale():
+            return
+        kind, obj = frame_cache[idx]
+        try:
+            from quantui import calc_log as _clog_df
+
+            _clog_df.log_event("traj_frame_display", f"idx={idx} kind={kind}")
+        except Exception:
+            pass
+        if kind == "error":
+            frame_out.clear_output()
+            with frame_out:
+                _ipy_display(
+                    HTML(
+                        f'<p style="color:#b91c1c;padding:8px">Frame render failed: {obj}</p>'
+                    )
+                )
+            return
+        if kind == "plotly":
+            # Render via to_html + append_display_data — same pattern proven to
+            # work in vib_output and other Plotly panels. The previous
+            # `with frame_out: display(fig)` path silently failed to update
+            # this *nested* Output widget after the parent VBox had already
+            # been displayed. See GOTCHAS: _render_vib_mode workaround.
+            import plotly.io as _pio
+
+            _html = _pio.to_html(
+                obj,
+                full_html=False,
+                include_plotlyjs="require",
+                config={"responsive": True},
+            )
+            frame_out.clear_output()
+            frame_out.append_display_data(HTML(_html))
+            return
+        frame_out.clear_output()
+        with frame_out:
+            _ipy_display(obj)
+
+    def _update_frame(change: dict[str, Any]) -> None:
+        if _is_stale():
+            return
+        idx = change["new"]
+        step_info.value = app._traj_step_html(idx, traj, energies, rel_e)
+        if idx in frame_cache:
+            _display_frame(idx)
+            return
+        frame_out.clear_output()
+        with frame_out:
+            _ipy_display(
+                HTML(
+                    '<p style="color:#555;font-style:italic;padding:8px">Rendering…</p>'
+                )
+            )
+
+        def _on_demand() -> None:
+            try:
+                frame_cache[idx] = _build_fig(idx)
+                app._queue_main_thread_callback(_display_frame, idx)
+            except Exception as exc:
+                if _is_stale():
+                    return
+                app._queue_main_thread_callback(_show_frame_error, str(exc))
+
+        threading.Thread(target=_on_demand, daemon=True).start()
+
+    step_slider.observe(app._safe_cb(_update_frame), names="value")
+
+    # --- Export button ---
+    export_btn = widgets.Button(
+        description="Export Animation",
+        icon="download",
+        layout=layout_fn(width="160px", margin="0 0 0 12px"),
+        tooltip="Generate a standalone HTML animation file (may take a minute)",
+    )
+    export_status = widgets.HTML()
+
+    def _on_export(_btn) -> None:
+        _btn.disabled = True
+        export_status.value = (
+            f'<span style="color:#555;font-style:italic">'
+            f"Generating {n}-frame animation, please wait…</span>"
+        )
+
+        def _do_export() -> None:
+            try:
+                from plotlymol3d import create_trajectory_animation
+
+                anim_fig = create_trajectory_animation(
+                    xyzblocks=xyzblocks,
+                    energies_hartree=energies if energies else None,
+                    charge=charge,
+                    mode="ball+stick",
+                    resolution=12,
+                    title=f"Geo Opt: {opt_result.formula}",
+                )
+                result_dir = getattr(app, "_last_result_dir", None)
+                out_path = (
+                    result_dir / "trajectory_animation.html"
+                    if result_dir is not None
+                    else Path.home() / f"{opt_result.formula}_trajectory.html"
+                )
+                anim_fig.write_html(str(out_path))
+                app._queue_main_thread_callback(
+                    setattr,
+                    export_status,
+                    "value",
+                    (
+                        f'<span style="color:#16a34a;font-size:12px">'
+                        f"✓ Saved: {out_path}</span>"
+                    ),
+                )
+            except Exception as exc:
+                app._queue_main_thread_callback(
+                    setattr,
+                    export_status,
+                    "value",
+                    f'<span style="color:#b91c1c">Export failed: {exc}</span>',
+                )
+            finally:
+                app._queue_main_thread_callback(setattr, _btn, "disabled", False)
+
+        threading.Thread(target=_do_export, daemon=True).start()
+
+    export_btn.on_click(_on_export)
+
+    # --- Assemble layout ---
+    header = widgets.HBox(
+        [step_slider, export_btn],
+        layout=layout_fn(align_items="center", margin="4px 0"),
+    )
+    panel = widgets.VBox([header, step_info, cache_label, frame_out, export_status])
+
+    # Build and render frame 0 SYNCHRONOUSLY on the main thread before
+    # displaying the panel, so the Output widget arrives at the browser with
+    # frame 0 already in its outputs list. This avoids the io_loop-callback
+    # latency that left frame 0 invisible until the first slider click.
+    if _is_stale():
+        return
+    try:
+        frame_cache[0] = _build_fig(0)
+        _display_frame(0)
+        sync_frame0_ok = True
+    except Exception as _f0_exc:
+        sync_frame0_ok = False
+        try:
+            from quantui import calc_log as _clog_f0
+
+            _clog_f0.log_event(
+                "traj_frame0_sync_error",
+                f"{type(_f0_exc).__name__}: {_f0_exc}"[:300],
+            )
+        except Exception:
+            pass
+        frame_out.clear_output()
+        with frame_out:
+            _ipy_display(
+                HTML(
+                    '<p style="color:#555;font-style:italic;padding:8px">'
+                    "Rendering frame 0…</p>"
+                )
+            )
+
+    # Display panel.
+    if _is_stale():
+        return
+    app.traj_output.clear_output()
+    with app.traj_output:
+        if has_plotly and rel_e:
+            _ipy_display(energy_fig)
+        _ipy_display(panel)
+    try:
+        from quantui import calc_log as _clog_sp
+
+        _clog_sp.log_event(
+            "traj_show_panel",
+            f"n={n} plotlymol_fast={plotlymol_fast} "
+            f"sync_frame0_ok={sync_frame0_ok}",
+        )
+    except Exception:
+        pass
+
+    def _prerender_all() -> None:
+        """Render remaining frames in a background thread (frame 0 already
+        built+displayed synchronously above when sync_frame0_ok)."""
+        if _is_stale():
+            return
+        try:
+            if 0 not in frame_cache:
+                frame_cache[0] = _build_fig(0)
+                app._queue_main_thread_callback(_display_frame, 0)
+            app._queue_main_thread_callback(
+                _set_cache_label,
+                f'<span style="color:#888;font-size:11px;font-style:italic">'
+                f"Pre-rendering frames… 1 / {n}</span>",
+            )
+            if n > 1:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                    futures = {pool.submit(_build_fig, i): i for i in range(1, n)}
+                    done = 1
+                    for fut in concurrent.futures.as_completed(futures):
+                        if _is_stale():
+                            return
+                        i = futures[fut]
+                        try:
+                            frame_cache[i] = fut.result()
+                        except Exception:
+                            pass
+                        done += 1
+                        app._queue_main_thread_callback(
+                            _set_cache_label,
+                            f'<span style="color:#888;font-size:11px;font-style:italic">'
+                            f"Pre-rendering frames… {done} / {n}</span>",
+                        )
+        except Exception:
+            pass
+        app._queue_main_thread_callback(
+            _set_cache_label,
+            f'<span style="color:#16a34a;font-size:11px">'
+            f"✓ All {n} frames ready</span>",
+        )
+        try:
+            from quantui import calc_log as _clog_pre
+
+            _clog_pre.log_event(
+                "traj_prerender_complete", f"n={n} cached={len(frame_cache)}"
+            )
+        except Exception:
+            pass
+
+    threading.Thread(target=_prerender_all, daemon=True).start()
+
+
+def traj_step_html(
+    app: Any, step: int, traj: list[Any], energies: list[Any], rel_e: list[Any]
+) -> str:
+    """One-line info label for a trajectory step index."""
+    n = len(traj)
+    mol = traj[step]
+    e_abs = f"{energies[step]:.8f} Ha" if energies and step < len(energies) else "—"
+    delta = (
+        f" &nbsp;·&nbsp; ΔE = {rel_e[step]:+.3f} kcal/mol"
+        if rel_e and step < len(rel_e)
+        else ""
+    )
+    return (
+        f'<span style="font-size:12px;color:#666">'
+        f"Step {step} / {n - 1} &nbsp;·&nbsp; {mol.get_formula()}"
+        f" &nbsp;·&nbsp; E = {e_abs}{delta}</span>"
+    )
+
+
+def render_traj_frame(app: Any, molecule: Any, output_widget: Any) -> None:
+    """Render one trajectory frame into output widget."""
+    try:
+        from quantui.visualization_py3dmol import visualize_molecule_plotlymol
+
+        fig = visualize_molecule_plotlymol(
+            molecule, mode="ball+stick", resolution=8, width=460, height=340
+        )
+        scene_bg = app._plotly_theme_colors()["scene_bgcolor"]
+        fig.update_layout(paper_bgcolor="white", scene=dict(bgcolor=scene_bg))
+        output_widget.clear_output()
+        with output_widget:
+            display(fig)
+        return
+    except ImportError:
+        pass
+
+    # Fallback: py3Dmol
+    try:
+        import py3Dmol as _p3d
+
+        xyz = (
+            f"{len(molecule.atoms)}\n"
+            f"{molecule.get_formula()}\n"
+            f"{molecule.to_xyz_string()}"
+        )
+        view = _p3d.view(width=460, height=340)
+        view.addModel(xyz, "xyz")
+        view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
+        view.setBackgroundColor("white")
+        view.zoomTo()
+        output_widget.clear_output()
+        with output_widget:
+            display(view)
+    except Exception as exc:
+        output_widget.clear_output()
+        with output_widget:
+            display(
+                HTML(
+                    f'<p style="color:#b91c1c;padding:8px">Frame render failed: {exc}</p>'
+                )
+            )
+
+
+def build_vib_data_from_freq_result(app: Any, freq_result: Any, molecule: Any) -> Any:
+    """Construct plotlymol3d VibrationalData from a frequency result."""
+    try:
+        import numpy as np
+        from plotlymol3d import VibrationalData, VibrationalMode
+    except ImportError:
+        return None
+
+    try:
+        return app._build_vib_data_inner(
+            freq_result, molecule, np, VibrationalData, VibrationalMode
+        )
+    except Exception as exc:
+        try:
+            from quantui import calc_log as _clog
+
+            _clog.log_event("vib_data_error", f"{type(exc).__name__}: {exc}"[:300])
+        except Exception:
+            pass
+        return None
+
+
+def build_vib_data_inner(
+    app: Any,
+    freq_result: Any,
+    molecule: Any,
+    np: Any,
+    VibrationalData: Any,
+    VibrationalMode: Any,
+) -> Any:
+    """Internal constructor for VibrationalData with dependency injection."""
+    displacements = getattr(freq_result, "displacements", None)
+    if displacements is None:
+        return None
+
+    freqs = freq_result.frequencies_cm1
+    intensities = freq_result.ir_intensities
+    n_modes = len(freqs)
+
+    coords = np.array(molecule.coordinates, dtype=float)
+
+    # Map element symbols to atomic numbers using a common-elements table.
+    z_map = {
+        "H": 1,
+        "He": 2,
+        "Li": 3,
+        "Be": 4,
+        "B": 5,
+        "C": 6,
+        "N": 7,
+        "O": 8,
+        "F": 9,
+        "Ne": 10,
+        "Na": 11,
+        "Mg": 12,
+        "Al": 13,
+        "Si": 14,
+        "P": 15,
+        "S": 16,
+        "Cl": 17,
+        "Ar": 18,
+        "K": 19,
+        "Ca": 20,
+        "Br": 35,
+        "I": 53,
+    }
+    atomic_numbers: List[int] = [z_map.get(sym, 0) for sym in molecule.atoms]
+
+    modes = []
+    for i in range(n_modes):
+        freq = freqs[i]
+        ir_inten = intensities[i] if i < len(intensities) else None
+        displ = np.array(displacements[i], dtype=float)
+        modes.append(
+            VibrationalMode(
+                mode_number=i + 1,
+                frequency=float(freq),
+                ir_intensity=ir_inten,
+                displacement_vectors=displ,
+                is_imaginary=freq < 0,
+            )
+        )
+
+    return VibrationalData(
+        coordinates=coords,
+        atomic_numbers=atomic_numbers,
+        modes=modes,
+        source_file="quantui_freq_calc",
+        program="pyscf",
+    )
+
+
+def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
+    """Populate vibrational animation accordion after a Frequency result."""
+    vib_data = app._build_vib_data_from_freq_result(freq_result, molecule)
+    if vib_data is None:
+        return False
+
+    freqs = freq_result.frequencies_cm1
+    if not freqs:
+        return False
+
+    # Build dropdown options; skip near-zero translation/rotation modes.
+    options = []
+    for mode in vib_data.modes:
+        freq_val = mode.frequency
+        if abs(freq_val) < 10:
+            continue
+        label = (
+            f"Mode {mode.mode_number}: {freq_val:.1f} cm⁻¹"
+            if freq_val >= 0
+            else f"Mode {mode.mode_number}: {freq_val:.1f} cm⁻¹ (imaginary, TS?)"
+        )
+        options.append((label, mode.mode_number))
+
+    if not options:
+        return False
+
+    app.vib_mode_dd.options = options
+    app.vib_mode_dd.value = options[0][1]
+
+    app._last_vib_data = vib_data
+    app._last_vib_molecule = molecule
+
+    first_label, first_mode = options[0]
+    app.vib_output.clear_output()
+    app.vib_output.append_display_data(
+        HTML(
+            f'<p style="color:#555;font-style:italic;padding:8px">'
+            f"⏳ Rendering vibrational animation ({first_label})…</p>"
+        )
+    )
+    threading.Thread(
+        target=app._render_vib_mode,
+        args=(vib_data, molecule, first_mode),
+        daemon=True,
+    ).start()
+
+    return True
+
+
+def show_ir_spectrum(app: Any, freq_result: Any) -> bool:
+    """Populate IR Spectrum accordion after a Frequency result."""
+    freqs = list(freq_result.frequencies_cm1 or [])
+    ints = list(getattr(freq_result, "ir_intensities", None) or [])
+    if not freqs:
+        return False
+
+    app._ir_intensities_real = bool(ints)
+    if not ints:
+        ints = [1.0] * len(freqs)
+    app._ir_accordion.set_title(
+        0,
+        (
+            "IR Spectrum"
+            if app._ir_intensities_real
+            else "IR Spectrum (positions only — intensities unavailable)"
+        ),
+    )
+
+    app._last_ir_freqs = freqs
+    app._last_ir_ints = ints
+
+    app._update_ir_figure("Stick", 20.0)
+
+    # _show_ir_spectrum may run from _do_run background thread.
+    app._queue_main_thread_callback(app._wire_ir_controls)
+
+    return True
+
+
+def wire_ir_controls(app: Any) -> None:
+    """Rebind IR controls and reset defaults on the main thread."""
+    # Observers are wired once in QuantUIApp._wire_callbacks. Avoid unobserve_all()
+    # here because it can remove unrelated trait observers in some frontends.
+    app._ir_mode_toggle.value = "Stick"
+    app._ir_fwhm_slider.value = 20.0
+    app._ir_fwhm_slider.layout.display = "none"
+
+
+def on_ir_mode_changed(app: Any, change: dict[str, Any]) -> None:
+    """Handle Stick/Broadened mode changes for IR panel."""
+    mode = change["new"]
+    try:
+        import quantui.calc_log as _calc_log
+
+        _calc_log.log_event(
+            "ir_mode_change",
+            mode,
+            mode=mode,
+            session_id=app._session_id,
+        )
+    except Exception:
+        pass
+    app._ir_fwhm_slider.layout.display = "" if mode == "Broadened" else "none"
+    app._update_ir_figure(mode, app._ir_fwhm_slider.value)
+
+
+def on_ir_fwhm_changed(app: Any, change: dict[str, Any]) -> None:
+    """Re-render broadened IR trace when line width slider changes."""
+    if app._ir_mode_toggle.value == "Broadened":
+        app._update_ir_figure("Broadened", change["new"])
+
+
+def update_ir_figure(app: Any, mode: str, fwhm: float) -> None:
+    """Re-render IR spectrum chart for mode and FWHM settings."""
+    try:
+        import plotly.io as _pio
+
+        from quantui.ir_plot import plot_ir_spectrum
+
+        y_title = (
+            "IR Intensity (km/mol)"
+            if getattr(app, "_ir_intensities_real", True)
+            else "Relative intensity (a.u.)"
+        )
+        fig = plot_ir_spectrum(
+            app._last_ir_freqs,
+            app._last_ir_ints,
+            mode=mode.lower(),
+            fwhm=fwhm,
+            yaxis_title=y_title,
+        )
+        app._apply_plotly_theme(fig)
+        app._last_ir_fig = fig
+        app._set_html_output(
+            app._ir_fig,
+            _pio.to_html(
+                fig,
+                include_plotlyjs="require",
+                full_html=False,
+                config={"responsive": True},
+            ),
+        )
+    except Exception as exc:
+        app._last_ir_fig = None
+        try:
+            from quantui import calc_log as _clog
+
+            _clog.log_event("ir_fig_error", f"{type(exc).__name__}: {exc}"[:300])
+        except Exception:
+            pass
+
+
+def show_uv_vis_spectrum(
+    app: Any,
+    energies_ev: List[float],
+    oscillator_strengths: List[float],
+    wavelengths_nm: List[float],
+) -> bool:
+    """Populate UV-Vis spectrum data and render the default stick plot."""
+    wl = list(wavelengths_nm or [])
+    if not wl:
+        wl = [1240.0 / e for e in energies_ev if e and e > 0]
+
+    peaks: list[tuple[float, float]] = []
+    for x0, amp in zip(wl, oscillator_strengths):
+        try:
+            x_val = float(x0)
+            a_val = float(amp)
+        except Exception:
+            continue
+        if x_val <= 0:
+            continue
+        peaks.append((x_val, max(a_val, 0.0)))
+
+    if not peaks:
+        return False
+
+    peaks.sort(key=lambda p: p[0])
+    app._last_uv_wavelengths_nm = [p[0] for p in peaks]
+    app._last_uv_oscillator_strengths = [p[1] for p in peaks]
+
+    app._update_uv_vis_figure("Stick", 20.0)
+
+    # _show_uv_vis_spectrum may run from _do_run background thread.
+    app._queue_main_thread_callback(app._wire_uv_controls)
+    return True
+
+
+def wire_uv_controls(app: Any) -> None:
+    """Rebind UV-Vis controls and reset defaults on the main thread."""
+    # Observers are wired once in QuantUIApp._wire_callbacks. Avoid unobserve_all()
+    # here because it can remove unrelated trait observers in some frontends.
+    app._uv_mode_toggle.value = "Stick"
+    app._uv_fwhm_slider.value = 20.0
+    app._uv_fwhm_slider.layout.display = "none"
+
+
+def on_uv_mode_changed(app: Any, change: dict[str, Any]) -> None:
+    """Handle Stick/Broadened mode changes for UV-Vis panel."""
+    mode = change["new"]
+    app._uv_fwhm_slider.layout.display = "" if mode == "Broadened" else "none"
+    app._update_uv_vis_figure(mode, app._uv_fwhm_slider.value)
+
+
+def on_uv_fwhm_changed(app: Any, change: dict[str, Any]) -> None:
+    """Re-render broadened UV-Vis trace when line width slider changes."""
+    if app._uv_mode_toggle.value == "Broadened":
+        app._update_uv_vis_figure("Broadened", change["new"])
+
+
+def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
+    """Re-render UV-Vis spectrum chart for mode and FWHM settings."""
+    wl = list(getattr(app, "_last_uv_wavelengths_nm", []) or [])
+    osc = list(getattr(app, "_last_uv_oscillator_strengths", []) or [])
+    if not wl or not osc:
+        return
+
+    try:
+        import numpy as _np
+        import plotly.graph_objects as _go
+        import plotly.io as _pio
+
+        mode_name = str(mode or "Stick")
+        mode_norm = mode_name.strip().lower()
+        fig = _go.Figure()
+
+        if mode_norm == "broadened":
+            gamma = max(float(fwhm), 1.0) / 2.0
+            x_min = max(100.0, min(wl) - 80.0)
+            x_max = max(wl) + 80.0
+            n_points = max(600, int((x_max - x_min) * 2.0))
+            x_grid = _np.linspace(x_min, x_max, n_points)
+            y_grid = _np.zeros_like(x_grid)
+            for x0, amp in zip(wl, osc):
+                y_grid += amp * (gamma**2 / ((x_grid - x0) ** 2 + gamma**2))
+            fig.add_trace(
+                _go.Scatter(
+                    x=x_grid.tolist(),
+                    y=y_grid.tolist(),
+                    mode="lines",
+                    line=dict(color="#2563eb", width=2),
+                    name="Broadened",
+                )
+            )
+        else:
+            stick_x: list[float | None] = []
+            stick_y: list[float | None] = []
+            for x0, amp in zip(wl, osc):
+                stick_x.extend([x0, x0, None])
+                stick_y.extend([0.0, amp, None])
+            fig.add_trace(
+                _go.Scatter(
+                    x=stick_x,
+                    y=stick_y,
+                    mode="lines",
+                    line=dict(color="#2563eb", width=2),
+                    name="Stick",
+                )
+            )
+            fig.add_trace(
+                _go.Scatter(
+                    x=wl,
+                    y=osc,
+                    mode="markers",
+                    marker=dict(color="#1d4ed8", size=6),
+                    showlegend=False,
+                    hovertemplate=(
+                        "Wavelength: %{x:.2f} nm"
+                        "<br>Oscillator strength: %{y:.3f}<extra></extra>"
+                    ),
+                )
+            )
+
+        tc = app._plotly_theme_colors()
+        fig.update_layout(
+            xaxis_title="Wavelength (nm)",
+            yaxis_title="Oscillator strength",
+            height=320,
+            margin=dict(l=60, r=20, t=30, b=50),
+            showlegend=False,
+            plot_bgcolor=tc["plot_bgcolor"],
+            paper_bgcolor=tc["paper_bgcolor"],
+            font=dict(color=tc["font_color"]),
+        )
+        fig.update_xaxes(showgrid=True, gridcolor=tc["grid_color"], zeroline=False)
+        fig.update_yaxes(
+            showgrid=True,
+            gridcolor=tc["grid_color"],
+            rangemode="tozero",
+        )
+
+        app._apply_plotly_theme(fig)
+        app._last_uv_fig = fig
+        app._set_html_output(
+            app._tddft_fig,
+            _pio.to_html(
+                fig,
+                include_plotlyjs="require",
+                full_html=False,
+                config={"responsive": True},
+            ),
+        )
+    except Exception as exc:
+        app._last_uv_fig = None
+        try:
+            from quantui import calc_log as _clog
+
+            _clog.log_event("uv_fig_error", f"{type(exc).__name__}: {exc}"[:300])
+        except Exception:
+            pass
+
+
+def show_orbital_diagram(app: Any, result: Any) -> bool:
+    """Build and reveal interactive orbital diagram accordion."""
+    mo_energy = getattr(result, "mo_energy_hartree", None)
+    mo_occ = getattr(result, "mo_occ", None)
+    if mo_energy is None or mo_occ is None:
+        return False
+
+    try:
+        from quantui.orbital_visualization import orbital_info_from_arrays
+
+        info = orbital_info_from_arrays(mo_energy, mo_occ, formula=result.formula)
+    except Exception:
+        return False
+
+    app._last_orb_info = info
+    app._last_orb_mo_coeff = getattr(result, "mo_coeff", None)
+    app._last_orb_mol_atom = getattr(result, "pyscf_mol_atom", None)
+    app._last_orb_mol_basis = getattr(result, "pyscf_mol_basis", None)
+
+    plotly_rendered = False
+    try:
+        import plotly.io as _pio
+
+        from quantui.orbital_visualization import plot_orbital_diagram_plotly
+
+        fig = plot_orbital_diagram_plotly(info, max_orbitals=app._orb_n_orb_input.value)
+        yr = fig.layout.yaxis.range
+        if yr is not None:
+            app._orb_ymin_input.value = round(float(yr[0]), 2)
+            app._orb_ymax_input.value = round(float(yr[1]), 2)
+        app._apply_plotly_theme(fig)
+        app._last_orb_fig = fig
+        html_str = _pio.to_html(
+            fig,
+            include_plotlyjs="require",
+            full_html=False,
+            config={"responsive": True},
+        )
+        app._set_html_output(app._orb_diagram_html, html_str)
+        plotly_rendered = True
+    except Exception:
+        pass
+
+    if not plotly_rendered:
+        app._last_orb_fig = None
+        import base64
+        import io as _io
+
+        try:
+            from matplotlib.backends.backend_agg import (
+                FigureCanvasAgg as _AggCanvas,
+            )
+
+            from quantui.orbital_visualization import plot_orbital_diagram
+
+            mpl_fig = plot_orbital_diagram(info)
+            _AggCanvas(mpl_fig)
+            buf = _io.BytesIO()
+            mpl_fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+            buf.seek(0)
+            img_b64 = base64.b64encode(buf.read()).decode()
+            app._set_html_output(
+                app._orb_diagram_html,
+                (
+                    f'<img src="data:image/png;base64,{img_b64}" '
+                    'style="max-width:100%;height:auto" />'
+                ),
+            )
+        except Exception:
+            pass
+
+    if (
+        app._last_orb_mo_coeff is not None
+        and app._last_orb_mol_atom is not None
+        and app._last_orb_mol_basis is not None
+    ):
+        app._orb_iso_output.clear_output()
+        app._orb_toggle.value = "HOMO"
+        app._orb_iso_controls.layout.display = ""
+        app._iso_generate_btn.disabled = False
+    else:
+        app._orb_iso_controls.layout.display = "none"
+        app._iso_generate_btn.disabled = True
+
+    return True
+
+
+def on_iso_generate(app: Any, btn: Any) -> None:
+    """Generate orbital isosurface for currently selected orbital."""
+    orbital_label = app._orb_toggle.value
+    app._iso_render_token = int(getattr(app, "_iso_render_token", 0)) + 1
+    render_token = app._iso_render_token
+    btn.disabled = True
+    btn.description = "Generating…"
+    try:
+        from quantui import calc_log as _clog
+
+        _clog.log_event("iso_render_start", orbital_label)
+    except Exception:
+        pass
+    app._orb_iso_output.clear_output()
+    with app._orb_iso_output:
+        display(
+            HTML(
+                f'<p style="color:#555;font-style:italic;padding:4px 0">'
+                f"⏳ Generating {orbital_label} cube file and rendering isosurface"
+                f" — this may take 15–30 s…</p>"
+            )
+        )
+
+    done = threading.Event()
+
+    def _reset_button() -> None:
+        if render_token != int(getattr(app, "_iso_render_token", 0)):
+            return
+        btn.disabled = False
+        btn.description = "Generate Isosurface"
+
+    def _run() -> None:
+        try:
+            app._render_orbital_isosurface(orbital_label, render_token=render_token)
+        finally:
+            done.set()
+            app._queue_main_thread_callback(_reset_button)
+
+    def _watchdog() -> None:
+        if done.wait(timeout=180):
+            return
+
+        def _show_timeout() -> None:
+            if render_token != int(getattr(app, "_iso_render_token", 0)):
+                return
+            try:
+                from quantui import calc_log as _clog
+
+                _clog.log_event("iso_render_timeout", orbital_label)
+            except Exception:
+                pass
+            btn.disabled = False
+            btn.description = "Generate Isosurface"
+            app._orb_iso_output.clear_output()
+            with app._orb_iso_output:
+                display(
+                    HTML(
+                        '<p style="color:#b91c1c;padding:8px">'
+                        "⚠ Orbital isosurface timed out after 180 s. "
+                        "Try a smaller basis set or a smaller molecule.</p>"
+                    )
+                )
+
+        app._queue_main_thread_callback(_show_timeout)
+
+    threading.Thread(target=_run, daemon=True).start()
+    threading.Thread(target=_watchdog, daemon=True).start()
+
+
+def on_orb_range_changed(app: Any, _change: Any = None) -> None:
+    """Live-update orbital diagram for axis limits or orbital count changes."""
+    info = getattr(app, "_last_orb_info", None)
+    if info is None:
+        return
+    ymin = app._orb_ymin_input.value
+    ymax = app._orb_ymax_input.value
+    if ymin >= ymax:
+        return
+    try:
+        import plotly.io as _pio
+
+        from quantui.orbital_visualization import plot_orbital_diagram_plotly
+
+        fig = plot_orbital_diagram_plotly(
+            info,
+            max_orbitals=app._orb_n_orb_input.value,
+            yrange=(ymin, ymax),
+        )
+        app._apply_plotly_theme(fig)
+        app._last_orb_fig = fig
+        app._set_html_output(
+            app._orb_diagram_html,
+            _pio.to_html(
+                fig,
+                include_plotlyjs="require",
+                full_html=False,
+                config={"responsive": True},
+            ),
+        )
+    except Exception:
+        app._last_orb_fig = None
+        pass
+
+
+def render_orbital_isosurface(
+    app: Any, orbital_label: str, render_token: int | None = None
+) -> None:
+    """Generate cube file and render orbital isosurface (Linux/WSL only)."""
+    import re as _re
+    from datetime import datetime as _dt
+
+    def _is_stale() -> bool:
+        return render_token is not None and render_token != int(
+            getattr(app, "_iso_render_token", 0)
+        )
+
+    orb_info = getattr(app, "_last_orb_info", None)
+    if orb_info is None:
+        return
+
+    n_occ = orb_info.n_occupied
+    n_total = len(orb_info.mo_energies_ev)
+    idx_map = {
+        "HOMO-1": n_occ - 2,
+        "HOMO": n_occ - 1,
+        "LUMO": n_occ,
+        "LUMO+1": n_occ + 1,
+    }
+    orb_idx = idx_map.get(orbital_label)
+    if orb_idx is None or orb_idx < 0 or orb_idx >= n_total:
+        return
+
+    mo_coeff = getattr(app, "_last_orb_mo_coeff", None)
+    mol_atom = getattr(app, "_last_orb_mol_atom", None)
+    mol_basis = getattr(app, "_last_orb_mol_basis", None)
+    if mo_coeff is None or mol_atom is None or mol_basis is None:
+        return
+
+    try:
+        import plotly.io as _pio
+
+        from quantui.orbital_visualization import (
+            generate_cube_from_arrays,
+            plot_cube_isosurface,
+        )
+
+        result_dir = getattr(app, "_last_result_dir", None)
+        if not isinstance(result_dir, Path):
+            try:
+                result_dir = app._get_results_dir()
+            except Exception:
+                result_dir = Path.cwd()
+
+        cube_dir = Path(result_dir) / "isosurfaces"
+        cube_dir.mkdir(parents=True, exist_ok=True)
+
+        formula = str(getattr(orb_info, "formula", "") or "molecule")
+        safe_formula = _re.sub(r"[^A-Za-z0-9_.-]+", "_", formula).strip("._")
+        if not safe_formula:
+            safe_formula = "molecule"
+        safe_orb = _re.sub(r"[^A-Za-z0-9_.-]+", "_", orbital_label).strip("._")
+        if not safe_orb:
+            safe_orb = "orbital"
+        ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
+        cube_path = cube_dir / f"{safe_formula}_{safe_orb}_{ts}.cube"
+
+        generate_cube_from_arrays(mol_atom, mol_basis, mo_coeff, orb_idx, cube_path)
+        is_dark = app.theme_btn.value == "Dark"
+        axis_color = "#dbeafe" if is_dark else "#1f2937"
+        bond_color = "#cbd5e1" if is_dark else "#4b5563"
+        title_color = app._plotly_theme_colors()["font_color"]
+        fig = plot_cube_isosurface(
+            cube_path,
+            title=f"{orbital_label} Isosurface",
+            show_molecule=True,
+            show_grid=False,
+            scene_bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+            axis_color=axis_color,
+            title_color=title_color,
+            bond_color=bond_color,
+        )
+        html_str = _pio.to_html(
+            fig,
+            include_plotlyjs="require",
+            full_html=False,
+            config={"responsive": True},
+        )
+    except Exception as exc:
+        if _is_stale():
+            return
+        err_msg = f"{type(exc).__name__}: {exc}"
+        try:
+            from quantui import calc_log as _clog
+
+            _clog.log_event(
+                "iso_render_error",
+                f"{orbital_label}: {err_msg}"[:300],
+            )
+        except Exception:
+            pass
+
+        def _show_err(msg: str = err_msg) -> None:
+            app._orb_iso_output.clear_output()
+            with app._orb_iso_output:
+                display(
+                    HTML(
+                        f'<p style="color:#b91c1c;padding:8px">'
+                        f"⚠ Orbital isosurface failed: {msg}</p>"
+                    )
+                )
+
+        app._queue_main_thread_callback(_show_err)
+        return
+    if _is_stale():
+        return
+    try:
+        from quantui import calc_log as _clog
+
+        _clog.log_event(
+            "iso_cube_saved",
+            cube_path.name,
+            cube_path=str(cube_path),
+            orbital=orbital_label,
+            session_id=app._session_id,
+        )
+        _clog.log_event("iso_render_done", orbital_label)
+    except Exception:
+        pass
+
+    app._queue_main_thread_callback(
+        app._set_html_output,
+        app._orb_iso_output,
+        html_str,
+    )
+
+
+def render_vib_mode(app: Any, vib_data: Any, molecule: Any, mode_number: int) -> None:
+    """Render vibrational animation for mode number into vib output."""
+    from IPython.display import HTML as _H
+
+    def _err(msg: str) -> None:
+        app.vib_output.clear_output()
+        app.vib_output.append_display_data(
+            _H(f'<p style="color:#b91c1c;padding:8px">⚠ {msg}</p>')
+        )
+
+    try:
+        from plotlymol3d import create_vibration_animation, xyzblock_to_rdkitmol
+    except ImportError as exc:
+        _err(
+            f"Vibrational animation requires plotlymol3d "
+            f"(<code>pip install plotlymol3d</code>): {exc}"
+        )
+        return
+
+    xyzblock = (
+        f"{len(molecule.atoms)}\n{molecule.get_formula()}\n"
+        f"{molecule.to_xyz_string()}"
+    )
+    try:
+        rdmol = xyzblock_to_rdkitmol(xyzblock, charge=molecule.charge)
+    except Exception as exc:
+        _err(f"Could not parse molecule for bond connectivity: {exc}")
+        return
+
+    try:
+        from quantui import calc_log as _clog_anim
+
+        _clog_anim.log_event("vib_render_start", f"mode {mode_number}")
+    except Exception:
+        pass
+    try:
+        anim_fig = create_vibration_animation(
+            vib_data=vib_data,
+            mode_number=mode_number,
+            mol=rdmol,
+            amplitude=0.4,
+            n_frames=20,
+            mode="ball+stick",
+            resolution=12,
+        )
+        anim_fig.update_layout(height=420)
+    except Exception as exc:
+        try:
+            from quantui import calc_log as _clog_anim
+
+            _clog_anim.log_event(
+                "vib_render_error",
+                f"mode {mode_number}: {type(exc).__name__}: {exc}"[:300],
+            )
+        except Exception:
+            pass
+        _err(f"Animation generation failed: {exc}")
+        return
+    try:
+        from quantui import calc_log as _clog_anim
+
+        _clog_anim.log_event("vib_render_done", f"mode {mode_number}")
+    except Exception:
+        pass
+
+    import plotly.io as _pio
+
+    anim_html = _pio.to_html(
+        anim_fig,
+        full_html=False,
+        include_plotlyjs="require",
+        config={"responsive": True},
+    )
+    app.vib_output.clear_output()
+    app.vib_output.append_display_data(_H(anim_html))
+
+
+def on_vib_mode_changed(app: Any, change: dict[str, Any]) -> None:
+    """Re-render vibrational animation when mode dropdown changes."""
+    mode_number = change["new"]
+    vib_data = getattr(app, "_last_vib_data", None)
+    molecule = getattr(app, "_last_vib_molecule", None)
+    if vib_data is None or molecule is None:
+        return
+
+    label = next(
+        (lbl for lbl, num in app.vib_mode_dd.options if num == mode_number),
+        f"mode {mode_number}",
+    )
+    app.vib_output.clear_output()
+    app.vib_output.append_display_data(
+        HTML(
+            f'<p style="color:#555;font-style:italic;padding:8px">'
+            f"⏳ Rendering vibrational animation ({label})…</p>"
+        )
+    )
+    threading.Thread(
+        target=app._render_vib_mode,
+        args=(vib_data, molecule, mode_number),
+        daemon=True,
+    ).start()
+
+
+def show_pes_scan_result(app: Any, result: Any) -> bool:
+    """Render PES energy profile chart and stash latest PES result."""
+    app._last_pes_result = result
+    try:
+        import plotly.graph_objects as go
+        import plotly.io as pio
+
+        e_rel = result.energies_relative_kcal
+        x_vals = result.scan_parameter_values
+
+        hover_text = [
+            f"{result.scan_coordinate_label}: {x:.4f}<br>"
+            f"ΔE = {de:.3f} kcal/mol<br>"
+            f"E = {e:.8f} Ha"
+            for x, de, e in zip(x_vals, e_rel, result.energies_hartree)
+        ]
+
+        fig = go.Figure(
+            go.Scatter(
+                x=x_vals,
+                y=e_rel,
+                mode="lines+markers",
+                line=dict(color="#2563eb", width=2),
+                marker=dict(size=8, color="#2563eb"),
+                hovertext=hover_text,
+                hoverinfo="text",
+            )
+        )
+        tc = app._plotly_theme_colors()
+        fig.update_layout(
+            xaxis_title=result.scan_coordinate_label,
+            yaxis_title="Relative energy / kcal mol⁻¹",
+            height=380,
+            margin=dict(l=60, r=20, t=30, b=50),
+            plot_bgcolor=tc["plot_bgcolor"],
+            paper_bgcolor=tc["paper_bgcolor"],
+            font=dict(color=tc["font_color"]),
+            xaxis=dict(showgrid=True, gridcolor=tc["grid_color"]),
+            yaxis=dict(showgrid=True, gridcolor=tc["grid_color"]),
+            hovermode="closest",
+        )
+        app._last_pes_fig = fig
+        app._set_html_output(
+            app._pes_plot_html,
+            pio.to_html(
+                fig,
+                include_plotlyjs="require",
+                full_html=False,
+                config={"responsive": True},
+            ),
+        )
+    except Exception:
+        app._last_pes_fig = None
+        pass
+
+    return True

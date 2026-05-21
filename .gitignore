@@ -60,3 +60,4 @@ planning/
 nul
 /.claude/
 /temp - untracked/
+/logs
