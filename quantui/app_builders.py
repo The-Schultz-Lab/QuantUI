@@ -23,6 +23,7 @@ def build_status_panel(
     ase_available: bool,
     pubchem_available: bool,
     visualization_available: bool,
+    viz_default_backend: str = "auto",
 ) -> None:
     """Build the Status tab panel."""
     cores, mem_gb = get_session_resources_fn()
@@ -104,8 +105,43 @@ def build_status_panel(
         f"</div>"
     )
 
+    # ── Settings section ──────────────────────────────────────────────────
+    # "Default 3D backend" — user preference persisted via UserSettings.
+    # Drives viz_backend_router resolution. Distinct from the Calculate-tab
+    # `viz_backend_toggle` (which selects the current effective backend for
+    # interactive use).
+    app.viz_default_backend_dd = widgets.ToggleButtons(
+        options=[
+            ("Auto", "auto"),
+            ("py3Dmol", "py3dmol"),
+            ("plotlymol3d", "plotlymol"),
+        ],
+        value=viz_default_backend,
+        style={"button_width": "110px"},
+        tooltips=[
+            "Use the recommended backend per task (py3Dmol-first where supported).",
+            "Always prefer py3Dmol when available.",
+            "Always prefer plotlymol3d when available.",
+        ],
+    )
+    settings_html = widgets.HTML(
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;'
+        "border-left:4px solid #94a3b8;padding:12px 16px;border-radius:6px;"
+        'margin:8px 0 4px">'
+        '<div style="font-weight:600;font-size:14px;color:#1e293b">Settings</div>'
+        '<div style="font-size:12px;color:#475569;margin-top:8px;margin-bottom:4px">'
+        "Default 3D backend "
+        '<span style="color:#94a3b8;font-size:11px">'
+        "(persists across launches)</span></div>"
+        "</div>"
+    )
+    settings_box = widgets.VBox(
+        [settings_html, app.viz_default_backend_dd],
+        layout=layout_fn(margin="0 0 8px 0"),
+    )
+
     app._status_tab_panel = widgets.VBox(
-        [app._status_html, guide_html],
+        [app._status_html, guide_html, settings_box],
         layout=layout_fn(padding="8px 0"),
     )
 

@@ -381,7 +381,9 @@ from quantui.config import (
 from quantui.help_content import HELP_TOPICS
 from quantui.molecule import Molecule, parse_xyz_input
 from quantui.progress import StepProgress
+from quantui.user_settings import UserSettings
 from quantui.utils import get_session_resources
+from quantui.viz_backend_router import BackendAvailability
 
 # ── Availability flags (computed once at import, not per-instantiation) ───────
 try:
@@ -754,6 +756,7 @@ class QuantUIApp:
         theme_btn: Any
         viz_backend_toggle: Any
         viz_controls_box: Any
+        viz_default_backend_dd: Any
         viz_lighting_dd: Any
         viz_output: Any
         viz_style_dd: Any
@@ -896,6 +899,15 @@ class QuantUIApp:
         # Availability (copied from module-level flags)
         self._pyscf_available: bool = _PYSCF_AVAILABLE
         self._preopt_available: bool = _PREOPT_AVAILABLE
+
+        # User settings (persisted in ~/.quantui/settings.json) + viz
+        # backend availability snapshot. The router consumes these; render
+        # call sites will be migrated to the router in VIZBACK.4 ff.
+        self._user_settings: UserSettings = UserSettings.load()
+        self._viz_availability: BackendAvailability = (
+            BackendAvailability.from_environment()
+        )
+        self._viz_backend_preference: str = self._user_settings.viz.default_backend
 
         # ── Build → wire → assemble ───────────────────────────────────────
         self._build_widgets()
@@ -1062,6 +1074,7 @@ class QuantUIApp:
             ase_available=ASE_AVAILABLE,
             pubchem_available=PUBCHEM_AVAILABLE,
             visualization_available=VISUALIZATION_AVAILABLE,
+            viz_default_backend=self._user_settings.viz.default_backend,
         )
 
     # ── Welcome header ────────────────────────────────────────────────────
@@ -1338,6 +1351,10 @@ class QuantUIApp:
             self.viz_backend_toggle.observe(
                 self._safe_cb(self._on_viz_backend_changed), names="value"
             )
+        # Settings → "Default 3D backend" preference (Status tab; persisted).
+        self.viz_default_backend_dd.observe(
+            self._safe_cb(self._on_viz_default_backend_changed), names="value"
+        )
         # 3D viewer style and lighting controls
         if VISUALIZATION_AVAILABLE:
             self.viz_style_dd.observe(
@@ -1970,6 +1987,23 @@ class QuantUIApp:
                     lighting=self._viz_lighting,
                     bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
                 )
+
+    def _on_viz_default_backend_changed(self, change) -> None:
+        """Update the persisted default-backend preference. Drives router
+        decisions for new render operations; existing widgets remain on
+        their current effective backend until the next render."""
+        new_value = change["new"]
+        if new_value not in ("auto", "py3dmol", "plotlymol"):
+            return
+        self._viz_backend_preference = new_value
+        self._user_settings.viz.default_backend = new_value
+        self._user_settings.save()
+        try:
+            _calc_log.log_event(
+                "viz_default_backend_changed", f"preference={new_value}"
+            )
+        except OSError:
+            pass
 
     def _on_viz_style_changed(self, change) -> None:
         self._viz_style = change["new"]
