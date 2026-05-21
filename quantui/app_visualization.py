@@ -39,6 +39,12 @@ def on_traj_expand(app: Any, change: dict[str, Any]) -> None:
     if change["new"] != 0:
         return
     result = app._pending_traj_result
+    try:
+        from quantui import calc_log as _clog_te
+
+        _clog_te.log_event("traj_expand", f"pending={result is not None}")
+    except Exception:
+        pass
     if result is None:
         return
     app._pending_traj_result = None
@@ -59,6 +65,15 @@ def on_traj_expand(app: Any, change: dict[str, Any]) -> None:
     try:
         app._show_opt_trajectory(result, render_token=render_token)
     except Exception as exc:
+        try:
+            from quantui import calc_log as _clog_te2
+
+            _clog_te2.log_event(
+                "traj_expand_error",
+                f"{type(exc).__name__}: {exc}"[:300],
+            )
+        except Exception:
+            pass
         if render_token != int(getattr(app, "_traj_render_token", 0)):
             return
         from IPython.display import HTML as _H2
@@ -275,6 +290,12 @@ def show_opt_trajectory(
         if _is_stale():
             return
         kind, obj = frame_cache[idx]
+        try:
+            from quantui import calc_log as _clog_df
+
+            _clog_df.log_event("traj_frame_display", f"idx={idx} kind={kind}")
+        except Exception:
+            pass
         if kind == "error":
             frame_out.clear_output()
             with frame_out:
@@ -285,7 +306,21 @@ def show_opt_trajectory(
                 )
             return
         if kind == "plotly":
-            app._set_plotly_figure_output(frame_out, obj)
+            # Render via to_html + append_display_data — same pattern proven to
+            # work in vib_output and other Plotly panels. The previous
+            # `with frame_out: display(fig)` path silently failed to update
+            # this *nested* Output widget after the parent VBox had already
+            # been displayed. See GOTCHAS: _render_vib_mode workaround.
+            import plotly.io as _pio
+
+            _html = _pio.to_html(
+                obj,
+                full_html=False,
+                include_plotlyjs="require",
+                config={"responsive": True},
+            )
+            frame_out.clear_output()
+            frame_out.append_display_data(HTML(_html))
             return
         frame_out.clear_output()
         with frame_out:
@@ -385,7 +420,37 @@ def show_opt_trajectory(
     )
     panel = widgets.VBox([header, step_info, cache_label, frame_out, export_status])
 
-    # Display panel immediately.
+    # Build and render frame 0 SYNCHRONOUSLY on the main thread before
+    # displaying the panel, so the Output widget arrives at the browser with
+    # frame 0 already in its outputs list. This avoids the io_loop-callback
+    # latency that left frame 0 invisible until the first slider click.
+    if _is_stale():
+        return
+    try:
+        frame_cache[0] = _build_fig(0)
+        _display_frame(0)
+        sync_frame0_ok = True
+    except Exception as _f0_exc:
+        sync_frame0_ok = False
+        try:
+            from quantui import calc_log as _clog_f0
+
+            _clog_f0.log_event(
+                "traj_frame0_sync_error",
+                f"{type(_f0_exc).__name__}: {_f0_exc}"[:300],
+            )
+        except Exception:
+            pass
+        frame_out.clear_output()
+        with frame_out:
+            _ipy_display(
+                HTML(
+                    '<p style="color:#555;font-style:italic;padding:8px">'
+                    "Rendering frame 0…</p>"
+                )
+            )
+
+    # Display panel.
     if _is_stale():
         return
     app.traj_output.clear_output()
@@ -393,26 +458,26 @@ def show_opt_trajectory(
         if has_plotly and rel_e:
             _ipy_display(energy_fig)
         _ipy_display(panel)
+    try:
+        from quantui import calc_log as _clog_sp
 
-    # Show placeholder while frame 0 renders in the background.
-    if _is_stale():
-        return
-    frame_out.clear_output()
-    with frame_out:
-        _ipy_display(
-            HTML(
-                '<p style="color:#555;font-style:italic;padding:8px">'
-                "Rendering frame 0…</p>"
-            )
+        _clog_sp.log_event(
+            "traj_show_panel",
+            f"n={n} plotlymol_fast={plotlymol_fast} "
+            f"sync_frame0_ok={sync_frame0_ok}",
         )
+    except Exception:
+        pass
 
     def _prerender_all() -> None:
-        """Render all frames (0 first, then 1+) in a background thread."""
+        """Render remaining frames in a background thread (frame 0 already
+        built+displayed synchronously above when sync_frame0_ok)."""
         if _is_stale():
             return
         try:
-            frame_cache[0] = _build_fig(0)
-            app._queue_main_thread_callback(_display_frame, 0)
+            if 0 not in frame_cache:
+                frame_cache[0] = _build_fig(0)
+                app._queue_main_thread_callback(_display_frame, 0)
             app._queue_main_thread_callback(
                 _set_cache_label,
                 f'<span style="color:#888;font-size:11px;font-style:italic">'
@@ -443,6 +508,14 @@ def show_opt_trajectory(
             f'<span style="color:#16a34a;font-size:11px">'
             f"✓ All {n} frames ready</span>",
         )
+        try:
+            from quantui import calc_log as _clog_pre
+
+            _clog_pre.log_event(
+                "traj_prerender_complete", f"n={n} cached={len(frame_cache)}"
+            )
+        except Exception:
+            pass
 
     threading.Thread(target=_prerender_all, daemon=True).start()
 
