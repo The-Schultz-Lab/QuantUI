@@ -831,27 +831,35 @@ def build_vib_data_inner(
 
 
 def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
-    """Populate vibrational animation accordion after a Frequency result."""
-    vib_data = app._build_vib_data_from_freq_result(freq_result, molecule)
-    if vib_data is None:
-        return False
+    """Populate vibrational animation accordion after a Frequency result.
 
+    Dropdown options are built from raw ``freq_result.frequencies_cm1`` so the
+    panel populates regardless of plotlymol3d availability. The plotlymol3d
+    `VibrationalData` wrapper is built optionally — required only when the
+    plotlymol render path is selected; the py3Dmol render path reads
+    displacements directly from ``freq_result`` (VIZBACK.8).
+    """
     freqs = freq_result.frequencies_cm1
     if not freqs:
         return False
 
-    # Build dropdown options; skip near-zero translation/rotation modes.
+    # Optional plotlymol3d data — may be None if plotlymol3d isn't installed.
+    # The py3Dmol render path doesn't need this; only the plotlymol path does.
+    vib_data = app._build_vib_data_from_freq_result(freq_result, molecule)
+
+    # Build dropdown options from raw freq_result; skip near-zero translation
+    # / rotation modes. Mode numbers are 1-indexed positions in
+    # frequencies_cm1.
     options = []
-    for mode in vib_data.modes:
-        freq_val = mode.frequency
+    for i, freq_val in enumerate(freqs, start=1):
         if abs(freq_val) < 10:
             continue
         label = (
-            f"Mode {mode.mode_number}: {freq_val:.1f} cm⁻¹"
+            f"Mode {i}: {freq_val:.1f} cm⁻¹"
             if freq_val >= 0
-            else f"Mode {mode.mode_number}: {freq_val:.1f} cm⁻¹ (imaginary, TS?)"
+            else f"Mode {i}: {freq_val:.1f} cm⁻¹ (imaginary, TS?)"
         )
-        options.append((label, mode.mode_number))
+        options.append((label, i))
 
     if not options:
         return False
@@ -859,8 +867,9 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     app.vib_mode_dd.options = options
     app.vib_mode_dd.value = options[0][1]
 
-    app._last_vib_data = vib_data
+    app._last_vib_data = vib_data  # may be None — plotlymol3d optional
     app._last_vib_molecule = molecule
+    app._last_vib_freq_result = freq_result
 
     first_label, first_mode = options[0]
     app.vib_output.clear_output()
@@ -1465,22 +1474,145 @@ def render_orbital_isosurface(
     )
 
 
-def render_vib_mode(app: Any, vib_data: Any, molecule: Any, mode_number: int) -> None:
-    """Render vibrational animation for mode number into vib output."""
+def _vib_err(app: Any, msg: str) -> None:
+    """Show an error message in the vibrational animation output panel."""
     from IPython.display import HTML as _H
 
-    def _err(msg: str) -> None:
-        app.vib_output.clear_output()
-        app.vib_output.append_display_data(
-            _H(f'<p style="color:#b91c1c;padding:8px">⚠ {msg}</p>')
+    app.vib_output.clear_output()
+    app.vib_output.append_display_data(
+        _H(f'<p style="color:#b91c1c;padding:8px">⚠ {msg}</p>')
+    )
+
+
+def _render_vib_mode_py3dmol(
+    app: Any,
+    molecule: Any,
+    mode_number: int,
+    *,
+    n_frames: int = 24,
+    amplitude: float = 0.4,
+) -> None:
+    """Render vibrational animation via py3Dmol multi-frame XYZ.
+
+    Per VIZBACK.8 spec: pure-numpy frame generation (no plotlymol3d
+    dependency); 24 sinusoidal-phase frames over one full oscillation;
+    py3Dmol view with ``addModelsAsFrames`` + ``animate``; serialized to
+    HTML and atomically swapped into ``app.vib_output``.
+    """
+    import numpy as np
+
+    try:
+        import py3Dmol
+    except ImportError as exc:
+        _vib_err(app, f"py3Dmol unavailable: {exc}")
+        return
+
+    freq_result = getattr(app, "_last_vib_freq_result", None)
+    if freq_result is None:
+        _vib_err(app, "No frequency result cached for vibrational animation.")
+        return
+
+    try:
+        displ = np.array(freq_result.displacements[mode_number - 1], dtype=float)
+    except (AttributeError, IndexError, ValueError, TypeError) as exc:
+        _vib_err(
+            app,
+            f"Could not read displacements for mode {mode_number}: {exc}",
         )
+        return
+
+    atoms = list(molecule.atoms)
+    base_coords = np.array(molecule.coordinates, dtype=float)
+    if base_coords.shape != displ.shape:
+        _vib_err(
+            app,
+            f"Shape mismatch: base coords {base_coords.shape} vs "
+            f"displacements {displ.shape}",
+        )
+        return
+
+    try:
+        from quantui import calc_log as _clog_anim
+
+        _clog_anim.log_event("vib_render_start", f"mode {mode_number} backend=py3dmol")
+    except Exception:
+        pass
+
+    # One full oscillation: n_frames evenly-spaced phases over [0, 2π).
+    phases = np.sin(np.linspace(0, 2 * np.pi, n_frames, endpoint=False))
+    n_atoms = len(atoms)
+    xyz_lines: list[str] = []
+    for phase in phases:
+        coords = base_coords + amplitude * float(phase) * displ
+        xyz_lines.append(f"{n_atoms}")
+        xyz_lines.append(f"mode {mode_number} phase {float(phase):+.3f}")
+        for sym, xyz in zip(atoms, coords):
+            xyz_lines.append(f"{sym} {xyz[0]:.6f} {xyz[1]:.6f} {xyz[2]:.6f}")
+    xyz_string = "\n".join(xyz_lines) + "\n"
+
+    try:
+        view = py3Dmol.view(width=460, height=420)
+        view.addModelsAsFrames(xyz_string, "xyz")
+        view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
+        bg = "white" if app.theme_btn.value == "Light" else "#1e1e1e"
+        view.setBackgroundColor(bg)
+        view.zoomTo()
+        view.animate({"loop": "forward", "interval": 100, "reps": 0})
+        html_str = view._make_html()
+    except Exception as exc:
+        try:
+            from quantui import calc_log as _clog_anim
+
+            _clog_anim.log_event(
+                "vib_render_error",
+                f"mode {mode_number} backend=py3dmol: "
+                f"{type(exc).__name__}: {exc}"[:300],
+            )
+        except Exception:
+            pass
+        _vib_err(app, f"Vibrational animation render failed: {exc}")
+        return
+
+    # Atomic outputs swap — single widget-state update, no flicker.
+    app.vib_output.outputs = (
+        {
+            "output_type": "display_data",
+            "data": {"text/html": html_str},
+            "metadata": {},
+        },
+    )
+
+    try:
+        from quantui import calc_log as _clog_anim
+
+        _clog_anim.log_event("vib_render_done", f"mode {mode_number} backend=py3dmol")
+    except Exception:
+        pass
+
+
+def _render_vib_mode_plotlymol(
+    app: Any, vib_data: Any, molecule: Any, mode_number: int
+) -> None:
+    """Render vibrational animation via the plotlymol3d path (PlotlyMol +
+    RDKit bond perception + Plotly figure). Used when user explicitly
+    prefers plotlymol or when py3Dmol is unavailable."""
+    from IPython.display import HTML as _H
+
+    if vib_data is None:
+        _vib_err(
+            app,
+            "PlotlyMol vibrational animation requires plotlymol3d, "
+            "which is not installed.",
+        )
+        return
 
     try:
         from plotlymol3d import create_vibration_animation, xyzblock_to_rdkitmol
     except ImportError as exc:
-        _err(
-            f"Vibrational animation requires plotlymol3d "
-            f"(<code>pip install plotlymol3d</code>): {exc}"
+        _vib_err(
+            app,
+            f"PlotlyMol vibrational animation requires plotlymol3d "
+            f"(<code>pip install plotlymol3d</code>): {exc}",
         )
         return
 
@@ -1491,13 +1623,15 @@ def render_vib_mode(app: Any, vib_data: Any, molecule: Any, mode_number: int) ->
     try:
         rdmol = xyzblock_to_rdkitmol(xyzblock, charge=molecule.charge)
     except Exception as exc:
-        _err(f"Could not parse molecule for bond connectivity: {exc}")
+        _vib_err(app, f"Could not parse molecule for bond connectivity: {exc}")
         return
 
     try:
         from quantui import calc_log as _clog_anim
 
-        _clog_anim.log_event("vib_render_start", f"mode {mode_number}")
+        _clog_anim.log_event(
+            "vib_render_start", f"mode {mode_number} backend=plotlymol"
+        )
     except Exception:
         pass
     try:
@@ -1517,16 +1651,17 @@ def render_vib_mode(app: Any, vib_data: Any, molecule: Any, mode_number: int) ->
 
             _clog_anim.log_event(
                 "vib_render_error",
-                f"mode {mode_number}: {type(exc).__name__}: {exc}"[:300],
+                f"mode {mode_number} backend=plotlymol: "
+                f"{type(exc).__name__}: {exc}"[:300],
             )
         except Exception:
             pass
-        _err(f"Animation generation failed: {exc}")
+        _vib_err(app, f"Animation generation failed: {exc}")
         return
     try:
         from quantui import calc_log as _clog_anim
 
-        _clog_anim.log_event("vib_render_done", f"mode {mode_number}")
+        _clog_anim.log_event("vib_render_done", f"mode {mode_number} backend=plotlymol")
     except Exception:
         pass
 
@@ -1542,12 +1677,38 @@ def render_vib_mode(app: Any, vib_data: Any, molecule: Any, mode_number: int) ->
     app.vib_output.append_display_data(_H(anim_html))
 
 
+def render_vib_mode(app: Any, vib_data: Any, molecule: Any, mode_number: int) -> None:
+    """Render vibrational animation for mode_number into ``app.vib_output``.
+
+    Backend dispatch goes through the router (``VizTask.VIB_INTERACTIVE``):
+    py3Dmol primary, plotlymol3d fallback. The py3Dmol path is preferred for
+    speed and doesn't require plotlymol3d to be installed.
+    """
+    from quantui.viz_backend_router import VizBackend as _VB
+    from quantui.viz_backend_router import VizTask as _VT
+
+    chosen = app._resolve_backend(_VT.VIB_INTERACTIVE)
+    if chosen == _VB.PY3DMOL:
+        _render_vib_mode_py3dmol(app, molecule, mode_number)
+    elif chosen == _VB.PLOTLYMOL:
+        _render_vib_mode_plotlymol(app, vib_data, molecule, mode_number)
+    else:
+        _vib_err(
+            app,
+            "No vibrational animation backend available "
+            "(neither py3Dmol nor plotlymol3d installed).",
+        )
+
+
 def on_vib_mode_changed(app: Any, change: dict[str, Any]) -> None:
     """Re-render vibrational animation when mode dropdown changes."""
     mode_number = change["new"]
     vib_data = getattr(app, "_last_vib_data", None)
     molecule = getattr(app, "_last_vib_molecule", None)
-    if vib_data is None or molecule is None:
+    freq_result = getattr(app, "_last_vib_freq_result", None)
+    # vib_data may be None when plotlymol3d is unavailable — the py3Dmol
+    # render path doesn't need it. Bail only if we can't render at all.
+    if molecule is None or freq_result is None:
         return
 
     label = next(
