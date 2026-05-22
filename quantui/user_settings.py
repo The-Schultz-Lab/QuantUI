@@ -44,6 +44,12 @@ _LOG = logging.getLogger(__name__)
 # this module zero-dependency for unit testing.
 _VALID_VIZ_BACKENDS = ("auto", "py3dmol", "plotlymol")
 
+# Vibrational animation playback rate. Clamped to a sensible range on load
+# so a corrupt value can't produce a 0-ms or absurdly high interval.
+_VIB_FPS_MIN = 1
+_VIB_FPS_MAX = 120
+_VIB_FPS_DEFAULT = 10
+
 # Default settings path. The QUANTUI_SETTINGS_PATH env var overrides for tests.
 DEFAULT_SETTINGS_PATH = Path.home() / ".quantui" / "settings.json"
 
@@ -53,6 +59,7 @@ class VizSettings:
     """Visualization-related user preferences."""
 
     default_backend: str = "auto"  # one of _VALID_VIZ_BACKENDS
+    vib_framerate_fps: int = _VIB_FPS_DEFAULT  # py3Dmol vib-animation fps
 
 
 @dataclass
@@ -124,6 +131,20 @@ class UserSettings:
                 "Invalid viz.default_backend %r; using %r",
                 candidate_backend,
                 viz.default_backend,
+            )
+
+        candidate_fps = viz_section.get("vib_framerate_fps", viz.vib_framerate_fps)
+        if (
+            isinstance(candidate_fps, int)
+            and not isinstance(candidate_fps, bool)
+            and _VIB_FPS_MIN <= candidate_fps <= _VIB_FPS_MAX
+        ):
+            viz.vib_framerate_fps = candidate_fps
+        else:
+            _LOG.warning(
+                "Invalid viz.vib_framerate_fps %r; using %r",
+                candidate_fps,
+                viz.vib_framerate_fps,
             )
 
         return cls(viz=viz)

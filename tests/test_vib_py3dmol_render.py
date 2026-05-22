@@ -142,6 +142,193 @@ class TestRenderVibModePy3Dmol:
         assert len(app.vib_output.outputs) >= 1
 
 
+class TestVibCacheIntegration:
+    """VIZBACK.9: `_render_vib_mode_py3dmol` should check and populate the
+    on-disk cache at ``<result_dir>/vib_frames/``."""
+
+    def test_cache_miss_then_hit_returns_same_html(
+        self, app, water_mol, fake_freq_result, tmp_path
+    ):
+        if not app._viz_availability.py3dmol:
+            pytest.skip("py3Dmol not installed in test env")
+        app._last_vib_freq_result = fake_freq_result
+        app._last_vib_molecule = water_mol
+        app._last_result_dir = tmp_path
+
+        # First call: cache miss → render → save
+        _render_vib_mode_py3dmol(app, water_mol, mode_number=1)
+        first_html = app.vib_output.outputs[0]["data"]["text/html"]
+        # Cache file should now exist
+        from quantui.vib_cache import cache_dir
+
+        assert (cache_dir(tmp_path) / "mode_001.html").exists()
+        assert (cache_dir(tmp_path) / "index.json").exists()
+
+        # Reset the output before the second call to confirm cache delivers it
+        app.vib_output.outputs = ()
+
+        # Second call: cache hit → identical HTML, no re-render
+        _render_vib_mode_py3dmol(app, water_mol, mode_number=1)
+        second_html = app.vib_output.outputs[0]["data"]["text/html"]
+        assert second_html == first_html
+
+    def test_no_result_dir_skips_cache_no_error(self, app, water_mol, fake_freq_result):
+        """Without _last_result_dir set, render still works (cache skipped)."""
+        if not app._viz_availability.py3dmol:
+            pytest.skip("py3Dmol not installed in test env")
+        app._last_vib_freq_result = fake_freq_result
+        app._last_vib_molecule = water_mol
+        app._last_result_dir = None  # explicit
+        _render_vib_mode_py3dmol(app, water_mol, mode_number=1)
+        assert len(app.vib_output.outputs) == 1
+
+    def test_changed_amplitude_invalidates_cache(
+        self, app, water_mol, fake_freq_result, tmp_path
+    ):
+        if not app._viz_availability.py3dmol:
+            pytest.skip("py3Dmol not installed in test env")
+        app._last_vib_freq_result = fake_freq_result
+        app._last_vib_molecule = water_mol
+        app._last_result_dir = tmp_path
+
+        # Render with default amplitude
+        _render_vib_mode_py3dmol(app, water_mol, mode_number=1, amplitude=0.4)
+        html_default = app.vib_output.outputs[0]["data"]["text/html"]
+
+        # Render with different amplitude — should NOT hit the prior cache,
+        # should render fresh and produce different HTML
+        _render_vib_mode_py3dmol(app, water_mol, mode_number=1, amplitude=0.8)
+        html_alt = app.vib_output.outputs[0]["data"]["text/html"]
+
+        assert html_default != html_alt
+
+
+class TestRenderTokenStaleness:
+    """The _vib_render_token machinery guarantees that an older render
+    thread cannot stomp a newer render's output. Verifies the bug-fix for
+    intermittent missing-render symptom on rapid mode switching."""
+
+    def test_stale_token_skips_output_write(self, app, water_mol, fake_freq_result):
+        if not app._viz_availability.py3dmol:
+            pytest.skip("py3Dmol not installed in test env")
+        app._last_vib_freq_result = fake_freq_result
+        app._last_vib_molecule = water_mol
+
+        # First, set a baseline output the test can detect.
+        app.vib_output.outputs = (
+            {
+                "output_type": "display_data",
+                "data": {"text/html": "BASELINE"},
+                "metadata": {},
+            },
+        )
+
+        # Bump the app's render token to N+1; pass N (stale) to the render.
+        # The render should bail and leave the baseline output untouched.
+        app._vib_render_token = 5
+        _render_vib_mode_py3dmol(app, water_mol, mode_number=1, render_token=2)
+        assert (
+            app.vib_output.outputs[0]["data"]["text/html"] == "BASELINE"
+        ), "stale render should not overwrite output"
+
+    def test_matching_token_writes_output(self, app, water_mol, fake_freq_result):
+        if not app._viz_availability.py3dmol:
+            pytest.skip("py3Dmol not installed in test env")
+        app._last_vib_freq_result = fake_freq_result
+        app._last_vib_molecule = water_mol
+
+        app._vib_render_token = 7
+        _render_vib_mode_py3dmol(app, water_mol, mode_number=1, render_token=7)
+        outputs = app.vib_output.outputs
+        assert len(outputs) == 1
+        assert "3Dmol" in outputs[0]["data"]["text/html"]
+
+
+class TestFpsParameter:
+    """fps parameter wiring — value flows into the py3Dmol animate
+    interval and into the cache key."""
+
+    def test_fps_affects_animate_interval(self, app, water_mol, fake_freq_result):
+        if not app._viz_availability.py3dmol:
+            pytest.skip("py3Dmol not installed in test env")
+        app._last_vib_freq_result = fake_freq_result
+        app._last_vib_molecule = water_mol
+        # 10 fps → interval=100; 60 fps → interval≈17
+        _render_vib_mode_py3dmol(app, water_mol, mode_number=1, fps=10)
+        html_10 = app.vib_output.outputs[0]["data"]["text/html"]
+        _render_vib_mode_py3dmol(app, water_mol, mode_number=1, fps=60)
+        html_60 = app.vib_output.outputs[0]["data"]["text/html"]
+        # interval is embedded in the HTML — different fps → different blob
+        assert html_10 != html_60
+        assert "interval" in html_10.lower()
+
+    def test_fps_changes_invalidate_cache(
+        self, app, water_mol, fake_freq_result, tmp_path
+    ):
+        if not app._viz_availability.py3dmol:
+            pytest.skip("py3Dmol not installed in test env")
+        app._last_vib_freq_result = fake_freq_result
+        app._last_vib_molecule = water_mol
+        app._last_result_dir = tmp_path
+        # Render at fps=10 → cache populated for fps=10
+        _render_vib_mode_py3dmol(app, water_mol, mode_number=1, fps=10)
+        # Re-render at fps=30 → cache should NOT hit (different fps)
+        from quantui.vib_cache import has_cached
+
+        assert has_cached(
+            tmp_path,
+            1,
+            n_frames=24,
+            amplitude=0.4,
+            renderer="py3dmol",
+            fps=10,
+        )
+        assert not has_cached(
+            tmp_path,
+            1,
+            n_frames=24,
+            amplitude=0.4,
+            renderer="py3dmol",
+            fps=30,
+        )
+
+    def test_fps_falls_back_to_user_settings_when_not_passed(
+        self, app, water_mol, fake_freq_result, tmp_path
+    ):
+        """When `fps` argument is None, render reads from
+        ``app._user_settings.viz.vib_framerate_fps``. We verify by saving
+        to cache and checking the cached index records the settings fps."""
+        if not app._viz_availability.py3dmol:
+            pytest.skip("py3Dmol not installed in test env")
+        app._last_vib_freq_result = fake_freq_result
+        app._last_vib_molecule = water_mol
+        app._last_result_dir = tmp_path
+        app._user_settings.viz.vib_framerate_fps = 45
+        # Don't pass fps; should pick up 45 from settings → cache should
+        # be keyed by fps=45.
+        _render_vib_mode_py3dmol(app, water_mol, mode_number=1)
+        from quantui.vib_cache import has_cached, load_index
+
+        assert load_index(tmp_path)["fps"] == 45
+        assert has_cached(
+            tmp_path,
+            1,
+            n_frames=24,
+            amplitude=0.4,
+            renderer="py3dmol",
+            fps=45,
+        )
+        # Wrong-fps query should miss
+        assert not has_cached(
+            tmp_path,
+            1,
+            n_frames=24,
+            amplitude=0.4,
+            renderer="py3dmol",
+            fps=10,
+        )
+
+
 class TestRenderVibModeDispatch:
     """render_vib_mode should route through the viz_backend_router."""
 

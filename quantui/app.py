@@ -760,6 +760,7 @@ class QuantUIApp:
         solvent_dd: Any
         step_progress: Any
         theme_btn: Any
+        vib_framerate_si: Any
         viz_backend_label_ana: Any
         viz_backend_toggle: Any
         viz_backend_toggle_ana: Any
@@ -886,6 +887,10 @@ class QuantUIApp:
         # Analysis tab, on_traj_expand re-renders from this cache. Cleared
         # by apply_analysis_context at every context reset.
         self._last_traj_result: Any = None
+        # Generation counter for vibrational-animation renders. Each
+        # mode-dropdown change bumps this so older worker-thread renders
+        # bail out before they overwrite the newer render's output.
+        self._vib_render_token: int = 0
         self._traj_render_token: int = 0
         self._iso_render_token: int = 0
         self._last_uv_wavelengths_nm: list[float] = []
@@ -1104,6 +1109,7 @@ class QuantUIApp:
             pubchem_available=PUBCHEM_AVAILABLE,
             visualization_available=VISUALIZATION_AVAILABLE,
             viz_default_backend=self._user_settings.viz.default_backend,
+            vib_framerate_fps=self._user_settings.viz.vib_framerate_fps,
         )
 
     # ── Welcome header ────────────────────────────────────────────────────
@@ -1388,6 +1394,10 @@ class QuantUIApp:
         # Settings → "Default 3D backend" preference (Status tab; persisted).
         self.viz_default_backend_dd.observe(
             self._safe_cb(self._on_viz_default_backend_changed), names="value"
+        )
+        # Settings → Vibrational animation framerate (Status tab; persisted).
+        self.vib_framerate_si.observe(
+            self._safe_cb(self._on_vib_framerate_changed), names="value"
         )
         # 3D viewer style and lighting controls
         if VISUALIZATION_AVAILABLE:
@@ -2176,6 +2186,32 @@ class QuantUIApp:
         if self._viz_sync_in_progress:
             return
         self._set_viz_preference(change["new"], persist=True)
+
+    def _on_vib_framerate_changed(self, change) -> None:
+        """Persist the vibrational-animation framerate and re-render the
+        current mode so the new fps applies immediately. Re-rendering also
+        rebuilds the on-disk cache under the new fps key."""
+        try:
+            new_fps = int(change["new"])
+        except (TypeError, ValueError):
+            return
+        if new_fps == self._user_settings.viz.vib_framerate_fps:
+            return
+        self._user_settings.viz.vib_framerate_fps = new_fps
+        self._user_settings.save()
+        try:
+            _calc_log.log_event("vib_framerate_changed", f"fps={new_fps}")
+        except OSError:
+            pass
+        # If a vibrational result is currently loaded, re-render the current
+        # mode through the new fps so the change is visible immediately.
+        if (
+            getattr(self, "_last_vib_freq_result", None) is not None
+            and getattr(self, "_last_vib_molecule", None) is not None
+        ):
+            current_mode = self.vib_mode_dd.value
+            if current_mode is not None:
+                self._on_vib_mode_changed({"new": current_mode})
 
     def _on_viz_style_changed(self, change) -> None:
         self._viz_style = change["new"]

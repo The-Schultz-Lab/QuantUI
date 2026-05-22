@@ -27,7 +27,10 @@ class TestDefaults:
     def test_to_dict_uses_current_schema_version(self):
         data = UserSettings().to_dict()
         assert data["_schema_version"] == 1
-        assert data["viz"] == {"default_backend": "auto"}
+        assert data["viz"] == {"default_backend": "auto", "vib_framerate_fps": 10}
+
+    def test_default_vib_framerate_is_10(self):
+        assert UserSettings().viz.vib_framerate_fps == 10
 
 
 class TestLoad:
@@ -100,6 +103,40 @@ class TestLoad:
         path.write_text(json.dumps(["not", "a", "dict"]))
         settings = UserSettings.load(path)
         assert settings.viz.default_backend == "auto"
+
+    @pytest.mark.parametrize("good_fps", [5, 10, 30, 60, 120])
+    def test_valid_vib_fps_round_trips(self, tmp_path, good_fps):
+        path = tmp_path / "settings.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "_schema_version": 1,
+                    "viz": {
+                        "default_backend": "auto",
+                        "vib_framerate_fps": good_fps,
+                    },
+                }
+            )
+        )
+        settings = UserSettings.load(path)
+        assert settings.viz.vib_framerate_fps == good_fps
+
+    @pytest.mark.parametrize("bad_fps", [0, -1, 121, "30", True])
+    def test_invalid_vib_fps_falls_back_to_default(self, tmp_path, bad_fps):
+        path = tmp_path / "settings.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "_schema_version": 1,
+                    "viz": {
+                        "default_backend": "auto",
+                        "vib_framerate_fps": bad_fps,
+                    },
+                }
+            )
+        )
+        settings = UserSettings.load(path)
+        assert settings.viz.vib_framerate_fps == 10
 
     def test_unknown_fields_are_tolerated(self, tmp_path):
         """Future versions may add fields old code doesn't know about — old

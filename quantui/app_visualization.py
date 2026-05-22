@@ -872,16 +872,19 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     app._last_vib_freq_result = freq_result
 
     first_label, first_mode = options[0]
-    app.vib_output.clear_output()
-    app.vib_output.append_display_data(
-        HTML(
-            f'<p style="color:#555;font-style:italic;padding:8px">'
-            f"⏳ Rendering vibrational animation ({first_label})…</p>"
-        )
+    # Bump render token so any stale worker thread bails out before stomping
+    # this fresh render's output.
+    app._vib_render_token = int(getattr(app, "_vib_render_token", 0)) + 1
+    token = app._vib_render_token
+    _swap_vib_output(
+        app,
+        f'<p style="color:#555;font-style:italic;padding:8px">'
+        f"⏳ Rendering vibrational animation ({first_label})…</p>",
     )
     threading.Thread(
         target=app._render_vib_mode,
         args=(vib_data, molecule, first_mode),
+        kwargs={"render_token": token},
         daemon=True,
     ).start()
 
@@ -1474,14 +1477,35 @@ def render_orbital_isosurface(
     )
 
 
+def _swap_vib_output(app: Any, html_str: str) -> None:
+    """Atomically replace ``app.vib_output``'s content with one HTML payload.
+
+    Single widget-state assignment → single browser update message → no
+    transient empty state → no layout reflow → no page-scroll jump on
+    every mode switch. Matches the atomic-swap pattern proven for
+    ``frame_out`` in the trajectory carousel.
+    """
+    app.vib_output.outputs = (
+        {
+            "output_type": "display_data",
+            "data": {"text/html": html_str},
+            "metadata": {},
+        },
+    )
+
+
 def _vib_err(app: Any, msg: str) -> None:
     """Show an error message in the vibrational animation output panel."""
-    from IPython.display import HTML as _H
+    _swap_vib_output(app, f'<p style="color:#b91c1c;padding:8px">⚠ {msg}</p>')
 
-    app.vib_output.clear_output()
-    app.vib_output.append_display_data(
-        _H(f'<p style="color:#b91c1c;padding:8px">⚠ {msg}</p>')
-    )
+
+def _is_vib_stale(app: Any, render_token: int | None) -> bool:
+    """True when a newer vib render has started; used to bail out of an
+    older background render thread before it stomps the newer one's
+    output. Returns False when no token was supplied (call-site opt-out)."""
+    if render_token is None:
+        return False
+    return render_token != int(getattr(app, "_vib_render_token", 0))
 
 
 def _render_vib_mode_py3dmol(
@@ -1491,6 +1515,8 @@ def _render_vib_mode_py3dmol(
     *,
     n_frames: int = 24,
     amplitude: float = 0.4,
+    fps: int | None = None,
+    render_token: int | None = None,
 ) -> None:
     """Render vibrational animation via py3Dmol multi-frame XYZ.
 
@@ -1498,43 +1524,111 @@ def _render_vib_mode_py3dmol(
     dependency); 24 sinusoidal-phase frames over one full oscillation;
     py3Dmol view with ``addModelsAsFrames`` + ``animate``; serialized to
     HTML and atomically swapped into ``app.vib_output``.
+
+    ``fps`` controls the playback rate of ``view.animate`` (interval =
+    1000 / fps ms). When ``None``, reads from
+    ``app._user_settings.viz.vib_framerate_fps``.
+
+    ``render_token`` is checked at every output-write site so a stale
+    background render thread can bail out before stomping a newer
+    render's output. See ``_is_vib_stale``.
     """
     import numpy as np
+
+    if fps is None:
+        fps = int(
+            getattr(
+                getattr(app, "_user_settings", None) and app._user_settings.viz,
+                "vib_framerate_fps",
+                10,
+            )
+        )
+    fps = max(1, int(fps))
 
     try:
         import py3Dmol
     except ImportError as exc:
-        _vib_err(app, f"py3Dmol unavailable: {exc}")
+        if not _is_vib_stale(app, render_token):
+            _vib_err(app, f"py3Dmol unavailable: {exc}")
         return
 
     freq_result = getattr(app, "_last_vib_freq_result", None)
     if freq_result is None:
-        _vib_err(app, "No frequency result cached for vibrational animation.")
+        if not _is_vib_stale(app, render_token):
+            _vib_err(app, "No frequency result cached for vibrational animation.")
         return
+
+    # Cache hit short-circuit (VIZBACK.9). The cache key now includes ``fps``
+    # so a user who changes the framerate will rebuild rather than play back
+    # a mismatched-interval HTML blob.
+    result_dir = getattr(app, "_last_result_dir", None)
+    if result_dir is not None:
+        try:
+            from quantui import vib_cache
+
+            cached_html = vib_cache.get_cached_html(
+                Path(result_dir),
+                mode_number,
+                n_frames=n_frames,
+                amplitude=amplitude,
+                renderer="py3dmol",
+                fps=fps,
+            )
+        except Exception:
+            cached_html = None
+        if cached_html is not None:
+            if _is_vib_stale(app, render_token):
+                return
+            _swap_vib_output(app, cached_html)
+            try:
+                from quantui import calc_log as _clog_cache_hit
+
+                _clog_cache_hit.log_event(
+                    "vib_cache_hit",
+                    f"mode {mode_number} backend=py3dmol fps={fps}",
+                )
+            except Exception:
+                pass
+            return
+
+    try:
+        from quantui import calc_log as _clog_cache_miss
+
+        _clog_cache_miss.log_event(
+            "vib_cache_miss",
+            f"mode {mode_number} backend=py3dmol fps={fps}",
+        )
+    except Exception:
+        pass
 
     try:
         displ = np.array(freq_result.displacements[mode_number - 1], dtype=float)
     except (AttributeError, IndexError, ValueError, TypeError) as exc:
-        _vib_err(
-            app,
-            f"Could not read displacements for mode {mode_number}: {exc}",
-        )
+        if not _is_vib_stale(app, render_token):
+            _vib_err(
+                app,
+                f"Could not read displacements for mode {mode_number}: {exc}",
+            )
         return
 
     atoms = list(molecule.atoms)
     base_coords = np.array(molecule.coordinates, dtype=float)
     if base_coords.shape != displ.shape:
-        _vib_err(
-            app,
-            f"Shape mismatch: base coords {base_coords.shape} vs "
-            f"displacements {displ.shape}",
-        )
+        if not _is_vib_stale(app, render_token):
+            _vib_err(
+                app,
+                f"Shape mismatch: base coords {base_coords.shape} vs "
+                f"displacements {displ.shape}",
+            )
         return
 
     try:
         from quantui import calc_log as _clog_anim
 
-        _clog_anim.log_event("vib_render_start", f"mode {mode_number} backend=py3dmol")
+        _clog_anim.log_event(
+            "vib_render_start",
+            f"mode {mode_number} backend=py3dmol fps={fps}",
+        )
     except Exception:
         pass
 
@@ -1551,13 +1645,14 @@ def _render_vib_mode_py3dmol(
     xyz_string = "\n".join(xyz_lines) + "\n"
 
     try:
+        interval_ms = max(1, int(round(1000.0 / fps)))
         view = py3Dmol.view(width=460, height=420)
         view.addModelsAsFrames(xyz_string, "xyz")
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
         bg = "white" if app.theme_btn.value == "Light" else "#1e1e1e"
         view.setBackgroundColor(bg)
         view.zoomTo()
-        view.animate({"loop": "forward", "interval": 100, "reps": 0})
+        view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
         html_str = view._make_html()
     except Exception as exc:
         try:
@@ -1570,50 +1665,89 @@ def _render_vib_mode_py3dmol(
             )
         except Exception:
             pass
-        _vib_err(app, f"Vibrational animation render failed: {exc}")
+        if not _is_vib_stale(app, render_token):
+            _vib_err(app, f"Vibrational animation render failed: {exc}")
         return
 
-    # Atomic outputs swap — single widget-state update, no flicker.
-    app.vib_output.outputs = (
-        {
-            "output_type": "display_data",
-            "data": {"text/html": html_str},
-            "metadata": {},
-        },
-    )
+    if _is_vib_stale(app, render_token):
+        # A newer render has superseded this one; do NOT write to vib_output
+        # (would stomp the newer render's content).
+        return
+
+    _swap_vib_output(app, html_str)
 
     try:
         from quantui import calc_log as _clog_anim
 
-        _clog_anim.log_event("vib_render_done", f"mode {mode_number} backend=py3dmol")
+        _clog_anim.log_event(
+            "vib_render_done",
+            f"mode {mode_number} backend=py3dmol fps={fps}",
+        )
     except Exception:
         pass
 
+    # Persist to disk cache so future visits and history replay can hit
+    # this mode instantly (VIZBACK.9). Non-fatal on failure — render still
+    # succeeded, cache is purely an optimization.
+    if result_dir is not None:
+        try:
+            freqs = getattr(freq_result, "frequencies_cm1", None) or []
+            freq_cm1 = (
+                float(freqs[mode_number - 1]) if 0 < mode_number <= len(freqs) else None
+            )
+            from quantui import vib_cache
+
+            vib_cache.save_cached_html(
+                Path(result_dir),
+                mode_number,
+                html_str,
+                freq_cm1=freq_cm1,
+                n_frames=n_frames,
+                amplitude=amplitude,
+                renderer="py3dmol",
+                fps=fps,
+            )
+        except Exception as exc:
+            try:
+                from quantui import calc_log as _clog_cache_err
+
+                _clog_cache_err.log_event(
+                    "vib_cache_write_error",
+                    f"mode {mode_number}: {type(exc).__name__}: {exc}"[:300],
+                )
+            except Exception:
+                pass
+
 
 def _render_vib_mode_plotlymol(
-    app: Any, vib_data: Any, molecule: Any, mode_number: int
+    app: Any,
+    vib_data: Any,
+    molecule: Any,
+    mode_number: int,
+    *,
+    render_token: int | None = None,
 ) -> None:
     """Render vibrational animation via the plotlymol3d path (PlotlyMol +
     RDKit bond perception + Plotly figure). Used when user explicitly
     prefers plotlymol or when py3Dmol is unavailable."""
-    from IPython.display import HTML as _H
-
     if vib_data is None:
-        _vib_err(
-            app,
-            "PlotlyMol vibrational animation requires plotlymol3d, "
-            "which is not installed.",
-        )
+        if not _is_vib_stale(app, render_token):
+            _vib_err(
+                app,
+                "PlotlyMol vibrational animation requires plotlymol3d, "
+                "which is not installed.",
+            )
         return
 
     try:
         from plotlymol3d import create_vibration_animation, xyzblock_to_rdkitmol
     except ImportError as exc:
-        _vib_err(
-            app,
-            f"PlotlyMol vibrational animation requires plotlymol3d "
-            f"(<code>pip install plotlymol3d</code>): {exc}",
-        )
+        if not _is_vib_stale(app, render_token):
+            _vib_err(
+                app,
+                f"PlotlyMol vibrational animation requires plotlymol3d "
+                f"(<code>pip install plotlymol3d</code>): {exc}",
+            )
         return
 
     xyzblock = (
@@ -1623,7 +1757,8 @@ def _render_vib_mode_plotlymol(
     try:
         rdmol = xyzblock_to_rdkitmol(xyzblock, charge=molecule.charge)
     except Exception as exc:
-        _vib_err(app, f"Could not parse molecule for bond connectivity: {exc}")
+        if not _is_vib_stale(app, render_token):
+            _vib_err(app, f"Could not parse molecule for bond connectivity: {exc}")
         return
 
     try:
@@ -1656,7 +1791,8 @@ def _render_vib_mode_plotlymol(
             )
         except Exception:
             pass
-        _vib_err(app, f"Animation generation failed: {exc}")
+        if not _is_vib_stale(app, render_token):
+            _vib_err(app, f"Animation generation failed: {exc}")
         return
     try:
         from quantui import calc_log as _clog_anim
@@ -1673,31 +1809,46 @@ def _render_vib_mode_plotlymol(
         include_plotlyjs="require",
         config={"responsive": True},
     )
-    app.vib_output.clear_output()
-    app.vib_output.append_display_data(_H(anim_html))
+    if _is_vib_stale(app, render_token):
+        return
+    _swap_vib_output(app, anim_html)
 
 
-def render_vib_mode(app: Any, vib_data: Any, molecule: Any, mode_number: int) -> None:
+def render_vib_mode(
+    app: Any,
+    vib_data: Any,
+    molecule: Any,
+    mode_number: int,
+    *,
+    render_token: int | None = None,
+) -> None:
     """Render vibrational animation for mode_number into ``app.vib_output``.
 
     Backend dispatch goes through the router (``VizTask.VIB_INTERACTIVE``):
     py3Dmol primary, plotlymol3d fallback. The py3Dmol path is preferred for
     speed and doesn't require plotlymol3d to be installed.
+
+    ``render_token`` lets a caller (e.g. ``on_vib_mode_changed``) bump
+    ``app._vib_render_token`` before spawning a worker thread, so any
+    stale worker can bail out before stomping the newer render's output.
     """
     from quantui.viz_backend_router import VizBackend as _VB
     from quantui.viz_backend_router import VizTask as _VT
 
     chosen = app._resolve_backend(_VT.VIB_INTERACTIVE)
     if chosen == _VB.PY3DMOL:
-        _render_vib_mode_py3dmol(app, molecule, mode_number)
+        _render_vib_mode_py3dmol(app, molecule, mode_number, render_token=render_token)
     elif chosen == _VB.PLOTLYMOL:
-        _render_vib_mode_plotlymol(app, vib_data, molecule, mode_number)
-    else:
-        _vib_err(
-            app,
-            "No vibrational animation backend available "
-            "(neither py3Dmol nor plotlymol3d installed).",
+        _render_vib_mode_plotlymol(
+            app, vib_data, molecule, mode_number, render_token=render_token
         )
+    else:
+        if not _is_vib_stale(app, render_token):
+            _vib_err(
+                app,
+                "No vibrational animation backend available "
+                "(neither py3Dmol nor plotlymol3d installed).",
+            )
 
 
 def on_vib_mode_changed(app: Any, change: dict[str, Any]) -> None:
@@ -1715,16 +1866,20 @@ def on_vib_mode_changed(app: Any, change: dict[str, Any]) -> None:
         (lbl for lbl, num in app.vib_mode_dd.options if num == mode_number),
         f"mode {mode_number}",
     )
-    app.vib_output.clear_output()
-    app.vib_output.append_display_data(
-        HTML(
-            f'<p style="color:#555;font-style:italic;padding:8px">'
-            f"⏳ Rendering vibrational animation ({label})…</p>"
-        )
+    # Bump render token so older in-flight render threads bail before they
+    # stomp the newer render's output. Eliminates the intermittent
+    # missing-render symptom from rapid mode switching.
+    app._vib_render_token = int(getattr(app, "_vib_render_token", 0)) + 1
+    token = app._vib_render_token
+    _swap_vib_output(
+        app,
+        f'<p style="color:#555;font-style:italic;padding:8px">'
+        f"⏳ Rendering vibrational animation ({label})…</p>",
     )
     threading.Thread(
         target=app._render_vib_mode,
         args=(vib_data, molecule, mode_number),
+        kwargs={"render_token": token},
         daemon=True,
     ).start()
 

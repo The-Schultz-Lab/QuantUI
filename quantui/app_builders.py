@@ -24,6 +24,7 @@ def build_status_panel(
     pubchem_available: bool,
     visualization_available: bool,
     viz_default_backend: str = "auto",
+    vib_framerate_fps: int = 10,
 ) -> None:
     """Build the Status tab panel."""
     cores, mem_gb = get_session_resources_fn()
@@ -135,8 +136,37 @@ def build_status_panel(
         "(persists across launches)</span></div>"
         "</div>"
     )
+    # Vibrational animation framerate (persists across launches).
+    app.vib_framerate_si = widgets.IntSlider(
+        value=vib_framerate_fps,
+        min=5,
+        max=60,
+        step=1,
+        description="Vib fps:",
+        style={"description_width": "60px"},
+        layout=layout_fn(width="320px", margin="6px 0 0 0"),
+        readout=True,
+        readout_format="d",
+        tooltip=(
+            "Frames per second for the py3Dmol vibrational animation. "
+            "Higher = smoother + faster oscillation. Cached HTML is "
+            "invalidated when this changes."
+        ),
+    )
+    vib_fps_label = widgets.HTML(
+        '<div style="font-size:12px;color:#475569;margin-top:10px;'
+        'margin-bottom:0px">Vibrational animation framerate '
+        '<span style="color:#94a3b8;font-size:11px">'
+        "(persists across launches)</span></div>"
+    )
+
     settings_box = widgets.VBox(
-        [settings_html, app.viz_default_backend_dd],
+        [
+            settings_html,
+            app.viz_default_backend_dd,
+            vib_fps_label,
+            app.vib_framerate_si,
+        ],
         layout=layout_fn(margin="0 0 8px 0"),
     )
 
