@@ -1068,11 +1068,39 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         style={"description_width": "50px"},
         layout=layout_fn(width="360px"),
     )
-    app.vib_output = widgets.Output()
+    # Prev/next arrow buttons for one-step navigation through modes. Click
+    # handlers step ``vib_mode_dd.value`` to the adjacent option; the
+    # existing dropdown observer then drives the re-render. Mirrors the
+    # trajectory-viewer prev/next pattern.
+    app.vib_prev_btn = widgets.Button(
+        icon="arrow-left",
+        tooltip="Previous mode",
+        layout=layout_fn(width="40px", margin="0 4px 0 0"),
+        disabled=True,
+    )
+    app.vib_next_btn = widgets.Button(
+        icon="arrow-right",
+        tooltip="Next mode",
+        layout=layout_fn(width="40px", margin="0 8px 0 4px"),
+        disabled=True,
+    )
+    vib_mode_row = widgets.HBox(
+        [app.vib_prev_btn, app.vib_mode_dd, app.vib_next_btn],
+        layout=layout_fn(align_items="center", margin="0 0 4px 0"),
+    )
+    # Fixed-dimension Output container so the box never resizes between
+    # content swaps (placeholder ↔ 3Dmol HTML). Without this, the empty
+    # state between atomic outputs assignments briefly collapses the
+    # container, the page reflows up, then reflows back when the new
+    # content arrives — visible as a scroll-jump flicker on every mode
+    # switch. Matches the trajectory frame_out fix pattern. 460+20=480
+    # accommodates the py3Dmol view (460px) plus a small horizontal pad;
+    # 420+20=440 likewise for the 420px view height.
+    app.vib_output = widgets.Output(layout=layout_fn(height="440px", width="480px"))
     app.vib_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
-                [app.vib_mode_dd, app.vib_output],
+                [vib_mode_row, app.vib_output],
                 layout=layout_fn(padding="8px"),
             )
         ],

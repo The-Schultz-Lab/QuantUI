@@ -1513,6 +1513,11 @@ class QuantUIApp:
         self.vib_mode_dd.observe(
             self._safe_cb(self._on_vib_mode_changed), names="value"
         )
+        self.vib_mode_dd.observe(
+            self._safe_cb(self._update_vib_nav_buttons), names=["value", "options"]
+        )
+        self.vib_prev_btn.on_click(self._on_vib_prev_clicked)
+        self.vib_next_btn.on_click(self._on_vib_next_clicked)
         # Orbital diagram axis controls
         self._orb_ymin_input.observe(
             self._safe_cb(self._on_orb_range_changed), names="value"
@@ -3009,11 +3014,54 @@ class QuantUIApp:
             render_token=render_token,
         )
 
-    def _render_vib_mode(self, vib_data, molecule, mode_number: int) -> None:
-        _viz_render_vib_mode(self, vib_data, molecule, mode_number)
+    def _render_vib_mode(
+        self,
+        vib_data,
+        molecule,
+        mode_number: int,
+        *,
+        render_token: Optional[int] = None,
+    ) -> None:
+        _viz_render_vib_mode(
+            self, vib_data, molecule, mode_number, render_token=render_token
+        )
 
     def _on_vib_mode_changed(self, change) -> None:
         _viz_on_vib_mode_changed(self, change)
+
+    def _update_vib_nav_buttons(self, change=None) -> None:
+        """Enable/disable prev/next vib mode buttons based on current
+        dropdown position. Called on both ``value`` and ``options`` changes
+        so the buttons stay correct after a new freq result populates the
+        options list."""
+        opts = self.vib_mode_dd.options or ()
+        if not opts:
+            self.vib_prev_btn.disabled = True
+            self.vib_next_btn.disabled = True
+            return
+        cur = self.vib_mode_dd.value
+        idx = next(
+            (i for i, (_lbl, num) in enumerate(opts) if num == cur),
+            -1,
+        )
+        self.vib_prev_btn.disabled = idx <= 0
+        self.vib_next_btn.disabled = idx < 0 or idx >= len(opts) - 1
+
+    def _on_vib_prev_clicked(self, _btn) -> None:
+        opts = self.vib_mode_dd.options or ()
+        cur = self.vib_mode_dd.value
+        for i, (_lbl, num) in enumerate(opts):
+            if num == cur and i > 0:
+                self.vib_mode_dd.value = opts[i - 1][1]
+                return
+
+    def _on_vib_next_clicked(self, _btn) -> None:
+        opts = self.vib_mode_dd.options or ()
+        cur = self.vib_mode_dd.value
+        for i, (_lbl, num) in enumerate(opts):
+            if num == cur and i < len(opts) - 1:
+                self.vib_mode_dd.value = opts[i + 1][1]
+                return
 
     def _do_run(self) -> None:
         """Main calculation dispatch — runs in a background thread."""

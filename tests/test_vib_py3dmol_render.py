@@ -203,6 +203,26 @@ class TestVibCacheIntegration:
         assert html_default != html_alt
 
 
+class TestAppWrapperAcceptsRenderToken:
+    """Regression test for BUG-VIB-WRAPPER-SIG (session 50): the
+    QuantUIApp wrapper ``_render_vib_mode`` must accept ``render_token``
+    via kwargs — show_vib_animation / on_vib_mode_changed pass it via
+    `threading.Thread(kwargs={"render_token": ...})`. A mismatched
+    signature causes the thread to die silently with TypeError and the
+    user sees a permanent 'Rendering...' placeholder."""
+
+    def test_wrapper_accepts_render_token_kwarg(self, app, water_mol, fake_freq_result):
+        if not app._viz_availability.py3dmol:
+            pytest.skip("py3Dmol not installed in test env")
+        app._last_vib_freq_result = fake_freq_result
+        app._last_vib_molecule = water_mol
+        app._vib_render_token = 1
+        # This call shape mirrors what show_vib_animation's thread does.
+        # Must not raise TypeError.
+        app._render_vib_mode(None, water_mol, 1, render_token=1)
+        assert len(app.vib_output.outputs) == 1
+
+
 class TestRenderTokenStaleness:
     """The _vib_render_token machinery guarantees that an older render
     thread cannot stomp a newer render's output. Verifies the bug-fix for

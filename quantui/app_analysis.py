@@ -380,7 +380,43 @@ def pop_vibrational(app: Any, ctx: Any) -> bool:
         freqs = ir.get("frequencies_cm1")
         ints = ir.get("ir_intensities")
         disps = ir.get("displacements")
-        if not (freqs and disps and mol_data.get("atoms")):
+        if not freqs:
+            _set_panel_unavailable_message(
+                app,
+                "Vibrational",
+                (
+                    "Not available for this Frequency history result: "
+                    "no frequency data was saved (`frequencies_cm1` empty "
+                    "or missing). Re-run the Frequency calculation to "
+                    "populate this panel."
+                ),
+            )
+            return False
+        if not mol_data.get("atoms"):
+            _set_panel_unavailable_message(
+                app,
+                "Vibrational",
+                (
+                    "Not available for this Frequency history result: "
+                    "no molecule geometry was saved with the result. "
+                    "Re-run the Frequency calculation to populate this panel."
+                ),
+            )
+            return False
+        if not disps:
+            _set_panel_unavailable_message(
+                app,
+                "Vibrational",
+                (
+                    "Not available for this Frequency history result: "
+                    "per-mode atomic displacements were not persisted with "
+                    "this calculation (a known limitation for older saved "
+                    "results — displacements began being written to disk in "
+                    "a later QuantUI version). Re-run the Frequency "
+                    "calculation to enable the animation. "
+                    "The IR Spectrum panel still works for this result."
+                ),
+            )
             return False
         from quantui.molecule import Molecule as _Mol
 

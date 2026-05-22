@@ -3,11 +3,61 @@
 from __future__ import annotations
 
 import threading
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, List
 
 import ipywidgets as widgets
 from IPython.display import HTML, display
+
+
+@contextmanager
+def _viz_render_event(app: Any, task: Any, backend: Any, **extras: Any):
+    """Lifecycle telemetry context manager for one render-path execution.
+
+    Emits ``viz_render_start`` on entry and ``viz_render_done`` /
+    ``viz_render_error`` on exit, each with ``elapsed_ms``. Wraps the
+    actual backend render work; the router decision itself is logged
+    separately by ``app._resolve_backend`` via ``viz_route_decision``.
+
+    Extra kwargs are appended as ``key=value`` pairs to the event body
+    (e.g. ``mode=3`` for vib renders, ``idx=12`` for trajectory frames).
+    All log writes are best-effort — failures never propagate.
+    """
+    from quantui import calc_log as _clog_evt
+
+    t0 = time.perf_counter()
+    pref = getattr(app, "_viz_backend_preference", "auto")
+    extras_str = " ".join(f"{k}={v}" for k, v in extras.items())
+    base = f"task={task} pref={pref} backend={backend}"
+    fields = f"{base} {extras_str}".strip()
+    try:
+        _clog_evt.log_event("viz_render_start", fields)
+    except Exception:
+        pass
+    try:
+        yield
+    except Exception as exc:
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        try:
+            _clog_evt.log_event(
+                "viz_render_error",
+                f"{fields} elapsed_ms={elapsed_ms} "
+                f"err={type(exc).__name__}:{exc}"[:300],
+            )
+        except Exception:
+            pass
+        raise
+    else:
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        try:
+            _clog_evt.log_event(
+                "viz_render_done",
+                f"{fields} elapsed_ms={elapsed_ms}",
+            )
+        except Exception:
+            pass
 
 
 def show_result_3d(
@@ -37,15 +87,20 @@ def show_result_3d(
     if app.result_viz_output is not None:
         chosen = app._resolve_backend(_VT.STRUCTURE_VIEW_RESULTS)
         if chosen is not None:
-            app.result_viz_output.clear_output()
-            with app.result_viz_output:
-                display_molecule_fn(
-                    molecule,
-                    backend=str(chosen),
-                    style=app._viz_style,
-                    lighting=app._viz_lighting,
-                    bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
-                )
+            with _viz_render_event(
+                app,
+                task="structure_view_results",
+                backend=str(chosen),
+            ):
+                app.result_viz_output.clear_output()
+                with app.result_viz_output:
+                    display_molecule_fn(
+                        molecule,
+                        backend=str(chosen),
+                        style=app._viz_style,
+                        lighting=app._viz_lighting,
+                        bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+                    )
 
     # Optional second viewer (typically the Analysis tab).
     if extra_output is not None:
@@ -56,15 +111,21 @@ def show_result_3d(
         )
         chosen = app._resolve_backend(task)
         if chosen is not None:
-            extra_output.clear_output()
-            with extra_output:
-                display_molecule_fn(
-                    molecule,
-                    backend=str(chosen),
-                    style=app._viz_style,
-                    lighting=app._viz_lighting,
-                    bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
-                )
+            task_label = (
+                "analysis_structure_view"
+                if is_analysis_output
+                else "structure_view_results"
+            )
+            with _viz_render_event(app, task=task_label, backend=str(chosen)):
+                extra_output.clear_output()
+                with extra_output:
+                    display_molecule_fn(
+                        molecule,
+                        backend=str(chosen),
+                        style=app._viz_style,
+                        lighting=app._viz_lighting,
+                        bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+                    )
             if is_analysis_output:
                 app._update_analysis_backend_label(chosen)
 
@@ -358,7 +419,10 @@ def show_opt_trajectory(
                 "Trajectory rendering requires py3Dmol (plotlymol blocked "
                 "for real-time use to avoid flicker). py3Dmol is unavailable.",
             )
-        result = _try_py3dmol(idx)
+        with _viz_render_event(
+            app, task="trajectory_frame", backend="py3dmol", idx=idx
+        ):
+            result = _try_py3dmol(idx)
         if result is not None:
             return result
         return ("error", "py3Dmol failed to build trajectory frame")
@@ -872,13 +936,20 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     app._last_vib_freq_result = freq_result
 
     first_label, first_mode = options[0]
+    # Cache-hit fast path: on history replay the cached HTML for the first
+    # mode is on disk, so swap it in synchronously without a placeholder.
+    # ``reset_camera=True`` clears any stale camera matrix from a previous
+    # freq result so the first mode opens at default zoom-to-fit.
+    if _try_vib_cache_hit_sync(app, first_mode, reset_camera=True):
+        return True
+
     # Bump render token so any stale worker thread bails out before stomping
     # this fresh render's output.
     app._vib_render_token = int(getattr(app, "_vib_render_token", 0)) + 1
     token = app._vib_render_token
     _swap_vib_output(
         app,
-        f'<p style="color:#555;font-style:italic;padding:8px">'
+        _VIB_CAMERA_RESET_JS + f'<p style="color:#555;font-style:italic;padding:8px">'
         f"⏳ Rendering vibrational animation ({first_label})…</p>",
     )
     threading.Thread(
@@ -1499,6 +1570,78 @@ def _vib_err(app: Any, msg: str) -> None:
     _swap_vib_output(app, f'<p style="color:#b91c1c;padding:8px">⚠ {msg}</p>')
 
 
+# JS snippet appended to every py3Dmol vib HTML payload. Patches
+# ``$3Dmol.createViewer`` once per page so each new viewer:
+#   1. Hijacks its own ``zoomTo`` — if ``window._quantuiVibCamera`` is set
+#      (from a previous mode's pan/rotate state) apply it via ``setView``
+#      instead of recomputing the default fit. Falls back to the original
+#      zoomTo when no camera is saved.
+#   2. Starts a periodic interval that writes ``viewer.getView()`` into
+#      ``window._quantuiVibCamera``, so the user's interactive pan/zoom
+#      survives mode switches.
+# The script is idempotent (``_quantuiVibCameraHookInstalled`` guard), so
+# it can ship inside every cached HTML blob without doubling the hook.
+_VIB_CAMERA_PERSISTENCE_JS = """
+<script>
+(function() {
+    if (window._quantuiVibCameraHookInstalled) return;
+    function install() {
+        if (!window.$3Dmol || !window.$3Dmol.createViewer) {
+            setTimeout(install, 50);
+            return;
+        }
+        if (window._quantuiVibCameraHookInstalled) return;
+        window._quantuiVibCameraHookInstalled = true;
+        var origCreate = window.$3Dmol.createViewer;
+        window.$3Dmol.createViewer = function(element, config) {
+            var v = origCreate.call(this, element, config);
+            try {
+                var origZoomTo = v.zoomTo ? v.zoomTo.bind(v) : null;
+                v.zoomTo = function() {
+                    if (window._quantuiVibCamera) {
+                        try { return v.setView(window._quantuiVibCamera); }
+                        catch (e) {}
+                    }
+                    if (origZoomTo) return origZoomTo.apply(this, arguments);
+                };
+                var iv = setInterval(function() {
+                    try {
+                        var el = (element && (element[0] || element));
+                        if (el && !document.body.contains(el)) {
+                            clearInterval(iv);
+                            return;
+                        }
+                        var view = v.getView();
+                        if (view) window._quantuiVibCamera = view;
+                    } catch (e) {}
+                }, 350);
+            } catch (e) {}
+            return v;
+        };
+    }
+    install();
+})();
+</script>
+"""
+
+# Tiny one-shot reset injected when a NEW freq result begins, so the
+# first mode of a new molecule opens at default zoom-to-fit instead of a
+# stale camera from a previous molecule. Mode switches WITHIN the same
+# freq result do not reset.
+_VIB_CAMERA_RESET_JS = "<script>window._quantuiVibCamera = null;</script>"
+
+
+def _ensure_vib_camera_hook(html: str) -> str:
+    """Prepend ``_VIB_CAMERA_PERSISTENCE_JS`` to ``html`` only when not
+    already present. Lets us serve both new cache entries (which embed
+    the hook) and old cache entries (written before this feature) with
+    a single code path — avoids redundant script tags and keeps cache
+    HTML byte-stable across miss/hit cycles."""
+    if "_quantuiVibCameraHookInstalled" in html:
+        return html
+    return _VIB_CAMERA_PERSISTENCE_JS + html
+
+
 def _is_vib_stale(app: Any, render_token: int | None) -> bool:
     """True when a newer vib render has started; used to bail out of an
     older background render thread before it stomps the newer one's
@@ -1506,6 +1649,85 @@ def _is_vib_stale(app: Any, render_token: int | None) -> bool:
     if render_token is None:
         return False
     return render_token != int(getattr(app, "_vib_render_token", 0))
+
+
+def _try_vib_cache_hit_sync(
+    app: Any, mode_number: int, *, reset_camera: bool = False
+) -> bool:
+    """Synchronous cache lookup + swap. Returns True iff a cached HTML blob
+    matching the current render params was found and injected directly
+    into ``app.vib_output``.
+
+    Why: without this, every mode switch sets a "Rendering…" placeholder,
+    spawns a thread, the thread checks the cache, then writes the cached
+    HTML — visible as a brief placeholder flash even when the result is
+    on disk. Doing the cache check on the main thread before the
+    placeholder avoids the flash entirely for cache hits.
+
+    When ``reset_camera`` is True a tiny inline script clears
+    ``window._quantuiVibCamera`` before the cached HTML runs, so the
+    first mode of a new molecule opens at default zoom rather than at a
+    stale camera from a previous molecule.
+
+    Bumps ``_vib_render_token`` so any in-flight render thread bails out
+    before stomping the swapped cached output.
+    """
+    result_dir = getattr(app, "_last_result_dir", None)
+    if result_dir is None:
+        return False
+
+    try:
+        from quantui.viz_backend_router import VizBackend as _VB
+        from quantui.viz_backend_router import VizTask as _VT
+
+        chosen = app._resolve_backend(_VT.VIB_INTERACTIVE)
+        if chosen != _VB.PY3DMOL:
+            # Plotlymol path doesn't write to the disk cache.
+            return False
+
+        viz_settings = getattr(getattr(app, "_user_settings", None), "viz", None)
+        fps = int(getattr(viz_settings, "vib_framerate_fps", 10))
+        fps = max(1, fps)
+
+        from quantui import vib_cache
+
+        cached_html = vib_cache.get_cached_html(
+            Path(result_dir),
+            mode_number,
+            n_frames=24,
+            amplitude=0.4,
+            renderer="py3dmol",
+            fps=fps,
+        )
+    except Exception:
+        return False
+
+    if cached_html is None:
+        return False
+
+    payload = _ensure_vib_camera_hook(cached_html)
+    if reset_camera:
+        payload = _VIB_CAMERA_RESET_JS + payload
+
+    app._vib_render_token = int(getattr(app, "_vib_render_token", 0)) + 1
+    with _viz_render_event(
+        app,
+        task="vib_interactive",
+        backend="py3dmol",
+        mode=mode_number,
+        source="cache_sync",
+    ):
+        _swap_vib_output(app, payload)
+        try:
+            from quantui import calc_log as _clog_sync_hit
+
+            _clog_sync_hit.log_event(
+                "vib_cache_hit",
+                f"mode {mode_number} backend=py3dmol fps={fps} path=sync",
+            )
+        except Exception:
+            pass
+    return True
 
 
 def _render_vib_mode_py3dmol(
@@ -1579,7 +1801,7 @@ def _render_vib_mode_py3dmol(
         if cached_html is not None:
             if _is_vib_stale(app, render_token):
                 return
-            _swap_vib_output(app, cached_html)
+            _swap_vib_output(app, _ensure_vib_camera_hook(cached_html))
             try:
                 from quantui import calc_log as _clog_cache_hit
 
@@ -1622,16 +1844,6 @@ def _render_vib_mode_py3dmol(
             )
         return
 
-    try:
-        from quantui import calc_log as _clog_anim
-
-        _clog_anim.log_event(
-            "vib_render_start",
-            f"mode {mode_number} backend=py3dmol fps={fps}",
-        )
-    except Exception:
-        pass
-
     # One full oscillation: n_frames evenly-spaced phases over [0, 2π).
     phases = np.sin(np.linspace(0, 2 * np.pi, n_frames, endpoint=False))
     n_atoms = len(atoms)
@@ -1653,21 +1865,15 @@ def _render_vib_mode_py3dmol(
         view.setBackgroundColor(bg)
         view.zoomTo()
         view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
-        html_str = view._make_html()
+        # Prepend the camera-persistence hook so the user's interactive
+        # pan/rotate state survives mode switches. The hook is idempotent
+        # (guarded by ``_quantuiVibCameraHookInstalled``) and ships inside
+        # the cached HTML too — so disk-cache hits also persist the camera.
+        html_str = _VIB_CAMERA_PERSISTENCE_JS + view._make_html()
     except Exception as exc:
-        try:
-            from quantui import calc_log as _clog_anim
-
-            _clog_anim.log_event(
-                "vib_render_error",
-                f"mode {mode_number} backend=py3dmol: "
-                f"{type(exc).__name__}: {exc}"[:300],
-            )
-        except Exception:
-            pass
         if not _is_vib_stale(app, render_token):
             _vib_err(app, f"Vibrational animation render failed: {exc}")
-        return
+        raise
 
     if _is_vib_stale(app, render_token):
         # A newer render has superseded this one; do NOT write to vib_output
@@ -1675,16 +1881,6 @@ def _render_vib_mode_py3dmol(
         return
 
     _swap_vib_output(app, html_str)
-
-    try:
-        from quantui import calc_log as _clog_anim
-
-        _clog_anim.log_event(
-            "vib_render_done",
-            f"mode {mode_number} backend=py3dmol fps={fps}",
-        )
-    except Exception:
-        pass
 
     # Persist to disk cache so future visits and history replay can hit
     # this mode instantly (VIZBACK.9). Non-fatal on failure — render still
@@ -1762,14 +1958,6 @@ def _render_vib_mode_plotlymol(
         return
 
     try:
-        from quantui import calc_log as _clog_anim
-
-        _clog_anim.log_event(
-            "vib_render_start", f"mode {mode_number} backend=plotlymol"
-        )
-    except Exception:
-        pass
-    try:
         anim_fig = create_vibration_animation(
             vib_data=vib_data,
             mode_number=mode_number,
@@ -1781,25 +1969,9 @@ def _render_vib_mode_plotlymol(
         )
         anim_fig.update_layout(height=420)
     except Exception as exc:
-        try:
-            from quantui import calc_log as _clog_anim
-
-            _clog_anim.log_event(
-                "vib_render_error",
-                f"mode {mode_number} backend=plotlymol: "
-                f"{type(exc).__name__}: {exc}"[:300],
-            )
-        except Exception:
-            pass
         if not _is_vib_stale(app, render_token):
             _vib_err(app, f"Animation generation failed: {exc}")
-        return
-    try:
-        from quantui import calc_log as _clog_anim
-
-        _clog_anim.log_event("vib_render_done", f"mode {mode_number} backend=plotlymol")
-    except Exception:
-        pass
+        raise
 
     import plotly.io as _pio
 
@@ -1837,11 +2009,29 @@ def render_vib_mode(
 
     chosen = app._resolve_backend(_VT.VIB_INTERACTIVE)
     if chosen == _VB.PY3DMOL:
-        _render_vib_mode_py3dmol(app, molecule, mode_number, render_token=render_token)
+        try:
+            with _viz_render_event(
+                app, task="vib_interactive", backend="py3dmol", mode=mode_number
+            ):
+                _render_vib_mode_py3dmol(
+                    app, molecule, mode_number, render_token=render_token
+                )
+        except Exception:
+            # viz_render_error was already logged by the context manager;
+            # swallow here so a worker-thread render failure doesn't crash
+            # the thread. The inner function already wrote a user-facing
+            # error message via ``_vib_err``.
+            pass
     elif chosen == _VB.PLOTLYMOL:
-        _render_vib_mode_plotlymol(
-            app, vib_data, molecule, mode_number, render_token=render_token
-        )
+        try:
+            with _viz_render_event(
+                app, task="vib_interactive", backend="plotlymol", mode=mode_number
+            ):
+                _render_vib_mode_plotlymol(
+                    app, vib_data, molecule, mode_number, render_token=render_token
+                )
+        except Exception:
+            pass
     else:
         if not _is_vib_stale(app, render_token):
             _vib_err(
@@ -1860,6 +2050,12 @@ def on_vib_mode_changed(app: Any, change: dict[str, Any]) -> None:
     # vib_data may be None when plotlymol3d is unavailable — the py3Dmol
     # render path doesn't need it. Bail only if we can't render at all.
     if molecule is None or freq_result is None:
+        return
+
+    # Cache-hit fast path: swap cached HTML synchronously, no placeholder,
+    # no thread. Bumps the render token internally to invalidate any
+    # in-flight render.
+    if _try_vib_cache_hit_sync(app, mode_number):
         return
 
     label = next(
