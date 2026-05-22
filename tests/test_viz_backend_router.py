@@ -32,7 +32,6 @@ _DUAL_BACKEND_TASKS = [
     VizTask.STRUCTURE_VIEW_RESULTS,
     VizTask.ANALYSIS_STRUCTURE_VIEW,
     VizTask.HISTORY_STRUCTURE_REPLAY,
-    VizTask.TRAJECTORY_FRAME,
     VizTask.VIB_INTERACTIVE,
 ]
 
@@ -41,6 +40,11 @@ _PLOTLYMOL_ONLY_TASKS = [
     VizTask.TRAJECTORY_EXPORT,
     VizTask.VIB_EXPORT,
     VizTask.ORBITAL_ISOSURFACE,
+]
+
+# Tasks that require py3Dmol regardless of preference.
+_PY3DMOL_ONLY_TASKS = [
+    VizTask.TRAJECTORY_FRAME,
 ]
 
 
@@ -166,6 +170,34 @@ class TestSingleBackendTasksIgnorePreference:
     )
     def test_returns_none_when_plotlymol_unavailable(self, task, preference):
         decision = select_backend(task, preference, ONLY_PY3DMOL)
+        assert decision.chosen is None
+        assert decision.fallback is None
+        assert "unavailable" in decision.reason
+
+
+class TestPy3DmolOnlyTasksIgnorePreference:
+    """Trajectory frame browsing requires py3Dmol regardless of preference —
+    plotlymol is blocked from real-time trajectory rendering to avoid the
+    RequireJS flicker issue."""
+
+    @pytest.mark.parametrize("task", _PY3DMOL_ONLY_TASKS)
+    @pytest.mark.parametrize(
+        "preference",
+        [VizPreference.AUTO, VizPreference.PY3DMOL, VizPreference.PLOTLYMOL],
+    )
+    def test_picks_py3dmol_when_available(self, task, preference):
+        decision = select_backend(task, preference, BOTH)
+        assert decision.chosen == VizBackend.PY3DMOL
+        assert decision.fallback is None
+        assert "requires" in decision.reason
+
+    @pytest.mark.parametrize("task", _PY3DMOL_ONLY_TASKS)
+    @pytest.mark.parametrize(
+        "preference",
+        [VizPreference.AUTO, VizPreference.PY3DMOL, VizPreference.PLOTLYMOL],
+    )
+    def test_returns_none_when_py3dmol_unavailable(self, task, preference):
+        decision = select_backend(task, preference, ONLY_PLOTLYMOL)
         assert decision.chosen is None
         assert decision.fallback is None
         assert "unavailable" in decision.reason

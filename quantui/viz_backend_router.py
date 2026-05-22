@@ -113,13 +113,20 @@ class Decision:
 #
 # Maps task -> (primary backend, optional fallback backend).
 # Tasks whose fallback is None are single-backend — user preference is ignored
-# for these (export-quality renders and the existing isosurface Plotly path).
+# for these. Single-backend rationale by task:
+#   - TRAJECTORY_FRAME: py3Dmol-only. Plotlymol's RequireJS-driven re-render
+#     pattern causes flicker when frames swap rapidly; py3Dmol's WebGL path
+#     is the only viable real-time trajectory backend in this app.
+#   - TRAJECTORY_EXPORT / VIB_EXPORT: plotlymol produces self-contained HTML
+#     animations with embedded controls, which is the export contract.
+#   - ORBITAL_ISOSURFACE: existing Plotly cube-isosurface path; orthogonal
+#     to the molecule backend policy.
 _TASK_POLICY: dict[VizTask, tuple[VizBackend, VizBackend | None]] = {
     VizTask.MOLECULE_PREVIEW: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
     VizTask.STRUCTURE_VIEW_RESULTS: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
     VizTask.ANALYSIS_STRUCTURE_VIEW: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
     VizTask.HISTORY_STRUCTURE_REPLAY: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
-    VizTask.TRAJECTORY_FRAME: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
+    VizTask.TRAJECTORY_FRAME: (VizBackend.PY3DMOL, None),
     VizTask.TRAJECTORY_EXPORT: (VizBackend.PLOTLYMOL, None),
     VizTask.VIB_INTERACTIVE: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
     VizTask.VIB_EXPORT: (VizBackend.PLOTLYMOL, None),

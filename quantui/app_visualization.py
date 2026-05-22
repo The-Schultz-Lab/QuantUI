@@ -17,21 +17,61 @@ def show_result_3d(
     *,
     display_molecule_fn: Any,
 ) -> None:
-    """Render molecule 3D structure in result and optional extra output panels."""
+    """Render molecule 3D structure in result and optional extra output panels.
+
+    Backend selection goes through ``app._resolve_backend(task)`` per-output:
+
+    - ``result_viz_output`` uses ``VizTask.STRUCTURE_VIEW_RESULTS``.
+    - ``extra_output == _analysis_mol_output`` uses ``ANALYSIS_STRUCTURE_VIEW``.
+    - Any other extra_output uses ``STRUCTURE_VIEW_RESULTS`` as a safe default.
+    """
     if display_molecule_fn is None or molecule is None:
         return
-    for out_widget in [app.result_viz_output, extra_output]:
-        if out_widget is None:
-            continue
-        out_widget.clear_output()
-        with out_widget:
-            display_molecule_fn(
-                molecule,
-                backend=app._viz_backend,
-                style=app._viz_style,
-                lighting=app._viz_lighting,
-                bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
-            )
+    from quantui.viz_backend_router import VizTask as _VT
+
+    is_analysis_output = extra_output is not None and extra_output is getattr(
+        app, "_analysis_mol_output", None
+    )
+
+    # Results-tab viewer.
+    if app.result_viz_output is not None:
+        chosen = app._resolve_backend(_VT.STRUCTURE_VIEW_RESULTS)
+        if chosen is not None:
+            app.result_viz_output.clear_output()
+            with app.result_viz_output:
+                display_molecule_fn(
+                    molecule,
+                    backend=str(chosen),
+                    style=app._viz_style,
+                    lighting=app._viz_lighting,
+                    bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+                )
+
+    # Optional second viewer (typically the Analysis tab).
+    if extra_output is not None:
+        task = (
+            _VT.ANALYSIS_STRUCTURE_VIEW
+            if is_analysis_output
+            else _VT.STRUCTURE_VIEW_RESULTS
+        )
+        chosen = app._resolve_backend(task)
+        if chosen is not None:
+            extra_output.clear_output()
+            with extra_output:
+                display_molecule_fn(
+                    molecule,
+                    backend=str(chosen),
+                    style=app._viz_style,
+                    lighting=app._viz_lighting,
+                    bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+                )
+            if is_analysis_output:
+                app._update_analysis_backend_label(chosen)
+
+    # Track the molecule currently shown in the Analysis-tab viewer so the
+    # preference-change re-render path can find it.
+    if is_analysis_output:
+        app._analysis_displayed_molecule = molecule
 
 
 def on_traj_expand(app: Any, change: dict[str, Any]) -> None:
@@ -110,16 +150,26 @@ def show_opt_trajectory(
             return
         cache_label.value = value
 
+    def _swap_frame_out(html_str: str) -> None:
+        """Atomically replace frame_out's content in a single widget-state
+        update so the browser never sees an intermediate empty state.
+        Combined with the fixed `height` on frame_out, this prevents the
+        layout-flash that otherwise happens between clear+append on every
+        frame switch (visible as a page-scroll jump in the previous build)."""
+        frame_out.outputs = (
+            {
+                "output_type": "display_data",
+                "data": {"text/html": html_str},
+                "metadata": {},
+            },
+        )
+
     def _show_frame_error(message: str) -> None:
         if _is_stale():
             return
-        frame_out.clear_output()
-        with frame_out:
-            _ipy_display(
-                HTML(
-                    f'<p style="color:#b91c1c;padding:8px">Frame render failed: {message}</p>'
-                )
-            )
+        _swap_frame_out(
+            f'<p style="color:#b91c1c;padding:8px">Frame render failed: {message}</p>'
+        )
 
     # Support both OptimizationResult (.trajectory) and PESScanResult (.coordinates_list)
     traj = getattr(opt_result, "trajectory", None) or getattr(
@@ -227,8 +277,25 @@ def show_opt_trajectory(
         )
         return fig
 
-    def _build_fig(idx: int):
-        """Return (kind, obj) for frame idx; fast path when bonds are cached."""
+    def _try_py3dmol(idx: int):
+        """Build frame idx with py3Dmol. Returns (kind, obj) or None."""
+        try:
+            import py3Dmol as _p3d
+
+            view = _p3d.view(width=frame_w, height=frame_h)
+            view.addModel(xyzblocks[idx], "xyz")
+            view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
+            view.setBackgroundColor(
+                "white" if app.theme_btn.value == "Light" else "#1e1e1e"
+            )
+            view.zoomTo()
+            return ("py3dmol", view)
+        except Exception:
+            return None
+
+    def _try_plotlymol(idx: int):
+        """Build frame idx with plotlymol3d. Tries fast bond-cached path
+        first, falls back to slow path. Returns (kind, obj) or None."""
         if plotlymol_fast:
             try:
                 fig = _build_fig_fast(idx)
@@ -236,7 +303,6 @@ def show_opt_trajectory(
                     return ("plotly", fig)
             except Exception:
                 pass
-        # Slow fallback: full plotlymol pipeline
         try:
             from quantui.visualization_py3dmol import visualize_molecule_plotlymol
 
@@ -251,21 +317,28 @@ def show_opt_trajectory(
             fig.update_layout(paper_bgcolor="white", scene=dict(bgcolor=scene_bg))
             return ("plotly", fig)
         except ImportError:
-            pass
-        # Last resort: py3Dmol
-        try:
-            import py3Dmol as _p3d
+            return None
 
-            view = _p3d.view(width=frame_w, height=frame_h)
-            view.addModel(xyzblocks[idx], "xyz")
-            view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
-            view.setBackgroundColor(
-                "white" if app.theme_btn.value == "Light" else "#1e1e1e"
+    def _build_fig(idx: int):
+        """Return (kind, obj) for frame idx. Trajectory frame rendering is
+        py3Dmol-only per the routing policy: plotlymol is blocked from
+        real-time trajectory use to avoid its RequireJS flicker pattern.
+        If py3Dmol is unavailable on this host, returns an error frame
+        rather than silently falling back to plotlymol."""
+        from quantui.viz_backend_router import VizBackend as _VB
+        from quantui.viz_backend_router import VizTask as _VT
+
+        chosen = app._resolve_backend(_VT.TRAJECTORY_FRAME)
+        if chosen != _VB.PY3DMOL:
+            return (
+                "error",
+                "Trajectory rendering requires py3Dmol (plotlymol blocked "
+                "for real-time use to avoid flicker). py3Dmol is unavailable.",
             )
-            view.zoomTo()
-            return ("py3dmol", view)
-        except Exception as exc:
-            return ("error", str(exc))
+        result = _try_py3dmol(idx)
+        if result is not None:
+            return result
+        return ("error", "py3Dmol failed to build trajectory frame")
 
     frame_cache: dict[int, Any] = {}
 
@@ -280,7 +353,12 @@ def show_opt_trajectory(
         layout=layout_fn(width="360px"),
     )
     step_info = widgets.HTML(value=app._traj_step_html(0, traj, energies, rel_e))
-    frame_out = widgets.Output(layout=layout_fn(min_height="340px"))
+    # Fixed height (not just min_height) so the container box never resizes
+    # between frame swaps — eliminates the layout flash / page-scroll jump
+    # the user reported on each arrow/slider click.
+    frame_out = widgets.Output(
+        layout=layout_fn(height=f"{frame_h}px", width=f"{frame_w}px")
+    )
     cache_label = widgets.HTML(
         value=f'<span style="color:#888;font-size:11px;font-style:italic">'
         f"Pre-rendering frames… 0 / {n}</span>"
@@ -297,34 +375,42 @@ def show_opt_trajectory(
         except Exception:
             pass
         if kind == "error":
-            frame_out.clear_output()
-            with frame_out:
-                _ipy_display(
-                    HTML(
-                        f'<p style="color:#b91c1c;padding:8px">Frame render failed: {obj}</p>'
-                    )
-                )
+            _swap_frame_out(
+                f'<p style="color:#b91c1c;padding:8px">'
+                f"Frame render failed: {obj}</p>"
+            )
             return
         if kind == "plotly":
-            # Render via to_html + append_display_data — same pattern proven to
-            # work in vib_output and other Plotly panels. The previous
-            # `with frame_out: display(fig)` path silently failed to update
-            # this *nested* Output widget after the parent VBox had already
-            # been displayed. See GOTCHAS: _render_vib_mode workaround.
+            # Render via Plotly HTML serialization. The atomic outputs swap
+            # avoids the brief empty state between clear+append, eliminating
+            # the layout-flash visible on rapid frame switches.
             import plotly.io as _pio
 
-            _html = _pio.to_html(
-                obj,
-                full_html=False,
-                include_plotlyjs="require",
-                config={"responsive": True},
+            _swap_frame_out(
+                _pio.to_html(
+                    obj,
+                    full_html=False,
+                    include_plotlyjs="require",
+                    config={"responsive": True},
+                )
             )
-            frame_out.clear_output()
-            frame_out.append_display_data(HTML(_html))
             return
-        frame_out.clear_output()
-        with frame_out:
-            _ipy_display(obj)
+        # py3Dmol view object — convert to its HTML repr and atomic-swap.
+        make_html = getattr(obj, "_make_html", None)
+        if callable(make_html):
+            try:
+                _swap_frame_out(obj._make_html())
+                return
+            except Exception as exc:
+                _swap_frame_out(
+                    f'<p style="color:#b91c1c;padding:8px">'
+                    f"py3Dmol render failed: {exc}</p>"
+                )
+                return
+        _swap_frame_out(
+            '<p style="color:#b91c1c;padding:8px">'
+            "Frame object missing HTML representation</p>"
+        )
 
     def _update_frame(change: dict[str, Any]) -> None:
         if _is_stale():
@@ -334,13 +420,9 @@ def show_opt_trajectory(
         if idx in frame_cache:
             _display_frame(idx)
             return
-        frame_out.clear_output()
-        with frame_out:
-            _ipy_display(
-                HTML(
-                    '<p style="color:#555;font-style:italic;padding:8px">Rendering…</p>'
-                )
-            )
+        _swap_frame_out(
+            '<p style="color:#555;font-style:italic;padding:8px">Rendering…</p>'
+        )
 
         def _on_demand() -> None:
             try:
@@ -354,6 +436,38 @@ def show_opt_trajectory(
         threading.Thread(target=_on_demand, daemon=True).start()
 
     step_slider.observe(app._safe_cb(_update_frame), names="value")
+
+    # --- Prev/next arrow buttons for one-step navigation ---
+    prev_btn = widgets.Button(
+        icon="arrow-left",
+        tooltip="Previous frame",
+        layout=layout_fn(width="40px", margin="0 4px 0 0"),
+        disabled=True,  # starts at frame 0
+    )
+    next_btn = widgets.Button(
+        icon="arrow-right",
+        tooltip="Next frame",
+        layout=layout_fn(width="40px", margin="0 8px 0 4px"),
+        disabled=(n <= 1),
+    )
+
+    def _on_prev_clicked(_btn) -> None:
+        if step_slider.value > 0:
+            step_slider.value -= 1
+
+    def _on_next_clicked(_btn) -> None:
+        if step_slider.value < n - 1:
+            step_slider.value += 1
+
+    prev_btn.on_click(_on_prev_clicked)
+    next_btn.on_click(_on_next_clicked)
+
+    def _update_nav_buttons(change: dict[str, Any]) -> None:
+        idx = change["new"]
+        prev_btn.disabled = idx <= 0
+        next_btn.disabled = idx >= n - 1
+
+    step_slider.observe(app._safe_cb(_update_nav_buttons), names="value")
 
     # --- Export button ---
     export_btn = widgets.Button(
@@ -415,7 +529,7 @@ def show_opt_trajectory(
 
     # --- Assemble layout ---
     header = widgets.HBox(
-        [step_slider, export_btn],
+        [prev_btn, step_slider, next_btn, export_btn],
         layout=layout_fn(align_items="center", margin="4px 0"),
     )
     panel = widgets.VBox([header, step_info, cache_label, frame_out, export_status])
@@ -441,14 +555,10 @@ def show_opt_trajectory(
             )
         except Exception:
             pass
-        frame_out.clear_output()
-        with frame_out:
-            _ipy_display(
-                HTML(
-                    '<p style="color:#555;font-style:italic;padding:8px">'
-                    "Rendering frame 0…</p>"
-                )
-            )
+        _swap_frame_out(
+            '<p style="color:#555;font-style:italic;padding:8px">'
+            "Rendering frame 0…</p>"
+        )
 
     # Display panel.
     if _is_stale():

@@ -1316,6 +1316,49 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
 
     app._analysis_mol_output = widgets.Output()
 
+    # Analysis-tab backend toggle — mirrors the Calculate-tab `viz_backend_toggle`.
+    # Created only when both backends are available (matches Calculate-tab
+    # convention). Synchronized with the Calculate-tab toggle via
+    # `_set_viz_preference` + `_viz_sync_in_progress` flag in app.py.
+    if app.viz_backend_toggle is not None:
+        app.viz_backend_toggle_ana = widgets.ToggleButtons(
+            options=[("PlotlyMol", "plotlymol"), ("py3Dmol", "py3dmol")],
+            value=app._viz_backend,
+            tooltips=["Plotly-based interactive viewer", "WebGL viewer (py3Dmol)"],
+            style={"button_width": "90px"},
+            layout=layout_fn(margin="2px 0 4px 0"),
+        )
+        # Small "Rendering with: X" label — updated by _update_analysis_backend_label
+        # after each render so the user can see what's actually rendering even
+        # when preference is "auto" (per-task routing may select different
+        # backends than the toggle suggests).
+        app.viz_backend_label_ana = widgets.HTML(
+            value=(
+                '<span style="font-size:11px;color:#94a3b8;font-style:italic">'
+                "Rendering with: —</span>"
+            ),
+            layout=layout_fn(margin="0 0 8px 0"),
+        )
+        ana_backend_row = widgets.VBox(
+            [
+                widgets.HBox(
+                    [
+                        widgets.HTML(
+                            '<span style="font-size:11px;color:#94a3b8;'
+                            'margin-right:6px;align-self:center">Backend:</span>'
+                        ),
+                        app.viz_backend_toggle_ana,
+                    ],
+                    layout=layout_fn(align_items="center"),
+                ),
+                app.viz_backend_label_ana,
+            ],
+        )
+    else:
+        app.viz_backend_toggle_ana = None  # type: ignore[assignment]
+        app.viz_backend_label_ana = None  # type: ignore[assignment]
+        ana_backend_row = None
+
     app._analysis_context_lbl = widgets.HTML(
         value=(
             '<p style="color:#555;font-size:13px;margin:4px 0 12px">'
@@ -1333,10 +1376,15 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._ana_unavail_html = widgets.HTML(value="", layout=layout_fn(display="none"))
     app._build_ana_switcher()
-    app.analysis_tab_panel = widgets.VBox(
+
+    ana_children = [
+        app._analysis_context_lbl,
+        app._analysis_mol_output,
+    ]
+    if ana_backend_row is not None:
+        ana_children.append(ana_backend_row)
+    ana_children.extend(
         [
-            app._analysis_context_lbl,
-            app._analysis_mol_output,
             app._analysis_empty_html,
             app._ana_unavail_html,
             app._orb_accordion,
@@ -1347,7 +1395,10 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             app._iso_accordion,
             app._tddft_accordion,
             app._nmr_accordion,
-        ],
+        ]
+    )
+    app.analysis_tab_panel = widgets.VBox(
+        ana_children,
         layout=layout_fn(padding="8px 0"),
     )
     app.post_calc_panel = app.analysis_tab_panel

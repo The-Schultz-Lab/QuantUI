@@ -383,7 +383,13 @@ from quantui.molecule import Molecule, parse_xyz_input
 from quantui.progress import StepProgress
 from quantui.user_settings import UserSettings
 from quantui.utils import get_session_resources
-from quantui.viz_backend_router import BackendAvailability
+from quantui.viz_backend_router import (
+    BackendAvailability,
+    VizBackend,
+    VizPreference,
+    VizTask,
+    select_backend,
+)
 
 # ── Availability flags (computed once at import, not per-instantiation) ───────
 try:
@@ -754,7 +760,9 @@ class QuantUIApp:
         solvent_dd: Any
         step_progress: Any
         theme_btn: Any
+        viz_backend_label_ana: Any
         viz_backend_toggle: Any
+        viz_backend_toggle_ana: Any
         viz_controls_box: Any
         viz_default_backend_dd: Any
         viz_lighting_dd: Any
@@ -909,8 +917,24 @@ class QuantUIApp:
         )
         self._viz_backend_preference: str = self._user_settings.viz.default_backend
 
+        # Synchronization state for Calculate/Analysis backend toggles.
+        # When _set_viz_backend updates one toggle, it sets this flag so the
+        # other toggle's observer can short-circuit and avoid an echo loop.
+        self._viz_sync_in_progress: bool = False
+        # Molecule currently rendered into _analysis_mol_output. Updated by
+        # show_result_3d; consumed by _set_viz_backend to re-render the
+        # Analysis-tab viewer when the toggle changes.
+        self._analysis_displayed_molecule: Any = None
+
         # ── Build → wire → assemble ───────────────────────────────────────
         self._build_widgets()
+
+        # Resolve the persisted preference through the router and align all
+        # three preference widgets + _viz_backend with the router decision.
+        # Observers are NOT yet wired so widget assignments don't trigger
+        # render side-effects — this is pure initial-state alignment.
+        self._initialize_viz_state_from_preference()
+
         self._wire_callbacks()
         self._assemble_tabs()
 
@@ -1350,6 +1374,11 @@ class QuantUIApp:
         if self.viz_backend_toggle is not None:
             self.viz_backend_toggle.observe(
                 self._safe_cb(self._on_viz_backend_changed), names="value"
+            )
+        # Analysis-tab backend toggle (only wired when both backends available).
+        if self.viz_backend_toggle_ana is not None:
+            self.viz_backend_toggle_ana.observe(
+                self._safe_cb(self._on_viz_backend_changed_ana), names="value"
             )
         # Settings → "Default 3D backend" preference (Status tab; persisted).
         self.viz_default_backend_dd.observe(
@@ -1969,41 +1998,179 @@ class QuantUIApp:
                     bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
                 )
 
-    def _on_viz_backend_changed(self, change) -> None:
-        self._viz_backend = change["new"]  # type: ignore[assignment]
-        # Lighting only works with the PlotlyMol backend
+    def _initialize_viz_state_from_preference(self) -> None:
+        """Align _viz_backend and the three preference widgets with the
+        persisted preference. Called at startup before observers are wired."""
+        resolved = self._resolve_backend(VizTask.MOLECULE_PREVIEW)
+        if resolved is not None:
+            self._viz_backend = str(resolved)  # type: ignore[assignment]
+            if (
+                self.viz_backend_toggle is not None
+                and self.viz_backend_toggle.value != str(resolved)
+            ):
+                self.viz_backend_toggle.value = str(resolved)
+            if (
+                self.viz_backend_toggle_ana is not None
+                and self.viz_backend_toggle_ana.value != str(resolved)
+            ):
+                self.viz_backend_toggle_ana.value = str(resolved)
+        # The Settings widget was already built with viz_default_backend
+        # loaded from settings.json — no further alignment needed there.
+
+    def _resolve_backend(self, task: VizTask) -> VizBackend | None:
+        """Convenience wrapper: resolve backend for a render task via the
+        router using current preference + availability. Returns None if no
+        backend is available for the task."""
+        decision = select_backend(
+            task,
+            VizPreference(self._viz_backend_preference),
+            self._viz_availability,
+        )
+        try:
+            _calc_log.log_event(
+                "viz_route_decision",
+                f"task={task} pref={self._viz_backend_preference} "
+                f"chosen={decision.chosen} reason={decision.reason}"[:300],
+            )
+        except OSError:
+            pass
+        return decision.chosen
+
+    def _set_viz_preference(self, new_pref: str, *, persist: bool) -> None:
+        """Single source-of-truth setter for the backend preference.
+
+        ``new_pref`` must be one of "auto" | "py3dmol" | "plotlymol". The
+        Settings widget (Status tab) calls this with ``persist=True``; the
+        Calculate/Analysis effective toggles call it with ``persist=False``
+        (session-only override — clicking either toggle is treated as an
+        explicit commit to a concrete preference, even if the prior
+        preference was "auto").
+
+        Updates ``self._viz_backend_preference``, resolves the effective
+        backend for general static-structure rendering, syncs all three
+        widgets under ``_viz_sync_in_progress`` (no echo loops), updates
+        lighting-control visibility, and re-renders all visible 3D views.
+        """
+        if new_pref not in ("auto", "py3dmol", "plotlymol"):
+            return
+        if new_pref == self._viz_backend_preference:
+            return
+        self._viz_backend_preference = new_pref
+
+        if persist:
+            self._user_settings.viz.default_backend = new_pref
+            self._user_settings.save()
+            try:
+                _calc_log.log_event(
+                    "viz_default_backend_changed", f"preference={new_pref}"
+                )
+            except OSError:
+                pass
+
+        # Resolve the effective backend for general static-structure rendering.
+        # MOLECULE_PREVIEW is used as the canonical task for the
+        # Calculate/Analysis toggle display (all static-structure tasks
+        # currently resolve to the same backend per the routing policy).
+        resolved = self._resolve_backend(VizTask.MOLECULE_PREVIEW)
+        if resolved is not None:
+            self._viz_backend = str(resolved)  # type: ignore[assignment]
+
+        # Sync all three widgets under the lock.
+        self._viz_sync_in_progress = True
+        try:
+            if self.viz_default_backend_dd.value != new_pref:
+                self.viz_default_backend_dd.value = new_pref
+            # Effective toggles can only display concrete values.
+            if resolved is not None:
+                resolved_str = str(resolved)
+                if (
+                    self.viz_backend_toggle is not None
+                    and self.viz_backend_toggle.value != resolved_str
+                ):
+                    self.viz_backend_toggle.value = resolved_str
+                if (
+                    self.viz_backend_toggle_ana is not None
+                    and self.viz_backend_toggle_ana.value != resolved_str
+                ):
+                    self.viz_backend_toggle_ana.value = resolved_str
+        finally:
+            self._viz_sync_in_progress = False
+
+        # Lighting only works with the PlotlyMol backend.
         _lighting_usable = _PLOTLYMOL_VIZ and self._viz_backend == "plotlymol"
         self.viz_lighting_dd.disabled = not _lighting_usable
         self.viz_lighting_dd.layout.visibility = (
             "visible" if _lighting_usable else "hidden"
         )
-        if self._molecule is not None and _display_molecule is not None:
-            self.viz_output.clear_output()
-            with self.viz_output:
-                _display_molecule(
-                    self._molecule,
-                    backend=self._viz_backend,
-                    style=self._viz_style,
-                    lighting=self._viz_lighting,
-                    bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
-                )
+
+        # Re-render all currently-visible 3D molecule viewers via the router.
+        self._rerender_3d_views()
+
+    def _rerender_3d_views(self) -> None:
+        """Re-render visible 3D molecule viewers using the router to pick a
+        backend per task. Updates the "Rendering with: X" label widgets."""
+        if _display_molecule is None:
+            return
+
+        # Calculate-tab molecule preview (MOLECULE_PREVIEW task).
+        if self._molecule is not None:
+            chosen = self._resolve_backend(VizTask.MOLECULE_PREVIEW)
+            if chosen is not None:
+                self.viz_output.clear_output()
+                with self.viz_output:
+                    _display_molecule(
+                        self._molecule,
+                        backend=str(chosen),
+                        style=self._viz_style,
+                        lighting=self._viz_lighting,
+                        bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
+                    )
+
+        # Analysis-tab molecule viewer (ANALYSIS_STRUCTURE_VIEW task).
+        if self._analysis_displayed_molecule is not None:
+            chosen = self._resolve_backend(VizTask.ANALYSIS_STRUCTURE_VIEW)
+            if chosen is not None:
+                self._analysis_mol_output.clear_output()
+                with self._analysis_mol_output:
+                    _display_molecule(
+                        self._analysis_displayed_molecule,
+                        backend=str(chosen),
+                        style=self._viz_style,
+                        lighting=self._viz_lighting,
+                        bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
+                    )
+                self._update_analysis_backend_label(chosen)
+
+    def _update_analysis_backend_label(self, chosen: VizBackend) -> None:
+        """Update the small 'Rendering with: X' label next to the Analysis
+        molecule viewer. No-op if the label widget does not exist (built only
+        when both backends are available)."""
+        label = getattr(self, "viz_backend_label_ana", None)
+        if label is None:
+            return
+        display_name = "py3Dmol" if chosen == VizBackend.PY3DMOL else "plotlymol3d"
+        label.value = (
+            f'<span style="font-size:11px;color:#94a3b8;font-style:italic">'
+            f"Rendering with: {display_name}</span>"
+        )
+
+    def _on_viz_backend_changed(self, change) -> None:
+        """Calculate-tab toggle observer — explicit override of preference."""
+        if self._viz_sync_in_progress:
+            return
+        self._set_viz_preference(change["new"], persist=False)
+
+    def _on_viz_backend_changed_ana(self, change) -> None:
+        """Analysis-tab toggle observer — explicit override of preference."""
+        if self._viz_sync_in_progress:
+            return
+        self._set_viz_preference(change["new"], persist=False)
 
     def _on_viz_default_backend_changed(self, change) -> None:
-        """Update the persisted default-backend preference. Drives router
-        decisions for new render operations; existing widgets remain on
-        their current effective backend until the next render."""
-        new_value = change["new"]
-        if new_value not in ("auto", "py3dmol", "plotlymol"):
+        """Settings widget observer — persistent preference change."""
+        if self._viz_sync_in_progress:
             return
-        self._viz_backend_preference = new_value
-        self._user_settings.viz.default_backend = new_value
-        self._user_settings.save()
-        try:
-            _calc_log.log_event(
-                "viz_default_backend_changed", f"preference={new_value}"
-            )
-        except OSError:
-            pass
+        self._set_viz_preference(change["new"], persist=True)
 
     def _on_viz_style_changed(self, change) -> None:
         self._viz_style = change["new"]
