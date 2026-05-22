@@ -79,10 +79,38 @@ def on_traj_expand(app: Any, change: dict[str, Any]) -> None:
     if change["new"] != 0:
         return
     result = app._pending_traj_result
+
+    # Safety net: if _pending_traj_result was already consumed by a prior
+    # auto-select render but traj_output is now empty, recover by rendering
+    # from the cached _last_traj_result.
+    # NOTE: traj_output is now a widgets.VBox — check `children` (not
+    # `outputs`) for the populated-state heuristic.
+    recovery_used = False
+    if result is None:
+        last = getattr(app, "_last_traj_result", None)
+        children = getattr(app.traj_output, "children", ())
+        if last is not None and len(children) == 0:
+            result = last
+            recovery_used = True
+            try:
+                from quantui import calc_log as _clog_recovery
+
+                _clog_recovery.log_event(
+                    "traj_render_recovery",
+                    "children=0, rendering from _last_traj_result",
+                )
+            except Exception:
+                pass
+
     try:
         from quantui import calc_log as _clog_te
 
-        _clog_te.log_event("traj_expand", f"pending={result is not None}")
+        _clog_te.log_event(
+            "traj_expand",
+            f"pending={app._pending_traj_result is not None} "
+            f"recovery={recovery_used} "
+            f"children_n={len(getattr(app.traj_output, 'children', ()))}",
+        )
     except Exception:
         pass
     if result is None:
@@ -91,16 +119,15 @@ def on_traj_expand(app: Any, change: dict[str, Any]) -> None:
     app._traj_render_token = int(getattr(app, "_traj_render_token", 0)) + 1
     render_token = app._traj_render_token
 
-    from IPython.display import HTML as _H
-    from IPython.display import display as _d
-
-    app.traj_output.clear_output()
-    with app.traj_output:
-        _d(
-            _H(
-                '<p style="color:#555;font-style:italic;padding:8px">Loading trajectory viewer…</p>'
+    # Placeholder: replace traj_output's children with a Loading message.
+    app.traj_output.children = (
+        widgets.HTML(
+            value=(
+                '<p style="color:#555;font-style:italic;padding:8px">'
+                "Loading trajectory viewer…</p>"
             )
-        )
+        ),
+    )
 
     try:
         app._show_opt_trajectory(result, render_token=render_token)
@@ -116,16 +143,14 @@ def on_traj_expand(app: Any, change: dict[str, Any]) -> None:
             pass
         if render_token != int(getattr(app, "_traj_render_token", 0)):
             return
-        from IPython.display import HTML as _H2
-        from IPython.display import display as _d2
-
-        app.traj_output.clear_output()
-        with app.traj_output:
-            _d2(
-                _H2(
-                    f'<p style="color:#b91c1c;padding:8px">⚠ Trajectory rendering failed: {exc}</p>'
+        app.traj_output.children = (
+            widgets.HTML(
+                value=(
+                    f'<p style="color:#b91c1c;padding:8px">'
+                    f"⚠ Trajectory rendering failed: {exc}</p>"
                 )
-            )
+            ),
+        )
 
 
 def show_opt_trajectory(
@@ -137,8 +162,6 @@ def show_opt_trajectory(
 ) -> None:
     """Build trajectory carousel and energy chart in trajectory panel."""
     import concurrent.futures
-
-    from IPython.display import display as _ipy_display
 
     def _is_stale() -> bool:
         return render_token is not None and render_token != int(
@@ -178,14 +201,14 @@ def show_opt_trajectory(
     energies = opt_result.energies_hartree
     n = len(traj)
     if n < 2:
-        app.traj_output.clear_output()
-        with app.traj_output:
-            _ipy_display(
-                HTML(
+        app.traj_output.children = (
+            widgets.HTML(
+                value=(
                     '<p style="color:#666;padding:8px">'
                     "No trajectory data available (single-frame result).</p>"
                 )
-            )
+            ),
+        )
         return
 
     hartree_to_kcal = 627.5094740631
@@ -563,18 +586,40 @@ def show_opt_trajectory(
     # Display panel.
     if _is_stale():
         return
-    app.traj_output.clear_output()
-    with app.traj_output:
-        if has_plotly and rel_e:
-            _ipy_display(energy_fig)
-        _ipy_display(panel)
+    # Build the energy figure as HTML inside an Output widget so RequireJS
+    # / Plotly scripts execute, and put the panel widget directly as a
+    # sibling child of traj_output. Setting traj_output.children atomically
+    # avoids the deferred-display-via-Output issue that was emptying the
+    # accordion in BUG-FRESH-TRAJ.
+    new_children = []
+    if has_plotly and rel_e:
+        import plotly.io as _pio_e
+
+        energy_html = _pio_e.to_html(
+            energy_fig,
+            full_html=False,
+            include_plotlyjs="require",
+            config={"responsive": True},
+        )
+        energy_holder = widgets.Output()
+        energy_holder.outputs = (
+            {
+                "output_type": "display_data",
+                "data": {"text/html": energy_html},
+                "metadata": {},
+            },
+        )
+        new_children.append(energy_holder)
+    new_children.append(panel)
+    app.traj_output.children = tuple(new_children)
     try:
         from quantui import calc_log as _clog_sp
 
         _clog_sp.log_event(
             "traj_show_panel",
             f"n={n} plotlymol_fast={plotlymol_fast} "
-            f"sync_frame0_ok={sync_frame0_ok}",
+            f"sync_frame0_ok={sync_frame0_ok} "
+            f"traj_children_n={len(getattr(app.traj_output, 'children', ()))}",
         )
     except Exception:
         pass

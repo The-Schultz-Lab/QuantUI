@@ -159,10 +159,17 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     app._deactivate_all_ana_panels()
     _reset_unavailable_messages_for_context(app, ctx)
     app._pending_traj_result = None
+    # Safety-net cache so on_traj_expand can recover if the initial render's
+    # outputs are missing from traj_output by the time the user views the
+    # accordion. Cleared here at context reset; re-set by each
+    # _pop_*_trajectory populate method.
+    app._last_traj_result = None
     app._traj_render_token = int(getattr(app, "_traj_render_token", 0)) + 1
     app._iso_render_token = int(getattr(app, "_iso_render_token", 0)) + 1
     app.traj_accordion.set_title(0, "Trajectory Viewer")
-    app.traj_output.clear_output()
+    # traj_output is a VBox (see app_builders.py traj_output construction);
+    # clear children instead of clear_output.
+    app.traj_output.children = ()
     app._orb_iso_output.clear_output()
 
     first_auto_selected = False
@@ -293,6 +300,7 @@ def pop_geo_trajectory(app: Any, ctx: Any) -> bool:
         formula=ctx.formula,
     )
     app._pending_traj_result = stub
+    app._last_traj_result = stub
     return True
 
 
@@ -356,6 +364,7 @@ def pop_preopt_trajectory(app: Any, ctx: Any) -> bool:
         formula=ctx.formula,
     )
     app._pending_traj_result = stub
+    app._last_traj_result = stub
     app.traj_accordion.set_title(0, "Pre-optimization Trajectory")
     return True
 
@@ -582,5 +591,6 @@ def pop_pes_trajectory(app: Any, ctx: Any) -> bool:
         formula=ctx.formula,
     )
     app._pending_traj_result = stub
+    app._last_traj_result = stub
     app.traj_accordion.set_title(0, "Geometry at Each Scan Point")
     return True

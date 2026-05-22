@@ -881,6 +881,11 @@ class QuantUIApp:
         self._last_calc_type: Optional[str] = None  # e.g. "frequency", "single_point"
         self._results: List = []
         self._pending_traj_result: Any = None
+        # Cached for the fresh-path safety net in on_traj_expand: if the
+        # initial render's outputs go missing before the user views the
+        # Analysis tab, on_traj_expand re-renders from this cache. Cleared
+        # by apply_analysis_context at every context reset.
+        self._last_traj_result: Any = None
         self._traj_render_token: int = 0
         self._iso_render_token: int = 0
         self._last_uv_wavelengths_nm: list[float] = []

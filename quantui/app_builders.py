@@ -1015,7 +1015,13 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._pes_scan_accordion.set_title(0, "PES Energy Profile")
     app._pes_scan_accordion.selected_index = None
 
-    app.traj_output = widgets.Output()
+    # traj_output is a VBox container (NOT widgets.Output) so widget content
+    # can be added as direct children via `traj_output.children = (...)`.
+    # Using `widgets.Output` here previously caused widget references inside
+    # `with output: display(widget)` to be deferred/asynchronous, leaving the
+    # accordion visibly empty even after _show_opt_trajectory logged success.
+    # See BUG-FRESH-TRAJ root-cause analysis in session 48.
+    app.traj_output = widgets.VBox(layout=layout_fn(margin="0"))
     app.traj_accordion = widgets.Accordion(
         children=[app.traj_output],
         layout=layout_fn(display="none", margin="8px 0"),
