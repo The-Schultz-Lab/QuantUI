@@ -306,15 +306,6 @@ CHANGELOG.md              Release history (Keep a Changelog format)
 
 ---
 
-## Relationship to the cluster version
-
-QuantUI (this repo) is a downstream port of the cluster-based
-[QuantUI-cluster](https://github.com/The-Schultz-Lab/QuantUI) repository. All SLURM
-infrastructure (job manager, job storage, batch templates) has been removed.
-Bug fixes flow from the cluster repo into this one, not the other way around.
-
----
-
 ## License
 
 [MIT](LICENSE) — Copyright 2026 The Schultz Lab, North Carolina Central University

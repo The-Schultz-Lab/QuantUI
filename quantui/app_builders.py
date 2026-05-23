@@ -1123,8 +1123,19 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         description="Line width:",
         style={"description_width": "80px"},
         layout=layout_fn(width="260px", display="none"),
+        # continuous_update=False so dragging the slider only fires on
+        # release, not 30-60 times per second during the drag (BUG.9 fix).
+        # Combined with the atomic outputs swap in _set_html_output this
+        # eliminates the IR re-render storm that caused visible flicker.
+        continuous_update=False,
     )
-    app._ir_fig = widgets.Output(layout=layout_fn(width="100%"))
+    # min_height matches the Plotly IR figure's intrinsic height (300px in
+    # ir_plot.plot_ir_spectrum) so the Output container does not collapse
+    # to 0px between renders. Pairs with the atomic outputs swap in
+    # _set_html_output to keep mode toggle / slider changes flicker-free.
+    app._ir_fig = widgets.Output(
+        layout=layout_fn(width="100%", min_height="300px"),
+    )
     ir_export_row = _plot_export_row("ir")
 
     ir_controls = widgets.HBox(

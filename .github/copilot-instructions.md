@@ -12,10 +12,8 @@
 QuantUI is an interactive Jupyter/Voilà platform for running PySCF quantum
 chemistry workflows end-to-end inside one app: setup, execution, analysis,
 visualization, and comparison. It is local-first today (no cluster account, no
-SLURM required for normal use), and is designed to evolve toward optional
-cluster-backed execution through interactive Jupyter/HPC environments. It is a
-downstream port of the cluster-focused
-`QuantUI` repo with all SLURM infrastructure removed.
+SLURM required), and a future roadmap item is to add optional cluster-backed
+execution through interactive Jupyter/HPC environments.
 
 **Primary users:** Undergraduate chemistry students and researchers at North Carolina
 Central University and collaborators. The UI runs as a Voilà app so users can run
@@ -701,15 +699,17 @@ across kernel restarts and are accessible from the host (home dir is bind-mounte
 
 ---
 
-## Relationship to Source Repo
+## Scope Notes — Intentionally Out of Repo
 
-QuantUI is a downstream port of `NCCU-Schultz-Lab/QuantUI` (the cluster version).
-Bug fixes and module updates originate in `QuantUI` and are ported here.
+The following module/file names are deliberately absent from `quantui/` and
+should not be reintroduced without an explicit roadmap milestone. They would
+only make sense once cluster-backed execution is added (a future roadmap
+item, not currently scoped).
 
-| Removed from source | Reason |
+| File / module | Why it's not here |
 | --- | --- |
-| `job_manager.py` | SLURM batch submission |
-| `storage.py` | SLURM job metadata |
-| `slurm_errors.py` | SLURM error translation |
-| `visualization.py` | PlotlyMol fallback (excluded here) |
-| SLURM templates in `config.py` | No cluster |
+| `job_manager.py` | SLURM batch submission belongs to the future cluster-execution path |
+| `storage.py` | SLURM job-metadata persistence — same future scope |
+| `slurm_errors.py` | SLURM error translation — same future scope |
+| `visualization.py` (the PlotlyMol-fallback module) | Superseded by `viz_backend_router.py` + `visualization_py3dmol.py` |
+| SLURM-related templates in `config.py` | No cluster orchestration today |

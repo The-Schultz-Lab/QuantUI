@@ -1028,6 +1028,21 @@ class TestIRSpectrumWidgets:
         assert app._ir_fwhm_slider.min == 5.0
         assert app._ir_fwhm_slider.max == 100.0
 
+    def test_fwhm_slider_continuous_update_false(self):
+        # BUG.9 regression guard: continuous_update must be False so the
+        # slider only fires the observer on release, not 30-60 times per
+        # second during a drag (which produces visible flicker).
+        app = QuantUIApp()
+        assert app._ir_fwhm_slider.continuous_update is False
+
+    def test_ir_fig_has_min_height(self):
+        # BUG.9 regression guard: min_height keeps the Output container
+        # from collapsing to 0px between renders. Pairs with the atomic
+        # outputs swap in _set_html_output to keep the IR panel
+        # flicker-free on mode toggle / slider changes.
+        app = QuantUIApp()
+        assert app._ir_fig.layout.min_height == "300px"
+
     def test_ir_export_controls_exist(self):
         app = QuantUIApp()
         assert isinstance(app._ir_export_btn, widgets.Button)
@@ -1085,6 +1100,39 @@ class TestShowIRSpectrum:
 # ---------------------------------------------------------------------------
 # M-UV — UV-Vis Spectrum accordion widgets
 # ---------------------------------------------------------------------------
+
+
+class TestSetHtmlOutputAtomic:
+    """_set_html_output must perform a single atomic outputs assignment.
+
+    BUG.9 root cause: the previous implementation was clear_output() +
+    append_display_data(), which produced an intermediate empty state
+    between the two calls. On rapid invocations (IR FWHM slider drag,
+    Stick/Broadened toggle), the user saw the panel flash blank between
+    every re-render. Atomic outputs swap eliminates the intermediate
+    state in one widget-state update.
+    """
+
+    def test_outputs_is_single_entry_after_set(self):
+        app = QuantUIApp()
+        out = widgets.Output()
+        app._set_html_output(out, "<p>hello</p>")
+        assert len(out.outputs) == 1
+        entry = out.outputs[0]
+        assert entry["output_type"] == "display_data"
+        assert entry["data"]["text/html"] == "<p>hello</p>"
+
+    def test_outputs_replaces_prior_content_atomically(self):
+        # Repeated calls (e.g. FWHM slider scrub) must each produce a
+        # single-entry outputs tuple — never accumulating or clearing-then-
+        # appending (which would briefly empty the widget mid-update).
+        app = QuantUIApp()
+        out = widgets.Output()
+        app._set_html_output(out, "<p>first</p>")
+        app._set_html_output(out, "<p>second</p>")
+        app._set_html_output(out, "<p>third</p>")
+        assert len(out.outputs) == 1
+        assert out.outputs[0]["data"]["text/html"] == "<p>third</p>"
 
 
 class TestUVVisSpectrumWidgets:

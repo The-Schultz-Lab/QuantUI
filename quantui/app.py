@@ -1939,19 +1939,31 @@ class QuantUIApp:
         )
 
     def _set_html_output(self, out: widgets.Output, html: str) -> None:
-        """Render HTML into an Output widget.
+        """Render HTML into an Output widget via an atomic outputs swap.
 
         Plotly HTML contains <script> tags. Those scripts do not execute when
         assigned to widgets.HTML.value (innerHTML path), which leads to blank
-        figure panels. Rendering through Output display_data executes the JS.
+        figure panels. Routing through ``Output.outputs`` executes the JS.
+
+        The assignment is a single ``out.outputs = (display_data,)`` rather
+        than ``clear_output() + append_display_data()`` so the browser never
+        observes an intermediate empty state. This eliminates the flicker
+        users were seeing on IR Stick/Broadened toggle and FWHM slider drag
+        (BUG.9) and matches the atomic-swap pattern already used by
+        ``_swap_frame_out`` (trajectory) and ``_swap_vib_output`` (vib).
         """
         if threading.current_thread() is not threading.main_thread():
             io_loop = self._get_kernel_io_loop()
             if io_loop is not None:
                 io_loop.add_callback(self._set_html_output, out, html)
                 return
-        self._clear_output_widget(out)
-        out.append_display_data(HTML(html))
+        out.outputs = (
+            {
+                "output_type": "display_data",
+                "data": {"text/html": html},
+                "metadata": {},
+            },
+        )
 
     def _get_kernel_io_loop(self) -> Any:
         """Return a cached kernel io_loop, resolving it lazily when needed."""
