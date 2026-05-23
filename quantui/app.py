@@ -293,6 +293,9 @@ from quantui.app_visualization import (
     build_vib_data_inner as _viz_build_vib_data_inner,
 )
 from quantui.app_visualization import (
+    build_vib_export_html as _viz_build_vib_export_html,
+)
+from quantui.app_visualization import (
     on_ir_fwhm_changed as _viz_on_ir_fwhm_changed,
 )
 from quantui.app_visualization import (
@@ -1458,6 +1461,7 @@ class QuantUIApp:
         self._uv_export_btn.on_click(self._on_uv_export_plot)
         self._orb_export_btn.on_click(self._on_orb_export_plot)
         self._pes_export_btn.on_click(self._on_pes_export_plot)
+        self._vib_export_btn.on_click(self._on_vib_export_animation)
         # Accumulate / export
         self.accumulate_btn.on_click(self._on_accumulate)
         self.clear_btn.on_click(self._on_clear)
@@ -2433,6 +2437,89 @@ class QuantUIApp:
             fmt=self._orb_export_fmt_dd.value,
             status_widget=self._orb_export_status,
         )
+
+    def _on_vib_export_animation(self, _btn) -> None:
+        """Export the active vibrational mode as a self-contained HTML file.
+
+        Backend selection is intentionally decoupled from the user's default
+        ``viz.default_backend`` preference: plotlymol3d is preferred for export
+        quality, with py3Dmol as a fallback when plotlymol3d is unavailable.
+        This is enforced inside ``build_vib_export_html``.
+        """
+        import re as _re
+        from datetime import datetime as _dt
+
+        status = self._vib_export_status
+
+        # Validate vib state before attempting anything else.
+        if (
+            getattr(self, "_last_vib_freq_result", None) is None
+            or getattr(self, "_last_vib_molecule", None) is None
+        ):
+            status.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                "No vibrational mode loaded — run a Frequency calculation first."
+                "</span>"
+            )
+            return
+
+        try:
+            mode_number = int(self.vib_mode_dd.value)
+        except (TypeError, ValueError):
+            status.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                "No vibrational mode selected.</span>"
+            )
+            return
+
+        try:
+            backend, html_str = _viz_build_vib_export_html(self, mode_number)
+        except Exception as exc:
+            status.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                f"Export failed: {exc}</span>"
+            )
+            try:
+                _calc_log.log_event(
+                    "vib_export_error",
+                    f"mode={mode_number} {type(exc).__name__}: {exc}"[:300],
+                )
+            except Exception:
+                pass
+            return
+
+        target_dir = (
+            self._last_result_dir
+            if isinstance(self._last_result_dir, Path)
+            else self._get_results_dir()
+        )
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        formula = getattr(self._last_vib_molecule, "get_formula", lambda: "mol")()
+        safe_formula = _re.sub(r"[^A-Za-z0-9_.-]+", "_", formula).strip("_") or "mol"
+        ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S")
+        dest = target_dir / f"vib_{safe_formula}_mode{mode_number}_{ts}.html"
+
+        try:
+            dest.write_text(html_str, encoding="utf-8")
+        except Exception as exc:
+            status.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                f"Write failed: {exc}</span>"
+            )
+            return
+
+        status.value = (
+            '<span style="color:#16a34a;font-size:12px">'
+            f"Saved ({backend}): {dest}</span>"
+        )
+        try:
+            _calc_log.log_event(
+                "vib_export_done",
+                f"mode={mode_number} backend={backend} path={dest}",
+            )
+        except Exception:
+            pass
 
     def _on_pes_export_plot(self, btn) -> None:
         self._export_plot_figure(

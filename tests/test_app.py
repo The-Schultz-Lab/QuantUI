@@ -1273,6 +1273,109 @@ class TestFreqSeedDropdownFilter:
         assert not any(lbl.startswith("CH4") for lbl in labels)
 
 
+class TestVibExportAnimation:
+    """The Vibrational accordion exposes an export-to-HTML button that
+    writes the current mode as a self-contained animation file.
+
+    Backend resolution is decoupled from the user's default backend
+    preference: plotlymol3d (preferred for export quality) with a py3Dmol
+    fallback. This separation is enforced inside ``build_vib_export_html``
+    so a user whose default render backend is py3Dmol can still get the
+    higher-quality plotlymol animation when exporting.
+    """
+
+    def _water(self):
+        return Molecule(
+            atoms=["O", "H", "H"],
+            coordinates=[
+                [0.0, 0.0, 0.0],
+                [0.96, 0.0, 0.0],
+                [-0.24, 0.93, 0.0],
+            ],
+        )
+
+    def _seed_vib_state(self, app):
+        """Populate the minimal state the export handler depends on.
+
+        Mirrors what ``_render_vib_mode_py3dmol`` reads but does not exercise
+        the live-render path — keeps the test focused on the export surface.
+        """
+        from types import SimpleNamespace
+
+        mol = self._water()
+        freq_stub = SimpleNamespace(
+            frequencies_cm1=[100.0, 200.0, 300.0],
+            ir_intensities=[1.0, 1.0, 1.0],
+            displacements=[
+                [[0.1, 0.0, 0.0], [-0.1, 0.0, 0.0], [0.0, 0.0, 0.0]],
+                [[0.0, 0.1, 0.0], [0.0, -0.1, 0.0], [0.0, 0.0, 0.0]],
+                [[0.0, 0.0, 0.1], [0.0, 0.0, -0.1], [0.0, 0.0, 0.0]],
+            ],
+        )
+        app._last_vib_freq_result = freq_stub
+        app._last_vib_molecule = mol
+        app._last_vib_data = None  # forces the py3dmol fallback in this test
+        app.vib_mode_dd.options = [
+            ("Mode 1: 100.0 cm⁻¹", 1),
+            ("Mode 2: 200.0 cm⁻¹", 2),
+            ("Mode 3: 300.0 cm⁻¹", 3),
+        ]
+        app.vib_mode_dd.value = 1
+
+    def test_export_button_and_status_exist(self):
+        app = QuantUIApp()
+        assert hasattr(app, "_vib_export_btn")
+        assert isinstance(app._vib_export_btn, widgets.Button)
+        assert hasattr(app, "_vib_export_status")
+        assert isinstance(app._vib_export_status, widgets.HTML)
+        assert app._vib_export_status.value == ""
+
+    def test_export_without_vib_state_shows_error_status(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        # No _last_vib_freq_result / _last_vib_molecule yet.
+        app._on_vib_export_animation(None)
+        assert "color:#b91c1c" in app._vib_export_status.value
+        assert "No vibrational mode loaded" in app._vib_export_status.value
+
+    def test_export_writes_html_and_reports_backend(self, tmp_path, monkeypatch):
+        from quantui.viz_backend_router import BackendAvailability
+
+        if not BackendAvailability.from_environment().py3dmol:
+            pytest.skip("py3Dmol not available for export fallback test")
+
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        self._seed_vib_state(app)
+        # Force the py3Dmol fallback regardless of plotlymol installation —
+        # the goal here is to assert the fallback writes a real HTML file.
+        app._viz_availability = BackendAvailability(py3dmol=True, plotlymol=False)
+        app._last_result_dir = tmp_path
+
+        app._on_vib_export_animation(None)
+
+        assert "color:#16a34a" in app._vib_export_status.value
+        assert "Saved (py3dmol)" in app._vib_export_status.value
+        # Find the file the handler wrote.
+        files = list(tmp_path.glob("vib_*_mode1_*.html"))
+        assert len(files) == 1
+        content = files[0].read_text(encoding="utf-8")
+        # py3Dmol HTML includes a 3dmoljs viewer block.
+        assert "viewer" in content.lower() or "3dmol" in content.lower()
+
+    def test_export_no_backend_available_surfaces_error(self, tmp_path, monkeypatch):
+        from quantui.viz_backend_router import BackendAvailability
+
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        self._seed_vib_state(app)
+        app._viz_availability = BackendAvailability(py3dmol=False, plotlymol=False)
+
+        app._on_vib_export_animation(None)
+        assert "color:#b91c1c" in app._vib_export_status.value
+        assert "No visualization backend available" in app._vib_export_status.value
+
+
 class TestUVVisSpectrumWidgets:
     """UV-Vis accordion and controls exist in correct initial state."""
 

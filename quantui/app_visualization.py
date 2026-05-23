@@ -2141,3 +2141,135 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
         pass
 
     return True
+
+
+def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
+    """Build a self-contained HTML string for the given vibrational mode.
+
+    Backend resolution is preference-independent (decoupled from the user's
+    live-render default backend): plotlymol3d is preferred because it produces
+    a self-contained Plotly animation with embedded playback controls — the
+    canonical "export quality" output. py3Dmol is used as a fallback only when
+    plotlymol3d is unavailable; the resulting HTML embeds the multi-frame
+    py3Dmol viewer with its built-in animate() loop.
+
+    Returns ``(backend_name, html_string)``.
+
+    Raises ``ValueError`` when vib state is missing or no backend is available.
+    """
+    freq_result = getattr(app, "_last_vib_freq_result", None)
+    molecule = getattr(app, "_last_vib_molecule", None)
+    if freq_result is None or molecule is None:
+        raise ValueError(
+            "No vibrational data available — run a Frequency calculation "
+            "and open the Vibrational panel first."
+        )
+
+    availability = getattr(app, "_viz_availability", None)
+    if availability is None:
+        raise ValueError("Visualization availability not initialised.")
+
+    # Plotlymol3d path — preferred for export.
+    if availability.plotlymol:
+        vib_data = getattr(app, "_last_vib_data", None)
+        if vib_data is None:
+            # Plotlymol3d installed but the per-result wrapper wasn't built.
+            # Try once more from the cached freq_result + molecule.
+            try:
+                vib_data = app._build_vib_data_from_freq_result(freq_result, molecule)
+            except Exception:
+                vib_data = None
+        if vib_data is not None:
+            try:
+                import plotly.io as _pio
+                from plotlymol3d import (
+                    create_vibration_animation,
+                    xyzblock_to_rdkitmol,
+                )
+            except ImportError:
+                pass
+            else:
+                xyzblock = (
+                    f"{len(molecule.atoms)}\n{molecule.get_formula()}\n"
+                    f"{molecule.to_xyz_string()}"
+                )
+                rdmol = xyzblock_to_rdkitmol(xyzblock, charge=molecule.charge)
+                anim_fig = create_vibration_animation(
+                    vib_data=vib_data,
+                    mode_number=mode_number,
+                    mol=rdmol,
+                    amplitude=0.4,
+                    n_frames=20,
+                    mode="ball+stick",
+                    resolution=12,
+                )
+                anim_fig.update_layout(height=420)
+                html_str = _pio.to_html(
+                    anim_fig,
+                    full_html=True,
+                    include_plotlyjs=True,
+                    config={"responsive": True},
+                )
+                return ("plotlymol", html_str)
+
+    # py3Dmol fallback — preference-independent fallback when plotlymol is
+    # unavailable or its build path fails. Mirrors _render_vib_mode_py3dmol's
+    # frame construction but emits stand-alone HTML rather than swapping into
+    # vib_output.
+    if availability.py3dmol:
+        try:
+            import numpy as np
+            import py3Dmol
+        except ImportError as exc:
+            raise ValueError(f"py3Dmol unavailable for fallback export: {exc}")
+
+        try:
+            displ = np.array(freq_result.displacements[mode_number - 1], dtype=float)
+        except (AttributeError, IndexError, ValueError, TypeError) as exc:
+            raise ValueError(
+                f"Could not read displacements for mode {mode_number}: {exc}"
+            )
+
+        atoms = list(molecule.atoms)
+        base_coords = np.array(molecule.coordinates, dtype=float)
+        if base_coords.shape != displ.shape:
+            raise ValueError(
+                f"Shape mismatch: base coords {base_coords.shape} vs "
+                f"displacements {displ.shape}"
+            )
+
+        n_frames = 24
+        amplitude = 0.4
+        fps = int(
+            getattr(
+                getattr(app, "_user_settings", None) and app._user_settings.viz,
+                "vib_framerate_fps",
+                10,
+            )
+        )
+        fps = max(1, fps)
+        interval_ms = max(1, int(round(1000.0 / fps)))
+
+        phases = np.sin(np.linspace(0, 2 * np.pi, n_frames, endpoint=False))
+        n_atoms = len(atoms)
+        xyz_lines: list[str] = []
+        for phase in phases:
+            coords = base_coords + amplitude * float(phase) * displ
+            xyz_lines.append(f"{n_atoms}")
+            xyz_lines.append(f"mode {mode_number} phase {float(phase):+.3f}")
+            for sym, xyz in zip(atoms, coords):
+                xyz_lines.append(f"{sym} {xyz[0]:.6f} {xyz[1]:.6f} {xyz[2]:.6f}")
+        xyz_string = "\n".join(xyz_lines) + "\n"
+
+        view = py3Dmol.view(width=640, height=520)
+        view.addModelsAsFrames(xyz_string, "xyz")
+        view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
+        view.setBackgroundColor("white")
+        view.zoomTo()
+        view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
+        return ("py3dmol", view._make_html())
+
+    raise ValueError(
+        "No visualization backend available to export the vibrational "
+        "animation. Install plotlymol3d (preferred) or py3dmol."
+    )

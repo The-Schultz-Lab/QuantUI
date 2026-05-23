@@ -1097,10 +1097,33 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     # accommodates the py3Dmol view (460px) plus a small horizontal pad;
     # 420+20=440 likewise for the 420px view height.
     app.vib_output = widgets.Output(layout=layout_fn(height="440px", width="480px"))
+
+    # Vibration animation export: writes the current mode as a self-contained
+    # HTML file. Backend selection is independent of the user's default — see
+    # _on_vib_export_animation: plotlymol3d is preferred for export quality,
+    # py3Dmol is the fallback when plotlymol3d isn't installed.
+    app._vib_export_btn = widgets.Button(
+        description="⬇ Export Animation",
+        tooltip=(
+            "Save the current vibrational mode as a self-contained HTML "
+            "file (plotlymol3d preferred for export quality; py3Dmol "
+            "fallback if plotlymol3d is not installed)"
+        ),
+        layout=layout_fn(width="180px"),
+    )
+    app._vib_export_status = widgets.HTML(
+        value="",
+        layout=layout_fn(flex="1 1 auto", margin="0 0 0 8px"),
+    )
+    vib_export_row = widgets.HBox(
+        [app._vib_export_btn, app._vib_export_status],
+        layout=layout_fn(align_items="center", margin="6px 0 0 0"),
+    )
+
     app.vib_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
-                [vib_mode_row, app.vib_output],
+                [vib_mode_row, app.vib_output, vib_export_row],
                 layout=layout_fn(padding="8px"),
             )
         ],
