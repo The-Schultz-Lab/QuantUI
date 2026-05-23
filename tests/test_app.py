@@ -8,7 +8,9 @@ not).  PySCF is unavailable on Windows; calculations are skipped accordingly.
 
 from __future__ import annotations
 
+import json
 import threading
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import ipywidgets as widgets
@@ -1194,6 +1196,81 @@ class TestShowResult3DAtomic:
             app._show_result_3d(mol, extra_output=app._analysis_mol_output)
         assert len(app._analysis_mol_output.outputs) == 1
         assert len(app.result_viz_output.outputs) == 1
+
+
+class TestFreqSeedDropdownFilter:
+    """The Freq seed-geometry dropdown should only list prior geo-opts of
+    the currently-active molecule.
+
+    Rationale: users selecting "Seed geometry" on the Frequency tab want a
+    geometry compatible with their current molecule. Listing a CH₄ geo-opt
+    while the user is working on H₂O is misleading and risks an accidental
+    geometry replacement. Filter is by formula (cheap and good enough for
+    the common case); strict atom-list match is queued under
+    M-HISTORY-HARDENING for later.
+    """
+
+    def _make_geo_opt_dir(self, root, formula, method="RHF", basis="STO-3G", offset=0):
+        # Offset the timestamp microseconds so directories sort
+        # deterministically when multiple fixtures share the same second.
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-") + f"{offset:06d}"
+        d = root / f"{ts}_{formula}_{method}_{basis}"
+        d.mkdir(parents=True)
+        (d / "result.json").write_text(
+            json.dumps(
+                {
+                    "_schema_version": 2,
+                    "timestamp": ts,
+                    "calc_type": "geometry_opt",
+                    "formula": formula,
+                    "method": method,
+                    "basis": basis,
+                }
+            )
+        )
+        (d / "trajectory.json").write_text("[]")
+        return d
+
+    def _water(self):
+        return Molecule(
+            atoms=["O", "H", "H"],
+            coordinates=[[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]],
+        )
+
+    def test_unfiltered_when_no_molecule_loaded(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        self._make_geo_opt_dir(tmp_path, "H2O", offset=1)
+        self._make_geo_opt_dir(tmp_path, "CH4", offset=2)
+        app = QuantUIApp()
+        assert app._molecule is None
+        app._refresh_freq_seed_options()
+        labels = [lbl for lbl, _ in app._freq_seed_dd.options]
+        assert any(lbl.startswith("H2O") for lbl in labels)
+        assert any(lbl.startswith("CH4") for lbl in labels)
+
+    def test_filtered_to_current_molecule_formula(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        self._make_geo_opt_dir(tmp_path, "H2O", offset=1)
+        self._make_geo_opt_dir(tmp_path, "CH4", offset=2)
+        app = QuantUIApp()
+        app._molecule = self._water()
+        app._refresh_freq_seed_options()
+        labels = [lbl for lbl, _ in app._freq_seed_dd.options]
+        assert labels[0] == "(use current molecule)"
+        assert any(lbl.startswith("H2O") for lbl in labels)
+        assert not any(lbl.startswith("CH4") for lbl in labels)
+
+    def test_set_molecule_triggers_filter(self, tmp_path, monkeypatch):
+        # Loading a new molecule should auto-refresh the dropdown so stale
+        # cross-molecule options drop out without the user clicking refresh.
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        self._make_geo_opt_dir(tmp_path, "H2O", offset=1)
+        self._make_geo_opt_dir(tmp_path, "CH4", offset=2)
+        app = QuantUIApp()
+        app._set_molecule(self._water(), label="test")
+        labels = [lbl for lbl, _ in app._freq_seed_dd.options]
+        assert any(lbl.startswith("H2O") for lbl in labels)
+        assert not any(lbl.startswith("CH4") for lbl in labels)
 
 
 class TestUVVisSpectrumWidgets:

@@ -133,14 +133,31 @@ def update_scan_widgets(app: Any, _change: Any = None) -> None:
 
 
 def refresh_freq_seed_options(app: Any) -> None:
-    """Populate frequency seed dropdown with saved geometry optimisations."""
+    """Populate frequency seed dropdown with saved geometry optimisations.
+
+    When an active molecule is loaded, the list is filtered to results whose
+    ``formula`` matches the current molecule. This keeps the dropdown from
+    offering seed geometries for unrelated molecules (e.g. a CH₄ geo-opt
+    while the user is working on H₂O). With no molecule loaded, the list is
+    unfiltered so the user can still browse history-stored options.
+    """
     from quantui.results_storage import list_results, load_result
+
+    current_formula: str | None = None
+    mol = getattr(app, "_molecule", None)
+    if mol is not None:
+        try:
+            current_formula = mol.get_formula()
+        except Exception:
+            current_formula = None
 
     options = [("(use current molecule)", "")]
     for d in list_results():
         try:
             data = load_result(d)
             if data.get("calc_type") != "geometry_opt":
+                continue
+            if current_formula is not None and data.get("formula") != current_formula:
                 continue
             traj_file = d / "trajectory.json"
             if not traj_file.exists():

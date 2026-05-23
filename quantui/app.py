@@ -2777,6 +2777,14 @@ class QuantUIApp:
             _collapsed_children.append(self.viz_controls_box)
         self.mol_input_container.children = _collapsed_children
 
+        # Re-filter seed-geometry dropdown to only include prior geo-opts of
+        # the now-active molecule (formula match). Best-effort: failures must
+        # not block molecule loading.
+        try:
+            self._refresh_freq_seed_options()
+        except Exception:
+            pass
+
     def _queue_main_thread_callback(self, callback, *args, **kwargs) -> None:
         """Run a callback on the notebook/kernel thread when possible."""
         if threading.current_thread() is threading.main_thread():
