@@ -23,6 +23,8 @@ def build_status_panel(
     ase_available: bool,
     pubchem_available: bool,
     visualization_available: bool,
+    viz_default_backend: str = "auto",
+    vib_framerate_fps: int = 10,
 ) -> None:
     """Build the Status tab panel."""
     cores, mem_gb = get_session_resources_fn()
@@ -104,8 +106,72 @@ def build_status_panel(
         f"</div>"
     )
 
+    # ── Settings section ──────────────────────────────────────────────────
+    # "Default 3D backend" — user preference persisted via UserSettings.
+    # Drives viz_backend_router resolution. Distinct from the Calculate-tab
+    # `viz_backend_toggle` (which selects the current effective backend for
+    # interactive use).
+    app.viz_default_backend_dd = widgets.ToggleButtons(
+        options=[
+            ("Auto", "auto"),
+            ("py3Dmol", "py3dmol"),
+            ("plotlymol3d", "plotlymol"),
+        ],
+        value=viz_default_backend,
+        style={"button_width": "110px"},
+        tooltips=[
+            "Use the recommended backend per task (py3Dmol-first where supported).",
+            "Always prefer py3Dmol when available.",
+            "Always prefer plotlymol3d when available.",
+        ],
+    )
+    settings_html = widgets.HTML(
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;'
+        "border-left:4px solid #94a3b8;padding:12px 16px;border-radius:6px;"
+        'margin:8px 0 4px">'
+        '<div style="font-weight:600;font-size:14px;color:#1e293b">Settings</div>'
+        '<div style="font-size:12px;color:#475569;margin-top:8px;margin-bottom:4px">'
+        "Default 3D backend "
+        '<span style="color:#94a3b8;font-size:11px">'
+        "(persists across launches)</span></div>"
+        "</div>"
+    )
+    # Vibrational animation framerate (persists across launches).
+    app.vib_framerate_si = widgets.IntSlider(
+        value=vib_framerate_fps,
+        min=5,
+        max=60,
+        step=1,
+        description="Vib fps:",
+        style={"description_width": "60px"},
+        layout=layout_fn(width="320px", margin="6px 0 0 0"),
+        readout=True,
+        readout_format="d",
+        tooltip=(
+            "Frames per second for the py3Dmol vibrational animation. "
+            "Higher = smoother + faster oscillation. Cached HTML is "
+            "invalidated when this changes."
+        ),
+    )
+    vib_fps_label = widgets.HTML(
+        '<div style="font-size:12px;color:#475569;margin-top:10px;'
+        'margin-bottom:0px">Vibrational animation framerate '
+        '<span style="color:#94a3b8;font-size:11px">'
+        "(persists across launches)</span></div>"
+    )
+
+    settings_box = widgets.VBox(
+        [
+            settings_html,
+            app.viz_default_backend_dd,
+            vib_fps_label,
+            app.vib_framerate_si,
+        ],
+        layout=layout_fn(margin="0 0 8px 0"),
+    )
+
     app._status_tab_panel = widgets.VBox(
-        [app._status_html, guide_html],
+        [app._status_html, guide_html, settings_box],
         layout=layout_fn(padding="8px 0"),
     )
 
@@ -979,7 +1045,13 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._pes_scan_accordion.set_title(0, "PES Energy Profile")
     app._pes_scan_accordion.selected_index = None
 
-    app.traj_output = widgets.Output()
+    # traj_output is a VBox container (NOT widgets.Output) so widget content
+    # can be added as direct children via `traj_output.children = (...)`.
+    # Using `widgets.Output` here previously caused widget references inside
+    # `with output: display(widget)` to be deferred/asynchronous, leaving the
+    # accordion visibly empty even after _show_opt_trajectory logged success.
+    # See BUG-FRESH-TRAJ root-cause analysis in session 48.
+    app.traj_output = widgets.VBox(layout=layout_fn(margin="0"))
     app.traj_accordion = widgets.Accordion(
         children=[app.traj_output],
         layout=layout_fn(display="none", margin="8px 0"),
@@ -996,11 +1068,39 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         style={"description_width": "50px"},
         layout=layout_fn(width="360px"),
     )
-    app.vib_output = widgets.Output()
+    # Prev/next arrow buttons for one-step navigation through modes. Click
+    # handlers step ``vib_mode_dd.value`` to the adjacent option; the
+    # existing dropdown observer then drives the re-render. Mirrors the
+    # trajectory-viewer prev/next pattern.
+    app.vib_prev_btn = widgets.Button(
+        icon="arrow-left",
+        tooltip="Previous mode",
+        layout=layout_fn(width="40px", margin="0 4px 0 0"),
+        disabled=True,
+    )
+    app.vib_next_btn = widgets.Button(
+        icon="arrow-right",
+        tooltip="Next mode",
+        layout=layout_fn(width="40px", margin="0 8px 0 4px"),
+        disabled=True,
+    )
+    vib_mode_row = widgets.HBox(
+        [app.vib_prev_btn, app.vib_mode_dd, app.vib_next_btn],
+        layout=layout_fn(align_items="center", margin="0 0 4px 0"),
+    )
+    # Fixed-dimension Output container so the box never resizes between
+    # content swaps (placeholder ↔ 3Dmol HTML). Without this, the empty
+    # state between atomic outputs assignments briefly collapses the
+    # container, the page reflows up, then reflows back when the new
+    # content arrives — visible as a scroll-jump flicker on every mode
+    # switch. Matches the trajectory frame_out fix pattern. 460+20=480
+    # accommodates the py3Dmol view (460px) plus a small horizontal pad;
+    # 420+20=440 likewise for the 420px view height.
+    app.vib_output = widgets.Output(layout=layout_fn(height="440px", width="480px"))
     app.vib_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
-                [app.vib_mode_dd, app.vib_output],
+                [vib_mode_row, app.vib_output],
                 layout=layout_fn(padding="8px"),
             )
         ],
@@ -1280,6 +1380,49 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
 
     app._analysis_mol_output = widgets.Output()
 
+    # Analysis-tab backend toggle — mirrors the Calculate-tab `viz_backend_toggle`.
+    # Created only when both backends are available (matches Calculate-tab
+    # convention). Synchronized with the Calculate-tab toggle via
+    # `_set_viz_preference` + `_viz_sync_in_progress` flag in app.py.
+    if app.viz_backend_toggle is not None:
+        app.viz_backend_toggle_ana = widgets.ToggleButtons(
+            options=[("PlotlyMol", "plotlymol"), ("py3Dmol", "py3dmol")],
+            value=app._viz_backend,
+            tooltips=["Plotly-based interactive viewer", "WebGL viewer (py3Dmol)"],
+            style={"button_width": "90px"},
+            layout=layout_fn(margin="2px 0 4px 0"),
+        )
+        # Small "Rendering with: X" label — updated by _update_analysis_backend_label
+        # after each render so the user can see what's actually rendering even
+        # when preference is "auto" (per-task routing may select different
+        # backends than the toggle suggests).
+        app.viz_backend_label_ana = widgets.HTML(
+            value=(
+                '<span style="font-size:11px;color:#94a3b8;font-style:italic">'
+                "Rendering with: —</span>"
+            ),
+            layout=layout_fn(margin="0 0 8px 0"),
+        )
+        ana_backend_row = widgets.VBox(
+            [
+                widgets.HBox(
+                    [
+                        widgets.HTML(
+                            '<span style="font-size:11px;color:#94a3b8;'
+                            'margin-right:6px;align-self:center">Backend:</span>'
+                        ),
+                        app.viz_backend_toggle_ana,
+                    ],
+                    layout=layout_fn(align_items="center"),
+                ),
+                app.viz_backend_label_ana,
+            ],
+        )
+    else:
+        app.viz_backend_toggle_ana = None  # type: ignore[assignment]
+        app.viz_backend_label_ana = None  # type: ignore[assignment]
+        ana_backend_row = None
+
     app._analysis_context_lbl = widgets.HTML(
         value=(
             '<p style="color:#555;font-size:13px;margin:4px 0 12px">'
@@ -1297,10 +1440,15 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._ana_unavail_html = widgets.HTML(value="", layout=layout_fn(display="none"))
     app._build_ana_switcher()
-    app.analysis_tab_panel = widgets.VBox(
+
+    ana_children = [
+        app._analysis_context_lbl,
+        app._analysis_mol_output,
+    ]
+    if ana_backend_row is not None:
+        ana_children.append(ana_backend_row)
+    ana_children.extend(
         [
-            app._analysis_context_lbl,
-            app._analysis_mol_output,
             app._analysis_empty_html,
             app._ana_unavail_html,
             app._orb_accordion,
@@ -1311,7 +1459,10 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             app._iso_accordion,
             app._tddft_accordion,
             app._nmr_accordion,
-        ],
+        ]
+    )
+    app.analysis_tab_panel = widgets.VBox(
+        ana_children,
         layout=layout_fn(padding="8px 0"),
     )
     app.post_calc_panel = app.analysis_tab_panel

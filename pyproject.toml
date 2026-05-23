@@ -4,18 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quantui"
-version = "0.1.0"
-description = "Educational quantum chemistry interface for local PySCF calculations"
+version = "0.2.0"
+description = "An open-source frontend for DFT and post-HF quantum chemistry with PySCF"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
 authors = [
     {name = "Jonathan Schultz", email = "nccu-schultz-lab@users.noreply.github.com"},
 ]
-keywords = ["quantum chemistry", "education", "PySCF", "jupyter", "local", "teaching"]
+keywords = ["quantum chemistry", "DFT", "PySCF", "jupyter", "voila", "frontend", "computational chemistry"]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
     "Intended Audience :: Education",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",

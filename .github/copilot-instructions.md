@@ -32,7 +32,14 @@ with transparent and extensible open tooling).
 ```
 QuantUI/
 ├── quantui/                  ← Main Python package (imports as `quantui`)
-│   ├── app.py                ← QuantUIApp class — all widgets, callbacks, state
+│   ├── app.py                ← QuantUIApp — orchestration + run dispatch
+│   ├── app_analysis.py       ← Analysis-tab panel registry + _pop_* methods
+│   ├── app_builders.py       ← _build_* widget construction
+│   ├── app_runflow.py        ← _do_run + run/orchestration UI handlers
+│   ├── app_visualization.py  ← Trajectory / vib / IR / orbital / PES rendering
+│   ├── app_history.py        ← History tab loaders, replay context
+│   ├── app_formatters.py     ← Result-card and text formatters
+│   ├── app_exports.py        ← Export handlers (XYZ/MOL/PDB/script)
 │   ├── molecule.py           ← Molecule dataclass + XYZ/SMILES parsing
 │   ├── session_calc.py       ← In-session PySCF runner (run_in_session)
 │   ├── optimizer.py          ← QM geometry optimization (ASE-BFGS + PySCF)
@@ -46,6 +53,9 @@ QuantUI/
 │   ├── calc_log.py           ← Performance + event logging (JSONL)
 │   ├── pubchem.py            ← PubChem molecule search
 │   ├── visualization_py3dmol.py ← 3D molecular viewer (py3Dmol / plotlyMol)
+│   ├── viz_backend_router.py ← Capability-aware backend router (pure function)
+│   ├── user_settings.py      ← Persistent user preferences (~/.quantui/settings.json)
+│   ├── vib_cache.py          ← On-disk cache of rendered vib-mode HTML
 │   ├── ase_bridge.py         ← ASE structure I/O + molecule library
 │   ├── preopt.py             ← ASE force-field pre-optimisation (fast, no PySCF)
 │   ├── progress.py           ← StepProgress widget
@@ -61,7 +71,7 @@ QuantUI/
 ├── notebooks/
 │   ├── molecule_computations.ipynb  ← Student-facing Voilà app (thin launcher)
 │   └── tutorials/                   ← 01–05 step-by-step tutorial notebooks
-├── tests/                    ← pytest suite (~875 tests)
+├── tests/                    ← pytest suite (~1000 tests; 97 PySCF-gated skip on Windows)
 ├── .github/
 │   └── copilot-instructions.md  ← This file
 ├── apptainer/
@@ -70,9 +80,20 @@ QuantUI/
 ├── local-setup/              ← Conda environment YAMLs
 ├── launch-app.bat            ← Windows double-click launcher (Voilà app mode)
 ├── launch-dev.bat            ← Windows double-click launcher (JupyterLab mode)
+├── CHANGELOG.md              ← Release history (Keep a Changelog format)
 ├── pyproject.toml            ← Package config (name: quantui, imports as quantui)
 └── pytest.ini                ← pytest configuration
 ```
+
+**Modular UI note.** `QuantUIApp` lives in `app.py`, but most of its logic is
+implemented as module-level functions in `app_builders.py`, `app_analysis.py`,
+`app_runflow.py`, `app_visualization.py`, `app_history.py`, `app_formatters.py`,
+and `app_exports.py`. `app.py` keeps thin instance-method wrappers that pass
+`self` through (e.g. `def _pop_energies(self, ctx): return _ana_pop_energies(self, ctx)`).
+When working on UI changes, prefer editing the relevant companion module
+rather than growing `app.py`. The conservative refactor close (DEC-014)
+intentionally leaves `_do_run` and a small molecule/theme/pubchem callback
+cluster in `app.py`.
 
 ---
 
@@ -205,6 +226,113 @@ Both `_do_run()` and the history loaders (`_on_view_log`, `_history_load_analysi
 build an `_AnalysisContext` and call `_apply_analysis_context()`. They are guaranteed
 to show identical panels for the same result data. Use `_build_history_context(result_dir)`
 to build the context from disk.
+
+---
+
+## Visualization Backend Router
+
+3D rendering is dispatched through a pure-function router in
+`quantui/viz_backend_router.py`. **Do not call py3Dmol or plotlymol3d
+directly from `app_visualization.py` — always go through the router.**
+
+### `VizTask` keys
+
+`MOLECULE_PREVIEW`, `STRUCTURE_VIEW_RESULTS`, `ANALYSIS_STRUCTURE_VIEW`,
+`HISTORY_STRUCTURE_REPLAY`, `TRAJECTORY_FRAME`, `TRAJECTORY_EXPORT`,
+`VIB_INTERACTIVE`, `VIB_EXPORT`, `ORBITAL_ISOSURFACE`.
+
+### Policy
+
+- Each task has a `(primary, fallback)` tuple.
+- User preference (`VizPreference.AUTO | PY3DMOL | PLOTLYMOL`) is respected
+  for tasks that support both backends.
+- Single-backend tasks **ignore preference** (e.g. `TRAJECTORY_FRAME` is
+  py3Dmol-only — Plotly causes flicker; `ORBITAL_ISOSURFACE` is py3Dmol-only).
+- `BackendAvailability.from_environment()` probes imports at startup; the
+  router falls back gracefully when one backend is missing.
+
+### Usage
+
+```python
+from quantui.viz_backend_router import VizTask, select_backend
+decision = app._resolve_backend(VizTask.STRUCTURE_VIEW_RESULTS)
+# decision.chosen is "py3dmol", "plotlymol", or None (no renderer)
+# decision.reason carries a human-readable explanation
+```
+
+`Decision` is a frozen dataclass — never mutate it.
+
+### Calculate ↔ Analysis toggle sync
+
+The Calculate and Analysis tabs each have a "Default 3D backend" ToggleButton.
+They are kept in sync via `_set_viz_preference(...)`, gated by
+`_viz_sync_in_progress` to prevent observer echo loops. The preference is
+persisted to `~/.quantui/settings.json` (`viz.default_backend`).
+
+---
+
+## Lifecycle Telemetry
+
+Every render-dispatch site in `app_visualization.py` is wrapped in the
+`_viz_render_event(app, task, backend, **extras)` context manager. It emits
+three event types to `event_log.jsonl`:
+
+| Event | When |
+| --- | --- |
+| `viz_render_start` | Entry into the context |
+| `viz_render_done` | Successful exit, with `elapsed_ms` |
+| `viz_render_error` | Exception in the body, with `elapsed_ms` + `error` |
+
+**All four render dispatch sites are wrapped:** static structure view,
+trajectory frame, vib mode, and the vib sync cache-hit fast path. Use this
+helper for any new render call so telemetry stays uniform.
+
+---
+
+## Persistent User Settings
+
+`quantui/user_settings.py` provides `UserSettings.load()` /
+`UserSettings.save()`, persisted to `~/.quantui/settings.json` (override with
+`QUANTUI_SETTINGS_PATH` for testing).
+
+Current schema (`_schema_version = 1`):
+
+| Section | Field | Default | Purpose |
+| --- | --- | --- | --- |
+| `viz` | `default_backend` | `"auto"` | One of `auto / py3dmol / plotlymol` |
+| `viz` | `vib_framerate_fps` | `10` | Clamped `[1, 120]`; included in vib cache key |
+
+**Robustness rules:** atomic writes (`.tmp` + rename); missing file, malformed
+JSON, unknown schema version, missing sections, or invalid values all fall
+back to defaults with a single warning log — startup never crashes on bad
+settings. Schema growth is additive; bump `_schema_version` only for
+breaking changes.
+
+---
+
+## Vib-Animation Disk Cache
+
+`quantui/vib_cache.py` stores rendered py3Dmol HTML for each vibrational mode
+under `<result_dir>/vib_frames/`:
+
+```
+<result_dir>/
+└── vib_frames/
+    ├── index.json   ← manifest (schema v1)
+    ├── mode_001.html
+    └── ...
+```
+
+**Cache key:** `(result_dir, mode_number, n_frames, amplitude, renderer, fps)`.
+Any parameter change → stale → cache miss → re-render.
+
+**Sync cache-hit fast path:** `_swap_vib_output()` atomically swaps in cached
+HTML without a transient "Rendering…" placeholder, eliminating flash on
+mode switches.
+
+**Staleness guard:** `_vib_render_token` is incremented on every render
+request; background renders that finish after a newer token has been issued
+bail out instead of overwriting newer output.
 
 ---
 
@@ -527,8 +655,8 @@ Test files in `tests/`:
 **PySCF-gated tests** use `@pytest.mark.skipif(not _PYSCF_AVAILABLE, ...)`.
 On Windows, these become skips — not failures.
 
-**Baseline (WSL, 2026-05-01; `python -m pytest tests/ -q --no-cov`):**
-860 passed, 15 skipped (875 collected).
+**Baseline (Windows `quantui-win`, 2026-05-22; `python -m pytest tests/ -q --no-cov`):**
+1004 passed, 97 skipped (the 97 skips are PySCF-gated Linux-only tests).
 
 ---
 
@@ -553,6 +681,7 @@ Install all runtime + dev extras: `pip install -e ".[pyscf,ase,app,notebook,dev]
 | --- | --- | --- |
 | `QUANTUI_RESULTS_DIR` | `./results` | Where calculation results are saved |
 | `QUANTUI_LOG_DIR` | `~/.quantui/logs` | Where perf_log and event_log live |
+| `QUANTUI_SETTINGS_PATH` | `~/.quantui/settings.json` | User-preferences file (`user_settings.py`); override for tests |
 
 ---
 

@@ -1,6 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
-# Shell scripts must always use LF — CRLF breaks bash on Linux/WSL
+# Shell scripts must always use LF — CRLF breaks bash on Linux/WSL/macOS
 *.sh text eol=lf
+*.command text eol=lf
 apptainer/*.def text eol=lf

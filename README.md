@@ -5,13 +5,15 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%20|%203.10%20|%203.11-blue)](https://www.python.org)
 
-An interactive Jupyter interface for running quantum chemistry calculations
-locally — no cluster account, no SLURM, no queueing. Students design
-molecules, launch PySCF calculations in their own Python session, and
-visualize results in minutes.
+A powerful open-source frontend for DFT and post-HF quantum chemistry.
+QuantUI puts [PySCF](https://pyscf.org) behind an interactive Jupyter/Voilà
+UI so you can build molecules, run calculations locally, and visualize the
+results — no cluster account, no SLURM, no queueing.
 
-Built for classroom teaching at the
-[Schultz Lab, North Carolina Central University](https://github.com/The-Schultz-Lab).
+Developed by the
+[Schultz Lab, North Carolina Central University](https://github.com/The-Schultz-Lab)
+as an open alternative to closed-source GUI workflows. Equally suitable for
+research and classroom use.
 
 ---
 
@@ -19,9 +21,10 @@ Built for classroom teaching at the
 
 - **Molecule input** — paste XYZ coordinates, draw from a 20+ preset library,
   or search PubChem by name or SMILES
-- **3D visualization** — interactive py3Dmol or PlotlyMol viewer with a live
-  backend toggle when both are installed; post-calculation structure rendered
-  automatically in the results panel
+- **3D visualization** — interactive py3Dmol viewer (py3Dmol-first; optional
+  plotlymol3d fallback for non-trajectory tasks). A capability-aware backend
+  router picks the right renderer per task, and a Status-tab toggle persists
+  your default-backend preference between sessions
 - **In-session calculations** — RHF, UHF, 9 DFT functionals, MP2, NMR
   shielding, TD-DFT UV-Vis, and 1D PES scans via PySCF, running in your
   Python kernel (no batch submission)
@@ -34,16 +37,21 @@ Built for classroom teaching at the
   HOMO, LUMO, LUMO+1), and a side-by-side comparison table for multiple
   calculations
 - **Geometry optimization** — BFGS optimizer with step-by-step trajectory
-  animation; vibrational frequency analysis with animated normal modes
+  animation; vibrational frequency analysis with animated normal modes,
+  user-tunable playback FPS, and a per-result-directory disk cache so mode
+  switches on repeat visits and history replay are instant
 - **Results persistence** — every calculation is saved automatically to a
-  timestamped directory; a built-in browser lets students reload past results
+  timestamped directory; a built-in browser lets you reload past results
   after a kernel restart; the full `pyscf.log` is shown inline
 - **Structure exports** — download XYZ, MOL/SDF, or PDB files alongside the
   saved results; script export for a standalone `.py` file
+- **Plot export** — save IR, UV-Vis, PES, and orbital diagrams as standalone
+  HTML
 - **Timing calibration** — one-click benchmark suite populates the time
   estimator with real machine data so predictions are accurate from the first run
-- **Voilà app mode** — serve the notebook as a polished widget-only UI (no code
-  visible) for classroom demos, with dark mode toggle and dedicated output log
+- **Voilà app mode** — serve the notebook as a polished widget-only UI (no
+  code visible), with Light/Dark themes, a dedicated output log, and an
+  in-app bug-report form
 
 ---
 
@@ -98,12 +106,89 @@ conda activate quantui
 # JupyterLab (full IDE — shows code)
 jupyter lab notebooks/molecule_computations.ipynb
 
-# Voilà app mode (widget-only — for classroom demos)
+# Voilà app mode (widget-only UI — code hidden)
 voila notebooks/molecule_computations.ipynb
 ```
 
 Open the notebook, pick a molecule, choose a method and basis set, and click
 **Run Calculation**. Results appear directly in the notebook.
+
+---
+
+## Launching QuantUI as an app
+
+For the smoothest day-to-day experience, QuantUI ships two double-clickable
+launchers that activate the right conda environment, install the editable
+package on first run (and only re-install when `pyproject.toml` actually
+changes), clear any stale bytecode, start Voilà on port `8867`, and open the
+app in your default browser. Edits to `quantui/*.py` are picked up live with
+no rebuild.
+
+| Platform | File | Action |
+| --- | --- | --- |
+| Windows | [`launch-native.bat`](launch-native.bat) | Activates the `quantui` conda env inside WSL Ubuntu, runs Voilà, and opens `http://localhost:8867` |
+| macOS / Linux | [`launch-native.command`](launch-native.command) | Activates the local `quantui` conda env directly (no WSL needed) and does the same |
+
+Both launchers reuse port `8867`, so you can keep the same browser tab pinned
+across platforms.
+
+### Windows — pin to the Start menu
+
+1. Right-click [`launch-native.bat`](launch-native.bat) in File Explorer
+   → **Send to** → **Desktop (create shortcut)**.
+2. Rename the shortcut to something friendly like `QuantUI`.
+3. *(Optional)* Right-click the shortcut → **Properties** → **Change Icon...**
+   and point at `docs\logo.ico` for a proper app icon.
+4. Move the shortcut into your Start-menu folder so it appears with normal
+   apps. Either:
+   - press `Win+R`, paste
+     `%APPDATA%\Microsoft\Windows\Start Menu\Programs`, and drop the
+     shortcut there *(per-user — recommended)*; or
+   - paste `%ProgramData%\Microsoft\Windows\Start Menu\Programs` for an
+     all-users install.
+5. Open the Start menu, find **QuantUI**, right-click it, and choose
+   **Pin to Start** (or **Pin to taskbar**).
+
+You now launch QuantUI like any other Windows app — one click and Voilà opens
+in your browser.
+
+### macOS — pin to the Dock / Launchpad
+
+**Quickest:** double-click [`launch-native.command`](launch-native.command)
+from Finder. macOS will open Terminal, run the script, and pop the app open
+in your browser. The first launch is gated by Gatekeeper: right-click the
+file → **Open** → **Open** to clear it (one time only).
+
+**App-like experience (recommended):** wrap the launcher in a tiny Automator
+application so it lives in Launchpad and pins to the Dock.
+
+1. Open **Automator** (Spotlight → "Automator") → **New Document** →
+   **Application**.
+2. In the actions library on the left, find **Run Shell Script** and drag it
+   into the workflow pane on the right.
+3. Set **Shell** to `/bin/bash` and **Pass input** to **as arguments**, then
+   replace the script body with the single line below (adjust the path if
+   your clone lives elsewhere):
+
+   ```bash
+   "$HOME/path/to/QuantUI/launch-native.command"
+   ```
+
+4. **File → Save** → name it `QuantUI` → save into `/Applications`.
+5. *(Optional)* Set a custom icon: in Finder, open `docs/logo.svg` in
+   **Preview**, **Edit → Select All → Copy**, then in Finder select the
+   new `QuantUI.app`, **File → Get Info**, click the small icon in the
+   top-left of the Info window, and **Edit → Paste**.
+6. Open Launchpad, find **QuantUI**, drag it into the Dock to pin it.
+
+You now have a real `.app` you can launch from Spotlight, Launchpad, or the
+Dock — it just runs the `.command` script under the hood, so any
+`quantui/*.py` edits take effect immediately on the next launch.
+
+> **Linux users:** the same `launch-native.command` script works from a
+> terminal — `./launch-native.command`. To wire it into your desktop
+> environment as a pinned app, create a `.desktop` entry pointing at the
+> script.
 
 ---
 
@@ -179,31 +264,44 @@ pytest -m "not network" \
 
 ```text
 quantui/                  Main package
-  app.py                  QuantUIApp widget class (all tabs, UI logic)
+  app.py                  QuantUIApp — widget orchestration, run dispatch
+  app_analysis.py         Analysis-tab panel registry + _pop_* methods
+  app_builders.py         _build_* widget construction
+  app_runflow.py          _do_run + run/orchestration UI handlers
+  app_visualization.py    Trajectory / vib / IR / orbital / PES rendering
+  app_history.py          History tab loaders, replay context
+  app_formatters.py       Result-card and text formatters
+  app_exports.py          Export handlers (XYZ/MOL/PDB/script)
   molecule.py             Molecule input and validation
   session_calc.py         In-session PySCF runner (RHF/UHF/DFT/MP2/PCM)
-  freq_calc.py            Vibrational frequency + thermochemistry analysis
-  ir_plot.py              IR spectrum chart (stick and Lorentzian broadened)
+  freq_calc.py            Vibrational frequency + thermochemistry
+  ir_plot.py              IR spectrum chart (stick / Lorentzian broadened)
   tddft_calc.py           TD-DFT UV-Vis excited-state calculations
-  nmr_calc.py             NMR shielding + ¹H/¹³C chemical shift prediction
+  nmr_calc.py             NMR shielding + ¹H/¹³C chemical shifts
   pes_scan.py             1D potential energy surface scan
   optimizer.py            QM geometry optimization with trajectory
-  visualization_py3dmol.py  3D viewer (py3Dmol + PlotlyMol backends)
+  visualization_py3dmol.py  3D viewer (py3Dmol-first; plotlymol fallback)
+  viz_backend_router.py   Capability-aware backend router (pure function)
+  user_settings.py        Persistent user preferences (~/.quantui/settings.json)
+  vib_cache.py            On-disk cache of rendered vib-mode HTML
+  orbital_visualization.py  Orbital energy diagrams + cube-file viewer
   pubchem.py              PubChem molecule search
   comparison.py           Side-by-side result tables
-  results_storage.py      Timestamped result persistence
-  calc_log.py             Performance logging and time estimation
+  results_storage.py      Timestamped result persistence (schema v2)
+  calc_log.py             Performance + event logging, time estimation
+  issue_tracker.py        In-app bug-report DB
   benchmarks.py           Timing calibration benchmark suite
   config.py               Methods, basis sets, solvent/NMR options, presets
   ase_bridge.py           ASE structure I/O
   preopt.py               LJ force-field pre-optimization
 notebooks/
-  molecule_computations.ipynb   Main student-facing interface
+  molecule_computations.ipynb   Main user-facing interface (3-cell launcher)
   tutorials/                    Step-by-step guided notebooks (01–05)
-tests/                    pytest test suite (860+ tests)
+tests/                    pytest test suite (~1000 tests)
 apptainer/                Container definition for reproducible deployment
 local-setup/              Conda environment definition
 pyproject.toml            Package metadata and tool config
+CHANGELOG.md              Release history (Keep a Changelog format)
 ```
 
 ---

@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>QuantUI — Quantum Chemistry in Jupyter</title>
-  <meta name="description" content="Interactive Jupyter interface for running PySCF quantum chemistry calculations locally. No cluster account, no SLURM, no queueing.">
-  <meta property="og:title" content="QuantUI">
-  <meta property="og:description" content="Quantum chemistry in Jupyter — molecules, PySCF, and 3D visualization on your laptop.">
+  <title>QuantUI — An open-source frontend for DFT and post-HF quantum chemistry</title>
+  <meta name="description" content="QuantUI is a powerful open-source frontend for PySCF — DFT, MP2, TD-DFT, NMR, geometry optimization, frequency analysis, PES scans, and interactive 3D visualization, running locally in Jupyter or Voilà.">
+  <meta property="og:title" content="QuantUI — A frontend for open-source DFT">
+  <meta property="og:description" content="PySCF in an interactive Jupyter/Voilà UI. DFT, post-HF, NMR, UV-Vis, frequencies, PES scans, and 3D structures — all local, no cluster required.">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary">
   <meta name="theme-color" content="#0f172a">
@@ -141,6 +141,8 @@
     .hero__meta { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
     .hero__stat { font-size: 0.8125rem; color: #64748b; font-weight: 500; }
     .hero__sep  { color: #334155; }
+    .hero__link { color: #93c5fd; text-decoration: underline; }
+    .hero__link:hover { color: #bfdbfe; }
     .hero__visual { display: flex; justify-content: center; align-items: center; }
     @media (max-width: 768px) {
       .hero__inner { grid-template-columns: 1fr; }
@@ -178,6 +180,7 @@
       text-align: center; max-width: 540px;
       margin: 0 auto 3rem; line-height: 1.65;
     }
+    .section__subtitle--mid { margin-top: 3rem; }
     .section__note {
       font-size: 0.875rem; color: #94a3b8;
       text-align: center; margin-top: 1rem;
@@ -243,6 +246,12 @@
       font-size: 0.8125rem; background: #f1f5f9;
       border: 1px solid #e2e8f0; border-radius: 4px;
       padding: 0.15rem 0.45rem; color: #0f172a;
+    }
+    .inline-code {
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: 0.8rem; background: #f1f5f9;
+      border: 1px solid #e2e8f0; border-radius: 4px;
+      padding: 0.1rem 0.35rem; color: #0f172a;
     }
     .td-num {
       font-weight: 700; color: #94a3b8;
@@ -330,7 +339,7 @@
 <nav class="nav" role="navigation">
   <div class="nav__inner">
     <a class="nav__logo" href="#">QuantUI</a>
-    <span class="nav__badge">v0.1 &middot; MIT</span>
+    <span class="nav__badge">v0.2 &middot; MIT</span>
     <a class="nav__link" href="#features">Features</a>
     <a class="nav__link" href="#install">Install</a>
     <a class="nav__link" href="#tutorials">Tutorials</a>
@@ -345,14 +354,16 @@
 
       <div class="hero__text">
         <div class="hero__eyebrow">
-          <span class="pill">Schultz Lab &middot; NCCU</span>
+          <span class="pill">Open-source DFT frontend</span>
           <span class="pill pill--teal">No cluster required</span>
         </div>
-        <h1 class="hero__title">Quantum chemistry,<br>right in Jupyter</h1>
+        <h1 class="hero__title">A powerful frontend for<br>open-source quantum chemistry</h1>
         <p class="hero__subtitle">
-          Design molecules, run RHF/UHF calculations with PySCF, and
-          explore interactive 3D structures &mdash; all on your laptop,
-          in under a minute.
+          QuantUI puts <a class="hero__link" href="https://pyscf.org" target="_blank" rel="noopener">PySCF</a>
+          behind an interactive Jupyter/Voil&agrave; UI. Run DFT, MP2, TD-DFT,
+          NMR, geometry optimization, frequencies, and PES scans &mdash;
+          visualize structures, orbitals, IR and UV-Vis spectra, all on
+          your laptop.
         </p>
         <div class="hero__actions">
           <a class="btn btn--primary" href="https://github.com/The-Schultz-Lab/QuantUI">
@@ -363,7 +374,7 @@
         <div class="hero__meta">
           <span class="hero__stat">Python 3.9&ndash;3.11</span>
           <span class="hero__sep">&middot;</span>
-          <span class="hero__stat">439 tests</span>
+          <span class="hero__stat">~1000 tests</span>
           <span class="hero__sep">&middot;</span>
           <span class="hero__stat">MIT License</span>
           <span class="hero__sep">&middot;</span>
@@ -416,10 +427,10 @@
 <!-- ── Features ─────────────────────────────────────────────────────────── -->
 <section class="section" id="features">
   <div class="container">
-    <h2 class="section__title">Everything students need</h2>
+    <h2 class="section__title">A complete PySCF workflow</h2>
     <p class="section__subtitle">
-      A complete quantum chemistry workflow, from molecule design to
-      result analysis, running entirely in your browser.
+      From molecule input to spectra and history replay &mdash;
+      everything runs in your local Python kernel.
     </p>
     <div class="features-grid">
 
@@ -427,9 +438,9 @@
         <div class="feature-card__icon">⚗️</div>
         <div class="feature-card__title">Molecule Input</div>
         <p class="feature-card__body">
-          Paste XYZ coordinates, choose from a curated preset library,
-          or search PubChem by name. ASE structure files (.xyz, .cif, .mol)
-          are also supported.
+          Paste XYZ coordinates, draw from a 20+ molecule preset library,
+          search PubChem by name or SMILES, or load ASE structure files
+          (<code class="inline-code">.xyz</code>, <code class="inline-code">.cif</code>, <code class="inline-code">.mol</code>).
         </p>
       </div>
 
@@ -437,50 +448,54 @@
         <div class="feature-card__icon">🔬</div>
         <div class="feature-card__title">3D Visualization</div>
         <p class="feature-card__body">
-          Interactive py3Dmol viewer embedded directly in the notebook.
-          Rotate, zoom, and inspect any structure with stick, sphere, or
-          line display modes.
+          py3Dmol-first interactive viewer with a capability-aware
+          backend router. Optimization trajectories and vibrational
+          modes animate inline with user-tunable playback FPS and an
+          on-disk cache for instant replay.
         </p>
       </div>
 
       <div class="card">
         <div class="feature-card__icon">⚡</div>
-        <div class="feature-card__title">In-Session Calculations</div>
+        <div class="feature-card__title">Calculations</div>
         <p class="feature-card__body">
-          RHF and UHF run live in your Python kernel via PySCF.
-          No queue, no waiting &mdash; results appear in under a minute
-          on a standard laptop.
+          RHF, UHF, nine DFT functionals, and MP2 &mdash; with six
+          calculation types: single point, geometry optimization,
+          frequencies/thermochemistry, TD-DFT UV-Vis, NMR shielding,
+          and 1D PES scans. PCM implicit solvation included.
         </p>
       </div>
 
       <div class="card">
         <div class="feature-card__icon">📊</div>
-        <div class="feature-card__title">Results &amp; Comparison</div>
+        <div class="feature-card__title">Spectra &amp; Analysis</div>
         <p class="feature-card__body">
-          Total energy, HOMO&ndash;LUMO gap, convergence status, and a
-          side-by-side table for comparing multiple calculations or
-          basis sets at once.
+          IR spectrum (stick + Lorentzian-broadened), UV-Vis plot,
+          orbital energy-level diagram with HOMO/LUMO isosurfaces,
+          and <sup>1</sup>H/<sup>13</sup>C NMR chemical shifts vs TMS.
+          Side-by-side comparison table for multiple calculations.
         </p>
       </div>
 
       <div class="card">
-        <div class="feature-card__icon">📄</div>
-        <div class="feature-card__title">Script Export</div>
+        <div class="feature-card__icon">📂</div>
+        <div class="feature-card__title">Exports &amp; History</div>
         <p class="feature-card__body">
-          Download a standalone <code style="font-size:0.8rem;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:.1rem .35rem;">.py</code>
-          file from any calculation &mdash; ready to run or study outside
-          the notebook. Great for learning how PySCF works.
+          Every calculation auto-saves to a timestamped directory and
+          can be replayed after a kernel restart. Export structures as
+          XYZ, MOL/SDF, or PDB; spectra as standalone HTML; or any run
+          as a runnable <code class="inline-code">.py</code> script.
         </p>
       </div>
 
       <div class="card">
-        <div class="feature-card__icon">🎓</div>
+        <div class="feature-card__icon">🖥️</div>
         <div class="feature-card__title">Voil&agrave; App Mode</div>
         <p class="feature-card__body">
-          Serve the notebook as a clean widget-only app with
-          <code style="font-size:0.8rem;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:.1rem .35rem;">voila</code>.
-          No code visible &mdash; ideal for classroom demos and
-          student-facing deployments.
+          Serve the notebook as a polished widget-only UI with
+          <code class="inline-code">voila</code>. Light/Dark themes,
+          inline log viewer, and an in-app bug-report form. Equally at
+          home in a research group or a classroom.
         </p>
       </div>
 
@@ -557,12 +572,12 @@ pip install -e <span class="s">".[pyscf,ase,app]"</span>
 <span class="c"># Launch in JupyterLab (full IDE — shows code)</span>
 jupyter lab notebooks/molecule_computations.ipynb
 
-<span class="c"># Or in Voilà app mode (widget-only — for classroom demos)</span>
+<span class="c"># Or in Voilà app mode (widget-only UI — code hidden)</span>
 voila notebooks/molecule_computations.ipynb</code></pre>
     </div>
 
     <p class="section__note">
-      Also available via <code style="font-size:0.8rem;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:.1rem .35rem;">pip install quantui[pyscf,ase,app]</code>
+      Also available via <code class="inline-code">pip install quantui[pyscf,ase,app]</code>
       or the Apptainer container for Windows.
     </p>
   </div>
@@ -622,49 +637,115 @@ voila notebooks/molecule_computations.ipynb</code></pre>
   <div class="container--narrow">
     <h2 class="section__title">Supported calculations</h2>
     <p class="section__subtitle">
-      Start with STO-3G to learn the workflow, then step up to larger
-      basis sets as calculations allow.
+      Six calculation types over twelve methods and nine basis sets,
+      all dispatched through a single Calculate tab.
+    </p>
+
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Calculation type</th>
+            <th>Output</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Single Point</strong></td>
+            <td>Energy, HOMO&ndash;LUMO gap, Mulliken charges, dipole moment</td>
+          </tr>
+          <tr>
+            <td><strong>Geometry Opt</strong></td>
+            <td>Optimized structure with step-by-step trajectory animation</td>
+          </tr>
+          <tr>
+            <td><strong>Frequency</strong></td>
+            <td>Vibrational frequencies, ZPVE, IR intensities, thermochemistry (H/S/G at 298&nbsp;K), animated normal modes</td>
+          </tr>
+          <tr>
+            <td><strong>UV-Vis (TD-DFT)</strong></td>
+            <td>Excitation energies, oscillator strengths, UV-Vis spectrum plot</td>
+          </tr>
+          <tr>
+            <td><strong>NMR Shielding</strong></td>
+            <td><sup>1</sup>H and <sup>13</sup>C chemical shifts vs TMS via GIAO</td>
+          </tr>
+          <tr>
+            <td><strong>PES Scan</strong></td>
+            <td>1D bond/angle/dihedral scan; energy profile + per-step geometries</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="section__subtitle section__subtitle--mid">
+      Twelve methods, grouped by family:
     </p>
     <div class="table-wrap">
       <table class="data-table">
         <thead>
           <tr>
-            <th>Method</th>
-            <th>When to use</th>
+            <th>Family</th>
+            <th>Methods</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>RHF</strong> &mdash; Restricted Hartree&ndash;Fock</td>
+            <td><strong>Hartree&ndash;Fock</strong></td>
             <td>
-              Closed-shell molecules &mdash; all electrons paired<br>
-              <span class="td-muted">Water, methane, benzene, most organic molecules</span>
+              RHF (closed-shell), UHF (open-shell radicals)<br>
+              <span class="td-muted">Baseline reference; fastest path to convergence</span>
             </td>
           </tr>
           <tr>
-            <td><strong>UHF</strong> &mdash; Unrestricted Hartree&ndash;Fock</td>
+            <td><strong>DFT</strong></td>
             <td>
-              Open-shell molecules &mdash; radicals or unpaired electrons<br>
-              <span class="td-muted">O&sub2; (triplet), NO, organic radicals, charged species</span>
+              B3LYP, PBE, PBE0, M06-2X, &omega;B97X-D, CAM-B3LYP, M06-L, HSE06, PBE-D3<br>
+              <span class="td-muted">Nine functionals spanning hybrid, GGA, meta-hybrid, range-separated, and dispersion-corrected families</span>
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Post-HF</strong></td>
+            <td>
+              MP2<br>
+              <span class="td-muted">Second-order M&oslash;ller&ndash;Plesset for accurate small-molecule energies</span>
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Implicit solvent</strong></td>
+            <td>
+              PCM &mdash; Water, Ethanol, THF, DMSO, Acetonitrile<br>
+              <span class="td-muted">Single checkbox; compatible with any method above</span>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
 
+    <p class="section__subtitle section__subtitle--mid">
+      Basis sets, from fast to high accuracy:
+    </p>
     <div class="basis-pills">
       <span class="basis-pill">STO-3G</span>
+      <span class="basis-arrow">&rarr;</span>
+      <span class="basis-pill">3-21G</span>
       <span class="basis-arrow">&rarr;</span>
       <span class="basis-pill">6-31G</span>
       <span class="basis-arrow">&rarr;</span>
       <span class="basis-pill">6-31G*</span>
       <span class="basis-arrow">&rarr;</span>
+      <span class="basis-pill">6-31G**</span>
+      <span class="basis-arrow">&rarr;</span>
       <span class="basis-pill">cc-pVDZ</span>
       <span class="basis-arrow">&rarr;</span>
       <span class="basis-pill">cc-pVTZ</span>
+      <span class="basis-arrow">&rarr;</span>
+      <span class="basis-pill">def2-SVP</span>
+      <span class="basis-arrow">&rarr;</span>
+      <span class="basis-pill">def2-TZVP</span>
     </div>
-    <p class="section__note" style="margin-top:1rem;">
-      Fast for learning &rarr; common research choice &rarr; high accuracy
+    <p class="section__note">
+      STO-3G for fast iteration &rarr; cc-pVDZ for common research &rarr; def2-TZVP for higher accuracy
     </p>
   </div>
 </section>
@@ -682,8 +763,8 @@ voila notebooks/molecule_computations.ipynb</code></pre>
       <nav class="footer__links" aria-label="Footer links">
         <a href="https://github.com/The-Schultz-Lab" target="_blank" rel="noopener">Schultz Lab</a>
         <a href="https://github.com/The-Schultz-Lab/QuantUI" target="_blank" rel="noopener">Repository</a>
+        <a href="https://github.com/The-Schultz-Lab/QuantUI/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
         <a href="https://github.com/The-Schultz-Lab/QuantUI/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
-        <a href="https://github.com/The-Schultz-Lab/QuantUI" target="_blank" rel="noopener">Cluster version</a>
       </nav>
     </div>
   </div>
