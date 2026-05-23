@@ -1135,6 +1135,67 @@ class TestSetHtmlOutputAtomic:
         assert out.outputs[0]["data"]["text/html"] == "<p>third</p>"
 
 
+class TestShowResult3DAtomic:
+    """``_show_result_3d`` must route through the atomic ``_set_html_output``
+    swap rather than ``with output: display(viz)``.
+
+    BUG.7 root cause: ``show_result_3d`` previously used the nested-Output +
+    main-thread ``display(viz)`` pattern, which intermittently produced a
+    blank 🙁 viewer on Analysis-tab history replay (same failure family as
+    resolved BUG.6 in trajectory render). After this fix, every invocation
+    leaves the target ``Output`` with a single-entry ``outputs`` tuple whose
+    ``text/html`` payload is non-empty.
+    """
+
+    def _make_water(self):
+        return Molecule(
+            atoms=["O", "H", "H"],
+            coordinates=[
+                [0.0, 0.0, 0.0],
+                [0.96, 0.0, 0.0],
+                [-0.24, 0.93, 0.0],
+            ],
+        )
+
+    def test_analysis_mol_output_is_single_entry_after_show(self):
+        from quantui.app import _render_molecule_html
+
+        if _render_molecule_html is None:
+            pytest.skip("No 3D visualization backend installed")
+        app = QuantUIApp()
+        app._show_result_3d(self._make_water(), extra_output=app._analysis_mol_output)
+        assert len(app._analysis_mol_output.outputs) == 1
+        entry = app._analysis_mol_output.outputs[0]
+        assert entry["output_type"] == "display_data"
+        assert entry["data"]["text/html"].strip() != ""
+
+    def test_result_viz_output_is_single_entry_after_show(self):
+        from quantui.app import _render_molecule_html
+
+        if _render_molecule_html is None:
+            pytest.skip("No 3D visualization backend installed")
+        app = QuantUIApp()
+        app._show_result_3d(self._make_water(), extra_output=None)
+        assert len(app.result_viz_output.outputs) == 1
+        entry = app.result_viz_output.outputs[0]
+        assert entry["output_type"] == "display_data"
+        assert entry["data"]["text/html"].strip() != ""
+
+    def test_repeated_calls_do_not_accumulate_outputs(self):
+        # Backend-toggle scenario: re-render the same molecule multiple
+        # times and confirm the viewer is replaced atomically each time.
+        from quantui.app import _render_molecule_html
+
+        if _render_molecule_html is None:
+            pytest.skip("No 3D visualization backend installed")
+        app = QuantUIApp()
+        mol = self._make_water()
+        for _ in range(3):
+            app._show_result_3d(mol, extra_output=app._analysis_mol_output)
+        assert len(app._analysis_mol_output.outputs) == 1
+        assert len(app.result_viz_output.outputs) == 1
+
+
 class TestUVVisSpectrumWidgets:
     """UV-Vis accordion and controls exist in correct initial state."""
 

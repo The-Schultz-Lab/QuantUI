@@ -419,11 +419,15 @@ try:
     from quantui.visualization_py3dmol import (
         display_molecule as _display_molecule,
     )
+    from quantui.visualization_py3dmol import (
+        render_molecule_html as _render_molecule_html,
+    )
 
     VISUALIZATION_AVAILABLE = True
 except ImportError:
     VISUALIZATION_AVAILABLE = False
     _display_molecule = None  # type: ignore[assignment]
+    _render_molecule_html = None  # type: ignore[assignment]
     _PLOTLYMOL_VIZ = False
     _PY3DMOL_VIZ = False
     _DEFAULT_VIZ_STYLE = "ball+stick"
@@ -2898,7 +2902,7 @@ class QuantUIApp:
             self,
             molecule,
             extra_output,
-            display_molecule_fn=_display_molecule,
+            render_html_fn=_render_molecule_html,
         )
 
     def _show_result_log(self, saved_dir: Path, log_text: str) -> None:

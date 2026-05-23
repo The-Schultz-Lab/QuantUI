@@ -65,7 +65,7 @@ def show_result_3d(
     molecule: Any,
     extra_output: Any = None,
     *,
-    display_molecule_fn: Any,
+    render_html_fn: Any,
 ) -> None:
     """Render molecule 3D structure in result and optional extra output panels.
 
@@ -74,8 +74,15 @@ def show_result_3d(
     - ``result_viz_output`` uses ``VizTask.STRUCTURE_VIEW_RESULTS``.
     - ``extra_output == _analysis_mol_output`` uses ``ANALYSIS_STRUCTURE_VIEW``.
     - Any other extra_output uses ``STRUCTURE_VIEW_RESULTS`` as a safe default.
+
+    ``render_html_fn`` must return self-contained HTML (e.g.
+    ``visualization_py3dmol.render_molecule_html``); the HTML is routed through
+    ``app._set_html_output`` so the viewer is replaced as a single atomic
+    ``Output.outputs`` swap. This avoids the nested-Output + ``display(viz)``
+    pattern that caused BUG.6 (trajectory regression) and BUG.7 (Analysis-tab
+    top viewer rendering blank with 🙁 on history replay).
     """
-    if display_molecule_fn is None or molecule is None:
+    if render_html_fn is None or molecule is None:
         return
     from quantui.viz_backend_router import VizTask as _VT
 
@@ -92,15 +99,14 @@ def show_result_3d(
                 task="structure_view_results",
                 backend=str(chosen),
             ):
-                app.result_viz_output.clear_output()
-                with app.result_viz_output:
-                    display_molecule_fn(
-                        molecule,
-                        backend=str(chosen),
-                        style=app._viz_style,
-                        lighting=app._viz_lighting,
-                        bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
-                    )
+                html = render_html_fn(
+                    molecule,
+                    backend=str(chosen),
+                    style=app._viz_style,
+                    lighting=app._viz_lighting,
+                    bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+                )
+                app._set_html_output(app.result_viz_output, html)
 
     # Optional second viewer (typically the Analysis tab).
     if extra_output is not None:
@@ -117,15 +123,14 @@ def show_result_3d(
                 else "structure_view_results"
             )
             with _viz_render_event(app, task=task_label, backend=str(chosen)):
-                extra_output.clear_output()
-                with extra_output:
-                    display_molecule_fn(
-                        molecule,
-                        backend=str(chosen),
-                        style=app._viz_style,
-                        lighting=app._viz_lighting,
-                        bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
-                    )
+                html = render_html_fn(
+                    molecule,
+                    backend=str(chosen),
+                    style=app._viz_style,
+                    lighting=app._viz_lighting,
+                    bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+                )
+                app._set_html_output(extra_output, html)
             if is_analysis_output:
                 app._update_analysis_backend_label(chosen)
 
