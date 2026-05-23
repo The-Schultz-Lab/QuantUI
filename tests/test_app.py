@@ -1273,6 +1273,131 @@ class TestFreqSeedDropdownFilter:
         assert not any(lbl.startswith("CH4") for lbl in labels)
 
 
+class TestTDDFTSeedDropdown:
+    """The UV-Vis (TD-DFT) Calculate-tab tab exposes a seed-geometry dropdown
+    that mirrors the Frequency tab's behaviour (BUG.5).
+
+    Acceptance:
+    - The dropdown widget exists with the placeholder option.
+    - On_calc_type_changed places the dropdown into ``calc_extra_opts``
+      when UV-Vis (TD-DFT) is selected, but not for other calc types.
+    - Like the Frequency seed dropdown, options are filtered to saved
+      ``geometry_opt`` results whose formula matches the active molecule.
+    - Picking a seed disables the QM pre-opt checkbox (seed = already
+      optimised) and surfaces the green confirmation note.
+    - ``_set_molecule`` auto-refreshes both seed dropdowns.
+    """
+
+    def _make_geo_opt_dir(self, root, formula, method="RHF", basis="STO-3G", offset=0):
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-") + f"{offset:06d}"
+        d = root / f"{ts}_{formula}_{method}_{basis}"
+        d.mkdir(parents=True)
+        (d / "result.json").write_text(
+            json.dumps(
+                {
+                    "_schema_version": 2,
+                    "timestamp": ts,
+                    "calc_type": "geometry_opt",
+                    "formula": formula,
+                    "method": method,
+                    "basis": basis,
+                }
+            )
+        )
+        (d / "trajectory.json").write_text("[]")
+        return d
+
+    def _water(self):
+        return Molecule(
+            atoms=["O", "H", "H"],
+            coordinates=[[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]],
+        )
+
+    def test_seed_widgets_exist(self):
+        app = QuantUIApp()
+        assert isinstance(app._tddft_seed_dd, widgets.Dropdown)
+        assert isinstance(app._tddft_seed_refresh_btn, widgets.Button)
+        assert isinstance(app._tddft_seed_note, widgets.HTML)
+        # Initial placeholder option is present.
+        labels = [lbl for lbl, _ in app._tddft_seed_dd.options]
+        assert labels[0] == "(use current molecule)"
+
+    def test_calc_type_uvvis_shows_seed_dropdown(self):
+        app = QuantUIApp()
+        app.calc_type_dd.value = "UV-Vis (TD-DFT)"
+        # The seed dropdown should now be one of the calc_extra_opts children.
+        descendants = list(app.calc_extra_opts.children)
+        # The seed dropdown is wrapped in an HBox with the refresh button.
+        found = False
+        for child in descendants:
+            if isinstance(child, widgets.HBox):
+                for sub in child.children:
+                    if sub is app._tddft_seed_dd:
+                        found = True
+                        break
+        assert found, "UV-Vis tab should include the seed-geometry dropdown"
+
+    def test_calc_type_single_point_does_not_show_seed_dropdown(self):
+        app = QuantUIApp()
+        app.calc_type_dd.value = "Single Point"
+        descendants = list(app.calc_extra_opts.children)
+        for child in descendants:
+            if isinstance(child, widgets.HBox):
+                for sub in child.children:
+                    assert sub is not app._tddft_seed_dd
+
+    def test_seed_options_filtered_by_formula(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        self._make_geo_opt_dir(tmp_path, "H2O", offset=1)
+        self._make_geo_opt_dir(tmp_path, "CH4", offset=2)
+        app = QuantUIApp()
+        app._molecule = self._water()
+        app._refresh_tddft_seed_options()
+        labels = [lbl for lbl, _ in app._tddft_seed_dd.options]
+        assert any(lbl.startswith("H2O") for lbl in labels)
+        assert not any(lbl.startswith("CH4") for lbl in labels)
+
+    def test_set_molecule_triggers_tddft_seed_filter(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        self._make_geo_opt_dir(tmp_path, "H2O", offset=1)
+        self._make_geo_opt_dir(tmp_path, "CH4", offset=2)
+        app = QuantUIApp()
+        app._set_molecule(self._water(), label="test")
+        labels = [lbl for lbl, _ in app._tddft_seed_dd.options]
+        assert any(lbl.startswith("H2O") for lbl in labels)
+        assert not any(lbl.startswith("CH4") for lbl in labels)
+
+    def test_picking_seed_disables_preopt_and_shows_note(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        seed_dir = self._make_geo_opt_dir(tmp_path, "H2O", offset=1)
+        app = QuantUIApp()
+        app._molecule = self._water()
+        app._refresh_tddft_seed_options()
+        # Pre-condition: pre-opt checkbox is enabled and toggled on.
+        app._freq_preopt_cb.disabled = False
+        app._freq_preopt_cb.value = True
+        # Pick the seed.
+        app._tddft_seed_dd.value = str(seed_dir)
+        # Post-condition: pre-opt is disabled and value cleared; note set.
+        assert app._freq_preopt_cb.disabled is True
+        assert app._freq_preopt_cb.value is False
+        assert "✓" in app._tddft_seed_note.value
+
+    def test_clearing_seed_re_enables_preopt_and_clears_note(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        seed_dir = self._make_geo_opt_dir(tmp_path, "H2O", offset=1)
+        app = QuantUIApp()
+        app._molecule = self._water()
+        app._refresh_tddft_seed_options()
+        app._tddft_seed_dd.value = str(seed_dir)
+        # Now clear the seed back to the placeholder.
+        app._tddft_seed_dd.value = ""
+        assert app._freq_preopt_cb.disabled is False
+        assert app._tddft_seed_note.value == ""
+
+
 class TestVibExportAnimation:
     """The Vibrational accordion exposes an export-to-HTML button that
     writes the current mode as a self-contained animation file.

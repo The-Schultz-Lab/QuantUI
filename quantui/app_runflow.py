@@ -71,8 +71,14 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
             app._freq_seed_note,
         ]
     elif ct == "UV-Vis (TD-DFT)":
+        app._refresh_tddft_seed_options()
         app.calc_extra_opts.children = [
             app.nstates_si,
+            widgets.HBox(
+                [app._tddft_seed_dd, app._tddft_seed_refresh_btn],
+                layout=layout_fn(align_items="center", gap="6px", width="100%"),
+            ),
+            app._tddft_seed_note,
             widgets.HTML(
                 '<span style="color:#b45309;font-size:12px">⚠ Requires a DFT '
                 "functional (e.g. B3LYP, PBE0). RHF/UHF will run TDHF (CIS) "
@@ -132,14 +138,14 @@ def update_scan_widgets(app: Any, _change: Any = None) -> None:
         app._scan_unit_lbl.value = '<span style="font-size:12px;color:#555">°</span>'
 
 
-def refresh_freq_seed_options(app: Any) -> None:
-    """Populate frequency seed dropdown with saved geometry optimisations.
+def _refresh_seed_options(app: Any, dropdown: Any) -> None:
+    """Populate a geo-opt seed dropdown filtered by the active molecule formula.
 
-    When an active molecule is loaded, the list is filtered to results whose
-    ``formula`` matches the current molecule. This keeps the dropdown from
-    offering seed geometries for unrelated molecules (e.g. a CH₄ geo-opt
-    while the user is working on H₂O). With no molecule loaded, the list is
-    unfiltered so the user can still browse history-stored options.
+    Shared helper used by both Frequency and UV-Vis (TD-DFT) seed dropdowns.
+    When ``app._molecule`` is set, only saved ``geometry_opt`` results whose
+    ``formula`` matches the current molecule are listed — keeps the dropdown
+    from offering seed geometries for unrelated molecules. With no molecule
+    loaded the list is unfiltered so the user can still browse history.
     """
     from quantui.results_storage import list_results, load_result
 
@@ -167,7 +173,17 @@ def refresh_freq_seed_options(app: Any) -> None:
             options.append((label, str(d)))
         except Exception:
             continue
-    app._freq_seed_dd.options = options
+    dropdown.options = options
+
+
+def refresh_freq_seed_options(app: Any) -> None:
+    """Populate frequency seed dropdown with saved geometry optimisations."""
+    _refresh_seed_options(app, app._freq_seed_dd)
+
+
+def refresh_tddft_seed_options(app: Any) -> None:
+    """Populate UV-Vis (TD-DFT) seed dropdown with saved geometry optimisations."""
+    _refresh_seed_options(app, app._tddft_seed_dd)
 
 
 def on_freq_seed_changed(app: Any, change: Any) -> None:
@@ -184,6 +200,26 @@ def on_freq_seed_changed(app: Any, change: Any) -> None:
     else:
         app._freq_preopt_cb.disabled = False
         app._freq_seed_note.value = ""
+
+
+def on_tddft_seed_changed(app: Any, change: Any) -> None:
+    """Enable/disable pre-opt checkbox and update UV-Vis seed note message.
+
+    Mirrors on_freq_seed_changed: a loaded seed geometry is already optimised,
+    so the global pre-opt checkbox is disabled while a seed is selected.
+    """
+    path_str = change["new"]
+    if path_str:
+        app._freq_preopt_cb.value = False
+        app._freq_preopt_cb.disabled = True
+        app._tddft_seed_note.value = (
+            '<span style="font-size:12px;color:#16a34a">'
+            "✓ Final optimised geometry will be loaded from the selected result."
+            "</span>"
+        )
+    else:
+        app._freq_preopt_cb.disabled = False
+        app._tddft_seed_note.value = ""
 
 
 def on_solvent_cb_changed(app: Any, change: Any) -> None:

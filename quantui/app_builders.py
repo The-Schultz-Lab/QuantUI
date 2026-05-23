@@ -585,6 +585,26 @@ def build_shared_widgets(
     )
     app._freq_seed_note = widgets.HTML("")
 
+    # UV-Vis (TD-DFT) seed-geometry parity with Frequency: lets the user run
+    # the excited-state calculation on a previously optimised geometry rather
+    # than the current input molecule. Same formula-filtered dropdown pattern
+    # as the Frequency seed widgets above; refresh button + status note also
+    # mirrored.
+    app._tddft_seed_dd = widgets.Dropdown(
+        options=[("(use current molecule)", "")],
+        description="Seed geometry:",
+        style={"description_width": "110px"},
+        layout=layout_fn(width="auto", flex="1 1 auto", min_width="260px"),
+        tooltip="Optionally load the final optimised geometry from a previous Geo Opt result",
+    )
+    app._tddft_seed_refresh_btn = widgets.Button(
+        description="",
+        icon="refresh",
+        layout=layout_fn(width="32px", height="32px"),
+        tooltip="Refresh the list of saved geometry optimisations",
+    )
+    app._tddft_seed_note = widgets.HTML("")
+
     app._scan_type_dd = widgets.Dropdown(
         options=["Bond", "Angle", "Dihedral"],
         value="Bond",

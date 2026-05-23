@@ -266,6 +266,9 @@ from quantui.app_runflow import (
     on_solvent_cb_changed as _run_on_solvent_cb_changed,
 )
 from quantui.app_runflow import (
+    on_tddft_seed_changed as _run_on_tddft_seed_changed,
+)
+from quantui.app_runflow import (
     populate_compare_list as _run_populate_compare_list,
 )
 from quantui.app_runflow import (
@@ -276,6 +279,9 @@ from quantui.app_runflow import (
 )
 from quantui.app_runflow import (
     refresh_results_browser as _run_refresh_results_browser,
+)
+from quantui.app_runflow import (
+    refresh_tddft_seed_options as _run_refresh_tddft_seed_options,
 )
 from quantui.app_runflow import (
     update_estimate as _run_update_estimate,
@@ -1428,11 +1434,17 @@ class QuantUIApp:
         self._freq_seed_dd.observe(
             self._safe_cb(self._on_freq_seed_changed), names="value"
         )
+        self._tddft_seed_dd.observe(
+            self._safe_cb(self._on_tddft_seed_changed), names="value"
+        )
         self._scan_type_dd.observe(
             self._safe_cb(self._update_scan_widgets), names="value"
         )
         self._freq_seed_refresh_btn.on_click(
             lambda _btn: self._refresh_freq_seed_options()
+        )
+        self._tddft_seed_refresh_btn.on_click(
+            lambda _btn: self._refresh_tddft_seed_options()
         )
         # Notes + estimate
         self.method_dd.observe(self._safe_cb(self._update_notes), names="value")
@@ -2370,6 +2382,12 @@ class QuantUIApp:
     def _on_freq_seed_changed(self, change) -> None:
         _run_on_freq_seed_changed(self, change)
 
+    def _refresh_tddft_seed_options(self) -> None:
+        _run_refresh_tddft_seed_options(self)
+
+    def _on_tddft_seed_changed(self, change) -> None:
+        _run_on_tddft_seed_changed(self, change)
+
     # ── Help buttons ──────────────────────────────────────────────────────
 
     def _on_method_help(self, btn) -> None:
@@ -2864,11 +2882,15 @@ class QuantUIApp:
             _collapsed_children.append(self.viz_controls_box)
         self.mol_input_container.children = _collapsed_children
 
-        # Re-filter seed-geometry dropdown to only include prior geo-opts of
-        # the now-active molecule (formula match). Best-effort: failures must
-        # not block molecule loading.
+        # Re-filter seed-geometry dropdowns (Freq + UV-Vis) to only include
+        # prior geo-opts of the now-active molecule (formula match). Best-
+        # effort: failures must not block molecule loading.
         try:
             self._refresh_freq_seed_options()
+        except Exception:
+            pass
+        try:
+            self._refresh_tddft_seed_options()
         except Exception:
             pass
 
@@ -3285,8 +3307,14 @@ class QuantUIApp:
             _pre_opt: Any = None  # OptimizationResult from Frequency pre-opt step
 
             # Optional QM geometry optimization before non-frequency workflows.
-            # Frequency has dedicated seed/pre-opt handling in its own branch.
-            if self._freq_preopt_cb.value and ct not in ("Geometry Opt", "Frequency"):
+            # Frequency and UV-Vis (TD-DFT) both have dedicated seed/pre-opt
+            # handling in their own branches so they can layer a seed
+            # geometry under the pre-opt step.
+            if self._freq_preopt_cb.value and ct not in (
+                "Geometry Opt",
+                "Frequency",
+                "UV-Vis (TD-DFT)",
+            ):
                 from quantui import optimize_geometry
 
                 self.run_status.value = f"Pre-optimizing geometry before {ct}…"
@@ -3450,9 +3478,59 @@ class QuantUIApp:
                 }
                 save_type = "frequency"
             elif ct == "UV-Vis (TD-DFT)":
-                self.run_status.value = "Running TD-DFT excited states..."
                 from quantui.tddft_calc import run_tddft_calc
 
+                # ── Step 1: resolve seed geometry ─────────────────────────────
+                _tddft_seed_path = self._tddft_seed_dd.value
+                if _tddft_seed_path:
+                    from quantui.results_storage import load_trajectory
+
+                    self.run_status.value = "Loading seed geometry from history…"
+                    _seed_traj, _ = load_trajectory(Path(_tddft_seed_path))
+                    calc_mol = _seed_traj[-1]
+                    log.write(
+                        f"\nSeed geometry loaded from: {Path(_tddft_seed_path).name}\n"
+                        f"  Formula: {calc_mol.get_formula()}  "
+                        f"Atoms: {len(calc_mol.atoms)}\n\n"
+                    )
+
+                # ── Step 2: optional geometry pre-optimisation ────────────────
+                if self._freq_preopt_cb.value:
+                    from quantui import optimize_geometry
+
+                    self.run_status.value = (
+                        "Pre-optimizing geometry before UV-Vis (TD-DFT)…"
+                    )
+                    log.write(
+                        "\n── Pre-optimisation (before UV-Vis (TD-DFT)) "
+                        "─────────────\n"
+                    )
+                    _pre_opt = optimize_geometry(
+                        molecule=calc_mol,
+                        method=self.method_dd.value,
+                        basis=self.basis_dd.value,
+                        progress_stream=log,  # type: ignore[arg-type]
+                    )
+                    calc_mol = _pre_opt.molecule
+                    _conv_str = (
+                        "converged" if _pre_opt.converged else "did NOT fully converge"
+                    )
+                    log.write(
+                        f"\nPre-optimisation {_conv_str} in {_pre_opt.n_steps} steps."
+                        f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
+                    )
+                    if not _pre_opt.converged:
+                        log.write(
+                            "⚠ Pre-optimisation did not fully converge — "
+                            "proceeding with best available geometry.\n\n"
+                        )
+                    _run_required_final_single_point(
+                        calc_mol,
+                        "after UV-Vis pre-optimisation",
+                    )
+
+                # ── Step 3: TD-DFT excited-state calculation ─────────────────
+                self.run_status.value = "Running TD-DFT excited states..."
                 result = run_tddft_calc(
                     molecule=calc_mol,
                     method=self.method_dd.value,
