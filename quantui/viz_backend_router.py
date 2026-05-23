@@ -29,8 +29,23 @@ Typical usage
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum
+
+# StrEnum landed in the stdlib in Python 3.11. Provide a behaviour-preserving
+# shim on 3.10 (and 3.9, which pyproject still claims to support) so the
+# router can use the cleaner inherited class. The shim matches StrEnum's key
+# observable behaviours: members compare equal to plain strings, and both
+# ``str(member)`` and ``f"{member}"`` return the underlying value rather than
+# the dotted enum name. ``__str__ = str.__str__`` works because each member is
+# already a real ``str`` instance whose content is the declared value.
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+else:
+
+    class StrEnum(str, Enum):  # type: ignore[no-redef]
+        __str__ = str.__str__
 
 
 class VizTask(StrEnum):
