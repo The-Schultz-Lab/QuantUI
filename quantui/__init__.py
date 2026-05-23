@@ -1,13 +1,13 @@
 """
 QuantUI Package
 
-Lightweight educational quantum chemistry interface for local PySCF calculations.
-No cluster or SLURM required — calculations run directly in the Jupyter session.
+An open-source frontend for DFT and post-HF quantum chemistry with PySCF.
+Calculations run locally in the Jupyter session — no cluster or SLURM required.
 
 PySCF requires Linux/macOS/WSL. Windows users should use the Apptainer container.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 import logging
 
