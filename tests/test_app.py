@@ -1576,6 +1576,190 @@ class TestVibExportAnimation:
         assert "No visualization backend available" in app._vib_export_status.value
 
 
+class TestHistoryHardeningHist6:
+    """HIST.6: strict atom-list + coordinate match for the seed-geometry
+    dropdown filter, replacing the formula-only filter shipped in session 54.
+
+    Acceptance:
+    - Two same-formula candidates with DIFFERENT starting geometries
+      (different isomers / conformers) are correctly excluded from each
+      other's seed dropdown when the active molecule matches only one of
+      them by coordinates.
+    - Two same-formula candidates with starting geometries within the RMSD
+      tolerance of the active molecule's coordinates BOTH appear.
+    - Malformed or missing ``trajectory.json`` falls through to a formula-
+      only match (don't punish the user for a corrupt history entry).
+    - ``_load_starting_geometry`` caches per-result results so repeated
+      dropdown refreshes don't re-parse the same JSON files.
+    """
+
+    def _make_geo_opt_dir_with_trajectory(
+        self,
+        root,
+        formula,
+        atoms,
+        starting_coords,
+        offset=0,
+        method="RHF",
+        basis="STO-3G",
+    ):
+        from pathlib import Path
+
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-") + f"{offset:06d}"
+        d = Path(root) / f"{ts}_{formula}_{method}_{basis}"
+        d.mkdir(parents=True)
+        (d / "result.json").write_text(
+            json.dumps(
+                {
+                    "_schema_version": 2,
+                    "timestamp": ts,
+                    "calc_type": "geometry_opt",
+                    "formula": formula,
+                    "method": method,
+                    "basis": basis,
+                }
+            )
+        )
+        (d / "trajectory.json").write_text(
+            json.dumps(
+                {
+                    "atoms": atoms,
+                    "charge": 0,
+                    "multiplicity": 1,
+                    "steps": [
+                        {
+                            "coords": [
+                                list(map(float, row)) for row in starting_coords
+                            ],
+                            "energy": -75.0,
+                        }
+                    ],
+                }
+            )
+        )
+        return d
+
+    def _water_coords(self, displacement=0.0):
+        # Returns water coords; ``displacement`` lets us produce a second
+        # water at a controllable RMSD distance from the canonical one.
+        return [
+            [0.0 + displacement, 0.0, 0.0],
+            [0.96 + displacement, 0.0, 0.0],
+            [-0.24 + displacement, 0.93, 0.0],
+        ]
+
+    def _water_molecule(self):
+        return Molecule(atoms=["O", "H", "H"], coordinates=self._water_coords(0.0))
+
+    def setup_method(self, _method):
+        # Tests share a module-level cache (_SEED_GEOMETRY_CACHE) for
+        # geometry parses; clear it before each test for determinism.
+        from quantui.app_runflow import _SEED_GEOMETRY_CACHE
+
+        _SEED_GEOMETRY_CACHE.clear()
+
+    def test_same_formula_different_geometry_excluded(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        # Active molecule = water at canonical coords.
+        # Saved A: same coords → matches.
+        # Saved B: coords shifted by 2 Å → RMSD ≈ 2 Å ≫ 0.1 Å → excluded.
+        self._make_geo_opt_dir_with_trajectory(
+            tmp_path, "H2O", ["O", "H", "H"], self._water_coords(0.0), offset=1
+        )
+        self._make_geo_opt_dir_with_trajectory(
+            tmp_path, "H2O", ["O", "H", "H"], self._water_coords(2.0), offset=2
+        )
+        app = QuantUIApp()
+        app._molecule = self._water_molecule()
+        app._refresh_freq_seed_options()
+        labels = [lbl for lbl, _ in app._freq_seed_dd.options]
+        assert len(labels) == 2, labels
+        assert labels[0] == "(use current molecule)"
+        assert labels[1].startswith("H2O")
+
+    def test_same_formula_within_tolerance_included(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        # Two candidates, both within 0.1 Å RMSD of the active mol.
+        self._make_geo_opt_dir_with_trajectory(
+            tmp_path, "H2O", ["O", "H", "H"], self._water_coords(0.0), offset=1
+        )
+        self._make_geo_opt_dir_with_trajectory(
+            tmp_path, "H2O", ["O", "H", "H"], self._water_coords(0.02), offset=2
+        )
+        app = QuantUIApp()
+        app._molecule = self._water_molecule()
+        app._refresh_freq_seed_options()
+        labels = [lbl for lbl, _ in app._freq_seed_dd.options]
+        assert len(labels) == 3, labels
+        assert sum(1 for lbl in labels if lbl.startswith("H2O")) == 2
+
+    def test_atom_order_mismatch_excluded(self, tmp_path, monkeypatch):
+        # Strict atom-order policy: ["H","O","H"] is not the same as
+        # ["O","H","H"] even though the formula matches.
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        self._make_geo_opt_dir_with_trajectory(
+            tmp_path, "H2O", ["O", "H", "H"], self._water_coords(0.0), offset=1
+        )
+        self._make_geo_opt_dir_with_trajectory(
+            tmp_path, "H2O", ["H", "O", "H"], self._water_coords(0.0), offset=2
+        )
+        app = QuantUIApp()
+        app._molecule = self._water_molecule()
+        app._refresh_freq_seed_options()
+        labels = [lbl for lbl, _ in app._freq_seed_dd.options]
+        assert len(labels) == 2
+        assert labels[1].startswith("H2O")
+
+    def test_malformed_trajectory_falls_back_to_formula_match(
+        self, tmp_path, monkeypatch
+    ):
+        # Malformed trajectory.json must NOT crash — and must fall through
+        # to formula-only match so the candidate still appears.
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-") + "000001"
+        d = tmp_path / f"{ts}_H2O_RHF_STO-3G"
+        d.mkdir()
+        (d / "result.json").write_text(
+            json.dumps(
+                {
+                    "_schema_version": 2,
+                    "timestamp": ts,
+                    "calc_type": "geometry_opt",
+                    "formula": "H2O",
+                    "method": "RHF",
+                    "basis": "STO-3G",
+                }
+            )
+        )
+        (d / "trajectory.json").write_text("[]")  # malformed (list, not dict)
+        app = QuantUIApp()
+        app._molecule = self._water_molecule()
+        app._refresh_freq_seed_options()
+        labels = [lbl for lbl, _ in app._freq_seed_dd.options]
+        assert any(lbl.startswith("H2O") for lbl in labels)
+
+    def test_starting_geometry_cache_hit_avoids_reread(self, tmp_path):
+        # _load_starting_geometry must cache per-result so back-to-back
+        # refreshes (e.g. when both Freq and UV-Vis dropdowns refresh from
+        # the same _set_molecule call) don't re-parse the JSON.
+        from quantui.app_runflow import (
+            _SEED_GEOMETRY_CACHE,
+            _load_starting_geometry,
+        )
+
+        _SEED_GEOMETRY_CACHE.clear()
+        d = self._make_geo_opt_dir_with_trajectory(
+            tmp_path, "H2O", ["O", "H", "H"], self._water_coords(0.0), offset=1
+        )
+        first = _load_starting_geometry(d)
+        assert first is not None
+        # Second call must return the cached object without touching disk.
+        with patch("pathlib.Path.read_text") as mock_read:
+            second = _load_starting_geometry(d)
+        assert second is first
+        mock_read.assert_not_called()
+
+
 class TestHistoryHardeningHist1:
     """HIST.1: clicking View Results / View Analysis on a History selection
     must give the user immediate visual feedback.

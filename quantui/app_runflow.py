@@ -138,24 +138,143 @@ def update_scan_widgets(app: Any, _change: Any = None) -> None:
         app._scan_unit_lbl.value = '<span style="font-size:12px;color:#555">°</span>'
 
 
+# Default RMSD tolerance for the seed-geometry "same molecule" check (HIST.6).
+# 0.1 Å is generous enough to admit slight conformational differences (e.g.
+# re-importing the same SMILES, which can produce ~0.05 Å float-precision
+# drift in RDKit's embedding) but tight enough to reject distinct isomers,
+# whose heavy-atom positions typically differ by ≥1 Å.
+_SEED_GEOMETRY_RMSD_TOLERANCE: float = 0.1
+
+
+# Per-result cache of (atoms, starting_coords) parsed from trajectory.json.
+# Saved geo-opt results are immutable once written, so a session-lifetime
+# cache is safe. Keyed by the resolved absolute path of the result dir.
+# ``None`` is cached as a sentinel for "trajectory.json missing or malformed"
+# to avoid retrying parse on every dropdown refresh.
+_SEED_GEOMETRY_CACHE: dict = {}
+
+
+def _load_starting_geometry(result_dir: Any):
+    """Read the starting-frame atom list + coordinates from a geo-opt result.
+
+    Returns ``(atoms, coords_ndarray)`` where ``coords_ndarray`` has shape
+    ``(N, 3)``, or ``None`` if ``trajectory.json`` is missing / malformed.
+    Per-session cache avoids re-parsing on every dropdown refresh.
+    """
+    try:
+        key = str(result_dir.resolve())
+    except OSError:
+        key = str(result_dir)
+    if key in _SEED_GEOMETRY_CACHE:
+        return _SEED_GEOMETRY_CACHE[key]
+
+    import json as _json
+
+    import numpy as _np
+
+    traj_path = result_dir / "trajectory.json"
+    if not traj_path.exists():
+        _SEED_GEOMETRY_CACHE[key] = None
+        return None
+    try:
+        data = _json.loads(traj_path.read_text())
+        atoms = data.get("atoms")
+        steps = data.get("steps", [])
+        if not atoms or not steps:
+            _SEED_GEOMETRY_CACHE[key] = None
+            return None
+        coords = _np.array(steps[0]["coords"], dtype=float)
+        if coords.shape != (len(atoms), 3):
+            _SEED_GEOMETRY_CACHE[key] = None
+            return None
+        result = (list(atoms), coords)
+        _SEED_GEOMETRY_CACHE[key] = result
+        return result
+    except Exception:
+        _SEED_GEOMETRY_CACHE[key] = None
+        return None
+
+
+def _geometries_match(
+    atoms_a,
+    coords_a,
+    atoms_b,
+    coords_b,
+    *,
+    rmsd_tol: float = _SEED_GEOMETRY_RMSD_TOLERANCE,
+) -> bool:
+    """Strict atom-order + RMSD-based geometry comparison (HIST.6).
+
+    Returns ``True`` iff the atom symbol lists are equal in order AND the
+    structures' RMSD (no rigid alignment) is at or below ``rmsd_tol`` Å.
+
+    Design decisions for v1:
+    - **Strict atom order** rather than permutation-aware. The latter requires
+      O(N!) or a proper graph isomorphism solver and is rarely needed in
+      practice — users almost always re-import a molecule in the same atom
+      order. If atom order matters in a real-world scenario, the right fix
+      is upstream (canonicalize on save) rather than per-compare permutation.
+    - **No rigid alignment.** The seed-geometry semantics is "load this exact
+      saved geometry to start from". A rotated copy will not match — but the
+      saved result and current molecule must come from the same input order
+      and similar source (e.g. the same SMILES), so rotation drift is rare.
+      Alignment can be added later under the same helper if it becomes a real
+      pain point.
+    - **RMSD across all atoms** rather than per-atom L₂. Heavy displacements
+      in one atom shouldn't swamp matches in the rest; conversely a tiny
+      jiggle across all atoms is a clear "same molecule".
+    """
+    if list(atoms_a) != list(atoms_b):
+        return False
+    import numpy as _np
+
+    coords_a = _np.asarray(coords_a, dtype=float)
+    coords_b = _np.asarray(coords_b, dtype=float)
+    if coords_a.shape != coords_b.shape:
+        return False
+    diff = coords_a - coords_b
+    rmsd = float(_np.sqrt(_np.mean(_np.sum(diff * diff, axis=1))))
+    return rmsd <= rmsd_tol
+
+
 def _refresh_seed_options(app: Any, dropdown: Any) -> None:
-    """Populate a geo-opt seed dropdown filtered by the active molecule formula.
+    """Populate a geo-opt seed dropdown filtered by strict atom+coord match.
 
     Shared helper used by both Frequency and UV-Vis (TD-DFT) seed dropdowns.
-    When ``app._molecule`` is set, only saved ``geometry_opt`` results whose
-    ``formula`` matches the current molecule are listed — keeps the dropdown
-    from offering seed geometries for unrelated molecules. With no molecule
-    loaded the list is unfiltered so the user can still browse history.
+    Filter cascade (HIST.6):
+
+    1. No active molecule → list every geo-opt result (no filter; lets the
+       user browse history before loading anything).
+    2. Formula mismatch → exclude (cheap pre-filter; avoids disk reads).
+    3. Same formula, but the candidate's ``trajectory.json`` starting frame
+       has a different atom list (in order) OR an RMSD greater than
+       ``_SEED_GEOMETRY_RMSD_TOLERANCE`` against the active molecule's
+       coordinates → exclude.
+    4. Atoms match AND RMSD within tolerance → include.
+
+    If the active molecule's coordinates can't be read (e.g. fresh app with
+    no molecule built yet) or a candidate's trajectory.json is malformed,
+    falls back to the formula-only filter for that candidate.
     """
     from quantui.results_storage import list_results, load_result
 
     current_formula: str | None = None
+    current_atoms = None
+    current_coords = None
     mol = getattr(app, "_molecule", None)
     if mol is not None:
         try:
             current_formula = mol.get_formula()
         except Exception:
             current_formula = None
+        try:
+            import numpy as _np
+
+            current_atoms = list(mol.atoms)
+            current_coords = _np.array(mol.coordinates, dtype=float)
+        except Exception:
+            current_atoms = None
+            current_coords = None
 
     options = [("(use current molecule)", "")]
     for d in list_results():
@@ -168,6 +287,18 @@ def _refresh_seed_options(app: Any, dropdown: Any) -> None:
             traj_file = d / "trajectory.json"
             if not traj_file.exists():
                 continue
+            # Strict atom + coord match when we have something to compare to.
+            if current_atoms is not None and current_coords is not None:
+                starting = _load_starting_geometry(d)
+                if starting is not None:
+                    cand_atoms, cand_coords = starting
+                    if not _geometries_match(
+                        current_atoms, current_coords, cand_atoms, cand_coords
+                    ):
+                        continue
+                # If starting geometry can't be read, fall through to
+                # formula-only match (don't punish the user for a malformed
+                # trajectory.json on an otherwise-matching result).
             ts = data.get("timestamp", d.name[:19])
             label = f"{data['formula']}  {data['method']}/{data['basis']}" f"  —  {ts}"
             options.append((label, str(d)))
