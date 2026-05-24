@@ -2677,21 +2677,24 @@ class QuantUIApp:
     def _mol_from_result_dir(self, result_dir: Path, data: dict):
         return _hist_mol_from_result_dir(result_dir, data)
 
-    def _history_load_results(self, data: dict, result_dir: Path) -> None:
-        self._activity_begin("Loading history result...")
+    def _history_load_results(
+        self, data: dict, result_dir: Path, *, source_btns: tuple = ()
+    ) -> None:
+        # Activity indicator + button-disable feedback are handled inside the
+        # inner ``history_load_results`` helper now (HIST.1). The wrapper just
+        # forwards source_btns and refreshes the Files tab after the load.
         try:
-            _hist_history_load_results(self, data, result_dir)
-            self._refresh_file_browser()
+            _hist_history_load_results(self, data, result_dir, source_btns=source_btns)
         finally:
-            self._activity_end()
+            self._refresh_file_browser()
 
-    def _history_load_analysis(self, result_dir: Path) -> None:
-        self._activity_begin("Loading history analysis...")
+    def _history_load_analysis(
+        self, result_dir: Path, *, source_btns: tuple = ()
+    ) -> None:
         try:
-            _hist_history_load_analysis(self, result_dir)
-            self._refresh_file_browser()
+            _hist_history_load_analysis(self, result_dir, source_btns=source_btns)
         finally:
-            self._activity_end()
+            self._refresh_file_browser()
 
     def _build_history_context(self, result_dir: Path) -> Optional[_AnalysisContext]:
         return _hist_build_history_context(result_dir, context_cls=_AnalysisContext)

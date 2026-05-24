@@ -304,7 +304,11 @@ def on_compare(app: Any, btn: Any, *, layout_fn: Any) -> None:
                     layout=layout_fn(width="auto", max_width="340px"),
                     tooltip=f"Load {short} into the Analysis tab",
                 )
-                button.on_click(lambda _, rd=rdir: app._history_load_analysis(rd))
+                button.on_click(
+                    lambda _, rd=rdir, b=button: app._history_load_analysis(
+                        rd, source_btns=(b,)
+                    )
+                )
                 btns.append(button)
             display(
                 widgets.HTML(

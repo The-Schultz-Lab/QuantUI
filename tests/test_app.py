@@ -1576,6 +1576,167 @@ class TestVibExportAnimation:
         assert "No visualization backend available" in app._vib_export_status.value
 
 
+class TestHistoryHardeningHist1:
+    """HIST.1: clicking View Results / View Analysis on a History selection
+    must give the user immediate visual feedback.
+
+    Acceptance:
+    - ``_activity_count`` increments while the loader runs (toolbar
+      indicator turns to "UI Active") and decrements back to 0 on completion.
+    - Source buttons (View Results, View Analysis) are disabled at start of
+      load and re-enabled at end — prevents double-click + signals "loading".
+    - The feedback contract holds even if the load raises (try/finally).
+    """
+
+    def _make_sp_result_dir(self, tmp_path):
+        """Create a minimal saved single-point result the loader can read."""
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-") + "000001"
+        d = tmp_path / f"{ts}_H2O_RHF_STO-3G"
+        d.mkdir()
+        (d / "result.json").write_text(
+            json.dumps(
+                {
+                    "_schema_version": 2,
+                    "timestamp": ts,
+                    "calc_type": "single_point",
+                    "formula": "H2O",
+                    "method": "RHF",
+                    "basis": "STO-3G",
+                    "energy_hartree": -75.0,
+                    "energy_ev": -2041.0,
+                    "homo_lumo_gap_ev": 8.0,
+                    "converged": True,
+                    "n_iterations": 10,
+                }
+            )
+        )
+        return d
+
+    def test_history_load_analysis_lights_activity_indicator(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        result_dir = self._make_sp_result_dir(tmp_path)
+        app = QuantUIApp()
+        # The loader bumps _activity_count up by 1 inside its body and back
+        # down on exit. Patch _apply_analysis_context to capture the live
+        # count mid-load. Patch out the tab-switch pulse so its timer doesn't
+        # race the assertion (the load ends by setting root_tab.selected_index
+        # which fires _activity_pulse on a 160ms Timer thread — separate from
+        # the loader's own begin/end pair we're verifying here).
+        captured_count: list[int] = []
+        original_apply = app._apply_analysis_context
+
+        def _capture_count(ctx):
+            captured_count.append(app._activity_count)
+            return original_apply(ctx)
+
+        with (
+            patch.object(app, "_apply_analysis_context", side_effect=_capture_count),
+            patch.object(app, "_activity_pulse"),
+        ):
+            app._history_load_analysis(result_dir)
+        assert captured_count == [1]  # exactly one active op while loading
+        assert app._activity_count == 0  # restored after completion
+
+    def test_history_load_analysis_disables_source_buttons(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        result_dir = self._make_sp_result_dir(tmp_path)
+        app = QuantUIApp()
+        btn_a = widgets.Button(description="View Results")
+        btn_b = widgets.Button(description="View Analysis")
+        # Both buttons start enabled.
+        assert btn_a.disabled is False
+        assert btn_b.disabled is False
+
+        # Capture disabled state mid-load.
+        captured: dict[str, bool] = {}
+        original_apply = app._apply_analysis_context
+
+        def _capture(ctx):
+            captured["a"] = btn_a.disabled
+            captured["b"] = btn_b.disabled
+            return original_apply(ctx)
+
+        with patch.object(app, "_apply_analysis_context", side_effect=_capture):
+            app._history_load_analysis(result_dir, source_btns=(btn_a, btn_b))
+        assert captured == {"a": True, "b": True}
+        # Buttons restored after the load.
+        assert btn_a.disabled is False
+        assert btn_b.disabled is False
+
+    def test_feedback_restored_even_on_exception(self, tmp_path, monkeypatch):
+        # If the loader raises mid-load, the activity counter and buttons
+        # must still be restored — try/finally contract.
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        result_dir = self._make_sp_result_dir(tmp_path)
+        app = QuantUIApp()
+        btn = widgets.Button(description="View")
+
+        with patch.object(
+            app,
+            "_apply_analysis_context",
+            side_effect=RuntimeError("simulated failure"),
+        ):
+            try:
+                app._history_load_analysis(result_dir, source_btns=(btn,))
+            except RuntimeError:
+                pass
+        assert app._activity_count == 0
+        assert btn.disabled is False
+
+
+class TestHistoryHardeningHist5:
+    """HIST.5: history dropdown labels must expose calc type before selection.
+
+    The current ``refresh_results_browser`` formats each option as
+    ``"<timestamp>  ·  [<calc-badge>]  <formula>  <method>/<basis>"``,
+    where the badge is the friendly name from ``_calc_type_badge``. This
+    test locks in that contract — particularly the bracketed badge — so
+    a future refactor can't accidentally drop the calc-type prefix that the
+    user originally reported missing in the M-PLOT user report.
+    """
+
+    def _make_result(self, tmp_path, formula, calc_type, offset):
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-") + f"{offset:06d}"
+        d = tmp_path / f"{ts}_{formula}_RHF_STO-3G"
+        d.mkdir()
+        (d / "result.json").write_text(
+            json.dumps(
+                {
+                    "_schema_version": 2,
+                    "timestamp": ts,
+                    "calc_type": calc_type,
+                    "formula": formula,
+                    "method": "RHF",
+                    "basis": "STO-3G",
+                }
+            )
+        )
+        # Geometry opt needs trajectory.json for the seed-dropdown side-path,
+        # but refresh_results_browser doesn't gate on it.
+        return d
+
+    def test_dropdown_label_includes_calc_badge_for_each_type(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        self._make_result(tmp_path, "H2O", "single_point", offset=1)
+        self._make_result(tmp_path, "H2O", "geometry_opt", offset=2)
+        self._make_result(tmp_path, "H2O", "frequency", offset=3)
+        self._make_result(tmp_path, "H2O", "tddft", offset=4)
+        self._make_result(tmp_path, "H2O", "nmr", offset=5)
+        self._make_result(tmp_path, "H2O", "pes_scan", offset=6)
+        app = QuantUIApp()
+        app._refresh_results_browser()
+        labels = [lbl for lbl, _ in app.past_dd.options]
+        # Every label must include a bracketed badge.
+        assert all("[" in lbl and "]" in lbl for lbl in labels), labels
+        joined = " ".join(labels)
+        for expected in ("[SP]", "[GeoOpt]", "[Freq]", "[UV-Vis]", "[NMR]", "[PES]"):
+            assert expected in joined, f"missing badge {expected} in {labels}"
+
+
 class TestUVVisSpectrumWidgets:
     """UV-Vis accordion and controls exist in correct initial state."""
 
