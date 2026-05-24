@@ -26,6 +26,8 @@ SUPPORTED_METHODS = [
     "HSE06",
     "PBE-D3",
     "MP2",
+    "CCSD",
+    "CCSD(T)",
 ]
 
 # Educational metadata for each method — shown to students in the UI
@@ -146,6 +148,30 @@ METHOD_INFO = {
             "but scales as O(N⁵). Avoid for molecules with > ~20 heavy atoms."
         ),
         "use_for": "Accurate energetics for small closed-shell molecules; bond dissociation.",
+    },
+    "CCSD": {
+        "type": "wavefunction",
+        "label": "CCSD — Coupled Cluster with Singles and Doubles",
+        "description": (
+            "Post-HF coupled-cluster method that includes all single and double "
+            "excitations from the HF reference. Often called the gold standard for "
+            "single-reference systems — significantly more accurate than MP2 — but "
+            "scales as O(N⁶). Memory and runtime both grow steeply with basis size; "
+            "expect very small molecules (~10 heavy atoms or fewer) only."
+        ),
+        "use_for": "High-accuracy benchmarks for small closed-shell molecules.",
+    },
+    "CCSD(T)": {
+        "type": "wavefunction",
+        "label": "CCSD(T) — CCSD with Perturbative Triples",
+        "description": (
+            "Adds a perturbative correction for connected triple excitations on top of "
+            "CCSD. Routinely called the 'gold standard' of single-reference electronic "
+            "structure when paired with a large basis set. Scales as O(N⁷); the (T) "
+            "correction alone is typically the cost bottleneck. Reserve for the "
+            "smallest molecules where benchmark-quality energies are required."
+        ),
+        "use_for": "Reference-quality energies and barrier heights for tiny molecules.",
     },
 }
 

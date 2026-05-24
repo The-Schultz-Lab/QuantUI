@@ -44,6 +44,11 @@ _METHOD_COST: dict[str, float] = {
     "HSE06": 2.5,
     "PBE-D3": 2.1,
     "MP2": 8.0,
+    # CCSD scales O(N⁶); CCSD(T) adds the perturbative-triples step that
+    # scales O(N⁷). Cost ratios here are illustrative — actual runtimes are
+    # extracted from the perf log when available.
+    "CCSD": 30.0,
+    "CCSD(T)": 100.0,
 }
 
 # Contracted basis function counts per element per basis set (spherical harmonics,

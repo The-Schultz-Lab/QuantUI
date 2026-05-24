@@ -68,6 +68,15 @@ class SessionResult:
     mulliken_charges: Optional[List[float]] = None
     dipole_moment_debye: Optional[float] = None
     mp2_correlation_hartree: Optional[float] = None
+    # CCSD post-HF correlation energy (Hartree), populated when method is
+    # ``"CCSD"`` or ``"CCSD(T)"``. ``None`` for HF/DFT/MP2 paths. The
+    # ``energy_hartree`` field already includes this correlation when set
+    # (matches the existing ``mp2_correlation_hartree`` convention).
+    ccsd_correlation_hartree: Optional[float] = None
+    # CCSD(T) perturbative-triples correction (Hartree), populated only when
+    # method is ``"CCSD(T)"``. ``None`` for plain CCSD. Again, included in
+    # ``energy_hartree`` when set.
+    ccsd_t_correction_hartree: Optional[float] = None
     solvent: Optional[str] = None
     mo_energy_hartree: Optional[Any] = None  # np.ndarray (n_mo,) or (2, n_mo) UHF
     mo_occ: Optional[Any] = None  # np.ndarray (n_mo,) or (2, n_mo) UHF
@@ -251,6 +260,11 @@ def _run_session_calc_body(
         mf = scf.UHF(mol)
     elif method_upper == "MP2":
         mf = scf.RHF(mol)  # MP2 runs on top of RHF
+    elif method_upper in ("CCSD", "CCSD(T)"):
+        # Coupled cluster builds on an RHF reference (M8.1). The correlation
+        # energy (and optional perturbative-triples correction) is added
+        # post-SCF below.
+        mf = scf.RHF(mol)
     else:
         # DFT: resolve alias then auto-select RKS / UKS
         xc_string = _XC_ALIAS.get(_method_key, method)
@@ -312,6 +326,36 @@ def _run_session_calc_body(
             raise RuntimeError(
                 f"MP2 correction failed for {molecule.get_formula()}: {exc}"
             ) from exc
+
+    # --- Coupled cluster correlation (M8.1) ---
+    # CCSD adds singles + doubles excitations on top of the RHF reference;
+    # CCSD(T) adds a perturbative-triples correction on top of CCSD. Both
+    # report their corrections as separate result fields so the UI can
+    # show the HF reference + correlation breakdown (mirrors the MP2 path).
+    ccsd_correlation_hartree: Optional[float] = None
+    ccsd_t_correction_hartree: Optional[float] = None
+    if method_upper in ("CCSD", "CCSD(T)"):
+        try:
+            from pyscf import cc as _cc
+
+            _ccsd_obj = _cc.CCSD(mf)
+            _e_corr_ccsd, _t1, _t2 = _ccsd_obj.kernel()
+            ccsd_correlation_hartree = float(_e_corr_ccsd)
+            energy_hartree += float(_e_corr_ccsd)
+        except Exception as exc:
+            raise RuntimeError(
+                f"CCSD correction failed for {molecule.get_formula()}: {exc}"
+            ) from exc
+        if method_upper == "CCSD(T)":
+            try:
+                _e_t = _ccsd_obj.ccsd_t()
+                ccsd_t_correction_hartree = float(_e_t)
+                energy_hartree += float(_e_t)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"CCSD(T) triples correction failed "
+                    f"for {molecule.get_formula()}: {exc}"
+                ) from exc
 
     # --- Extract results from the mean-field object ---
     converged = bool(getattr(mf, "converged", False))
@@ -398,6 +442,8 @@ def _run_session_calc_body(
         mulliken_charges=mulliken_charges,
         dipole_moment_debye=dipole_moment_debye,
         mp2_correlation_hartree=mp2_correlation_hartree,
+        ccsd_correlation_hartree=ccsd_correlation_hartree,
+        ccsd_t_correction_hartree=ccsd_t_correction_hartree,
         solvent=solvent,
         mo_energy_hartree=_mo_energy_ha_arr,
         mo_occ=_mo_occ_arr,

@@ -46,6 +46,26 @@ def format_result(r: Any) -> str:
             f'<tr><td style="padding:3px 18px 3px 0;color:#444">MP2 correlation</td>'
             f'<td style="color:#000">{_mp2_corr:.8f} Ha</td></tr>'
         )
+    # CCSD / CCSD(T) (M8.1): show the HF reference + each correlation
+    # contribution as its own row so the user can read off the cost vs.
+    # accuracy breakdown. ``energy_hartree`` already includes both
+    # contributions (matches the MP2 convention above).
+    _ccsd_corr = getattr(r, "ccsd_correlation_hartree", None)
+    _ccsd_t_corr = getattr(r, "ccsd_t_correction_hartree", None)
+    if _ccsd_corr is not None:
+        _hf_e = r.energy_hartree - _ccsd_corr - (_ccsd_t_corr or 0.0)
+        _extra += (
+            f'<tr><td style="padding:3px 18px 3px 0;color:#444">HF reference</td>'
+            f'<td style="color:#000">{_hf_e:.8f} Ha</td></tr>'
+            f'<tr><td style="padding:3px 18px 3px 0;color:#444">CCSD correlation</td>'
+            f'<td style="color:#000">{_ccsd_corr:.8f} Ha</td></tr>'
+        )
+        if _ccsd_t_corr is not None:
+            _extra += (
+                f'<tr><td style="padding:3px 18px 3px 0;color:#444">'
+                f"(T) triples correction</td>"
+                f'<td style="color:#000">{_ccsd_t_corr:.8f} Ha</td></tr>'
+            )
     _solvent = getattr(r, "solvent", None)
     if _solvent is not None:
         _extra += (

@@ -82,8 +82,11 @@ class TestPySCFCalculationInit:
 
     def test_unsupported_method(self, water_molecule):
         """Test error for unsupported method."""
+        # Use a fictional method name to exercise the validation path —
+        # the previous stand-in "CCSD" became a real supported method in
+        # M8.1 (session 54), so the validator no longer rejects it.
         with pytest.raises(ValueError, match="not supported"):
-            PySCFCalculation(water_molecule, method="CCSD", basis="6-31G")
+            PySCFCalculation(water_molecule, method="NONEXISTENT", basis="6-31G")
 
     def test_nonstandard_basis_warning(self, water_molecule, caplog):
         """Test warning for non-standard basis set."""

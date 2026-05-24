@@ -166,8 +166,10 @@ class TestRunInSessionDFT:
         assert dft.energy_hartree < hf.energy_hartree
 
     def test_invalid_method_raises(self):
+        # Previously used "CCSD" as the unsupported-method stand-in; CCSD
+        # became a real method in M8.1 (session 54).
         with pytest.raises(ValueError):
-            run_in_session(_water(), method="CCSD", basis="STO-3G", verbose=0)
+            run_in_session(_water(), method="NONEXISTENT", basis="STO-3G", verbose=0)
 
 
 # ---------------------------------------------------------------------------

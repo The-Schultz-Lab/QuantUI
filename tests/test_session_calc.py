@@ -349,6 +349,140 @@ class TestPublicAPI:
 
 
 # ============================================================================
+# M8.1 — CCSD and CCSD(T) scaffolding (config + result + formatter)
+# ============================================================================
+
+
+class TestM8CcsdScaffolding:
+    """Verify CCSD + CCSD(T) are wired into the method list, METHOD_INFO,
+    SessionResult dataclass, formatter, and perf-scaling tables.
+
+    These checks run on any platform — no PySCF required. The actual CCSD
+    compute path is exercised by ``TestM8CcsdComputeWater`` below, which
+    is PySCF-gated.
+    """
+
+    def test_ccsd_in_supported_methods(self):
+        from quantui.config import SUPPORTED_METHODS
+
+        assert "CCSD" in SUPPORTED_METHODS
+
+    def test_ccsd_t_in_supported_methods(self):
+        from quantui.config import SUPPORTED_METHODS
+
+        assert "CCSD(T)" in SUPPORTED_METHODS
+
+    def test_method_info_has_ccsd_entry_with_scaling_warning(self):
+        from quantui.config import METHOD_INFO
+
+        assert "CCSD" in METHOD_INFO
+        info = METHOD_INFO["CCSD"]
+        # Type marker + description mentions the O(N^6) scaling so the user
+        # understands the cost tradeoff before clicking Run.
+        assert info["type"] == "wavefunction"
+        assert "N⁶" in info["description"] or "N^6" in info["description"]
+
+    def test_method_info_has_ccsd_t_entry_with_scaling_warning(self):
+        from quantui.config import METHOD_INFO
+
+        assert "CCSD(T)" in METHOD_INFO
+        info = METHOD_INFO["CCSD(T)"]
+        assert info["type"] == "wavefunction"
+        # Either notation acceptable in the user-facing description.
+        assert "N⁷" in info["description"] or "N^7" in info["description"]
+
+    def test_session_result_has_ccsd_fields_defaulting_none(self):
+        result = _make_result()
+        assert result.ccsd_correlation_hartree is None
+        assert result.ccsd_t_correction_hartree is None
+
+    def test_session_result_can_store_ccsd_fields(self):
+        result = _make_result(
+            ccsd_correlation_hartree=-0.123,
+            ccsd_t_correction_hartree=-0.005,
+        )
+        assert result.ccsd_correlation_hartree == pytest.approx(-0.123)
+        assert result.ccsd_t_correction_hartree == pytest.approx(-0.005)
+
+    def test_formatter_renders_ccsd_breakdown(self):
+        from quantui.app_formatters import format_result
+
+        # CCSD-only result: HF reference + CCSD correlation, no (T) row.
+        result = _make_result(
+            energy_hartree=-1.200,  # arbitrary; HF derived = -1.077
+            ccsd_correlation_hartree=-0.123,
+        )
+        html = format_result(result)
+        assert "HF reference" in html
+        assert "CCSD correlation" in html
+        assert "(T) triples correction" not in html
+
+    def test_formatter_renders_ccsd_t_breakdown(self):
+        from quantui.app_formatters import format_result
+
+        # CCSD(T) result: HF + CCSD correlation + triples correction rows.
+        result = _make_result(
+            energy_hartree=-1.205,
+            ccsd_correlation_hartree=-0.123,
+            ccsd_t_correction_hartree=-0.005,
+        )
+        html = format_result(result)
+        assert "HF reference" in html
+        assert "CCSD correlation" in html
+        assert "(T) triples correction" in html
+
+    def test_calc_log_scaling_exponent_ccsd(self):
+        from quantui.calc_log import _METHOD_SCALE_EXP
+
+        assert _METHOD_SCALE_EXP.get("CCSD") == pytest.approx(6.0)
+
+    def test_calc_log_scaling_exponent_ccsd_t(self):
+        from quantui.calc_log import _METHOD_SCALE_EXP
+
+        assert _METHOD_SCALE_EXP.get("CCSD(T)") == pytest.approx(7.0)
+
+
+class TestM8CcsdComputeWater:
+    """PySCF-gated water-CCSD smoke test. Runs on WSL / Linux / macOS where
+    PySCF is installed; skipped on Windows.
+    """
+
+    @pyscf_only
+    def test_ccsd_water_runs_and_reports_correlation(self):
+        from quantui.session_calc import run_in_session
+
+        result = run_in_session(
+            molecule=_water(),
+            method="CCSD",
+            basis="STO-3G",
+        )
+        assert result.converged is True
+        # CCSD correlation must be set and negative (correlation lowers energy).
+        assert result.ccsd_correlation_hartree is not None
+        assert result.ccsd_correlation_hartree < 0
+        # (T) field must remain None for plain CCSD.
+        assert result.ccsd_t_correction_hartree is None
+        # Total energy must equal HF reference + CCSD correlation.
+        assert result.energy_hartree < -74.0  # HF/STO-3G water ≈ -74.96 Ha
+
+    @pyscf_only
+    def test_ccsd_t_water_runs_and_reports_triples(self):
+        from quantui.session_calc import run_in_session
+
+        result = run_in_session(
+            molecule=_water(),
+            method="CCSD(T)",
+            basis="STO-3G",
+        )
+        assert result.converged is True
+        assert result.ccsd_correlation_hartree is not None
+        assert result.ccsd_correlation_hartree < 0
+        # (T) correction must be present and negative for water at minimum.
+        assert result.ccsd_t_correction_hartree is not None
+        assert result.ccsd_t_correction_hartree < 0
+
+
+# ============================================================================
 # Run directly
 # ============================================================================
 
