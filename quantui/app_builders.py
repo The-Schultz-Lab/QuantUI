@@ -42,6 +42,20 @@ def build_status_panel(
         cross = '<span style="color:#ef4444">&#10007;</span>'
         return (tick if flag else cross) + (" " + extra if extra else "")
 
+    # GPU offload indicator (M-GPU / GPU.2). Reuses the runtime detection
+    # helper so this status line tracks the EXACT same logic the dispatcher
+    # uses — no risk of drift between "what the user sees in Status" and
+    # "what actually happens when they click Run".
+    from .gpu_offload import is_gpu_available as _gpu_available_fn
+
+    _gpu_avail, _gpu_name = _gpu_available_fn()
+    if _gpu_avail:
+        _gpu_msg = f"&mdash; <code>{_gpu_name}</code>"
+        _gpu_flag = True
+    else:
+        _gpu_msg = "&mdash; <code>gpu4pyscf</code> not installed or no CUDA device"
+        _gpu_flag = False
+
     items = [
         (
             "PySCF (calculations)",
@@ -53,6 +67,7 @@ def build_status_panel(
         ("ASE (structure I/O, opt.)", _ok(ase_available)),
         ("PubChem search", _ok(pubchem_available)),
         ("3D viewer (py3Dmol)", _ok(visualization_available)),
+        ("GPU offload (gpu4pyscf)", _ok(_gpu_flag, _gpu_msg)),
         ("CPU cores / Memory", f"<b>{cores}</b> cores / <b>{mem}</b>"),
     ]
     rows = "".join(

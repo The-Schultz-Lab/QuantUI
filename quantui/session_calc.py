@@ -77,6 +77,12 @@ class SessionResult:
     # method is ``"CCSD(T)"``. ``None`` for plain CCSD. Again, included in
     # ``energy_hartree`` when set.
     ccsd_t_correction_hartree: Optional[float] = None
+    # GPU offload status (M-GPU / GPU.2). ``gpu_used`` is True only when the
+    # SCF object was successfully migrated to gpu4pyscf for this run.
+    # ``gpu_name`` carries the CUDA device name when ``gpu_used`` is True so
+    # the result card can show *which* GPU ran the calc.
+    gpu_used: bool = False
+    gpu_name: Optional[str] = None
     solvent: Optional[str] = None
     mo_energy_hartree: Optional[Any] = None  # np.ndarray (n_mo,) or (2, n_mo) UHF
     mo_occ: Optional[Any] = None  # np.ndarray (n_mo,) or (2, n_mo) UHF
@@ -303,6 +309,21 @@ def _run_session_calc_body(
                         "\n⚠  PCM solvent unavailable — running in gas phase.\n"
                     )
 
+    # --- Try GPU offload (M-GPU / GPU.1) ---
+    # Migrate the SCF object to gpu4pyscf when (a) the package is installed,
+    # (b) a CUDA device is available, and (c) the method is supported.
+    # Failures fall back to CPU silently — the calc still runs. The
+    # ``gpu_used`` + ``gpu_name`` fields on the SessionResult carry the
+    # outcome so the UI can show which device produced the numbers.
+    from .gpu_offload import try_to_gpu as _try_to_gpu
+
+    mf, gpu_used, gpu_name = _try_to_gpu(mf, method_upper)
+    if gpu_used and progress_stream is not None:
+        try:
+            progress_stream.write(f"\n🚀  GPU offload active — running on {gpu_name}\n")
+        except Exception:
+            pass
+
     # --- Run SCF ---
     try:
         energy_hartree = float(mf.kernel())
@@ -444,6 +465,8 @@ def _run_session_calc_body(
         mp2_correlation_hartree=mp2_correlation_hartree,
         ccsd_correlation_hartree=ccsd_correlation_hartree,
         ccsd_t_correction_hartree=ccsd_t_correction_hartree,
+        gpu_used=gpu_used,
+        gpu_name=gpu_name,
         solvent=solvent,
         mo_energy_hartree=_mo_energy_ha_arr,
         mo_occ=_mo_occ_arr,

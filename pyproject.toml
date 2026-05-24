@@ -64,6 +64,17 @@ app = [
     "ipykernel>=6.0.0",
 ]
 
+# GPU acceleration via gpu4pyscf + cupy (M-GPU). Linux + NVIDIA CUDA only.
+# When installed, ``quantui.gpu_offload`` auto-detects + migrates SCF
+# objects via ``mf.to_gpu()``. Set ``QUANTUI_DISABLE_GPU=1`` to force CPU
+# at runtime even when these are available. Method coverage per the
+# gpu4pyscf README: RHF/UHF/RKS/UKS fully supported; MP2/CCSD experimental;
+# CCSD(T) explicitly unsupported (QuantUI's dispatcher skips it).
+gpu = [
+    "gpu4pyscf",
+    "cupy",
+]
+
 # Notebook smoke-test dependencies
 notebook = [
     "nbmake>=1.4.0",
