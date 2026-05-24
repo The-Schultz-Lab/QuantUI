@@ -1234,7 +1234,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             app._orb_ymax_input,
             widgets.HTML(
                 '<span style="font-size:11px;color:#555;font-weight:600;margin-left:8px">'
-                "Orbitals shown:</span>"
+                "Levels shown:</span>"
             ),
             app._orb_n_orb_input,
         ],
@@ -1488,7 +1488,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             '<p style="color:#888;font-size:13px;font-style:italic;margin:8px 0">'
             "No interactive analysis is available for this calculation type.<br>"
             "Run a Single Point, Geo Opt, or Frequency calculation to see "
-            "orbital diagrams, trajectory animations, and spectra here.</p>"
+            "energy-level diagrams, trajectory animations, and spectra here.</p>"
         ),
         layout=layout_fn(display="none"),
     )
@@ -1638,7 +1638,7 @@ def build_output_tab(app: Any, *, layout_fn: Any) -> None:
                 '<p style="color:#555;font-size:13px;margin:4px 0 8px">'
                 "Raw PySCF output for the most recent calculation. "
                 "Use <b>View log</b> in the History tab to load a saved result's log. "
-                "Orbital diagrams, trajectories, and spectra are in the "
+                "Energy-level diagrams, trajectories, and spectra are in the "
                 "<b>Analysis</b> tab.</p>"
             ),
             widgets.HBox(

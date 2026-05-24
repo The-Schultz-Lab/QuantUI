@@ -34,7 +34,7 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "<b>Calculation Setup</b></li>"
             "<li>Click <b>Run Calculation</b> — results appear in the "
             "<b>Results</b> tab immediately</li>"
-            "<li>View orbital diagrams, trajectories, and spectra in the "
+            "<li>View energy-level diagrams, trajectories, and spectra in the "
             "<b>Analysis</b> tab</li>"
             "<li>Optionally compare results in <b>Compare</b>, or use "
             "<b>History</b> to reload a previous run</li>"
