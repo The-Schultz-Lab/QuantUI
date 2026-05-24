@@ -166,6 +166,16 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     app._last_traj_result = None
     app._traj_render_token = int(getattr(app, "_traj_render_token", 0)) + 1
     app._iso_render_token = int(getattr(app, "_iso_render_token", 0)) + 1
+    # Orbital state is consumed by pop_isosurface (and ana_pop_iso_generate
+    # when the user clicks Generate). Reset here so a context that doesn't
+    # populate these fields (history result without orbitals.npz, BUG.8)
+    # cannot leak the prior calc's orbital arrays into the Isosurface panel
+    # of an unrelated molecule. Each populate method that wants the panel
+    # to activate re-sets these in show_orbital_diagram.
+    app._last_orb_info = None
+    app._last_orb_mo_coeff = None
+    app._last_orb_mol_atom = None
+    app._last_orb_mol_basis = None
     app.traj_accordion.set_title(0, "Trajectory Viewer")
     # traj_output is a VBox (see app_builders.py traj_output construction);
     # clear children instead of clear_output.
@@ -243,11 +253,20 @@ def pop_energies(app: Any, ctx: Any) -> bool:
 
 
 def pop_isosurface(app: Any, ctx: Any) -> bool:
-    """Populate Isosurface availability from orbital state."""
+    """Populate Isosurface availability from orbital state.
+
+    Uses ``getattr(..., None)`` for the orbital state fields rather than
+    direct attribute access. The attributes are initialized in
+    ``QuantUIApp.__init__`` and reset in ``apply_analysis_context`` so they
+    are always present in practice, but the defensive read mirrors the
+    pattern used by ``render_orbital_isosurface`` and keeps this populator
+    robust against future refactors that might call it before the context
+    reset has run (BUG.8 root-cause guard).
+    """
     return (
-        app._last_orb_mo_coeff is not None
-        and app._last_orb_mol_atom is not None
-        and app._last_orb_mol_basis is not None
+        getattr(app, "_last_orb_mo_coeff", None) is not None
+        and getattr(app, "_last_orb_mol_atom", None) is not None
+        and getattr(app, "_last_orb_mol_basis", None) is not None
     )
 
 

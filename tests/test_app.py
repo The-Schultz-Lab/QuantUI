@@ -1273,6 +1273,81 @@ class TestFreqSeedDropdownFilter:
         assert not any(lbl.startswith("CH4") for lbl in labels)
 
 
+class TestPopIsosurfaceBug8:
+    """Regression tests for BUG.8: ``_pop_isosurface`` raised AttributeError
+    on single-point history replay when ``orbitals.npz`` was missing.
+
+    Root cause: ``_last_orb_mo_coeff`` (and siblings) were only assigned by
+    ``show_orbital_diagram`` during a successful Energies-panel populate.
+    When that path returned early (no orbitals file or missing fields), the
+    attributes never existed, and the immediately-following Isosurface
+    populator's direct ``app._last_orb_mo_coeff is not None`` read blew up.
+
+    Fix: initialize the attributes in ``__init__`` so they always exist,
+    reset them at the start of ``apply_analysis_context`` so stale state
+    can't leak between contexts, and use defensive ``getattr`` in the
+    populator as belt-and-suspenders.
+    """
+
+    def test_orb_state_initialized_on_fresh_app(self):
+        app = QuantUIApp()
+        # All three attributes must exist (initialized to None) so the
+        # populator can read them safely.
+        assert app._last_orb_mo_coeff is None
+        assert app._last_orb_mol_atom is None
+        assert app._last_orb_mol_basis is None
+        assert app._last_orb_info is None
+
+    def test_pop_isosurface_on_fresh_app_returns_false_without_error(self):
+        # The exact crash scenario from the user's 2026-05-20 event log:
+        # a fresh QuantUIApp where no orbital data has been loaded yet
+        # should NOT raise; it should report the panel as unavailable.
+        from quantui.app_analysis import pop_isosurface
+
+        app = QuantUIApp()
+        ctx = _AnalysisContext(
+            calc_type="single_point",
+            formula="H2O",
+            method="RHF",
+            basis="STO-3G",
+        )
+        result = pop_isosurface(app, ctx)
+        assert result is False
+
+    def test_apply_analysis_context_resets_orbital_state(self, tmp_path, monkeypatch):
+        # After running an SP that populated orbital state, replaying a
+        # different result (no orbitals.npz on disk) must NOT leak the
+        # previous calc's orbital arrays into the Isosurface panel.
+        from quantui.app_analysis import apply_analysis_context
+
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        # Simulate a prior live SP having populated orbital state.
+        app._last_orb_mo_coeff = [[1.0, 0.0], [0.0, 1.0]]
+        app._last_orb_mol_atom = [["H", [0.0, 0.0, 0.0]]]
+        app._last_orb_mol_basis = "sto-3g"
+        app._last_orb_info = MagicMock()
+
+        # Now replay a context with no result_dir and no live_result —
+        # i.e. nothing to repopulate orbital state from.
+        ctx = _AnalysisContext(
+            calc_type="single_point",
+            formula="CH4",
+            method="RHF",
+            basis="STO-3G",
+            result_dir=None,
+            live_result=None,
+        )
+        apply_analysis_context(app, ctx)
+
+        # State must have been wiped — stale H2O orbitals must not survive
+        # into the CH4 context.
+        assert app._last_orb_mo_coeff is None
+        assert app._last_orb_mol_atom is None
+        assert app._last_orb_mol_basis is None
+        assert app._last_orb_info is None
+
+
 class TestTDDFTSeedDropdown:
     """The UV-Vis (TD-DFT) Calculate-tab tab exposes a seed-geometry dropdown
     that mirrors the Frequency tab's behaviour (BUG.5).

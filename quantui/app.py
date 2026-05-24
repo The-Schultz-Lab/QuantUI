@@ -911,6 +911,16 @@ class QuantUIApp:
         self._last_ir_fig: Any = None
         self._last_uv_fig: Any = None
         self._last_orb_fig: Any = None
+        self._last_orb_info: Any = None
+        # Orbital state consumed by the Isosurface panel populator. Always
+        # initialized to None so ``pop_isosurface`` can read the attributes
+        # via direct access without raising AttributeError on a fresh app
+        # or on a history-replay where ``orbitals.npz`` is missing (BUG.8).
+        # ``_apply_analysis_context`` resets these between contexts so stale
+        # state from a prior calc cannot leak into the next molecule.
+        self._last_orb_mo_coeff: Any = None
+        self._last_orb_mol_atom: Any = None
+        self._last_orb_mol_basis: Any = None
         self._last_pes_fig: Any = None
         self._run_output_scroll_guard_installed: bool = False
         self._files_current_dir: Optional[Path] = None
