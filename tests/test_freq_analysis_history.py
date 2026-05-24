@@ -28,7 +28,12 @@ import pytest
 
 from quantui.app import QuantUIApp
 from quantui.molecule import Molecule
-from quantui.results_storage import list_results, load_result, save_result
+from quantui.results_storage import (
+    list_results,
+    load_result,
+    save_orbitals,
+    save_result,
+)
 
 try:
     from quantui.app import _PYSCF_AVAILABLE
@@ -73,9 +78,13 @@ def _make_freq_result():
             [[0.0, 0.1, 0.0], [0.0, -0.05, 0.07], [0.0, -0.05, -0.07]],
         ],
         thermo=None,
-        # MO data for orbital diagram / save_orbitals
-        mo_energy_hartree=np.array([-20.0, -1.3, -0.7, -0.5, -0.3]),
-        mo_occ=np.array([2.0, 2.0, 2.0, 2.0, 2.0]),
+        # MO data for orbital diagram / save_orbitals.
+        # 7 MOs (matching STO-3G water: 5 occupied + 2 virtual) so
+        # orbital_info_from_arrays doesn't reject on the no-LUMO edge case.
+        # The 2 virtual orbitals are only consumed by the Energies panel
+        # activation path; they don't affect IR/Vibrational behavior.
+        mo_energy_hartree=np.array([-20.0, -1.3, -0.7, -0.5, -0.3, 0.5, 0.7]),
+        mo_occ=np.array([2.0, 2.0, 2.0, 2.0, 2.0, 0.0, 0.0]),
         mo_coeff=None,
         pyscf_mol_atom=[
             ("O", [0.0, 0.0, 0.0]),
@@ -292,6 +301,36 @@ class TestFreqAnalysisPanelActivation:
         assert (
             "IR Spectrum" in app._ana_available
         ), "IR Spectrum only needs frequencies_cm1, not displacements"
+
+    def test_energies_panel_activates_when_orbitals_present(
+        self, tmp_path, app, freq_result, water_mol
+    ):
+        # _PANEL_REGISTRY["frequency"] includes ("Energies", ..., True) — a
+        # Frequency calc that saves orbitals.npz should activate the Energies
+        # panel on history replay (mirrors the SP path). Closes the
+        # M-PANEL-TESTS coverage gap identified in session 54 — every panel
+        # in the registry now has a history-activation test.
+        saved = self._save(tmp_path, freq_result, water_mol)
+        save_orbitals(saved, freq_result)
+        ctx = app._build_history_context(saved)
+        app._apply_analysis_context(ctx)
+        assert "Energies" in app._ana_available
+
+    def test_energies_panel_absent_when_orbitals_missing(
+        self, tmp_path, app, freq_result, water_mol
+    ):
+        # Pair with the above: when ``orbitals.npz`` is missing (older saved
+        # Freq results, or a calc that didn't persist MO data), the Energies
+        # panel must NOT activate but the rest of the Frequency panels still
+        # do. Same defensive-fallback pattern as the SP path.
+        saved = self._save(tmp_path, freq_result, water_mol)
+        assert not (saved / "orbitals.npz").exists()
+        ctx = app._build_history_context(saved)
+        app._apply_analysis_context(ctx)
+        assert "Energies" not in app._ana_available
+        # IR + Vibrational must still activate — they don't depend on orbitals.
+        assert "IR Spectrum" in app._ana_available
+        assert "Vibrational" in app._ana_available
 
     def test_no_panels_when_spectra_empty(self, tmp_path, app, freq_result):
         saved = save_result(

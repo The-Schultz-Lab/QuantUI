@@ -195,6 +195,45 @@ class TestSPPanelActivation:
         assert len(app._ana_available) == 0
         assert app._to_analysis_btn.layout.display == "none"
 
+    def test_isosurface_stays_silent_when_orbitals_missing(
+        self, tmp_path, app, sp_result, monkeypatch
+    ):
+        """BUG.8 end-to-end regression: a saved SP result without
+        ``orbitals.npz`` on disk must NOT raise an AttributeError when the
+        Isosurface populator runs. The unit test (TestPopIsosurfaceBug8)
+        covers the bare populator; this exercises the full save → load →
+        apply path on disk so we catch any future regression in the
+        Energies-or-Isosurface ordering, the populator-loop exception
+        handling, or the __init__ + apply_analysis_context reset pair.
+        """
+        # Save WITHOUT save_orbitals → no orbitals.npz on disk.
+        saved = save_result(
+            sp_result, results_dir=tmp_path, calc_type="single_point", spectra={}
+        )
+        assert not (saved / "orbitals.npz").exists()
+
+        # Capture any ana_panel_error events that get logged by the
+        # registry loop. Direct-patch log_event so the assertion is precise.
+        logged: list[tuple[str, str]] = []
+
+        def _capture(event_type, message, **_extra):
+            logged.append((event_type, message))
+
+        monkeypatch.setattr("quantui.calc_log.log_event", _capture)
+        ctx = app._build_history_context(saved)
+        app._apply_analysis_context(ctx)
+
+        # No ana_panel_error from pop_isosurface — the defensive getattr +
+        # __init__ initialization combo prevents AttributeError.
+        errors = [m for e, m in logged if e == "ana_panel_error"]
+        assert errors == [], (
+            f"Unexpected ana_panel_error events on SP-without-orbitals "
+            f"history replay: {errors}"
+        )
+        # Both Energies and Isosurface stay unavailable (no orbitals).
+        assert "Energies" not in app._ana_available
+        assert "Isosurface" not in app._ana_available
+
 
 # ---------------------------------------------------------------------------
 # Part 4: _do_run end-to-end (PySCF-gated)
