@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import threading
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import ipywidgets as widgets
@@ -1574,6 +1575,156 @@ class TestVibExportAnimation:
         app._on_vib_export_animation(None)
         assert "color:#b91c1c" in app._vib_export_status.value
         assert "No visualization backend available" in app._vib_export_status.value
+
+
+class TestHistoryHardeningHist2:
+    """HIST.2: every history-load operation emits a single
+    ``history_load_timing`` event capturing total elapsed_ms + per-stage
+    breakdown.
+
+    Acceptance:
+    - ``_LoadTimer.stage`` records elapsed_ms for each named sub-stage.
+    - ``_LoadTimer.emit`` calls ``calc_log.log_event`` with event_type
+      ``history_load_timing``, the total_ms, the op name, and per-stage
+      ``<name>_ms`` keys.
+    - ``history_load_analysis`` emits exactly one timing event per call
+      with all expected stages.
+    - ``status="error"`` is reported when the loader raises mid-load.
+    - Telemetry failures (e.g. log_event itself raising) must NOT block
+      the load — they're swallowed inside ``emit``.
+    """
+
+    def _make_sp_result_dir(self, tmp_path):
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-") + "000001"
+        d = tmp_path / f"{ts}_H2O_RHF_STO-3G"
+        d.mkdir()
+        (d / "result.json").write_text(
+            json.dumps(
+                {
+                    "_schema_version": 2,
+                    "timestamp": ts,
+                    "calc_type": "single_point",
+                    "formula": "H2O",
+                    "method": "RHF",
+                    "basis": "STO-3G",
+                    "energy_hartree": -75.0,
+                    "energy_ev": -2041.0,
+                    "homo_lumo_gap_ev": 8.0,
+                    "converged": True,
+                    "n_iterations": 10,
+                }
+            )
+        )
+        return d
+
+    def test_load_timer_stage_records_elapsed_ms(self):
+        from quantui.app_history import _LoadTimer
+
+        timer = _LoadTimer("test_op", Path("/tmp/dummy"))
+        with timer.stage("phase_a"):
+            pass  # near-zero elapsed
+        with timer.stage("phase_b"):
+            pass
+        assert "phase_a" in timer._stages
+        assert "phase_b" in timer._stages
+        assert timer._stages["phase_a"] >= 0.0
+        assert timer._stages["phase_b"] >= 0.0
+
+    def test_load_timer_emit_logs_event_with_stage_breakdown(self):
+        from quantui.app_history import _LoadTimer
+
+        timer = _LoadTimer("test_op", Path("/tmp/dummy"))
+        with timer.stage("foo"):
+            pass
+        with patch("quantui.calc_log.log_event") as mock_log:
+            timer.emit(status="ok")
+        mock_log.assert_called_once()
+        event_type, _message = mock_log.call_args.args[:2]
+        kwargs = mock_log.call_args.kwargs
+        assert event_type == "history_load_timing"
+        assert kwargs["op"] == "test_op"
+        assert kwargs["status"] == "ok"
+        assert kwargs["total_ms"] >= 0.0
+        assert "foo_ms" in kwargs
+
+    def test_load_timer_emit_swallows_log_event_failures(self):
+        # If log_event raises (e.g. disk full), the timer's emit MUST NOT
+        # propagate the exception — telemetry must never block the load.
+        from quantui.app_history import _LoadTimer
+
+        timer = _LoadTimer("test_op", Path("/tmp/dummy"))
+        with patch("quantui.calc_log.log_event", side_effect=RuntimeError("disk full")):
+            timer.emit(status="ok")  # must not raise
+
+    def test_history_load_analysis_emits_one_timing_event(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        result_dir = self._make_sp_result_dir(tmp_path)
+        app = QuantUIApp()
+        with (
+            patch("quantui.calc_log.log_event") as mock_log,
+            patch.object(app, "_activity_pulse"),
+        ):
+            app._history_load_analysis(result_dir)
+
+        # Find the history_load_timing event (mock_log captures many other
+        # events too — e.g. _refresh_file_browser may log nothing, but other
+        # observers do).
+        timing_calls = [
+            call
+            for call in mock_log.call_args_list
+            if call.args and call.args[0] == "history_load_timing"
+        ]
+        assert len(timing_calls) == 1, (
+            f"Expected exactly one history_load_timing event, got "
+            f"{len(timing_calls)}"
+        )
+        kwargs = timing_calls[0].kwargs
+        assert kwargs["op"] == "history_load_analysis"
+        assert kwargs["status"] == "ok"
+        assert kwargs["total_ms"] >= 0.0
+        # All five expected stages must appear.
+        expected_stages = {
+            "read_pyscf_log_ms",
+            "update_log_panel_ms",
+            "build_context_ms",
+            "mol_reconstruction_ms",
+            "show_result_3d_ms",
+            "apply_analysis_context_ms",
+            "nav_tab_ms",
+        }
+        actual_stages = set(kwargs.keys()) & expected_stages
+        assert actual_stages == expected_stages, (
+            f"Missing stages: {expected_stages - actual_stages}; "
+            f"unexpected stages: {actual_stages - expected_stages}"
+        )
+
+    def test_history_load_analysis_reports_error_status_on_raise(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        result_dir = self._make_sp_result_dir(tmp_path)
+        app = QuantUIApp()
+        with (
+            patch("quantui.calc_log.log_event") as mock_log,
+            patch.object(
+                app,
+                "_apply_analysis_context",
+                side_effect=RuntimeError("simulated"),
+            ),
+            patch.object(app, "_activity_pulse"),
+        ):
+            try:
+                app._history_load_analysis(result_dir)
+            except RuntimeError:
+                pass
+
+        timing_calls = [
+            call
+            for call in mock_log.call_args_list
+            if call.args and call.args[0] == "history_load_timing"
+        ]
+        assert len(timing_calls) == 1
+        assert timing_calls[0].kwargs["status"] == "error"
 
 
 class TestHistoryHardeningHist6:
