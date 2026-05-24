@@ -85,12 +85,44 @@ def run_nmr_calc(
             "Note: PySCF is Linux / macOS / WSL only."
         ) from exc
 
+    stream = progress_stream if progress_stream is not None else sys.stdout
+
+    # M-STDERR / STDERR.1: see quantui/c_stderr.py — captures fd-2 stderr
+    # from libcint / BLAS / LAPACK / GIAO / NMR-CPHF C code and relays to
+    # ``stream`` on exit. POSIX-only; no-op on Windows.
+    from quantui.c_stderr import capture_c_stderr
+
+    with capture_c_stderr(stream):
+        return _run_nmr_calc_body(
+            molecule=molecule,
+            method=method,
+            basis=basis,
+            progress_stream=progress_stream,
+            _dft=dft,
+            _gto=gto,
+            _scf=scf,
+            stream=stream,
+        )
+
+
+def _run_nmr_calc_body(
+    *,
+    molecule: Molecule,
+    method: str,
+    basis: str,
+    progress_stream: Any,
+    _dft: Any,
+    _gto: Any,
+    _scf: Any,
+    stream: Any,
+) -> NMRResult:
+    """Inner body of :func:`run_nmr_calc` (split out for STDERR.1 wrap)."""
+    dft, gto, scf = _dft, _gto, _scf
+
     import numpy as _np
 
     from . import config as _config
     from .session_calc import _XC_ALIAS
-
-    stream = progress_stream if progress_stream is not None else sys.stdout
 
     mol = gto.Mole()
     mol.atom = molecule.to_pyscf_format()

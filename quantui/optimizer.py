@@ -374,6 +374,12 @@ def optimize_geometry(
     _stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
     _null = io.StringIO()
 
+    # M-STDERR / STDERR.1: PySCF gradients (called by ASE-BFGS at every
+    # step) emit fd-2 stderr from libcint / BLAS. Wrap the full BFGS run
+    # in capture_c_stderr so those bytes go to _stream instead of the red-
+    # text channel. POSIX-only; no-op on Windows.
+    from quantui.c_stderr import capture_c_stderr
+
     # --- Run optimization with trajectory file ---
     converged = False
     try:
@@ -386,7 +392,7 @@ def optimize_geometry(
                 logfile=_stream,  # BFGS step table → progress_stream
             )
 
-            with contextlib.redirect_stdout(_null):
+            with capture_c_stderr(_stream), contextlib.redirect_stdout(_null):
                 converged = bool(dyn.run(fmax=fmax, steps=steps))
 
             # --- Read trajectory frames ---

@@ -177,6 +177,50 @@ def run_in_session(
 
     stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
 
+    # M-STDERR / STDERR.1: capture C-level (fd-2) stderr from libcint / BLAS
+    # / LAPACK and relay it to ``stream`` on exit. Without this wrapper, the
+    # bytes surface as red text above the cell output in Voilà / Jupyter.
+    # POSIX-only; no-op on Windows. See quantui/c_stderr.py for design.
+    from quantui.c_stderr import capture_c_stderr
+
+    with capture_c_stderr(stream):
+        return _run_session_calc_body(
+            molecule=molecule,
+            method=method,
+            basis=basis,
+            verbose=verbose,
+            progress_stream=progress_stream,
+            solvent=solvent,
+            _dft=dft,
+            _gto=gto,
+            _scf=scf,
+            stream=stream,
+        )
+
+
+def _run_session_calc_body(
+    *,
+    molecule: Molecule,
+    method: str,
+    basis: str,
+    verbose: int,
+    progress_stream: Optional[IO[str]],
+    solvent: Optional[str],
+    _dft: Any,
+    _gto: Any,
+    _scf: Any,
+    stream: IO[str],
+) -> SessionResult:
+    """Inner body of :func:`run_session_calc` — see public docstring.
+
+    Split out so the public entry can wrap the C-heavy work in the
+    ``capture_c_stderr`` context manager without re-indenting ~150 lines.
+    Imports of ``pyscf`` are passed through so the dependency check stays
+    in the public entry (where its ImportError can reach the user via
+    Python's normal stderr).
+    """
+    dft, gto, scf = _dft, _gto, _scf
+
     # --- Validate method ---
     from . import config as _config
 

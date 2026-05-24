@@ -29,7 +29,7 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass, field
-from typing import IO, List, Optional
+from typing import IO, Any, List, Optional
 
 from .molecule import Molecule
 from .session_calc import HARTREE_TO_EV
@@ -168,6 +168,40 @@ def run_freq_calc(
         ) from exc
 
     stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
+
+    # M-STDERR / STDERR.1: see quantui/c_stderr.py — captures fd-2 stderr
+    # from libcint / BLAS / LAPACK / Hessian C code and relays to ``stream``
+    # on exit. POSIX-only; no-op on Windows.
+    from quantui.c_stderr import capture_c_stderr
+
+    with capture_c_stderr(stream):
+        return _run_freq_calc_body(
+            molecule=molecule,
+            method=method,
+            basis=basis,
+            progress_stream=progress_stream,
+            _dft=dft,
+            _gto=gto,
+            _scf=scf,
+            _pyscf_thermo=pyscf_thermo,
+            stream=stream,
+        )
+
+
+def _run_freq_calc_body(
+    *,
+    molecule: Molecule,
+    method: str,
+    basis: str,
+    progress_stream: Optional[IO[str]],
+    _dft: Any,
+    _gto: Any,
+    _scf: Any,
+    _pyscf_thermo: Any,
+    stream: IO[str],
+) -> FreqResult:
+    """Inner body of :func:`run_freq_calc` (split out for STDERR.1 wrap)."""
+    dft, gto, scf, pyscf_thermo = _dft, _gto, _scf, _pyscf_thermo
 
     def _status(msg: str) -> None:
         """Emit a status marker line consumable by QuantUI's log capture."""

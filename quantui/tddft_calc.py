@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass, field
-from typing import IO, List, Optional
+from typing import IO, Any, List, Optional
 
 from .molecule import Molecule
 from .session_calc import HARTREE_TO_EV
@@ -141,6 +141,40 @@ def run_tddft_calc(
         ) from exc
 
     stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
+
+    # M-STDERR / STDERR.1: see quantui/c_stderr.py — captures fd-2 stderr
+    # from libcint / BLAS / LAPACK / TDA solver C code and relays to
+    # ``stream`` on exit. POSIX-only; no-op on Windows.
+    from quantui.c_stderr import capture_c_stderr
+
+    with capture_c_stderr(stream):
+        return _run_tddft_calc_body(
+            molecule=molecule,
+            method=method,
+            basis=basis,
+            nstates=nstates,
+            progress_stream=progress_stream,
+            _dft=dft,
+            _gto=gto,
+            _scf=scf,
+            stream=stream,
+        )
+
+
+def _run_tddft_calc_body(
+    *,
+    molecule: Molecule,
+    method: str,
+    basis: str,
+    nstates: int,
+    progress_stream: Optional[IO[str]],
+    _dft: Any,
+    _gto: Any,
+    _scf: Any,
+    stream: IO[str],
+) -> TDDFTResult:
+    """Inner body of :func:`run_tddft_calc` (split out for STDERR.1 wrap)."""
+    dft, gto, scf = _dft, _gto, _scf
 
     # ── Build Mole object ────────────────────────────────────────────────────
     mol = gto.Mole()
