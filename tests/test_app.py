@@ -209,7 +209,8 @@ class TestTabStructure:
             "Compare",
             "Log",
             "Files",
-            "Status",
+            # POLISH.4 (M-POLISH, 2026-05-25): "Status" → "System Settings".
+            "System Settings",
         ]
         for i, title in enumerate(expected):
             assert app.root_tab.get_title(i) == title
@@ -2186,11 +2187,16 @@ class TestHistoryHardeningHist5:
         app = QuantUIApp()
         app._refresh_results_browser()
         labels = [lbl for lbl, _ in app.past_dd.options]
-        # Every label must include a bracketed badge.
-        assert all("[" in lbl and "]" in lbl for lbl in labels), labels
-        joined = " ".join(labels)
+        # POLISH.6 (M-POLISH, 2026-05-25) prepends a
+        # "(select a calculation to view)" placeholder so the dropdown
+        # opens in an explicit no-selection state. Strip it before
+        # asserting per-row badge contents.
+        result_labels = [lbl for lbl in labels if "select a calculation" not in lbl]
+        # Every result row must include a bracketed badge.
+        assert all("[" in lbl and "]" in lbl for lbl in result_labels), result_labels
+        joined = " ".join(result_labels)
         for expected in ("[SP]", "[GeoOpt]", "[Freq]", "[UV-Vis]", "[NMR]", "[PES]"):
-            assert expected in joined, f"missing badge {expected} in {labels}"
+            assert expected in joined, f"missing badge {expected} in {result_labels}"
 
 
 class TestUVVisSpectrumWidgets:

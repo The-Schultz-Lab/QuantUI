@@ -998,7 +998,7 @@ class QuantUIApp:
         display(
             widgets.VBox(
                 [
-                    self._welcome_html,
+                    self._welcome_header,
                     widgets.HBox(
                         [
                             self._activity_btn,
@@ -1153,7 +1153,7 @@ class QuantUIApp:
     # ── Welcome header ────────────────────────────────────────────────────
 
     def _build_welcome_header(self) -> None:
-        _bld_build_welcome_header(self)
+        _bld_build_welcome_header(self, layout_fn=_layout)
 
     # ── Shared widgets (Cell 3) ───────────────────────────────────────────
 

@@ -557,19 +557,29 @@ def build_shared_widgets(
         style={"description_width": "100px"},
         layout=layout_fn(width="190px"),
     )
+    # POLISH.10 (M-POLISH, 2026-05-25): ``style={"description_width":
+    # "initial"}`` removes the default left-side description gutter that
+    # ipywidgets reserves on Checkbox, which was producing both the
+    # indent the user noticed AND the horizontal scrollbar (description
+    # gutter + ``width="100%"`` exceeded the container width). Letting
+    # the checkbox size to its content also drops the scrollbar.
     app.preopt_cb = widgets.Checkbox(
         value=False,
         description="Classical pre-optimize geometry (fast, crude starting point)",
         disabled=not preopt_available,
-        layout=layout_fn(width="100%"),
+        style={"description_width": "initial"},
+        indent=False,
     )
 
     from quantui.config import SOLVENT_OPTIONS as _SOLVENT_OPTS
 
+    # POLISH.10: same fix as preopt_cb above — drop the gutter +
+    # explicit width that produced the indent + scrollbar.
     app.solvent_cb = widgets.Checkbox(
         value=False,
         description="Implicit solvent (PCM)",
-        layout=layout_fn(width="240px"),
+        style={"description_width": "initial"},
+        indent=False,
     )
     app.solvent_dd = widgets.Dropdown(
         options=list(_SOLVENT_OPTS.keys()),
@@ -636,7 +646,7 @@ def build_shared_widgets(
         value=False,
         description="Geometry optimization before calculation (QM, slower)",
         style={"description_width": "initial"},
-        layout=layout_fn(width="100%"),
+        indent=False,
     )
     app._freq_seed_note = widgets.HTML("")
 
@@ -850,33 +860,42 @@ def build_theme_selector(app: Any, *, layout_fn: Any) -> None:
         display(HTML(app._theme_css("Dark")))
 
 
-def build_welcome_header(app: Any) -> None:
+def build_welcome_header(app: Any, *, layout_fn: Any = None) -> None:
     """Build the QuantUI welcome banner.
 
-    POLISH.1 (M-POLISH, 2026-05-25): the inline SVG was already here but
-    static. Ported the CSS keyframe animations from ``docs/logo.svg`` so
-    the orbital rings spin at slightly different speeds + directions
-    (9 s / 13 s reverse / 17 s). ``prefers-reduced-motion`` is honoured.
-    Inline-SVG + inline-CSS works in ipywidgets.HTML because both pass
-    the Jupyter widget sanitizer (Voilà's HTML pipeline allows <style>
-    inside <svg> root).
+    POLISH.1 third iteration (M-POLISH, 2026-05-25): the
+    ``<img src="data:image/svg+xml;base64,...">`` approach failed too
+    — Voilà's HTML sanitizer (stricter than JupyterLab's) strips
+    ``data:`` URIs from ``<img src>`` attributes. The third iteration
+    uses ``widgets.Image(value=svg_bytes, format="svg+xml")`` which
+    routes the SVG through Jupyter's binary widget channel, bypassing
+    the HTML sanitizer entirely. CSS animations inside the SVG still
+    run because the front-end serves it as an external SVG document.
+
+    The original ``_welcome_html`` widget remains (the exit handler at
+    ``app_runflow.on_exit_clicked`` rewrites its ``.value`` with the
+    shutdown message; an HBox-based wrapper would break that path).
+    A new ``_welcome_header`` HBox combines the logo widget + text
+    widget for the display() entry point.
     """
-    logo_svg = (
-        '<svg width="120" height="120" viewBox="0 0 280 280"'
-        ' xmlns="http://www.w3.org/2000/svg">'
+    # Full SVG. Includes the orbital animations ported from
+    # ``docs/logo.svg`` — three rings spinning at 9 s / 13 s reverse /
+    # 17 s with prefers-reduced-motion respected.
+    _logo_svg_raw = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 280">'
         "<defs>"
         "<style>"
-        ".qring{transform-origin:140px 140px;}"
-        ".qring--1{animation:qspin1 9s linear infinite;}"
+        ".qring{transform-origin:140px 140px}"
+        ".qring--1{animation:qspin1 9s linear infinite}"
         ".qring--2{animation:qspin2 13s linear infinite reverse;"
-        "transform:rotate(60deg);}"
+        "transform:rotate(60deg)}"
         ".qring--3{animation:qspin3 17s linear infinite;"
-        "transform:rotate(120deg);}"
-        "@keyframes qspin1{to{transform:rotate(360deg);}}"
-        "@keyframes qspin2{to{transform:rotate(-300deg);}}"
-        "@keyframes qspin3{to{transform:rotate(480deg);}}"
+        "transform:rotate(120deg)}"
+        "@keyframes qspin1{to{transform:rotate(360deg)}}"
+        "@keyframes qspin2{to{transform:rotate(-300deg)}}"
+        "@keyframes qspin3{to{transform:rotate(480deg)}}"
         "@media (prefers-reduced-motion:reduce){"
-        ".qring{animation-play-state:paused;}}"
+        ".qring{animation-play-state:paused}}"
         "</style>"
         '<filter id="q-glow" x="-50%" y="-50%" width="200%" height="200%">'
         '<feGaussianBlur stdDeviation="7" result="blur"/>'
@@ -914,25 +933,50 @@ def build_welcome_header(app: Any) -> None:
         '<circle cx="137" cy="137" r="3" fill="rgba(255,255,255,0.45)"/>'
         "</svg>"
     )
-    html = (
-        f'<div style="display:flex;align-items:center;gap:28px;'
-        f"padding:22px 4px 18px;margin-bottom:4px;"
-        f"border-bottom:1px solid #e2e8f0"
-        ">"
-        f"{logo_svg}"
-        f"<div>"
-        f'<div style="font-size:44px;font-weight:700;letter-spacing:-0.8px;'
-        f'color:#0f172a;line-height:1.05">QuantUI</div>'
-        f'<div style="font-size:20px;color:#475569;margin-top:7px">'
-        f"Quantum chemistry calculations, right on your device</div>"
-        f'<div style="font-size:13px;color:#94a3b8;margin-top:5px">'
-        f"v{quantui.__version__} &nbsp;&middot;&nbsp; "
-        f"<b>Help</b> tab for instructions &nbsp;&middot;&nbsp; "
-        f"<b>System Settings</b> tab for environment + calibration</div>"
-        f"</div>"
-        f"</div>"
+    # widgets.Image takes the raw SVG bytes and serves them as
+    # ``format="svg+xml"`` over Jupyter's BINARY widget channel — no
+    # HTML sanitizer touches the bytes, no ``data:`` URI restriction.
+    # The browser renders the SVG natively as an image (CSS animations
+    # inside the SVG still play).
+    app._welcome_logo = widgets.Image(
+        value=_logo_svg_raw.encode("utf-8"),
+        format="svg+xml",
+        width=120,
+        height=120,
     )
-    app._welcome_html = widgets.HTML(value=html)
+
+    # Text-only HTML. ``_welcome_html`` is kept as a pure HTML widget so
+    # ``app_runflow.on_exit_clicked`` can still ``.value = ...`` it with
+    # the shutdown message.
+    text_html = (
+        "<div>"
+        '<div style="font-size:44px;font-weight:700;letter-spacing:-0.8px;'
+        'color:#0f172a;line-height:1.05">QuantUI</div>'
+        '<div style="font-size:20px;color:#475569;margin-top:7px">'
+        "Free, open, and interactive quantum chemistry</div>"
+        '<div style="font-size:13px;color:#94a3b8;margin-top:5px">'
+        f"v{quantui.__version__} &nbsp;&middot;&nbsp; "
+        "<b>Help</b> tab for instructions &nbsp;&middot;&nbsp; "
+        "<b>System Settings</b> tab for environment + calibration</div>"
+        "</div>"
+    )
+    app._welcome_html = widgets.HTML(value=text_html)
+
+    # Container that combines logo + text. ``display()`` mounts this
+    # instead of ``_welcome_html`` directly (see app.py:1001).
+    _layout = (
+        layout_fn if layout_fn is not None else (lambda **kw: widgets.Layout(**kw))
+    )
+    app._welcome_header = widgets.HBox(
+        [app._welcome_logo, app._welcome_html],
+        layout=_layout(
+            align_items="center",
+            justify_content="flex-start",
+            padding="22px 4px 18px",
+            margin="0 0 4px",
+            border_bottom="1px solid #e2e8f0",
+        ),
+    )
 
 
 def build_molecule_section(

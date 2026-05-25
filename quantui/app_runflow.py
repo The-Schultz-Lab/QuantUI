@@ -612,14 +612,17 @@ def on_exit_clicked(app: Any, _unused: Any = None) -> None:
 
     app._exit_btn.description = "Exiting…"
     app._exit_btn.disabled = True
+    # POLISH.1 retry-2 (2026-05-25): the welcome logo now lives in its
+    # own ``widgets.Image`` next to the text. At shutdown hide the logo
+    # so the centered "QuantUI has shut down" message isn't off-center.
+    if hasattr(app, "_welcome_logo"):
+        try:
+            app._welcome_logo.layout.display = "none"
+        except Exception:  # noqa: BLE001 — best-effort UI tweak
+            pass
     app._welcome_html.value = (
         '<div style="display:flex;align-items:center;justify-content:center;'
-        'padding:32px;gap:16px">'
-        '<svg width="40" height="40" viewBox="0 0 280 280" xmlns="http://www.w3.org/2000/svg">'
-        '<circle cx="140" cy="140" r="48" fill="rgba(37,99,235,0.15)"/>'
-        '<circle cx="140" cy="140" r="14" fill="#2563eb"/>'
-        '<circle cx="140" cy="140" r="8" fill="#60a5fa"/>'
-        "</svg>"
+        'padding:32px;gap:16px;width:100%">'
         '<div style="font-size:20px;color:#475569">'
         "QuantUI has shut down. You may close this tab.</div>"
         "</div>"
