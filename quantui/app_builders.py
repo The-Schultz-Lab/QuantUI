@@ -403,6 +403,10 @@ def build_history_section(
     app._cal_accordion = widgets.Accordion(children=[cal_panel], selected_index=None)
     app._cal_accordion.set_title(0, "Calibrate time estimates")
 
+    # POLISH.3 (M-POLISH, 2026-05-25): the History tab is now purely
+    # the result-browser. Performance stats + Calibrate accordions
+    # moved to the System Settings tab — see below — so the user finds
+    # benchmarking + system state in one logical place.
     app.history_panel = widgets.VBox(
         [
             widgets.HTML(
@@ -420,9 +424,17 @@ def build_history_section(
             ),
             app.results_path_lbl,
             app.past_output,
-            app._perf_accordion,
-            app._cal_accordion,
         ]
+    )
+
+    # POLISH.3: now that the calibration + performance accordions exist
+    # (created above in this function), append them to the System
+    # Settings tab. ``_status_tab_panel`` was built earlier in
+    # ``build_status_panel`` without these — extend its children tuple.
+    app._status_tab_panel.children = (
+        *app._status_tab_panel.children,
+        app._cal_accordion,
+        app._perf_accordion,
     )
 
     app._refresh_results_browser()
@@ -1815,12 +1827,16 @@ def build_output_tab(app: Any, *, layout_fn: Any) -> None:
         button_style="danger",
         layout=layout_fn(width="140px", display="none"),
     )
+    # POLISH.8 (M-POLISH, 2026-05-25): the Log tab moved to be an
+    # Accordion inside the History tab — rationale in the roadmap. The
+    # explanatory text no longer needs to say "Use View log in the
+    # History tab" since the user IS in the History tab now.
     app.log_tab_panel = widgets.VBox(
         [
             widgets.HTML(
                 '<p style="color:#555;font-size:13px;margin:4px 0 8px">'
-                "Raw PySCF output for the most recent calculation. "
-                "Use <b>View log</b> in the History tab to load a saved result's log. "
+                "Raw PySCF output for the most recent calculation or the "
+                "currently-selected history result. "
                 "Energy-level diagrams, trajectories, and spectra are in the "
                 "<b>Analysis</b> tab.</p>"
             ),
@@ -1843,6 +1859,20 @@ def build_output_tab(app: Any, *, layout_fn: Any) -> None:
             ),
         ],
         layout=layout_fn(padding="8px 0"),
+    )
+
+    # POLISH.8: wrap the log panel in an Accordion + append to the
+    # History tab. ``history_panel`` was built in
+    # ``build_history_section`` earlier in the app-init sequence
+    # (see app.py: _build_history_section runs BEFORE _build_output_tab).
+    app._history_log_accordion = widgets.Accordion(
+        children=[app.log_tab_panel],
+        selected_index=None,
+    )
+    app._history_log_accordion.set_title(0, "PySCF output log")
+    app.history_panel.children = (
+        *app.history_panel.children,
+        app._history_log_accordion,
     )
 
 

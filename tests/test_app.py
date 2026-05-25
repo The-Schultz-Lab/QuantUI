@@ -195,9 +195,11 @@ class TestMainThreadCallbackQueue:
 class TestTabStructure:
     """root_tab has the correct number and titles of tabs."""
 
-    def test_eight_tabs(self):
+    def test_seven_tabs(self):
+        # POLISH.8 (M-POLISH, 2026-05-25): Log moved into the History
+        # tab as a sub-accordion → 8 root tabs → 7.
         app = QuantUIApp()
-        assert len(app.root_tab.children) == 8
+        assert len(app.root_tab.children) == 7
 
     def test_tab_titles(self):
         app = QuantUIApp()
@@ -207,7 +209,9 @@ class TestTabStructure:
             "Analysis",
             "History",
             "Compare",
-            "Log",
+            # POLISH.8 (M-POLISH, 2026-05-25): Log tab moved into the
+            # History tab as a sub-accordion; Files + System Settings
+            # renumber to indices 5 and 6.
             "Files",
             # POLISH.4 (M-POLISH, 2026-05-25): "Status" → "System Settings".
             "System Settings",

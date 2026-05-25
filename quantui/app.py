@@ -1392,6 +1392,12 @@ class QuantUIApp:
         _rtp.insert(_rtp.index(self._to_analysis_btn), self.advanced_accordion)
         self.results_tab_panel.children = tuple(_rtp)
 
+        # POLISH.8 (M-POLISH, 2026-05-25): Log moved to be an
+        # Accordion inside the History tab — see build_output_tab for
+        # the wrap. Tab indices renumbered: Files 6→5, System Settings
+        # 7→6. Update any caller that depended on tab-index 5 being
+        # "Log" (notably _goto_output_tab — now navigates to History
+        # and expands the log accordion).
         self.root_tab = widgets.Tab(
             children=[
                 _calculate_content,
@@ -1399,7 +1405,6 @@ class QuantUIApp:
                 self.analysis_tab_panel,
                 self.history_panel,
                 self.compare_panel,
-                self.log_tab_panel,
                 self.files_tab_panel,
                 self._status_tab_panel,
             ]
@@ -1409,12 +1414,11 @@ class QuantUIApp:
         self.root_tab.set_title(2, "Analysis")
         self.root_tab.set_title(3, "History")
         self.root_tab.set_title(4, "Compare")
-        self.root_tab.set_title(5, "Log")
-        self.root_tab.set_title(6, "Files")
+        self.root_tab.set_title(5, "Files")
         # POLISH.4 (M-POLISH, 2026-05-25): "Status" was ambiguous —
         # status of what? "System Settings" is what the tab actually
         # holds (env info + calibration + GPU status + UI prefs).
-        self.root_tab.set_title(7, "System Settings")
+        self.root_tab.set_title(6, "System Settings")
         self.root_tab.observe(
             self._safe_cb(self._on_root_tab_changed), names="selected_index"
         )
@@ -1824,6 +1828,7 @@ class QuantUIApp:
             ".yml",
             ".xyz",
             ".cube",
+            ".molden",
         }
 
         if suffix in image_ext:
@@ -1833,6 +1838,184 @@ class QuantUIApp:
                 display(_Image(filename=str(path)))
             self._set_files_status(f"Previewing image: {path.name}")
             return
+
+        if suffix == ".svg":
+            # IPython.display.Image doesn't handle SVG well — use SVG.
+            from IPython.display import SVG as _SVG
+
+            with self._files_preview_output:
+                display(_SVG(filename=str(path)))
+            self._set_files_status(f"Previewing SVG: {path.name}")
+            return
+
+        # POLISH.5 (M-POLISH, 2026-05-25): specialized previews for
+        # extensions where the generic text dump is unhelpful. Each
+        # handler caps file reads at 256 KB. On any exception inside a
+        # handler, fall through to the generic text dispatch below so
+        # the user always sees SOMETHING. Order matters: 3D-structure
+        # extensions (.xyz/.mol/.pdb) take precedence over their
+        # text-ext membership.
+
+        if suffix in {".xyz", ".mol", ".pdb"}:
+            # 3D structure → py3Dmol viewer via raw model load. Falls
+            # through to text dispatch on failure (so the user still
+            # sees the raw coordinates).
+            try:
+                import py3Dmol as _p3d  # type: ignore[import]
+
+                model_format = {".xyz": "xyz", ".mol": "mol", ".pdb": "pdb"}[suffix]
+                raw_text = path.read_text(encoding="utf-8", errors="replace")
+                if len(raw_text) <= 256_000:
+                    viewer = _p3d.view(width=500, height=380)
+                    viewer.addModel(raw_text, model_format)
+                    viewer.setStyle({"stick": {}, "sphere": {"scale": 0.25}})
+                    viewer.setBackgroundColor("white")
+                    viewer.zoomTo()
+                    html_str = viewer._make_html()
+                    with self._files_preview_output:
+                        display(HTML(html_str))
+                    self._set_files_status(
+                        f"3D structure preview: {path.name}"
+                        f" ({model_format.upper()})"
+                    )
+                    return
+            except Exception:  # noqa: BLE001 — fall through to text preview
+                pass
+
+        if suffix == ".json":
+            try:
+                import json as _json_pretty
+
+                raw = path.read_bytes()[:256_000]
+                parsed = _json_pretty.loads(raw.decode("utf-8", errors="replace"))
+                pretty = _json_pretty.dumps(parsed, indent=2, ensure_ascii=False)
+                # Cap line count so a 10k-key dict doesn't lock the viewport.
+                lines = pretty.splitlines()
+                truncated = False
+                if len(lines) > 500:
+                    lines = lines[:500]
+                    truncated = True
+                rendered = "\n".join(lines)
+                if truncated:
+                    rendered += "\n\n[truncated to first 500 lines]"
+                with self._files_preview_output:
+                    display(
+                        HTML(
+                            "<pre style='white-space:pre-wrap;word-break:break-word;"
+                            "font-size:12px;line-height:1.35;margin:0'>"
+                            f"{_html.escape(rendered)}</pre>"
+                        )
+                    )
+                self._set_files_status(f"JSON preview: {path.name}")
+                return
+            except Exception:  # noqa: BLE001 — fall through to text preview
+                pass
+
+        if suffix == ".csv":
+            try:
+                import csv as _csv
+
+                with open(path, encoding="utf-8", errors="replace", newline="") as fh:
+                    reader = _csv.reader(fh)
+                    rows: list[list[str]] = []
+                    for i, row in enumerate(reader):
+                        if i >= 50:
+                            break
+                        rows.append(row)
+                if rows:
+                    header = rows[0]
+                    body = rows[1:]
+                    head_html = "".join(
+                        f'<th style="padding:4px 10px;text-align:left;'
+                        f"border-bottom:1px solid #cbd5e1;font-size:12px;"
+                        f'color:#1e293b">{_html.escape(str(c))}</th>'
+                        for c in header
+                    )
+                    body_html = "".join(
+                        "<tr>"
+                        + "".join(
+                            f'<td style="padding:3px 10px;font-size:12px;'
+                            f"border-bottom:1px solid #f1f5f9;color:#334155;"
+                            f'font-variant-numeric:tabular-nums">{_html.escape(str(c))}</td>'
+                            for c in r
+                        )
+                        + "</tr>"
+                        for r in body
+                    )
+                    note = (
+                        f'<p style="font-size:11px;color:#94a3b8;margin:4px 0 6px">'
+                        f"First {len(rows)} rows shown.</p>"
+                        if len(rows) >= 50
+                        else ""
+                    )
+                    table_html = (
+                        f"{note}"
+                        '<table style="border-collapse:collapse;width:100%">'
+                        f"<thead><tr>{head_html}</tr></thead>"
+                        f"<tbody>{body_html}</tbody></table>"
+                    )
+                    with self._files_preview_output:
+                        display(HTML(table_html))
+                    self._set_files_status(
+                        f"CSV preview: {path.name} ({len(rows)} rows)"
+                    )
+                    return
+            except Exception:  # noqa: BLE001 — fall through to text preview
+                pass
+
+        if suffix in {".html", ".htm"}:
+            try:
+                raw = path.read_text(encoding="utf-8", errors="replace")
+                if len(raw) <= 1_000_000:
+                    # Sandboxed iframe via srcdoc — embedded JS can't
+                    # reach the parent app.
+                    iframe_html = (
+                        '<iframe sandbox="allow-scripts" '
+                        'style="width:100%;height:400px;border:1px solid #cbd5e1;'
+                        'border-radius:4px" '
+                        f'srcdoc="{_html.escape(raw, quote=True)}"></iframe>'
+                    )
+                    with self._files_preview_output:
+                        display(HTML(iframe_html))
+                    self._set_files_status(f"HTML preview (sandboxed): {path.name}")
+                    return
+            except Exception:  # noqa: BLE001 — fall through to text preview
+                pass
+
+        if suffix == ".cube":
+            # Cube files can be hundreds of MB (volumetric data). Don't
+            # dump them — show the header + a size + a hint.
+            try:
+                stat = path.stat()
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    head_lines = []
+                    for i, line in enumerate(fh):
+                        if i >= 6:
+                            break
+                        head_lines.append(line.rstrip("\n"))
+                header_text = "\n".join(head_lines)
+                size_mb = stat.st_size / (1024 * 1024)
+                msg_html = (
+                    f'<p style="font-size:13px;color:#475569;margin:0 0 6px">'
+                    f"<b>Cube file:</b> {_html.escape(path.name)} "
+                    f"&middot; {size_mb:.2f} MB</p>"
+                    '<p style="font-size:12px;color:#64748b;margin:0 0 6px">'
+                    "Use the <b>Analysis</b> tab's Orbital Isosurface panel to "
+                    "render volumetric data; the raw file is too large to "
+                    "preview inline.</p>"
+                    '<p style="font-size:11px;color:#94a3b8;margin:6px 0 4px">'
+                    "Header (first 6 lines):</p>"
+                    '<pre style="white-space:pre-wrap;font-size:11px;'
+                    "line-height:1.35;margin:0;background:#f8fafc;padding:6px;"
+                    'border-radius:4px">'
+                    f"{_html.escape(header_text)}</pre>"
+                )
+                with self._files_preview_output:
+                    display(HTML(msg_html))
+                self._set_files_status(f"Cube file metadata: {path.name}")
+                return
+            except Exception:  # noqa: BLE001 — fall through to text preview
+                pass
 
         is_text = suffix in text_ext
         if not is_text:
@@ -4389,7 +4572,16 @@ class QuantUIApp:
         return _wrapper
 
     def _goto_output_tab(self) -> None:
-        self.root_tab.selected_index = 5
+        # POLISH.8 (M-POLISH, 2026-05-25): the standalone Log tab is
+        # gone; the PySCF output log now lives in an Accordion inside
+        # the History tab (index 3). Switch tabs + expand the log
+        # accordion so the user lands directly on the log content.
+        self.root_tab.selected_index = 3
+        if hasattr(self, "_history_log_accordion"):
+            try:
+                self._history_log_accordion.selected_index = 0
+            except Exception:  # noqa: BLE001 — best-effort UI tweak
+                pass
 
     def _render_log(self, text: str, source_label: str = "") -> None:
         import html as _html_mod
