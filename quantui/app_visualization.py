@@ -1532,6 +1532,11 @@ def render_orbital_isosurface(
         return
     if _is_stale():
         return
+    # M-EXPORT / EXPORT.5: track the last-generated cube + its orbital
+    # label so the "Export cube" button can copy it to the top-level
+    # result dir with a friendly name without re-deriving the path.
+    app._last_cube_path = cube_path
+    app._last_cube_orbital = orbital_label
     try:
         from quantui import calc_log as _clog
 
@@ -1551,6 +1556,17 @@ def render_orbital_isosurface(
         app._orb_iso_output,
         html_str,
     )
+
+    # M-EXPORT / EXPORT.5: now that ``_last_cube_path`` is populated, the
+    # "Export cube" button has something to copy. Enable it on the main
+    # thread alongside the iso render swap.
+    def _enable_cube_btn() -> None:
+        try:
+            app._iso_export_cube_btn.disabled = False
+        except Exception:
+            pass
+
+    app._queue_main_thread_callback(_enable_cube_btn)
 
 
 def _swap_vib_output(app: Any, html_str: str) -> None:

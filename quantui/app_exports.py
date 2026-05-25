@@ -119,6 +119,54 @@ def export_molecule_and_label(app: Any) -> tuple[Any, str, str]:
     return mol, method, basis
 
 
+def on_iso_export_cube(app: Any, btn: Any) -> None:
+    """Copy the last-generated cube file to the result folder (EXPORT.5).
+
+    Reads ``app._last_cube_path`` (set by the isosurface render path in
+    ``app_visualization.py``) and copies it to
+    ``<result_dir>/<orbital_label>.cube`` so the user can hand a
+    friendly-named cube to Avogadro / VMD / Multiwfn without scrolling
+    through ``isosurfaces/<formula>_<orb>_<timestamp>.cube``.
+    """
+    from quantui.results_storage import export_cube
+
+    src = getattr(app, "_last_cube_path", None)
+    label = getattr(app, "_last_cube_orbital", None) or "orbital"
+    result_dir = getattr(app, "_last_result_dir", None)
+    if src is None or not isinstance(src, Path) or not src.exists():
+        app._iso_export_status.value = (
+            '<span style="color:#b22">Generate an isosurface first.</span>'
+        )
+        return
+    if result_dir is None or not isinstance(result_dir, Path):
+        app._iso_export_status.value = (
+            '<span style="color:#b22">No result folder available.</span>'
+        )
+        return
+    dest = export_cube(src, result_dir, orbital_label=label)
+    if dest is None:
+        app._iso_export_status.value = (
+            '<span style="color:#b22">Cube export failed (see log).</span>'
+        )
+        return
+    app._iso_export_status.value = f'<span style="color:#2a7">Saved: {dest.name}</span>'
+
+
+def on_export_bundle(app: Any, btn: Any) -> None:
+    """Zip the entire result folder for sharing (EXPORT.5)."""
+    from quantui.results_storage import export_result_bundle
+
+    result_dir = getattr(app, "_last_result_dir", None)
+    if result_dir is None or not isinstance(result_dir, Path):
+        app._export_bundle_status.value = "Run or load a calculation first."
+        return
+    out_path = export_result_bundle(result_dir)
+    if out_path is None:
+        app._export_bundle_status.value = "Bundle export failed (see log)."
+        return
+    app._export_bundle_status.value = f"Saved: {out_path}"
+
+
 def molecule_to_rdkit(mol: Any) -> Any:
     """Convert a Molecule to an RDKit Mol with inferred bonds (best-effort)."""
     try:

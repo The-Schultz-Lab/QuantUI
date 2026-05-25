@@ -444,6 +444,89 @@ def save_trajectory_ase(
     return out_path
 
 
+def export_cube(
+    src_cube_path: Path,
+    result_dir: Path,
+    *,
+    orbital_label: str = "orbital",
+) -> Optional[Path]:
+    """Copy a cube file to the top-level result dir with a friendly name (EXPORT.5).
+
+    Internal cube files live in ``<result_dir>/isosurfaces/`` with
+    timestamped filenames (``H2O_HOMO_2026-05-23_19-30-00.cube``) — fine
+    for replay but verbose to share. This helper makes a copy at
+    ``<result_dir>/<orbital_label>.cube`` so the user can hand a cube
+    to Avogadro / VMD / Multiwfn without scrolling through timestamp
+    suffixes.
+
+    Returns the destination path on success, ``None`` if the source
+    doesn't exist or the copy fails. Overwrites any existing
+    ``<orbital_label>.cube`` at the top level — by design, the user is
+    explicitly asking for "the active cube under a friendly name".
+    """
+    import re as _re
+    import shutil
+
+    if not src_cube_path.exists():
+        return None
+    safe_label = _re.sub(r"[^A-Za-z0-9_.-]+", "_", orbital_label).strip("._")
+    if not safe_label:
+        safe_label = "orbital"
+    dest = result_dir / f"{safe_label}.cube"
+    try:
+        shutil.copy2(src_cube_path, dest)
+    except Exception:
+        return None
+    return dest
+
+
+def export_result_bundle(
+    result_dir: Path,
+    *,
+    output_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """Zip an entire result directory for sharing (EXPORT.5 stretch goal).
+
+    Produces ``<output_dir>/<result_dir_name>.zip`` containing every
+    file the calc wrote — ``result.json``, ``pyscf.log``, ``orbitals.npz``,
+    ``trajectory.json`` / ``.xyz`` / ``.traj``, the ``isosurfaces/``
+    folder, the ``.molden`` companion, every panel-data CSV, etc. The
+    one-zip artifact is what students typically need to email a result
+    to a collaborator or attach to a writeup.
+
+    ``output_dir`` defaults to ``result_dir.parent`` (sibling of the
+    result folder) — keeps the zip next to the original directory so
+    the user finds it from the Files tab.
+
+    Returns the path to the zip on success, ``None`` if the result dir
+    doesn't exist or ``shutil.make_archive`` raises.
+    """
+    import shutil
+
+    if not result_dir.exists() or not result_dir.is_dir():
+        return None
+    base = output_dir if output_dir is not None else result_dir.parent
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    # ``make_archive`` returns the full path of the created archive
+    # (including the extension). It accepts a base name without
+    # extension and the format (``"zip"``); root_dir + base_dir control
+    # what's inside.
+    archive_basename = str(base / result_dir.name)
+    try:
+        archive_path = shutil.make_archive(
+            base_name=archive_basename,
+            format="zip",
+            root_dir=str(result_dir.parent),
+            base_dir=result_dir.name,
+        )
+    except Exception:
+        return None
+    return Path(archive_path)
+
+
 def load_orbitals(result_dir: Path):
     """Reload MO data saved by :func:`save_orbitals`.
 

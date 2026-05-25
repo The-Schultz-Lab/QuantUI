@@ -772,6 +772,19 @@ def build_shared_widgets(
         layout=layout_fn(width="130px"),
     )
     app.struct_export_status = widgets.Label()
+    # M-EXPORT / EXPORT.5: zip the entire result folder for emailing /
+    # attaching to a writeup. Disabled until ``_last_result_dir`` is set.
+    app._export_bundle_btn = widgets.Button(
+        description="Export bundle (.zip)",
+        icon="file-archive-o",
+        disabled=True,
+        tooltip=(
+            "Zip the entire result folder (geometry, log, orbitals, cubes, "
+            "spectra) for sharing."
+        ),
+        layout=layout_fn(width="180px"),
+    )
+    app._export_bundle_status = widgets.Label()
 
 
 def build_theme_selector(app: Any, *, layout_fn: Any) -> None:
@@ -1327,6 +1340,23 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         ),
         layout=layout_fn(width="200px", margin="8px 0 4px 0"),
     )
+    # M-EXPORT / EXPORT.5: copy the last-generated cube to the top-level
+    # result dir under a friendly name (HOMO.cube / LUMO.cube / etc.).
+    # Disabled until the first isosurface generation populates
+    # ``app._last_cube_path``.
+    app._iso_export_cube_btn = widgets.Button(
+        description="Export cube",
+        icon="download",
+        disabled=True,
+        tooltip=(
+            "Copy the last-generated cube file to the result folder under a "
+            "friendly name (e.g. HOMO.cube) for use in Avogadro / VMD / Multiwfn."
+        ),
+        layout=layout_fn(width="160px", margin="8px 0 4px 8px"),
+    )
+    app._iso_export_status = widgets.HTML(
+        value="", layout=layout_fn(margin="0 0 0 8px")
+    )
     iso_body = widgets.VBox(
         [
             widgets.HTML(
@@ -1336,7 +1366,14 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 "Optimization first, then click <b>Generate</b>.</p>"
             ),
             app._orb_iso_controls,
-            app._iso_generate_btn,
+            widgets.HBox(
+                [
+                    app._iso_generate_btn,
+                    app._iso_export_cube_btn,
+                    app._iso_export_status,
+                ],
+                layout=layout_fn(align_items="center", gap="6px"),
+            ),
         ],
         layout=layout_fn(padding="8px"),
     )
@@ -1624,6 +1661,16 @@ def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) ->
                 layout=layout_fn(flex_wrap="wrap", gap="6px"),
             ),
             app.struct_export_status,
+            widgets.HTML('<hr style="margin:10px 0 8px">'),
+            widgets.HTML(
+                '<p style="color:#555;font-size:13px;margin:0 0 6px">'
+                "Bundle every file in this result folder into a single zip "
+                "for sharing.</p>"
+            ),
+            widgets.HBox(
+                [app._export_bundle_btn, app._export_bundle_status],
+                layout=layout_fn(align_items="center", gap="6px"),
+            ),
         ]
     )
     app.advanced_accordion = widgets.Accordion(children=[export_content])

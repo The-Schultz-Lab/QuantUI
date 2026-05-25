@@ -122,6 +122,10 @@ def on_view_log(app: Any, btn: Any) -> None:
     result_dir = Path(path_str)
     app._last_result_dir = result_dir
     try:
+        app._export_bundle_btn.disabled = False
+    except Exception:
+        pass
+    try:
         import quantui.calc_log as _calc_log
 
         _calc_log.log_event(
@@ -276,6 +280,10 @@ def history_load_results(
     status = "ok"
     try:
         app._last_result_dir = result_dir
+        try:
+            app._export_bundle_btn.disabled = False
+        except Exception:
+            pass
         with timer.stage("format_result_html"):
             app.result_output.clear_output()
             with app.result_output:
@@ -318,6 +326,10 @@ def history_load_analysis(
     status = "ok"
     try:
         app._last_result_dir = result_dir
+        try:
+            app._export_bundle_btn.disabled = False
+        except Exception:
+            pass
         with timer.stage("read_pyscf_log"):
             log_path = result_dir / "pyscf.log"
             text = (

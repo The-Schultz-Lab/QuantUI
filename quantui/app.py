@@ -128,6 +128,9 @@ from quantui.app_exports import (
     on_export as _exp_on_export,
 )
 from quantui.app_exports import (
+    on_export_bundle as _exp_on_export_bundle,
+)
+from quantui.app_exports import (
     on_export_mol as _exp_on_export_mol,
 )
 from quantui.app_exports import (
@@ -135,6 +138,9 @@ from quantui.app_exports import (
 )
 from quantui.app_exports import (
     on_export_xyz as _exp_on_export_xyz,
+)
+from quantui.app_exports import (
+    on_iso_export_cube as _exp_on_iso_export_cube,
 )
 from quantui.app_formatters import (
     format_freq_result as _fmt_freq_result,
@@ -921,6 +927,12 @@ class QuantUIApp:
         self._last_orb_mo_coeff: Any = None
         self._last_orb_mol_atom: Any = None
         self._last_orb_mol_basis: Any = None
+        # Last-generated cube file path + orbital label (M-EXPORT / EXPORT.5).
+        # Set by the isosurface render path; consumed by the Export cube
+        # button. Initialized here so the button handler reads ``None``
+        # cleanly when no isosurface has been generated yet.
+        self._last_cube_path: Optional[Path] = None
+        self._last_cube_orbital: Optional[str] = None
         self._last_pes_fig: Any = None
         self._run_output_scroll_guard_installed: bool = False
         self._files_current_dir: Optional[Path] = None
@@ -1565,6 +1577,9 @@ class QuantUIApp:
         )
         # Orbital isosurface generate button
         self._iso_generate_btn.on_click(self._on_iso_generate)
+        # M-EXPORT / EXPORT.5: cube + bundle exports
+        self._iso_export_cube_btn.on_click(self._on_iso_export_cube)
+        self._export_bundle_btn.on_click(self._on_export_bundle)
 
     # ── Files tab ────────────────────────────────────────────────────────
 
@@ -2446,6 +2461,12 @@ class QuantUIApp:
 
     def _on_export_pdb(self, btn) -> None:
         _exp_on_export_pdb(self, btn)
+
+    def _on_iso_export_cube(self, btn) -> None:
+        _exp_on_iso_export_cube(self, btn)
+
+    def _on_export_bundle(self, btn) -> None:
+        _exp_on_export_bundle(self, btn)
 
     def _on_ir_export_plot(self, btn) -> None:
         self._export_plot_figure(
@@ -3887,6 +3908,12 @@ class QuantUIApp:
                     spectra=save_spectra,
                 )
                 self._last_result_dir = _saved_dir
+                # M-EXPORT / EXPORT.5: result folder is now on disk —
+                # the "Export bundle (.zip)" button has something to zip.
+                try:
+                    self._export_bundle_btn.disabled = False
+                except Exception:
+                    pass
                 _saved_data = load_result(_saved_dir)
                 save_thumbnail(_saved_dir, _saved_data)
                 _ana_ctx.result_dir = _saved_dir
