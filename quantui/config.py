@@ -631,6 +631,19 @@ def main():
 
     try:
         method = '{method}'
+        # Display name → PySCF xc string + external D3 dispersion. Matches
+        # quantui/session_calc.py resolve_xc + maybe_apply_d3. Important
+        # for methods that PySCF doesn't accept directly (notably
+        # wB97X-D — on dftd3's black-list; PBE-D3 — D3 must be applied
+        # externally via pyscf.dftd3).
+        _XC_ALIAS = {{
+            'M06-L': 'm06l',
+            'wB97X-D': 'wb97x',
+            'CAM-B3LYP': 'camb3lyp',
+            'PBE-D3': 'pbe',
+        }}
+        _NEEDS_D3 = {{'PBE-D3', 'wB97X-D'}}
+
         if method == 'RHF':
             mf = scf.RHF(mol)
         elif method == 'UHF':
@@ -638,7 +651,16 @@ def main():
         else:
             # DFT: auto-select RKS/UKS based on spin
             mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
-            mf.xc = method
+            mf.xc = _XC_ALIAS.get(method, method)
+            if method in _NEEDS_D3:
+                try:
+                    from pyscf import dftd3 as _dftd3
+                    mf = _dftd3.dftd3(mf)
+                except ImportError:
+                    print(
+                        "WARNING: pyscf.dftd3 not available; "
+                        "running {{method}} without D3 dispersion."
+                    )
 
         energy = mf.kernel()
 

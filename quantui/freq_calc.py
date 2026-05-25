@@ -228,8 +228,14 @@ def _run_freq_calc_body(
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
     else:
+        # session 55: route through resolve_xc + maybe_apply_d3 so
+        # methods like wB97X-D (PySCF rejects "wb97x-d") map to the
+        # bare functional + external D3 dispersion.
+        from .session_calc import maybe_apply_d3, resolve_xc
+
         mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
-        mf.xc = method
+        mf.xc = resolve_xc(method)
+        mf = maybe_apply_d3(mf, method, progress_stream=stream)
 
     try:
         energy_hartree = float(mf.kernel())

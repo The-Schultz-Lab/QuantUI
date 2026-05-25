@@ -125,7 +125,7 @@ def _run_nmr_calc_body(
     import numpy as _np
 
     from . import config as _config
-    from .session_calc import _XC_ALIAS
+    from .session_calc import maybe_apply_d3, resolve_xc
 
     mol = gto.Mole()
     mol.atom = molecule.to_pyscf_format()
@@ -142,9 +142,13 @@ def _run_nmr_calc_body(
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
     else:
-        xc_string = _XC_ALIAS.get(method, method)
+        # session 55: route through resolve_xc + maybe_apply_d3 so
+        # wB97X-D / PBE-D3 work for NMR calcs (was using raw _XC_ALIAS
+        # lookup before, which would fail for wB97X-D after the alias
+        # change to "wb97x" + external D3).
         mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
-        mf.xc = xc_string
+        mf.xc = resolve_xc(method)
+        mf = maybe_apply_d3(mf, method, progress_stream=stream)
 
     try:
         mf.kernel()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any
+from typing import Any, Optional
 
 import ipywidgets as widgets
 from IPython.display import HTML, Javascript, display
@@ -670,30 +670,90 @@ def on_cal_stop(app: Any, btn: Any) -> None:
 
 
 def do_calibration(app: Any, *, pyscf_available: bool) -> None:
-    """Run calibration suite and render calibration summary table."""
+    """Run calibration suite and render calibration summary table.
+
+    Fixes shipped 2026-05-25 (session 55 user report — tier 4 stuck the
+    user with no progress signal):
+
+    - Wraps the whole run in ``_activity_begin/_end`` so the toolbar
+      activity badge stops reading "Idle" while calibration is busy.
+    - Per-step ``progress_cb`` now writes a multi-line status block
+      (live tail of the per-step PySCF / SCF log) so the user can see
+      where a slow step is rather than guess whether it froze.
+    """
     from quantui.benchmarks import run_calibration
 
     mode = app._cal_mode_toggle.value
+    # Per-tier timeout budget. Tier 3 + tier 4 have freq/geo-opt anchors
+    # that run for minutes; tier 1 / tier 2 stay SP-only at 120 s/step.
+    _timeout_map = {
+        "tier1": 120.0,
+        "short": 120.0,
+        "tier2": 300.0,
+        "long": 300.0,
+        "tier3": 900.0,
+        "tier4": 1800.0,
+    }
+    timeout_per_step = _timeout_map.get(mode, 120.0)
+
+    # M-EST follow-up (2026-05-25): keep the toolbar activity badge red
+    # for the duration of the calibration so the user knows the kernel
+    # is busy. Without this it reads "Idle" while the worker thread
+    # burns CPU for tier 3/4 (~10-30 min).
+    app._activity_begin(f"Calibrating ({mode})…", kind="compute")
 
     def _progress(
-        step_n: int, total: int, label: str, status: str, elapsed: float
+        step_n: int,
+        total: int,
+        label: str,
+        status: str,
+        elapsed: float,
+        *,
+        live_message: Optional[str] = None,
     ) -> None:
-        icon = {"ok": "✓", "timed_out": "⏱", "stopped": "⛔", "error": "✗"}.get(
-            status, "?"
+        """Per-step progress callback.
+
+        Two call modes:
+        - Step-finish: status is one of ok/timed_out/stopped/error;
+          ``live_message`` is None. Updates the progress bar.
+        - Live-tick: status is "running"; ``live_message`` carries the
+          latest ``[QuantUI_STATUS]`` marker from inside the step (set
+          by freq_calc / optimizer during long inner loops). Updates
+          the step label only.
+        """
+        icon = {
+            "ok": "✓",
+            "timed_out": "⏱",
+            "stopped": "⛔",
+            "error": "✗",
+            "running": "▶",
+        }.get(status, "?")
+        if status != "running":
+            app._cal_progress.value = step_n
+        # Multi-line block: top line = step + status; second line = the
+        # most recent live message (if any). Keeps the user oriented
+        # during the slow tier-4 freq anchors.
+        live_line = (
+            f'<br><span style="font-size:11px;color:#64748b">{live_message}</span>'
+            if live_message
+            else ""
         )
-        app._cal_progress.value = step_n
         app._cal_step_label.value = (
             f'<span style="font-size:12px;color:#475569">'
             f"Step {step_n} / {total} — {label} "
             f"[{icon} {elapsed:.1f} s]</span>"
+            f"{live_line}"
         )
 
-    result = run_calibration(
-        progress_cb=_progress,
-        stop_event=app._cal_stop_event,
-        timeout_per_step=300.0 if mode == "long" else 120.0,
-        mode=mode,
-    )
+    try:
+        result = run_calibration(
+            progress_cb=_progress,
+            stop_event=app._cal_stop_event,
+            timeout_per_step=timeout_per_step,
+            mode=mode,
+        )
+    finally:
+        app._activity_end(kind="compute")
 
     rows = "".join(
         f"<tr>"
@@ -789,6 +849,27 @@ def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
         n_basis = calc_log_mod.count_basis_functions(
             app._molecule.atoms, app.basis_dd.value
         )
+        # M-EST / EST.1: predict the device the upcoming run will use so
+        # the estimator can partition history by GPU vs CPU. The method
+        # also matters — gpu4pyscf doesn't support CCSD(T), so even on a
+        # GPU machine that calc will run CPU-side.
+        _predicted_gpu_used: Optional[bool] = None
+        try:
+            from quantui.gpu_offload import (
+                _GPU_UNSUPPORTED_METHODS as _GPU_NO,
+            )
+            from quantui.gpu_offload import (
+                is_gpu_available,
+            )
+
+            _gpu_avail, _ = is_gpu_available()
+            if _gpu_avail and app.method_dd.value.upper() not in _GPU_NO:
+                _predicted_gpu_used = True
+            else:
+                _predicted_gpu_used = False
+        except Exception:  # noqa: BLE001 — fall back to device-agnostic prediction
+            _predicted_gpu_used = None
+
         est = calc_log_mod.estimate_time(
             n_atoms=len(app._molecule.atoms),
             n_electrons=app._molecule.get_electron_count(),
@@ -796,6 +877,7 @@ def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
             basis=app.basis_dd.value,
             n_basis=n_basis,
             calc_type=calc_type,
+            gpu_used=_predicted_gpu_used,
         )
         app.perf_estimate_html.value = calc_log_mod.format_estimate(est)
     except Exception:

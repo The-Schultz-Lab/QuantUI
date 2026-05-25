@@ -323,6 +323,85 @@ def count_basis_functions(atoms: list[str], basis: str) -> Optional[int]:
 
 
 # ---------------------------------------------------------------------------
+# Statistical helpers (M-EST / EST.3, 2026-05-25)
+# ---------------------------------------------------------------------------
+
+
+def _iqr_filter(values: list[float]) -> list[float]:
+    """Discard outliers outside [Q1 − 1.5·IQR, Q3 + 1.5·IQR].
+
+    The classic Tukey fence catches cold-cache outliers (single slow
+    runs that landed before BLAS / DFT grids were resident) and
+    thermal-throttled runs (a single overheated run pulled the median
+    high) without being overly aggressive on the legitimate spread
+    you'd expect across the perf-log timeline.
+
+    Returns the unmodified list when there are fewer than 4 samples —
+    IQR isn't meaningful on small N, and the median-based predictors
+    upstream already handle small-N gracefully.
+    """
+    if len(values) < 4:
+        return list(values)
+    sorted_v = sorted(values)
+    # Use the "inclusive" method (matches numpy/pandas default linear
+    # interpolation). "exclusive" places quartiles BETWEEN data points
+    # via n*p/(n+1) which lets a single small-N outlier pull Q3 high
+    # enough that its own value falls inside the fence — defeating the
+    # filter. "inclusive" anchors quartiles AT data points so the
+    # fence cleanly excludes the outlier.
+    q1 = statistics.quantiles(sorted_v, n=4, method="inclusive")[0]
+    q3 = statistics.quantiles(sorted_v, n=4, method="inclusive")[2]
+    iqr = q3 - q1
+    if iqr == 0:
+        # All-equal pool — no outliers to reject.
+        return list(values)
+    low = q1 - 1.5 * iqr
+    high = q3 + 1.5 * iqr
+    return [v for v in values if low <= v <= high]
+
+
+def _coefficient_of_variation(values: list[float]) -> float:
+    """Return σ / |μ|. Returns 0.0 when the mean is zero or N < 2."""
+    if len(values) < 2:
+        return 0.0
+    mean = statistics.mean(values)
+    if mean == 0:
+        return 0.0
+    return statistics.stdev(values) / abs(mean)
+
+
+def _confidence_label(values: list[float], n_samples: int) -> str:
+    """Variance-aware confidence label (M-EST / EST.3).
+
+    Combines coefficient of variation (CV) with sample count:
+
+    - CV < 0.15        → "high"
+    - 0.15 ≤ CV < 0.35 → "medium"
+    - CV ≥ 0.35        → "low"
+
+    Then capped by sample count: n < 3 always reports "low" (CV is
+    noisy on tiny pools); n < 5 caps at "medium" regardless of CV.
+
+    This is what catches the 1-min-predicted / 5-min-actual class —
+    even with many samples, a high-variance pool should report "low"
+    confidence so the user knows the prediction has wide error bars.
+    """
+    if n_samples < 3:
+        return "low"
+    cv = _coefficient_of_variation(values)
+    if cv < 0.15:
+        base = "high"
+    elif cv < 0.35:
+        base = "medium"
+    else:
+        base = "low"
+    # Sample-count cap.
+    if n_samples < 5 and base == "high":
+        return "medium"
+    return base
+
+
+# ---------------------------------------------------------------------------
 # Performance log
 # ---------------------------------------------------------------------------
 
@@ -381,6 +460,7 @@ def estimate_time(
     n_basis: Optional[int] = None,
     n_cores: Optional[int] = None,
     calc_type: Optional[str] = None,
+    gpu_used: Optional[bool] = None,
 ) -> Optional[dict]:
     """
     Return a time estimate dict, or ``None`` if there is insufficient data.
@@ -417,6 +497,21 @@ def estimate_time(
     (for example, Single Point). Legacy records without ``calc_type`` are
     only included when estimating ``single_point``.
 
+    **GPU-aware filtering** (M-EST / EST.1, 2026-05-25): when ``gpu_used``
+    is passed, the candidate pool is partitioned by device — GPU-history
+    predicts GPU runs and CPU-history predicts CPU runs. Records written
+    before session 55 don't have ``gpu_used`` at all; those are treated
+    as "device unknown" and admitted only when ``gpu_used=False`` is
+    requested (the conservative assumption, since QuantUI was CPU-only
+    before M-GPU shipped). When ``gpu_used=None`` (default), the device
+    axis is ignored and all records are eligible — back-compat with
+    callers that don't know which device the upcoming run will use.
+
+    If GPU partitioning leaves fewer than 2 records in the pool, the
+    function falls back to the unpartitioned pool with the confidence
+    label downgraded one notch — better an approximate estimate from
+    cross-device data than no estimate at all.
+
     Returns ``None`` when fewer than 2 converged records are available for
     the scoped candidate pool.
     """
@@ -439,6 +534,32 @@ def estimate_time(
 
     if len(scoped) < 2:
         return None
+
+    # M-EST / EST.1: partition by device when the caller specified one.
+    # Records pre-dating session 55 don't carry ``gpu_used`` — admit them
+    # only into the CPU pool, since QuantUI was CPU-only when they were
+    # written. Track whether we downgraded for the fall-back path below.
+    _gpu_filtered = False
+    if gpu_used is True:
+        gpu_scoped = [r for r in scoped if r.get("gpu_used") is True]
+        if len(gpu_scoped) >= 2:
+            scoped = gpu_scoped
+            _gpu_filtered = True
+        # else: fall through to the unpartitioned pool; caller's
+        # confidence will be downgraded below.
+    elif gpu_used is False:
+        cpu_scoped = [
+            r for r in scoped if r.get("gpu_used") is False or "gpu_used" not in r
+        ]
+        if len(cpu_scoped) >= 2:
+            scoped = cpu_scoped
+            _gpu_filtered = True
+
+    def _maybe_downgrade(conf: str) -> str:
+        """Downgrade confidence one notch if device-partition fell back."""
+        if gpu_used is None or _gpu_filtered:
+            return conf
+        return {"high": "medium", "medium": "low", "low": "low"}[conf]
 
     beta_new = _METHOD_SCALE_EXP.get(method, 3.5)
     n_cores_current = n_cores if n_cores is not None else 1
@@ -465,23 +586,41 @@ def estimate_time(
         ]
         effs = [e for r in exact_nb for e in [_eff(r)] if e is not None]
         if len(effs) >= 2:
-            predicted = statistics.median(effs) * (n_basis**beta_new) / n_cores_current
+            # EST.3: drop Tukey outliers before computing the predictor.
+            # The variance of the *filtered* pool drives confidence.
+            filtered_effs = _iqr_filter(effs)
+            predicted = (
+                statistics.median(filtered_effs) * (n_basis**beta_new) / n_cores_current
+            )
             return {
                 "seconds": predicted,
-                "confidence": "high" if len(effs) >= 5 else "medium",
-                "n_samples": len(effs),
+                "confidence": _maybe_downgrade(
+                    _confidence_label(filtered_effs, len(filtered_effs))
+                ),
+                "n_samples": len(filtered_effs),
             }
 
     # ── Strategy 2: exact method + basis, electron-count fallback ────────────
     exact = [r for r in scoped if r.get("method") == method and r.get("basis") == basis]
     if len(exact) >= 2:
-        median_ne = statistics.median(r["n_electrons"] for r in exact)
-        median_t = statistics.median(r["elapsed_s"] for r in exact)
+        elapsed_values = [float(r["elapsed_s"]) for r in exact]
+        filtered_elapsed = _iqr_filter(elapsed_values)
+        # Recompute electron-count median against the same filtered pool
+        # so the scale factor is consistent with the time median.
+        filtered_records = [
+            r for r in exact if float(r["elapsed_s"]) in filtered_elapsed
+        ]
+        median_ne = statistics.median(
+            r["n_electrons"] for r in (filtered_records or exact)
+        )
+        median_t = statistics.median(filtered_elapsed)
         scale = (n_electrons / median_ne) ** 2.7 if median_ne > 0 else 1.0
         return {
             "seconds": median_t * scale,
-            "confidence": "high" if len(exact) >= 5 else "medium",
-            "n_samples": len(exact),
+            "confidence": _maybe_downgrade(
+                _confidence_label(filtered_elapsed, len(filtered_elapsed))
+            ),
+            "n_samples": len(filtered_elapsed),
         }
 
     # ── Strategy 3: same basis, any method, basis-function efficiency ─────────

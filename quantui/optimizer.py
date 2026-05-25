@@ -144,9 +144,13 @@ try:
             elif method_upper == "UHF":
                 mf = scf.UHF(mol)
             else:
-                # DFT functional
+                # DFT functional. session 55: route through resolve_xc +
+                # maybe_apply_d3 so wB97X-D / PBE-D3 work mid-optimization.
+                from .session_calc import maybe_apply_d3, resolve_xc
+
                 mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
-                mf.xc = self.method
+                mf.xc = resolve_xc(self.method)
+                mf = maybe_apply_d3(mf, self.method)
 
             mf.verbose = 0
             mf.stdout = _sink

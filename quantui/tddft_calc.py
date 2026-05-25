@@ -195,8 +195,13 @@ def _run_tddft_calc_body(
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
     else:
+        # session 55: route through resolve_xc + maybe_apply_d3 so
+        # methods like wB97X-D (PySCF rejects "wb97x-d") map cleanly.
+        from .session_calc import maybe_apply_d3, resolve_xc
+
         mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
-        mf.xc = method
+        mf.xc = resolve_xc(method)
+        mf = maybe_apply_d3(mf, method, progress_stream=progress_stream)
 
     if using_hf and progress_stream is not None:
         try:

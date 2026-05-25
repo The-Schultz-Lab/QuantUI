@@ -127,14 +127,80 @@ class SessionResult:
 
 
 # Maps QuantUI display names → PySCF xc strings where they differ.
+#
+# ``wB97X-D`` is a special case: PySCF + dftd3 cannot compose
+# ``mf.xc = "wb97x-d"`` cleanly (it's on dftd3's black-list — see
+# pyscf/pyscf#2069). The workaround that matches what our UI label
+# already claims ("wB97X-D — Range-Separated Hybrid + D3 Dispersion")
+# is to use the bare ``wb97x`` functional and apply D3 via dftd3
+# externally — same pattern as PBE-D3 below. This is D3, not the
+# original Chai 2008 D2; the empirical dispersion energies differ by
+# a few percent for most systems but the functional family is the same.
 _XC_ALIAS: dict = {
     "M06-L": "m06l",
-    "wB97X-D": "wb97x-d",
+    "wB97X-D": "wb97x",  # bare functional; D3 applied via _NEEDS_D3
     "CAM-B3LYP": "camb3lyp",
     "PBE-D3": "pbe",  # base functional; D3 applied separately
 }
 # Methods that require Grimme D3 dispersion correction via pyscf.dftd3.
-_NEEDS_D3: frozenset = frozenset({"PBE-D3"})
+_NEEDS_D3: frozenset = frozenset({"PBE-D3", "wB97X-D"})
+
+
+def resolve_xc(method: str) -> str:
+    """Map a QuantUI display method name to a PySCF xc string.
+
+    Uses ``_XC_ALIAS`` case-insensitively so callers can pass either
+    the display form (``"wB97X-D"``) or the upper form. Methods not
+    in the alias table pass through unchanged.
+
+    This is the single source of truth for QuantUI → PySCF xc-name
+    translation. Every DFT entry point — ``session_calc``, ``freq_calc``,
+    ``tddft_calc``, ``optimizer``, ``freq_ir_workers``, ``nmr_calc``,
+    and the script-export path in ``config.py`` — should use this
+    helper rather than passing ``method`` to PySCF directly. (Before
+    session 55 they didn't, which is why wB97X-D errored in tier 3
+    SP calcs but ALSO would have errored in freq / opt / tddft.)
+    """
+    method_upper = method.upper()
+    _key = next((k for k in _XC_ALIAS if k.upper() == method_upper), method)
+    return _XC_ALIAS.get(_key, method)
+
+
+def needs_d3(method: str) -> bool:
+    """Return True when ``method`` requires external D3 dispersion.
+
+    The DFT entry points should call this AFTER setting ``mf.xc`` to
+    decide whether to wrap the SCF object in ``pyscf.dftd3.dftd3(mf)``.
+    """
+    method_upper = method.upper()
+    _key = next((k for k in _XC_ALIAS if k.upper() == method_upper), method)
+    return _key in _NEEDS_D3
+
+
+def maybe_apply_d3(mf, method: str, progress_stream=None):
+    """Wrap ``mf`` in ``pyscf.dftd3.dftd3(mf)`` if ``method`` requires D3.
+
+    Returns the (possibly wrapped) mf object. On ``pyscf.dftd3``
+    ImportError, returns the original ``mf`` unmodified and surfaces
+    a warning via ``progress_stream`` (if provided) so the user sees
+    that the result is missing the dispersion correction.
+    """
+    if not needs_d3(method):
+        return mf
+    try:
+        from pyscf import dftd3 as _dftd3
+
+        return _dftd3.dftd3(mf)
+    except ImportError:
+        if progress_stream is not None:
+            try:
+                progress_stream.write(
+                    f"\n⚠  pyscf.dftd3 not available — running {method} "
+                    "without D3 correction.\n"
+                )
+            except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
+                pass
+        return mf
 
 
 def run_in_session(
@@ -257,8 +323,6 @@ def _run_session_calc_body(
 
     # --- Select SCF method ---
     method_upper = method.upper()
-    # Normalise to the key used in _XC_ALIAS / _NEEDS_D3 (preserve original case)
-    _method_key = next((k for k in _XC_ALIAS if k.upper() == method_upper), method)
 
     if method_upper == "RHF":
         mf = scf.RHF(mol)
@@ -272,25 +336,15 @@ def _run_session_calc_body(
         # post-SCF below.
         mf = scf.RHF(mol)
     else:
-        # DFT: resolve alias then auto-select RKS / UKS
-        xc_string = _XC_ALIAS.get(_method_key, method)
+        # DFT: resolve alias then auto-select RKS / UKS. ``resolve_xc``
+        # handles the wB97X-D → wb97x + external D3 dispersion mapping
+        # (session 55 fix; see _XC_ALIAS docstring).
         if mol.spin == 0:
             mf = dft.RKS(mol)
         else:
             mf = dft.UKS(mol)
-        mf.xc = xc_string
-        # Apply D3 dispersion correction where needed
-        if _method_key in _NEEDS_D3:
-            try:
-                from pyscf import dftd3 as _dftd3
-
-                mf = _dftd3.dftd3(mf)
-            except ImportError:
-                if progress_stream is not None:
-                    progress_stream.write(
-                        f"\n⚠  pyscf.dftd3 not available — running {method} "
-                        "without D3 correction.\n"
-                    )
+        mf.xc = resolve_xc(method)
+        mf = maybe_apply_d3(mf, method, progress_stream=progress_stream)
 
     # --- Wrap with implicit solvent (PCM) if requested ---
     if solvent is not None:

@@ -231,12 +231,21 @@ def build_history_section(
         tooltip="Open the full PySCF output log in the Output tab",
     )
 
+    # M-EST / EST.4: 4-tier calibration selector. ToggleButtons works for
+    # 4 options; switch to a Dropdown if a 5th tier is ever added. Tier 3
+    # / tier 4 require PySCF (the geom-opt + freq dispatch); tier 1 / 2
+    # are SP-only and gated separately by the run button.
     app._cal_mode_toggle = widgets.ToggleButtons(
-        options=[("Quick (~10 s)", "short"), ("Full (~5 min)", "long")],
-        value="short",
+        options=[
+            ("Tier 1 — Quick (~15 s)", "tier1"),
+            ("Tier 2 — Standard (~3–5 min)", "tier2"),
+            ("Tier 3 — Mixed (~10–15 min)", "tier3"),
+            ("Tier 4 — Deep (~30 min)", "tier4"),
+        ],
+        value="tier1",
         description="",
         button_style="",
-        style={"description_width": "0px", "button_width": "140px"},
+        style={"description_width": "0px", "button_width": "200px"},
         layout=layout_fn(margin="0 0 8px"),
     )
     app._cal_run_btn = widgets.Button(
@@ -339,15 +348,31 @@ def build_history_section(
         if cal_last
         else ""
     )
+    # M-EST / EST.4: import tier sizes lazily so we can refer to all four
+    # in the panel blurb. ``benchmark_suite`` / ``benchmark_suite_long``
+    # are kept as positional args for back-compat but new code prefers
+    # the four named tiers.
+    from quantui.benchmarks import (
+        BENCHMARK_SUITE_TIER3 as _T3,
+    )
+    from quantui.benchmarks import (
+        BENCHMARK_SUITE_TIER4 as _T4,
+    )
+
     cal_panel = widgets.VBox(
         [
             widgets.HTML(
                 f'<p style="color:#555;font-size:13px;margin:0 0 6px">'
                 f"Benchmark this machine so the time estimator uses basis-function "
                 f"scaling (N<sup>β</sup>) rather than generic defaults. "
-                f"<b>Quick</b> runs {len(benchmark_suite)} small calculations (~10 s). "
-                f"<b>Full</b> runs {len(benchmark_suite_long)} calculations spanning "
-                f"all common molecule sizes and methods (~5 min).</p>" + cal_note
+                f"Tier 1 ({len(benchmark_suite)} calcs, ~15&nbsp;s) is a quick "
+                f"SP-only smoke test; tier 2 ({len(benchmark_suite_long)} calcs, "
+                f"~3–5&nbsp;min) expands the SP grid; "
+                f"tier 3 ({len(_T3)} calcs, ~10–15&nbsp;min) adds small geometry "
+                f"optimizations + frequency calcs; "
+                f"tier 4 ({len(_T4)} calcs, up to ~30&nbsp;min) anchors every "
+                f"calc-type × device combo for the most accurate predictions.</p>"
+                + cal_note
             ),
             app._cal_mode_toggle,
             widgets.HBox(
