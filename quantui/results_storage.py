@@ -189,6 +189,142 @@ def save_orbitals(result_dir: Path, result: object) -> None:
         (result_dir / "orbitals_meta.json").write_text(json.dumps(meta))
 
 
+def save_molden(
+    result_dir: Path,
+    *,
+    mo_energy_hartree=None,
+    mo_occ=None,
+    mo_coeff=None,
+    pyscf_mol_atom=None,
+    pyscf_mol_basis: Optional[str] = None,
+    charge: int = 0,
+    multiplicity: int = 1,
+    frequencies_cm1: Optional[list] = None,
+    normal_modes=None,
+    filename: str = "result.molden",
+) -> Optional[Path]:
+    """Write a Molden-format file alongside ``result.json`` (M-EXPORT / EXPORT.1+2).
+
+    Molden is the lingua franca for orbital + vibration interop with
+    Avogadro / IQmol / Jmol / Multiwfn. This helper writes whichever data
+    is available — both orbitals and vibrations, just orbitals, or just
+    the structure + vibrations — using the appropriate pyscf.tools.molden
+    entry point.
+
+    Behaviour:
+
+    - ``mo_coeff`` present → ``pyscf.tools.molden.from_mo(mol, ..., mo_coeff,
+      ene=mo_energy, occ=mo_occ)`` writes ``[Atoms]`` + ``[GTO]`` + ``[MO]``.
+    - ``mo_coeff`` absent but vibrations present → ``pyscf.tools.molden.header``
+      writes only the structure header; we append ``[FREQ]`` +
+      ``[FR-COORD]`` + ``[FR-NORM-COORD]`` manually so Avogadro can animate.
+    - Neither present → returns ``None`` (nothing meaningful to export).
+
+    Best-effort: PySCF / Molden writer failures are caught and the
+    function returns ``None`` rather than propagating. Callers should
+    log but not fail the calc on a missing Molden file.
+
+    Returns the path to the written file on success, ``None`` otherwise.
+    """
+    try:
+        from pyscf import gto
+        from pyscf.tools import molden as _molden
+    except Exception:
+        return None
+
+    has_mo = (
+        mo_coeff is not None and mo_energy_hartree is not None and mo_occ is not None
+    )
+    has_vib = bool(frequencies_cm1) and bool(normal_modes)
+    if not (has_mo or has_vib):
+        return None
+
+    if not pyscf_mol_atom or not pyscf_mol_basis:
+        return None
+
+    try:
+        mol = gto.Mole()
+        mol.atom = [(str(sym), list(coords)) for sym, coords in pyscf_mol_atom]
+        mol.basis = pyscf_mol_basis
+        mol.charge = int(charge)
+        mol.spin = max(0, int(multiplicity) - 1)
+        mol.verbose = 0
+        mol.build()
+    except Exception:
+        return None
+
+    dest = result_dir / filename
+    try:
+        if has_mo:
+            _molden.from_mo(
+                mol,
+                str(dest),
+                mo_coeff,
+                ene=mo_energy_hartree,
+                occ=mo_occ,
+            )
+        else:
+            # Structure-only header; vibration blocks appended below.
+            with open(dest, "w", encoding="utf-8") as fh:
+                _molden.header(mol, fh)
+    except Exception:
+        return None
+
+    if has_vib:
+        try:
+            _append_molden_vibrations(
+                dest,
+                frequencies_cm1=frequencies_cm1,
+                normal_modes=normal_modes,
+                pyscf_mol_atom=pyscf_mol_atom,
+            )
+        except Exception:
+            pass  # Best-effort: the orbital block (or header) is already written.
+
+    return dest
+
+
+def _append_molden_vibrations(
+    path: Path,
+    *,
+    frequencies_cm1: list,
+    normal_modes,
+    pyscf_mol_atom,
+) -> None:
+    """Append Molden ``[FREQ]`` + ``[FR-COORD]`` + ``[FR-NORM-COORD]`` blocks.
+
+    Used by :func:`save_molden` after the structure (and optionally MO)
+    sections are in place. Format follows the Molden spec — Avogadro and
+    IQmol both accept this layout for animated normal-mode display.
+
+    ``frequencies_cm1`` is a flat list of N modes (length matches
+    ``normal_modes``). ``normal_modes`` is a list of length-N entries,
+    each a list of per-atom (x, y, z) displacement triples. The
+    ``[FR-COORD]`` block repeats the equilibrium geometry from
+    ``pyscf_mol_atom`` so the file is self-contained.
+    """
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("\n[FREQ]\n")
+        for freq in frequencies_cm1:
+            fh.write(f"{float(freq):.6f}\n")
+
+        fh.write("\n[FR-COORD]\n")
+        for sym, coords in pyscf_mol_atom:
+            fh.write(
+                f"{sym}  {float(coords[0]):.6f} {float(coords[1]):.6f} "
+                f"{float(coords[2]):.6f}\n"
+            )
+
+        fh.write("\n[FR-NORM-COORD]\n")
+        for i, mode in enumerate(normal_modes, start=1):
+            fh.write(f"vibration   {i}\n")
+            for atom_vec in mode:
+                fh.write(
+                    f" {float(atom_vec[0]):.6f} {float(atom_vec[1]):.6f} "
+                    f"{float(atom_vec[2]):.6f}\n"
+                )
+
+
 def load_orbitals(result_dir: Path):
     """Reload MO data saved by :func:`save_orbitals`.
 

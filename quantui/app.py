@@ -3915,6 +3915,35 @@ class QuantUIApp:
                 # Persist MO data for orbital diagram + isosurface replay.
                 if ct in ("Single Point", "Geometry Opt", "Frequency"):
                     save_orbitals(_saved_dir, result)
+                # M-EXPORT / EXPORT.1+2: write a Molden-format companion
+                # file so users can open results in Avogadro / IQmol /
+                # Jmol. Best-effort — failures are swallowed by the
+                # outer try block above and the calc still completes.
+                # For SP / GeoOpt this writes orbitals + structure; for
+                # Frequency it writes structure + [FREQ] / [FR-NORM-COORD]
+                # blocks so Avogadro can animate vibrations directly.
+                if ct in ("Single Point", "Geometry Opt", "Frequency"):
+                    try:
+                        from quantui.results_storage import (
+                            save_molden as _save_molden,
+                        )
+
+                        _save_molden(
+                            _saved_dir,
+                            mo_energy_hartree=getattr(
+                                result, "mo_energy_hartree", None
+                            ),
+                            mo_occ=getattr(result, "mo_occ", None),
+                            mo_coeff=getattr(result, "mo_coeff", None),
+                            pyscf_mol_atom=getattr(result, "pyscf_mol_atom", None),
+                            pyscf_mol_basis=getattr(result, "pyscf_mol_basis", None),
+                            charge=int(getattr(calc_mol, "charge", 0)),
+                            multiplicity=int(getattr(calc_mol, "multiplicity", 1)),
+                            frequencies_cm1=getattr(result, "frequencies_cm1", None),
+                            normal_modes=getattr(result, "displacements", None),
+                        )
+                    except Exception:
+                        pass
                 self._queue_main_thread_callback(self._refresh_results_browser)
                 self._queue_main_thread_callback(self._populate_compare_list)
                 self._queue_main_thread_callback(
