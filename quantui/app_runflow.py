@@ -969,7 +969,24 @@ def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
 
 
 def refresh_results_browser(app: Any) -> None:
-    """Refresh the History dropdown with saved result directories."""
+    """Refresh the History dropdown with saved result directories.
+
+    POLISH.6 (M-POLISH, 2026-05-25): prepends a
+    ``"(select a calculation to view)"`` placeholder so the dropdown
+    opens in an explicit "no calc loaded yet" state. Without the
+    placeholder, ipywidgets auto-selected the most-recent entry as the
+    dropdown's ``value`` — visually implying the calc was loaded when
+    actually the user still has to click "View Results" / "View
+    Analysis" to populate the rest of the UI. The ``value`` observer
+    fires when options are reassigned (the result card *is* shown),
+    but no calc state is loaded into the app until the explicit
+    button-click, which mismatched user expectation.
+
+    The placeholder is always at index 0 of ``options`` so the
+    Dropdown widget's value-preservation behaviour kicks in: a
+    previously-picked real result survives a refresh, but the initial
+    render shows the placeholder.
+    """
     try:
         from quantui import list_results, load_result
     except ImportError:
@@ -982,7 +999,8 @@ def refresh_results_browser(app: Any) -> None:
     if not dirs:
         app.past_dd.options = [("(no saved results)", "")]
         return
-    options = []
+    placeholder = ("(select a calculation to view)", "")
+    options = [placeholder]
     for d in dirs:
         try:
             data = load_result(d)
@@ -995,7 +1013,12 @@ def refresh_results_browser(app: Any) -> None:
             options.append((label, str(d)))
         except Exception:
             pass
-    app.past_dd.options = options if options else [("(no saved results)", "")]
+    # If the only entry is the placeholder, fall back to the empty-list
+    # message — the loop above silently swallowed every load_result call.
+    if len(options) == 1:
+        app.past_dd.options = [("(no saved results)", "")]
+        return
+    app.past_dd.options = options
     if app.calc_type_dd.value == "Frequency":
         app._refresh_freq_seed_options()
 
