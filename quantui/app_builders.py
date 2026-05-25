@@ -891,7 +891,7 @@ def build_welcome_header(app: Any) -> None:
         f'<div style="font-size:13px;color:#94a3b8;margin-top:5px">'
         f"v{quantui.__version__} &nbsp;&middot;&nbsp; "
         f"<b>Help</b> tab for instructions &nbsp;&middot;&nbsp; "
-        f"<b>Status</b> tab for system info</div>"
+        f"<b>System Settings</b> tab for environment + calibration</div>"
         f"</div>"
         f"</div>"
     )
@@ -1855,11 +1855,17 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
     app.help_content_html = widgets.HTML()
     app._render_help_topic()
 
+    # POLISH.2 (M-POLISH, 2026-05-25): the single-character "?" was
+    # visually noisy and hard to recognise as the global help toggle.
+    # Field-level "?" buttons (method_help_btn / basis_help_btn earlier
+    # in this file) keep the symbol — for inline-with-input help it's
+    # universally understood.
     app._help_btn = widgets.Button(
-        description="?",
+        description="Help",
         button_style="",
+        icon="question-circle",
         tooltip="Help topics",
-        layout=layout_fn(width="34px", margin="0 0 0 8px"),
+        layout=layout_fn(width="80px", margin="0 0 0 8px"),
     )
 
     app._exit_btn = widgets.Button(

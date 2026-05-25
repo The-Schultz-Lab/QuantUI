@@ -324,7 +324,15 @@ def pop_geo_trajectory(app: Any, ctx: Any) -> bool:
 
 
 def pop_preopt_trajectory(app: Any, ctx: Any) -> bool:
-    """Populate Trajectory panel for frequency pre-optimization contexts."""
+    """Populate Trajectory panel for the frequency-time DFT geometry
+    optimization trajectory.
+
+    POLISH.9 (2026-05-25): the wrapped operation is a full DFT geom-opt
+    at the user's method/basis, not the classical LJ pre-opt that lives
+    in ``quantui/preopt.py``. The function name + ``preopt_trajectory.json``
+    filename stay (renaming the saved file would break history replay of
+    older results) but user-facing strings now say "geometry optimization".
+    """
     if ctx.source == "live":
         pre = ctx.preopt_result
         if pre is None:
@@ -341,7 +349,8 @@ def pop_preopt_trajectory(app: Any, ctx: Any) -> bool:
                 "Trajectory",
                 (
                     "Not available for this Frequency history result: "
-                    "preopt_trajectory.json is missing (pre-opt may have been disabled)."
+                    "preopt_trajectory.json is missing (geometry "
+                    "optimization may have been disabled)."
                 ),
             )
             return False
@@ -363,7 +372,8 @@ def pop_preopt_trajectory(app: Any, ctx: Any) -> bool:
                 "Trajectory",
                 (
                     "Not available for this Frequency history result: "
-                    f"failed to load preopt trajectory ({type(exc).__name__})."
+                    f"failed to load geometry-optimization trajectory "
+                    f"({type(exc).__name__})."
                 ),
             )
             return False
@@ -373,7 +383,7 @@ def pop_preopt_trajectory(app: Any, ctx: Any) -> bool:
             "Trajectory",
             (
                 "Not available for this Frequency result: "
-                "pre-optimization trajectory has fewer than 2 frames."
+                "geometry-optimization trajectory has fewer than 2 frames."
             ),
         )
         return False
@@ -384,7 +394,7 @@ def pop_preopt_trajectory(app: Any, ctx: Any) -> bool:
     )
     app._pending_traj_result = stub
     app._last_traj_result = stub
-    app.traj_accordion.set_title(0, "Pre-optimization Trajectory")
+    app.traj_accordion.set_title(0, "Geometry Optimization Trajectory")
     return True
 
 

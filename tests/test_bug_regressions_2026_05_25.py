@@ -166,10 +166,13 @@ class TestBugC_PreoptFailureFallback:
         # Confirm the source contains the new fallback paths. Reading
         # the source is the most direct way to assert this; running the
         # actual freq calc would require PySCF.
+        #
+        # POLISH.9 (2026-05-25) renamed user-facing "Pre-optimisation"
+        # → "Geometry optimization"; update the guard string to match.
         from quantui import app as _app_mod
 
         src = inspect.getsource(_app_mod)
-        assert "Pre-optimisation failed" in src
+        assert "Geometry optimization failed" in src
         # The exception variable name (_pre_exc) is unique to the new
         # try/except wrapping all three pre-opt sites.
         assert src.count("except Exception as _pre_exc") >= 3

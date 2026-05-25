@@ -980,7 +980,6 @@ def run_calibration(
     """
     import multiprocessing as _mp
     import queue as _queue
-    import sys as _sys
 
     from quantui import calc_log as _calc_log
 
@@ -1021,23 +1020,39 @@ def run_calibration(
         # the per-step progress trail.
         pass
 
-    # ``fork`` is fast on Linux/macOS but unsupported on Windows; spawn
-    # is the portable fallback. ``forkserver`` is also available but
-    # slower than fork on Linux.
-    _ctx_name = "spawn" if _sys.platform == "win32" else "fork"
-    _ctx = _mp.get_context(_ctx_name)
+    # Use ``spawn`` everywhere (session 55 follow-up): ``fork`` from a
+    # background thread (run_calibration runs inside ``_do_calibration``
+    # which is itself a daemon thread) collides hard with CUDA contexts
+    # that the parent process may have initialized via the GPU-detection
+    # probe — every step would die at ~0.04 s with no useful error.
+    # ``spawn`` adds ~1-2 s startup overhead per step but isolates the
+    # worker from the parent's interpreter state entirely, so CUDA / MPI /
+    # any C-extension global is freshly initialized. Sub-2-second-per-step
+    # overhead is a great trade for "the Stop button works AND nothing
+    # crashes for opaque reasons".
+    _ctx = _mp.get_context("spawn")
 
-    def _emit_progress(*args, live_message=None) -> None:
+    def _emit_progress(*args, live_message=None, step=None) -> None:
         """Wrap progress_cb to tolerate callers that pre-date the
-        ``live_message`` kwarg (notably the test-suite lambdas that
-        accept ``*args`` only). Falls back to the old 5-arg form on
-        ``TypeError``."""
+        ``live_message`` / ``step`` kwargs (notably the test-suite
+        lambdas that accept ``*args`` only). Falls back through each
+        new kwarg in turn on ``TypeError``."""
         if progress_cb is None:
             return
+        # Try newest signature first, peel off kwargs the caller can't
+        # accept. Modern callers (do_calibration) take both; tests pass
+        # ``lambda *a: ...``.
+        try:
+            progress_cb(*args, live_message=live_message, step=step)
+            return
+        except TypeError:
+            pass
         try:
             progress_cb(*args, live_message=live_message)
+            return
         except TypeError:
-            progress_cb(*args)
+            pass
+        progress_cb(*args)
 
     stopped_mid_step = False
     for step_n, entry in enumerate(suite, start=1):
@@ -1072,7 +1087,7 @@ def run_calibration(
             step.error_msg = "PySCF not available"
             result.steps.append(step)
             _save_calibration_json(result, log_path)
-            _emit_progress(step_n, total, label, step.status, 0.0)
+            _emit_progress(step_n, total, label, step.status, 0.0, step=step)
             continue
 
         # Spawn the worker.
@@ -1133,9 +1148,34 @@ def run_calibration(
             try:
                 msg = result_queue.get(timeout=2.0)
             except _queue.Empty:
+                # Worker process exited (either crashed during import,
+                # raised before reaching the worker's try/except, or
+                # was killed by the OS) without putting anything on
+                # the queue. Capture the exit code + the tail of the
+                # calibration log so the user can see what actually
+                # happened — "worker exited without result" alone is
+                # useless for diagnosis (the original session-55
+                # symptom of every step failing at 0.04 s).
+                _exitcode = getattr(worker, "exitcode", None)
+                _tail = _tail_last_status_line(log_path) or "(no log output)"
+                _hint = ""
+                if _exitcode is not None and _exitcode != 0:
+                    # On Unix, negative exit codes encode the signal
+                    # that killed the process (-9 = SIGKILL, -11 = SEGV).
+                    if _exitcode < 0:
+                        import signal as _sig
+
+                        try:
+                            _sig_name = _sig.Signals(-_exitcode).name
+                            _hint = f" (killed by {_sig_name})"
+                        except (ValueError, AttributeError):
+                            _hint = f" (signal {-_exitcode})"
                 msg = {
                     "status": "error",
-                    "error_msg": "worker exited without returning a result",
+                    "error_msg": (
+                        f"worker exited (exitcode={_exitcode}){_hint}; "
+                        f"last log line: {_tail}"
+                    )[:500],
                     "elapsed_s": time.perf_counter() - t_start,
                 }
             if msg.get("status") == "ok":
@@ -1167,7 +1207,9 @@ def run_calibration(
         # still leaves a partial-state record on disk.
         _save_calibration_json(result, log_path)
 
-        _emit_progress(step_n, total, label, step.status, step.elapsed_s)
+        # Terminal call for this step — pass the full BenchmarkStep so
+        # the UI callback can append it to the incremental results table.
+        _emit_progress(step_n, total, label, step.status, step.elapsed_s, step=step)
 
         if stopped_mid_step:
             break

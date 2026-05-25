@@ -584,7 +584,10 @@ def save_trajectory(
         List of total energies in Hartree, parallel to *trajectory*.
     filename:
         Output filename inside *result_dir*. Defaults to ``trajectory.json``.
-        Pass ``preopt_trajectory.json`` for pre-optimisation steps.
+        Pass ``preopt_trajectory.json`` for the DFT-geometry-optimization
+        trajectory that runs before a Frequency / TD-DFT calc. (The
+        filename keeps the historical ``preopt_`` prefix for back-compat
+        with saved-result replay — renaming would break older results.)
     """
     if not trajectory:
         return
@@ -669,7 +672,12 @@ def save_thumbnail(result_dir: Path, data: dict) -> None:
     fg, bg = _colors.get(ct, ("#555555", "#f3f4f6"))
     ct_label = _ct_labels.get(ct, ct.replace("_", " ").title())
 
-    fig = plt.figure(figsize=(2.4, 1.5), facecolor=bg)
+    # POLISH.7 (M-POLISH, 2026-05-25): bumped figsize 2.4→3.6 + dpi 72→144
+    # so the History-card text is readable on 1× displays. Source PNG goes
+    # from 173×108 px (~8 KB) to 518×324 px (~25 KB); the History dropdown
+    # downscales to its native ~250–300 px width, so the user sees crisp
+    # anti-aliased text rather than the blurry letters from the old config.
+    fig = plt.figure(figsize=(3.6, 2.25), facecolor=bg)
     ax = fig.add_axes([0, 0, 1, 1])
     ax.set_facecolor(bg)
     ax.set_xlim(0, 1)
@@ -748,7 +756,7 @@ def save_thumbnail(result_dir: Path, data: dict) -> None:
     try:
         fig.savefig(
             str(result_dir / "thumbnail.png"),
-            dpi=72,
+            dpi=144,
             bbox_inches="tight",
             facecolor=bg,
             pad_inches=0.05,

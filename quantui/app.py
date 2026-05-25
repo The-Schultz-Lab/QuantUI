@@ -1408,7 +1408,10 @@ class QuantUIApp:
         self.root_tab.set_title(4, "Compare")
         self.root_tab.set_title(5, "Log")
         self.root_tab.set_title(6, "Files")
-        self.root_tab.set_title(7, "Status")
+        # POLISH.4 (M-POLISH, 2026-05-25): "Status" was ambiguous —
+        # status of what? "System Settings" is what the tab actually
+        # holds (env info + calibration + GPU status + UI prefs).
+        self.root_tab.set_title(7, "System Settings")
         self.root_tab.observe(
             self._safe_cb(self._on_root_tab_changed), names="selected_index"
         )
@@ -3510,10 +3513,16 @@ class QuantUIApp:
             ):
                 from quantui import optimize_geometry
 
-                self.run_status.value = f"Pre-optimizing geometry before {ct}…"
+                # POLISH.9 (M-POLISH, 2026-05-25): rename user-facing
+                # "Pre-optimisation" → "Geometry optimization". The
+                # wrapped operation is the full DFT geom-opt at the
+                # user's selected method/basis — same code path as the
+                # standalone Geometry Opt calc-type. The LJ classical
+                # pre-opt earlier (around line 3488) keeps its name.
+                self.run_status.value = f"Optimizing geometry before {ct}…"
                 log.write(
-                    f"\n── Pre-optimisation (before {ct}) "
-                    f"────────────────────────────────────\n"
+                    f"\n── Geometry optimization (before {ct}) "
+                    f"────────────────────────────\n"
                 )
                 # BUG C (2026-05-25): catch numerical failures (e.g.
                 # singular matrix in cho_solve on tight rings) and fall
@@ -3531,22 +3540,22 @@ class QuantUIApp:
                         "converged" if _pre_opt.converged else "did NOT fully converge"
                     )
                     log.write(
-                        f"\nPre-optimisation {_conv_str} in {_pre_opt.n_steps} steps."
+                        f"\nGeometry optimization {_conv_str} in {_pre_opt.n_steps} steps."
                         f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
                     )
                     if not _pre_opt.converged:
                         log.write(
-                            "⚠ Pre-optimisation did not fully converge — "
+                            "⚠ Geometry optimization did not fully converge — "
                             "proceeding with best available geometry.\n\n"
                         )
                     if ct != "Single Point":
                         _run_required_final_single_point(
                             calc_mol,
-                            f"after pre-optimisation before {ct}",
+                            f"after geometry optimization before {ct}",
                         )
                 except Exception as _pre_exc:
                     log.write(
-                        f"\n⚠ Pre-optimisation failed: {_pre_exc}\n"
+                        f"\n⚠ Geometry optimization failed: {_pre_exc}\n"
                         "  Proceeding with the user-provided geometry "
                         "as-is.\n\n"
                     )
@@ -3613,10 +3622,16 @@ class QuantUIApp:
                         f"Atoms: {len(calc_mol.atoms)}\n\n"
                     )
 
-                # ── Step 2: optional geometry pre-optimisation ────────────────
+                # ── Step 2: optional geometry optimization ────────────────────
                 #
-                # BUG C (2026-05-25): pre-opt can hit a singular matrix in
-                # PySCF's ``cho_solve`` on tight rings (e.g. aromatic
+                # POLISH.9 (M-POLISH, 2026-05-25): renamed from
+                # "pre-optimisation" — the wrapped operation is a full
+                # DFT geometry optimization at the user's selected
+                # method/basis. The LJ-classical pre-opt is in
+                # quantui/preopt.py and keeps its "pre-opt" name.
+                #
+                # BUG C (2026-05-25): geom-opt can hit a singular matrix
+                # in PySCF's ``cho_solve`` on tight rings (e.g. aromatic
                 # benzene with B3LYP/6-31G). That raises out of the
                 # optimizer and used to kill the whole calc. Wrap it: on
                 # any failure log to the user log, keep ``calc_mol`` as
@@ -3625,9 +3640,9 @@ class QuantUIApp:
                 if self._freq_preopt_cb.value:
                     from quantui import optimize_geometry
 
-                    self.run_status.value = "Pre-optimizing geometry before frequency…"
+                    self.run_status.value = "Optimizing geometry before frequency…"
                     log.write(
-                        "\n── Pre-optimisation (before frequency analysis) ──────────────────\n"
+                        "\n── Geometry optimization (before frequency analysis) ──────────────────\n"
                     )
                     try:
                         _pre_opt = optimize_geometry(
@@ -3643,21 +3658,21 @@ class QuantUIApp:
                             else "did NOT fully converge"
                         )
                         log.write(
-                            f"\nPre-optimisation {_conv_str} in {_pre_opt.n_steps} steps."
+                            f"\nGeometry optimization {_conv_str} in {_pre_opt.n_steps} steps."
                             f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
                         )
                         if not _pre_opt.converged:
                             log.write(
-                                "⚠ Pre-optimisation did not fully converge — "
+                                "⚠ Geometry optimization did not fully converge — "
                                 "proceeding with best available geometry.\n\n"
                             )
                         _run_required_final_single_point(
                             calc_mol,
-                            "after frequency pre-optimisation",
+                            "after geometry optimization before frequency",
                         )
                     except Exception as _pre_exc:
                         log.write(
-                            f"\n⚠ Pre-optimisation failed: {_pre_exc}\n"
+                            f"\n⚠ Geometry optimization failed: {_pre_exc}\n"
                             "  Proceeding with the user-provided geometry "
                             "as-is; if the molecule was already near a "
                             "stationary point this is usually fine.\n\n"
@@ -3716,15 +3731,17 @@ class QuantUIApp:
                         f"Atoms: {len(calc_mol.atoms)}\n\n"
                     )
 
-                # ── Step 2: optional geometry pre-optimisation ────────────────
+                # ── Step 2: optional geometry optimization ────────────────────
+                # POLISH.9 (M-POLISH, 2026-05-25): renamed from
+                # "pre-optimisation" — DFT geom-opt is just geom-opt.
                 if self._freq_preopt_cb.value:
                     from quantui import optimize_geometry
 
                     self.run_status.value = (
-                        "Pre-optimizing geometry before UV-Vis (TD-DFT)…"
+                        "Optimizing geometry before UV-Vis (TD-DFT)…"
                     )
                     log.write(
-                        "\n── Pre-optimisation (before UV-Vis (TD-DFT)) "
+                        "\n── Geometry optimization (before UV-Vis (TD-DFT)) "
                         "─────────────\n"
                     )
                     # BUG C (2026-05-25): catch numerical failures and
@@ -3744,21 +3761,21 @@ class QuantUIApp:
                             else "did NOT fully converge"
                         )
                         log.write(
-                            f"\nPre-optimisation {_conv_str} in {_pre_opt.n_steps} steps."
+                            f"\nGeometry optimization {_conv_str} in {_pre_opt.n_steps} steps."
                             f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
                         )
                         if not _pre_opt.converged:
                             log.write(
-                                "⚠ Pre-optimisation did not fully converge — "
+                                "⚠ Geometry optimization did not fully converge — "
                                 "proceeding with best available geometry.\n\n"
                             )
                         _run_required_final_single_point(
                             calc_mol,
-                            "after UV-Vis pre-optimisation",
+                            "after geometry optimization before UV-Vis",
                         )
                     except Exception as _pre_exc:
                         log.write(
-                            f"\n⚠ Pre-optimisation failed: {_pre_exc}\n"
+                            f"\n⚠ Geometry optimization failed: {_pre_exc}\n"
                             "  Proceeding with the seed geometry as-is.\n\n"
                         )
 
