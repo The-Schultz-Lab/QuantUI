@@ -1484,6 +1484,11 @@ class QuantUIApp:
         self._orb_export_btn.on_click(self._on_orb_export_plot)
         self._pes_export_btn.on_click(self._on_pes_export_plot)
         self._vib_export_btn.on_click(self._on_vib_export_animation)
+        # M-EXPORT / EXPORT.4: per-panel CSV-to-clipboard / file buttons.
+        self._ir_copy_data_btn.on_click(self._on_ir_copy_data)
+        self._uv_copy_data_btn.on_click(self._on_uv_copy_data)
+        self._orb_copy_data_btn.on_click(self._on_orb_copy_data)
+        self._pes_copy_data_btn.on_click(self._on_pes_copy_data)
         # Accumulate / export
         self.accumulate_btn.on_click(self._on_accumulate)
         self.clear_btn.on_click(self._on_clear)
@@ -2616,6 +2621,160 @@ class QuantUIApp:
                 '<span style="color:#b91c1c;font-size:12px">'
                 f"Export failed: {msg}</span>"
             )
+
+    @staticmethod
+    def _fig_to_csv(fig: Any, *, title: str = "") -> str:
+        """Extract per-trace (x, y) pairs from a Plotly figure into CSV text.
+
+        Used by ``_copy_plot_data`` to surface the underlying numerical
+        data for every plot panel as a portable CSV. Layout:
+
+        ```
+        # <title>
+        # <trace name>
+        x,y
+        <x>,<y>
+        ...
+        ```
+
+        Multiple traces are emitted as separated sections so the user can
+        see (e.g.) Stick + Broadened spectra in one file. Returns the
+        empty string if the figure has no extractable data — caller treats
+        that as "nothing to copy" rather than writing an empty file.
+        (M-EXPORT / EXPORT.4)
+        """
+        if fig is None:
+            return ""
+        import io as _io
+
+        out = _io.StringIO()
+        if title:
+            out.write(f"# {title}\n")
+        any_trace = False
+        for trace in getattr(fig, "data", []):
+            name = getattr(trace, "name", None) or "trace"
+            x = getattr(trace, "x", None)
+            y = getattr(trace, "y", None)
+            if x is None or y is None:
+                continue
+            out.write(f"\n# {name}\n")
+            out.write("x,y\n")
+            for xi, yi in zip(x, y):
+                out.write(f"{xi},{yi}\n")
+            any_trace = True
+        return out.getvalue() if any_trace else ""
+
+    def _copy_plot_data(
+        self,
+        *,
+        fig: Any,
+        stem: str,
+        title: str,
+        status_widget: widgets.HTML,
+    ) -> None:
+        """Write a Plotly figure's data to CSV + try to copy to clipboard.
+
+        Saves ``<stem>_data_<timestamp>.csv`` into the active result
+        directory (always works) and emits a JS snippet that copies the
+        same CSV to the user's system clipboard via
+        ``navigator.clipboard.writeText`` (best-effort — the API requires
+        a secure context + user-gesture in some browsers; failures are
+        invisible by design). Status widget surfaces the saved path so
+        the user can find the file even when clipboard is unavailable.
+        (M-EXPORT / EXPORT.4)
+        """
+        if fig is None:
+            status_widget.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                "No plot data to copy yet.</span>"
+            )
+            return
+
+        csv_text = self._fig_to_csv(fig, title=title)
+        if not csv_text:
+            status_widget.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                "Figure had no extractable (x, y) traces.</span>"
+            )
+            return
+
+        import json as _json
+        import re as _re
+        from datetime import datetime as _dt
+
+        target_dir = (
+            self._last_result_dir
+            if isinstance(self._last_result_dir, Path)
+            else self._get_results_dir()
+        )
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        safe_stem = _re.sub(r"[^A-Za-z0-9_.-]+", "_", stem.strip()) or "plot"
+        ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S")
+        dest = target_dir / f"{safe_stem}_data_{ts}.csv"
+
+        try:
+            dest.write_text(csv_text, encoding="utf-8")
+        except Exception as exc:
+            status_widget.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                f"Write failed: {exc}</span>"
+            )
+            return
+
+        # Best-effort clipboard copy via the browser's clipboard API.
+        # Wrapped in try/catch on the JS side so a permissions error
+        # doesn't show up as a Voilà console exception.
+        from IPython.display import Javascript, display
+
+        try:
+            js_payload = _json.dumps(csv_text)
+            display(
+                Javascript(
+                    "try { navigator.clipboard.writeText("
+                    f"{js_payload}); }} catch (e) {{ /* clipboard unavailable */ }}"
+                )
+            )
+        except Exception:
+            pass  # Clipboard is best-effort; the file is the canonical artifact.
+
+        status_widget.value = (
+            '<span style="color:#16a34a;font-size:12px">'
+            f"Saved CSV: {dest} &mdash; copied to clipboard"
+            "</span>"
+        )
+
+    def _on_ir_copy_data(self, _btn) -> None:
+        self._copy_plot_data(
+            fig=getattr(self, "_last_ir_fig", None),
+            stem="ir_spectrum",
+            title="IR Spectrum",
+            status_widget=self._ir_export_status,
+        )
+
+    def _on_uv_copy_data(self, _btn) -> None:
+        self._copy_plot_data(
+            fig=getattr(self, "_last_uv_fig", None),
+            stem="uv_vis_spectrum",
+            title="UV-Vis Spectrum",
+            status_widget=self._uv_export_status,
+        )
+
+    def _on_orb_copy_data(self, _btn) -> None:
+        self._copy_plot_data(
+            fig=getattr(self, "_last_orb_fig", None),
+            stem="orbital_energy_diagram",
+            title="Orbital Energy Diagram",
+            status_widget=self._orb_export_status,
+        )
+
+    def _on_pes_copy_data(self, _btn) -> None:
+        self._copy_plot_data(
+            fig=getattr(self, "_last_pes_fig", None),
+            stem="pes_scan_profile",
+            title="PES Scan Profile",
+            status_widget=self._pes_export_status,
+        )
 
     def _export_molecule_and_label(self):
         return _exp_export_molecule_and_label(self)

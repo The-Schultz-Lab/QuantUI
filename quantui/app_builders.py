@@ -1055,14 +1055,29 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             description="Save Plot",
             icon="download",
             layout=layout_fn(width="130px"),
-            tooltip="Export the current plot",
+            tooltip="Export the current plot as HTML or PNG",
+        )
+        # M-EXPORT / EXPORT.4: per-panel "Copy data" button that exports
+        # the underlying numerical data to CSV (saved to result_dir) and
+        # also attempts to copy to the system clipboard via the browser
+        # API. Status widget below is shared with the Save Plot path —
+        # whichever action runs last updates the visible status string.
+        copy_btn = widgets.Button(
+            description="Copy data",
+            icon="clipboard",
+            layout=layout_fn(width="120px"),
+            tooltip=(
+                "Save the plot's underlying (x, y) data to CSV in the "
+                "result folder and copy it to the system clipboard"
+            ),
         )
         status = widgets.HTML(value="", layout=layout_fn(margin="0 0 0 8px"))
         setattr(app, f"_{prefix}_export_fmt_dd", fmt_dd)
         setattr(app, f"_{prefix}_export_btn", btn)
+        setattr(app, f"_{prefix}_copy_data_btn", copy_btn)
         setattr(app, f"_{prefix}_export_status", status)
         return widgets.HBox(
-            [fmt_dd, btn, status],
+            [fmt_dd, btn, copy_btn, status],
             layout=layout_fn(align_items="center", margin="0 0 6px 0", gap="6px"),
         )
 

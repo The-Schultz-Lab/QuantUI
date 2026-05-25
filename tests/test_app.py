@@ -1911,6 +1911,127 @@ class TestHistoryHardeningHist6:
         mock_read.assert_not_called()
 
 
+class TestMExportCopyPlotData:
+    """M-EXPORT / EXPORT.4: every spectrum / diagram panel offers a
+    "Copy data" button that exports the plot's (x, y) data to CSV and
+    attempts a clipboard copy via the browser's clipboard API.
+
+    Acceptance:
+    - ``_fig_to_csv`` extracts per-trace (x, y) data from a Plotly figure
+      in the documented CSV layout; empty figure → empty string (caller
+      treats as "nothing to copy" rather than writing an empty file).
+    - Each plot panel (IR, UV-Vis, orbital, PES) exposes a
+      ``_*_copy_data_btn`` widget.
+    - The handler writes a CSV file to the active result directory and
+      updates the panel's status widget.
+    - The status reports an error when no figure has been rendered yet.
+    - Output CSV round-trips cleanly via stdlib ``csv.reader``.
+    """
+
+    def _make_simple_fig(self):
+        import plotly.graph_objects as go
+
+        return go.Figure(
+            go.Scatter(x=[1.0, 2.0, 3.0], y=[10.0, 20.0, 30.0], name="trace0")
+        )
+
+    def _make_two_trace_fig(self):
+        import plotly.graph_objects as go
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=[100, 200], y=[5, 8], name="Stick"))
+        fig.add_trace(go.Scatter(x=[100, 150, 200], y=[1, 4, 8], name="Broadened"))
+        return fig
+
+    def test_fig_to_csv_returns_empty_string_for_none(self):
+        assert QuantUIApp._fig_to_csv(None) == ""
+
+    def test_fig_to_csv_returns_empty_string_when_no_traces(self):
+        import plotly.graph_objects as go
+
+        fig = go.Figure()  # no data
+        assert QuantUIApp._fig_to_csv(fig) == ""
+
+    def test_fig_to_csv_extracts_single_trace(self):
+        fig = self._make_simple_fig()
+        csv_text = QuantUIApp._fig_to_csv(fig, title="Test Plot")
+        assert "# Test Plot" in csv_text
+        assert "# trace0" in csv_text
+        assert "x,y" in csv_text
+        assert "1.0,10.0" in csv_text
+        assert "3.0,30.0" in csv_text
+
+    def test_fig_to_csv_extracts_multi_trace_with_separator_sections(self):
+        fig = self._make_two_trace_fig()
+        csv_text = QuantUIApp._fig_to_csv(fig)
+        assert "# Stick" in csv_text
+        assert "# Broadened" in csv_text
+        # Each section gets its own "x,y" header — the layout is
+        # repeated, not merged into one wide table.
+        assert csv_text.count("x,y") == 2
+
+    def test_fig_to_csv_output_round_trips_via_stdlib_csv(self):
+        import csv as _csv
+        import io as _io
+
+        fig = self._make_simple_fig()
+        text = QuantUIApp._fig_to_csv(fig, title="Roundtrip")
+        # Strip the "# ..." comment lines, leaving the actual rows.
+        lines = [
+            line for line in text.splitlines() if line and not line.startswith("#")
+        ]
+        reader = _csv.reader(_io.StringIO("\n".join(lines)))
+        rows = list(reader)
+        assert rows[0] == ["x", "y"]
+        assert rows[1:] == [
+            ["1.0", "10.0"],
+            ["2.0", "20.0"],
+            ["3.0", "30.0"],
+        ]
+
+    def test_all_four_panels_expose_copy_data_button(self):
+        app = QuantUIApp()
+        for prefix in ("ir", "uv", "orb", "pes"):
+            btn = getattr(app, f"_{prefix}_copy_data_btn", None)
+            assert isinstance(btn, widgets.Button), f"missing _{prefix}_copy_data_btn"
+            assert btn.description == "Copy data"
+
+    def test_copy_data_with_no_figure_shows_error_status(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        app._last_ir_fig = None
+        app._on_ir_copy_data(None)
+        assert "color:#b91c1c" in app._ir_export_status.value
+        assert "No plot data" in app._ir_export_status.value
+
+    def test_copy_data_writes_csv_to_result_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        app._last_result_dir = tmp_path
+        app._last_ir_fig = self._make_simple_fig()
+        app._on_ir_copy_data(None)
+        assert "color:#16a34a" in app._ir_export_status.value
+        assert "Saved CSV" in app._ir_export_status.value
+        csv_files = list(tmp_path.glob("ir_spectrum_data_*.csv"))
+        assert len(csv_files) == 1
+        content = csv_files[0].read_text(encoding="utf-8")
+        assert "trace0" in content
+        assert "1.0,10.0" in content
+
+    def test_copy_data_handles_figure_with_no_extractable_traces(
+        self, tmp_path, monkeypatch
+    ):
+        import plotly.graph_objects as go
+
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        app._last_result_dir = tmp_path
+        app._last_ir_fig = go.Figure()  # empty
+        app._on_ir_copy_data(None)
+        assert "color:#b91c1c" in app._ir_export_status.value
+        assert "no extractable" in app._ir_export_status.value.lower()
+
+
 class TestHistoryHardeningHist1:
     """HIST.1: clicking View Results / View Analysis on a History selection
     must give the user immediate visual feedback.
