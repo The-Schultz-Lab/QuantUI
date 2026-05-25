@@ -465,6 +465,114 @@ def log_calculation(
     _append(_perf_path(), record)
 
 
+#: Hessian-cost multipliers used by the EST.2 frequency cost model.
+#: PySCF's analytical Hessian for HF/DFT runs in ~2-3× SCF time; for
+#: post-HF methods it falls back to numerical Hessian which is much
+#: more expensive (effectively 6N SCFs by itself, on top of the IR
+#: intensity 6N SCFs). The constants below are empirical defaults that
+#: tier-3/4 calibration data can refine — they're load-bearing only
+#: when no direct frequency-calc history exists for the (method, basis)
+#: tuple. Once the user has run a tier-4 freq, strategies 1-4 use real
+#: data and the cost model is skipped entirely.
+_HESSIAN_MULTIPLIER_HF_DFT: float = 2.0
+_HESSIAN_MULTIPLIER_POST_HF: float = 6.0
+_POST_HF_METHODS: frozenset = frozenset({"MP2", "CCSD", "CCSD(T)"})
+
+
+def _estimate_frequency_cost(
+    n_atoms: int,
+    n_electrons: int,
+    method: str,
+    basis: str,
+    n_basis: Optional[int] = None,
+    n_cores: Optional[int] = None,
+    gpu_used: Optional[bool] = None,
+) -> Optional[dict]:
+    """EST.2: structured frequency-time estimate from an SP anchor.
+
+    Decomposition::
+
+        freq_total ≈ scf_anchor + hessian_term + ir_intensity_term
+
+    where:
+
+    - ``scf_anchor`` — predicted single-point time for the same
+      ``(method, basis, n_atoms, gpu_used)`` profile, derived via
+      :func:`estimate_time` with ``calc_type="single_point"``.
+    - ``hessian_term`` — empirical multiple of ``scf_anchor`` (~2× for
+      HF/DFT analytical, ~6× for post-HF numerical).
+    - ``ir_intensity_term`` — the 6N inner SCFs that compute ∂μ/∂R for
+      IR intensities, divided by ``effective_workers`` when the
+      ``QUANTUI_FREQ_PARALLEL`` cross-displacement worker pool is gated
+      on (requires no GPU + ≥4 cores + ≥6 displacements). On a GPU host
+      the inner SCFs are already accelerated by gpu4pyscf, so parallel
+      adds little and stays serial.
+
+    Returns ``None`` when the SP anchor can't be produced (no usable
+    history for the SP profile). In that case ``estimate_time``'s
+    overall return value stays ``None`` and the UI shows
+    "no estimate available — run a calibration".
+
+    The model's confidence is inherited from the SP anchor — we don't
+    have direct freq variance data to claim independently, and the
+    cost decomposition itself is a fixed structural assumption.
+    """
+    if n_atoms <= 0:
+        return None
+
+    sp_est = estimate_time(
+        n_atoms=n_atoms,
+        n_electrons=n_electrons,
+        method=method,
+        basis=basis,
+        n_basis=n_basis,
+        n_cores=n_cores,
+        calc_type="single_point",
+        gpu_used=gpu_used,
+    )
+    if sp_est is None:
+        return None
+    scf_anchor_s = float(sp_est["seconds"])
+
+    # Hessian term.
+    method_upper = method.strip().upper()
+    hessian_mult = (
+        _HESSIAN_MULTIPLIER_POST_HF
+        if method_upper in _POST_HF_METHODS
+        else _HESSIAN_MULTIPLIER_HF_DFT
+    )
+    hessian_term_s = hessian_mult * scf_anchor_s
+
+    # IR intensity term — 6N inner SCFs, possibly parallelized.
+    displacement_count = 6 * n_atoms
+    effective_workers = 1
+    try:
+        from quantui.freq_ir_workers import (
+            parallel_enabled_for_run,
+            pick_worker_count,
+        )
+
+        cpu_count = n_cores if n_cores is not None else (os.cpu_count() or 1)
+        if parallel_enabled_for_run(
+            cpu_count=cpu_count,
+            displacement_count=displacement_count,
+            gpu_available=bool(gpu_used),
+        ):
+            effective_workers = pick_worker_count(cpu_count, displacement_count)
+    except Exception:  # noqa: BLE001 — gating is best-effort
+        effective_workers = 1
+    ir_term_s = displacement_count * scf_anchor_s / max(1, effective_workers)
+
+    total_s = scf_anchor_s + hessian_term_s + ir_term_s
+    return {
+        "seconds": total_s,
+        # Cost model adds structural assumptions but no new data — don't
+        # claim more confidence than the SP anchor it leans on.
+        "confidence": sp_est["confidence"],
+        "n_samples": sp_est["n_samples"],
+    }
+
+
 def estimate_time(
     n_atoms: int,
     n_electrons: int,
@@ -546,7 +654,15 @@ def estimate_time(
         scoped = [r for r in converged if r.get("calc_type") == calc_type]
 
     if len(scoped) < 2:
-        return None
+        # EST.2: frequency calcs can still produce a prediction via the
+        # SP-anchored cost model even when direct freq history is empty.
+        # The cost model lives at the end of this function — fall through
+        # for freq, bail for everything else.
+        if calc_type != "frequency":
+            return None
+        # Continue with empty/small ``scoped``: the four direct strategies
+        # will all no-op (their pool checks require len >= 2), and the
+        # freq cost-model fallback at the end will fire.
 
     # M-EST / EST.1: partition by device when the caller specified one.
     # Records pre-dating session 55 don't carry ``gpu_used`` — admit them
@@ -678,6 +794,25 @@ def estimate_time(
             "confidence": "low",
             "n_samples": len(same_basis),
         }
+
+    # ── EST.2 frequency cost-model fallback ───────────────────────────────────
+    # When all four direct-history strategies fail for a freq calc, fall
+    # back to the structural decomposition: SP anchor + Hessian + 6N
+    # inner SCFs. The SP anchor comes from the much richer single-point
+    # history pool, which is usually populated even on a fresh install
+    # (tier 1 is SP-only). Confidence is inherited from the SP anchor.
+    if calc_type == "frequency":
+        cost_est = _estimate_frequency_cost(
+            n_atoms=n_atoms,
+            n_electrons=n_electrons,
+            method=method,
+            basis=basis,
+            n_basis=n_basis,
+            n_cores=n_cores,
+            gpu_used=gpu_used,
+        )
+        if cost_est is not None:
+            return cost_est
 
     return None
 

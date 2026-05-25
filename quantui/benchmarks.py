@@ -641,6 +641,69 @@ def _normalize_entry(entry: tuple) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Cross-device probe (M-EST / EST.5, 2026-05-25)
+# ---------------------------------------------------------------------------
+#
+# When GPU offload is available, tier 3 and tier 4 calibrations should run
+# a SMALL representative subset of entries twice — once on GPU and once on
+# CPU (via ``QUANTUI_DISABLE_GPU=1``) — so a single calibration populates
+# the analytics dashboard's GPU-vs-CPU speedup table with measured pairs
+# rather than asking users to re-run the suite under different env vars.
+#
+# Doubling the WHOLE tier would blow the time budget (tier 4 is already
+# up to 30 min); 3-4 representative entries per tier costs ~5-10 min
+# extra on a GPU host and is the right granularity for the speedup table.
+
+#: Labels of benchmark entries that get a CPU/GPU probe pair in tier 3+4.
+#: Matched exactly against the ``label`` field of normalized entries. Keep
+#: this short — one cheap SP, one medium SP, one cheap freq is plenty.
+_CROSS_DEVICE_PROBE_LABELS = frozenset(
+    {
+        "H₂O  B3LYP/6-31G*",
+        "C₆H₆ (benzene)  B3LYP/6-31G*",
+        "H₂O  B3LYP/STO-3G  [Freq]",
+    }
+)
+
+
+def _build_execution_plan(suite: list, mode: str, gpu_available: bool) -> list[dict]:
+    """Expand the suite into a list of execution entries.
+
+    Each entry is a normalized dict with an additional ``force_cpu``
+    bool field. Non-probe entries appear once with ``force_cpu=False``.
+    Probe entries appear:
+
+    - **once** when GPU is unavailable or the tier is 1/2 (no cross-
+      device data to collect).
+    - **twice** when GPU is available AND mode is tier3/tier4 — once
+      with ``force_cpu=False`` (will use GPU offload) and once with
+      ``force_cpu=True`` (will set ``QUANTUI_DISABLE_GPU=1`` in the
+      worker's environment). Labels are suffixed ``[GPU]`` / ``[CPU]``
+      to keep the results table unambiguous.
+
+    The worker reads ``force_cpu`` and toggles the env var BEFORE any
+    quantui / gpu4pyscf import so the cached probe sees the right state.
+    """
+    do_cross_device = gpu_available and mode in ("tier3", "tier4")
+    plan: list[dict] = []
+    for entry in suite:
+        normalized = _normalize_entry(entry)
+        if do_cross_device and normalized["label"] in _CROSS_DEVICE_PROBE_LABELS:
+            gpu_variant = dict(normalized)
+            gpu_variant["label"] = f"{normalized['label']}  [GPU]"
+            gpu_variant["force_cpu"] = False
+            cpu_variant = dict(normalized)
+            cpu_variant["label"] = f"{normalized['label']}  [CPU]"
+            cpu_variant["force_cpu"] = True
+            plan.append(gpu_variant)
+            plan.append(cpu_variant)
+        else:
+            normalized["force_cpu"] = False
+            plan.append(normalized)
+    return plan
+
+
+# ---------------------------------------------------------------------------
 # Result dataclass
 # ---------------------------------------------------------------------------
 
@@ -683,6 +746,12 @@ class CalibrationResult:
     steps: List[BenchmarkStep] = field(default_factory=list)
     stopped_early: bool = False
     mode: str = "tier1"
+    # EST.5 cross-device probe expands the execution plan beyond
+    # ``len(_MODE_TO_SUITE[mode])`` for tier 3/4 on GPU hosts. Store
+    # the plan length explicitly so progress denominators stay correct;
+    # 0 (default) means "fall back to suite size" for back-compat with
+    # callers that construct the dataclass directly without a runner.
+    expected_steps: int = 0
 
     @property
     def n_completed(self) -> int:
@@ -690,6 +759,8 @@ class CalibrationResult:
 
     @property
     def n_total(self) -> int:
+        if self.expected_steps:
+            return self.expected_steps
         return len(_MODE_TO_SUITE.get(self.mode, BENCHMARK_SUITE_TIER1))
 
 
@@ -919,6 +990,7 @@ def _calibration_worker(
     log_path_str: str,
     result_queue,
     calibration_run_id: str = "",
+    force_cpu: bool = False,
 ) -> None:
     """Run one calibration step in a child process.
 
@@ -926,6 +998,13 @@ def _calibration_worker(
     PySCF progress to ``log_path_str`` (append mode) so the parent can
     tail it AND to an in-memory buffer so the per-calc PySCF output
     can be saved alongside the result.
+
+    ``force_cpu=True`` sets ``QUANTUI_DISABLE_GPU=1`` in the worker's
+    environment BEFORE any quantui / gpu4pyscf import so the cached
+    ``is_gpu_available()`` probe sees the override and the calc actually
+    runs on CPU. Used by the EST.5 cross-device probe — tier 3/4 on a
+    GPU host runs selected entries twice (once forced-CPU, once GPU) so
+    the analytics speedup table is populated from one calibration run.
 
     On success: saves a real result directory via ``_save_calibration_step``
     (tagged with ``calibration_run_id``) and puts a summary dict with
@@ -936,9 +1015,15 @@ def _calibration_worker(
     crashed worker — distinct from a step-level error.
     """
     import io as _io
+    import os as _os
     import time as _t
     from datetime import datetime as _dt
     from pathlib import Path as _P
+
+    # EST.5: must run BEFORE any quantui / pyscf / gpu4pyscf import so
+    # the ``is_gpu_available()`` cache sees the override on first probe.
+    if force_cpu:
+        _os.environ["QUANTUI_DISABLE_GPU"] = "1"
 
     log_path = _P(log_path_str)
     t0 = _t.perf_counter()
@@ -1202,9 +1287,23 @@ def run_calibration(
         )
         mode = "tier1"
     suite = _MODE_TO_SUITE[mode]
+
+    # EST.5: probe GPU availability once in the parent so we know whether
+    # to duplicate cross-device entries. Failure (e.g. gpu_offload import
+    # error on a misconfigured install) defaults to "no GPU" — the
+    # calibration still runs, it just doesn't collect speedup pairs.
+    gpu_available = False
+    try:
+        from quantui.gpu_offload import is_gpu_available as _is_gpu_avail
+
+        gpu_available = bool(_is_gpu_avail()[0])
+    except Exception:  # noqa: BLE001 — best-effort probe
+        gpu_available = False
+
+    execution_plan = _build_execution_plan(suite, mode, gpu_available)
     timestamp = datetime.now(timezone.utc).isoformat()
-    result = CalibrationResult(timestamp=timestamp, mode=mode)
-    total = len(suite)
+    total = len(execution_plan)
+    result = CalibrationResult(timestamp=timestamp, mode=mode, expected_steps=total)
 
     # Per-run calibration log file. The worker appends; the parent tails.
     log_path = _calibration_log_path(timestamp)
@@ -1263,8 +1362,7 @@ def run_calibration(
         progress_cb(*args)
 
     stopped_mid_step = False
-    for step_n, entry in enumerate(suite, start=1):
-        normalized = _normalize_entry(entry)
+    for step_n, normalized in enumerate(execution_plan, start=1):
         label = normalized["label"]
         atoms = normalized["atoms"]
         coords = normalized["coords"]
@@ -1273,6 +1371,7 @@ def run_calibration(
         method = normalized["method"]
         basis = normalized["basis"]
         calc_type = normalized["calc_type"]
+        force_cpu = bool(normalized.get("force_cpu", False))
 
         # Honour stop request BEFORE starting a new step.
         if stop_event is not None and stop_event.is_set():
@@ -1313,6 +1412,7 @@ def run_calibration(
                 str(log_path),
                 result_queue,
                 timestamp,  # calibration_run_id — the parent's run timestamp
+                force_cpu,  # EST.5 cross-device probe flag
             ),
             daemon=True,
         )
