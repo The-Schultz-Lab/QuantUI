@@ -104,6 +104,35 @@ class TestFilePreviewDispatch:
         ), f"unexpected status: {status!r}"
 
 
+class TestFilePreviewAutoOnSelect:
+    """Selecting a file in the entries widget should auto-preview it.
+
+    Users reported (session 54) that just clicking a file did nothing —
+    they had to additionally click Open. The fix: ``_on_files_entry_changed``
+    invokes ``_preview_file_path`` for files (folders still require Open
+    so single-click doesn't accidentally navigate).
+    """
+
+    def test_selecting_file_triggers_preview(self, app, tmp_path):
+        p = tmp_path / "data.json"
+        p.write_text('{"x": 1}', encoding="utf-8")
+        # Simulate the ipywidgets observe payload that fires on value change.
+        app._files_current_dir = tmp_path
+        app._on_files_entry_changed({"new": str(p)})
+        assert "JSON preview" in app._files_status_html.value
+
+    def test_selecting_folder_does_not_preview(self, app, tmp_path):
+        sub = tmp_path / "subdir"
+        sub.mkdir()
+        app._files_current_dir = tmp_path
+        app._on_files_entry_changed({"new": str(sub)})
+        # Status should hint at Open, NOT a preview-type tag.
+        status = app._files_status_html.value
+        assert "click Open" in status
+        assert "JSON preview" not in status
+        assert "CSV preview" not in status
+
+
 class TestFilePreviewSafety:
     def test_path_outside_allowed_roots_rejected(self, app, tmp_path, monkeypatch):
         # Tighten allowed roots to a subdirectory; a sibling file must

@@ -294,6 +294,23 @@ def history_load_results(
         if mol is not None:
             with timer.stage("show_result_3d"):
                 app._show_result_3d(mol)
+        # Also populate the Analysis tab so the two tabs stay in sync.
+        # Without this, clicking "View Results" left Analysis showing the
+        # previously-loaded calc (or empty panels), which surprised users
+        # who expected loading a history item to refresh both views.
+        with timer.stage("build_context"):
+            ctx = app._build_history_context(result_dir)
+        if ctx is not None:
+            with timer.stage("analysis_mol_render"):
+                try:
+                    if mol is not None:
+                        app._show_result_3d(mol, extra_output=app._analysis_mol_output)
+                    else:
+                        app._analysis_mol_output.clear_output()
+                except Exception:
+                    pass
+            with timer.stage("apply_analysis_context"):
+                app._apply_analysis_context(ctx)
         with timer.stage("nav_tab"):
             app.root_tab.selected_index = 1
     except Exception:

@@ -102,25 +102,6 @@ def build_status_panel(
         f"</div>"
     )
 
-    steps = [
-        "Select a molecule &mdash; library dropdown, XYZ paste, or PubChem search",
-        "Choose a <b>method</b> (RHF / DFT / MP2) and <b>basis set</b> in the Calculate tab",
-        "Click <b>Run Calculation</b> &mdash; SCF progress appears in real time",
-        "Explore results in the <b>Results</b> and <b>Analysis</b> tabs",
-        "Browse past calculations in <b>History</b>; compare them in <b>Compare</b>",
-    ]
-    steps_html = "".join(
-        f'<li style="margin:5px 0;font-size:13px;color:#475569">{s}</li>' for s in steps
-    )
-    guide_html = widgets.HTML(
-        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;'
-        f'padding:12px 16px;border-radius:6px;margin:8px 0">'
-        f'<div style="font-weight:600;font-size:13px;color:#1e293b;margin-bottom:8px">'
-        f"Quick start</div>"
-        f'<ol style="margin:0;padding-left:20px">{steps_html}</ol>'
-        f"</div>"
-    )
-
     # ── Settings section ──────────────────────────────────────────────────
     # "Default 3D backend" — user preference persisted via UserSettings.
     # Drives viz_backend_router resolution. Distinct from the Calculate-tab
@@ -186,7 +167,7 @@ def build_status_panel(
     )
 
     app._status_tab_panel = widgets.VBox(
-        [app._status_html, guide_html, settings_box],
+        [app._status_html, settings_box],
         layout=layout_fn(padding="8px 0"),
     )
 
@@ -1324,9 +1305,10 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         min=5.0,
         max=100.0,
         step=5.0,
-        description="Line width:",
-        style={"description_width": "80px"},
-        layout=layout_fn(width="260px", display="none"),
+        description="Line width (cm⁻¹):",
+        readout_format=".0f",
+        style={"description_width": "120px"},
+        layout=layout_fn(width="300px", display="none"),
         # continuous_update=False so dragging the slider only fires on
         # release, not 30-60 times per second during the drag (BUG.9 fix).
         # Combined with the atomic outputs swap in _set_html_output this
@@ -1513,11 +1495,21 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         min=5.0,
         max=100.0,
         step=5.0,
-        description="Line width:",
-        style={"description_width": "80px"},
-        layout=layout_fn(width="260px", display="none"),
+        description="Line width (nm):",
+        readout_format=".0f",
+        style={"description_width": "110px"},
+        layout=layout_fn(width="290px", display="none"),
+        # Fire only on slider release — avoids a re-render storm during drag
+        # that, combined with the full HTML output swap, causes the page
+        # to scroll back to the top mid-drag.
+        continuous_update=False,
     )
-    app._tddft_fig = widgets.Output(layout=layout_fn(width="100%"))
+    # min_height matches the Plotly UV-Vis figure height (320px) so the
+    # Output container does not briefly collapse to 0px during the atomic
+    # outputs swap on mode/slider changes — same fix as the IR Output above.
+    app._tddft_fig = widgets.Output(
+        layout=layout_fn(width="100%", min_height="320px"),
+    )
     uv_export_row = _plot_export_row("uv")
     uv_controls = widgets.HBox(
         [app._uv_mode_toggle, app._uv_fwhm_slider],
@@ -1919,7 +1911,7 @@ def build_files_tab(app: Any, *, layout_fn: Any) -> None:
     app._files_status_html = widgets.HTML(
         value=(
             '<span style="font-size:12px;color:#94a3b8">'
-            "Select a file and click Open to preview.</span>"
+            "Select a file to preview it; use Open to enter a folder.</span>"
         )
     )
     app._files_preview_output = widgets.Output(

@@ -29,13 +29,19 @@ class TestStickMode:
         fig = plot_ir_spectrum(_SIMPLE_FREQS, _SIMPLE_INTS)
         assert isinstance(fig, go.Figure)
 
-    def test_has_one_trace(self):
+    def test_has_lines_and_markers_traces(self):
+        # Stick mode renders two traces: vertical lines + marker dots at
+        # each stick tip (the dots provide a hover target, mirroring the
+        # UV-Vis spectrum affordance).
         fig = plot_ir_spectrum(_SIMPLE_FREQS, _SIMPLE_INTS)
-        assert len(fig.data) == 1
+        assert len(fig.data) == 2
+        assert fig.data[0].mode == "lines"
+        assert fig.data[1].mode == "markers"
 
     def test_trace_is_scatter(self):
         fig = plot_ir_spectrum(_SIMPLE_FREQS, _SIMPLE_INTS)
         assert isinstance(fig.data[0], go.Scatter)
+        assert isinstance(fig.data[1], go.Scatter)
 
     def test_xaxis_low_to_high(self):
         fig = plot_ir_spectrum(_SIMPLE_FREQS, _SIMPLE_INTS)

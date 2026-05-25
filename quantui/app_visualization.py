@@ -1144,10 +1144,16 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
         mode_norm = mode_name.strip().lower()
         fig = _go.Figure()
 
+        # Use one stable x-range across modes so toggling Stick/Broadened
+        # doesn't visibly shift the axis. The Broadened wings need ~3*gamma
+        # of headroom to show the full Lorentzian tail; padding by the same
+        # amount in Stick keeps the layout identical.
+        gamma = max(float(fwhm), 1.0) / 2.0
+        pad = max(80.0, 3.0 * gamma)
+        x_min = max(100.0, min(wl) - pad)
+        x_max = max(wl) + pad
+
         if mode_norm == "broadened":
-            gamma = max(float(fwhm), 1.0) / 2.0
-            x_min = max(100.0, min(wl) - 80.0)
-            x_max = max(wl) + 80.0
             n_points = max(600, int((x_max - x_min) * 2.0))
             x_grid = _np.linspace(x_min, x_max, n_points)
             y_grid = _np.zeros_like(x_grid)
@@ -1202,7 +1208,12 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
             paper_bgcolor=tc["paper_bgcolor"],
             font=dict(color=tc["font_color"]),
         )
-        fig.update_xaxes(showgrid=True, gridcolor=tc["grid_color"], zeroline=False)
+        fig.update_xaxes(
+            showgrid=True,
+            gridcolor=tc["grid_color"],
+            zeroline=False,
+            range=[x_min, x_max],
+        )
         fig.update_yaxes(
             showgrid=True,
             gridcolor=tc["grid_color"],

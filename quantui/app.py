@@ -2089,9 +2089,13 @@ class QuantUIApp:
             self._set_files_status("Select a folder or file.")
             return
         if self._files_selected_path.is_dir():
-            self._set_files_status(f"Folder selected: {self._files_selected_path.name}")
+            self._set_files_status(
+                f"Folder selected: {self._files_selected_path.name} — click Open to enter."
+            )
         else:
-            self._set_files_status(f"File selected: {self._files_selected_path.name}")
+            # Auto-preview on selection so the user doesn't need to click Open
+            # for every file. Open remains useful for folders.
+            self._preview_file_path(self._files_selected_path)
 
     def _on_files_open(self, _btn) -> None:
         self._activity_begin("Opening selected path...")
