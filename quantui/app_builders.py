@@ -836,11 +836,33 @@ def build_theme_selector(app: Any, *, layout_fn: Any) -> None:
 
 
 def build_welcome_header(app: Any) -> None:
-    """Build the static QuantUI welcome banner."""
+    """Build the QuantUI welcome banner.
+
+    POLISH.1 (M-POLISH, 2026-05-25): the inline SVG was already here but
+    static. Ported the CSS keyframe animations from ``docs/logo.svg`` so
+    the orbital rings spin at slightly different speeds + directions
+    (9 s / 13 s reverse / 17 s). ``prefers-reduced-motion`` is honoured.
+    Inline-SVG + inline-CSS works in ipywidgets.HTML because both pass
+    the Jupyter widget sanitizer (Voilà's HTML pipeline allows <style>
+    inside <svg> root).
+    """
     logo_svg = (
         '<svg width="120" height="120" viewBox="0 0 280 280"'
         ' xmlns="http://www.w3.org/2000/svg">'
         "<defs>"
+        "<style>"
+        ".qring{transform-origin:140px 140px;}"
+        ".qring--1{animation:qspin1 9s linear infinite;}"
+        ".qring--2{animation:qspin2 13s linear infinite reverse;"
+        "transform:rotate(60deg);}"
+        ".qring--3{animation:qspin3 17s linear infinite;"
+        "transform:rotate(120deg);}"
+        "@keyframes qspin1{to{transform:rotate(360deg);}}"
+        "@keyframes qspin2{to{transform:rotate(-300deg);}}"
+        "@keyframes qspin3{to{transform:rotate(480deg);}}"
+        "@media (prefers-reduced-motion:reduce){"
+        ".qring{animation-play-state:paused;}}"
+        "</style>"
         '<filter id="q-glow" x="-50%" y="-50%" width="200%" height="200%">'
         '<feGaussianBlur stdDeviation="7" result="blur"/>'
         "<feMerge>"
@@ -854,17 +876,17 @@ def build_welcome_header(app: Any) -> None:
         "</defs>"
         '<circle cx="140" cy="140" r="48"'
         ' fill="rgba(37,99,235,0.20)" filter="url(#q-halo)"/>'
-        '<g transform="rotate(0,140,140)">'
+        '<g class="qring qring--1">'
         '<ellipse cx="140" cy="140" rx="115" ry="33" fill="none"'
         ' stroke="#0891b2" stroke-width="1.4" opacity="0.70"/>'
         '<circle cx="255" cy="140" r="5.5" fill="#67e8f9"/>'
         "</g>"
-        '<g transform="rotate(60,140,140)">'
+        '<g class="qring qring--2">'
         '<ellipse cx="140" cy="140" rx="115" ry="33" fill="none"'
         ' stroke="#0891b2" stroke-width="1.4" opacity="0.55"/>'
         '<circle cx="255" cy="140" r="4.5" fill="#93c5fd"/>'
         "</g>"
-        '<g transform="rotate(120,140,140)">'
+        '<g class="qring qring--3">'
         '<ellipse cx="140" cy="140" rx="115" ry="33" fill="none"'
         ' stroke="#3b82f6" stroke-width="1.4" opacity="0.42"/>'
         '<circle cx="255" cy="140" r="4" fill="#60a5fa"/>'

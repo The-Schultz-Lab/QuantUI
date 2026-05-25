@@ -46,8 +46,11 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     """Update extra options panel based on selected calculation type."""
     ct = change["new"]
 
-    # QM pre-optimization is meaningful for all workflows except Geometry Opt,
-    # which is itself an optimization workflow.
+    # The "geometry optimization before this calc" checkbox is meaningful
+    # for all workflows except Geometry Opt itself (which IS the geom-opt
+    # workflow). POLISH.9: this was called "pre-optimisation" pre-2026-05-25;
+    # the underlying operation is a full DFT geom-opt — distinct from the
+    # LJ classical pre-opt in quantui/preopt.py.
     if ct == "Geometry Opt":
         app._freq_preopt_cb.value = False
         app._freq_preopt_cb.layout.display = "none"
@@ -645,7 +648,14 @@ def on_cal_run(
     """Start async calibration run and initialize calibration UI state."""
     _ = btn
     mode = app._cal_mode_toggle.value
-    suite = benchmark_suite if mode == "short" else benchmark_suite_long
+    # session 55 hotfix: the old ``"short" else "long"`` two-tier dispatch
+    # silently routed tier 3 / tier 4 (and tier 1!) to the tier-2 suite,
+    # which set ``progress_bar.max = 20`` while tier 1 only ran 8 steps
+    # — the bar froze at 40% on completion. Use the 4-tier lookup so
+    # ``max`` matches the actual step count.
+    from quantui.benchmarks import _MODE_TO_SUITE
+
+    suite = _MODE_TO_SUITE.get(mode, benchmark_suite)
     app._cal_stop_event = threading.Event()
     app._cal_run_btn.disabled = True
     app._cal_mode_toggle.disabled = True
@@ -656,6 +666,9 @@ def on_cal_run(
     app._cal_step_label.layout.display = ""
     app._cal_step_label.value = (
         '<span style="font-size:12px;color:#475569">Starting…</span>'
+        # Reserve a second invisible line so the live-message ticker
+        # doesn't jump the accordion height (session 55 user report).
+        '<br><span style="font-size:11px;color:transparent">.</span>'
     )
     app._cal_results_html.value = ""
 
@@ -669,21 +682,95 @@ def on_cal_stop(app: Any, btn: Any) -> None:
         app._cal_stop_event.set()
 
 
+def _cal_status_text(status: str) -> str:
+    """Render a benchmark-step status code as a glanceable HTML cell."""
+    return {
+        "ok": "✓",
+        "timed_out": "⏱ timed out",
+        "stopped": "⛔ stopped",
+        "error": "✗ error",
+        "running": "▶ running",
+    }.get(status, status)
+
+
+def _cal_table_html(steps_so_far, total: int, *, in_flight_step=None) -> str:
+    """Render the calibration results table.
+
+    Called incrementally — after every completed step — so the user sees
+    rows accumulate in real time instead of waiting for the whole tier
+    to finish (session 55 user request). ``steps_so_far`` is the list of
+    ``BenchmarkStep`` objects completed; ``in_flight_step`` (optional)
+    is a dict ``{label, n_electrons, n_basis, status, elapsed_s}`` that
+    appends a "running" row at the bottom while a step is mid-execution.
+    """
+    row_tpl = (
+        "<tr>"
+        '<td style="padding:2px 12px 2px 0;font-size:12px">{label}</td>'
+        '<td style="padding:2px 8px 2px 0;font-size:12px;text-align:right">{ne}</td>'
+        '<td style="padding:2px 8px 2px 0;font-size:12px;text-align:right">{nb}</td>'
+        '<td style="padding:2px 8px 2px 0;font-size:12px;text-align:right">{t:.2f} s</td>'
+        '<td style="padding:2px 0;font-size:12px">{status}</td>'
+        "</tr>"
+    )
+    rows = "".join(
+        row_tpl.format(
+            label=s.label,
+            ne=s.n_electrons,
+            nb=s.n_basis if s.n_basis is not None else "—",
+            t=s.elapsed_s,
+            status=_cal_status_text(s.status),
+        )
+        for s in steps_so_far
+    )
+    if in_flight_step is not None:
+        rows += row_tpl.format(
+            label=in_flight_step["label"],
+            ne=in_flight_step.get("n_electrons", "—"),
+            nb=in_flight_step.get("n_basis", "—") or "—",
+            t=in_flight_step.get("elapsed_s", 0.0),
+            status=_cal_status_text("running"),
+        )
+
+    n_done = sum(1 for s in steps_so_far if s.status == "ok")
+    summary = f"Completed {n_done} / {total} steps."
+    return (
+        '<div style="margin-top:8px">'
+        f'<p style="font-size:13px;color:#374151;margin:0 0 6px">{summary}</p>'
+        '<table style="border-collapse:collapse">'
+        "<tr>"
+        '<th style="padding:2px 12px 2px 0;font-size:12px;text-align:left">Calculation</th>'
+        '<th style="padding:2px 8px 2px 0;font-size:12px;text-align:right">e⁻</th>'
+        '<th style="padding:2px 8px 2px 0;font-size:12px;text-align:right">Basis fns</th>'
+        '<th style="padding:2px 8px 2px 0;font-size:12px;text-align:right">Wall time</th>'
+        '<th style="padding:2px 0;font-size:12px">Status</th>'
+        "</tr>"
+        f"{rows}</table></div>"
+    )
+
+
 def do_calibration(app: Any, *, pyscf_available: bool) -> None:
     """Run calibration suite and render calibration summary table.
 
-    Fixes shipped 2026-05-25 (session 55 user report — tier 4 stuck the
-    user with no progress signal):
+    Fixes shipped 2026-05-25 (session 55 user reports):
 
     - Wraps the whole run in ``_activity_begin/_end`` so the toolbar
       activity badge stops reading "Idle" while calibration is busy.
-    - Per-step ``progress_cb`` now writes a multi-line status block
-      (live tail of the per-step PySCF / SCF log) so the user can see
-      where a slow step is rather than guess whether it froze.
+    - Per-step ``progress_cb`` writes a multi-line status block (live
+      tail of the per-step PySCF / SCF log) so the user can see where
+      a slow step is rather than guess whether it froze.
+    - Table rows render incrementally (after each step completes)
+      instead of all at once at end-of-run.
+    - The live-message line is ALWAYS present (transparent placeholder
+      when there's no message yet) so the accordion height doesn't
+      flicker between one-line and two-line states.
     """
     from quantui.benchmarks import run_calibration
 
     mode = app._cal_mode_toggle.value
+    # Total-step count comes via the ``total`` arg of the ``_progress``
+    # callback; no need to compute it locally. (The earlier draft pulled
+    # it from ``_MODE_TO_SUITE`` but never used it — ruff F841.)
+
     # Per-tier timeout budget. Tier 3 + tier 4 have freq/geo-opt anchors
     # that run for minutes; tier 1 / tier 2 stay SP-only at 120 s/step.
     _timeout_map = {
@@ -696,11 +783,16 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
     }
     timeout_per_step = _timeout_map.get(mode, 120.0)
 
-    # M-EST follow-up (2026-05-25): keep the toolbar activity badge red
-    # for the duration of the calibration so the user knows the kernel
-    # is busy. Without this it reads "Idle" while the worker thread
-    # burns CPU for tier 3/4 (~10-30 min).
+    # M-EST follow-up: keep the toolbar activity badge red for the
+    # duration of the calibration so the user knows the kernel is busy.
     app._activity_begin(f"Calibrating ({mode})…", kind="compute")
+
+    # Per-step buffer of completed steps for incremental table rendering.
+    # Steps accumulate here as soon as each one finishes.
+    _completed_steps: list = []
+    # Buffer for the currently-running step so we can show a "running"
+    # row at the bottom of the table while it's in-flight.
+    _in_flight: dict = {}
 
     def _progress(
         step_n: int,
@@ -710,16 +802,17 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
         elapsed: float,
         *,
         live_message: Optional[str] = None,
+        step: Any = None,
     ) -> None:
         """Per-step progress callback.
 
-        Two call modes:
+        Three call modes:
+        - Live-tick: status is "running"; ``step`` is None. Updates
+          the step label and shows an "in flight" row at the bottom
+          of the table.
         - Step-finish: status is one of ok/timed_out/stopped/error;
-          ``live_message`` is None. Updates the progress bar.
-        - Live-tick: status is "running"; ``live_message`` carries the
-          latest ``[QuantUI_STATUS]`` marker from inside the step (set
-          by freq_calc / optimizer during long inner loops). Updates
-          the step label only.
+          ``step`` is the completed ``BenchmarkStep``. Appends to the
+          completed-steps buffer + re-renders the table.
         """
         icon = {
             "ok": "✓",
@@ -730,20 +823,32 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
         }.get(status, "?")
         if status != "running":
             app._cal_progress.value = step_n
-        # Multi-line block: top line = step + status; second line = the
-        # most recent live message (if any). Keeps the user oriented
-        # during the slow tier-4 freq anchors.
-        live_line = (
-            f'<br><span style="font-size:11px;color:#64748b">{live_message}</span>'
-            if live_message
-            else ""
-        )
+            if step is not None:
+                _completed_steps.append(step)
+        # ALWAYS render two lines so the accordion height doesn't
+        # flip-flop. Empty live-message becomes a transparent dot to
+        # preserve the line-height.
+        live_line_text = live_message if live_message else "."
+        live_line_color = "#64748b" if live_message else "transparent"
         app._cal_step_label.value = (
             f'<span style="font-size:12px;color:#475569">'
             f"Step {step_n} / {total} — {label} "
             f"[{icon} {elapsed:.1f} s]</span>"
-            f"{live_line}"
+            f'<br><span style="font-size:11px;color:{live_line_color}">'
+            f"{live_line_text}</span>"
         )
+
+        # Refresh in-flight buffer + the table snapshot.
+        if status == "running":
+            # Pull electron-count / basis from the active suite entry so
+            # the in-flight row has the same columns as completed rows.
+            _in_flight.update(label=label, elapsed_s=elapsed)
+            app._cal_results_html.value = _cal_table_html(
+                _completed_steps, total, in_flight_step=_in_flight or None
+            )
+        else:
+            _in_flight.clear()
+            app._cal_results_html.value = _cal_table_html(_completed_steps, total)
 
     try:
         result = run_calibration(
@@ -752,46 +857,25 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
             timeout_per_step=timeout_per_step,
             mode=mode,
         )
+        # Belt-and-suspenders: re-render the table from the canonical
+        # ``result.steps`` in case any per-step callback was dropped
+        # (e.g. transient widget-update exception). The progress
+        # callback should have already kept _completed_steps in sync.
+        app._cal_results_html.value = _cal_table_html(
+            list(result.steps), result.n_total
+        )
     finally:
         app._activity_end(kind="compute")
-
-    rows = "".join(
-        f"<tr>"
-        f'<td style="padding:2px 12px 2px 0;font-size:12px">{s.label}</td>'
-        f'<td style="padding:2px 8px 2px 0;font-size:12px;text-align:right">'
-        f"{s.n_electrons}</td>"
-        f'<td style="padding:2px 8px 2px 0;font-size:12px;text-align:right">'
-        f"{s.n_basis if s.n_basis is not None else '—'}</td>"
-        f'<td style="padding:2px 8px 2px 0;font-size:12px;text-align:right">'
-        f"{s.elapsed_s:.2f} s</td>"
-        f'<td style="padding:2px 0;font-size:12px">'
-        f'{"✓" if s.status == "ok" else ("⏱ timed out" if s.status == "timed_out" else ("⛔ stopped" if s.status == "stopped" else "✗ error"))}'
-        f"</td>"
-        f"</tr>"
-        for s in result.steps
-    )
-    summary = f"Completed {result.n_completed} / {result.n_total} steps." + (
-        " (stopped early)" if result.stopped_early else ""
-    )
-    app._cal_results_html.value = (
-        f'<div style="margin-top:8px">'
-        f'<p style="font-size:13px;color:#374151;margin:0 0 6px">{summary}</p>'
-        f'<table style="border-collapse:collapse">'
-        f"<tr>"
-        f'<th style="padding:2px 12px 2px 0;font-size:12px;text-align:left">Calculation</th>'
-        f'<th style="padding:2px 8px 2px 0;font-size:12px;text-align:right">e⁻</th>'
-        f'<th style="padding:2px 8px 2px 0;font-size:12px;text-align:right">Basis fns</th>'
-        f'<th style="padding:2px 8px 2px 0;font-size:12px;text-align:right">Wall time</th>'
-        f'<th style="padding:2px 0;font-size:12px">Status</th>'
-        f"</tr>"
-        f"{rows}</table></div>"
-    )
 
     app._cal_step_label.value = (
         '<span style="font-size:12px;color:#16a34a"><b>Calibration complete.</b> '
         "Time estimates are now active.</span>"
+        '<br><span style="font-size:11px;color:transparent">.</span>'
         if result.n_completed > 0
-        else '<span style="font-size:12px;color:#dc2626">No steps completed.</span>'
+        else (
+            '<span style="font-size:12px;color:#dc2626">No steps completed.</span>'
+            '<br><span style="font-size:11px;color:transparent">.</span>'
+        )
     )
     app._cal_stop_btn.layout.display = "none"
     app._cal_run_btn.disabled = not pyscf_available
