@@ -325,6 +325,125 @@ def _append_molden_vibrations(
                 )
 
 
+def save_trajectory_xyz(
+    result_dir: Path,
+    *,
+    frames: list,
+    energies: list,
+    filename: str = "trajectory.xyz",
+) -> Optional[Path]:
+    """Write a multi-frame XYZ trajectory file (M-EXPORT / EXPORT.3).
+
+    Universal format readable by Avogadro, VMD, OVITO, Jmol, Pymol,
+    OpenBabel, ASE (``ase.io.read``), and basically any molecular tool
+    that handles XYZ. Each frame's comment line carries the energy in
+    Hartree when known (parsed by tools that follow the extended-XYZ
+    convention).
+
+    Parameters
+    ----------
+    result_dir:
+        Directory returned by :func:`save_result`.
+    frames:
+        List of :class:`~quantui.molecule.Molecule` objects, one per
+        trajectory step.
+    energies:
+        Parallel list of total energies in Hartree. Missing entries are
+        written as plain frame numbers in the comment line.
+    filename:
+        Output filename inside *result_dir*. Defaults to
+        ``trajectory.xyz``.
+
+    Returns the path on success, ``None`` if ``frames`` is empty or the
+    write fails. Best-effort: failures don't propagate.
+    """
+    if not frames:
+        return None
+
+    out_path = result_dir / filename
+    try:
+        with open(out_path, "w", encoding="utf-8") as fh:
+            for i, mol in enumerate(frames):
+                atoms = list(mol.atoms)
+                coords = mol.coordinates
+                fh.write(f"{len(atoms)}\n")
+                # Extended-XYZ comment line: include energy when known
+                # so downstream parsers (ASE, OVITO) can pick it up.
+                if i < len(energies) and energies[i] is not None:
+                    fh.write(f"energy={float(energies[i]):.10f} Hartree\n")
+                else:
+                    fh.write(f"frame {i}\n")
+                for sym, xyz in zip(atoms, coords):
+                    fh.write(
+                        f"{sym} {float(xyz[0]):.6f} "
+                        f"{float(xyz[1]):.6f} {float(xyz[2]):.6f}\n"
+                    )
+    except Exception:
+        return None
+    return out_path
+
+
+def save_trajectory_ase(
+    result_dir: Path,
+    *,
+    frames: list,
+    energies: list,
+    filename: str = "trajectory.traj",
+) -> Optional[Path]:
+    """Write an ASE Trajectory (.traj) file (M-EXPORT / EXPORT.7).
+
+    Lets users open the result in ``ase gui trajectory.traj``, slice
+    frames (``trajectory.traj@0:10:2``), and use ASE-GUI's interactive
+    editing tools to modify the structure as a starting point for
+    follow-up calcs. Also enables ASE-Python-side post-processing
+    (custom analyses, force diagnostics, etc.). Per-frame energies are
+    attached via :class:`ase.calculators.singlepoint.SinglePointCalculator`
+    so ``ase gui -g "d(0,1),e-E[0]"`` can plot derived quantities.
+
+    Parameters
+    ----------
+    result_dir, frames, energies:
+        Same convention as :func:`save_trajectory_xyz`.
+    filename:
+        Output filename inside *result_dir*. Defaults to
+        ``trajectory.traj``.
+
+    Returns the path on success, ``None`` if ASE is unavailable, frames
+    is empty, or the writer raises. Best-effort: failures don't
+    propagate.
+    """
+    if not frames:
+        return None
+    try:
+        from ase import Atoms
+        from ase.calculators.singlepoint import SinglePointCalculator
+        from ase.io.trajectory import Trajectory
+    except Exception:
+        return None
+
+    _HARTREE_TO_EV = 27.211386245988  # ASE uses eV for the calculator energy
+    out_path = result_dir / filename
+    try:
+        traj = Trajectory(str(out_path), "w")
+        try:
+            for i, mol in enumerate(frames):
+                atoms = Atoms(
+                    symbols=list(mol.atoms),
+                    positions=[list(row) for row in mol.coordinates],
+                )
+                if i < len(energies) and energies[i] is not None:
+                    atoms.calc = SinglePointCalculator(
+                        atoms,
+                        energy=float(energies[i]) * _HARTREE_TO_EV,
+                    )
+                traj.write(atoms)
+        finally:
+            traj.close()
+    except Exception:
+        return None
+    return out_path
+
+
 def load_orbitals(result_dir: Path):
     """Reload MO data saved by :func:`save_orbitals`.
 

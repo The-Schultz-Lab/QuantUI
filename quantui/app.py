@@ -3901,6 +3901,32 @@ class QuantUIApp:
                     _e_list = getattr(result, "energies_hartree", [])
                     if _traj:
                         save_trajectory(_saved_dir, _traj, _e_list or [])
+                        # M-EXPORT / EXPORT.3 + EXPORT.7: also write
+                        # external-tool-friendly trajectory formats.
+                        # Multi-frame XYZ (any viewer) and ASE .traj
+                        # (ASE-GUI + ASE Python post-processing). Both
+                        # best-effort: failures are caught by the outer
+                        # save try/except so the calc still completes.
+                        try:
+                            from quantui.results_storage import (
+                                save_trajectory_ase as _save_traj_ase,
+                            )
+                            from quantui.results_storage import (
+                                save_trajectory_xyz as _save_traj_xyz,
+                            )
+
+                            _save_traj_xyz(
+                                _saved_dir,
+                                frames=_traj,
+                                energies=_e_list or [],
+                            )
+                            _save_traj_ase(
+                                _saved_dir,
+                                frames=_traj,
+                                energies=_e_list or [],
+                            )
+                        except Exception:
+                            pass
                 # Persist pre-opt geometry trajectory for Frequency runs (DEC-007).
                 if ct == "Frequency" and _pre_opt is not None:
                     _pre_traj = getattr(_pre_opt, "trajectory", None)
