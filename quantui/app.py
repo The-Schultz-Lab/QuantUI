@@ -2015,6 +2015,45 @@ class QuantUIApp:
             },
         )
 
+    def _refresh_calc_mol_viewer(self, *, backend: Optional[str] = None) -> None:
+        """Re-render the Calculate-tab molecule viewer via an atomic HTML swap.
+
+        Replaces the ``with self.viz_output: display_molecule(...)`` pattern
+        that surfaced BUG B1/B2/B3 (2026-05-25 user report):
+
+        - **B1** "viewer doesn't update on PubChem load until I toggle the
+          backend" — the Output-context render path was racing the kernel's
+          comms flush, so the initial display was sometimes never emitted.
+          Atomic ``outputs = (display_data,)`` is a single synchronous
+          assignment that the front-end always picks up.
+        - **B3** "red log lines around the viewer on the Calculate tab" —
+          ``with self.viz_output:`` captured every ``logger.info`` /
+          ``logger.error`` line that ``display_molecule`` emitted while it
+          ran. ``render_molecule_html`` returns the HTML string OUTSIDE any
+          Output context, so the only thing that lands in the widget is
+          the viewer itself.
+        - **B2** "PlotlyMol valence error spills as red text" — the same
+          helper wraps render failures into an inline error <div>, so
+          plotlymol's RDKit-bond-perception failure on aromatic systems
+          shows up as a friendly inline message instead of a logger.error
+          line bleeding through the Output context.
+
+        ``backend`` defaults to ``self._viz_backend`` (user's current
+        Calculate-tab toggle); pass an explicit value when the router has
+        chosen one (see ``_rerender_viz_for_backend_change``).
+        """
+        if self._molecule is None or _render_molecule_html is None:
+            return
+        backend_to_use = backend if backend is not None else self._viz_backend
+        html = _render_molecule_html(
+            self._molecule,
+            backend=backend_to_use,
+            style=self._viz_style,
+            lighting=self._viz_lighting,
+            bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
+        )
+        self._set_html_output(self.viz_output, html)
+
     def _get_kernel_io_loop(self) -> Any:
         """Return a cached kernel io_loop, resolving it lazily when needed."""
         io_loop = getattr(self, "_kernel_io_loop", None)
@@ -2069,16 +2108,7 @@ class QuantUIApp:
         if _last_pes is not None:
             self._show_pes_scan_result(_last_pes)
         # Re-render 3D molecule viewer so scene_bgcolor updates immediately.
-        if self._molecule is not None and _display_molecule is not None:
-            self.viz_output.clear_output()
-            with self.viz_output:
-                _display_molecule(
-                    self._molecule,
-                    backend=self._viz_backend,
-                    style=self._viz_style,
-                    lighting=self._viz_lighting,
-                    bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
-                )
+        self._refresh_calc_mol_viewer()
 
     def _initialize_viz_state_from_preference(self) -> None:
         """Align _viz_backend and the three preference widgets with the
@@ -2198,15 +2228,7 @@ class QuantUIApp:
         if self._molecule is not None:
             chosen = self._resolve_backend(VizTask.MOLECULE_PREVIEW)
             if chosen is not None:
-                self.viz_output.clear_output()
-                with self.viz_output:
-                    _display_molecule(
-                        self._molecule,
-                        backend=str(chosen),
-                        style=self._viz_style,
-                        lighting=self._viz_lighting,
-                        bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
-                    )
+                self._refresh_calc_mol_viewer(backend=str(chosen))
 
         # Analysis-tab molecule viewer (ANALYSIS_STRUCTURE_VIEW task).
         if self._analysis_displayed_molecule is not None:
@@ -2282,29 +2304,11 @@ class QuantUIApp:
 
     def _on_viz_style_changed(self, change) -> None:
         self._viz_style = change["new"]
-        if self._molecule is not None and _display_molecule is not None:
-            self.viz_output.clear_output()
-            with self.viz_output:
-                _display_molecule(
-                    self._molecule,
-                    backend=self._viz_backend,
-                    style=self._viz_style,
-                    lighting=self._viz_lighting,
-                    bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
-                )
+        self._refresh_calc_mol_viewer()
 
     def _on_viz_lighting_changed(self, change) -> None:
         self._viz_lighting = change["new"]
-        if self._molecule is not None and _display_molecule is not None:
-            self.viz_output.clear_output()
-            with self.viz_output:
-                _display_molecule(
-                    self._molecule,
-                    backend=self._viz_backend,
-                    style=self._viz_style,
-                    lighting=self._viz_lighting,
-                    bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
-                )
+        self._refresh_calc_mol_viewer()
 
     # ── Molecule input ────────────────────────────────────────────────────
 
@@ -3045,16 +3049,12 @@ class QuantUIApp:
         if mol.multiplicity > 1 and self.method_dd.value == "RHF":
             self.method_dd.value = "UHF"
 
-        self.viz_output.clear_output()
-        if _display_molecule is not None:
-            with self.viz_output:
-                _display_molecule(
-                    mol,
-                    backend=self._viz_backend,
-                    style=self._viz_style,
-                    lighting=self._viz_lighting,
-                    bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
-                )
+        # BUG B1/B2/B3 (2026-05-25): route through ``_refresh_calc_mol_viewer``
+        # so the viewer renders via an atomic outputs swap rather than the
+        # ``with self.viz_output: display(...)`` pattern that the BUG.7 fix
+        # already replaced for the Analysis tab. The molecule attribute on
+        # the app was set just above; the helper reads it.
+        self._refresh_calc_mol_viewer()
 
         self._update_notes()
 
@@ -3515,29 +3515,40 @@ class QuantUIApp:
                     f"\n── Pre-optimisation (before {ct}) "
                     f"────────────────────────────────────\n"
                 )
-                _pre_opt = optimize_geometry(
-                    molecule=calc_mol,
-                    method=self.method_dd.value,
-                    basis=self.basis_dd.value,
-                    progress_stream=log,  # type: ignore[arg-type]
-                )
-                calc_mol = _pre_opt.molecule
-                _conv_str = (
-                    "converged" if _pre_opt.converged else "did NOT fully converge"
-                )
-                log.write(
-                    f"\nPre-optimisation {_conv_str} in {_pre_opt.n_steps} steps."
-                    f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
-                )
-                if not _pre_opt.converged:
-                    log.write(
-                        "⚠ Pre-optimisation did not fully converge — "
-                        "proceeding with best available geometry.\n\n"
+                # BUG C (2026-05-25): catch numerical failures (e.g.
+                # singular matrix in cho_solve on tight rings) and fall
+                # back to the user's input geometry rather than killing
+                # the whole calc.
+                try:
+                    _pre_opt = optimize_geometry(
+                        molecule=calc_mol,
+                        method=self.method_dd.value,
+                        basis=self.basis_dd.value,
+                        progress_stream=log,  # type: ignore[arg-type]
                     )
-                if ct != "Single Point":
-                    _run_required_final_single_point(
-                        calc_mol,
-                        f"after pre-optimisation before {ct}",
+                    calc_mol = _pre_opt.molecule
+                    _conv_str = (
+                        "converged" if _pre_opt.converged else "did NOT fully converge"
+                    )
+                    log.write(
+                        f"\nPre-optimisation {_conv_str} in {_pre_opt.n_steps} steps."
+                        f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
+                    )
+                    if not _pre_opt.converged:
+                        log.write(
+                            "⚠ Pre-optimisation did not fully converge — "
+                            "proceeding with best available geometry.\n\n"
+                        )
+                    if ct != "Single Point":
+                        _run_required_final_single_point(
+                            calc_mol,
+                            f"after pre-optimisation before {ct}",
+                        )
+                except Exception as _pre_exc:
+                    log.write(
+                        f"\n⚠ Pre-optimisation failed: {_pre_exc}\n"
+                        "  Proceeding with the user-provided geometry "
+                        "as-is.\n\n"
                     )
 
             if ct == "Geometry Opt":
@@ -3603,6 +3614,14 @@ class QuantUIApp:
                     )
 
                 # ── Step 2: optional geometry pre-optimisation ────────────────
+                #
+                # BUG C (2026-05-25): pre-opt can hit a singular matrix in
+                # PySCF's ``cho_solve`` on tight rings (e.g. aromatic
+                # benzene with B3LYP/6-31G). That raises out of the
+                # optimizer and used to kill the whole calc. Wrap it: on
+                # any failure log to the user log, keep ``calc_mol`` as
+                # the input geometry, and proceed to the freq analysis —
+                # the user can iterate if their input was actually wrong.
                 if self._freq_preopt_cb.value:
                     from quantui import optimize_geometry
 
@@ -3610,29 +3629,39 @@ class QuantUIApp:
                     log.write(
                         "\n── Pre-optimisation (before frequency analysis) ──────────────────\n"
                     )
-                    _pre_opt = optimize_geometry(
-                        molecule=calc_mol,
-                        method=self.method_dd.value,
-                        basis=self.basis_dd.value,
-                        progress_stream=log,  # type: ignore[arg-type]
-                    )
-                    calc_mol = _pre_opt.molecule
-                    _conv_str = (
-                        "converged" if _pre_opt.converged else "did NOT fully converge"
-                    )
-                    log.write(
-                        f"\nPre-optimisation {_conv_str} in {_pre_opt.n_steps} steps."
-                        f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
-                    )
-                    if not _pre_opt.converged:
-                        log.write(
-                            "⚠ Pre-optimisation did not fully converge — "
-                            "proceeding with best available geometry.\n\n"
+                    try:
+                        _pre_opt = optimize_geometry(
+                            molecule=calc_mol,
+                            method=self.method_dd.value,
+                            basis=self.basis_dd.value,
+                            progress_stream=log,  # type: ignore[arg-type]
                         )
-                    _run_required_final_single_point(
-                        calc_mol,
-                        "after frequency pre-optimisation",
-                    )
+                        calc_mol = _pre_opt.molecule
+                        _conv_str = (
+                            "converged"
+                            if _pre_opt.converged
+                            else "did NOT fully converge"
+                        )
+                        log.write(
+                            f"\nPre-optimisation {_conv_str} in {_pre_opt.n_steps} steps."
+                            f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
+                        )
+                        if not _pre_opt.converged:
+                            log.write(
+                                "⚠ Pre-optimisation did not fully converge — "
+                                "proceeding with best available geometry.\n\n"
+                            )
+                        _run_required_final_single_point(
+                            calc_mol,
+                            "after frequency pre-optimisation",
+                        )
+                    except Exception as _pre_exc:
+                        log.write(
+                            f"\n⚠ Pre-optimisation failed: {_pre_exc}\n"
+                            "  Proceeding with the user-provided geometry "
+                            "as-is; if the molecule was already near a "
+                            "stationary point this is usually fine.\n\n"
+                        )
 
                 # ── Step 3: frequency analysis ────────────────────────────────
                 self.run_status.value = "Computing frequencies (SCF + Hessian)…"
@@ -3698,29 +3727,40 @@ class QuantUIApp:
                         "\n── Pre-optimisation (before UV-Vis (TD-DFT)) "
                         "─────────────\n"
                     )
-                    _pre_opt = optimize_geometry(
-                        molecule=calc_mol,
-                        method=self.method_dd.value,
-                        basis=self.basis_dd.value,
-                        progress_stream=log,  # type: ignore[arg-type]
-                    )
-                    calc_mol = _pre_opt.molecule
-                    _conv_str = (
-                        "converged" if _pre_opt.converged else "did NOT fully converge"
-                    )
-                    log.write(
-                        f"\nPre-optimisation {_conv_str} in {_pre_opt.n_steps} steps."
-                        f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
-                    )
-                    if not _pre_opt.converged:
-                        log.write(
-                            "⚠ Pre-optimisation did not fully converge — "
-                            "proceeding with best available geometry.\n\n"
+                    # BUG C (2026-05-25): catch numerical failures and
+                    # fall back to the user's seed geometry rather than
+                    # killing the whole TD-DFT calc.
+                    try:
+                        _pre_opt = optimize_geometry(
+                            molecule=calc_mol,
+                            method=self.method_dd.value,
+                            basis=self.basis_dd.value,
+                            progress_stream=log,  # type: ignore[arg-type]
                         )
-                    _run_required_final_single_point(
-                        calc_mol,
-                        "after UV-Vis pre-optimisation",
-                    )
+                        calc_mol = _pre_opt.molecule
+                        _conv_str = (
+                            "converged"
+                            if _pre_opt.converged
+                            else "did NOT fully converge"
+                        )
+                        log.write(
+                            f"\nPre-optimisation {_conv_str} in {_pre_opt.n_steps} steps."
+                            f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
+                        )
+                        if not _pre_opt.converged:
+                            log.write(
+                                "⚠ Pre-optimisation did not fully converge — "
+                                "proceeding with best available geometry.\n\n"
+                            )
+                        _run_required_final_single_point(
+                            calc_mol,
+                            "after UV-Vis pre-optimisation",
+                        )
+                    except Exception as _pre_exc:
+                        log.write(
+                            f"\n⚠ Pre-optimisation failed: {_pre_exc}\n"
+                            "  Proceeding with the seed geometry as-is.\n\n"
+                        )
 
                 # ── Step 3: TD-DFT excited-state calculation ─────────────────
                 self.run_status.value = "Running TD-DFT excited states..."
@@ -4047,12 +4087,16 @@ class QuantUIApp:
                     ),
                     n_cores=1,
                     calc_type=save_type,
+                    gpu_used=getattr(result, "gpu_used", None),
+                    gpu_name=getattr(result, "gpu_name", None),
                 )
                 _calc_log.log_event(
                     "calc_done",
                     f"{result.method}/{result.basis} on {result.formula}",
                     elapsed_s=round(_elapsed_for_est, 2),
                     converged=result.converged,
+                    gpu_used=bool(getattr(result, "gpu_used", False)),
+                    gpu_name=getattr(result, "gpu_name", None),
                 )
                 self._update_estimate()
             except Exception:

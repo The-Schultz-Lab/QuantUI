@@ -422,16 +422,40 @@ def _run_session_calc_body(
         except Exception:
             pass
 
-    # MO arrays for orbital visualization (non-fatal if extraction fails)
+    # MO arrays for orbital visualization (non-fatal if extraction fails).
+    #
+    # GPU-offload note (BUG fix, 2026-05-25): when ``gpu4pyscf`` migrated
+    # ``mf`` to the GPU, ``mf.mo_energy`` / ``mo_coeff`` / ``mo_occ`` are
+    # CuPy arrays. ``numpy.array(cupy_array)`` raises ``TypeError`` (numpy
+    # refuses implicit device transfers), so the bare ``except`` swallowed
+    # it and we silently shipped a ``SessionResult`` with all MO fields
+    # ``None``. That in turn made ``save_orbitals`` no-op (it short-
+    # circuits when both ``mo_e`` and ``mo_occ`` are None), and history
+    # replay of GPU-run geo-opts / single-points showed "Not available"
+    # in the Energies + Isosurface panels. ``_to_numpy_array`` below
+    # detects CuPy arrays and copies them to host via ``cupy.asnumpy``.
     _mo_energy_ha_arr: Optional[Any] = None
     _mo_occ_arr: Optional[Any] = None
     _mo_coeff_arr: Optional[Any] = None
     _pyscf_mol_atom: Optional[Any] = None
     _pyscf_mol_basis: Optional[str] = None
+
+    def _to_numpy_array(arr: Any) -> Any:
+        """Convert ``arr`` to a NumPy array, transferring from GPU if needed."""
+        if arr is None:
+            return None
+        # CuPy arrays have a ``.get()`` method (synchronous device→host copy).
+        # Probe for it rather than importing cupy, so the CPU-only path
+        # doesn't pull cupy onto the import graph.
+        get = getattr(arr, "get", None)
+        if callable(get) and type(arr).__module__.startswith("cupy"):
+            return _np.asarray(get())
+        return _np.asarray(arr)
+
     try:
-        _mo_energy_ha_arr = _np.array(mf.mo_energy)
-        _mo_occ_arr = _np.array(mf.mo_occ)
-        _mo_coeff_arr = _np.array(mf.mo_coeff)
+        _mo_energy_ha_arr = _to_numpy_array(mf.mo_energy)
+        _mo_occ_arr = _to_numpy_array(mf.mo_occ)
+        _mo_coeff_arr = _to_numpy_array(mf.mo_coeff)
         _pyscf_mol_atom = [
             (atom, list(map(float, coords)))
             for atom, coords in zip(molecule.atoms, molecule.coordinates)

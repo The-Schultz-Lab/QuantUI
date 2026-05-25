@@ -339,8 +339,16 @@ def log_calculation(
     n_basis: Optional[int] = None,
     n_cores: Optional[int] = None,
     calc_type: Optional[str] = None,
+    gpu_used: Optional[bool] = None,
+    gpu_name: Optional[str] = None,
 ) -> None:
-    """Append one performance record to ``perf_log.jsonl``."""
+    """Append one performance record to ``perf_log.jsonl``.
+
+    ``gpu_used`` / ``gpu_name`` (added M-GPU follow-up, 2026-05-25) record
+    whether GPU offload was active for the run; reading these back lets
+    ``quantui.analytics.build_dashboard`` compute GPU-vs-CPU speedups
+    across runs of the same (method, basis, formula) tuple.
+    """
     record: dict = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "formula": formula,
@@ -358,6 +366,10 @@ def log_calculation(
         record["n_cores"] = n_cores
     if calc_type is not None:
         record["calc_type"] = calc_type
+    if gpu_used is not None:
+        record["gpu_used"] = bool(gpu_used)
+    if gpu_name is not None:
+        record["gpu_name"] = gpu_name
     _append(_perf_path(), record)
 
 
