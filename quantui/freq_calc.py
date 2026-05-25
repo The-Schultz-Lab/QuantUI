@@ -208,7 +208,7 @@ def _run_freq_calc_body(
         """Emit a status marker line consumable by QuantUI's log capture."""
         try:
             stream.write(f"\n[QuantUI_STATUS] {msg}\n")
-        except Exception:
+        except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
             pass
 
     # ── Build Mole object ────────────────────────────────────────────────────
@@ -261,8 +261,8 @@ def _run_freq_calc_body(
             homo_lumo_gap_ev = float(
                 (mo_e_ref[n_occ] - mo_e_ref[n_occ - 1]) * HARTREE_TO_EV
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("HOMO-LUMO gap extraction failed in freq calc: %s", exc)
 
     # ── MO data for orbital energy diagram (best-effort) ─────────────────────
     mo_energy_hartree: Optional[List] = None
@@ -278,8 +278,15 @@ def _run_freq_calc_body(
         mo_energy_hartree = _np_mo.asarray(_moe, dtype=float).tolist()
         mo_occ_list = _np_mo.asarray(_moo, dtype=float).tolist()
         pyscf_mol_atom = [(str(s), list(map(float, c))) for s, c in mol._atom]
-    except Exception:
-        pass
+    except Exception as exc:
+        # Same class as session_calc bug-A: silent failure here ships
+        # a FreqResult with no MO data, breaking the Energies panel on
+        # history replay. Log to surface in the Log tab.
+        logger.warning(
+            "MO data extraction failed in freq calc for %s: %s",
+            molecule.get_formula(),
+            exc,
+        )
 
     # ── Hessian + frequency analysis ─────────────────────────────────────────
     frequencies_cm1: List[float] = []
@@ -329,7 +336,8 @@ def _run_freq_calc_body(
                 if nm.ndim == 2:
                     nm = nm.reshape(n_modes_out, n_atoms, 3)
                 displacements = nm.tolist()
-        except Exception:
+        except Exception as exc:
+            logger.debug("Normal-mode displacement extraction failed: %s", exc)
             displacements = None
 
         # Numerical IR intensities via finite-difference dipole derivatives.
@@ -614,7 +622,7 @@ def _run_freq_calc_body(
         if progress_stream is not None:
             try:
                 progress_stream.write(f"\n⚠ Hessian failed: {exc}\n")
-            except Exception:
+            except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
                 pass
 
     return FreqResult(

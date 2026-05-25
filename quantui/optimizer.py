@@ -420,7 +420,7 @@ def optimize_geometry(
         try:
             e_ev = frame.get_potential_energy()
             energies_hartree.append(e_ev / HARTREE_TO_EV)
-        except Exception:
+        except Exception:  # noqa: BLE001 — NaN fallback for missing per-frame energy
             energies_hartree.append(float("nan"))
 
     if not trajectory:
@@ -429,7 +429,7 @@ def optimize_geometry(
         try:
             e_ev = atoms.get_potential_energy()
             energies_hartree = [e_ev / HARTREE_TO_EV]
-        except Exception:
+        except Exception:  # noqa: BLE001 — NaN fallback for missing final energy
             energies_hartree = [float("nan")]
 
     n_steps = max(0, len(trajectory) - 1)
@@ -452,8 +452,15 @@ def optimize_geometry(
             _opt_mo_coeff = _np_mo.array(_last_mf.mo_coeff)
             _opt_mol_atom = _last_atom_list
             _opt_mol_basis = basis
-    except Exception:
-        pass
+    except Exception as exc:
+        # Bug-A class — silent failure here ships an OptimizationResult
+        # with no MO data, breaking Energies + Isosurface panels on
+        # history replay. (Same root-cause class as session_calc.)
+        logger.warning(
+            "Final-step MO extraction failed in optimizer for %s: %s",
+            molecule.get_formula(),
+            exc,
+        )
 
     # Write a final MO summary to the progress stream (replaces per-step verbose output
     # which is suppressed to avoid thousands of SCF lines for long optimizations).
@@ -499,7 +506,7 @@ def optimize_geometry(
             _stream.write(
                 f"  All MO energies (eV): {' '.join(f'{e:.3f}' for e in _e_ev_1d)}\n"
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
             pass
 
     logger.info(

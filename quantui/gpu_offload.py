@@ -28,9 +28,12 @@ debugging, and "first run as student" comparisons.
 
 from __future__ import annotations
 
+import logging
 import os
 from functools import lru_cache
 from typing import Any, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 # Methods for which gpu4pyscf has zero or known-broken support. ``CCSD(T)``
 # is documented as unsupported in the gpu4pyscf README; double hybrids are
@@ -65,10 +68,13 @@ def is_gpu_available() -> Tuple[bool, Optional[str]]:
         import gpu4pyscf  # noqa: F401
     except ImportError:
         return (False, None)
-    except Exception:
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 — fall-back to CPU on any import-chain breakage
         # Any other import-time error (broken cupy → broken gpu4pyscf
         # import-chain, mismatched cuda libs, etc.) is treated as
-        # "no GPU available".
+        # "no GPU available". Log so `quantui log tail` reveals why.
+        logger.debug("gpu4pyscf import raised non-ImportError: %s", exc)
         return (False, None)
 
     try:
@@ -84,7 +90,10 @@ def is_gpu_available() -> Tuple[bool, Optional[str]]:
         else:
             name = str(name_raw)
         return (True, name)
-    except Exception:
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 — fall-back to CPU on any cupy probe failure
+        logger.debug("cupy device probe failed: %s", exc)
         return (False, None)
 
 
@@ -119,8 +128,10 @@ def try_to_gpu(mf: Any, method_upper: str) -> Tuple[Any, bool, Optional[str]]:
     try:
         mf_gpu = mf.to_gpu()
         return (mf_gpu, True, gpu_name)
-    except Exception:
+    except Exception as exc:
         # gpu4pyscf migration can fail for many reasons (unsupported method
         # variant, density-fitting requirement, basis-set quirk). On any
-        # failure we silently fall back to CPU — the calc still runs.
+        # failure we fall back to CPU — the calc still runs. Log so the
+        # user can `quantui log tail` and see why offload didn't happen.
+        logger.warning("mf.to_gpu() migration failed, falling back to CPU: %s", exc)
         return (mf, False, None)

@@ -205,7 +205,7 @@ def _run_tddft_calc_body(
                 "For a proper TD-DFT UV-Vis spectrum, use a DFT functional\n"
                 "such as B3LYP or PBE0 in the Method dropdown.\n\n"
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
             pass
 
     try:
@@ -236,8 +236,8 @@ def _run_tddft_calc_body(
             homo_lumo_gap_ev = float(
                 (mo_e_ref[n_occ] - mo_e_ref[n_occ - 1]) * HARTREE_TO_EV
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("HOMO-LUMO gap extraction failed in TD-DFT calc: %s", exc)
 
     # ── TD-DFT / TDHF ────────────────────────────────────────────────────────
     excitation_energies_ev: List[float] = []
@@ -259,7 +259,7 @@ def _run_tddft_calc_body(
         if progress_stream is not None:
             try:
                 progress_stream.write(f"\n⚠ TD-DFT failed: {exc}\n")
-            except Exception:
+            except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
                 pass
 
     return TDDFTResult(

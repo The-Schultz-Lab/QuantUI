@@ -303,7 +303,12 @@ def _run_session_calc_body(
 
                 mf = _PCM(mf)
                 mf.with_solvent.eps = _eps
-            except Exception:
+            except (
+                Exception
+            ) as exc:  # noqa: BLE001 — optional probe (PySCF version drift)
+                logger.debug(
+                    "PCM solvent unavailable, falling back to gas phase: %s", exc
+                )
                 if progress_stream is not None:
                     progress_stream.write(
                         "\n⚠  PCM solvent unavailable — running in gas phase.\n"
@@ -321,7 +326,7 @@ def _run_session_calc_body(
     if gpu_used and progress_stream is not None:
         try:
             progress_stream.write(f"\n🚀  GPU offload active — running on {gpu_name}\n")
-        except Exception:
+        except Exception:  # noqa: BLE001 — cleanup (progress stream may be closed)
             pass
 
     # --- Run SCF ---
@@ -403,8 +408,8 @@ def _run_session_calc_body(
             homo_lumo_gap_ev = float(
                 (mo_energy_ref[n_occ] - mo_energy_ref[n_occ - 1]) * HARTREE_TO_EV
             )
-    except Exception:
-        pass  # gap stays None — non-fatal
+    except Exception as exc:
+        logger.debug("HOMO-LUMO gap extraction failed (non-fatal): %s", exc)
 
     mulliken_charges: Optional[List[float]] = None
     dipole_moment_debye: Optional[float] = None
@@ -412,15 +417,15 @@ def _run_session_calc_body(
         try:
             _, chg = mf.mulliken_pop(verbose=0)
             mulliken_charges = [float(c) for c in chg]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Mulliken population extraction failed: %s", exc)
         try:
             import numpy as _np2
 
             dip = mf.dip_moment(verbose=0)
             dipole_moment_debye = float(_np2.linalg.norm(dip))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Dipole moment extraction failed: %s", exc)
 
     # MO arrays for orbital visualization (non-fatal if extraction fails).
     #
@@ -461,8 +466,30 @@ def _run_session_calc_body(
             for atom, coords in zip(molecule.atoms, molecule.coordinates)
         ]
         _pyscf_mol_basis = basis
-    except Exception:
-        pass
+    except Exception as exc:
+        # Bug-A class (session 55): a silent failure here ships a
+        # SessionResult with mo_coeff=None, which makes save_orbitals
+        # no-op and breaks Energies + Isosurface panels on history
+        # replay. Surface to the event log so a future regression is
+        # visible in `quantui log tail` immediately.
+        logger.warning(
+            "MO array extraction failed for %s (%s/%s): %s",
+            molecule.get_formula(),
+            method,
+            basis,
+            exc,
+        )
+        try:
+            from . import calc_log as _clog
+
+            _clog.log_event(
+                "mo_array_extract_failed",
+                f"{method}/{basis} on {molecule.get_formula()}",
+                error=str(exc)[:300],
+                gpu_used=gpu_used,
+            )
+        except Exception:  # noqa: BLE001 — telemetry self-guard
+            pass
 
     formula = molecule.get_formula()
     logger.info(

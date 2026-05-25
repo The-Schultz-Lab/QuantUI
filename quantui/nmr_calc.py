@@ -15,11 +15,14 @@ Typical usage::
 
 from __future__ import annotations
 
+import logging
 import sys
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
 from .molecule import Molecule
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -198,8 +201,8 @@ def _run_nmr_calc_body(
             return vind
 
         _prop_nmr_rhf.gen_vind = _fixed_gen_vind
-    except Exception:
-        pass
+    except (ImportError, AttributeError) as exc:  # noqa: BLE001 — optional probe
+        logger.debug("pyscf.prop.nmr.rhf.gen_vind patch not applied: %s", exc)
 
     # pyscf-properties 0.1.0 get_vxc_giao computes
     #   blksize = min(int(X*BLKSIZE)*BLKSIZE, ngrids)
@@ -285,8 +288,8 @@ def _run_nmr_calc_body(
             return vmat - vmat.transpose(0, 2, 1)
 
         _prop_nmr_rks.get_vxc_giao = _fixed_get_vxc_giao
-    except Exception:
-        pass
+    except (ImportError, AttributeError) as exc:  # noqa: BLE001 — optional probe
+        logger.debug("pyscf.prop.nmr.rks.get_vxc_giao patch not applied: %s", exc)
 
     try:
         if method_upper == "RHF":
