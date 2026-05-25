@@ -185,7 +185,7 @@ browser tab.
 | Flag | Default | Description |
 | --- | --- | --- |
 | `-o PATH`, `--output PATH` | `~/.quantui/dashboard.html` | Output HTML path |
-| `--open` | off | After writing, open the dashboard in the default browser |
+| `--open` | off | After writing, open the dashboard in the default browser (WSL-aware — uses `wslview` / `explorer.exe` on WSL) |
 
 ### Examples
 
@@ -209,9 +209,18 @@ quantui analytics build -o ~/projects/lab-share/quantui-report.html --open
 Wrote /home/schul/.quantui/dashboard.html
 ```
 
-With `--open`, the CLI then attempts `webbrowser.open(...)`. If your
-environment is headless (e.g. WSL without a configured `BROWSER`
-variable) you'll see an additional note:
+With `--open`, the CLI picks the right opener for your environment:
+
+- **WSL**: tries `wslview` first (bundled with the `wslu` package),
+  then falls back to `explorer.exe`. Both delegate to your **Windows
+  default browser** via WSL interop — no Linux-side browser install
+  needed. If neither is available, `sudo apt install wslu` fixes it
+  in one step.
+- **Linux native**: stdlib `webbrowser.open` (which uses `xdg-open`).
+- **macOS / Windows native**: stdlib `webbrowser.open`.
+
+If no opener succeeds — e.g. a headless container with no display —
+you'll see:
 
 ```
 Wrote /home/schul/.quantui/dashboard.html

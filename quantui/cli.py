@@ -138,6 +138,74 @@ def _cmd_gpu_check(args: argparse.Namespace) -> int:
     return 1
 
 
+def _is_wsl() -> bool:
+    """Return True when running inside Windows Subsystem for Linux.
+
+    Checks the cheap signal first (``WSL_DISTRO_NAME`` env var, set on
+    every WSL2 distro) before falling back to a ``/proc/version`` read
+    (covers WSL1 + edge cases where the env var is unset). Returns
+    ``False`` on any IO error rather than raising.
+    """
+    import os as _os
+
+    if _os.environ.get("WSL_DISTRO_NAME"):
+        return True
+    try:
+        with open("/proc/version", encoding="utf-8", errors="ignore") as fh:
+            return "microsoft" in fh.read().lower()
+    except OSError:
+        return False
+
+
+def _open_in_browser(path: Path) -> tuple[bool, Optional[str]]:
+    """Cross-platform "open this file in the user's browser".
+
+    On WSL, ``webbrowser.open`` ultimately calls ``xdg-open`` which fails
+    on minimal Ubuntu installs ("no method available for opening...") —
+    there's no native Linux browser and xdg-open doesn't know to bridge
+    to the Windows host. So on WSL we prefer the WSL-aware openers in
+    order: ``wslview`` (canonical xdg-open replacement, from the ``wslu``
+    package), then ``explorer.exe`` (always available via WSL interop).
+
+    Off WSL, defer to Python's stdlib ``webbrowser`` module which has the
+    right per-platform handling for macOS / native Linux / Windows.
+
+    Returns ``(success, tool_name)``. ``tool_name`` is ``None`` when no
+    opener succeeded.
+    """
+    import subprocess
+
+    if _is_wsl():
+        # ``wslview`` accepts a Linux path directly. ``explorer.exe``
+        # accepts either a Windows path OR a Linux file:// URL — but in
+        # practice, passing the Linux path works through WSL interop
+        # too, so we pass the path as-is to both.
+        for tool in ("wslview", "explorer.exe"):
+            try:
+                rc = subprocess.run(
+                    [tool, str(path)],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                ).returncode
+                if rc == 0:
+                    return (True, tool)
+            except FileNotFoundError:
+                continue
+            except Exception:
+                continue
+        return (False, None)
+
+    import webbrowser
+
+    try:
+        if webbrowser.open(path.as_uri()):
+            return (True, "webbrowser")
+    except Exception:
+        pass
+    return (False, None)
+
+
 def _cmd_analytics_build(args: argparse.Namespace) -> int:
     """Build the HTML analytics dashboard from the perf log."""
     from quantui.analytics import build_dashboard
@@ -152,22 +220,13 @@ def _cmd_analytics_build(args: argparse.Namespace) -> int:
         return 0
     print(f"Wrote {result}")
     if getattr(args, "open_after", False):
-        # ``webbrowser.open`` accepts a file:// URL. ``Path.as_uri()`` builds
-        # the cross-platform form. Failure (e.g. headless WSL with no
-        # ``BROWSER`` env var, no $DISPLAY) is non-fatal — the path was
-        # already printed above so the user can copy-paste it manually.
-        import webbrowser
-
-        try:
-            opened = webbrowser.open(result.as_uri())
-            if not opened:
-                print(
-                    f"(could not auto-open browser — open {result} manually)",
-                    file=sys.stderr,
-                )
-        except Exception as exc:
+        # Cross-platform open: WSL → wslview / explorer.exe; otherwise
+        # stdlib webbrowser. Failure is non-fatal (the path was already
+        # printed) so users can always copy-paste manually.
+        opened, tool = _open_in_browser(result)
+        if not opened:
             print(
-                f"(open failed: {exc}; open {result} manually)",
+                f"(could not auto-open browser — open {result} manually)",
                 file=sys.stderr,
             )
     return 0

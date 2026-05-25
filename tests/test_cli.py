@@ -233,9 +233,9 @@ class TestAnalyticsBuild:
         assert "Wrote" in out
         assert str(target) in out
 
-    def test_open_flag_calls_webbrowser(self, isolated_log_dir, tmp_path, monkeypatch):
-        # Seed perf log with a single record so build succeeds.
-        perf_path = isolated_log_dir / "perf_log.jsonl"
+    def _seed_perf_log(self, log_dir):
+        """Helper: write one perf record so build_dashboard has data."""
+        perf_path = log_dir / "perf_log.jsonl"
         perf_path.write_text(
             json.dumps(
                 {
@@ -250,9 +250,15 @@ class TestAnalyticsBuild:
             + "\n",
             encoding="utf-8",
         )
+
+    def test_open_flag_calls_webbrowser_off_wsl(
+        self, isolated_log_dir, tmp_path, monkeypatch
+    ):
+        # Force the non-WSL branch so the test runs the webbrowser path.
+        monkeypatch.setattr(cli, "_is_wsl", lambda: False)
+        self._seed_perf_log(isolated_log_dir)
         target = tmp_path / "report.html"
 
-        # Capture webbrowser.open invocations rather than launching one.
         opened_urls: list[str] = []
         import webbrowser as _wb
 
@@ -273,21 +279,8 @@ class TestAnalyticsBuild:
     def test_open_flag_handles_browser_failure_gracefully(
         self, isolated_log_dir, tmp_path, monkeypatch
     ):
-        perf_path = isolated_log_dir / "perf_log.jsonl"
-        perf_path.write_text(
-            json.dumps(
-                {
-                    "timestamp": "2026-05-25T12:00:00+00:00",
-                    "formula": "H2O",
-                    "method": "B3LYP",
-                    "basis": "STO-3G",
-                    "elapsed_s": 1.0,
-                    "converged": True,
-                }
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+        monkeypatch.setattr(cli, "_is_wsl", lambda: False)
+        self._seed_perf_log(isolated_log_dir)
         target = tmp_path / "report.html"
 
         import webbrowser as _wb
@@ -299,3 +292,118 @@ class TestAnalyticsBuild:
         # Exit code must remain 0 — the dashboard was written successfully.
         assert rc == 0
         assert "could not auto-open" in err
+
+
+class TestWslAwareOpener:
+    """`_open_in_browser` chooses wslview / explorer.exe on WSL."""
+
+    def test_is_wsl_detects_env_var(self, monkeypatch):
+        monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
+        assert cli._is_wsl() is True
+
+    def test_is_wsl_false_when_env_and_proc_missing(self, monkeypatch):
+        # Both signals absent → must return False, not raise.
+        monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
+        import builtins
+
+        original = builtins.open
+
+        def _fail_open(*args, **kwargs):
+            if args and args[0] == "/proc/version":
+                raise OSError("simulated absence")
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", _fail_open)
+        assert cli._is_wsl() is False
+
+    def test_wsl_prefers_wslview(self, monkeypatch, tmp_path):
+        """On WSL, wslview is tried first and wins when it returns 0."""
+        monkeypatch.setattr(cli, "_is_wsl", lambda: True)
+
+        calls: list[list[str]] = []
+
+        class _FakeRun:
+            def __init__(self, returncode):
+                self.returncode = returncode
+
+        def _fake_subprocess_run(cmd, **_kwargs):
+            calls.append(list(cmd))
+            return _FakeRun(0)
+
+        import subprocess
+
+        monkeypatch.setattr(subprocess, "run", _fake_subprocess_run)
+        target = tmp_path / "report.html"
+        target.write_text("x", encoding="utf-8")
+
+        ok, tool = cli._open_in_browser(target)
+        assert ok is True
+        assert tool == "wslview"
+        assert len(calls) == 1
+        assert calls[0][0] == "wslview"
+        assert str(target) in calls[0]
+
+    def test_wsl_falls_back_to_explorer_when_wslview_missing(
+        self, monkeypatch, tmp_path
+    ):
+        """When wslview isn't installed (FileNotFoundError), explorer.exe runs."""
+        monkeypatch.setattr(cli, "_is_wsl", lambda: True)
+
+        calls: list[str] = []
+
+        class _FakeRun:
+            def __init__(self, returncode):
+                self.returncode = returncode
+
+        def _fake_subprocess_run(cmd, **_kwargs):
+            tool = cmd[0]
+            calls.append(tool)
+            if tool == "wslview":
+                raise FileNotFoundError("not installed")
+            return _FakeRun(0)
+
+        import subprocess
+
+        monkeypatch.setattr(subprocess, "run", _fake_subprocess_run)
+        target = tmp_path / "report.html"
+        target.write_text("x", encoding="utf-8")
+
+        ok, tool = cli._open_in_browser(target)
+        assert ok is True
+        assert tool == "explorer.exe"
+        assert calls == ["wslview", "explorer.exe"]
+
+    def test_wsl_returns_false_when_all_openers_fail(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(cli, "_is_wsl", lambda: True)
+
+        import subprocess
+
+        def _fake_run(cmd, **_kwargs):
+            raise FileNotFoundError(f"{cmd[0]} not installed")
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+        target = tmp_path / "report.html"
+        target.write_text("x", encoding="utf-8")
+
+        ok, tool = cli._open_in_browser(target)
+        assert ok is False
+        assert tool is None
+
+    def test_non_wsl_uses_webbrowser(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(cli, "_is_wsl", lambda: False)
+
+        opened: list[str] = []
+        import webbrowser
+
+        def _fake_open(url, *_args, **_kwargs):
+            opened.append(url)
+            return True
+
+        monkeypatch.setattr(webbrowser, "open", _fake_open)
+        target = tmp_path / "report.html"
+        target.write_text("x", encoding="utf-8")
+
+        ok, tool = cli._open_in_browser(target)
+        assert ok is True
+        assert tool == "webbrowser"
+        assert opened[0].startswith("file:")
