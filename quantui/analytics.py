@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from quantui.calc_log import _log_dir, get_perf_history
+from quantui.calc_log import _log_dir, get_perf_history, get_prediction_history
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -353,6 +353,178 @@ def _timeline_html(records: list[dict], *, include_plotlyjs: bool) -> Optional[s
 
 
 # ---------------------------------------------------------------------------
+# Prediction-accuracy section (M-EST / EST.6, 2026-05-25)
+# ---------------------------------------------------------------------------
+
+
+def _prediction_accuracy_metrics(records: list[dict]) -> dict:
+    """Compute headline accuracy metrics from prediction-log records.
+
+    Records with ``predicted_s=None`` are "no-estimate" runs and counted
+    separately. For the median-error calculation we use absolute
+    percentage error (``|actual - predicted| / predicted * 100``), so
+    over- and under-predictions weigh the same; the dashboard shows
+    both the signed median (bias) and the absolute median (magnitude).
+    """
+    have_pred = [
+        r
+        for r in records
+        if r.get("predicted_s") is not None and r.get("error_pct") is not None
+    ]
+    no_pred = [r for r in records if r.get("predicted_s") is None]
+    abs_errs = [abs(float(r["error_pct"])) for r in have_pred]
+    signed_errs = [float(r["error_pct"]) for r in have_pred]
+    return {
+        "n_total": len(records),
+        "n_with_estimate": len(have_pred),
+        "n_no_estimate": len(no_pred),
+        "median_abs_error_pct": (statistics.median(abs_errs) if abs_errs else None),
+        "median_signed_error_pct": (
+            statistics.median(signed_errs) if signed_errs else None
+        ),
+        # "Within 25%" — a useful headline metric ("how often is the
+        # estimator usefully close?"). Roadmap target: ≥ 70% after a
+        # tier-4 calibration.
+        "pct_within_25": (
+            round(100.0 * sum(1 for e in abs_errs if e <= 25.0) / len(abs_errs), 1)
+            if abs_errs
+            else None
+        ),
+    }
+
+
+def _prediction_scatter_html(
+    records: list[dict], *, include_plotlyjs: bool
+) -> Optional[str]:
+    """Scatter of predicted_s vs actual_s with a y=x reference line."""
+    have_pred = [
+        r
+        for r in records
+        if r.get("predicted_s") is not None and r.get("actual_s") is not None
+    ]
+    if len(have_pred) < 2:
+        return None
+    try:
+        import plotly.graph_objects as go
+        import plotly.io as pio
+    except ImportError:
+        return None
+
+    # Hover labels show the calc spec so the user can identify outliers.
+    text_labels = [
+        f"{r.get('method', '?')}/{r.get('basis', '?')} on {r.get('formula', '?')}"
+        for r in have_pred
+    ]
+    predicted = [float(r["predicted_s"]) for r in have_pred]
+    actual = [float(r["actual_s"]) for r in have_pred]
+    max_val = max(max(predicted), max(actual), 1.0) * 1.1
+
+    fig = go.Figure()
+    # y=x reference line (perfect prediction).
+    fig.add_trace(
+        go.Scatter(
+            x=[0, max_val],
+            y=[0, max_val],
+            mode="lines",
+            name="perfect (y=x)",
+            line=dict(color="#94a3b8", dash="dash", width=1),
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=predicted,
+            y=actual,
+            mode="markers",
+            name="run",
+            text=text_labels,
+            marker=dict(size=9, color="#6366f1", opacity=0.75),
+            hovertemplate=(
+                "%{text}<br>predicted: %{x:.2f} s<br>actual: %{y:.2f} s<extra></extra>"
+            ),
+        )
+    )
+    fig.update_layout(
+        height=420,
+        xaxis=dict(title="Predicted (s)", range=[0, max_val]),
+        yaxis=dict(title="Actual (s)", range=[0, max_val]),
+        margin=dict(l=60, r=20, t=10, b=50),
+        plot_bgcolor="#ffffff",
+        legend=dict(orientation="h", x=0, y=1.05),
+    )
+    return pio.to_html(
+        fig,
+        include_plotlyjs="inline" if include_plotlyjs else False,
+        full_html=False,
+        config={"displayModeBar": False},
+    )
+
+
+def _prediction_accuracy_section(
+    records: list[dict], scatter_html: Optional[str]
+) -> str:
+    """Render the "Prediction accuracy" section of the dashboard."""
+    if not records:
+        return (
+            "<section><h2>Prediction accuracy</h2>"
+            '<p class="empty">No predictions logged yet — run a few '
+            "calculations and the estimator's track record will appear here.</p>"
+            "</section>"
+        )
+
+    m = _prediction_accuracy_metrics(records)
+    median_abs = m["median_abs_error_pct"]
+    median_signed = m["median_signed_error_pct"]
+    within_25 = m["pct_within_25"]
+
+    # Banner when median absolute error exceeds 50%: estimator is in
+    # rough shape; re-running calibration usually helps.
+    banner = ""
+    if median_abs is not None and median_abs > 50.0:
+        banner = (
+            '<p style="background:#fef3c7;color:#78350f;border-left:4px solid #f59e0b;'
+            'padding:8px 12px;margin:8px 0;border-radius:4px;font-size:13px">'
+            f"⚠ Median absolute prediction error is {median_abs:.0f}%. "
+            "Re-running a deeper calibration tier (System Settings → Calibrate "
+            "time estimates) typically tightens this within ±25%."
+            "</p>"
+        )
+
+    cards = [
+        _card("Predictions logged", str(m["n_total"])),
+        _card(
+            "With estimate",
+            f"{m['n_with_estimate']} / {m['n_total']}",
+        ),
+    ]
+    if median_abs is not None:
+        cards.append(_card("Median |error|", f"{median_abs:.1f}%"))
+    if median_signed is not None:
+        sign = "+" if median_signed >= 0 else ""
+        cards.append(_card("Median bias", f"{sign}{median_signed:.1f}%"))
+    if within_25 is not None:
+        cards.append(_card("Within ±25%", f"{within_25:.0f}%"))
+    if m["n_no_estimate"]:
+        cards.append(_card("No estimate", str(m["n_no_estimate"])))
+
+    chart_block = (
+        scatter_html
+        if scatter_html
+        else (
+            '<p class="empty">Need at least 2 predictions with an estimate '
+            "before plotting accuracy.</p>"
+        )
+    )
+    return (
+        "<section><h2>Prediction accuracy</h2>"
+        + banner
+        + f'<div class="card-row">{"".join(cards)}</div>'
+        + chart_block
+        + "</section>"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -383,6 +555,14 @@ def build_dashboard(out_path: Optional[Path] = None) -> Optional[Path]:
     method_counts = _counts_by(records, "method")
     calc_type_counts = _counts_by(records, "calc_type")
 
+    # M-EST / EST.6: prediction-accuracy data lives in its own log file.
+    # Best-effort read — older installs without the file produce an
+    # empty list and the section degrades to an empty-state message.
+    try:
+        prediction_records = get_prediction_history()
+    except Exception:  # noqa: BLE001 — best-effort
+        prediction_records = []
+
     # Inline plotly.js exactly once (in the first figure that renders).
     # Subsequent figures pass include_plotlyjs=False so we don't ship
     # the ~3 MB bundle three times.
@@ -393,6 +573,9 @@ def build_dashboard(out_path: Optional[Path] = None) -> Optional[Path]:
         calc_type_counts, title="Calc-type distribution", include_plotlyjs=False
     )
     timeline = _timeline_html(records, include_plotlyjs=False)
+    prediction_scatter = _prediction_scatter_html(
+        prediction_records, include_plotlyjs=False
+    )
 
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     body = (
@@ -402,6 +585,7 @@ def build_dashboard(out_path: Optional[Path] = None) -> Optional[Path]:
         f'<p class="sub">Generated {generated} — {summary["total_runs"]} runs in perf log</p>'
         + _overview_section(summary)
         + _speedup_section(speedup_rows)
+        + _prediction_accuracy_section(prediction_records, prediction_scatter)
         + _figure_section(
             "Method usage",
             method_bar,

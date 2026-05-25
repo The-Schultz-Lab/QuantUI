@@ -657,9 +657,13 @@ def on_cal_run(
 
     suite = _MODE_TO_SUITE.get(mode, benchmark_suite)
     app._cal_stop_event = threading.Event()
+    # session 55 user request: skip-current-step event, separate from
+    # the whole-run stop event. Replaces the hard per-step timeout.
+    app._cal_skip_event = threading.Event()
     app._cal_run_btn.disabled = True
     app._cal_mode_toggle.disabled = True
     app._cal_stop_btn.layout.display = ""
+    app._cal_skip_btn.layout.display = ""
     app._cal_progress.max = len(suite)
     app._cal_progress.value = 0
     app._cal_progress.layout.display = ""
@@ -682,12 +686,27 @@ def on_cal_stop(app: Any, btn: Any) -> None:
         app._cal_stop_event.set()
 
 
+def on_cal_skip(app: Any, btn: Any) -> None:
+    """Signal the active calibration to skip the CURRENT step + continue.
+
+    Replaces the per-step timeout (session 55 user request after a
+    near-finishing benzene B3LYP/6-31G* freq calc got cut off at the
+    1800 s tier-4 cap). The worker is killed, the step is marked
+    ``skipped``, the event is cleared inside ``run_calibration``, and
+    the loop moves on to the next step.
+    """
+    _ = btn
+    if hasattr(app, "_cal_skip_event"):
+        app._cal_skip_event.set()
+
+
 def _cal_status_text(status: str) -> str:
     """Render a benchmark-step status code as a glanceable HTML cell."""
     return {
         "ok": "✓",
         "timed_out": "⏱ timed out",
         "stopped": "⛔ stopped",
+        "skipped": "⏭ skipped",
         "error": "✗ error",
         "running": "▶ running",
     }.get(status, status)
@@ -702,16 +721,38 @@ def _cal_table_html(steps_so_far, total: int, *, in_flight_step=None) -> str:
     ``BenchmarkStep`` objects completed; ``in_flight_step`` (optional)
     is a dict ``{label, n_electrons, n_basis, status, elapsed_s}`` that
     appends a "running" row at the bottom while a step is mid-execution.
+
+    For failed steps (error / timeout / skipped) we render an inline
+    italic line below the status cell with a truncated ``error_msg``,
+    so the user can see WHY a step failed without having to open
+    ``calibration.json`` (session 55 user request after MP2/CCSD on
+    H₂O/cc-pVDZ silently 'errored' with no on-screen explanation).
     """
+    import html as _html_mod
+
     row_tpl = (
         "<tr>"
         '<td style="padding:2px 12px 2px 0;font-size:12px">{label}</td>'
         '<td style="padding:2px 8px 2px 0;font-size:12px;text-align:right">{ne}</td>'
         '<td style="padding:2px 8px 2px 0;font-size:12px;text-align:right">{nb}</td>'
         '<td style="padding:2px 8px 2px 0;font-size:12px;text-align:right">{t:.2f} s</td>'
-        '<td style="padding:2px 0;font-size:12px">{status}</td>'
+        '<td style="padding:2px 0;font-size:12px">{status}{detail}</td>'
         "</tr>"
     )
+
+    def _err_detail(s) -> str:
+        # Show err_msg inline only for non-ok terminal statuses.
+        msg = getattr(s, "error_msg", "") or ""
+        if not msg or s.status in ("ok", "running"):
+            return ""
+        # Truncate hard so a verbose PySCF traceback can't blow up the row.
+        if len(msg) > 140:
+            msg = msg[:137] + "…"
+        return (
+            '<br><span style="color:#94a3b8;font-style:italic;font-size:11px">'
+            f"{_html_mod.escape(msg)}</span>"
+        )
+
     rows = "".join(
         row_tpl.format(
             label=s.label,
@@ -719,6 +760,7 @@ def _cal_table_html(steps_so_far, total: int, *, in_flight_step=None) -> str:
             nb=s.n_basis if s.n_basis is not None else "—",
             t=s.elapsed_s,
             status=_cal_status_text(s.status),
+            detail=_err_detail(s),
         )
         for s in steps_so_far
     )
@@ -729,6 +771,7 @@ def _cal_table_html(steps_so_far, total: int, *, in_flight_step=None) -> str:
             nb=in_flight_step.get("n_basis", "—") or "—",
             t=in_flight_step.get("elapsed_s", 0.0),
             status=_cal_status_text("running"),
+            detail="",
         )
 
     n_done = sum(1 for s in steps_so_far if s.status == "ok")
@@ -771,17 +814,13 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
     # callback; no need to compute it locally. (The earlier draft pulled
     # it from ``_MODE_TO_SUITE`` but never used it — ruff F841.)
 
-    # Per-tier timeout budget. Tier 3 + tier 4 have freq/geo-opt anchors
-    # that run for minutes; tier 1 / tier 2 stay SP-only at 120 s/step.
-    _timeout_map = {
-        "tier1": 120.0,
-        "short": 120.0,
-        "tier2": 300.0,
-        "long": 300.0,
-        "tier3": 900.0,
-        "tier4": 1800.0,
-    }
-    timeout_per_step = _timeout_map.get(mode, 120.0)
+    # session 55 user request (after a near-finishing benzene
+    # B3LYP/6-31G* freq got cut off at the old 1800 s tier-4 cap):
+    # no automatic timeout — the user controls long-running steps via
+    # the Skip button. If they walk away from a runaway calc, the
+    # Stop button is still available. Headless callers that genuinely
+    # want a wall-clock cap can pass timeout_per_step explicitly.
+    timeout_per_step: Optional[float] = None
 
     # M-EST follow-up: keep the toolbar activity badge red for the
     # duration of the calibration so the user knows the kernel is busy.
@@ -856,6 +895,7 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
             stop_event=app._cal_stop_event,
             timeout_per_step=timeout_per_step,
             mode=mode,
+            skip_event=app._cal_skip_event,
         )
         # Belt-and-suspenders: re-render the table from the canonical
         # ``result.steps`` in case any per-step callback was dropped
@@ -878,6 +918,7 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
         )
     )
     app._cal_stop_btn.layout.display = "none"
+    app._cal_skip_btn.layout.display = "none"
     app._cal_run_btn.disabled = not pyscf_available
     app._cal_mode_toggle.disabled = False
     app._refresh_perf_stats()
@@ -1006,9 +1047,14 @@ def refresh_results_browser(app: Any) -> None:
             data = load_result(d)
             ts = data.get("timestamp", d.name)
             calc_badge = _calc_type_badge(data.get("calc_type", ""))
+            # M-EST follow-up (2026-05-25): calibration-produced results
+            # get a 🔧 marker so the user can tell them apart from
+            # user-initiated calcs. The marker comes from result.json's
+            # ``calibration_run_id`` extras field written by the worker.
+            calib_marker = "🔧 " if data.get("calibration_run_id") else ""
             label = (
                 f"{ts}  ·  [{calc_badge}]  "
-                f"{data['formula']}  {data['method']}/{data['basis']}"
+                f"{calib_marker}{data['formula']}  {data['method']}/{data['basis']}"
             )
             options.append((label, str(d)))
         except Exception:

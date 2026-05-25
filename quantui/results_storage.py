@@ -52,6 +52,7 @@ def save_result(
     results_dir: Optional[Path] = None,
     calc_type: str = "single_point",
     spectra: Optional[dict] = None,
+    extras: Optional[dict] = None,
 ) -> Path:
     """Write *result* to a new timestamped subdirectory of *results_dir*.
 
@@ -77,6 +78,14 @@ def save_result(
     spectra:
         Dict of spectra data (IR frequencies, UV-Vis excitations, …)
         stored under the ``"spectra"`` key in ``result.json``.
+    extras:
+        Optional dict of additional fields to merge into ``result.json``.
+        Used by the calibration runner to tag results with a
+        ``calibration_run_id`` marker so the History browser can show
+        a small badge distinguishing them from user-initiated calcs.
+        Keys clash with built-in result.json fields (``timestamp``,
+        ``formula``, etc.) overwrite them — by design, since the
+        caller is asserting they want to override.
 
     Returns
     -------
@@ -123,6 +132,8 @@ def save_result(
         "n_iterations": getattr(result, "n_iterations", -1),
         "spectra": spectra if spectra is not None else {},
     }
+    if extras:
+        data.update(extras)
     (dest / "result.json").write_text(json.dumps(data, indent=2))
 
     if pyscf_log:

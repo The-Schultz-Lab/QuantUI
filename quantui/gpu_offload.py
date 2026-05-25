@@ -35,10 +35,21 @@ from typing import Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Methods for which gpu4pyscf has zero or known-broken support. ``CCSD(T)``
-# is documented as unsupported in the gpu4pyscf README; double hybrids are
-# also listed but QuantUI doesn't expose any double-hybrid methods today.
-_GPU_UNSUPPORTED_METHODS: frozenset = frozenset({"CCSD(T)"})
+# Methods for which gpu4pyscf has zero or known-broken support.
+#
+# - ``CCSD(T)`` is documented as unsupported in the gpu4pyscf README.
+# - ``MP2`` and ``CCSD`` are labelled "experimental" by gpu4pyscf and
+#   were observed (session 55, 2026-05-25 user tier-4 run) to fail
+#   immediately after a successful RHF reference on GPU — the failure
+#   fingerprint was "step completed in RHF wall time + small delta,
+#   then errored", which fits the post-HF code choking on a
+#   GPU-migrated mf object. Until the upstream support matures, route
+#   these through CPU so calibration data accrues reliably. The RHF
+#   reference still benefits from GPU because ``try_to_gpu`` only
+#   short-circuits BEFORE the migration.
+# - Double-hybrids would belong here too, but QuantUI doesn't expose
+#   any double-hybrid methods today.
+_GPU_UNSUPPORTED_METHODS: frozenset = frozenset({"MP2", "CCSD", "CCSD(T)"})
 
 
 @lru_cache(maxsize=1)

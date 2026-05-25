@@ -646,7 +646,8 @@ def _normalize_entry(entry: tuple) -> dict:
 
 _STATUS_OK = "ok"
 _STATUS_TIMEOUT = "timed_out"
-_STATUS_STOPPED = "stopped"
+_STATUS_STOPPED = "stopped"  # whole-suite stop (e.g. Stop button)
+_STATUS_SKIPPED = "skipped"  # single-step skip (e.g. Skip button)
 _STATUS_ERROR = "error"
 
 
@@ -666,6 +667,12 @@ class BenchmarkStep:
     # M-EST / EST.4: track which calc-type this step ran so tier 3+4
     # entries can be distinguished in summaries.
     calc_type: str = "single_point"
+    # M-EST follow-up (2026-05-25 user request): the calibration worker
+    # now saves each step as a real result directory (via save_result)
+    # so users can re-open them from the History tab like any other
+    # calc. ``None`` when save_result failed (best-effort) or the step
+    # itself errored before completion.
+    result_dir: Optional[str] = None
 
 
 @dataclass
@@ -742,6 +749,165 @@ def _count_electrons(atoms: list[str], charge: int) -> int:
 # rewritten after each completed step.
 
 
+class _TeeStream:
+    """Minimal text stream that fans writes to multiple destinations.
+
+    Used in the calibration worker so PySCF's ``progress_stream`` output
+    lands BOTH in the shared per-run calibration log (for the parent's
+    live tail) AND in an in-memory ``StringIO`` (so we can pass the
+    per-calc PySCF log text to ``save_result`` for the result dir's
+    ``pyscf.log`` file). Errors writing to any one stream are swallowed
+    — the goal is never to take down the calc because of a bad fanout.
+    """
+
+    def __init__(self, *streams) -> None:
+        self._streams = streams
+
+    def write(self, s) -> int:
+        for stream in self._streams:
+            try:
+                stream.write(s)
+            except Exception:  # noqa: BLE001 — tee best-effort
+                pass
+        return len(s)
+
+    def flush(self) -> None:
+        for stream in self._streams:
+            try:
+                stream.flush()
+            except Exception:  # noqa: BLE001 — tee best-effort
+                pass
+
+
+def _save_calibration_step(
+    res,
+    *,
+    calc_type: str,
+    pyscf_log: str,
+    calibration_run_id: str,
+    mol,
+):
+    """Save a completed calibration calc as a regular result directory.
+
+    Matches the save sequence from ``_do_run`` in ``app.py`` so the
+    History browser can load + replay calibration entries like any
+    user-initiated calc:
+
+    - ``save_result`` — base dir + result.json + pyscf.log. The
+      ``extras={"calibration_run_id": ...}`` tag lets the History
+      dropdown render a 🔧 marker beside calibration entries.
+    - ``save_thumbnail`` — the card shown in the History dropdown.
+    - For GeoOpt: ``save_trajectory`` (so the Trajectory panel works).
+    - For SP/GeoOpt/Freq with MO data: ``save_orbitals`` (so the
+      Energies + Isosurface panels work).
+    - For Freq: a ``spectra`` dict baked into result.json so the IR
+      + Vibrational panels work; ``displacements`` serialized to
+      nested lists.
+
+    Returns the result directory path, or ``None`` on save failure
+    (caller treats this as "calc succeeded but couldn't save — log it
+    but don't fail the step").
+    """
+    from quantui.results_storage import (
+        load_result,
+        save_orbitals,
+        save_result,
+        save_thumbnail,
+        save_trajectory,
+    )
+
+    # Build the spectra dict for Frequency calcs — must match what the
+    # Analysis tab's _pop_ir_spectrum / _pop_vibrational expect.
+    spectra: dict = {}
+    if calc_type == "frequency":
+        displacements_serialized = None
+        try:
+            import numpy as _np
+
+            if getattr(res, "displacements", None) is not None:
+                displacements_serialized = _np.asarray(res.displacements).tolist()
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+        spectra = {
+            "ir": {
+                "frequencies_cm1": getattr(res, "frequencies_cm1", []),
+                "ir_intensities": getattr(res, "ir_intensities", []),
+                "zpve_hartree": getattr(res, "zpve_hartree", 0.0),
+                "displacements": displacements_serialized,
+            },
+            "molecule": {
+                "atoms": list(mol.atoms),
+                "coords": [list(map(float, row)) for row in mol.coordinates],
+                "charge": mol.charge,
+                "multiplicity": mol.multiplicity,
+            },
+        }
+
+    # For GeoOpt the ``res`` from optimize_geometry has its own .method /
+    # .basis / .formula via res.molecule. save_result expects those
+    # attributes on the top-level result. Build a uniform shim.
+    if calc_type == "geometry_opt":
+        from types import SimpleNamespace
+
+        save_obj = SimpleNamespace(
+            formula=res.molecule.get_formula(),
+            method=res.method,
+            basis=res.basis,
+            energy_hartree=(
+                res.energies_hartree[-1] if res.energies_hartree else float("nan")
+            ),
+            converged=bool(res.converged),
+            n_iterations=int(getattr(res, "n_steps", -1)),
+            homo_lumo_gap_ev=None,
+            mo_energy_hartree=getattr(res, "mo_energy_hartree", None),
+            mo_occ=getattr(res, "mo_occ", None),
+            mo_coeff=getattr(res, "mo_coeff", None),
+            pyscf_mol_atom=getattr(res, "pyscf_mol_atom", None),
+            pyscf_mol_basis=getattr(res, "pyscf_mol_basis", None),
+        )
+    else:
+        save_obj = res
+
+    extras = {"calibration_run_id": calibration_run_id}
+    try:
+        saved_dir = save_result(
+            save_obj,
+            pyscf_log=pyscf_log,
+            calc_type=calc_type,
+            spectra=spectra or None,
+            extras=extras,
+        )
+    except Exception:  # noqa: BLE001 — save is best-effort
+        return None
+
+    # Best-effort follow-on saves. None of these are required for the
+    # History card to render — they enrich the replay experience.
+    try:
+        saved_data = load_result(saved_dir)
+        save_thumbnail(saved_dir, saved_data)
+    except Exception:  # noqa: BLE001 — thumbnail is purely cosmetic
+        pass
+
+    if calc_type == "geometry_opt":
+        try:
+            traj = getattr(res, "trajectory", None) or getattr(res, "molecule", None)
+            energies = list(getattr(res, "energies_hartree", []) or [])
+            if traj and not isinstance(traj, list):
+                traj = [traj]
+            if traj and len(traj) >= 1:
+                save_trajectory(saved_dir, traj, energies)
+        except Exception:  # noqa: BLE001 — trajectory save is best-effort
+            pass
+
+    if calc_type in ("single_point", "geometry_opt", "frequency"):
+        try:
+            save_orbitals(saved_dir, save_obj)
+        except Exception:  # noqa: BLE001 — orbital save is best-effort
+            pass
+
+    return saved_dir
+
+
 def _calibration_worker(
     atoms: list,
     coords: list,
@@ -752,18 +918,24 @@ def _calibration_worker(
     calc_type: str,
     log_path_str: str,
     result_queue,
+    calibration_run_id: str = "",
 ) -> None:
     """Run one calibration step in a child process.
 
     Picklable (top-level function, primitive args + a Queue). Pipes
     PySCF progress to ``log_path_str`` (append mode) so the parent can
-    tail it. Puts a dict with status / formula / n_iterations /
-    converged / elapsed_s on ``result_queue`` when done.
+    tail it AND to an in-memory buffer so the per-calc PySCF output
+    can be saved alongside the result.
 
-    On exception, puts ``{"status": "error", "error_msg": ...}``. The
-    parent treats absence of a queue entry (after worker exit) as a
+    On success: saves a real result directory via ``_save_calibration_step``
+    (tagged with ``calibration_run_id``) and puts a summary dict with
+    ``result_dir`` on ``result_queue``.
+
+    On exception: puts ``{"status": "error", "error_msg": ..., "result_dir": None}``.
+    The parent treats absence of a queue entry (after worker exit) as a
     crashed worker — distinct from a step-level error.
     """
+    import io as _io
     import time as _t
     from datetime import datetime as _dt
     from pathlib import Path as _P
@@ -775,10 +947,15 @@ def _calibration_worker(
     try:
         # Line-buffered append so the parent's tail sees output as it
         # arrives. ``buffering=1`` requires text mode (which we use).
+        # The tee fans writes to both the shared log + an in-memory
+        # buffer so we can save the per-calc PySCF output to the
+        # result dir's pyscf.log.
         with open(log_path, "a", encoding="utf-8", buffering=1) as log_fh:
             log_fh.write(
                 f"\n========= {_dt.utcnow().isoformat()} :: {label} =========\n"
             )
+            per_calc_buf = _io.StringIO()
+            stream = _TeeStream(log_fh, per_calc_buf)
 
             from quantui.molecule import Molecule as _Molecule
 
@@ -791,7 +968,7 @@ def _calibration_worker(
                     molecule=mol,
                     method=method,
                     basis=basis,
-                    progress_stream=log_fh,
+                    progress_stream=stream,
                 )
                 formula = res.molecule.get_formula()
                 converged = bool(res.converged)
@@ -803,7 +980,7 @@ def _calibration_worker(
                     molecule=mol,
                     method=method,
                     basis=basis,
-                    progress_stream=log_fh,
+                    progress_stream=stream,
                 )
                 formula = res.formula
                 converged = bool(res.converged)
@@ -819,7 +996,7 @@ def _calibration_worker(
                     method=method,
                     basis=basis,
                     verbose=3,
-                    progress_stream=log_fh,
+                    progress_stream=stream,
                 )
                 formula = res.formula
                 converged = bool(res.converged)
@@ -828,6 +1005,17 @@ def _calibration_worker(
             elapsed = _t.perf_counter() - t0
             log_fh.write(f"\n[QuantUI_STATUS] COMPLETED in {elapsed:.2f} s\n")
 
+            # Save as a regular result directory (M-EST follow-up,
+            # 2026-05-25 user request — tier 4's MP2 + CCSD + benzene
+            # freq are scientifically valuable; don't discard them).
+            saved_dir = _save_calibration_step(
+                res,
+                calc_type=calc_type,
+                pyscf_log=per_calc_buf.getvalue(),
+                calibration_run_id=calibration_run_id,
+                mol=mol,
+            )
+
             result_queue.put(
                 {
                     "status": "ok",
@@ -835,6 +1023,7 @@ def _calibration_worker(
                     "converged": converged,
                     "n_iterations": n_iterations,
                     "elapsed_s": elapsed,
+                    "result_dir": str(saved_dir) if saved_dir else None,
                 }
             )
     except Exception as exc:
@@ -843,6 +1032,7 @@ def _calibration_worker(
                 "status": "error",
                 "error_msg": str(exc)[:500],
                 "elapsed_s": _t.perf_counter() - t0,
+                "result_dir": None,
             }
         )
 
@@ -928,6 +1118,7 @@ def _save_calibration_json(result: CalibrationResult, log_path: Path) -> None:
                             "elapsed_s": round(s.elapsed_s, 3),
                             "error_msg": s.error_msg,
                             "calc_type": s.calc_type,
+                            "result_dir": s.result_dir,
                         }
                         for s in result.steps
                     ],
@@ -946,8 +1137,9 @@ def _save_calibration_json(result: CalibrationResult, log_path: Path) -> None:
 def run_calibration(
     progress_cb: Optional[ProgressCallback] = None,
     stop_event=None,
-    timeout_per_step: float = 120.0,
+    timeout_per_step: Optional[float] = None,
     mode: str = "tier1",
+    skip_event=None,
 ) -> CalibrationResult:
     """Run the benchmark suite and populate ``perf_log.jsonl``.
 
@@ -963,17 +1155,28 @@ def run_calibration(
             ``(step_n, total, label, status, elapsed_s)`` and optionally
             ``live_message=<latest log line>`` during slow steps. The
             terminal call after each step uses status in
-            ``ok / timed_out / stopped / error``; intermediate "running"
-            ticks fire while the step is in-flight.
+            ``ok / timed_out / stopped / skipped / error``; intermediate
+            "running" ticks fire while the step is in-flight.
         stop_event: A :class:`threading.Event`; checked every 500 ms.
-            When set, the in-flight worker is terminated immediately
-            and the current step is marked ``"stopped"``.
-        timeout_per_step: Wall-clock seconds allowed per step. Defaults
-            to 120 s — fine for tier 1 / tier 2 (SP only). Caller
-            should bump for tier 3 (~900 s) and tier 4 (~1800 s).
+            When set, the in-flight worker is terminated immediately,
+            the current step is marked ``"stopped"``, and remaining
+            steps are abandoned (no further work).
+        timeout_per_step: Wall-clock seconds allowed per step.
+            ``None`` (default) means no timeout — the user controls
+            stoppage via the Stop / Skip buttons. The session-55 tier-4
+            run had a benzene B3LYP/6-31G* freq calc finish at
+            ~1500 s but be cut off at the old 1800 s hard cap, losing
+            the data; the no-timeout default removes that footgun.
+            Pass a numeric value only when running headlessly (e.g. CI)
+            where you genuinely want a wall-clock cap.
         mode: One of ``"tier1"`` / ``"tier2"`` / ``"tier3"`` / ``"tier4"``.
             Legacy aliases ``"short"`` / ``"long"`` map to tier1 / tier2.
             Unknown modes fall back to tier1 with a warning.
+        skip_event: A :class:`threading.Event`; checked every 500 ms.
+            When set, the in-flight worker is terminated, the current
+            step is marked ``"skipped"``, the event is cleared, and
+            the loop continues to the NEXT step. Distinct from
+            ``stop_event``: skip is one step, stop is the whole run.
 
     Returns:
         :class:`CalibrationResult` with per-step outcomes.
@@ -1005,6 +1208,11 @@ def run_calibration(
 
     # Per-run calibration log file. The worker appends; the parent tails.
     log_path = _calibration_log_path(timestamp)
+    timeout_str = (
+        f"{timeout_per_step:.0f} s"
+        if timeout_per_step is not None
+        else "none (user-controlled)"
+    )
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         with open(log_path, "w", encoding="utf-8") as fh:
@@ -1013,7 +1221,7 @@ def run_calibration(
                 f"started   : {timestamp}\n"
                 f"mode      : {mode}\n"
                 f"suite size: {total} entries\n"
-                f"timeout/step: {timeout_per_step:.0f} s\n"
+                f"timeout/step: {timeout_str}\n"
             )
     except OSError:
         # No log file is non-fatal — calibration still runs, just without
@@ -1104,13 +1312,14 @@ def run_calibration(
                 calc_type,
                 str(log_path),
                 result_queue,
+                timestamp,  # calibration_run_id — the parent's run timestamp
             ),
             daemon=True,
         )
         t_start = time.perf_counter()
         worker.start()
 
-        # Poll loop — finish naturally OR hit timeout OR receive stop signal.
+        # Poll loop — finish naturally OR hit timeout OR stop OR skip.
         poll_interval = 0.5
         worker_done_normally = False
         while True:
@@ -1121,7 +1330,10 @@ def run_calibration(
                 worker_done_normally = True
                 break
 
-            if elapsed > timeout_per_step:
+            # Timeout is now opt-in (was a hard 1800 s for tier 4 which
+            # cut off a near-finishing benzene freq in session 55).
+            # ``None`` means "user controls; never auto-kill".
+            if timeout_per_step is not None and elapsed > timeout_per_step:
                 worker.terminate()
                 worker.join(timeout=5)
                 step.status = _STATUS_TIMEOUT
@@ -1136,6 +1348,20 @@ def run_calibration(
                 step.elapsed_s = elapsed
                 result.stopped_early = True
                 stopped_mid_step = True
+                break
+
+            # Skip = "abandon THIS step, continue to the next." Distinct
+            # from Stop. Clear the event after consuming so the next
+            # step starts fresh — the UI re-sets it if the user clicks
+            # Skip again. (session 55 user request — replaces the
+            # hard timeout that was cutting off near-finishing calcs.)
+            if skip_event is not None and skip_event.is_set():
+                worker.terminate()
+                worker.join(timeout=5)
+                step.status = _STATUS_SKIPPED
+                step.elapsed_s = elapsed
+                step.error_msg = f"skipped by user at {elapsed:.0f}s"
+                skip_event.clear()
                 break
 
             # Live-tick: pull the latest log line for the UI.
@@ -1181,6 +1407,7 @@ def run_calibration(
             if msg.get("status") == "ok":
                 step.status = _STATUS_OK
                 step.elapsed_s = float(msg["elapsed_s"])
+                step.result_dir = msg.get("result_dir")
                 # Log to perf_log.jsonl so estimate_time() picks it up.
                 _calc_log.log_calculation(
                     formula=msg["formula"],

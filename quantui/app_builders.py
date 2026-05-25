@@ -264,7 +264,22 @@ def build_history_section(
         description="Stop",
         button_style="warning",
         icon="stop",
+        tooltip="Abandon the rest of the calibration (current step is also killed).",
         layout=layout_fn(width="90px", display="none"),
+    )
+    # session 55 user request: replaced the hard 1800 s per-step timeout
+    # with a Skip button so the user can abandon ONE step that's running
+    # too long without losing the whole run. Distinct from Stop (which
+    # abandons everything remaining).
+    app._cal_skip_btn = widgets.Button(
+        description="Skip step",
+        button_style="info",
+        icon="step-forward",
+        tooltip=(
+            "Abandon the current step and move on to the next. Other "
+            "completed steps stay; the calibration continues."
+        ),
+        layout=layout_fn(width="120px", display="none"),
     )
     app._cal_progress = widgets.IntProgress(
         min=0,
@@ -376,7 +391,7 @@ def build_history_section(
             ),
             app._cal_mode_toggle,
             widgets.HBox(
-                [app._cal_run_btn, app._cal_stop_btn],
+                [app._cal_run_btn, app._cal_skip_btn, app._cal_stop_btn],
                 layout=layout_fn(gap="6px", align_items="center"),
             ),
             app._cal_progress,

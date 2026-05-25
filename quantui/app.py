@@ -194,6 +194,9 @@ from quantui.app_runflow import (
     on_cal_run as _run_on_cal_run,
 )
 from quantui.app_runflow import (
+    on_cal_skip as _run_on_cal_skip,
+)
+from quantui.app_runflow import (
     on_cal_stop as _run_on_cal_stop,
 )
 from quantui.app_runflow import (
@@ -1512,6 +1515,7 @@ class QuantUIApp:
         )
         self._cal_run_btn.on_click(self._on_cal_run)
         self._cal_stop_btn.on_click(self._on_cal_stop)
+        self._cal_skip_btn.on_click(self._on_cal_skip)
         self.export_btn.on_click(self._on_export)
         self.export_xyz_btn.on_click(self._on_export_xyz)
         self.export_mol_btn.on_click(self._on_export_mol)
@@ -2910,6 +2914,9 @@ class QuantUIApp:
     def _on_cal_stop(self, btn) -> None:
         _run_on_cal_stop(self, btn)
 
+    def _on_cal_skip(self, btn) -> None:
+        _run_on_cal_skip(self, btn)
+
     def _do_calibration(self) -> None:
         _run_do_calibration(self, pyscf_available=_PYSCF_AVAILABLE)
 
@@ -3417,6 +3424,70 @@ class QuantUIApp:
         _run_cpu_t = time.process_time()
         _scf_converged_t: Optional[float] = None
         _tail_marks: dict[str, float] = {}
+
+        # M-EST / EST.6 (2026-05-25): capture the estimator's pre-run
+        # prediction so we can write a (predicted, actual) record to
+        # ``prediction_log.jsonl`` after the calc completes. The
+        # estimator may return None (insufficient history); we record
+        # that as "no estimate" so the dashboard counts it separately
+        # from "estimate was wrong by N%".
+        _predicted_run_s: Optional[float] = None
+        _predicted_run_confidence: str = "unknown"
+        try:
+            _ct_for_est = {
+                "Single Point": "single_point",
+                "Geometry Opt": "geometry_opt",
+                "Frequency": "frequency",
+                "UV-Vis (TD-DFT)": "tddft",
+                "NMR Shielding": "nmr",
+                "PES Scan": "pes_scan",
+            }.get(self.calc_type_dd.value, "single_point")
+            _nb_for_est = _calc_log.count_basis_functions(
+                mol.atoms, self.basis_dd.value
+            )
+            # Match _update_estimate's GPU-prediction logic so the
+            # recorded predicted_s is what the user SAW in the UI
+            # before they hit Run.
+            _predicted_gpu_used: Optional[bool] = None
+            try:
+                from quantui.gpu_offload import (
+                    _GPU_UNSUPPORTED_METHODS as _GPU_NO,
+                )
+                from quantui.gpu_offload import (
+                    is_gpu_available,
+                )
+
+                _gpu_avail, _ = is_gpu_available()
+                if _gpu_avail and self.method_dd.value.upper() not in _GPU_NO:
+                    _predicted_gpu_used = True
+                else:
+                    _predicted_gpu_used = False
+            except Exception:  # noqa: BLE001 — fall back to device-agnostic
+                _predicted_gpu_used = None
+
+            _est = _calc_log.estimate_time(
+                n_atoms=len(mol.atoms),
+                n_electrons=mol.get_electron_count(),
+                method=self.method_dd.value,
+                basis=self.basis_dd.value,
+                n_basis=_nb_for_est,
+                calc_type=_ct_for_est,
+                gpu_used=_predicted_gpu_used,
+            )
+            if _est is not None:
+                _predicted_run_s = float(_est["seconds"])
+                _predicted_run_confidence = str(_est.get("confidence", "unknown"))
+        except Exception as _est_exc:
+            # Estimator failure here is non-fatal — we just won't have a
+            # predicted_s to compare against. Log to event_log so the
+            # cause is at least surfaced for diagnosis.
+            try:
+                _calc_log.log_event(
+                    "predict_capture_failed",
+                    f"{type(_est_exc).__name__}: {_est_exc}"[:300],
+                )
+            except Exception:  # noqa: BLE001 — telemetry self-guard
+                pass
 
         def _mark(stage: str) -> None:
             _tail_marks[stage] = time.perf_counter()
@@ -4115,6 +4186,27 @@ class QuantUIApp:
                     gpu_used=bool(getattr(result, "gpu_used", False)),
                     gpu_name=getattr(result, "gpu_name", None),
                 )
+                # M-EST / EST.6: persist the (predicted, actual) pair to
+                # ``prediction_log.jsonl``. ``_predicted_run_s`` was
+                # captured at the top of _do_run via the same
+                # estimate_time(...) call that drives the UI estimate;
+                # ``_elapsed_for_est`` is the actual wall-time the calc
+                # took. The analytics dashboard reads both to surface
+                # accuracy metrics + the "consider re-calibrating"
+                # banner when the median error exceeds threshold.
+                try:
+                    _calc_log.log_prediction(
+                        predicted_s=_predicted_run_s,
+                        actual_s=_elapsed_for_est,
+                        method=result.method,
+                        basis=result.basis,
+                        calc_type=save_type,
+                        formula=result.formula,
+                        confidence=_predicted_run_confidence,
+                        gpu_used=getattr(result, "gpu_used", None),
+                    )
+                except Exception:  # noqa: BLE001 — telemetry self-guard
+                    pass
                 self._update_estimate()
             except Exception:
                 pass

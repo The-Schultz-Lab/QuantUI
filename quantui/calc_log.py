@@ -269,6 +269,19 @@ def _event_path() -> Path:
     return _log_dir() / "event_log.jsonl"
 
 
+def _prediction_log_path() -> Path:
+    """Path to ``prediction_log.jsonl`` — the M-EST / EST.6 file
+    capturing one record per ``_do_run`` invocation with the
+    estimator's pre-run prediction and the actual wall-clock outcome.
+
+    Kept indefinitely (like ``perf_log.jsonl``) so the analytics
+    dashboard can plot prediction accuracy over time without manual
+    pruning. Lives in the same dir as the other logs; honours
+    ``QUANTUI_LOG_DIR`` for tests.
+    """
+    return _log_dir() / "prediction_log.jsonl"
+
+
 def _append(path: Path, record: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(record, ensure_ascii=False) + "\n"
@@ -702,6 +715,72 @@ def format_estimate(est: Optional[dict]) -> str:
 def get_perf_history() -> list[dict]:
     """Return all records from ``perf_log.jsonl`` as a list of dicts."""
     return _read_all(_perf_path())
+
+
+# ---------------------------------------------------------------------------
+# Prediction log (M-EST / EST.6, 2026-05-25)
+# ---------------------------------------------------------------------------
+#
+# Captures one record per ``_do_run`` invocation with the estimator's
+# pre-run prediction + the actual wall-clock outcome. Lets the analytics
+# dashboard show prediction accuracy over time, broken down by calc-type
+# and device, so the user can tell at a glance whether the estimator is
+# working or whether it's time to re-calibrate.
+
+
+def log_prediction(
+    predicted_s: Optional[float],
+    actual_s: float,
+    *,
+    method: str,
+    basis: str,
+    calc_type: str,
+    formula: str = "",
+    confidence: str = "unknown",
+    gpu_used: Optional[bool] = None,
+) -> None:
+    """Append one prediction record to ``prediction_log.jsonl``.
+
+    ``predicted_s`` is ``None`` when the estimator returned no estimate
+    (insufficient history at run-time). Both columns are still logged
+    so the dashboard can count "no-estimate" runs separately from
+    "estimate-was-way-off" runs — both are meaningful failure modes
+    for the predictor.
+
+    ``actual_s`` should match the value passed to ``log_calculation``
+    for the same run; the dashboard cross-references them via the
+    ``timestamp`` key. The two writes are not transactional — if one
+    side fails we'd rather have the perf-log record than no record
+    at all, so ``log_prediction`` is best-effort and the caller does
+    not depend on its return.
+    """
+    record: dict = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "predicted_s": (
+            round(float(predicted_s), 3) if predicted_s is not None else None
+        ),
+        "actual_s": round(float(actual_s), 3),
+        "method": method,
+        "basis": basis,
+        "calc_type": calc_type,
+        "formula": formula,
+        "confidence": confidence,
+    }
+    if gpu_used is not None:
+        record["gpu_used"] = bool(gpu_used)
+    # Derived: signed error percentage. ``None`` when we had no estimate.
+    if predicted_s is not None and predicted_s > 0:
+        record["error_pct"] = round(
+            100.0 * (float(actual_s) - float(predicted_s)) / float(predicted_s), 1
+        )
+    else:
+        record["error_pct"] = None
+    _append(_prediction_log_path(), record)
+
+
+def get_prediction_history() -> list[dict]:
+    """Return all records from ``prediction_log.jsonl`` as a list of dicts."""
+    return _read_all(_prediction_log_path())
 
 
 def reset_perf_log() -> None:
