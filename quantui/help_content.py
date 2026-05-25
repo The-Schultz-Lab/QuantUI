@@ -254,6 +254,57 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "QuantUI will warn you if the combination is impossible.</p>"
         ),
     },
+    "external_tools": {
+        "title": "Importing results into Avogadro / IQmol / Jmol",
+        "body": (
+            "<p>Every QuantUI result folder ships with portable, standards-"
+            "compliant files. No screen-scraping — open the right file in "
+            "the right tool.</p>"
+            "<table style='border-collapse:collapse; margin:6px 0;'>"
+            "<tr style='border-bottom:1px solid #ccc;'>"
+            "  <th style='padding:3px 12px; text-align:left;'>What you want to do</th>"
+            "  <th style='padding:3px 12px; text-align:left;'>QuantUI file</th>"
+            "  <th style='padding:3px 12px; text-align:left;'>External tool</th></tr>"
+            "<tr><td style='padding:3px 12px;'>View MOs in 3D</td>"
+            "  <td style='padding:3px 12px;'><code>result.molden</code></td>"
+            "  <td style='padding:3px 12px;'>Avogadro, IQmol, Jmol</td></tr>"
+            "<tr><td style='padding:3px 12px;'>Animate vibrations</td>"
+            "  <td style='padding:3px 12px;'><code>result.molden</code> (freq)</td>"
+            "  <td style='padding:3px 12px;'>Avogadro 2</td></tr>"
+            "<tr><td style='padding:3px 12px;'>Replay a trajectory</td>"
+            "  <td style='padding:3px 12px;'><code>trajectory.xyz</code> or <code>.traj</code></td>"
+            "  <td style='padding:3px 12px;'>VMD, Avogadro, ASE-GUI</td></tr>"
+            "<tr><td style='padding:3px 12px;'>Render an orbital isosurface</td>"
+            "  <td style='padding:3px 12px;'><code>isosurfaces/&lt;orb&gt;.cube</code></td>"
+            "  <td style='padding:3px 12px;'>Avogadro, VMD, ChimeraX</td></tr>"
+            "<tr><td style='padding:3px 12px;'>Open spectrum data in Excel</td>"
+            "  <td style='padding:3px 12px;'><code>*_data_*.csv</code></td>"
+            "  <td style='padding:3px 12px;'>Excel, LibreOffice, pandas</td></tr>"
+            "<tr><td style='padding:3px 12px;'>Share the whole result</td>"
+            "  <td style='padding:3px 12px;'><code>&lt;result&gt;.zip</code> (Export bundle)</td>"
+            "  <td style='padding:3px 12px;'>Any unzip tool</td></tr>"
+            "<tr><td style='padding:3px 12px;'>Edit a structure and re-run</td>"
+            "  <td style='padding:3px 12px;'><code>trajectory.traj</code></td>"
+            "  <td style='padding:3px 12px;'>ASE-GUI</td></tr>"
+            "</table>"
+            "<p><b>Quick paths:</b></p>"
+            "<ul>"
+            "<li><b>Avogadro 2:</b> <code>File → Open → result.molden</code>; for "
+            "vibrations use <b>Extensions → Vibrational Modes</b>.</li>"
+            "<li><b>IQmol:</b> <code>File → Open → result.molden</code>; "
+            "double-click an orbital in the side panel to render its isosurface.</li>"
+            "<li><b>VMD:</b> <code>vmd -m trajectory.xyz</code> for large trajectories.</li>"
+            "<li><b>ASE Python:</b> <code>frames = ase.io.read('trajectory.traj', ':')</code> "
+            "— per-frame energies are preserved in eV.</li>"
+            "</ul>"
+            "<p><b>Find the files:</b> open the <b>Files tab</b>, browse to the "
+            "result folder, and either preview each file there or open the folder "
+            "in your OS file manager.</p>"
+            "<p>Full guide with per-tool details, troubleshooting, and a sample "
+            "result-folder layout: see <code>docs/IMPORTING-INTO-AVOGADRO.md</code> "
+            "in the QuantUI repo.</p>"
+        ),
+    },
 }
 
 # All valid topic keys (for testing / discovery)

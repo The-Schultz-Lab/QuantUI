@@ -270,6 +270,24 @@ Full reference with all flags and examples: [docs/CLI.md](docs/CLI.md).
 
 ---
 
+## Using QuantUI results in other tools
+
+QuantUI's M-EXPORT milestone writes portable companion files alongside
+every result so you can hand-off to Avogadro, IQmol, Jmol, VMD, ASE-GUI,
+or any spreadsheet without screen-scraping. The quick reference:
+
+| Goal | QuantUI file | Tool |
+| --- | --- | --- |
+| MOs in 3D, vibrations | `result.molden` | Avogadro 2, IQmol, Jmol |
+| Geometry-opt / PES replay | `trajectory.xyz` or `.traj` | VMD, Avogadro, ASE-GUI |
+| Orbital isosurface | `isosurfaces/<orb>.cube` | Avogadro, VMD, ChimeraX |
+| Spectrum data in Excel | `*_data_*.csv` | Excel, LibreOffice, pandas |
+| Share whole result | `<result>.zip` (Export bundle) | Any unzip tool |
+
+Full per-tool walkthrough with troubleshooting: [docs/IMPORTING-INTO-AVOGADRO.md](docs/IMPORTING-INTO-AVOGADRO.md).
+
+---
+
 ## Tutorials
 
 Five step-by-step notebooks in [`notebooks/tutorials/`](notebooks/tutorials/):
