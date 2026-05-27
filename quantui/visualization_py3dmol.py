@@ -368,6 +368,106 @@ def visualize_molecule(
         raise ValueError(f"Unknown backend: {backend}")
 
 
+def _info_box_html(molecule, backend: str) -> str:
+    """Build the info-box HTML fragment shown above the 3D viewer."""
+    backends = get_available_backends()
+    backend_str = ", ".join(backends)
+    selected = backend if backend != "auto" else (backends[0] if backends else "")
+    return (
+        '<div style="background-color: #f0f8ff; padding: 10px;'
+        " border-radius: 5px; margin-bottom: 10px;"
+        ' border-left: 4px solid #4a90e2;">'
+        "<strong>📊 Molecule Information</strong><br>"
+        f"<strong>Formula:</strong> {molecule.get_formula()} | "
+        f"<strong>Atoms:</strong> {len(molecule.atoms)} | "
+        f"<strong>Electrons:</strong> {molecule.get_electron_count()} | "
+        f"<strong>Charge:</strong> {molecule.charge} | "
+        f"<strong>Multiplicity:</strong> {molecule.multiplicity}<br>"
+        f'<small style="color: #666;">Using: {selected} '
+        f"(available: {backend_str})</small>"
+        "</div>"
+    )
+
+
+def _unavailable_html(molecule) -> str:
+    """HTML fallback when no 3D visualization backend is installed."""
+    return (
+        '<div style="padding:10px;font-family:sans-serif;color:#444;">'
+        "<p>⚠️ 3D visualization not available.</p>"
+        "<p>To enable visualization, install one of:</p>"
+        "<ul><li><code>pip install py3dmol</code> (recommended)</li>"
+        "<li><code>pip install plotlymol</code></li></ul>"
+        "<p><strong>Molecule Information</strong><br>"
+        f"Formula: {molecule.get_formula()}<br>"
+        f"Atoms: {len(molecule.atoms)}<br>"
+        f"Electrons: {molecule.get_electron_count()}<br>"
+        f"Charge: {molecule.charge}<br>"
+        f"Multiplicity: {molecule.multiplicity}</p>"
+        f"<pre>{molecule.to_xyz_string()}</pre>"
+        "</div>"
+    )
+
+
+def render_molecule_html(
+    molecule,
+    backend: Literal["auto", "py3dmol", "plotlymol"] = "auto",
+    style: str = "ball+stick",
+    show_info: bool = True,
+    width: int = 600,
+    height: int = 500,
+    bgcolor: str = "#ffffff",
+    lighting: str = "soft",
+) -> str:
+    """Return self-contained HTML for the molecule viewer (no display side-effects).
+
+    Mirrors :func:`display_molecule` but emits a single HTML string so callers
+    can route through an atomic ``Output.outputs`` swap (Rule 6 in
+    ``reflections/01-voila-rendering-and-display.md``) rather than
+    ``with output: display(viz)`` — the latter is the BUG.6/BUG.7 root cause
+    family. Errors are caught and returned as inline HTML so the caller sees a
+    visible failure message in the viewer slot instead of a blank 🙁 panel.
+    """
+    if not is_visualization_available():
+        return _unavailable_html(molecule)
+
+    parts: list[str] = []
+    if show_info:
+        parts.append(_info_box_html(molecule, backend))
+
+    try:
+        viz = visualize_molecule(
+            molecule,
+            backend=backend,
+            style=style,
+            width=width,
+            height=height,
+            bgcolor=bgcolor,
+            lighting=lighting,
+        )
+        make_html = getattr(viz, "_make_html", None)
+        if callable(make_html):
+            parts.append(viz._make_html())
+        else:
+            import plotly.io as _pio
+
+            parts.append(
+                _pio.to_html(
+                    viz,
+                    full_html=False,
+                    include_plotlyjs="require",
+                    config={"responsive": True},
+                )
+            )
+        logger.info(f"Rendered HTML for {molecule.get_formula()}")
+    except Exception as e:
+        logger.error(f"Render failed for {molecule.get_formula()}: {e}")
+        parts.append(
+            '<div style="color:#b91c1c;padding:8px;">'
+            f"❌ Visualization failed: {e}</div>"
+        )
+    return "\n".join(parts)
+
+
 def display_molecule(
     molecule,
     backend: Literal["auto", "py3dmol", "plotlymol"] = "auto",

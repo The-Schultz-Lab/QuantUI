@@ -166,6 +166,16 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     app._last_traj_result = None
     app._traj_render_token = int(getattr(app, "_traj_render_token", 0)) + 1
     app._iso_render_token = int(getattr(app, "_iso_render_token", 0)) + 1
+    # Orbital state is consumed by pop_isosurface (and ana_pop_iso_generate
+    # when the user clicks Generate). Reset here so a context that doesn't
+    # populate these fields (history result without orbitals.npz, BUG.8)
+    # cannot leak the prior calc's orbital arrays into the Isosurface panel
+    # of an unrelated molecule. Each populate method that wants the panel
+    # to activate re-sets these in show_orbital_diagram.
+    app._last_orb_info = None
+    app._last_orb_mo_coeff = None
+    app._last_orb_mol_atom = None
+    app._last_orb_mol_basis = None
     app.traj_accordion.set_title(0, "Trajectory Viewer")
     # traj_output is a VBox (see app_builders.py traj_output construction);
     # clear children instead of clear_output.
@@ -243,11 +253,20 @@ def pop_energies(app: Any, ctx: Any) -> bool:
 
 
 def pop_isosurface(app: Any, ctx: Any) -> bool:
-    """Populate Isosurface availability from orbital state."""
+    """Populate Isosurface availability from orbital state.
+
+    Uses ``getattr(..., None)`` for the orbital state fields rather than
+    direct attribute access. The attributes are initialized in
+    ``QuantUIApp.__init__`` and reset in ``apply_analysis_context`` so they
+    are always present in practice, but the defensive read mirrors the
+    pattern used by ``render_orbital_isosurface`` and keeps this populator
+    robust against future refactors that might call it before the context
+    reset has run (BUG.8 root-cause guard).
+    """
     return (
-        app._last_orb_mo_coeff is not None
-        and app._last_orb_mol_atom is not None
-        and app._last_orb_mol_basis is not None
+        getattr(app, "_last_orb_mo_coeff", None) is not None
+        and getattr(app, "_last_orb_mol_atom", None) is not None
+        and getattr(app, "_last_orb_mol_basis", None) is not None
     )
 
 
@@ -305,7 +324,15 @@ def pop_geo_trajectory(app: Any, ctx: Any) -> bool:
 
 
 def pop_preopt_trajectory(app: Any, ctx: Any) -> bool:
-    """Populate Trajectory panel for frequency pre-optimization contexts."""
+    """Populate Trajectory panel for the frequency-time DFT geometry
+    optimization trajectory.
+
+    POLISH.9 (2026-05-25): the wrapped operation is a full DFT geom-opt
+    at the user's method/basis, not the classical LJ pre-opt that lives
+    in ``quantui/preopt.py``. The function name + ``preopt_trajectory.json``
+    filename stay (renaming the saved file would break history replay of
+    older results) but user-facing strings now say "geometry optimization".
+    """
     if ctx.source == "live":
         pre = ctx.preopt_result
         if pre is None:
@@ -322,7 +349,8 @@ def pop_preopt_trajectory(app: Any, ctx: Any) -> bool:
                 "Trajectory",
                 (
                     "Not available for this Frequency history result: "
-                    "preopt_trajectory.json is missing (pre-opt may have been disabled)."
+                    "preopt_trajectory.json is missing (geometry "
+                    "optimization may have been disabled)."
                 ),
             )
             return False
@@ -344,7 +372,8 @@ def pop_preopt_trajectory(app: Any, ctx: Any) -> bool:
                 "Trajectory",
                 (
                     "Not available for this Frequency history result: "
-                    f"failed to load preopt trajectory ({type(exc).__name__})."
+                    f"failed to load geometry-optimization trajectory "
+                    f"({type(exc).__name__})."
                 ),
             )
             return False
@@ -354,7 +383,7 @@ def pop_preopt_trajectory(app: Any, ctx: Any) -> bool:
             "Trajectory",
             (
                 "Not available for this Frequency result: "
-                "pre-optimization trajectory has fewer than 2 frames."
+                "geometry-optimization trajectory has fewer than 2 frames."
             ),
         )
         return False
@@ -365,7 +394,7 @@ def pop_preopt_trajectory(app: Any, ctx: Any) -> bool:
     )
     app._pending_traj_result = stub
     app._last_traj_result = stub
-    app.traj_accordion.set_title(0, "Pre-optimization Trajectory")
+    app.traj_accordion.set_title(0, "Geometry Optimization Trajectory")
     return True
 
 

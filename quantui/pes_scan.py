@@ -300,7 +300,14 @@ def run_pes_scan(
                 atoms.set_constraint(constraint)
 
                 dyn = BFGS(atoms, logfile=_stream)
-                with contextlib.redirect_stdout(_null):
+                # M-STDERR / STDERR.1: capture fd-2 stderr from PySCF C
+                # extensions for the duration of this scan-point optimisation.
+                from quantui.c_stderr import capture_c_stderr
+
+                with (
+                    capture_c_stderr(_stream),
+                    contextlib.redirect_stdout(_null),
+                ):
                     ok = bool(dyn.run(fmax=fmax, steps=max_opt_steps))
 
             converged_all = converged_all and ok

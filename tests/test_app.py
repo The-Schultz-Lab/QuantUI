@@ -8,7 +8,10 @@ not).  PySCF is unavailable on Windows; calculations are skipped accordingly.
 
 from __future__ import annotations
 
+import json
 import threading
+from datetime import datetime
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import ipywidgets as widgets
@@ -192,9 +195,11 @@ class TestMainThreadCallbackQueue:
 class TestTabStructure:
     """root_tab has the correct number and titles of tabs."""
 
-    def test_eight_tabs(self):
+    def test_seven_tabs(self):
+        # POLISH.8 (M-POLISH, 2026-05-25): Log moved into the History
+        # tab as a sub-accordion → 8 root tabs → 7.
         app = QuantUIApp()
-        assert len(app.root_tab.children) == 8
+        assert len(app.root_tab.children) == 7
 
     def test_tab_titles(self):
         app = QuantUIApp()
@@ -204,9 +209,12 @@ class TestTabStructure:
             "Analysis",
             "History",
             "Compare",
-            "Log",
+            # POLISH.8 (M-POLISH, 2026-05-25): Log tab moved into the
+            # History tab as a sub-accordion; Files + System Settings
+            # renumber to indices 5 and 6.
             "Files",
-            "Status",
+            # POLISH.4 (M-POLISH, 2026-05-25): "Status" → "System Settings".
+            "System Settings",
         ]
         for i, title in enumerate(expected):
             assert app.root_tab.get_title(i) == title
@@ -1028,6 +1036,21 @@ class TestIRSpectrumWidgets:
         assert app._ir_fwhm_slider.min == 5.0
         assert app._ir_fwhm_slider.max == 100.0
 
+    def test_fwhm_slider_continuous_update_false(self):
+        # BUG.9 regression guard: continuous_update must be False so the
+        # slider only fires the observer on release, not 30-60 times per
+        # second during a drag (which produces visible flicker).
+        app = QuantUIApp()
+        assert app._ir_fwhm_slider.continuous_update is False
+
+    def test_ir_fig_has_min_height(self):
+        # BUG.9 regression guard: min_height keeps the Output container
+        # from collapsing to 0px between renders. Pairs with the atomic
+        # outputs swap in _set_html_output to keep the IR panel
+        # flicker-free on mode toggle / slider changes.
+        app = QuantUIApp()
+        assert app._ir_fig.layout.min_height == "300px"
+
     def test_ir_export_controls_exist(self):
         app = QuantUIApp()
         assert isinstance(app._ir_export_btn, widgets.Button)
@@ -1085,6 +1108,1099 @@ class TestShowIRSpectrum:
 # ---------------------------------------------------------------------------
 # M-UV — UV-Vis Spectrum accordion widgets
 # ---------------------------------------------------------------------------
+
+
+class TestSetHtmlOutputAtomic:
+    """_set_html_output must perform a single atomic outputs assignment.
+
+    BUG.9 root cause: the previous implementation was clear_output() +
+    append_display_data(), which produced an intermediate empty state
+    between the two calls. On rapid invocations (IR FWHM slider drag,
+    Stick/Broadened toggle), the user saw the panel flash blank between
+    every re-render. Atomic outputs swap eliminates the intermediate
+    state in one widget-state update.
+    """
+
+    def test_outputs_is_single_entry_after_set(self):
+        app = QuantUIApp()
+        out = widgets.Output()
+        app._set_html_output(out, "<p>hello</p>")
+        assert len(out.outputs) == 1
+        entry = out.outputs[0]
+        assert entry["output_type"] == "display_data"
+        assert entry["data"]["text/html"] == "<p>hello</p>"
+
+    def test_outputs_replaces_prior_content_atomically(self):
+        # Repeated calls (e.g. FWHM slider scrub) must each produce a
+        # single-entry outputs tuple — never accumulating or clearing-then-
+        # appending (which would briefly empty the widget mid-update).
+        app = QuantUIApp()
+        out = widgets.Output()
+        app._set_html_output(out, "<p>first</p>")
+        app._set_html_output(out, "<p>second</p>")
+        app._set_html_output(out, "<p>third</p>")
+        assert len(out.outputs) == 1
+        assert out.outputs[0]["data"]["text/html"] == "<p>third</p>"
+
+
+class TestShowResult3DAtomic:
+    """``_show_result_3d`` must route through the atomic ``_set_html_output``
+    swap rather than ``with output: display(viz)``.
+
+    BUG.7 root cause: ``show_result_3d`` previously used the nested-Output +
+    main-thread ``display(viz)`` pattern, which intermittently produced a
+    blank 🙁 viewer on Analysis-tab history replay (same failure family as
+    resolved BUG.6 in trajectory render). After this fix, every invocation
+    leaves the target ``Output`` with a single-entry ``outputs`` tuple whose
+    ``text/html`` payload is non-empty.
+    """
+
+    def _make_water(self):
+        return Molecule(
+            atoms=["O", "H", "H"],
+            coordinates=[
+                [0.0, 0.0, 0.0],
+                [0.96, 0.0, 0.0],
+                [-0.24, 0.93, 0.0],
+            ],
+        )
+
+    def test_analysis_mol_output_is_single_entry_after_show(self):
+        from quantui.app import _render_molecule_html
+
+        if _render_molecule_html is None:
+            pytest.skip("No 3D visualization backend installed")
+        app = QuantUIApp()
+        app._show_result_3d(self._make_water(), extra_output=app._analysis_mol_output)
+        assert len(app._analysis_mol_output.outputs) == 1
+        entry = app._analysis_mol_output.outputs[0]
+        assert entry["output_type"] == "display_data"
+        assert entry["data"]["text/html"].strip() != ""
+
+    def test_result_viz_output_is_single_entry_after_show(self):
+        from quantui.app import _render_molecule_html
+
+        if _render_molecule_html is None:
+            pytest.skip("No 3D visualization backend installed")
+        app = QuantUIApp()
+        app._show_result_3d(self._make_water(), extra_output=None)
+        assert len(app.result_viz_output.outputs) == 1
+        entry = app.result_viz_output.outputs[0]
+        assert entry["output_type"] == "display_data"
+        assert entry["data"]["text/html"].strip() != ""
+
+    def test_repeated_calls_do_not_accumulate_outputs(self):
+        # Backend-toggle scenario: re-render the same molecule multiple
+        # times and confirm the viewer is replaced atomically each time.
+        from quantui.app import _render_molecule_html
+
+        if _render_molecule_html is None:
+            pytest.skip("No 3D visualization backend installed")
+        app = QuantUIApp()
+        mol = self._make_water()
+        for _ in range(3):
+            app._show_result_3d(mol, extra_output=app._analysis_mol_output)
+        assert len(app._analysis_mol_output.outputs) == 1
+        assert len(app.result_viz_output.outputs) == 1
+
+
+class TestFreqSeedDropdownFilter:
+    """The Freq seed-geometry dropdown should only list prior geo-opts of
+    the currently-active molecule.
+
+    Rationale: users selecting "Seed geometry" on the Frequency tab want a
+    geometry compatible with their current molecule. Listing a CH₄ geo-opt
+    while the user is working on H₂O is misleading and risks an accidental
+    geometry replacement. Filter is by formula (cheap and good enough for
+    the common case); strict atom-list match is queued under
+    M-HISTORY-HARDENING for later.
+    """
+
+    def _make_geo_opt_dir(self, root, formula, method="RHF", basis="STO-3G", offset=0):
+        # Offset the timestamp microseconds so directories sort
+        # deterministically when multiple fixtures share the same second.
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-") + f"{offset:06d}"
+        d = root / f"{ts}_{formula}_{method}_{basis}"
+        d.mkdir(parents=True)
+        (d / "result.json").write_text(
+            json.dumps(
+                {
+                    "_schema_version": 2,
+                    "timestamp": ts,
+                    "calc_type": "geometry_opt",
+                    "formula": formula,
+                    "method": method,
+                    "basis": basis,
+                }
+            )
+        )
+        (d / "trajectory.json").write_text("[]")
+        return d
+
+    def _water(self):
+        return Molecule(
+            atoms=["O", "H", "H"],
+            coordinates=[[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]],
+        )
+
+    def test_unfiltered_when_no_molecule_loaded(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        self._make_geo_opt_dir(tmp_path, "H2O", offset=1)
+        self._make_geo_opt_dir(tmp_path, "CH4", offset=2)
+        app = QuantUIApp()
+        assert app._molecule is None
+        app._refresh_freq_seed_options()
+        labels = [lbl for lbl, _ in app._freq_seed_dd.options]
+        assert any(lbl.startswith("H2O") for lbl in labels)
+        assert any(lbl.startswith("CH4") for lbl in labels)
+
+    def test_filtered_to_current_molecule_formula(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        self._make_geo_opt_dir(tmp_path, "H2O", offset=1)
+        self._make_geo_opt_dir(tmp_path, "CH4", offset=2)
+        app = QuantUIApp()
+        app._molecule = self._water()
+        app._refresh_freq_seed_options()
+        labels = [lbl for lbl, _ in app._freq_seed_dd.options]
+        assert labels[0] == "(use current molecule)"
+        assert any(lbl.startswith("H2O") for lbl in labels)
+        assert not any(lbl.startswith("CH4") for lbl in labels)
+
+    def test_set_molecule_triggers_filter(self, tmp_path, monkeypatch):
+        # Loading a new molecule should auto-refresh the dropdown so stale
+        # cross-molecule options drop out without the user clicking refresh.
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        self._make_geo_opt_dir(tmp_path, "H2O", offset=1)
+        self._make_geo_opt_dir(tmp_path, "CH4", offset=2)
+        app = QuantUIApp()
+        app._set_molecule(self._water(), label="test")
+        labels = [lbl for lbl, _ in app._freq_seed_dd.options]
+        assert any(lbl.startswith("H2O") for lbl in labels)
+        assert not any(lbl.startswith("CH4") for lbl in labels)
+
+
+class TestPopIsosurfaceBug8:
+    """Regression tests for BUG.8: ``_pop_isosurface`` raised AttributeError
+    on single-point history replay when ``orbitals.npz`` was missing.
+
+    Root cause: ``_last_orb_mo_coeff`` (and siblings) were only assigned by
+    ``show_orbital_diagram`` during a successful Energies-panel populate.
+    When that path returned early (no orbitals file or missing fields), the
+    attributes never existed, and the immediately-following Isosurface
+    populator's direct ``app._last_orb_mo_coeff is not None`` read blew up.
+
+    Fix: initialize the attributes in ``__init__`` so they always exist,
+    reset them at the start of ``apply_analysis_context`` so stale state
+    can't leak between contexts, and use defensive ``getattr`` in the
+    populator as belt-and-suspenders.
+    """
+
+    def test_orb_state_initialized_on_fresh_app(self):
+        app = QuantUIApp()
+        # All three attributes must exist (initialized to None) so the
+        # populator can read them safely.
+        assert app._last_orb_mo_coeff is None
+        assert app._last_orb_mol_atom is None
+        assert app._last_orb_mol_basis is None
+        assert app._last_orb_info is None
+
+    def test_pop_isosurface_on_fresh_app_returns_false_without_error(self):
+        # The exact crash scenario from the user's 2026-05-20 event log:
+        # a fresh QuantUIApp where no orbital data has been loaded yet
+        # should NOT raise; it should report the panel as unavailable.
+        from quantui.app_analysis import pop_isosurface
+
+        app = QuantUIApp()
+        ctx = _AnalysisContext(
+            calc_type="single_point",
+            formula="H2O",
+            method="RHF",
+            basis="STO-3G",
+        )
+        result = pop_isosurface(app, ctx)
+        assert result is False
+
+    def test_apply_analysis_context_resets_orbital_state(self, tmp_path, monkeypatch):
+        # After running an SP that populated orbital state, replaying a
+        # different result (no orbitals.npz on disk) must NOT leak the
+        # previous calc's orbital arrays into the Isosurface panel.
+        from quantui.app_analysis import apply_analysis_context
+
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        # Simulate a prior live SP having populated orbital state.
+        app._last_orb_mo_coeff = [[1.0, 0.0], [0.0, 1.0]]
+        app._last_orb_mol_atom = [["H", [0.0, 0.0, 0.0]]]
+        app._last_orb_mol_basis = "sto-3g"
+        app._last_orb_info = MagicMock()
+
+        # Now replay a context with no result_dir and no live_result —
+        # i.e. nothing to repopulate orbital state from.
+        ctx = _AnalysisContext(
+            calc_type="single_point",
+            formula="CH4",
+            method="RHF",
+            basis="STO-3G",
+            result_dir=None,
+            live_result=None,
+        )
+        apply_analysis_context(app, ctx)
+
+        # State must have been wiped — stale H2O orbitals must not survive
+        # into the CH4 context.
+        assert app._last_orb_mo_coeff is None
+        assert app._last_orb_mol_atom is None
+        assert app._last_orb_mol_basis is None
+        assert app._last_orb_info is None
+
+
+class TestTDDFTSeedDropdown:
+    """The UV-Vis (TD-DFT) Calculate-tab tab exposes a seed-geometry dropdown
+    that mirrors the Frequency tab's behaviour (BUG.5).
+
+    Acceptance:
+    - The dropdown widget exists with the placeholder option.
+    - On_calc_type_changed places the dropdown into ``calc_extra_opts``
+      when UV-Vis (TD-DFT) is selected, but not for other calc types.
+    - Like the Frequency seed dropdown, options are filtered to saved
+      ``geometry_opt`` results whose formula matches the active molecule.
+    - Picking a seed disables the QM pre-opt checkbox (seed = already
+      optimised) and surfaces the green confirmation note.
+    - ``_set_molecule`` auto-refreshes both seed dropdowns.
+    """
+
+    def _make_geo_opt_dir(self, root, formula, method="RHF", basis="STO-3G", offset=0):
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-") + f"{offset:06d}"
+        d = root / f"{ts}_{formula}_{method}_{basis}"
+        d.mkdir(parents=True)
+        (d / "result.json").write_text(
+            json.dumps(
+                {
+                    "_schema_version": 2,
+                    "timestamp": ts,
+                    "calc_type": "geometry_opt",
+                    "formula": formula,
+                    "method": method,
+                    "basis": basis,
+                }
+            )
+        )
+        (d / "trajectory.json").write_text("[]")
+        return d
+
+    def _water(self):
+        return Molecule(
+            atoms=["O", "H", "H"],
+            coordinates=[[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]],
+        )
+
+    def test_seed_widgets_exist(self):
+        app = QuantUIApp()
+        assert isinstance(app._tddft_seed_dd, widgets.Dropdown)
+        assert isinstance(app._tddft_seed_refresh_btn, widgets.Button)
+        assert isinstance(app._tddft_seed_note, widgets.HTML)
+        # Initial placeholder option is present.
+        labels = [lbl for lbl, _ in app._tddft_seed_dd.options]
+        assert labels[0] == "(use current molecule)"
+
+    def test_calc_type_uvvis_shows_seed_dropdown(self):
+        app = QuantUIApp()
+        app.calc_type_dd.value = "UV-Vis (TD-DFT)"
+        # The seed dropdown should now be one of the calc_extra_opts children.
+        descendants = list(app.calc_extra_opts.children)
+        # The seed dropdown is wrapped in an HBox with the refresh button.
+        found = False
+        for child in descendants:
+            if isinstance(child, widgets.HBox):
+                for sub in child.children:
+                    if sub is app._tddft_seed_dd:
+                        found = True
+                        break
+        assert found, "UV-Vis tab should include the seed-geometry dropdown"
+
+    def test_calc_type_single_point_does_not_show_seed_dropdown(self):
+        app = QuantUIApp()
+        app.calc_type_dd.value = "Single Point"
+        descendants = list(app.calc_extra_opts.children)
+        for child in descendants:
+            if isinstance(child, widgets.HBox):
+                for sub in child.children:
+                    assert sub is not app._tddft_seed_dd
+
+    def test_seed_options_filtered_by_formula(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        self._make_geo_opt_dir(tmp_path, "H2O", offset=1)
+        self._make_geo_opt_dir(tmp_path, "CH4", offset=2)
+        app = QuantUIApp()
+        app._molecule = self._water()
+        app._refresh_tddft_seed_options()
+        labels = [lbl for lbl, _ in app._tddft_seed_dd.options]
+        assert any(lbl.startswith("H2O") for lbl in labels)
+        assert not any(lbl.startswith("CH4") for lbl in labels)
+
+    def test_set_molecule_triggers_tddft_seed_filter(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        self._make_geo_opt_dir(tmp_path, "H2O", offset=1)
+        self._make_geo_opt_dir(tmp_path, "CH4", offset=2)
+        app = QuantUIApp()
+        app._set_molecule(self._water(), label="test")
+        labels = [lbl for lbl, _ in app._tddft_seed_dd.options]
+        assert any(lbl.startswith("H2O") for lbl in labels)
+        assert not any(lbl.startswith("CH4") for lbl in labels)
+
+    def test_picking_seed_disables_preopt_and_shows_note(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        seed_dir = self._make_geo_opt_dir(tmp_path, "H2O", offset=1)
+        app = QuantUIApp()
+        app._molecule = self._water()
+        app._refresh_tddft_seed_options()
+        # Pre-condition: pre-opt checkbox is enabled and toggled on.
+        app._freq_preopt_cb.disabled = False
+        app._freq_preopt_cb.value = True
+        # Pick the seed.
+        app._tddft_seed_dd.value = str(seed_dir)
+        # Post-condition: pre-opt is disabled and value cleared; note set.
+        assert app._freq_preopt_cb.disabled is True
+        assert app._freq_preopt_cb.value is False
+        assert "✓" in app._tddft_seed_note.value
+
+    def test_clearing_seed_re_enables_preopt_and_clears_note(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        seed_dir = self._make_geo_opt_dir(tmp_path, "H2O", offset=1)
+        app = QuantUIApp()
+        app._molecule = self._water()
+        app._refresh_tddft_seed_options()
+        app._tddft_seed_dd.value = str(seed_dir)
+        # Now clear the seed back to the placeholder.
+        app._tddft_seed_dd.value = ""
+        assert app._freq_preopt_cb.disabled is False
+        assert app._tddft_seed_note.value == ""
+
+
+class TestVibExportAnimation:
+    """The Vibrational accordion exposes an export-to-HTML button that
+    writes the current mode as a self-contained animation file.
+
+    Backend resolution is decoupled from the user's default backend
+    preference: plotlymol3d (preferred for export quality) with a py3Dmol
+    fallback. This separation is enforced inside ``build_vib_export_html``
+    so a user whose default render backend is py3Dmol can still get the
+    higher-quality plotlymol animation when exporting.
+    """
+
+    def _water(self):
+        return Molecule(
+            atoms=["O", "H", "H"],
+            coordinates=[
+                [0.0, 0.0, 0.0],
+                [0.96, 0.0, 0.0],
+                [-0.24, 0.93, 0.0],
+            ],
+        )
+
+    def _seed_vib_state(self, app):
+        """Populate the minimal state the export handler depends on.
+
+        Mirrors what ``_render_vib_mode_py3dmol`` reads but does not exercise
+        the live-render path — keeps the test focused on the export surface.
+        """
+        from types import SimpleNamespace
+
+        mol = self._water()
+        freq_stub = SimpleNamespace(
+            frequencies_cm1=[100.0, 200.0, 300.0],
+            ir_intensities=[1.0, 1.0, 1.0],
+            displacements=[
+                [[0.1, 0.0, 0.0], [-0.1, 0.0, 0.0], [0.0, 0.0, 0.0]],
+                [[0.0, 0.1, 0.0], [0.0, -0.1, 0.0], [0.0, 0.0, 0.0]],
+                [[0.0, 0.0, 0.1], [0.0, 0.0, -0.1], [0.0, 0.0, 0.0]],
+            ],
+        )
+        app._last_vib_freq_result = freq_stub
+        app._last_vib_molecule = mol
+        app._last_vib_data = None  # forces the py3dmol fallback in this test
+        app.vib_mode_dd.options = [
+            ("Mode 1: 100.0 cm⁻¹", 1),
+            ("Mode 2: 200.0 cm⁻¹", 2),
+            ("Mode 3: 300.0 cm⁻¹", 3),
+        ]
+        app.vib_mode_dd.value = 1
+
+    def test_export_button_and_status_exist(self):
+        app = QuantUIApp()
+        assert hasattr(app, "_vib_export_btn")
+        assert isinstance(app._vib_export_btn, widgets.Button)
+        assert hasattr(app, "_vib_export_status")
+        assert isinstance(app._vib_export_status, widgets.HTML)
+        assert app._vib_export_status.value == ""
+
+    def test_export_without_vib_state_shows_error_status(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        # No _last_vib_freq_result / _last_vib_molecule yet.
+        app._on_vib_export_animation(None)
+        assert "color:#b91c1c" in app._vib_export_status.value
+        assert "No vibrational mode loaded" in app._vib_export_status.value
+
+    def test_export_writes_html_and_reports_backend(self, tmp_path, monkeypatch):
+        from quantui.viz_backend_router import BackendAvailability
+
+        if not BackendAvailability.from_environment().py3dmol:
+            pytest.skip("py3Dmol not available for export fallback test")
+
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        self._seed_vib_state(app)
+        # Force the py3Dmol fallback regardless of plotlymol installation —
+        # the goal here is to assert the fallback writes a real HTML file.
+        app._viz_availability = BackendAvailability(py3dmol=True, plotlymol=False)
+        app._last_result_dir = tmp_path
+
+        app._on_vib_export_animation(None)
+
+        assert "color:#16a34a" in app._vib_export_status.value
+        assert "Saved (py3dmol)" in app._vib_export_status.value
+        # Find the file the handler wrote.
+        files = list(tmp_path.glob("vib_*_mode1_*.html"))
+        assert len(files) == 1
+        content = files[0].read_text(encoding="utf-8")
+        # py3Dmol HTML includes a 3dmoljs viewer block.
+        assert "viewer" in content.lower() or "3dmol" in content.lower()
+
+    def test_export_no_backend_available_surfaces_error(self, tmp_path, monkeypatch):
+        from quantui.viz_backend_router import BackendAvailability
+
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        self._seed_vib_state(app)
+        app._viz_availability = BackendAvailability(py3dmol=False, plotlymol=False)
+
+        app._on_vib_export_animation(None)
+        assert "color:#b91c1c" in app._vib_export_status.value
+        assert "No visualization backend available" in app._vib_export_status.value
+
+
+class TestHistoryHardeningHist2:
+    """HIST.2: every history-load operation emits a single
+    ``history_load_timing`` event capturing total elapsed_ms + per-stage
+    breakdown.
+
+    Acceptance:
+    - ``_LoadTimer.stage`` records elapsed_ms for each named sub-stage.
+    - ``_LoadTimer.emit`` calls ``calc_log.log_event`` with event_type
+      ``history_load_timing``, the total_ms, the op name, and per-stage
+      ``<name>_ms`` keys.
+    - ``history_load_analysis`` emits exactly one timing event per call
+      with all expected stages.
+    - ``status="error"`` is reported when the loader raises mid-load.
+    - Telemetry failures (e.g. log_event itself raising) must NOT block
+      the load — they're swallowed inside ``emit``.
+    """
+
+    def _make_sp_result_dir(self, tmp_path):
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-") + "000001"
+        d = tmp_path / f"{ts}_H2O_RHF_STO-3G"
+        d.mkdir()
+        (d / "result.json").write_text(
+            json.dumps(
+                {
+                    "_schema_version": 2,
+                    "timestamp": ts,
+                    "calc_type": "single_point",
+                    "formula": "H2O",
+                    "method": "RHF",
+                    "basis": "STO-3G",
+                    "energy_hartree": -75.0,
+                    "energy_ev": -2041.0,
+                    "homo_lumo_gap_ev": 8.0,
+                    "converged": True,
+                    "n_iterations": 10,
+                }
+            )
+        )
+        return d
+
+    def test_load_timer_stage_records_elapsed_ms(self):
+        from quantui.app_history import _LoadTimer
+
+        timer = _LoadTimer("test_op", Path("/tmp/dummy"))
+        with timer.stage("phase_a"):
+            pass  # near-zero elapsed
+        with timer.stage("phase_b"):
+            pass
+        assert "phase_a" in timer._stages
+        assert "phase_b" in timer._stages
+        assert timer._stages["phase_a"] >= 0.0
+        assert timer._stages["phase_b"] >= 0.0
+
+    def test_load_timer_emit_logs_event_with_stage_breakdown(self):
+        from quantui.app_history import _LoadTimer
+
+        timer = _LoadTimer("test_op", Path("/tmp/dummy"))
+        with timer.stage("foo"):
+            pass
+        with patch("quantui.calc_log.log_event") as mock_log:
+            timer.emit(status="ok")
+        mock_log.assert_called_once()
+        event_type, _message = mock_log.call_args.args[:2]
+        kwargs = mock_log.call_args.kwargs
+        assert event_type == "history_load_timing"
+        assert kwargs["op"] == "test_op"
+        assert kwargs["status"] == "ok"
+        assert kwargs["total_ms"] >= 0.0
+        assert "foo_ms" in kwargs
+
+    def test_load_timer_emit_swallows_log_event_failures(self):
+        # If log_event raises (e.g. disk full), the timer's emit MUST NOT
+        # propagate the exception — telemetry must never block the load.
+        from quantui.app_history import _LoadTimer
+
+        timer = _LoadTimer("test_op", Path("/tmp/dummy"))
+        with patch("quantui.calc_log.log_event", side_effect=RuntimeError("disk full")):
+            timer.emit(status="ok")  # must not raise
+
+    def test_history_load_analysis_emits_one_timing_event(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        result_dir = self._make_sp_result_dir(tmp_path)
+        app = QuantUIApp()
+        with (
+            patch("quantui.calc_log.log_event") as mock_log,
+            patch.object(app, "_activity_pulse"),
+        ):
+            app._history_load_analysis(result_dir)
+
+        # Find the history_load_timing event (mock_log captures many other
+        # events too — e.g. _refresh_file_browser may log nothing, but other
+        # observers do).
+        timing_calls = [
+            call
+            for call in mock_log.call_args_list
+            if call.args and call.args[0] == "history_load_timing"
+        ]
+        assert len(timing_calls) == 1, (
+            f"Expected exactly one history_load_timing event, got "
+            f"{len(timing_calls)}"
+        )
+        kwargs = timing_calls[0].kwargs
+        assert kwargs["op"] == "history_load_analysis"
+        assert kwargs["status"] == "ok"
+        assert kwargs["total_ms"] >= 0.0
+        # All five expected stages must appear.
+        expected_stages = {
+            "read_pyscf_log_ms",
+            "update_log_panel_ms",
+            "build_context_ms",
+            "mol_reconstruction_ms",
+            "show_result_3d_ms",
+            "apply_analysis_context_ms",
+            "nav_tab_ms",
+        }
+        actual_stages = set(kwargs.keys()) & expected_stages
+        assert actual_stages == expected_stages, (
+            f"Missing stages: {expected_stages - actual_stages}; "
+            f"unexpected stages: {actual_stages - expected_stages}"
+        )
+
+    def test_history_load_analysis_reports_error_status_on_raise(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        result_dir = self._make_sp_result_dir(tmp_path)
+        app = QuantUIApp()
+        with (
+            patch("quantui.calc_log.log_event") as mock_log,
+            patch.object(
+                app,
+                "_apply_analysis_context",
+                side_effect=RuntimeError("simulated"),
+            ),
+            patch.object(app, "_activity_pulse"),
+        ):
+            try:
+                app._history_load_analysis(result_dir)
+            except RuntimeError:
+                pass
+
+        timing_calls = [
+            call
+            for call in mock_log.call_args_list
+            if call.args and call.args[0] == "history_load_timing"
+        ]
+        assert len(timing_calls) == 1
+        assert timing_calls[0].kwargs["status"] == "error"
+
+
+class TestHistoryHardeningHist6:
+    """HIST.6: strict atom-list + coordinate match for the seed-geometry
+    dropdown filter, replacing the formula-only filter shipped in session 54.
+
+    Acceptance:
+    - Two same-formula candidates with DIFFERENT starting geometries
+      (different isomers / conformers) are correctly excluded from each
+      other's seed dropdown when the active molecule matches only one of
+      them by coordinates.
+    - Two same-formula candidates with starting geometries within the RMSD
+      tolerance of the active molecule's coordinates BOTH appear.
+    - Malformed or missing ``trajectory.json`` falls through to a formula-
+      only match (don't punish the user for a corrupt history entry).
+    - ``_load_starting_geometry`` caches per-result results so repeated
+      dropdown refreshes don't re-parse the same JSON files.
+    """
+
+    def _make_geo_opt_dir_with_trajectory(
+        self,
+        root,
+        formula,
+        atoms,
+        starting_coords,
+        offset=0,
+        method="RHF",
+        basis="STO-3G",
+    ):
+        from pathlib import Path
+
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-") + f"{offset:06d}"
+        d = Path(root) / f"{ts}_{formula}_{method}_{basis}"
+        d.mkdir(parents=True)
+        (d / "result.json").write_text(
+            json.dumps(
+                {
+                    "_schema_version": 2,
+                    "timestamp": ts,
+                    "calc_type": "geometry_opt",
+                    "formula": formula,
+                    "method": method,
+                    "basis": basis,
+                }
+            )
+        )
+        (d / "trajectory.json").write_text(
+            json.dumps(
+                {
+                    "atoms": atoms,
+                    "charge": 0,
+                    "multiplicity": 1,
+                    "steps": [
+                        {
+                            "coords": [
+                                list(map(float, row)) for row in starting_coords
+                            ],
+                            "energy": -75.0,
+                        }
+                    ],
+                }
+            )
+        )
+        return d
+
+    def _water_coords(self, displacement=0.0):
+        # Returns water coords; ``displacement`` lets us produce a second
+        # water at a controllable RMSD distance from the canonical one.
+        return [
+            [0.0 + displacement, 0.0, 0.0],
+            [0.96 + displacement, 0.0, 0.0],
+            [-0.24 + displacement, 0.93, 0.0],
+        ]
+
+    def _water_molecule(self):
+        return Molecule(atoms=["O", "H", "H"], coordinates=self._water_coords(0.0))
+
+    def setup_method(self, _method):
+        # Tests share a module-level cache (_SEED_GEOMETRY_CACHE) for
+        # geometry parses; clear it before each test for determinism.
+        from quantui.app_runflow import _SEED_GEOMETRY_CACHE
+
+        _SEED_GEOMETRY_CACHE.clear()
+
+    def test_same_formula_different_geometry_excluded(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        # Active molecule = water at canonical coords.
+        # Saved A: same coords → matches.
+        # Saved B: coords shifted by 2 Å → RMSD ≈ 2 Å ≫ 0.1 Å → excluded.
+        self._make_geo_opt_dir_with_trajectory(
+            tmp_path, "H2O", ["O", "H", "H"], self._water_coords(0.0), offset=1
+        )
+        self._make_geo_opt_dir_with_trajectory(
+            tmp_path, "H2O", ["O", "H", "H"], self._water_coords(2.0), offset=2
+        )
+        app = QuantUIApp()
+        app._molecule = self._water_molecule()
+        app._refresh_freq_seed_options()
+        labels = [lbl for lbl, _ in app._freq_seed_dd.options]
+        assert len(labels) == 2, labels
+        assert labels[0] == "(use current molecule)"
+        assert labels[1].startswith("H2O")
+
+    def test_same_formula_within_tolerance_included(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        # Two candidates, both within 0.1 Å RMSD of the active mol.
+        self._make_geo_opt_dir_with_trajectory(
+            tmp_path, "H2O", ["O", "H", "H"], self._water_coords(0.0), offset=1
+        )
+        self._make_geo_opt_dir_with_trajectory(
+            tmp_path, "H2O", ["O", "H", "H"], self._water_coords(0.02), offset=2
+        )
+        app = QuantUIApp()
+        app._molecule = self._water_molecule()
+        app._refresh_freq_seed_options()
+        labels = [lbl for lbl, _ in app._freq_seed_dd.options]
+        assert len(labels) == 3, labels
+        assert sum(1 for lbl in labels if lbl.startswith("H2O")) == 2
+
+    def test_atom_order_mismatch_excluded(self, tmp_path, monkeypatch):
+        # Strict atom-order policy: ["H","O","H"] is not the same as
+        # ["O","H","H"] even though the formula matches.
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        self._make_geo_opt_dir_with_trajectory(
+            tmp_path, "H2O", ["O", "H", "H"], self._water_coords(0.0), offset=1
+        )
+        self._make_geo_opt_dir_with_trajectory(
+            tmp_path, "H2O", ["H", "O", "H"], self._water_coords(0.0), offset=2
+        )
+        app = QuantUIApp()
+        app._molecule = self._water_molecule()
+        app._refresh_freq_seed_options()
+        labels = [lbl for lbl, _ in app._freq_seed_dd.options]
+        assert len(labels) == 2
+        assert labels[1].startswith("H2O")
+
+    def test_malformed_trajectory_falls_back_to_formula_match(
+        self, tmp_path, monkeypatch
+    ):
+        # Malformed trajectory.json must NOT crash — and must fall through
+        # to formula-only match so the candidate still appears.
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-") + "000001"
+        d = tmp_path / f"{ts}_H2O_RHF_STO-3G"
+        d.mkdir()
+        (d / "result.json").write_text(
+            json.dumps(
+                {
+                    "_schema_version": 2,
+                    "timestamp": ts,
+                    "calc_type": "geometry_opt",
+                    "formula": "H2O",
+                    "method": "RHF",
+                    "basis": "STO-3G",
+                }
+            )
+        )
+        (d / "trajectory.json").write_text("[]")  # malformed (list, not dict)
+        app = QuantUIApp()
+        app._molecule = self._water_molecule()
+        app._refresh_freq_seed_options()
+        labels = [lbl for lbl, _ in app._freq_seed_dd.options]
+        assert any(lbl.startswith("H2O") for lbl in labels)
+
+    def test_starting_geometry_cache_hit_avoids_reread(self, tmp_path):
+        # _load_starting_geometry must cache per-result so back-to-back
+        # refreshes (e.g. when both Freq and UV-Vis dropdowns refresh from
+        # the same _set_molecule call) don't re-parse the JSON.
+        from quantui.app_runflow import (
+            _SEED_GEOMETRY_CACHE,
+            _load_starting_geometry,
+        )
+
+        _SEED_GEOMETRY_CACHE.clear()
+        d = self._make_geo_opt_dir_with_trajectory(
+            tmp_path, "H2O", ["O", "H", "H"], self._water_coords(0.0), offset=1
+        )
+        first = _load_starting_geometry(d)
+        assert first is not None
+        # Second call must return the cached object without touching disk.
+        with patch("pathlib.Path.read_text") as mock_read:
+            second = _load_starting_geometry(d)
+        assert second is first
+        mock_read.assert_not_called()
+
+
+class TestMExportCopyPlotData:
+    """M-EXPORT / EXPORT.4: every spectrum / diagram panel offers a
+    "Copy data" button that exports the plot's (x, y) data to CSV and
+    attempts a clipboard copy via the browser's clipboard API.
+
+    Acceptance:
+    - ``_fig_to_csv`` extracts per-trace (x, y) data from a Plotly figure
+      in the documented CSV layout; empty figure → empty string (caller
+      treats as "nothing to copy" rather than writing an empty file).
+    - Each plot panel (IR, UV-Vis, orbital, PES) exposes a
+      ``_*_copy_data_btn`` widget.
+    - The handler writes a CSV file to the active result directory and
+      updates the panel's status widget.
+    - The status reports an error when no figure has been rendered yet.
+    - Output CSV round-trips cleanly via stdlib ``csv.reader``.
+    """
+
+    def _make_simple_fig(self):
+        import plotly.graph_objects as go
+
+        return go.Figure(
+            go.Scatter(x=[1.0, 2.0, 3.0], y=[10.0, 20.0, 30.0], name="trace0")
+        )
+
+    def _make_two_trace_fig(self):
+        import plotly.graph_objects as go
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=[100, 200], y=[5, 8], name="Stick"))
+        fig.add_trace(go.Scatter(x=[100, 150, 200], y=[1, 4, 8], name="Broadened"))
+        return fig
+
+    def test_fig_to_csv_returns_empty_string_for_none(self):
+        assert QuantUIApp._fig_to_csv(None) == ""
+
+    def test_fig_to_csv_returns_empty_string_when_no_traces(self):
+        import plotly.graph_objects as go
+
+        fig = go.Figure()  # no data
+        assert QuantUIApp._fig_to_csv(fig) == ""
+
+    def test_fig_to_csv_extracts_single_trace(self):
+        fig = self._make_simple_fig()
+        csv_text = QuantUIApp._fig_to_csv(fig, title="Test Plot")
+        assert "# Test Plot" in csv_text
+        assert "# trace0" in csv_text
+        assert "x,y" in csv_text
+        assert "1.0,10.0" in csv_text
+        assert "3.0,30.0" in csv_text
+
+    def test_fig_to_csv_extracts_multi_trace_with_separator_sections(self):
+        fig = self._make_two_trace_fig()
+        csv_text = QuantUIApp._fig_to_csv(fig)
+        assert "# Stick" in csv_text
+        assert "# Broadened" in csv_text
+        # Each section gets its own "x,y" header — the layout is
+        # repeated, not merged into one wide table.
+        assert csv_text.count("x,y") == 2
+
+    def test_fig_to_csv_output_round_trips_via_stdlib_csv(self):
+        import csv as _csv
+        import io as _io
+
+        fig = self._make_simple_fig()
+        text = QuantUIApp._fig_to_csv(fig, title="Roundtrip")
+        # Strip the "# ..." comment lines, leaving the actual rows.
+        lines = [
+            line for line in text.splitlines() if line and not line.startswith("#")
+        ]
+        reader = _csv.reader(_io.StringIO("\n".join(lines)))
+        rows = list(reader)
+        assert rows[0] == ["x", "y"]
+        assert rows[1:] == [
+            ["1.0", "10.0"],
+            ["2.0", "20.0"],
+            ["3.0", "30.0"],
+        ]
+
+    def test_all_four_panels_expose_copy_data_button(self):
+        app = QuantUIApp()
+        for prefix in ("ir", "uv", "orb", "pes"):
+            btn = getattr(app, f"_{prefix}_copy_data_btn", None)
+            assert isinstance(btn, widgets.Button), f"missing _{prefix}_copy_data_btn"
+            assert btn.description == "Copy data"
+
+    def test_copy_data_with_no_figure_shows_error_status(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        app._last_ir_fig = None
+        app._on_ir_copy_data(None)
+        assert "color:#b91c1c" in app._ir_export_status.value
+        assert "No plot data" in app._ir_export_status.value
+
+    def test_copy_data_writes_csv_to_result_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        app._last_result_dir = tmp_path
+        app._last_ir_fig = self._make_simple_fig()
+        app._on_ir_copy_data(None)
+        assert "color:#16a34a" in app._ir_export_status.value
+        assert "Saved CSV" in app._ir_export_status.value
+        csv_files = list(tmp_path.glob("ir_spectrum_data_*.csv"))
+        assert len(csv_files) == 1
+        content = csv_files[0].read_text(encoding="utf-8")
+        assert "trace0" in content
+        assert "1.0,10.0" in content
+
+    def test_copy_data_handles_figure_with_no_extractable_traces(
+        self, tmp_path, monkeypatch
+    ):
+        import plotly.graph_objects as go
+
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        app._last_result_dir = tmp_path
+        app._last_ir_fig = go.Figure()  # empty
+        app._on_ir_copy_data(None)
+        assert "color:#b91c1c" in app._ir_export_status.value
+        assert "no extractable" in app._ir_export_status.value.lower()
+
+
+class TestHistoryHardeningHist1:
+    """HIST.1: clicking View Results / View Analysis on a History selection
+    must give the user immediate visual feedback.
+
+    Acceptance:
+    - ``_activity_count`` increments while the loader runs (toolbar
+      indicator turns to "UI Active") and decrements back to 0 on completion.
+    - Source buttons (View Results, View Analysis) are disabled at start of
+      load and re-enabled at end — prevents double-click + signals "loading".
+    - The feedback contract holds even if the load raises (try/finally).
+    """
+
+    def _make_sp_result_dir(self, tmp_path):
+        """Create a minimal saved single-point result the loader can read."""
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-") + "000001"
+        d = tmp_path / f"{ts}_H2O_RHF_STO-3G"
+        d.mkdir()
+        (d / "result.json").write_text(
+            json.dumps(
+                {
+                    "_schema_version": 2,
+                    "timestamp": ts,
+                    "calc_type": "single_point",
+                    "formula": "H2O",
+                    "method": "RHF",
+                    "basis": "STO-3G",
+                    "energy_hartree": -75.0,
+                    "energy_ev": -2041.0,
+                    "homo_lumo_gap_ev": 8.0,
+                    "converged": True,
+                    "n_iterations": 10,
+                }
+            )
+        )
+        return d
+
+    def test_history_load_analysis_lights_activity_indicator(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        result_dir = self._make_sp_result_dir(tmp_path)
+        app = QuantUIApp()
+        # The loader bumps _activity_count up by 1 inside its body and back
+        # down on exit. Patch _apply_analysis_context to capture the live
+        # count mid-load. Patch out the tab-switch pulse so its timer doesn't
+        # race the assertion (the load ends by setting root_tab.selected_index
+        # which fires _activity_pulse on a 160ms Timer thread — separate from
+        # the loader's own begin/end pair we're verifying here).
+        captured_count: list[int] = []
+        original_apply = app._apply_analysis_context
+
+        def _capture_count(ctx):
+            captured_count.append(app._activity_count)
+            return original_apply(ctx)
+
+        with (
+            patch.object(app, "_apply_analysis_context", side_effect=_capture_count),
+            patch.object(app, "_activity_pulse"),
+        ):
+            app._history_load_analysis(result_dir)
+        assert captured_count == [1]  # exactly one active op while loading
+        assert app._activity_count == 0  # restored after completion
+
+    def test_history_load_analysis_disables_source_buttons(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        result_dir = self._make_sp_result_dir(tmp_path)
+        app = QuantUIApp()
+        btn_a = widgets.Button(description="View Results")
+        btn_b = widgets.Button(description="View Analysis")
+        # Both buttons start enabled.
+        assert btn_a.disabled is False
+        assert btn_b.disabled is False
+
+        # Capture disabled state mid-load.
+        captured: dict[str, bool] = {}
+        original_apply = app._apply_analysis_context
+
+        def _capture(ctx):
+            captured["a"] = btn_a.disabled
+            captured["b"] = btn_b.disabled
+            return original_apply(ctx)
+
+        with patch.object(app, "_apply_analysis_context", side_effect=_capture):
+            app._history_load_analysis(result_dir, source_btns=(btn_a, btn_b))
+        assert captured == {"a": True, "b": True}
+        # Buttons restored after the load.
+        assert btn_a.disabled is False
+        assert btn_b.disabled is False
+
+    def test_feedback_restored_even_on_exception(self, tmp_path, monkeypatch):
+        # If the loader raises mid-load, the activity counter and buttons
+        # must still be restored — try/finally contract.
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        result_dir = self._make_sp_result_dir(tmp_path)
+        app = QuantUIApp()
+        btn = widgets.Button(description="View")
+
+        with patch.object(
+            app,
+            "_apply_analysis_context",
+            side_effect=RuntimeError("simulated failure"),
+        ):
+            try:
+                app._history_load_analysis(result_dir, source_btns=(btn,))
+            except RuntimeError:
+                pass
+        assert app._activity_count == 0
+        assert btn.disabled is False
+
+
+class TestHistoryHardeningHist5:
+    """HIST.5: history dropdown labels must expose calc type before selection.
+
+    The current ``refresh_results_browser`` formats each option as
+    ``"<timestamp>  ·  [<calc-badge>]  <formula>  <method>/<basis>"``,
+    where the badge is the friendly name from ``_calc_type_badge``. This
+    test locks in that contract — particularly the bracketed badge — so
+    a future refactor can't accidentally drop the calc-type prefix that the
+    user originally reported missing in the M-PLOT user report.
+    """
+
+    def _make_result(self, tmp_path, formula, calc_type, offset):
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-") + f"{offset:06d}"
+        d = tmp_path / f"{ts}_{formula}_RHF_STO-3G"
+        d.mkdir()
+        (d / "result.json").write_text(
+            json.dumps(
+                {
+                    "_schema_version": 2,
+                    "timestamp": ts,
+                    "calc_type": calc_type,
+                    "formula": formula,
+                    "method": "RHF",
+                    "basis": "STO-3G",
+                }
+            )
+        )
+        # Geometry opt needs trajectory.json for the seed-dropdown side-path,
+        # but refresh_results_browser doesn't gate on it.
+        return d
+
+    def test_dropdown_label_includes_calc_badge_for_each_type(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        self._make_result(tmp_path, "H2O", "single_point", offset=1)
+        self._make_result(tmp_path, "H2O", "geometry_opt", offset=2)
+        self._make_result(tmp_path, "H2O", "frequency", offset=3)
+        self._make_result(tmp_path, "H2O", "tddft", offset=4)
+        self._make_result(tmp_path, "H2O", "nmr", offset=5)
+        self._make_result(tmp_path, "H2O", "pes_scan", offset=6)
+        app = QuantUIApp()
+        app._refresh_results_browser()
+        labels = [lbl for lbl, _ in app.past_dd.options]
+        # POLISH.6 (M-POLISH, 2026-05-25) prepends a
+        # "(select a calculation to view)" placeholder so the dropdown
+        # opens in an explicit no-selection state. Strip it before
+        # asserting per-row badge contents.
+        result_labels = [lbl for lbl in labels if "select a calculation" not in lbl]
+        # Every result row must include a bracketed badge.
+        assert all("[" in lbl and "]" in lbl for lbl in result_labels), result_labels
+        joined = " ".join(result_labels)
+        for expected in ("[SP]", "[GeoOpt]", "[Freq]", "[UV-Vis]", "[NMR]", "[PES]"):
+            assert expected in joined, f"missing badge {expected} in {result_labels}"
 
 
 class TestUVVisSpectrumWidgets:

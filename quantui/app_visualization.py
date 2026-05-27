@@ -65,7 +65,7 @@ def show_result_3d(
     molecule: Any,
     extra_output: Any = None,
     *,
-    display_molecule_fn: Any,
+    render_html_fn: Any,
 ) -> None:
     """Render molecule 3D structure in result and optional extra output panels.
 
@@ -74,8 +74,15 @@ def show_result_3d(
     - ``result_viz_output`` uses ``VizTask.STRUCTURE_VIEW_RESULTS``.
     - ``extra_output == _analysis_mol_output`` uses ``ANALYSIS_STRUCTURE_VIEW``.
     - Any other extra_output uses ``STRUCTURE_VIEW_RESULTS`` as a safe default.
+
+    ``render_html_fn`` must return self-contained HTML (e.g.
+    ``visualization_py3dmol.render_molecule_html``); the HTML is routed through
+    ``app._set_html_output`` so the viewer is replaced as a single atomic
+    ``Output.outputs`` swap. This avoids the nested-Output + ``display(viz)``
+    pattern that caused BUG.6 (trajectory regression) and BUG.7 (Analysis-tab
+    top viewer rendering blank with 🙁 on history replay).
     """
-    if display_molecule_fn is None or molecule is None:
+    if render_html_fn is None or molecule is None:
         return
     from quantui.viz_backend_router import VizTask as _VT
 
@@ -92,15 +99,14 @@ def show_result_3d(
                 task="structure_view_results",
                 backend=str(chosen),
             ):
-                app.result_viz_output.clear_output()
-                with app.result_viz_output:
-                    display_molecule_fn(
-                        molecule,
-                        backend=str(chosen),
-                        style=app._viz_style,
-                        lighting=app._viz_lighting,
-                        bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
-                    )
+                html = render_html_fn(
+                    molecule,
+                    backend=str(chosen),
+                    style=app._viz_style,
+                    lighting=app._viz_lighting,
+                    bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+                )
+                app._set_html_output(app.result_viz_output, html)
 
     # Optional second viewer (typically the Analysis tab).
     if extra_output is not None:
@@ -117,15 +123,14 @@ def show_result_3d(
                 else "structure_view_results"
             )
             with _viz_render_event(app, task=task_label, backend=str(chosen)):
-                extra_output.clear_output()
-                with extra_output:
-                    display_molecule_fn(
-                        molecule,
-                        backend=str(chosen),
-                        style=app._viz_style,
-                        lighting=app._viz_lighting,
-                        bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
-                    )
+                html = render_html_fn(
+                    molecule,
+                    backend=str(chosen),
+                    style=app._viz_style,
+                    lighting=app._viz_lighting,
+                    bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+                )
+                app._set_html_output(extra_output, html)
             if is_analysis_output:
                 app._update_analysis_backend_label(chosen)
 
@@ -1139,10 +1144,16 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
         mode_norm = mode_name.strip().lower()
         fig = _go.Figure()
 
+        # Use one stable x-range across modes so toggling Stick/Broadened
+        # doesn't visibly shift the axis. The Broadened wings need ~3*gamma
+        # of headroom to show the full Lorentzian tail; padding by the same
+        # amount in Stick keeps the layout identical.
+        gamma = max(float(fwhm), 1.0) / 2.0
+        pad = max(80.0, 3.0 * gamma)
+        x_min = max(100.0, min(wl) - pad)
+        x_max = max(wl) + pad
+
         if mode_norm == "broadened":
-            gamma = max(float(fwhm), 1.0) / 2.0
-            x_min = max(100.0, min(wl) - 80.0)
-            x_max = max(wl) + 80.0
             n_points = max(600, int((x_max - x_min) * 2.0))
             x_grid = _np.linspace(x_min, x_max, n_points)
             y_grid = _np.zeros_like(x_grid)
@@ -1197,7 +1208,12 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
             paper_bgcolor=tc["paper_bgcolor"],
             font=dict(color=tc["font_color"]),
         )
-        fig.update_xaxes(showgrid=True, gridcolor=tc["grid_color"], zeroline=False)
+        fig.update_xaxes(
+            showgrid=True,
+            gridcolor=tc["grid_color"],
+            zeroline=False,
+            range=[x_min, x_max],
+        )
         fig.update_yaxes(
             showgrid=True,
             gridcolor=tc["grid_color"],
@@ -1527,6 +1543,11 @@ def render_orbital_isosurface(
         return
     if _is_stale():
         return
+    # M-EXPORT / EXPORT.5: track the last-generated cube + its orbital
+    # label so the "Export cube" button can copy it to the top-level
+    # result dir with a friendly name without re-deriving the path.
+    app._last_cube_path = cube_path
+    app._last_cube_orbital = orbital_label
     try:
         from quantui import calc_log as _clog
 
@@ -1546,6 +1567,17 @@ def render_orbital_isosurface(
         app._orb_iso_output,
         html_str,
     )
+
+    # M-EXPORT / EXPORT.5: now that ``_last_cube_path`` is populated, the
+    # "Export cube" button has something to copy. Enable it on the main
+    # thread alongside the iso render swap.
+    def _enable_cube_btn() -> None:
+        try:
+            app._iso_export_cube_btn.disabled = False
+        except Exception:
+            pass
+
+    app._queue_main_thread_callback(_enable_cube_btn)
 
 
 def _swap_vib_output(app: Any, html_str: str) -> None:
@@ -2136,3 +2168,135 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
         pass
 
     return True
+
+
+def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
+    """Build a self-contained HTML string for the given vibrational mode.
+
+    Backend resolution is preference-independent (decoupled from the user's
+    live-render default backend): plotlymol3d is preferred because it produces
+    a self-contained Plotly animation with embedded playback controls — the
+    canonical "export quality" output. py3Dmol is used as a fallback only when
+    plotlymol3d is unavailable; the resulting HTML embeds the multi-frame
+    py3Dmol viewer with its built-in animate() loop.
+
+    Returns ``(backend_name, html_string)``.
+
+    Raises ``ValueError`` when vib state is missing or no backend is available.
+    """
+    freq_result = getattr(app, "_last_vib_freq_result", None)
+    molecule = getattr(app, "_last_vib_molecule", None)
+    if freq_result is None or molecule is None:
+        raise ValueError(
+            "No vibrational data available — run a Frequency calculation "
+            "and open the Vibrational panel first."
+        )
+
+    availability = getattr(app, "_viz_availability", None)
+    if availability is None:
+        raise ValueError("Visualization availability not initialised.")
+
+    # Plotlymol3d path — preferred for export.
+    if availability.plotlymol:
+        vib_data = getattr(app, "_last_vib_data", None)
+        if vib_data is None:
+            # Plotlymol3d installed but the per-result wrapper wasn't built.
+            # Try once more from the cached freq_result + molecule.
+            try:
+                vib_data = app._build_vib_data_from_freq_result(freq_result, molecule)
+            except Exception:
+                vib_data = None
+        if vib_data is not None:
+            try:
+                import plotly.io as _pio
+                from plotlymol3d import (
+                    create_vibration_animation,
+                    xyzblock_to_rdkitmol,
+                )
+            except ImportError:
+                pass
+            else:
+                xyzblock = (
+                    f"{len(molecule.atoms)}\n{molecule.get_formula()}\n"
+                    f"{molecule.to_xyz_string()}"
+                )
+                rdmol = xyzblock_to_rdkitmol(xyzblock, charge=molecule.charge)
+                anim_fig = create_vibration_animation(
+                    vib_data=vib_data,
+                    mode_number=mode_number,
+                    mol=rdmol,
+                    amplitude=0.4,
+                    n_frames=20,
+                    mode="ball+stick",
+                    resolution=12,
+                )
+                anim_fig.update_layout(height=420)
+                html_str = _pio.to_html(
+                    anim_fig,
+                    full_html=True,
+                    include_plotlyjs=True,
+                    config={"responsive": True},
+                )
+                return ("plotlymol", html_str)
+
+    # py3Dmol fallback — preference-independent fallback when plotlymol is
+    # unavailable or its build path fails. Mirrors _render_vib_mode_py3dmol's
+    # frame construction but emits stand-alone HTML rather than swapping into
+    # vib_output.
+    if availability.py3dmol:
+        try:
+            import numpy as np
+            import py3Dmol
+        except ImportError as exc:
+            raise ValueError(f"py3Dmol unavailable for fallback export: {exc}")
+
+        try:
+            displ = np.array(freq_result.displacements[mode_number - 1], dtype=float)
+        except (AttributeError, IndexError, ValueError, TypeError) as exc:
+            raise ValueError(
+                f"Could not read displacements for mode {mode_number}: {exc}"
+            )
+
+        atoms = list(molecule.atoms)
+        base_coords = np.array(molecule.coordinates, dtype=float)
+        if base_coords.shape != displ.shape:
+            raise ValueError(
+                f"Shape mismatch: base coords {base_coords.shape} vs "
+                f"displacements {displ.shape}"
+            )
+
+        n_frames = 24
+        amplitude = 0.4
+        fps = int(
+            getattr(
+                getattr(app, "_user_settings", None) and app._user_settings.viz,
+                "vib_framerate_fps",
+                10,
+            )
+        )
+        fps = max(1, fps)
+        interval_ms = max(1, int(round(1000.0 / fps)))
+
+        phases = np.sin(np.linspace(0, 2 * np.pi, n_frames, endpoint=False))
+        n_atoms = len(atoms)
+        xyz_lines: list[str] = []
+        for phase in phases:
+            coords = base_coords + amplitude * float(phase) * displ
+            xyz_lines.append(f"{n_atoms}")
+            xyz_lines.append(f"mode {mode_number} phase {float(phase):+.3f}")
+            for sym, xyz in zip(atoms, coords):
+                xyz_lines.append(f"{sym} {xyz[0]:.6f} {xyz[1]:.6f} {xyz[2]:.6f}")
+        xyz_string = "\n".join(xyz_lines) + "\n"
+
+        view = py3Dmol.view(width=640, height=520)
+        view.addModelsAsFrames(xyz_string, "xyz")
+        view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
+        view.setBackgroundColor("white")
+        view.zoomTo()
+        view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
+        return ("py3dmol", view._make_html())
+
+    raise ValueError(
+        "No visualization backend available to export the vibrational "
+        "animation. Install plotlymol3d (preferred) or py3dmol."
+    )

@@ -68,6 +68,21 @@ class SessionResult:
     mulliken_charges: Optional[List[float]] = None
     dipole_moment_debye: Optional[float] = None
     mp2_correlation_hartree: Optional[float] = None
+    # CCSD post-HF correlation energy (Hartree), populated when method is
+    # ``"CCSD"`` or ``"CCSD(T)"``. ``None`` for HF/DFT/MP2 paths. The
+    # ``energy_hartree`` field already includes this correlation when set
+    # (matches the existing ``mp2_correlation_hartree`` convention).
+    ccsd_correlation_hartree: Optional[float] = None
+    # CCSD(T) perturbative-triples correction (Hartree), populated only when
+    # method is ``"CCSD(T)"``. ``None`` for plain CCSD. Again, included in
+    # ``energy_hartree`` when set.
+    ccsd_t_correction_hartree: Optional[float] = None
+    # GPU offload status (M-GPU / GPU.2). ``gpu_used`` is True only when the
+    # SCF object was successfully migrated to gpu4pyscf for this run.
+    # ``gpu_name`` carries the CUDA device name when ``gpu_used`` is True so
+    # the result card can show *which* GPU ran the calc.
+    gpu_used: bool = False
+    gpu_name: Optional[str] = None
     solvent: Optional[str] = None
     mo_energy_hartree: Optional[Any] = None  # np.ndarray (n_mo,) or (2, n_mo) UHF
     mo_occ: Optional[Any] = None  # np.ndarray (n_mo,) or (2, n_mo) UHF
@@ -112,14 +127,80 @@ class SessionResult:
 
 
 # Maps QuantUI display names → PySCF xc strings where they differ.
+#
+# ``wB97X-D`` is a special case: PySCF + dftd3 cannot compose
+# ``mf.xc = "wb97x-d"`` cleanly (it's on dftd3's black-list — see
+# pyscf/pyscf#2069). The workaround that matches what our UI label
+# already claims ("wB97X-D — Range-Separated Hybrid + D3 Dispersion")
+# is to use the bare ``wb97x`` functional and apply D3 via dftd3
+# externally — same pattern as PBE-D3 below. This is D3, not the
+# original Chai 2008 D2; the empirical dispersion energies differ by
+# a few percent for most systems but the functional family is the same.
 _XC_ALIAS: dict = {
     "M06-L": "m06l",
-    "wB97X-D": "wb97x-d",
+    "wB97X-D": "wb97x",  # bare functional; D3 applied via _NEEDS_D3
     "CAM-B3LYP": "camb3lyp",
     "PBE-D3": "pbe",  # base functional; D3 applied separately
 }
 # Methods that require Grimme D3 dispersion correction via pyscf.dftd3.
-_NEEDS_D3: frozenset = frozenset({"PBE-D3"})
+_NEEDS_D3: frozenset = frozenset({"PBE-D3", "wB97X-D"})
+
+
+def resolve_xc(method: str) -> str:
+    """Map a QuantUI display method name to a PySCF xc string.
+
+    Uses ``_XC_ALIAS`` case-insensitively so callers can pass either
+    the display form (``"wB97X-D"``) or the upper form. Methods not
+    in the alias table pass through unchanged.
+
+    This is the single source of truth for QuantUI → PySCF xc-name
+    translation. Every DFT entry point — ``session_calc``, ``freq_calc``,
+    ``tddft_calc``, ``optimizer``, ``freq_ir_workers``, ``nmr_calc``,
+    and the script-export path in ``config.py`` — should use this
+    helper rather than passing ``method`` to PySCF directly. (Before
+    session 55 they didn't, which is why wB97X-D errored in tier 3
+    SP calcs but ALSO would have errored in freq / opt / tddft.)
+    """
+    method_upper = method.upper()
+    _key = next((k for k in _XC_ALIAS if k.upper() == method_upper), method)
+    return _XC_ALIAS.get(_key, method)
+
+
+def needs_d3(method: str) -> bool:
+    """Return True when ``method`` requires external D3 dispersion.
+
+    The DFT entry points should call this AFTER setting ``mf.xc`` to
+    decide whether to wrap the SCF object in ``pyscf.dftd3.dftd3(mf)``.
+    """
+    method_upper = method.upper()
+    _key = next((k for k in _XC_ALIAS if k.upper() == method_upper), method)
+    return _key in _NEEDS_D3
+
+
+def maybe_apply_d3(mf, method: str, progress_stream=None):
+    """Wrap ``mf`` in ``pyscf.dftd3.dftd3(mf)`` if ``method`` requires D3.
+
+    Returns the (possibly wrapped) mf object. On ``pyscf.dftd3``
+    ImportError, returns the original ``mf`` unmodified and surfaces
+    a warning via ``progress_stream`` (if provided) so the user sees
+    that the result is missing the dispersion correction.
+    """
+    if not needs_d3(method):
+        return mf
+    try:
+        from pyscf import dftd3 as _dftd3
+
+        return _dftd3.dftd3(mf)
+    except ImportError:
+        if progress_stream is not None:
+            try:
+                progress_stream.write(
+                    f"\n⚠  pyscf.dftd3 not available — running {method} "
+                    "without D3 correction.\n"
+                )
+            except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
+                pass
+        return mf
 
 
 def run_in_session(
@@ -177,6 +258,50 @@ def run_in_session(
 
     stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
 
+    # M-STDERR / STDERR.1: capture C-level (fd-2) stderr from libcint / BLAS
+    # / LAPACK and relay it to ``stream`` on exit. Without this wrapper, the
+    # bytes surface as red text above the cell output in Voilà / Jupyter.
+    # POSIX-only; no-op on Windows. See quantui/c_stderr.py for design.
+    from quantui.c_stderr import capture_c_stderr
+
+    with capture_c_stderr(stream):
+        return _run_session_calc_body(
+            molecule=molecule,
+            method=method,
+            basis=basis,
+            verbose=verbose,
+            progress_stream=progress_stream,
+            solvent=solvent,
+            _dft=dft,
+            _gto=gto,
+            _scf=scf,
+            stream=stream,
+        )
+
+
+def _run_session_calc_body(
+    *,
+    molecule: Molecule,
+    method: str,
+    basis: str,
+    verbose: int,
+    progress_stream: Optional[IO[str]],
+    solvent: Optional[str],
+    _dft: Any,
+    _gto: Any,
+    _scf: Any,
+    stream: IO[str],
+) -> SessionResult:
+    """Inner body of :func:`run_session_calc` — see public docstring.
+
+    Split out so the public entry can wrap the C-heavy work in the
+    ``capture_c_stderr`` context manager without re-indenting ~150 lines.
+    Imports of ``pyscf`` are passed through so the dependency check stays
+    in the public entry (where its ImportError can reach the user via
+    Python's normal stderr).
+    """
+    dft, gto, scf = _dft, _gto, _scf
+
     # --- Validate method ---
     from . import config as _config
 
@@ -198,8 +323,6 @@ def run_in_session(
 
     # --- Select SCF method ---
     method_upper = method.upper()
-    # Normalise to the key used in _XC_ALIAS / _NEEDS_D3 (preserve original case)
-    _method_key = next((k for k in _XC_ALIAS if k.upper() == method_upper), method)
 
     if method_upper == "RHF":
         mf = scf.RHF(mol)
@@ -207,26 +330,21 @@ def run_in_session(
         mf = scf.UHF(mol)
     elif method_upper == "MP2":
         mf = scf.RHF(mol)  # MP2 runs on top of RHF
+    elif method_upper in ("CCSD", "CCSD(T)"):
+        # Coupled cluster builds on an RHF reference (M8.1). The correlation
+        # energy (and optional perturbative-triples correction) is added
+        # post-SCF below.
+        mf = scf.RHF(mol)
     else:
-        # DFT: resolve alias then auto-select RKS / UKS
-        xc_string = _XC_ALIAS.get(_method_key, method)
+        # DFT: resolve alias then auto-select RKS / UKS. ``resolve_xc``
+        # handles the wB97X-D → wb97x + external D3 dispersion mapping
+        # (session 55 fix; see _XC_ALIAS docstring).
         if mol.spin == 0:
             mf = dft.RKS(mol)
         else:
             mf = dft.UKS(mol)
-        mf.xc = xc_string
-        # Apply D3 dispersion correction where needed
-        if _method_key in _NEEDS_D3:
-            try:
-                from pyscf import dftd3 as _dftd3
-
-                mf = _dftd3.dftd3(mf)
-            except ImportError:
-                if progress_stream is not None:
-                    progress_stream.write(
-                        f"\n⚠  pyscf.dftd3 not available — running {method} "
-                        "without D3 correction.\n"
-                    )
+        mf.xc = resolve_xc(method)
+        mf = maybe_apply_d3(mf, method, progress_stream=progress_stream)
 
     # --- Wrap with implicit solvent (PCM) if requested ---
     if solvent is not None:
@@ -239,11 +357,31 @@ def run_in_session(
 
                 mf = _PCM(mf)
                 mf.with_solvent.eps = _eps
-            except Exception:
+            except (
+                Exception
+            ) as exc:  # noqa: BLE001 — optional probe (PySCF version drift)
+                logger.debug(
+                    "PCM solvent unavailable, falling back to gas phase: %s", exc
+                )
                 if progress_stream is not None:
                     progress_stream.write(
                         "\n⚠  PCM solvent unavailable — running in gas phase.\n"
                     )
+
+    # --- Try GPU offload (M-GPU / GPU.1) ---
+    # Migrate the SCF object to gpu4pyscf when (a) the package is installed,
+    # (b) a CUDA device is available, and (c) the method is supported.
+    # Failures fall back to CPU silently — the calc still runs. The
+    # ``gpu_used`` + ``gpu_name`` fields on the SessionResult carry the
+    # outcome so the UI can show which device produced the numbers.
+    from .gpu_offload import try_to_gpu as _try_to_gpu
+
+    mf, gpu_used, gpu_name = _try_to_gpu(mf, method_upper)
+    if gpu_used and progress_stream is not None:
+        try:
+            progress_stream.write(f"\n🚀  GPU offload active — running on {gpu_name}\n")
+        except Exception:  # noqa: BLE001 — cleanup (progress stream may be closed)
+            pass
 
     # --- Run SCF ---
     try:
@@ -268,6 +406,36 @@ def run_in_session(
             raise RuntimeError(
                 f"MP2 correction failed for {molecule.get_formula()}: {exc}"
             ) from exc
+
+    # --- Coupled cluster correlation (M8.1) ---
+    # CCSD adds singles + doubles excitations on top of the RHF reference;
+    # CCSD(T) adds a perturbative-triples correction on top of CCSD. Both
+    # report their corrections as separate result fields so the UI can
+    # show the HF reference + correlation breakdown (mirrors the MP2 path).
+    ccsd_correlation_hartree: Optional[float] = None
+    ccsd_t_correction_hartree: Optional[float] = None
+    if method_upper in ("CCSD", "CCSD(T)"):
+        try:
+            from pyscf import cc as _cc
+
+            _ccsd_obj = _cc.CCSD(mf)
+            _e_corr_ccsd, _t1, _t2 = _ccsd_obj.kernel()
+            ccsd_correlation_hartree = float(_e_corr_ccsd)
+            energy_hartree += float(_e_corr_ccsd)
+        except Exception as exc:
+            raise RuntimeError(
+                f"CCSD correction failed for {molecule.get_formula()}: {exc}"
+            ) from exc
+        if method_upper == "CCSD(T)":
+            try:
+                _e_t = _ccsd_obj.ccsd_t()
+                ccsd_t_correction_hartree = float(_e_t)
+                energy_hartree += float(_e_t)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"CCSD(T) triples correction failed "
+                    f"for {molecule.get_formula()}: {exc}"
+                ) from exc
 
     # --- Extract results from the mean-field object ---
     converged = bool(getattr(mf, "converged", False))
@@ -294,8 +462,8 @@ def run_in_session(
             homo_lumo_gap_ev = float(
                 (mo_energy_ref[n_occ] - mo_energy_ref[n_occ - 1]) * HARTREE_TO_EV
             )
-    except Exception:
-        pass  # gap stays None — non-fatal
+    except Exception as exc:
+        logger.debug("HOMO-LUMO gap extraction failed (non-fatal): %s", exc)
 
     mulliken_charges: Optional[List[float]] = None
     dipole_moment_debye: Optional[float] = None
@@ -303,33 +471,79 @@ def run_in_session(
         try:
             _, chg = mf.mulliken_pop(verbose=0)
             mulliken_charges = [float(c) for c in chg]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Mulliken population extraction failed: %s", exc)
         try:
             import numpy as _np2
 
             dip = mf.dip_moment(verbose=0)
             dipole_moment_debye = float(_np2.linalg.norm(dip))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Dipole moment extraction failed: %s", exc)
 
-    # MO arrays for orbital visualization (non-fatal if extraction fails)
+    # MO arrays for orbital visualization (non-fatal if extraction fails).
+    #
+    # GPU-offload note (BUG fix, 2026-05-25): when ``gpu4pyscf`` migrated
+    # ``mf`` to the GPU, ``mf.mo_energy`` / ``mo_coeff`` / ``mo_occ`` are
+    # CuPy arrays. ``numpy.array(cupy_array)`` raises ``TypeError`` (numpy
+    # refuses implicit device transfers), so the bare ``except`` swallowed
+    # it and we silently shipped a ``SessionResult`` with all MO fields
+    # ``None``. That in turn made ``save_orbitals`` no-op (it short-
+    # circuits when both ``mo_e`` and ``mo_occ`` are None), and history
+    # replay of GPU-run geo-opts / single-points showed "Not available"
+    # in the Energies + Isosurface panels. ``_to_numpy_array`` below
+    # detects CuPy arrays and copies them to host via ``cupy.asnumpy``.
     _mo_energy_ha_arr: Optional[Any] = None
     _mo_occ_arr: Optional[Any] = None
     _mo_coeff_arr: Optional[Any] = None
     _pyscf_mol_atom: Optional[Any] = None
     _pyscf_mol_basis: Optional[str] = None
+
+    def _to_numpy_array(arr: Any) -> Any:
+        """Convert ``arr`` to a NumPy array, transferring from GPU if needed."""
+        if arr is None:
+            return None
+        # CuPy arrays have a ``.get()`` method (synchronous device→host copy).
+        # Probe for it rather than importing cupy, so the CPU-only path
+        # doesn't pull cupy onto the import graph.
+        get = getattr(arr, "get", None)
+        if callable(get) and type(arr).__module__.startswith("cupy"):
+            return _np.asarray(get())
+        return _np.asarray(arr)
+
     try:
-        _mo_energy_ha_arr = _np.array(mf.mo_energy)
-        _mo_occ_arr = _np.array(mf.mo_occ)
-        _mo_coeff_arr = _np.array(mf.mo_coeff)
+        _mo_energy_ha_arr = _to_numpy_array(mf.mo_energy)
+        _mo_occ_arr = _to_numpy_array(mf.mo_occ)
+        _mo_coeff_arr = _to_numpy_array(mf.mo_coeff)
         _pyscf_mol_atom = [
             (atom, list(map(float, coords)))
             for atom, coords in zip(molecule.atoms, molecule.coordinates)
         ]
         _pyscf_mol_basis = basis
-    except Exception:
-        pass
+    except Exception as exc:
+        # Bug-A class (session 55): a silent failure here ships a
+        # SessionResult with mo_coeff=None, which makes save_orbitals
+        # no-op and breaks Energies + Isosurface panels on history
+        # replay. Surface to the event log so a future regression is
+        # visible in `quantui log tail` immediately.
+        logger.warning(
+            "MO array extraction failed for %s (%s/%s): %s",
+            molecule.get_formula(),
+            method,
+            basis,
+            exc,
+        )
+        try:
+            from . import calc_log as _clog
+
+            _clog.log_event(
+                "mo_array_extract_failed",
+                f"{method}/{basis} on {molecule.get_formula()}",
+                error=str(exc)[:300],
+                gpu_used=gpu_used,
+            )
+        except Exception:  # noqa: BLE001 — telemetry self-guard
+            pass
 
     formula = molecule.get_formula()
     logger.info(
@@ -354,6 +568,10 @@ def run_in_session(
         mulliken_charges=mulliken_charges,
         dipole_moment_debye=dipole_moment_debye,
         mp2_correlation_hartree=mp2_correlation_hartree,
+        ccsd_correlation_hartree=ccsd_correlation_hartree,
+        ccsd_t_correction_hartree=ccsd_t_correction_hartree,
+        gpu_used=gpu_used,
+        gpu_name=gpu_name,
         solvent=solvent,
         mo_energy_hartree=_mo_energy_ha_arr,
         mo_occ=_mo_occ_arr,

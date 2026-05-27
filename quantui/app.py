@@ -128,6 +128,9 @@ from quantui.app_exports import (
     on_export as _exp_on_export,
 )
 from quantui.app_exports import (
+    on_export_bundle as _exp_on_export_bundle,
+)
+from quantui.app_exports import (
     on_export_mol as _exp_on_export_mol,
 )
 from quantui.app_exports import (
@@ -135,6 +138,9 @@ from quantui.app_exports import (
 )
 from quantui.app_exports import (
     on_export_xyz as _exp_on_export_xyz,
+)
+from quantui.app_exports import (
+    on_iso_export_cube as _exp_on_iso_export_cube,
 )
 from quantui.app_formatters import (
     format_freq_result as _fmt_freq_result,
@@ -186,6 +192,9 @@ from quantui.app_runflow import (
 )
 from quantui.app_runflow import (
     on_cal_run as _run_on_cal_run,
+)
+from quantui.app_runflow import (
+    on_cal_skip as _run_on_cal_skip,
 )
 from quantui.app_runflow import (
     on_cal_stop as _run_on_cal_stop,
@@ -266,6 +275,9 @@ from quantui.app_runflow import (
     on_solvent_cb_changed as _run_on_solvent_cb_changed,
 )
 from quantui.app_runflow import (
+    on_tddft_seed_changed as _run_on_tddft_seed_changed,
+)
+from quantui.app_runflow import (
     populate_compare_list as _run_populate_compare_list,
 )
 from quantui.app_runflow import (
@@ -276,6 +288,9 @@ from quantui.app_runflow import (
 )
 from quantui.app_runflow import (
     refresh_results_browser as _run_refresh_results_browser,
+)
+from quantui.app_runflow import (
+    refresh_tddft_seed_options as _run_refresh_tddft_seed_options,
 )
 from quantui.app_runflow import (
     update_estimate as _run_update_estimate,
@@ -291,6 +306,9 @@ from quantui.app_visualization import (
 )
 from quantui.app_visualization import (
     build_vib_data_inner as _viz_build_vib_data_inner,
+)
+from quantui.app_visualization import (
+    build_vib_export_html as _viz_build_vib_export_html,
 )
 from quantui.app_visualization import (
     on_ir_fwhm_changed as _viz_on_ir_fwhm_changed,
@@ -419,11 +437,15 @@ try:
     from quantui.visualization_py3dmol import (
         display_molecule as _display_molecule,
     )
+    from quantui.visualization_py3dmol import (
+        render_molecule_html as _render_molecule_html,
+    )
 
     VISUALIZATION_AVAILABLE = True
 except ImportError:
     VISUALIZATION_AVAILABLE = False
     _display_molecule = None  # type: ignore[assignment]
+    _render_molecule_html = None  # type: ignore[assignment]
     _PLOTLYMOL_VIZ = False
     _PY3DMOL_VIZ = False
     _DEFAULT_VIZ_STYLE = "ball+stick"
@@ -898,6 +920,22 @@ class QuantUIApp:
         self._last_ir_fig: Any = None
         self._last_uv_fig: Any = None
         self._last_orb_fig: Any = None
+        self._last_orb_info: Any = None
+        # Orbital state consumed by the Isosurface panel populator. Always
+        # initialized to None so ``pop_isosurface`` can read the attributes
+        # via direct access without raising AttributeError on a fresh app
+        # or on a history-replay where ``orbitals.npz`` is missing (BUG.8).
+        # ``_apply_analysis_context`` resets these between contexts so stale
+        # state from a prior calc cannot leak into the next molecule.
+        self._last_orb_mo_coeff: Any = None
+        self._last_orb_mol_atom: Any = None
+        self._last_orb_mol_basis: Any = None
+        # Last-generated cube file path + orbital label (M-EXPORT / EXPORT.5).
+        # Set by the isosurface render path; consumed by the Export cube
+        # button. Initialized here so the button handler reads ``None``
+        # cleanly when no isosurface has been generated yet.
+        self._last_cube_path: Optional[Path] = None
+        self._last_cube_orbital: Optional[str] = None
         self._last_pes_fig: Any = None
         self._run_output_scroll_guard_installed: bool = False
         self._files_current_dir: Optional[Path] = None
@@ -960,7 +998,7 @@ class QuantUIApp:
         display(
             widgets.VBox(
                 [
-                    self._welcome_html,
+                    self._welcome_header,
                     widgets.HBox(
                         [
                             self._activity_btn,
@@ -1115,7 +1153,7 @@ class QuantUIApp:
     # ── Welcome header ────────────────────────────────────────────────────
 
     def _build_welcome_header(self) -> None:
-        _bld_build_welcome_header(self)
+        _bld_build_welcome_header(self, layout_fn=_layout)
 
     # ── Shared widgets (Cell 3) ───────────────────────────────────────────
 
@@ -1354,6 +1392,12 @@ class QuantUIApp:
         _rtp.insert(_rtp.index(self._to_analysis_btn), self.advanced_accordion)
         self.results_tab_panel.children = tuple(_rtp)
 
+        # POLISH.8 (M-POLISH, 2026-05-25): Log moved to be an
+        # Accordion inside the History tab — see build_output_tab for
+        # the wrap. Tab indices renumbered: Files 6→5, System Settings
+        # 7→6. Update any caller that depended on tab-index 5 being
+        # "Log" (notably _goto_output_tab — now navigates to History
+        # and expands the log accordion).
         self.root_tab = widgets.Tab(
             children=[
                 _calculate_content,
@@ -1361,7 +1405,6 @@ class QuantUIApp:
                 self.analysis_tab_panel,
                 self.history_panel,
                 self.compare_panel,
-                self.log_tab_panel,
                 self.files_tab_panel,
                 self._status_tab_panel,
             ]
@@ -1371,9 +1414,11 @@ class QuantUIApp:
         self.root_tab.set_title(2, "Analysis")
         self.root_tab.set_title(3, "History")
         self.root_tab.set_title(4, "Compare")
-        self.root_tab.set_title(5, "Log")
-        self.root_tab.set_title(6, "Files")
-        self.root_tab.set_title(7, "Status")
+        self.root_tab.set_title(5, "Files")
+        # POLISH.4 (M-POLISH, 2026-05-25): "Status" was ambiguous —
+        # status of what? "System Settings" is what the tab actually
+        # holds (env info + calibration + GPU status + UI prefs).
+        self.root_tab.set_title(6, "System Settings")
         self.root_tab.observe(
             self._safe_cb(self._on_root_tab_changed), names="selected_index"
         )
@@ -1421,11 +1466,17 @@ class QuantUIApp:
         self._freq_seed_dd.observe(
             self._safe_cb(self._on_freq_seed_changed), names="value"
         )
+        self._tddft_seed_dd.observe(
+            self._safe_cb(self._on_tddft_seed_changed), names="value"
+        )
         self._scan_type_dd.observe(
             self._safe_cb(self._update_scan_widgets), names="value"
         )
         self._freq_seed_refresh_btn.on_click(
             lambda _btn: self._refresh_freq_seed_options()
+        )
+        self._tddft_seed_refresh_btn.on_click(
+            lambda _btn: self._refresh_tddft_seed_options()
         )
         # Notes + estimate
         self.method_dd.observe(self._safe_cb(self._update_notes), names="value")
@@ -1454,6 +1505,12 @@ class QuantUIApp:
         self._uv_export_btn.on_click(self._on_uv_export_plot)
         self._orb_export_btn.on_click(self._on_orb_export_plot)
         self._pes_export_btn.on_click(self._on_pes_export_plot)
+        self._vib_export_btn.on_click(self._on_vib_export_animation)
+        # M-EXPORT / EXPORT.4: per-panel CSV-to-clipboard / file buttons.
+        self._ir_copy_data_btn.on_click(self._on_ir_copy_data)
+        self._uv_copy_data_btn.on_click(self._on_uv_copy_data)
+        self._orb_copy_data_btn.on_click(self._on_orb_copy_data)
+        self._pes_copy_data_btn.on_click(self._on_pes_copy_data)
         # Accumulate / export
         self.accumulate_btn.on_click(self._on_accumulate)
         self.clear_btn.on_click(self._on_clear)
@@ -1462,6 +1519,7 @@ class QuantUIApp:
         )
         self._cal_run_btn.on_click(self._on_cal_run)
         self._cal_stop_btn.on_click(self._on_cal_stop)
+        self._cal_skip_btn.on_click(self._on_cal_skip)
         self.export_btn.on_click(self._on_export)
         self.export_xyz_btn.on_click(self._on_export_xyz)
         self.export_mol_btn.on_click(self._on_export_mol)
@@ -1530,6 +1588,9 @@ class QuantUIApp:
         )
         # Orbital isosurface generate button
         self._iso_generate_btn.on_click(self._on_iso_generate)
+        # M-EXPORT / EXPORT.5: cube + bundle exports
+        self._iso_export_cube_btn.on_click(self._on_iso_export_cube)
+        self._export_bundle_btn.on_click(self._on_export_bundle)
 
     # ── Files tab ────────────────────────────────────────────────────────
 
@@ -1767,6 +1828,7 @@ class QuantUIApp:
             ".yml",
             ".xyz",
             ".cube",
+            ".molden",
         }
 
         if suffix in image_ext:
@@ -1776,6 +1838,184 @@ class QuantUIApp:
                 display(_Image(filename=str(path)))
             self._set_files_status(f"Previewing image: {path.name}")
             return
+
+        if suffix == ".svg":
+            # IPython.display.Image doesn't handle SVG well — use SVG.
+            from IPython.display import SVG as _SVG
+
+            with self._files_preview_output:
+                display(_SVG(filename=str(path)))
+            self._set_files_status(f"Previewing SVG: {path.name}")
+            return
+
+        # POLISH.5 (M-POLISH, 2026-05-25): specialized previews for
+        # extensions where the generic text dump is unhelpful. Each
+        # handler caps file reads at 256 KB. On any exception inside a
+        # handler, fall through to the generic text dispatch below so
+        # the user always sees SOMETHING. Order matters: 3D-structure
+        # extensions (.xyz/.mol/.pdb) take precedence over their
+        # text-ext membership.
+
+        if suffix in {".xyz", ".mol", ".pdb"}:
+            # 3D structure → py3Dmol viewer via raw model load. Falls
+            # through to text dispatch on failure (so the user still
+            # sees the raw coordinates).
+            try:
+                import py3Dmol as _p3d  # type: ignore[import]
+
+                model_format = {".xyz": "xyz", ".mol": "mol", ".pdb": "pdb"}[suffix]
+                raw_text = path.read_text(encoding="utf-8", errors="replace")
+                if len(raw_text) <= 256_000:
+                    viewer = _p3d.view(width=500, height=380)
+                    viewer.addModel(raw_text, model_format)
+                    viewer.setStyle({"stick": {}, "sphere": {"scale": 0.25}})
+                    viewer.setBackgroundColor("white")
+                    viewer.zoomTo()
+                    html_str = viewer._make_html()
+                    with self._files_preview_output:
+                        display(HTML(html_str))
+                    self._set_files_status(
+                        f"3D structure preview: {path.name}"
+                        f" ({model_format.upper()})"
+                    )
+                    return
+            except Exception:  # noqa: BLE001 — fall through to text preview
+                pass
+
+        if suffix == ".json":
+            try:
+                import json as _json_pretty
+
+                raw = path.read_bytes()[:256_000]
+                parsed = _json_pretty.loads(raw.decode("utf-8", errors="replace"))
+                pretty = _json_pretty.dumps(parsed, indent=2, ensure_ascii=False)
+                # Cap line count so a 10k-key dict doesn't lock the viewport.
+                lines = pretty.splitlines()
+                truncated = False
+                if len(lines) > 500:
+                    lines = lines[:500]
+                    truncated = True
+                rendered = "\n".join(lines)
+                if truncated:
+                    rendered += "\n\n[truncated to first 500 lines]"
+                with self._files_preview_output:
+                    display(
+                        HTML(
+                            "<pre style='white-space:pre-wrap;word-break:break-word;"
+                            "font-size:12px;line-height:1.35;margin:0'>"
+                            f"{_html.escape(rendered)}</pre>"
+                        )
+                    )
+                self._set_files_status(f"JSON preview: {path.name}")
+                return
+            except Exception:  # noqa: BLE001 — fall through to text preview
+                pass
+
+        if suffix == ".csv":
+            try:
+                import csv as _csv
+
+                with open(path, encoding="utf-8", errors="replace", newline="") as fh:
+                    reader = _csv.reader(fh)
+                    rows: list[list[str]] = []
+                    for i, row in enumerate(reader):
+                        if i >= 50:
+                            break
+                        rows.append(row)
+                if rows:
+                    header = rows[0]
+                    body = rows[1:]
+                    head_html = "".join(
+                        f'<th style="padding:4px 10px;text-align:left;'
+                        f"border-bottom:1px solid #cbd5e1;font-size:12px;"
+                        f'color:#1e293b">{_html.escape(str(c))}</th>'
+                        for c in header
+                    )
+                    body_html = "".join(
+                        "<tr>"
+                        + "".join(
+                            f'<td style="padding:3px 10px;font-size:12px;'
+                            f"border-bottom:1px solid #f1f5f9;color:#334155;"
+                            f'font-variant-numeric:tabular-nums">{_html.escape(str(c))}</td>'
+                            for c in r
+                        )
+                        + "</tr>"
+                        for r in body
+                    )
+                    note = (
+                        f'<p style="font-size:11px;color:#94a3b8;margin:4px 0 6px">'
+                        f"First {len(rows)} rows shown.</p>"
+                        if len(rows) >= 50
+                        else ""
+                    )
+                    table_html = (
+                        f"{note}"
+                        '<table style="border-collapse:collapse;width:100%">'
+                        f"<thead><tr>{head_html}</tr></thead>"
+                        f"<tbody>{body_html}</tbody></table>"
+                    )
+                    with self._files_preview_output:
+                        display(HTML(table_html))
+                    self._set_files_status(
+                        f"CSV preview: {path.name} ({len(rows)} rows)"
+                    )
+                    return
+            except Exception:  # noqa: BLE001 — fall through to text preview
+                pass
+
+        if suffix in {".html", ".htm"}:
+            try:
+                raw = path.read_text(encoding="utf-8", errors="replace")
+                if len(raw) <= 1_000_000:
+                    # Sandboxed iframe via srcdoc — embedded JS can't
+                    # reach the parent app.
+                    iframe_html = (
+                        '<iframe sandbox="allow-scripts" '
+                        'style="width:100%;height:400px;border:1px solid #cbd5e1;'
+                        'border-radius:4px" '
+                        f'srcdoc="{_html.escape(raw, quote=True)}"></iframe>'
+                    )
+                    with self._files_preview_output:
+                        display(HTML(iframe_html))
+                    self._set_files_status(f"HTML preview (sandboxed): {path.name}")
+                    return
+            except Exception:  # noqa: BLE001 — fall through to text preview
+                pass
+
+        if suffix == ".cube":
+            # Cube files can be hundreds of MB (volumetric data). Don't
+            # dump them — show the header + a size + a hint.
+            try:
+                stat = path.stat()
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    head_lines = []
+                    for i, line in enumerate(fh):
+                        if i >= 6:
+                            break
+                        head_lines.append(line.rstrip("\n"))
+                header_text = "\n".join(head_lines)
+                size_mb = stat.st_size / (1024 * 1024)
+                msg_html = (
+                    f'<p style="font-size:13px;color:#475569;margin:0 0 6px">'
+                    f"<b>Cube file:</b> {_html.escape(path.name)} "
+                    f"&middot; {size_mb:.2f} MB</p>"
+                    '<p style="font-size:12px;color:#64748b;margin:0 0 6px">'
+                    "Use the <b>Analysis</b> tab's Orbital Isosurface panel to "
+                    "render volumetric data; the raw file is too large to "
+                    "preview inline.</p>"
+                    '<p style="font-size:11px;color:#94a3b8;margin:6px 0 4px">'
+                    "Header (first 6 lines):</p>"
+                    '<pre style="white-space:pre-wrap;font-size:11px;'
+                    "line-height:1.35;margin:0;background:#f8fafc;padding:6px;"
+                    'border-radius:4px">'
+                    f"{_html.escape(header_text)}</pre>"
+                )
+                with self._files_preview_output:
+                    display(HTML(msg_html))
+                self._set_files_status(f"Cube file metadata: {path.name}")
+                return
+            except Exception:  # noqa: BLE001 — fall through to text preview
+                pass
 
         is_text = suffix in text_ext
         if not is_text:
@@ -1849,9 +2089,13 @@ class QuantUIApp:
             self._set_files_status("Select a folder or file.")
             return
         if self._files_selected_path.is_dir():
-            self._set_files_status(f"Folder selected: {self._files_selected_path.name}")
+            self._set_files_status(
+                f"Folder selected: {self._files_selected_path.name} — click Open to enter."
+            )
         else:
-            self._set_files_status(f"File selected: {self._files_selected_path.name}")
+            # Auto-preview on selection so the user doesn't need to click Open
+            # for every file. Open remains useful for folders.
+            self._preview_file_path(self._files_selected_path)
 
     def _on_files_open(self, _btn) -> None:
         self._activity_begin("Opening selected path...")
@@ -1939,19 +2183,70 @@ class QuantUIApp:
         )
 
     def _set_html_output(self, out: widgets.Output, html: str) -> None:
-        """Render HTML into an Output widget.
+        """Render HTML into an Output widget via an atomic outputs swap.
 
         Plotly HTML contains <script> tags. Those scripts do not execute when
         assigned to widgets.HTML.value (innerHTML path), which leads to blank
-        figure panels. Rendering through Output display_data executes the JS.
+        figure panels. Routing through ``Output.outputs`` executes the JS.
+
+        The assignment is a single ``out.outputs = (display_data,)`` rather
+        than ``clear_output() + append_display_data()`` so the browser never
+        observes an intermediate empty state. This eliminates the flicker
+        users were seeing on IR Stick/Broadened toggle and FWHM slider drag
+        (BUG.9) and matches the atomic-swap pattern already used by
+        ``_swap_frame_out`` (trajectory) and ``_swap_vib_output`` (vib).
         """
         if threading.current_thread() is not threading.main_thread():
             io_loop = self._get_kernel_io_loop()
             if io_loop is not None:
                 io_loop.add_callback(self._set_html_output, out, html)
                 return
-        self._clear_output_widget(out)
-        out.append_display_data(HTML(html))
+        out.outputs = (
+            {
+                "output_type": "display_data",
+                "data": {"text/html": html},
+                "metadata": {},
+            },
+        )
+
+    def _refresh_calc_mol_viewer(self, *, backend: Optional[str] = None) -> None:
+        """Re-render the Calculate-tab molecule viewer via an atomic HTML swap.
+
+        Replaces the ``with self.viz_output: display_molecule(...)`` pattern
+        that surfaced BUG B1/B2/B3 (2026-05-25 user report):
+
+        - **B1** "viewer doesn't update on PubChem load until I toggle the
+          backend" — the Output-context render path was racing the kernel's
+          comms flush, so the initial display was sometimes never emitted.
+          Atomic ``outputs = (display_data,)`` is a single synchronous
+          assignment that the front-end always picks up.
+        - **B3** "red log lines around the viewer on the Calculate tab" —
+          ``with self.viz_output:`` captured every ``logger.info`` /
+          ``logger.error`` line that ``display_molecule`` emitted while it
+          ran. ``render_molecule_html`` returns the HTML string OUTSIDE any
+          Output context, so the only thing that lands in the widget is
+          the viewer itself.
+        - **B2** "PlotlyMol valence error spills as red text" — the same
+          helper wraps render failures into an inline error <div>, so
+          plotlymol's RDKit-bond-perception failure on aromatic systems
+          shows up as a friendly inline message instead of a logger.error
+          line bleeding through the Output context.
+
+        ``backend`` defaults to ``self._viz_backend`` (user's current
+        Calculate-tab toggle); pass an explicit value when the router has
+        chosen one (see ``_rerender_viz_for_backend_change``).
+        """
+        if self._molecule is None or _render_molecule_html is None:
+            return
+        backend_to_use = backend if backend is not None else self._viz_backend
+        html = _render_molecule_html(
+            self._molecule,
+            backend=backend_to_use,
+            style=self._viz_style,
+            lighting=self._viz_lighting,
+            bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
+        )
+        self._set_html_output(self.viz_output, html)
 
     def _get_kernel_io_loop(self) -> Any:
         """Return a cached kernel io_loop, resolving it lazily when needed."""
@@ -2007,16 +2302,7 @@ class QuantUIApp:
         if _last_pes is not None:
             self._show_pes_scan_result(_last_pes)
         # Re-render 3D molecule viewer so scene_bgcolor updates immediately.
-        if self._molecule is not None and _display_molecule is not None:
-            self.viz_output.clear_output()
-            with self.viz_output:
-                _display_molecule(
-                    self._molecule,
-                    backend=self._viz_backend,
-                    style=self._viz_style,
-                    lighting=self._viz_lighting,
-                    bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
-                )
+        self._refresh_calc_mol_viewer()
 
     def _initialize_viz_state_from_preference(self) -> None:
         """Align _viz_backend and the three preference widgets with the
@@ -2136,15 +2422,7 @@ class QuantUIApp:
         if self._molecule is not None:
             chosen = self._resolve_backend(VizTask.MOLECULE_PREVIEW)
             if chosen is not None:
-                self.viz_output.clear_output()
-                with self.viz_output:
-                    _display_molecule(
-                        self._molecule,
-                        backend=str(chosen),
-                        style=self._viz_style,
-                        lighting=self._viz_lighting,
-                        bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
-                    )
+                self._refresh_calc_mol_viewer(backend=str(chosen))
 
         # Analysis-tab molecule viewer (ANALYSIS_STRUCTURE_VIEW task).
         if self._analysis_displayed_molecule is not None:
@@ -2220,29 +2498,11 @@ class QuantUIApp:
 
     def _on_viz_style_changed(self, change) -> None:
         self._viz_style = change["new"]
-        if self._molecule is not None and _display_molecule is not None:
-            self.viz_output.clear_output()
-            with self.viz_output:
-                _display_molecule(
-                    self._molecule,
-                    backend=self._viz_backend,
-                    style=self._viz_style,
-                    lighting=self._viz_lighting,
-                    bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
-                )
+        self._refresh_calc_mol_viewer()
 
     def _on_viz_lighting_changed(self, change) -> None:
         self._viz_lighting = change["new"]
-        if self._molecule is not None and _display_molecule is not None:
-            self.viz_output.clear_output()
-            with self.viz_output:
-                _display_molecule(
-                    self._molecule,
-                    backend=self._viz_backend,
-                    style=self._viz_style,
-                    lighting=self._viz_lighting,
-                    bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
-                )
+        self._refresh_calc_mol_viewer()
 
     # ── Molecule input ────────────────────────────────────────────────────
 
@@ -2350,6 +2610,12 @@ class QuantUIApp:
     def _on_freq_seed_changed(self, change) -> None:
         _run_on_freq_seed_changed(self, change)
 
+    def _refresh_tddft_seed_options(self) -> None:
+        _run_refresh_tddft_seed_options(self)
+
+    def _on_tddft_seed_changed(self, change) -> None:
+        _run_on_tddft_seed_changed(self, change)
+
     # ── Help buttons ──────────────────────────────────────────────────────
 
     def _on_method_help(self, btn) -> None:
@@ -2394,6 +2660,12 @@ class QuantUIApp:
     def _on_export_pdb(self, btn) -> None:
         _exp_on_export_pdb(self, btn)
 
+    def _on_iso_export_cube(self, btn) -> None:
+        _exp_on_iso_export_cube(self, btn)
+
+    def _on_export_bundle(self, btn) -> None:
+        _exp_on_export_bundle(self, btn)
+
     def _on_ir_export_plot(self, btn) -> None:
         self._export_plot_figure(
             fig=getattr(self, "_last_ir_fig", None),
@@ -2417,6 +2689,89 @@ class QuantUIApp:
             fmt=self._orb_export_fmt_dd.value,
             status_widget=self._orb_export_status,
         )
+
+    def _on_vib_export_animation(self, _btn) -> None:
+        """Export the active vibrational mode as a self-contained HTML file.
+
+        Backend selection is intentionally decoupled from the user's default
+        ``viz.default_backend`` preference: plotlymol3d is preferred for export
+        quality, with py3Dmol as a fallback when plotlymol3d is unavailable.
+        This is enforced inside ``build_vib_export_html``.
+        """
+        import re as _re
+        from datetime import datetime as _dt
+
+        status = self._vib_export_status
+
+        # Validate vib state before attempting anything else.
+        if (
+            getattr(self, "_last_vib_freq_result", None) is None
+            or getattr(self, "_last_vib_molecule", None) is None
+        ):
+            status.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                "No vibrational mode loaded — run a Frequency calculation first."
+                "</span>"
+            )
+            return
+
+        try:
+            mode_number = int(self.vib_mode_dd.value)
+        except (TypeError, ValueError):
+            status.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                "No vibrational mode selected.</span>"
+            )
+            return
+
+        try:
+            backend, html_str = _viz_build_vib_export_html(self, mode_number)
+        except Exception as exc:
+            status.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                f"Export failed: {exc}</span>"
+            )
+            try:
+                _calc_log.log_event(
+                    "vib_export_error",
+                    f"mode={mode_number} {type(exc).__name__}: {exc}"[:300],
+                )
+            except Exception:
+                pass
+            return
+
+        target_dir = (
+            self._last_result_dir
+            if isinstance(self._last_result_dir, Path)
+            else self._get_results_dir()
+        )
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        formula = getattr(self._last_vib_molecule, "get_formula", lambda: "mol")()
+        safe_formula = _re.sub(r"[^A-Za-z0-9_.-]+", "_", formula).strip("_") or "mol"
+        ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S")
+        dest = target_dir / f"vib_{safe_formula}_mode{mode_number}_{ts}.html"
+
+        try:
+            dest.write_text(html_str, encoding="utf-8")
+        except Exception as exc:
+            status.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                f"Write failed: {exc}</span>"
+            )
+            return
+
+        status.value = (
+            '<span style="color:#16a34a;font-size:12px">'
+            f"Saved ({backend}): {dest}</span>"
+        )
+        try:
+            _calc_log.log_event(
+                "vib_export_done",
+                f"mode={mode_number} backend={backend} path={dest}",
+            )
+        except Exception:
+            pass
 
     def _on_pes_export_plot(self, btn) -> None:
         self._export_plot_figure(
@@ -2486,6 +2841,160 @@ class QuantUIApp:
                 f"Export failed: {msg}</span>"
             )
 
+    @staticmethod
+    def _fig_to_csv(fig: Any, *, title: str = "") -> str:
+        """Extract per-trace (x, y) pairs from a Plotly figure into CSV text.
+
+        Used by ``_copy_plot_data`` to surface the underlying numerical
+        data for every plot panel as a portable CSV. Layout:
+
+        ```
+        # <title>
+        # <trace name>
+        x,y
+        <x>,<y>
+        ...
+        ```
+
+        Multiple traces are emitted as separated sections so the user can
+        see (e.g.) Stick + Broadened spectra in one file. Returns the
+        empty string if the figure has no extractable data — caller treats
+        that as "nothing to copy" rather than writing an empty file.
+        (M-EXPORT / EXPORT.4)
+        """
+        if fig is None:
+            return ""
+        import io as _io
+
+        out = _io.StringIO()
+        if title:
+            out.write(f"# {title}\n")
+        any_trace = False
+        for trace in getattr(fig, "data", []):
+            name = getattr(trace, "name", None) or "trace"
+            x = getattr(trace, "x", None)
+            y = getattr(trace, "y", None)
+            if x is None or y is None:
+                continue
+            out.write(f"\n# {name}\n")
+            out.write("x,y\n")
+            for xi, yi in zip(x, y):
+                out.write(f"{xi},{yi}\n")
+            any_trace = True
+        return out.getvalue() if any_trace else ""
+
+    def _copy_plot_data(
+        self,
+        *,
+        fig: Any,
+        stem: str,
+        title: str,
+        status_widget: widgets.HTML,
+    ) -> None:
+        """Write a Plotly figure's data to CSV + try to copy to clipboard.
+
+        Saves ``<stem>_data_<timestamp>.csv`` into the active result
+        directory (always works) and emits a JS snippet that copies the
+        same CSV to the user's system clipboard via
+        ``navigator.clipboard.writeText`` (best-effort — the API requires
+        a secure context + user-gesture in some browsers; failures are
+        invisible by design). Status widget surfaces the saved path so
+        the user can find the file even when clipboard is unavailable.
+        (M-EXPORT / EXPORT.4)
+        """
+        if fig is None:
+            status_widget.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                "No plot data to copy yet.</span>"
+            )
+            return
+
+        csv_text = self._fig_to_csv(fig, title=title)
+        if not csv_text:
+            status_widget.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                "Figure had no extractable (x, y) traces.</span>"
+            )
+            return
+
+        import json as _json
+        import re as _re
+        from datetime import datetime as _dt
+
+        target_dir = (
+            self._last_result_dir
+            if isinstance(self._last_result_dir, Path)
+            else self._get_results_dir()
+        )
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        safe_stem = _re.sub(r"[^A-Za-z0-9_.-]+", "_", stem.strip()) or "plot"
+        ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S")
+        dest = target_dir / f"{safe_stem}_data_{ts}.csv"
+
+        try:
+            dest.write_text(csv_text, encoding="utf-8")
+        except Exception as exc:
+            status_widget.value = (
+                '<span style="color:#b91c1c;font-size:12px">'
+                f"Write failed: {exc}</span>"
+            )
+            return
+
+        # Best-effort clipboard copy via the browser's clipboard API.
+        # Wrapped in try/catch on the JS side so a permissions error
+        # doesn't show up as a Voilà console exception.
+        from IPython.display import Javascript, display
+
+        try:
+            js_payload = _json.dumps(csv_text)
+            display(
+                Javascript(
+                    "try { navigator.clipboard.writeText("
+                    f"{js_payload}); }} catch (e) {{ /* clipboard unavailable */ }}"
+                )
+            )
+        except Exception:
+            pass  # Clipboard is best-effort; the file is the canonical artifact.
+
+        status_widget.value = (
+            '<span style="color:#16a34a;font-size:12px">'
+            f"Saved CSV: {dest} &mdash; copied to clipboard"
+            "</span>"
+        )
+
+    def _on_ir_copy_data(self, _btn) -> None:
+        self._copy_plot_data(
+            fig=getattr(self, "_last_ir_fig", None),
+            stem="ir_spectrum",
+            title="IR Spectrum",
+            status_widget=self._ir_export_status,
+        )
+
+    def _on_uv_copy_data(self, _btn) -> None:
+        self._copy_plot_data(
+            fig=getattr(self, "_last_uv_fig", None),
+            stem="uv_vis_spectrum",
+            title="UV-Vis Spectrum",
+            status_widget=self._uv_export_status,
+        )
+
+    def _on_orb_copy_data(self, _btn) -> None:
+        self._copy_plot_data(
+            fig=getattr(self, "_last_orb_fig", None),
+            stem="orbital_energy_diagram",
+            title="Orbital Energy Diagram",
+            status_widget=self._orb_export_status,
+        )
+
+    def _on_pes_copy_data(self, _btn) -> None:
+        self._copy_plot_data(
+            fig=getattr(self, "_last_pes_fig", None),
+            stem="pes_scan_profile",
+            title="PES Scan Profile",
+            status_widget=self._pes_export_status,
+        )
+
     def _export_molecule_and_label(self):
         return _exp_export_molecule_and_label(self)
 
@@ -2546,21 +3055,24 @@ class QuantUIApp:
     def _mol_from_result_dir(self, result_dir: Path, data: dict):
         return _hist_mol_from_result_dir(result_dir, data)
 
-    def _history_load_results(self, data: dict, result_dir: Path) -> None:
-        self._activity_begin("Loading history result...")
+    def _history_load_results(
+        self, data: dict, result_dir: Path, *, source_btns: tuple = ()
+    ) -> None:
+        # Activity indicator + button-disable feedback are handled inside the
+        # inner ``history_load_results`` helper now (HIST.1). The wrapper just
+        # forwards source_btns and refreshes the Files tab after the load.
         try:
-            _hist_history_load_results(self, data, result_dir)
-            self._refresh_file_browser()
+            _hist_history_load_results(self, data, result_dir, source_btns=source_btns)
         finally:
-            self._activity_end()
+            self._refresh_file_browser()
 
-    def _history_load_analysis(self, result_dir: Path) -> None:
-        self._activity_begin("Loading history analysis...")
+    def _history_load_analysis(
+        self, result_dir: Path, *, source_btns: tuple = ()
+    ) -> None:
         try:
-            _hist_history_load_analysis(self, result_dir)
-            self._refresh_file_browser()
+            _hist_history_load_analysis(self, result_dir, source_btns=source_btns)
         finally:
-            self._activity_end()
+            self._refresh_file_browser()
 
     def _build_history_context(self, result_dir: Path) -> Optional[_AnalysisContext]:
         return _hist_build_history_context(result_dir, context_cls=_AnalysisContext)
@@ -2588,6 +3100,9 @@ class QuantUIApp:
 
     def _on_cal_stop(self, btn) -> None:
         _run_on_cal_stop(self, btn)
+
+    def _on_cal_skip(self, btn) -> None:
+        _run_on_cal_skip(self, btn)
 
     def _do_calibration(self) -> None:
         _run_do_calibration(self, pyscf_available=_PYSCF_AVAILABLE)
@@ -2731,16 +3246,12 @@ class QuantUIApp:
         if mol.multiplicity > 1 and self.method_dd.value == "RHF":
             self.method_dd.value = "UHF"
 
-        self.viz_output.clear_output()
-        if _display_molecule is not None:
-            with self.viz_output:
-                _display_molecule(
-                    mol,
-                    backend=self._viz_backend,
-                    style=self._viz_style,
-                    lighting=self._viz_lighting,
-                    bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
-                )
+        # BUG B1/B2/B3 (2026-05-25): route through ``_refresh_calc_mol_viewer``
+        # so the viewer renders via an atomic outputs swap rather than the
+        # ``with self.viz_output: display(...)`` pattern that the BUG.7 fix
+        # already replaced for the Analysis tab. The molecule attribute on
+        # the app was set just above; the helper reads it.
+        self._refresh_calc_mol_viewer()
 
         self._update_notes()
 
@@ -2760,6 +3271,18 @@ class QuantUIApp:
         if VISUALIZATION_AVAILABLE:
             _collapsed_children.append(self.viz_controls_box)
         self.mol_input_container.children = _collapsed_children
+
+        # Re-filter seed-geometry dropdowns (Freq + UV-Vis) to only include
+        # prior geo-opts of the now-active molecule (formula match). Best-
+        # effort: failures must not block molecule loading.
+        try:
+            self._refresh_freq_seed_options()
+        except Exception:
+            pass
+        try:
+            self._refresh_tddft_seed_options()
+        except Exception:
+            pass
 
     def _queue_main_thread_callback(self, callback, *args, **kwargs) -> None:
         """Run a callback on the notebook/kernel thread when possible."""
@@ -2886,7 +3409,7 @@ class QuantUIApp:
             self,
             molecule,
             extra_output,
-            display_molecule_fn=_display_molecule,
+            render_html_fn=_render_molecule_html,
         )
 
     def _show_result_log(self, saved_dir: Path, log_text: str) -> None:
@@ -3089,6 +3612,70 @@ class QuantUIApp:
         _scf_converged_t: Optional[float] = None
         _tail_marks: dict[str, float] = {}
 
+        # M-EST / EST.6 (2026-05-25): capture the estimator's pre-run
+        # prediction so we can write a (predicted, actual) record to
+        # ``prediction_log.jsonl`` after the calc completes. The
+        # estimator may return None (insufficient history); we record
+        # that as "no estimate" so the dashboard counts it separately
+        # from "estimate was wrong by N%".
+        _predicted_run_s: Optional[float] = None
+        _predicted_run_confidence: str = "unknown"
+        try:
+            _ct_for_est = {
+                "Single Point": "single_point",
+                "Geometry Opt": "geometry_opt",
+                "Frequency": "frequency",
+                "UV-Vis (TD-DFT)": "tddft",
+                "NMR Shielding": "nmr",
+                "PES Scan": "pes_scan",
+            }.get(self.calc_type_dd.value, "single_point")
+            _nb_for_est = _calc_log.count_basis_functions(
+                mol.atoms, self.basis_dd.value
+            )
+            # Match _update_estimate's GPU-prediction logic so the
+            # recorded predicted_s is what the user SAW in the UI
+            # before they hit Run.
+            _predicted_gpu_used: Optional[bool] = None
+            try:
+                from quantui.gpu_offload import (
+                    _GPU_UNSUPPORTED_METHODS as _GPU_NO,
+                )
+                from quantui.gpu_offload import (
+                    is_gpu_available,
+                )
+
+                _gpu_avail, _ = is_gpu_available()
+                if _gpu_avail and self.method_dd.value.upper() not in _GPU_NO:
+                    _predicted_gpu_used = True
+                else:
+                    _predicted_gpu_used = False
+            except Exception:  # noqa: BLE001 — fall back to device-agnostic
+                _predicted_gpu_used = None
+
+            _est = _calc_log.estimate_time(
+                n_atoms=len(mol.atoms),
+                n_electrons=mol.get_electron_count(),
+                method=self.method_dd.value,
+                basis=self.basis_dd.value,
+                n_basis=_nb_for_est,
+                calc_type=_ct_for_est,
+                gpu_used=_predicted_gpu_used,
+            )
+            if _est is not None:
+                _predicted_run_s = float(_est["seconds"])
+                _predicted_run_confidence = str(_est.get("confidence", "unknown"))
+        except Exception as _est_exc:
+            # Estimator failure here is non-fatal — we just won't have a
+            # predicted_s to compare against. Log to event_log so the
+            # cause is at least surfaced for diagnosis.
+            try:
+                _calc_log.log_event(
+                    "predict_capture_failed",
+                    f"{type(_est_exc).__name__}: {_est_exc}"[:300],
+                )
+            except Exception:  # noqa: BLE001 — telemetry self-guard
+                pass
+
         def _mark(stage: str) -> None:
             _tail_marks[stage] = time.perf_counter()
 
@@ -3174,38 +3761,61 @@ class QuantUIApp:
             _pre_opt: Any = None  # OptimizationResult from Frequency pre-opt step
 
             # Optional QM geometry optimization before non-frequency workflows.
-            # Frequency has dedicated seed/pre-opt handling in its own branch.
-            if self._freq_preopt_cb.value and ct not in ("Geometry Opt", "Frequency"):
+            # Frequency and UV-Vis (TD-DFT) both have dedicated seed/pre-opt
+            # handling in their own branches so they can layer a seed
+            # geometry under the pre-opt step.
+            if self._freq_preopt_cb.value and ct not in (
+                "Geometry Opt",
+                "Frequency",
+                "UV-Vis (TD-DFT)",
+            ):
                 from quantui import optimize_geometry
 
-                self.run_status.value = f"Pre-optimizing geometry before {ct}…"
+                # POLISH.9 (M-POLISH, 2026-05-25): rename user-facing
+                # "Pre-optimisation" → "Geometry optimization". The
+                # wrapped operation is the full DFT geom-opt at the
+                # user's selected method/basis — same code path as the
+                # standalone Geometry Opt calc-type. The LJ classical
+                # pre-opt earlier (around line 3488) keeps its name.
+                self.run_status.value = f"Optimizing geometry before {ct}…"
                 log.write(
-                    f"\n── Pre-optimisation (before {ct}) "
-                    f"────────────────────────────────────\n"
+                    f"\n── Geometry optimization (before {ct}) "
+                    f"────────────────────────────\n"
                 )
-                _pre_opt = optimize_geometry(
-                    molecule=calc_mol,
-                    method=self.method_dd.value,
-                    basis=self.basis_dd.value,
-                    progress_stream=log,  # type: ignore[arg-type]
-                )
-                calc_mol = _pre_opt.molecule
-                _conv_str = (
-                    "converged" if _pre_opt.converged else "did NOT fully converge"
-                )
-                log.write(
-                    f"\nPre-optimisation {_conv_str} in {_pre_opt.n_steps} steps."
-                    f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
-                )
-                if not _pre_opt.converged:
-                    log.write(
-                        "⚠ Pre-optimisation did not fully converge — "
-                        "proceeding with best available geometry.\n\n"
+                # BUG C (2026-05-25): catch numerical failures (e.g.
+                # singular matrix in cho_solve on tight rings) and fall
+                # back to the user's input geometry rather than killing
+                # the whole calc.
+                try:
+                    _pre_opt = optimize_geometry(
+                        molecule=calc_mol,
+                        method=self.method_dd.value,
+                        basis=self.basis_dd.value,
+                        progress_stream=log,  # type: ignore[arg-type]
                     )
-                if ct != "Single Point":
-                    _run_required_final_single_point(
-                        calc_mol,
-                        f"after pre-optimisation before {ct}",
+                    calc_mol = _pre_opt.molecule
+                    _conv_str = (
+                        "converged" if _pre_opt.converged else "did NOT fully converge"
+                    )
+                    log.write(
+                        f"\nGeometry optimization {_conv_str} in {_pre_opt.n_steps} steps."
+                        f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
+                    )
+                    if not _pre_opt.converged:
+                        log.write(
+                            "⚠ Geometry optimization did not fully converge — "
+                            "proceeding with best available geometry.\n\n"
+                        )
+                    if ct != "Single Point":
+                        _run_required_final_single_point(
+                            calc_mol,
+                            f"after geometry optimization before {ct}",
+                        )
+                except Exception as _pre_exc:
+                    log.write(
+                        f"\n⚠ Geometry optimization failed: {_pre_exc}\n"
+                        "  Proceeding with the user-provided geometry "
+                        "as-is.\n\n"
                     )
 
             if ct == "Geometry Opt":
@@ -3270,37 +3880,61 @@ class QuantUIApp:
                         f"Atoms: {len(calc_mol.atoms)}\n\n"
                     )
 
-                # ── Step 2: optional geometry pre-optimisation ────────────────
+                # ── Step 2: optional geometry optimization ────────────────────
+                #
+                # POLISH.9 (M-POLISH, 2026-05-25): renamed from
+                # "pre-optimisation" — the wrapped operation is a full
+                # DFT geometry optimization at the user's selected
+                # method/basis. The LJ-classical pre-opt is in
+                # quantui/preopt.py and keeps its "pre-opt" name.
+                #
+                # BUG C (2026-05-25): geom-opt can hit a singular matrix
+                # in PySCF's ``cho_solve`` on tight rings (e.g. aromatic
+                # benzene with B3LYP/6-31G). That raises out of the
+                # optimizer and used to kill the whole calc. Wrap it: on
+                # any failure log to the user log, keep ``calc_mol`` as
+                # the input geometry, and proceed to the freq analysis —
+                # the user can iterate if their input was actually wrong.
                 if self._freq_preopt_cb.value:
                     from quantui import optimize_geometry
 
-                    self.run_status.value = "Pre-optimizing geometry before frequency…"
+                    self.run_status.value = "Optimizing geometry before frequency…"
                     log.write(
-                        "\n── Pre-optimisation (before frequency analysis) ──────────────────\n"
+                        "\n── Geometry optimization (before frequency analysis) ──────────────────\n"
                     )
-                    _pre_opt = optimize_geometry(
-                        molecule=calc_mol,
-                        method=self.method_dd.value,
-                        basis=self.basis_dd.value,
-                        progress_stream=log,  # type: ignore[arg-type]
-                    )
-                    calc_mol = _pre_opt.molecule
-                    _conv_str = (
-                        "converged" if _pre_opt.converged else "did NOT fully converge"
-                    )
-                    log.write(
-                        f"\nPre-optimisation {_conv_str} in {_pre_opt.n_steps} steps."
-                        f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
-                    )
-                    if not _pre_opt.converged:
-                        log.write(
-                            "⚠ Pre-optimisation did not fully converge — "
-                            "proceeding with best available geometry.\n\n"
+                    try:
+                        _pre_opt = optimize_geometry(
+                            molecule=calc_mol,
+                            method=self.method_dd.value,
+                            basis=self.basis_dd.value,
+                            progress_stream=log,  # type: ignore[arg-type]
                         )
-                    _run_required_final_single_point(
-                        calc_mol,
-                        "after frequency pre-optimisation",
-                    )
+                        calc_mol = _pre_opt.molecule
+                        _conv_str = (
+                            "converged"
+                            if _pre_opt.converged
+                            else "did NOT fully converge"
+                        )
+                        log.write(
+                            f"\nGeometry optimization {_conv_str} in {_pre_opt.n_steps} steps."
+                            f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
+                        )
+                        if not _pre_opt.converged:
+                            log.write(
+                                "⚠ Geometry optimization did not fully converge — "
+                                "proceeding with best available geometry.\n\n"
+                            )
+                        _run_required_final_single_point(
+                            calc_mol,
+                            "after geometry optimization before frequency",
+                        )
+                    except Exception as _pre_exc:
+                        log.write(
+                            f"\n⚠ Geometry optimization failed: {_pre_exc}\n"
+                            "  Proceeding with the user-provided geometry "
+                            "as-is; if the molecule was already near a "
+                            "stationary point this is usually fine.\n\n"
+                        )
 
                 # ── Step 3: frequency analysis ────────────────────────────────
                 self.run_status.value = "Computing frequencies (SCF + Hessian)…"
@@ -3339,9 +3973,72 @@ class QuantUIApp:
                 }
                 save_type = "frequency"
             elif ct == "UV-Vis (TD-DFT)":
-                self.run_status.value = "Running TD-DFT excited states..."
                 from quantui.tddft_calc import run_tddft_calc
 
+                # ── Step 1: resolve seed geometry ─────────────────────────────
+                _tddft_seed_path = self._tddft_seed_dd.value
+                if _tddft_seed_path:
+                    from quantui.results_storage import load_trajectory
+
+                    self.run_status.value = "Loading seed geometry from history…"
+                    _seed_traj, _ = load_trajectory(Path(_tddft_seed_path))
+                    calc_mol = _seed_traj[-1]
+                    log.write(
+                        f"\nSeed geometry loaded from: {Path(_tddft_seed_path).name}\n"
+                        f"  Formula: {calc_mol.get_formula()}  "
+                        f"Atoms: {len(calc_mol.atoms)}\n\n"
+                    )
+
+                # ── Step 2: optional geometry optimization ────────────────────
+                # POLISH.9 (M-POLISH, 2026-05-25): renamed from
+                # "pre-optimisation" — DFT geom-opt is just geom-opt.
+                if self._freq_preopt_cb.value:
+                    from quantui import optimize_geometry
+
+                    self.run_status.value = (
+                        "Optimizing geometry before UV-Vis (TD-DFT)…"
+                    )
+                    log.write(
+                        "\n── Geometry optimization (before UV-Vis (TD-DFT)) "
+                        "─────────────\n"
+                    )
+                    # BUG C (2026-05-25): catch numerical failures and
+                    # fall back to the user's seed geometry rather than
+                    # killing the whole TD-DFT calc.
+                    try:
+                        _pre_opt = optimize_geometry(
+                            molecule=calc_mol,
+                            method=self.method_dd.value,
+                            basis=self.basis_dd.value,
+                            progress_stream=log,  # type: ignore[arg-type]
+                        )
+                        calc_mol = _pre_opt.molecule
+                        _conv_str = (
+                            "converged"
+                            if _pre_opt.converged
+                            else "did NOT fully converge"
+                        )
+                        log.write(
+                            f"\nGeometry optimization {_conv_str} in {_pre_opt.n_steps} steps."
+                            f"  E = {_pre_opt.energies_hartree[-1]:.8f} Ha\n\n"
+                        )
+                        if not _pre_opt.converged:
+                            log.write(
+                                "⚠ Geometry optimization did not fully converge — "
+                                "proceeding with best available geometry.\n\n"
+                            )
+                        _run_required_final_single_point(
+                            calc_mol,
+                            "after geometry optimization before UV-Vis",
+                        )
+                    except Exception as _pre_exc:
+                        log.write(
+                            f"\n⚠ Geometry optimization failed: {_pre_exc}\n"
+                            "  Proceeding with the seed geometry as-is.\n\n"
+                        )
+
+                # ── Step 3: TD-DFT excited-state calculation ─────────────────
+                self.run_status.value = "Running TD-DFT excited states..."
                 result = run_tddft_calc(
                     molecule=calc_mol,
                     method=self.method_dd.value,
@@ -3526,6 +4223,12 @@ class QuantUIApp:
                     spectra=save_spectra,
                 )
                 self._last_result_dir = _saved_dir
+                # M-EXPORT / EXPORT.5: result folder is now on disk —
+                # the "Export bundle (.zip)" button has something to zip.
+                try:
+                    self._export_bundle_btn.disabled = False
+                except Exception:
+                    pass
                 _saved_data = load_result(_saved_dir)
                 save_thumbnail(_saved_dir, _saved_data)
                 _ana_ctx.result_dir = _saved_dir
@@ -3540,6 +4243,32 @@ class QuantUIApp:
                     _e_list = getattr(result, "energies_hartree", [])
                     if _traj:
                         save_trajectory(_saved_dir, _traj, _e_list or [])
+                        # M-EXPORT / EXPORT.3 + EXPORT.7: also write
+                        # external-tool-friendly trajectory formats.
+                        # Multi-frame XYZ (any viewer) and ASE .traj
+                        # (ASE-GUI + ASE Python post-processing). Both
+                        # best-effort: failures are caught by the outer
+                        # save try/except so the calc still completes.
+                        try:
+                            from quantui.results_storage import (
+                                save_trajectory_ase as _save_traj_ase,
+                            )
+                            from quantui.results_storage import (
+                                save_trajectory_xyz as _save_traj_xyz,
+                            )
+
+                            _save_traj_xyz(
+                                _saved_dir,
+                                frames=_traj,
+                                energies=_e_list or [],
+                            )
+                            _save_traj_ase(
+                                _saved_dir,
+                                frames=_traj,
+                                energies=_e_list or [],
+                            )
+                        except Exception:
+                            pass
                 # Persist pre-opt geometry trajectory for Frequency runs (DEC-007).
                 if ct == "Frequency" and _pre_opt is not None:
                     _pre_traj = getattr(_pre_opt, "trajectory", None)
@@ -3554,6 +4283,35 @@ class QuantUIApp:
                 # Persist MO data for orbital diagram + isosurface replay.
                 if ct in ("Single Point", "Geometry Opt", "Frequency"):
                     save_orbitals(_saved_dir, result)
+                # M-EXPORT / EXPORT.1+2: write a Molden-format companion
+                # file so users can open results in Avogadro / IQmol /
+                # Jmol. Best-effort — failures are swallowed by the
+                # outer try block above and the calc still completes.
+                # For SP / GeoOpt this writes orbitals + structure; for
+                # Frequency it writes structure + [FREQ] / [FR-NORM-COORD]
+                # blocks so Avogadro can animate vibrations directly.
+                if ct in ("Single Point", "Geometry Opt", "Frequency"):
+                    try:
+                        from quantui.results_storage import (
+                            save_molden as _save_molden,
+                        )
+
+                        _save_molden(
+                            _saved_dir,
+                            mo_energy_hartree=getattr(
+                                result, "mo_energy_hartree", None
+                            ),
+                            mo_occ=getattr(result, "mo_occ", None),
+                            mo_coeff=getattr(result, "mo_coeff", None),
+                            pyscf_mol_atom=getattr(result, "pyscf_mol_atom", None),
+                            pyscf_mol_basis=getattr(result, "pyscf_mol_basis", None),
+                            charge=int(getattr(calc_mol, "charge", 0)),
+                            multiplicity=int(getattr(calc_mol, "multiplicity", 1)),
+                            frequencies_cm1=getattr(result, "frequencies_cm1", None),
+                            normal_modes=getattr(result, "displacements", None),
+                        )
+                    except Exception:
+                        pass
                 self._queue_main_thread_callback(self._refresh_results_browser)
                 self._queue_main_thread_callback(self._populate_compare_list)
                 self._queue_main_thread_callback(
@@ -3604,13 +4362,38 @@ class QuantUIApp:
                     ),
                     n_cores=1,
                     calc_type=save_type,
+                    gpu_used=getattr(result, "gpu_used", None),
+                    gpu_name=getattr(result, "gpu_name", None),
                 )
                 _calc_log.log_event(
                     "calc_done",
                     f"{result.method}/{result.basis} on {result.formula}",
                     elapsed_s=round(_elapsed_for_est, 2),
                     converged=result.converged,
+                    gpu_used=bool(getattr(result, "gpu_used", False)),
+                    gpu_name=getattr(result, "gpu_name", None),
                 )
+                # M-EST / EST.6: persist the (predicted, actual) pair to
+                # ``prediction_log.jsonl``. ``_predicted_run_s`` was
+                # captured at the top of _do_run via the same
+                # estimate_time(...) call that drives the UI estimate;
+                # ``_elapsed_for_est`` is the actual wall-time the calc
+                # took. The analytics dashboard reads both to surface
+                # accuracy metrics + the "consider re-calibrating"
+                # banner when the median error exceeds threshold.
+                try:
+                    _calc_log.log_prediction(
+                        predicted_s=_predicted_run_s,
+                        actual_s=_elapsed_for_est,
+                        method=result.method,
+                        basis=result.basis,
+                        calc_type=save_type,
+                        formula=result.formula,
+                        confidence=_predicted_run_confidence,
+                        gpu_used=getattr(result, "gpu_used", None),
+                    )
+                except Exception:  # noqa: BLE001 — telemetry self-guard
+                    pass
                 self._update_estimate()
             except Exception:
                 pass
@@ -3793,7 +4576,16 @@ class QuantUIApp:
         return _wrapper
 
     def _goto_output_tab(self) -> None:
-        self.root_tab.selected_index = 5
+        # POLISH.8 (M-POLISH, 2026-05-25): the standalone Log tab is
+        # gone; the PySCF output log now lives in an Accordion inside
+        # the History tab (index 3). Switch tabs + expand the log
+        # accordion so the user lands directly on the log content.
+        self.root_tab.selected_index = 3
+        if hasattr(self, "_history_log_accordion"):
+            try:
+                self._history_log_accordion.selected_index = 0
+            except Exception:  # noqa: BLE001 — best-effort UI tweak
+                pass
 
     def _render_log(self, text: str, source_label: str = "") -> None:
         import html as _html_mod

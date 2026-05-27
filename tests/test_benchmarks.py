@@ -152,16 +152,26 @@ class TestProgressCallback:
         calls = []
         stop = threading.Event()
 
-        # Only run first 2 steps for speed
-        with patch("quantui.benchmarks.BENCHMARK_SUITE", BENCHMARK_SUITE[:2]):
+        # Only run first 2 steps for speed. ``_MODE_TO_SUITE["tier1"]`` is the
+        # actual binding ``run_calibration`` reads at call time — patching
+        # ``BENCHMARK_SUITE`` alone no longer propagates, since
+        # ``BENCHMARK_SUITE_TIER1`` aliases the original list at import time.
+        with patch.dict(
+            "quantui.benchmarks._MODE_TO_SUITE",
+            {"tier1": BENCHMARK_SUITE[:2]},
+        ):
             run_calibration(
                 progress_cb=lambda *a: calls.append(a),
                 stop_event=stop,
                 timeout_per_step=60.0,
             )
 
-        assert len(calls) == 2
-        step_n, total, label, status, elapsed = calls[0]
+        # Filter to terminal per-step calls; intermediate "running" heartbeats
+        # (emitted every ~500ms while a step is in-flight) are an implementation
+        # detail of the live-status display and should not be counted here.
+        terminal = [c for c in calls if c[3] != "running"]
+        assert len(terminal) == 2
+        step_n, total, label, status, elapsed = terminal[0]
         assert step_n == 1
         assert total == 2
         assert isinstance(label, str)

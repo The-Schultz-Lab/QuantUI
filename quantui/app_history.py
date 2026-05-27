@@ -3,11 +3,62 @@
 from __future__ import annotations
 
 import json as _json
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional
 
 import ipywidgets as widgets
 from IPython.display import HTML, display
+
+
+class _LoadTimer:
+    """Per-stage timing collector for a history-load operation (HIST.2).
+
+    Used as: open one ``_LoadTimer`` at the top of each loader, wrap each
+    interesting sub-stage in ``with timer.stage("name"):``, then call
+    ``timer.emit(status=...)`` exactly once (from the loader's ``finally``
+    block). One ``history_load_timing`` event is appended to
+    ``event_log.jsonl`` per load with the total elapsed time and a per-stage
+    breakdown. The data drives the HIST.2 latency-optimization pass — until
+    we know which stage dominates, we don't know which to optimize.
+
+    Failures inside ``calc_log.log_event`` are swallowed: telemetry must
+    never block the actual load.
+    """
+
+    def __init__(self, op_name: str, result_dir: Path) -> None:
+        self.op_name = op_name
+        self.result_dir = result_dir
+        self._t0 = time.perf_counter()
+        self._stages: dict[str, float] = {}
+
+    @contextmanager
+    def stage(self, name: str):
+        s0 = time.perf_counter()
+        try:
+            yield
+        finally:
+            self._stages[name] = round((time.perf_counter() - s0) * 1000.0, 2)
+
+    def emit(self, status: str = "ok") -> None:
+        total_ms = round((time.perf_counter() - self._t0) * 1000.0, 2)
+        try:
+            from quantui import calc_log as _clog
+
+            stage_msg = " ".join(f"{k}={v}ms" for k, v in self._stages.items())
+            _clog.log_event(
+                "history_load_timing",
+                f"{self.op_name} {self.result_dir.name} "
+                f"total={total_ms}ms status={status} {stage_msg}".rstrip(),
+                op=self.op_name,
+                result_dir=self.result_dir.name,
+                total_ms=total_ms,
+                status=status,
+                **{f"{k}_ms": v for k, v in self._stages.items()},
+            )
+        except Exception:
+            pass
 
 
 def on_past_dd_changed(app: Any, change: dict[str, Any], *, layout_fn: Any) -> None:
@@ -44,10 +95,14 @@ def on_past_dd_changed(app: Any, change: dict[str, Any], *, layout_fn: Any) -> N
                 tooltip="Load analysis panels and navigate to the Analysis tab",
             )
             btn_results.on_click(
-                lambda _, d=data, rd=result_dir: app._history_load_results(d, rd)
+                lambda _, d=data, rd=result_dir, br=btn_results, ba=btn_analysis: (
+                    app._history_load_results(d, rd, source_btns=(br, ba))
+                )
             )
             btn_analysis.on_click(
-                lambda _, rd=result_dir: app._history_load_analysis(rd)
+                lambda _, rd=result_dir, br=btn_results, ba=btn_analysis: (
+                    app._history_load_analysis(rd, source_btns=(br, ba))
+                )
             )
             display(
                 widgets.HBox(
@@ -66,6 +121,10 @@ def on_view_log(app: Any, btn: Any) -> None:
         return
     result_dir = Path(path_str)
     app._last_result_dir = result_dir
+    try:
+        app._export_bundle_btn.disabled = False
+    except Exception:
+        pass
     try:
         import quantui.calc_log as _calc_log
 
@@ -163,46 +222,170 @@ def mol_from_result_dir(result_dir: Path, data: dict[str, Any]) -> Any:
     return None
 
 
-def history_load_results(app: Any, data: dict[str, Any], result_dir: Path) -> None:
-    """Display a history result card in the Results tab and navigate there."""
-    app._last_result_dir = result_dir
-    app.result_output.clear_output()
-    with app.result_output:
-        display(HTML(app._format_past_result(data, result_dir=result_dir)))
-    app._result_dir_label.layout.display = "none"
-    # Also show 3D structure if geometry is recoverable
-    mol = app._mol_from_result_dir(result_dir, data)
-    if mol is not None:
-        app._show_result_3d(mol)
-    app.root_tab.selected_index = 1
+def _begin_history_load(app: Any, message: str, source_btns: tuple) -> None:
+    """Show immediate feedback when a history-load action starts (HIST.1).
 
-
-def history_load_analysis(app: Any, result_dir: Path) -> None:
-    """Load analysis panels for a history result and navigate to Analysis tab."""
-    app._last_result_dir = result_dir
-    log_path = result_dir / "pyscf.log"
-    text = (
-        log_path.read_text(encoding="utf-8", errors="replace")
-        if log_path.exists()
-        else "(No pyscf.log found for this result.)"
-    )
-    app._update_log_panel(result_dir.name if log_path.exists() else "", text)
-    app._show_result_log(result_dir, text)
-
-    ctx = app._build_history_context(result_dir)
-    if ctx is not None:
-        data_stub = {"calc_type": ctx.calc_type, "spectra": ctx.spectra_data}
+    Lights the toolbar activity indicator and disables the source buttons so
+    a second click can't fire a parallel load. Both actions are best-effort —
+    failure to update a button (e.g. it was already destroyed) must not block
+    the actual load.
+    """
+    for btn in source_btns:
         try:
-            mol = app._mol_from_result_dir(result_dir, data_stub)
-            if mol is not None:
-                app._show_result_3d(mol, extra_output=app._analysis_mol_output)
-            else:
-                app._analysis_mol_output.clear_output()
+            btn.disabled = True
         except Exception:
             pass
-        app._apply_analysis_context(ctx)
+    try:
+        app._activity_begin(message, kind="ui")
+    except Exception:
+        pass
 
-    app.root_tab.selected_index = 2
+
+def _end_history_load(app: Any, source_btns: tuple) -> None:
+    """Restore UI state after a history-load action finishes (HIST.1).
+
+    Mirrors :func:`_begin_history_load`. Called from the loader's ``finally``
+    block so the activity indicator + buttons are always restored, even when
+    the load raises.
+    """
+    try:
+        app._activity_end(kind="ui")
+    except Exception:
+        pass
+    for btn in source_btns:
+        try:
+            btn.disabled = False
+        except Exception:
+            pass
+
+
+def history_load_results(
+    app: Any,
+    data: dict[str, Any],
+    result_dir: Path,
+    *,
+    source_btns: tuple = (),
+) -> None:
+    """Display a history result card in the Results tab and navigate there.
+
+    ``source_btns`` is an optional tuple of button widgets to disable while
+    the load is in flight (HIST.1 immediate-loading-feedback contract). Tests
+    and callers that don't have a button reference can omit it.
+
+    Stage timings are emitted as a single ``history_load_timing`` event on
+    completion (HIST.2 — drives latency-optimization decisions).
+    """
+    _begin_history_load(app, "Loading history result…", source_btns)
+    timer = _LoadTimer("history_load_results", result_dir)
+    status = "ok"
+    try:
+        app._last_result_dir = result_dir
+        try:
+            app._export_bundle_btn.disabled = False
+        except Exception:
+            pass
+        with timer.stage("format_result_html"):
+            app.result_output.clear_output()
+            with app.result_output:
+                display(HTML(app._format_past_result(data, result_dir=result_dir)))
+            app._result_dir_label.layout.display = "none"
+        with timer.stage("mol_reconstruction"):
+            mol = app._mol_from_result_dir(result_dir, data)
+        if mol is not None:
+            with timer.stage("show_result_3d"):
+                app._show_result_3d(mol)
+        # Also populate the Analysis tab so the two tabs stay in sync.
+        # Without this, clicking "View Results" left Analysis showing the
+        # previously-loaded calc (or empty panels), which surprised users
+        # who expected loading a history item to refresh both views.
+        with timer.stage("build_context"):
+            ctx = app._build_history_context(result_dir)
+        if ctx is not None:
+            with timer.stage("analysis_mol_render"):
+                try:
+                    if mol is not None:
+                        app._show_result_3d(mol, extra_output=app._analysis_mol_output)
+                    else:
+                        app._analysis_mol_output.clear_output()
+                except Exception:
+                    pass
+            with timer.stage("apply_analysis_context"):
+                app._apply_analysis_context(ctx)
+        with timer.stage("nav_tab"):
+            app.root_tab.selected_index = 1
+    except Exception:
+        status = "error"
+        raise
+    finally:
+        timer.emit(status=status)
+        _end_history_load(app, source_btns)
+
+
+def history_load_analysis(
+    app: Any,
+    result_dir: Path,
+    *,
+    source_btns: tuple = (),
+) -> None:
+    """Load analysis panels for a history result and navigate to Analysis tab.
+
+    ``source_btns`` is an optional tuple of button widgets to disable while
+    the load is in flight (HIST.1 immediate-loading-feedback contract). Tests
+    and callers that don't have a button reference can omit it.
+
+    Stage timings are emitted as a single ``history_load_timing`` event on
+    completion (HIST.2 — drives latency-optimization decisions). Stages cover
+    the four expected hotspots: pyscf.log read, context build, molecule
+    reconstruction, 3D viewer render, and the analysis-context registry walk.
+    """
+    _begin_history_load(app, "Loading analysis from history…", source_btns)
+    timer = _LoadTimer("history_load_analysis", result_dir)
+    status = "ok"
+    try:
+        app._last_result_dir = result_dir
+        try:
+            app._export_bundle_btn.disabled = False
+        except Exception:
+            pass
+        with timer.stage("read_pyscf_log"):
+            log_path = result_dir / "pyscf.log"
+            text = (
+                log_path.read_text(encoding="utf-8", errors="replace")
+                if log_path.exists()
+                else "(No pyscf.log found for this result.)"
+            )
+        with timer.stage("update_log_panel"):
+            app._update_log_panel(result_dir.name if log_path.exists() else "", text)
+            app._show_result_log(result_dir, text)
+
+        with timer.stage("build_context"):
+            ctx = app._build_history_context(result_dir)
+        if ctx is not None:
+            data_stub = {"calc_type": ctx.calc_type, "spectra": ctx.spectra_data}
+            with timer.stage("mol_reconstruction"):
+                try:
+                    mol = app._mol_from_result_dir(result_dir, data_stub)
+                except Exception:
+                    mol = None
+            with timer.stage("show_result_3d"):
+                try:
+                    if mol is not None:
+                        app._show_result_3d(mol, extra_output=app._analysis_mol_output)
+                    else:
+                        app._analysis_mol_output.clear_output()
+                except Exception:
+                    pass
+            with timer.stage("apply_analysis_context"):
+                app._apply_analysis_context(ctx)
+
+        with timer.stage("nav_tab"):
+            app.root_tab.selected_index = 2
+    except Exception:
+        status = "error"
+        raise
+    finally:
+        timer.emit(status=status)
+        _end_history_load(app, source_btns)
 
 
 def build_history_context(result_dir: Path, *, context_cls: Any) -> Optional[Any]:

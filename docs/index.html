@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>QuantUI — An open-source frontend for DFT and post-HF quantum chemistry</title>
-  <meta name="description" content="QuantUI is a powerful open-source frontend for PySCF — DFT, MP2, TD-DFT, NMR, geometry optimization, frequency analysis, PES scans, and interactive 3D visualization, running locally in Jupyter or Voilà.">
-  <meta property="og:title" content="QuantUI — A frontend for open-source DFT">
-  <meta property="og:description" content="PySCF in an interactive Jupyter/Voilà UI. DFT, post-HF, NMR, UV-Vis, frequencies, PES scans, and 3D structures — all local, no cluster required.">
+  <title>QuantUI — Free, open, and interactive quantum chemistry</title>
+  <meta name="description" content="QuantUI is a free, open-source frontend for PySCF — DFT, MP2, CCSD, CCSD(T), TD-DFT, NMR, geometry optimization, frequency analysis, PES scans, optional NVIDIA GPU offload, and interactive 3D visualization, running locally in Jupyter or Voilà.">
+  <meta property="og:title" content="QuantUI — Free, open, and interactive quantum chemistry">
+  <meta property="og:description" content="PySCF in an interactive Jupyter/Voilà UI. DFT, MP2, CCSD, CCSD(T), NMR, UV-Vis, frequencies, PES scans, GPU offload, and 3D structures — all local, no cluster required.">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary">
   <meta name="theme-color" content="#0f172a">
@@ -354,16 +354,18 @@
 
       <div class="hero__text">
         <div class="hero__eyebrow">
-          <span class="pill">Open-source DFT frontend</span>
+          <span class="pill">Open-source PySCF frontend</span>
           <span class="pill pill--teal">No cluster required</span>
+          <span class="pill pill--teal">GPU-ready</span>
         </div>
-        <h1 class="hero__title">A powerful frontend for<br>open-source quantum chemistry</h1>
+        <h1 class="hero__title">Free, open, and<br>interactive quantum chemistry</h1>
         <p class="hero__subtitle">
           QuantUI puts <a class="hero__link" href="https://pyscf.org" target="_blank" rel="noopener">PySCF</a>
-          behind an interactive Jupyter/Voil&agrave; UI. Run DFT, MP2, TD-DFT,
-          NMR, geometry optimization, frequencies, and PES scans &mdash;
-          visualize structures, orbitals, IR and UV-Vis spectra, all on
-          your laptop.
+          behind an interactive Jupyter/Voil&agrave; UI. Run DFT, MP2, CCSD,
+          CCSD(T), TD-DFT, NMR, geometry optimization, frequencies, and
+          PES scans &mdash; visualize structures, orbitals, IR and UV-Vis
+          spectra, all on your laptop with optional NVIDIA GPU offload via
+          <a class="hero__link" href="https://github.com/pyscf/gpu4pyscf" target="_blank" rel="noopener">gpu4pyscf</a>.
         </p>
         <div class="hero__actions">
           <a class="btn btn--primary" href="https://github.com/The-Schultz-Lab/QuantUI">
@@ -374,7 +376,7 @@
         <div class="hero__meta">
           <span class="hero__stat">Python 3.9&ndash;3.11</span>
           <span class="hero__sep">&middot;</span>
-          <span class="hero__stat">~1000 tests</span>
+          <span class="hero__stat">1280+ tests</span>
           <span class="hero__sep">&middot;</span>
           <span class="hero__stat">MIT License</span>
           <span class="hero__sep">&middot;</span>
@@ -459,8 +461,8 @@
         <div class="feature-card__icon">⚡</div>
         <div class="feature-card__title">Calculations</div>
         <p class="feature-card__body">
-          RHF, UHF, nine DFT functionals, and MP2 &mdash; with six
-          calculation types: single point, geometry optimization,
+          RHF, UHF, nine DFT functionals, MP2, CCSD, and CCSD(T) &mdash;
+          with six calculation types: single point, geometry optimization,
           frequencies/thermochemistry, TD-DFT UV-Vis, NMR shielding,
           and 1D PES scans. PCM implicit solvation included.
         </p>
@@ -481,10 +483,51 @@
         <div class="feature-card__icon">📂</div>
         <div class="feature-card__title">Exports &amp; History</div>
         <p class="feature-card__body">
-          Every calculation auto-saves to a timestamped directory and
-          can be replayed after a kernel restart. Export structures as
-          XYZ, MOL/SDF, or PDB; spectra as standalone HTML; or any run
-          as a runnable <code class="inline-code">.py</code> script.
+          Every calc auto-saves to a timestamped directory and replays
+          after a kernel restart. Export structures (XYZ, MOL/SDF, PDB),
+          orbital data (Molden), trajectories (multi-frame XYZ, ASE
+          <code class="inline-code">.traj</code>), cube files, spectra
+          as HTML, full result bundles as <code class="inline-code">.zip</code>,
+          or any run as a standalone <code class="inline-code">.py</code> script.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="feature-card__icon">🚀</div>
+        <div class="feature-card__title">GPU Acceleration</div>
+        <p class="feature-card__body">
+          Optional NVIDIA GPU offload via
+          <a class="hero__link" href="https://github.com/pyscf/gpu4pyscf" target="_blank" rel="noopener">gpu4pyscf</a>
+          &mdash; RHF, UHF, RKS/UKS DFT, and TD-DFT auto-migrate to GPU
+          when available. Numerical IR-intensity SCFs also offload. Set
+          <code class="inline-code">QUANTUI_DISABLE_GPU=1</code> to force
+          CPU; the result card always shows which device produced the numbers.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="feature-card__icon">📈</div>
+        <div class="feature-card__title">Time Estimator &amp; Calibration</div>
+        <p class="feature-card__body">
+          Four-tier calibration suite anchors a per-machine time-prediction
+          model with GPU-vs-CPU partitioning, IQR outlier rejection, and
+          variance-aware confidence labels. Pre-run estimates show in the
+          Calculate tab; predicted-vs-actual accuracy accrues automatically
+          in the analytics dashboard.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="feature-card__icon">⌨️</div>
+        <div class="feature-card__title">CLI &amp; Analytics</div>
+        <p class="feature-card__body">
+          The <code class="inline-code">quantui</code> CLI inspects the
+          event log (<code class="inline-code">log tail</code>), probes
+          GPU availability (<code class="inline-code">gpu check</code>),
+          and builds a self-contained HTML analytics dashboard
+          (<code class="inline-code">analytics build --open</code>) with
+          GPU-vs-CPU speedup tables, method usage, and estimator-accuracy
+          tracking.
         </p>
       </div>
 
@@ -637,7 +680,7 @@ voila notebooks/molecule_computations.ipynb</code></pre>
   <div class="container--narrow">
     <h2 class="section__title">Supported calculations</h2>
     <p class="section__subtitle">
-      Six calculation types over twelve methods and nine basis sets,
+      Six calculation types over fourteen methods and nine basis sets,
       all dispatched through a single Calculate tab.
     </p>
 
@@ -679,7 +722,7 @@ voila notebooks/molecule_computations.ipynb</code></pre>
     </div>
 
     <p class="section__subtitle section__subtitle--mid">
-      Twelve methods, grouped by family:
+      Fourteen methods, grouped by family:
     </p>
     <div class="table-wrap">
       <table class="data-table">
@@ -707,8 +750,8 @@ voila notebooks/molecule_computations.ipynb</code></pre>
           <tr>
             <td><strong>Post-HF</strong></td>
             <td>
-              MP2<br>
-              <span class="td-muted">Second-order M&oslash;ller&ndash;Plesset for accurate small-molecule energies</span>
+              MP2, CCSD, CCSD(T)<br>
+              <span class="td-muted">M&oslash;ller&ndash;Plesset (O(N&#8309;)) for fast post-HF; coupled cluster (O(N&#8310;) singles+doubles, O(N&#8311;) with perturbative triples) for benchmark-quality small-molecule energies</span>
             </td>
           </tr>
           <tr>
@@ -764,6 +807,7 @@ voila notebooks/molecule_computations.ipynb</code></pre>
         <a href="https://github.com/The-Schultz-Lab" target="_blank" rel="noopener">Schultz Lab</a>
         <a href="https://github.com/The-Schultz-Lab/QuantUI" target="_blank" rel="noopener">Repository</a>
         <a href="https://github.com/The-Schultz-Lab/QuantUI/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
+        <a href="https://github.com/The-Schultz-Lab/QuantUI/blob/main/docs/IMPORTING-INTO-AVOGADRO.md" target="_blank" rel="noopener">Import into Avogadro</a>
         <a href="https://github.com/The-Schultz-Lab/QuantUI/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
       </nav>
     </div>

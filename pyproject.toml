@@ -37,6 +37,11 @@ dependencies = [
     "plotlymol>=0.2.1",
 ]
 
+[project.scripts]
+# ``quantui`` CLI — small toolkit for inspecting QuantUI state from
+# the terminal (``quantui log tail -n 50``, etc.). See ``quantui/cli.py``.
+quantui = "quantui.cli:main"
+
 [tool.setuptools]
 packages = ["quantui"]
 
@@ -62,6 +67,31 @@ ase = [
 app = [
     "voila>=0.5.0",
     "ipykernel>=6.0.0",
+]
+
+# GPU acceleration via gpu4pyscf + cupy (M-GPU). Linux + NVIDIA CUDA only.
+# When installed, ``quantui.gpu_offload`` auto-detects + migrates SCF
+# objects via ``mf.to_gpu()``. Set ``QUANTUI_DISABLE_GPU=1`` to force CPU
+# at runtime even when these are available. Method coverage per the
+# gpu4pyscf README: RHF/UHF/RKS/UKS fully supported; MP2/CCSD experimental;
+# CCSD(T) explicitly unsupported (QuantUI's dispatcher skips it).
+#
+# IMPORTANT: gpu4pyscf and cupy publish CUDA-suffixed wheels — pick the
+# extra matching your NVIDIA driver's CUDA version (see ``nvidia-smi``).
+# The bare ``gpu4pyscf`` / ``cupy`` packages on PyPI are source sdists
+# that require a local CUDA Toolkit (``nvcc``) to build; the suffixed
+# wheels (``-cuda12x``, ``-cuda13x``) are prebuilt binaries and do NOT.
+# See the "Optional: GPU acceleration" section in README.md for the
+# full step-by-step including the ``nvidia-smi`` check.
+gpu-cuda12x = [
+    "gpu4pyscf-cuda12x",
+    "cupy-cuda12x",
+    "cutensor-cu12",
+]
+gpu-cuda13x = [
+    "gpu4pyscf-cuda13x",
+    "cupy-cuda13x",
+    "cutensor-cu13",
 ]
 
 # Notebook smoke-test dependencies

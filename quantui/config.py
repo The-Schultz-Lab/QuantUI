@@ -26,6 +26,8 @@ SUPPORTED_METHODS = [
     "HSE06",
     "PBE-D3",
     "MP2",
+    "CCSD",
+    "CCSD(T)",
 ]
 
 # Educational metadata for each method — shown to students in the UI
@@ -146,6 +148,30 @@ METHOD_INFO = {
             "but scales as O(N⁵). Avoid for molecules with > ~20 heavy atoms."
         ),
         "use_for": "Accurate energetics for small closed-shell molecules; bond dissociation.",
+    },
+    "CCSD": {
+        "type": "wavefunction",
+        "label": "CCSD — Coupled Cluster with Singles and Doubles",
+        "description": (
+            "Post-HF coupled-cluster method that includes all single and double "
+            "excitations from the HF reference. Often called the gold standard for "
+            "single-reference systems — significantly more accurate than MP2 — but "
+            "scales as O(N⁶). Memory and runtime both grow steeply with basis size; "
+            "expect very small molecules (~10 heavy atoms or fewer) only."
+        ),
+        "use_for": "High-accuracy benchmarks for small closed-shell molecules.",
+    },
+    "CCSD(T)": {
+        "type": "wavefunction",
+        "label": "CCSD(T) — CCSD with Perturbative Triples",
+        "description": (
+            "Adds a perturbative correction for connected triple excitations on top of "
+            "CCSD. Routinely called the 'gold standard' of single-reference electronic "
+            "structure when paired with a large basis set. Scales as O(N⁷); the (T) "
+            "correction alone is typically the cost bottleneck. Reserve for the "
+            "smallest molecules where benchmark-quality energies are required."
+        ),
+        "use_for": "Reference-quality energies and barrier heights for tiny molecules.",
     },
 }
 
@@ -605,6 +631,19 @@ def main():
 
     try:
         method = '{method}'
+        # Display name → PySCF xc string + external D3 dispersion. Matches
+        # quantui/session_calc.py resolve_xc + maybe_apply_d3. Important
+        # for methods that PySCF doesn't accept directly (notably
+        # wB97X-D — on dftd3's black-list; PBE-D3 — D3 must be applied
+        # externally via pyscf.dftd3).
+        _XC_ALIAS = {{
+            'M06-L': 'm06l',
+            'wB97X-D': 'wb97x',
+            'CAM-B3LYP': 'camb3lyp',
+            'PBE-D3': 'pbe',
+        }}
+        _NEEDS_D3 = {{'PBE-D3', 'wB97X-D'}}
+
         if method == 'RHF':
             mf = scf.RHF(mol)
         elif method == 'UHF':
@@ -612,7 +651,16 @@ def main():
         else:
             # DFT: auto-select RKS/UKS based on spin
             mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
-            mf.xc = method
+            mf.xc = _XC_ALIAS.get(method, method)
+            if method in _NEEDS_D3:
+                try:
+                    from pyscf import dftd3 as _dftd3
+                    mf = _dftd3.dftd3(mf)
+                except ImportError:
+                    print(
+                        "WARNING: pyscf.dftd3 not available; "
+                        "running {{method}} without D3 dispersion."
+                    )
 
         energy = mf.kernel()
 

@@ -144,9 +144,13 @@ try:
             elif method_upper == "UHF":
                 mf = scf.UHF(mol)
             else:
-                # DFT functional
+                # DFT functional. session 55: route through resolve_xc +
+                # maybe_apply_d3 so wB97X-D / PBE-D3 work mid-optimization.
+                from .session_calc import maybe_apply_d3, resolve_xc
+
                 mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
-                mf.xc = self.method
+                mf.xc = resolve_xc(self.method)
+                mf = maybe_apply_d3(mf, self.method)
 
             mf.verbose = 0
             mf.stdout = _sink
@@ -374,6 +378,12 @@ def optimize_geometry(
     _stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
     _null = io.StringIO()
 
+    # M-STDERR / STDERR.1: PySCF gradients (called by ASE-BFGS at every
+    # step) emit fd-2 stderr from libcint / BLAS. Wrap the full BFGS run
+    # in capture_c_stderr so those bytes go to _stream instead of the red-
+    # text channel. POSIX-only; no-op on Windows.
+    from quantui.c_stderr import capture_c_stderr
+
     # --- Run optimization with trajectory file ---
     converged = False
     try:
@@ -386,7 +396,7 @@ def optimize_geometry(
                 logfile=_stream,  # BFGS step table → progress_stream
             )
 
-            with contextlib.redirect_stdout(_null):
+            with capture_c_stderr(_stream), contextlib.redirect_stdout(_null):
                 converged = bool(dyn.run(fmax=fmax, steps=steps))
 
             # --- Read trajectory frames ---
@@ -414,7 +424,7 @@ def optimize_geometry(
         try:
             e_ev = frame.get_potential_energy()
             energies_hartree.append(e_ev / HARTREE_TO_EV)
-        except Exception:
+        except Exception:  # noqa: BLE001 — NaN fallback for missing per-frame energy
             energies_hartree.append(float("nan"))
 
     if not trajectory:
@@ -423,7 +433,7 @@ def optimize_geometry(
         try:
             e_ev = atoms.get_potential_energy()
             energies_hartree = [e_ev / HARTREE_TO_EV]
-        except Exception:
+        except Exception:  # noqa: BLE001 — NaN fallback for missing final energy
             energies_hartree = [float("nan")]
 
     n_steps = max(0, len(trajectory) - 1)
@@ -446,8 +456,15 @@ def optimize_geometry(
             _opt_mo_coeff = _np_mo.array(_last_mf.mo_coeff)
             _opt_mol_atom = _last_atom_list
             _opt_mol_basis = basis
-    except Exception:
-        pass
+    except Exception as exc:
+        # Bug-A class — silent failure here ships an OptimizationResult
+        # with no MO data, breaking Energies + Isosurface panels on
+        # history replay. (Same root-cause class as session_calc.)
+        logger.warning(
+            "Final-step MO extraction failed in optimizer for %s: %s",
+            molecule.get_formula(),
+            exc,
+        )
 
     # Write a final MO summary to the progress stream (replaces per-step verbose output
     # which is suppressed to avoid thousands of SCF lines for long optimizations).
@@ -493,7 +510,7 @@ def optimize_geometry(
             _stream.write(
                 f"  All MO energies (eV): {' '.join(f'{e:.3f}' for e in _e_ev_1d)}\n"
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
             pass
 
     logger.info(

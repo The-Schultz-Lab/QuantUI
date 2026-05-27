@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass, field
-from typing import IO, List, Optional
+from typing import IO, Any, List, Optional
 
 from .molecule import Molecule
 from .session_calc import HARTREE_TO_EV
@@ -142,6 +142,40 @@ def run_tddft_calc(
 
     stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
 
+    # M-STDERR / STDERR.1: see quantui/c_stderr.py — captures fd-2 stderr
+    # from libcint / BLAS / LAPACK / TDA solver C code and relays to
+    # ``stream`` on exit. POSIX-only; no-op on Windows.
+    from quantui.c_stderr import capture_c_stderr
+
+    with capture_c_stderr(stream):
+        return _run_tddft_calc_body(
+            molecule=molecule,
+            method=method,
+            basis=basis,
+            nstates=nstates,
+            progress_stream=progress_stream,
+            _dft=dft,
+            _gto=gto,
+            _scf=scf,
+            stream=stream,
+        )
+
+
+def _run_tddft_calc_body(
+    *,
+    molecule: Molecule,
+    method: str,
+    basis: str,
+    nstates: int,
+    progress_stream: Optional[IO[str]],
+    _dft: Any,
+    _gto: Any,
+    _scf: Any,
+    stream: IO[str],
+) -> TDDFTResult:
+    """Inner body of :func:`run_tddft_calc` (split out for STDERR.1 wrap)."""
+    dft, gto, scf = _dft, _gto, _scf
+
     # ── Build Mole object ────────────────────────────────────────────────────
     mol = gto.Mole()
     mol.atom = molecule.to_pyscf_format()
@@ -161,8 +195,13 @@ def run_tddft_calc(
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
     else:
+        # session 55: route through resolve_xc + maybe_apply_d3 so
+        # methods like wB97X-D (PySCF rejects "wb97x-d") map cleanly.
+        from .session_calc import maybe_apply_d3, resolve_xc
+
         mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
-        mf.xc = method
+        mf.xc = resolve_xc(method)
+        mf = maybe_apply_d3(mf, method, progress_stream=progress_stream)
 
     if using_hf and progress_stream is not None:
         try:
@@ -171,7 +210,7 @@ def run_tddft_calc(
                 "For a proper TD-DFT UV-Vis spectrum, use a DFT functional\n"
                 "such as B3LYP or PBE0 in the Method dropdown.\n\n"
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
             pass
 
     try:
@@ -202,8 +241,8 @@ def run_tddft_calc(
             homo_lumo_gap_ev = float(
                 (mo_e_ref[n_occ] - mo_e_ref[n_occ - 1]) * HARTREE_TO_EV
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("HOMO-LUMO gap extraction failed in TD-DFT calc: %s", exc)
 
     # ── TD-DFT / TDHF ────────────────────────────────────────────────────────
     excitation_energies_ev: List[float] = []
@@ -225,7 +264,7 @@ def run_tddft_calc(
         if progress_stream is not None:
             try:
                 progress_stream.write(f"\n⚠ TD-DFT failed: {exc}\n")
-            except Exception:
+            except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
                 pass
 
     return TDDFTResult(

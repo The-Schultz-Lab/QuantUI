@@ -251,6 +251,43 @@ class TestGeoOptPanelActivation:
         assert len(app._ana_available) == 0
         assert app._to_analysis_btn.layout.display == "none"
 
+    def test_isosurface_stays_silent_when_orbitals_missing(
+        self, tmp_path, app, geo_opt_result, monkeypatch
+    ):
+        """BUG.8 end-to-end regression for the Geo-Opt path.
+
+        A saved geometry_opt result with trajectory.json but no orbitals.npz
+        must NOT raise an AttributeError when the Isosurface populator
+        runs. The Trajectory and Energies panels behave per their own data
+        availability; what we're asserting here is the absence of
+        ana_panel_error events from the Isosurface populator.
+        """
+        saved = save_result(
+            geo_opt_result, results_dir=tmp_path, calc_type="geometry_opt", spectra={}
+        )
+        save_trajectory(
+            saved, geo_opt_result.trajectory, geo_opt_result.energies_hartree
+        )
+        assert not (saved / "orbitals.npz").exists()
+
+        logged: list[tuple[str, str]] = []
+
+        def _capture(event_type, message, **_extra):
+            logged.append((event_type, message))
+
+        monkeypatch.setattr("quantui.calc_log.log_event", _capture)
+        ctx = app._build_history_context(saved)
+        app._apply_analysis_context(ctx)
+
+        errors = [m for e, m in logged if e == "ana_panel_error"]
+        assert errors == [], (
+            f"Unexpected ana_panel_error events on Geo-Opt-without-orbitals "
+            f"history replay: {errors}"
+        )
+        # Trajectory must still activate; Isosurface must not (no orbitals).
+        assert "Trajectory" in app._ana_available
+        assert "Isosurface" not in app._ana_available
+
 
 # ---------------------------------------------------------------------------
 # Part 4: _do_run end-to-end (PySCF-gated)

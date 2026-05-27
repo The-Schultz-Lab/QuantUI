@@ -42,6 +42,20 @@ def build_status_panel(
         cross = '<span style="color:#ef4444">&#10007;</span>'
         return (tick if flag else cross) + (" " + extra if extra else "")
 
+    # GPU offload indicator (M-GPU / GPU.2). Reuses the runtime detection
+    # helper so this status line tracks the EXACT same logic the dispatcher
+    # uses — no risk of drift between "what the user sees in Status" and
+    # "what actually happens when they click Run".
+    from .gpu_offload import is_gpu_available as _gpu_available_fn
+
+    _gpu_avail, _gpu_name = _gpu_available_fn()
+    if _gpu_avail:
+        _gpu_msg = f"&mdash; <code>{_gpu_name}</code>"
+        _gpu_flag = True
+    else:
+        _gpu_msg = "&mdash; <code>gpu4pyscf</code> not installed or no CUDA device"
+        _gpu_flag = False
+
     items = [
         (
             "PySCF (calculations)",
@@ -53,6 +67,7 @@ def build_status_panel(
         ("ASE (structure I/O, opt.)", _ok(ase_available)),
         ("PubChem search", _ok(pubchem_available)),
         ("3D viewer (py3Dmol)", _ok(visualization_available)),
+        ("GPU offload (gpu4pyscf)", _ok(_gpu_flag, _gpu_msg)),
         ("CPU cores / Memory", f"<b>{cores}</b> cores / <b>{mem}</b>"),
     ]
     rows = "".join(
@@ -84,25 +99,6 @@ def build_status_panel(
         f"Python {py_ver}{env_badge}</span></div>"
         f'<table style="margin-top:10px;border-collapse:collapse">{rows}</table>'
         f"{cal_line}"
-        f"</div>"
-    )
-
-    steps = [
-        "Select a molecule &mdash; library dropdown, XYZ paste, or PubChem search",
-        "Choose a <b>method</b> (RHF / DFT / MP2) and <b>basis set</b> in the Calculate tab",
-        "Click <b>Run Calculation</b> &mdash; SCF progress appears in real time",
-        "Explore results in the <b>Results</b> and <b>Analysis</b> tabs",
-        "Browse past calculations in <b>History</b>; compare them in <b>Compare</b>",
-    ]
-    steps_html = "".join(
-        f'<li style="margin:5px 0;font-size:13px;color:#475569">{s}</li>' for s in steps
-    )
-    guide_html = widgets.HTML(
-        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;'
-        f'padding:12px 16px;border-radius:6px;margin:8px 0">'
-        f'<div style="font-weight:600;font-size:13px;color:#1e293b;margin-bottom:8px">'
-        f"Quick start</div>"
-        f'<ol style="margin:0;padding-left:20px">{steps_html}</ol>'
         f"</div>"
     )
 
@@ -171,7 +167,7 @@ def build_status_panel(
     )
 
     app._status_tab_panel = widgets.VBox(
-        [app._status_html, guide_html, settings_box],
+        [app._status_html, settings_box],
         layout=layout_fn(padding="8px 0"),
     )
 
@@ -216,12 +212,21 @@ def build_history_section(
         tooltip="Open the full PySCF output log in the Output tab",
     )
 
+    # M-EST / EST.4: 4-tier calibration selector. ToggleButtons works for
+    # 4 options; switch to a Dropdown if a 5th tier is ever added. Tier 3
+    # / tier 4 require PySCF (the geom-opt + freq dispatch); tier 1 / 2
+    # are SP-only and gated separately by the run button.
     app._cal_mode_toggle = widgets.ToggleButtons(
-        options=[("Quick (~10 s)", "short"), ("Full (~5 min)", "long")],
-        value="short",
+        options=[
+            ("Tier 1 — Quick (~15 s)", "tier1"),
+            ("Tier 2 — Standard (~3–5 min)", "tier2"),
+            ("Tier 3 — Mixed (~10–15 min)", "tier3"),
+            ("Tier 4 — Deep (~30 min)", "tier4"),
+        ],
+        value="tier1",
         description="",
         button_style="",
-        style={"description_width": "0px", "button_width": "140px"},
+        style={"description_width": "0px", "button_width": "200px"},
         layout=layout_fn(margin="0 0 8px"),
     )
     app._cal_run_btn = widgets.Button(
@@ -240,7 +245,22 @@ def build_history_section(
         description="Stop",
         button_style="warning",
         icon="stop",
+        tooltip="Abandon the rest of the calibration (current step is also killed).",
         layout=layout_fn(width="90px", display="none"),
+    )
+    # session 55 user request: replaced the hard 1800 s per-step timeout
+    # with a Skip button so the user can abandon ONE step that's running
+    # too long without losing the whole run. Distinct from Stop (which
+    # abandons everything remaining).
+    app._cal_skip_btn = widgets.Button(
+        description="Skip step",
+        button_style="info",
+        icon="step-forward",
+        tooltip=(
+            "Abandon the current step and move on to the next. Other "
+            "completed steps stay; the calibration continues."
+        ),
+        layout=layout_fn(width="120px", display="none"),
     )
     app._cal_progress = widgets.IntProgress(
         min=0,
@@ -324,19 +344,35 @@ def build_history_section(
         if cal_last
         else ""
     )
+    # M-EST / EST.4: import tier sizes lazily so we can refer to all four
+    # in the panel blurb. ``benchmark_suite`` / ``benchmark_suite_long``
+    # are kept as positional args for back-compat but new code prefers
+    # the four named tiers.
+    from quantui.benchmarks import (
+        BENCHMARK_SUITE_TIER3 as _T3,
+    )
+    from quantui.benchmarks import (
+        BENCHMARK_SUITE_TIER4 as _T4,
+    )
+
     cal_panel = widgets.VBox(
         [
             widgets.HTML(
                 f'<p style="color:#555;font-size:13px;margin:0 0 6px">'
                 f"Benchmark this machine so the time estimator uses basis-function "
                 f"scaling (N<sup>β</sup>) rather than generic defaults. "
-                f"<b>Quick</b> runs {len(benchmark_suite)} small calculations (~10 s). "
-                f"<b>Full</b> runs {len(benchmark_suite_long)} calculations spanning "
-                f"all common molecule sizes and methods (~5 min).</p>" + cal_note
+                f"Tier 1 ({len(benchmark_suite)} calcs, ~15&nbsp;s) is a quick "
+                f"SP-only smoke test; tier 2 ({len(benchmark_suite_long)} calcs, "
+                f"~3–5&nbsp;min) expands the SP grid; "
+                f"tier 3 ({len(_T3)} calcs, ~10–15&nbsp;min) adds small geometry "
+                f"optimizations + frequency calcs; "
+                f"tier 4 ({len(_T4)} calcs, up to ~30&nbsp;min) anchors every "
+                f"calc-type × device combo for the most accurate predictions.</p>"
+                + cal_note
             ),
             app._cal_mode_toggle,
             widgets.HBox(
-                [app._cal_run_btn, app._cal_stop_btn],
+                [app._cal_run_btn, app._cal_skip_btn, app._cal_stop_btn],
                 layout=layout_fn(gap="6px", align_items="center"),
             ),
             app._cal_progress,
@@ -348,6 +384,10 @@ def build_history_section(
     app._cal_accordion = widgets.Accordion(children=[cal_panel], selected_index=None)
     app._cal_accordion.set_title(0, "Calibrate time estimates")
 
+    # POLISH.3 (M-POLISH, 2026-05-25): the History tab is now purely
+    # the result-browser. Performance stats + Calibrate accordions
+    # moved to the System Settings tab — see below — so the user finds
+    # benchmarking + system state in one logical place.
     app.history_panel = widgets.VBox(
         [
             widgets.HTML(
@@ -365,9 +405,17 @@ def build_history_section(
             ),
             app.results_path_lbl,
             app.past_output,
-            app._perf_accordion,
-            app._cal_accordion,
         ]
+    )
+
+    # POLISH.3: now that the calibration + performance accordions exist
+    # (created above in this function), append them to the System
+    # Settings tab. ``_status_tab_panel`` was built earlier in
+    # ``build_status_panel`` without these — extend its children tuple.
+    app._status_tab_panel.children = (
+        *app._status_tab_panel.children,
+        app._cal_accordion,
+        app._perf_accordion,
     )
 
     app._refresh_results_browser()
@@ -502,19 +550,29 @@ def build_shared_widgets(
         style={"description_width": "100px"},
         layout=layout_fn(width="190px"),
     )
+    # POLISH.10 (M-POLISH, 2026-05-25): ``style={"description_width":
+    # "initial"}`` removes the default left-side description gutter that
+    # ipywidgets reserves on Checkbox, which was producing both the
+    # indent the user noticed AND the horizontal scrollbar (description
+    # gutter + ``width="100%"`` exceeded the container width). Letting
+    # the checkbox size to its content also drops the scrollbar.
     app.preopt_cb = widgets.Checkbox(
         value=False,
         description="Classical pre-optimize geometry (fast, crude starting point)",
         disabled=not preopt_available,
-        layout=layout_fn(width="100%"),
+        style={"description_width": "initial"},
+        indent=False,
     )
 
     from quantui.config import SOLVENT_OPTIONS as _SOLVENT_OPTS
 
+    # POLISH.10: same fix as preopt_cb above — drop the gutter +
+    # explicit width that produced the indent + scrollbar.
     app.solvent_cb = widgets.Checkbox(
         value=False,
         description="Implicit solvent (PCM)",
-        layout=layout_fn(width="240px"),
+        style={"description_width": "initial"},
+        indent=False,
     )
     app.solvent_dd = widgets.Dropdown(
         options=list(_SOLVENT_OPTS.keys()),
@@ -581,9 +639,29 @@ def build_shared_widgets(
         value=False,
         description="Geometry optimization before calculation (QM, slower)",
         style={"description_width": "initial"},
-        layout=layout_fn(width="100%"),
+        indent=False,
     )
     app._freq_seed_note = widgets.HTML("")
+
+    # UV-Vis (TD-DFT) seed-geometry parity with Frequency: lets the user run
+    # the excited-state calculation on a previously optimised geometry rather
+    # than the current input molecule. Same formula-filtered dropdown pattern
+    # as the Frequency seed widgets above; refresh button + status note also
+    # mirrored.
+    app._tddft_seed_dd = widgets.Dropdown(
+        options=[("(use current molecule)", "")],
+        description="Seed geometry:",
+        style={"description_width": "110px"},
+        layout=layout_fn(width="auto", flex="1 1 auto", min_width="260px"),
+        tooltip="Optionally load the final optimised geometry from a previous Geo Opt result",
+    )
+    app._tddft_seed_refresh_btn = widgets.Button(
+        description="",
+        icon="refresh",
+        layout=layout_fn(width="32px", height="32px"),
+        tooltip="Refresh the list of saved geometry optimisations",
+    )
+    app._tddft_seed_note = widgets.HTML("")
 
     app._scan_type_dd = widgets.Dropdown(
         options=["Bond", "Angle", "Dihedral"],
@@ -737,6 +815,19 @@ def build_shared_widgets(
         layout=layout_fn(width="130px"),
     )
     app.struct_export_status = widgets.Label()
+    # M-EXPORT / EXPORT.5: zip the entire result folder for emailing /
+    # attaching to a writeup. Disabled until ``_last_result_dir`` is set.
+    app._export_bundle_btn = widgets.Button(
+        description="Export bundle (.zip)",
+        icon="file-archive-o",
+        disabled=True,
+        tooltip=(
+            "Zip the entire result folder (geometry, log, orbitals, cubes, "
+            "spectra) for sharing."
+        ),
+        layout=layout_fn(width="180px"),
+    )
+    app._export_bundle_status = widgets.Label()
 
 
 def build_theme_selector(app: Any, *, layout_fn: Any) -> None:
@@ -762,12 +853,43 @@ def build_theme_selector(app: Any, *, layout_fn: Any) -> None:
         display(HTML(app._theme_css("Dark")))
 
 
-def build_welcome_header(app: Any) -> None:
-    """Build the static QuantUI welcome banner."""
-    logo_svg = (
-        '<svg width="120" height="120" viewBox="0 0 280 280"'
-        ' xmlns="http://www.w3.org/2000/svg">'
+def build_welcome_header(app: Any, *, layout_fn: Any = None) -> None:
+    """Build the QuantUI welcome banner.
+
+    POLISH.1 third iteration (M-POLISH, 2026-05-25): the
+    ``<img src="data:image/svg+xml;base64,...">`` approach failed too
+    — Voilà's HTML sanitizer (stricter than JupyterLab's) strips
+    ``data:`` URIs from ``<img src>`` attributes. The third iteration
+    uses ``widgets.Image(value=svg_bytes, format="svg+xml")`` which
+    routes the SVG through Jupyter's binary widget channel, bypassing
+    the HTML sanitizer entirely. CSS animations inside the SVG still
+    run because the front-end serves it as an external SVG document.
+
+    The original ``_welcome_html`` widget remains (the exit handler at
+    ``app_runflow.on_exit_clicked`` rewrites its ``.value`` with the
+    shutdown message; an HBox-based wrapper would break that path).
+    A new ``_welcome_header`` HBox combines the logo widget + text
+    widget for the display() entry point.
+    """
+    # Full SVG. Includes the orbital animations ported from
+    # ``docs/logo.svg`` — three rings spinning at 9 s / 13 s reverse /
+    # 17 s with prefers-reduced-motion respected.
+    _logo_svg_raw = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 280">'
         "<defs>"
+        "<style>"
+        ".qring{transform-origin:140px 140px}"
+        ".qring--1{animation:qspin1 9s linear infinite}"
+        ".qring--2{animation:qspin2 13s linear infinite reverse;"
+        "transform:rotate(60deg)}"
+        ".qring--3{animation:qspin3 17s linear infinite;"
+        "transform:rotate(120deg)}"
+        "@keyframes qspin1{to{transform:rotate(360deg)}}"
+        "@keyframes qspin2{to{transform:rotate(-300deg)}}"
+        "@keyframes qspin3{to{transform:rotate(480deg)}}"
+        "@media (prefers-reduced-motion:reduce){"
+        ".qring{animation-play-state:paused}}"
+        "</style>"
         '<filter id="q-glow" x="-50%" y="-50%" width="200%" height="200%">'
         '<feGaussianBlur stdDeviation="7" result="blur"/>'
         "<feMerge>"
@@ -781,17 +903,17 @@ def build_welcome_header(app: Any) -> None:
         "</defs>"
         '<circle cx="140" cy="140" r="48"'
         ' fill="rgba(37,99,235,0.20)" filter="url(#q-halo)"/>'
-        '<g transform="rotate(0,140,140)">'
+        '<g class="qring qring--1">'
         '<ellipse cx="140" cy="140" rx="115" ry="33" fill="none"'
         ' stroke="#0891b2" stroke-width="1.4" opacity="0.70"/>'
         '<circle cx="255" cy="140" r="5.5" fill="#67e8f9"/>'
         "</g>"
-        '<g transform="rotate(60,140,140)">'
+        '<g class="qring qring--2">'
         '<ellipse cx="140" cy="140" rx="115" ry="33" fill="none"'
         ' stroke="#0891b2" stroke-width="1.4" opacity="0.55"/>'
         '<circle cx="255" cy="140" r="4.5" fill="#93c5fd"/>'
         "</g>"
-        '<g transform="rotate(120,140,140)">'
+        '<g class="qring qring--3">'
         '<ellipse cx="140" cy="140" rx="115" ry="33" fill="none"'
         ' stroke="#3b82f6" stroke-width="1.4" opacity="0.42"/>'
         '<circle cx="255" cy="140" r="4" fill="#60a5fa"/>'
@@ -804,25 +926,50 @@ def build_welcome_header(app: Any) -> None:
         '<circle cx="137" cy="137" r="3" fill="rgba(255,255,255,0.45)"/>'
         "</svg>"
     )
-    html = (
-        f'<div style="display:flex;align-items:center;gap:28px;'
-        f"padding:22px 4px 18px;margin-bottom:4px;"
-        f"border-bottom:1px solid #e2e8f0"
-        ">"
-        f"{logo_svg}"
-        f"<div>"
-        f'<div style="font-size:44px;font-weight:700;letter-spacing:-0.8px;'
-        f'color:#0f172a;line-height:1.05">QuantUI</div>'
-        f'<div style="font-size:20px;color:#475569;margin-top:7px">'
-        f"Quantum chemistry calculations, right on your device</div>"
-        f'<div style="font-size:13px;color:#94a3b8;margin-top:5px">'
-        f"v{quantui.__version__} &nbsp;&middot;&nbsp; "
-        f"<b>Help</b> tab for instructions &nbsp;&middot;&nbsp; "
-        f"<b>Status</b> tab for system info</div>"
-        f"</div>"
-        f"</div>"
+    # widgets.Image takes the raw SVG bytes and serves them as
+    # ``format="svg+xml"`` over Jupyter's BINARY widget channel — no
+    # HTML sanitizer touches the bytes, no ``data:`` URI restriction.
+    # The browser renders the SVG natively as an image (CSS animations
+    # inside the SVG still play).
+    app._welcome_logo = widgets.Image(
+        value=_logo_svg_raw.encode("utf-8"),
+        format="svg+xml",
+        width=120,
+        height=120,
     )
-    app._welcome_html = widgets.HTML(value=html)
+
+    # Text-only HTML. ``_welcome_html`` is kept as a pure HTML widget so
+    # ``app_runflow.on_exit_clicked`` can still ``.value = ...`` it with
+    # the shutdown message.
+    text_html = (
+        "<div>"
+        '<div style="font-size:44px;font-weight:700;letter-spacing:-0.8px;'
+        'color:#0f172a;line-height:1.05">QuantUI</div>'
+        '<div style="font-size:20px;color:#475569;margin-top:7px">'
+        "Free, open, and interactive quantum chemistry</div>"
+        '<div style="font-size:13px;color:#94a3b8;margin-top:5px">'
+        f"v{quantui.__version__} &nbsp;&middot;&nbsp; "
+        "<b>Help</b> tab for instructions &nbsp;&middot;&nbsp; "
+        "<b>System Settings</b> tab for environment + calibration</div>"
+        "</div>"
+    )
+    app._welcome_html = widgets.HTML(value=text_html)
+
+    # Container that combines logo + text. ``display()`` mounts this
+    # instead of ``_welcome_html`` directly (see app.py:1001).
+    _layout = (
+        layout_fn if layout_fn is not None else (lambda **kw: widgets.Layout(**kw))
+    )
+    app._welcome_header = widgets.HBox(
+        [app._welcome_logo, app._welcome_html],
+        layout=_layout(
+            align_items="center",
+            justify_content="flex-start",
+            padding="22px 4px 18px",
+            margin="0 0 4px",
+            border_bottom="1px solid #e2e8f0",
+        ),
+    )
 
 
 def build_molecule_section(
@@ -1020,14 +1167,29 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             description="Save Plot",
             icon="download",
             layout=layout_fn(width="130px"),
-            tooltip="Export the current plot",
+            tooltip="Export the current plot as HTML or PNG",
+        )
+        # M-EXPORT / EXPORT.4: per-panel "Copy data" button that exports
+        # the underlying numerical data to CSV (saved to result_dir) and
+        # also attempts to copy to the system clipboard via the browser
+        # API. Status widget below is shared with the Save Plot path —
+        # whichever action runs last updates the visible status string.
+        copy_btn = widgets.Button(
+            description="Copy data",
+            icon="clipboard",
+            layout=layout_fn(width="120px"),
+            tooltip=(
+                "Save the plot's underlying (x, y) data to CSV in the "
+                "result folder and copy it to the system clipboard"
+            ),
         )
         status = widgets.HTML(value="", layout=layout_fn(margin="0 0 0 8px"))
         setattr(app, f"_{prefix}_export_fmt_dd", fmt_dd)
         setattr(app, f"_{prefix}_export_btn", btn)
+        setattr(app, f"_{prefix}_copy_data_btn", copy_btn)
         setattr(app, f"_{prefix}_export_status", status)
         return widgets.HBox(
-            [fmt_dd, btn, status],
+            [fmt_dd, btn, copy_btn, status],
             layout=layout_fn(align_items="center", margin="0 0 6px 0", gap="6px"),
         )
 
@@ -1097,10 +1259,33 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     # accommodates the py3Dmol view (460px) plus a small horizontal pad;
     # 420+20=440 likewise for the 420px view height.
     app.vib_output = widgets.Output(layout=layout_fn(height="440px", width="480px"))
+
+    # Vibration animation export: writes the current mode as a self-contained
+    # HTML file. Backend selection is independent of the user's default — see
+    # _on_vib_export_animation: plotlymol3d is preferred for export quality,
+    # py3Dmol is the fallback when plotlymol3d isn't installed.
+    app._vib_export_btn = widgets.Button(
+        description="⬇ Export Animation",
+        tooltip=(
+            "Save the current vibrational mode as a self-contained HTML "
+            "file (plotlymol3d preferred for export quality; py3Dmol "
+            "fallback if plotlymol3d is not installed)"
+        ),
+        layout=layout_fn(width="180px"),
+    )
+    app._vib_export_status = widgets.HTML(
+        value="",
+        layout=layout_fn(flex="1 1 auto", margin="0 0 0 8px"),
+    )
+    vib_export_row = widgets.HBox(
+        [app._vib_export_btn, app._vib_export_status],
+        layout=layout_fn(align_items="center", margin="6px 0 0 0"),
+    )
+
     app.vib_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
-                [vib_mode_row, app.vib_output],
+                [vib_mode_row, app.vib_output, vib_export_row],
                 layout=layout_fn(padding="8px"),
             )
         ],
@@ -1120,11 +1305,23 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         min=5.0,
         max=100.0,
         step=5.0,
-        description="Line width:",
-        style={"description_width": "80px"},
-        layout=layout_fn(width="260px", display="none"),
+        description="Line width (cm⁻¹):",
+        readout_format=".0f",
+        style={"description_width": "120px"},
+        layout=layout_fn(width="300px", display="none"),
+        # continuous_update=False so dragging the slider only fires on
+        # release, not 30-60 times per second during the drag (BUG.9 fix).
+        # Combined with the atomic outputs swap in _set_html_output this
+        # eliminates the IR re-render storm that caused visible flicker.
+        continuous_update=False,
     )
-    app._ir_fig = widgets.Output(layout=layout_fn(width="100%"))
+    # min_height matches the Plotly IR figure's intrinsic height (300px in
+    # ir_plot.plot_ir_spectrum) so the Output container does not collapse
+    # to 0px between renders. Pairs with the atomic outputs swap in
+    # _set_html_output to keep mode toggle / slider changes flicker-free.
+    app._ir_fig = widgets.Output(
+        layout=layout_fn(width="100%", min_height="300px"),
+    )
     ir_export_row = _plot_export_row("ir")
 
     ir_controls = widgets.HBox(
@@ -1180,7 +1377,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             app._orb_ymax_input,
             widgets.HTML(
                 '<span style="font-size:11px;color:#555;font-weight:600;margin-left:8px">'
-                "Orbitals shown:</span>"
+                "Levels shown:</span>"
             ),
             app._orb_n_orb_input,
         ],
@@ -1243,6 +1440,23 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         ),
         layout=layout_fn(width="200px", margin="8px 0 4px 0"),
     )
+    # M-EXPORT / EXPORT.5: copy the last-generated cube to the top-level
+    # result dir under a friendly name (HOMO.cube / LUMO.cube / etc.).
+    # Disabled until the first isosurface generation populates
+    # ``app._last_cube_path``.
+    app._iso_export_cube_btn = widgets.Button(
+        description="Export cube",
+        icon="download",
+        disabled=True,
+        tooltip=(
+            "Copy the last-generated cube file to the result folder under a "
+            "friendly name (e.g. HOMO.cube) for use in Avogadro / VMD / Multiwfn."
+        ),
+        layout=layout_fn(width="160px", margin="8px 0 4px 8px"),
+    )
+    app._iso_export_status = widgets.HTML(
+        value="", layout=layout_fn(margin="0 0 0 8px")
+    )
     iso_body = widgets.VBox(
         [
             widgets.HTML(
@@ -1252,7 +1466,14 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 "Optimization first, then click <b>Generate</b>.</p>"
             ),
             app._orb_iso_controls,
-            app._iso_generate_btn,
+            widgets.HBox(
+                [
+                    app._iso_generate_btn,
+                    app._iso_export_cube_btn,
+                    app._iso_export_status,
+                ],
+                layout=layout_fn(align_items="center", gap="6px"),
+            ),
         ],
         layout=layout_fn(padding="8px"),
     )
@@ -1274,11 +1495,21 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         min=5.0,
         max=100.0,
         step=5.0,
-        description="Line width:",
-        style={"description_width": "80px"},
-        layout=layout_fn(width="260px", display="none"),
+        description="Line width (nm):",
+        readout_format=".0f",
+        style={"description_width": "110px"},
+        layout=layout_fn(width="290px", display="none"),
+        # Fire only on slider release — avoids a re-render storm during drag
+        # that, combined with the full HTML output swap, causes the page
+        # to scroll back to the top mid-drag.
+        continuous_update=False,
     )
-    app._tddft_fig = widgets.Output(layout=layout_fn(width="100%"))
+    # min_height matches the Plotly UV-Vis figure height (320px) so the
+    # Output container does not briefly collapse to 0px during the atomic
+    # outputs swap on mode/slider changes — same fix as the IR Output above.
+    app._tddft_fig = widgets.Output(
+        layout=layout_fn(width="100%", min_height="320px"),
+    )
     uv_export_row = _plot_export_row("uv")
     uv_controls = widgets.HBox(
         [app._uv_mode_toggle, app._uv_fwhm_slider],
@@ -1434,7 +1665,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             '<p style="color:#888;font-size:13px;font-style:italic;margin:8px 0">'
             "No interactive analysis is available for this calculation type.<br>"
             "Run a Single Point, Geo Opt, or Frequency calculation to see "
-            "orbital diagrams, trajectory animations, and spectra here.</p>"
+            "energy-level diagrams, trajectory animations, and spectra here.</p>"
         ),
         layout=layout_fn(display="none"),
     )
@@ -1540,6 +1771,16 @@ def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) ->
                 layout=layout_fn(flex_wrap="wrap", gap="6px"),
             ),
             app.struct_export_status,
+            widgets.HTML('<hr style="margin:10px 0 8px">'),
+            widgets.HTML(
+                '<p style="color:#555;font-size:13px;margin:0 0 6px">'
+                "Bundle every file in this result folder into a single zip "
+                "for sharing.</p>"
+            ),
+            widgets.HBox(
+                [app._export_bundle_btn, app._export_bundle_status],
+                layout=layout_fn(align_items="center", gap="6px"),
+            ),
         ]
     )
     app.advanced_accordion = widgets.Accordion(children=[export_content])
@@ -1578,13 +1819,17 @@ def build_output_tab(app: Any, *, layout_fn: Any) -> None:
         button_style="danger",
         layout=layout_fn(width="140px", display="none"),
     )
+    # POLISH.8 (M-POLISH, 2026-05-25): the Log tab moved to be an
+    # Accordion inside the History tab — rationale in the roadmap. The
+    # explanatory text no longer needs to say "Use View log in the
+    # History tab" since the user IS in the History tab now.
     app.log_tab_panel = widgets.VBox(
         [
             widgets.HTML(
                 '<p style="color:#555;font-size:13px;margin:4px 0 8px">'
-                "Raw PySCF output for the most recent calculation. "
-                "Use <b>View log</b> in the History tab to load a saved result's log. "
-                "Orbital diagrams, trajectories, and spectra are in the "
+                "Raw PySCF output for the most recent calculation or the "
+                "currently-selected history result. "
+                "Energy-level diagrams, trajectories, and spectra are in the "
                 "<b>Analysis</b> tab.</p>"
             ),
             widgets.HBox(
@@ -1606,6 +1851,20 @@ def build_output_tab(app: Any, *, layout_fn: Any) -> None:
             ),
         ],
         layout=layout_fn(padding="8px 0"),
+    )
+
+    # POLISH.8: wrap the log panel in an Accordion + append to the
+    # History tab. ``history_panel`` was built in
+    # ``build_history_section`` earlier in the app-init sequence
+    # (see app.py: _build_history_section runs BEFORE _build_output_tab).
+    app._history_log_accordion = widgets.Accordion(
+        children=[app.log_tab_panel],
+        selected_index=None,
+    )
+    app._history_log_accordion.set_title(0, "PySCF output log")
+    app.history_panel.children = (
+        *app.history_panel.children,
+        app._history_log_accordion,
     )
 
 
@@ -1652,7 +1911,7 @@ def build_files_tab(app: Any, *, layout_fn: Any) -> None:
     app._files_status_html = widgets.HTML(
         value=(
             '<span style="font-size:12px;color:#94a3b8">'
-            "Select a file and click Open to preview.</span>"
+            "Select a file to preview it; use Open to enter a folder.</span>"
         )
     )
     app._files_preview_output = widgets.Output(
@@ -1699,11 +1958,17 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
     app.help_content_html = widgets.HTML()
     app._render_help_topic()
 
+    # POLISH.2 (M-POLISH, 2026-05-25): the single-character "?" was
+    # visually noisy and hard to recognise as the global help toggle.
+    # Field-level "?" buttons (method_help_btn / basis_help_btn earlier
+    # in this file) keep the symbol — for inline-with-input help it's
+    # universally understood.
     app._help_btn = widgets.Button(
-        description="?",
+        description="Help",
         button_style="",
+        icon="question-circle",
         tooltip="Help topics",
-        layout=layout_fn(width="34px", margin="0 0 0 8px"),
+        layout=layout_fn(width="80px", margin="0 0 0 8px"),
     )
 
     app._exit_btn = widgets.Button(

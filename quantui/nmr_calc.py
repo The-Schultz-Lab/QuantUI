@@ -15,11 +15,14 @@ Typical usage::
 
 from __future__ import annotations
 
+import logging
 import sys
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
 from .molecule import Molecule
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -85,12 +88,44 @@ def run_nmr_calc(
             "Note: PySCF is Linux / macOS / WSL only."
         ) from exc
 
+    stream = progress_stream if progress_stream is not None else sys.stdout
+
+    # M-STDERR / STDERR.1: see quantui/c_stderr.py — captures fd-2 stderr
+    # from libcint / BLAS / LAPACK / GIAO / NMR-CPHF C code and relays to
+    # ``stream`` on exit. POSIX-only; no-op on Windows.
+    from quantui.c_stderr import capture_c_stderr
+
+    with capture_c_stderr(stream):
+        return _run_nmr_calc_body(
+            molecule=molecule,
+            method=method,
+            basis=basis,
+            progress_stream=progress_stream,
+            _dft=dft,
+            _gto=gto,
+            _scf=scf,
+            stream=stream,
+        )
+
+
+def _run_nmr_calc_body(
+    *,
+    molecule: Molecule,
+    method: str,
+    basis: str,
+    progress_stream: Any,
+    _dft: Any,
+    _gto: Any,
+    _scf: Any,
+    stream: Any,
+) -> NMRResult:
+    """Inner body of :func:`run_nmr_calc` (split out for STDERR.1 wrap)."""
+    dft, gto, scf = _dft, _gto, _scf
+
     import numpy as _np
 
     from . import config as _config
-    from .session_calc import _XC_ALIAS
-
-    stream = progress_stream if progress_stream is not None else sys.stdout
+    from .session_calc import maybe_apply_d3, resolve_xc
 
     mol = gto.Mole()
     mol.atom = molecule.to_pyscf_format()
@@ -107,9 +142,13 @@ def run_nmr_calc(
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
     else:
-        xc_string = _XC_ALIAS.get(method, method)
+        # session 55: route through resolve_xc + maybe_apply_d3 so
+        # wB97X-D / PBE-D3 work for NMR calcs (was using raw _XC_ALIAS
+        # lookup before, which would fail for wB97X-D after the alias
+        # change to "wb97x" + external D3).
         mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
-        mf.xc = xc_string
+        mf.xc = resolve_xc(method)
+        mf = maybe_apply_d3(mf, method, progress_stream=stream)
 
     try:
         mf.kernel()
@@ -166,8 +205,8 @@ def run_nmr_calc(
             return vind
 
         _prop_nmr_rhf.gen_vind = _fixed_gen_vind
-    except Exception:
-        pass
+    except (ImportError, AttributeError) as exc:  # noqa: BLE001 — optional probe
+        logger.debug("pyscf.prop.nmr.rhf.gen_vind patch not applied: %s", exc)
 
     # pyscf-properties 0.1.0 get_vxc_giao computes
     #   blksize = min(int(X*BLKSIZE)*BLKSIZE, ngrids)
@@ -253,8 +292,8 @@ def run_nmr_calc(
             return vmat - vmat.transpose(0, 2, 1)
 
         _prop_nmr_rks.get_vxc_giao = _fixed_get_vxc_giao
-    except Exception:
-        pass
+    except (ImportError, AttributeError) as exc:  # noqa: BLE001 — optional probe
+        logger.debug("pyscf.prop.nmr.rks.get_vxc_giao patch not applied: %s", exc)
 
     try:
         if method_upper == "RHF":

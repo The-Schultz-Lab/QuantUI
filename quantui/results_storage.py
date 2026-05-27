@@ -52,6 +52,7 @@ def save_result(
     results_dir: Optional[Path] = None,
     calc_type: str = "single_point",
     spectra: Optional[dict] = None,
+    extras: Optional[dict] = None,
 ) -> Path:
     """Write *result* to a new timestamped subdirectory of *results_dir*.
 
@@ -77,6 +78,14 @@ def save_result(
     spectra:
         Dict of spectra data (IR frequencies, UV-Vis excitations, …)
         stored under the ``"spectra"`` key in ``result.json``.
+    extras:
+        Optional dict of additional fields to merge into ``result.json``.
+        Used by the calibration runner to tag results with a
+        ``calibration_run_id`` marker so the History browser can show
+        a small badge distinguishing them from user-initiated calcs.
+        Keys clash with built-in result.json fields (``timestamp``,
+        ``formula``, etc.) overwrite them — by design, since the
+        caller is asserting they want to override.
 
     Returns
     -------
@@ -123,6 +132,8 @@ def save_result(
         "n_iterations": getattr(result, "n_iterations", -1),
         "spectra": spectra if spectra is not None else {},
     }
+    if extras:
+        data.update(extras)
     (dest / "result.json").write_text(json.dumps(data, indent=2))
 
     if pyscf_log:
@@ -189,6 +200,344 @@ def save_orbitals(result_dir: Path, result: object) -> None:
         (result_dir / "orbitals_meta.json").write_text(json.dumps(meta))
 
 
+def save_molden(
+    result_dir: Path,
+    *,
+    mo_energy_hartree=None,
+    mo_occ=None,
+    mo_coeff=None,
+    pyscf_mol_atom=None,
+    pyscf_mol_basis: Optional[str] = None,
+    charge: int = 0,
+    multiplicity: int = 1,
+    frequencies_cm1: Optional[list] = None,
+    normal_modes=None,
+    filename: str = "result.molden",
+) -> Optional[Path]:
+    """Write a Molden-format file alongside ``result.json`` (M-EXPORT / EXPORT.1+2).
+
+    Molden is the lingua franca for orbital + vibration interop with
+    Avogadro / IQmol / Jmol / Multiwfn. This helper writes whichever data
+    is available — both orbitals and vibrations, just orbitals, or just
+    the structure + vibrations — using the appropriate pyscf.tools.molden
+    entry point.
+
+    Behaviour:
+
+    - ``mo_coeff`` present → ``pyscf.tools.molden.from_mo(mol, ..., mo_coeff,
+      ene=mo_energy, occ=mo_occ)`` writes ``[Atoms]`` + ``[GTO]`` + ``[MO]``.
+    - ``mo_coeff`` absent but vibrations present → ``pyscf.tools.molden.header``
+      writes only the structure header; we append ``[FREQ]`` +
+      ``[FR-COORD]`` + ``[FR-NORM-COORD]`` manually so Avogadro can animate.
+    - Neither present → returns ``None`` (nothing meaningful to export).
+
+    Best-effort: PySCF / Molden writer failures are caught and the
+    function returns ``None`` rather than propagating. Callers should
+    log but not fail the calc on a missing Molden file.
+
+    Returns the path to the written file on success, ``None`` otherwise.
+    """
+    try:
+        from pyscf import gto
+        from pyscf.tools import molden as _molden
+    except Exception:
+        return None
+
+    has_mo = (
+        mo_coeff is not None and mo_energy_hartree is not None and mo_occ is not None
+    )
+    has_vib = bool(frequencies_cm1) and bool(normal_modes)
+    if not (has_mo or has_vib):
+        return None
+
+    if not pyscf_mol_atom or not pyscf_mol_basis:
+        return None
+
+    try:
+        mol = gto.Mole()
+        mol.atom = [(str(sym), list(coords)) for sym, coords in pyscf_mol_atom]
+        mol.basis = pyscf_mol_basis
+        mol.charge = int(charge)
+        mol.spin = max(0, int(multiplicity) - 1)
+        mol.verbose = 0
+        mol.build()
+    except Exception:
+        return None
+
+    dest = result_dir / filename
+    try:
+        if has_mo:
+            _molden.from_mo(
+                mol,
+                str(dest),
+                mo_coeff,
+                ene=mo_energy_hartree,
+                occ=mo_occ,
+            )
+        else:
+            # Structure-only header; vibration blocks appended below.
+            with open(dest, "w", encoding="utf-8") as fh:
+                _molden.header(mol, fh)
+    except Exception:
+        return None
+
+    if has_vib:
+        try:
+            _append_molden_vibrations(
+                dest,
+                frequencies_cm1=frequencies_cm1,
+                normal_modes=normal_modes,
+                pyscf_mol_atom=pyscf_mol_atom,
+            )
+        except Exception:
+            pass  # Best-effort: the orbital block (or header) is already written.
+
+    return dest
+
+
+def _append_molden_vibrations(
+    path: Path,
+    *,
+    frequencies_cm1: list,
+    normal_modes,
+    pyscf_mol_atom,
+) -> None:
+    """Append Molden ``[FREQ]`` + ``[FR-COORD]`` + ``[FR-NORM-COORD]`` blocks.
+
+    Used by :func:`save_molden` after the structure (and optionally MO)
+    sections are in place. Format follows the Molden spec — Avogadro and
+    IQmol both accept this layout for animated normal-mode display.
+
+    ``frequencies_cm1`` is a flat list of N modes (length matches
+    ``normal_modes``). ``normal_modes`` is a list of length-N entries,
+    each a list of per-atom (x, y, z) displacement triples. The
+    ``[FR-COORD]`` block repeats the equilibrium geometry from
+    ``pyscf_mol_atom`` so the file is self-contained.
+    """
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("\n[FREQ]\n")
+        for freq in frequencies_cm1:
+            fh.write(f"{float(freq):.6f}\n")
+
+        fh.write("\n[FR-COORD]\n")
+        for sym, coords in pyscf_mol_atom:
+            fh.write(
+                f"{sym}  {float(coords[0]):.6f} {float(coords[1]):.6f} "
+                f"{float(coords[2]):.6f}\n"
+            )
+
+        fh.write("\n[FR-NORM-COORD]\n")
+        for i, mode in enumerate(normal_modes, start=1):
+            fh.write(f"vibration   {i}\n")
+            for atom_vec in mode:
+                fh.write(
+                    f" {float(atom_vec[0]):.6f} {float(atom_vec[1]):.6f} "
+                    f"{float(atom_vec[2]):.6f}\n"
+                )
+
+
+def save_trajectory_xyz(
+    result_dir: Path,
+    *,
+    frames: list,
+    energies: list,
+    filename: str = "trajectory.xyz",
+) -> Optional[Path]:
+    """Write a multi-frame XYZ trajectory file (M-EXPORT / EXPORT.3).
+
+    Universal format readable by Avogadro, VMD, OVITO, Jmol, Pymol,
+    OpenBabel, ASE (``ase.io.read``), and basically any molecular tool
+    that handles XYZ. Each frame's comment line carries the energy in
+    Hartree when known (parsed by tools that follow the extended-XYZ
+    convention).
+
+    Parameters
+    ----------
+    result_dir:
+        Directory returned by :func:`save_result`.
+    frames:
+        List of :class:`~quantui.molecule.Molecule` objects, one per
+        trajectory step.
+    energies:
+        Parallel list of total energies in Hartree. Missing entries are
+        written as plain frame numbers in the comment line.
+    filename:
+        Output filename inside *result_dir*. Defaults to
+        ``trajectory.xyz``.
+
+    Returns the path on success, ``None`` if ``frames`` is empty or the
+    write fails. Best-effort: failures don't propagate.
+    """
+    if not frames:
+        return None
+
+    out_path = result_dir / filename
+    try:
+        with open(out_path, "w", encoding="utf-8") as fh:
+            for i, mol in enumerate(frames):
+                atoms = list(mol.atoms)
+                coords = mol.coordinates
+                fh.write(f"{len(atoms)}\n")
+                # Extended-XYZ comment line: include energy when known
+                # so downstream parsers (ASE, OVITO) can pick it up.
+                if i < len(energies) and energies[i] is not None:
+                    fh.write(f"energy={float(energies[i]):.10f} Hartree\n")
+                else:
+                    fh.write(f"frame {i}\n")
+                for sym, xyz in zip(atoms, coords):
+                    fh.write(
+                        f"{sym} {float(xyz[0]):.6f} "
+                        f"{float(xyz[1]):.6f} {float(xyz[2]):.6f}\n"
+                    )
+    except Exception:
+        return None
+    return out_path
+
+
+def save_trajectory_ase(
+    result_dir: Path,
+    *,
+    frames: list,
+    energies: list,
+    filename: str = "trajectory.traj",
+) -> Optional[Path]:
+    """Write an ASE Trajectory (.traj) file (M-EXPORT / EXPORT.7).
+
+    Lets users open the result in ``ase gui trajectory.traj``, slice
+    frames (``trajectory.traj@0:10:2``), and use ASE-GUI's interactive
+    editing tools to modify the structure as a starting point for
+    follow-up calcs. Also enables ASE-Python-side post-processing
+    (custom analyses, force diagnostics, etc.). Per-frame energies are
+    attached via :class:`ase.calculators.singlepoint.SinglePointCalculator`
+    so ``ase gui -g "d(0,1),e-E[0]"`` can plot derived quantities.
+
+    Parameters
+    ----------
+    result_dir, frames, energies:
+        Same convention as :func:`save_trajectory_xyz`.
+    filename:
+        Output filename inside *result_dir*. Defaults to
+        ``trajectory.traj``.
+
+    Returns the path on success, ``None`` if ASE is unavailable, frames
+    is empty, or the writer raises. Best-effort: failures don't
+    propagate.
+    """
+    if not frames:
+        return None
+    try:
+        from ase import Atoms
+        from ase.calculators.singlepoint import SinglePointCalculator
+        from ase.io.trajectory import Trajectory
+    except Exception:
+        return None
+
+    _HARTREE_TO_EV = 27.211386245988  # ASE uses eV for the calculator energy
+    out_path = result_dir / filename
+    try:
+        traj = Trajectory(str(out_path), "w")
+        try:
+            for i, mol in enumerate(frames):
+                atoms = Atoms(
+                    symbols=list(mol.atoms),
+                    positions=[list(row) for row in mol.coordinates],
+                )
+                if i < len(energies) and energies[i] is not None:
+                    atoms.calc = SinglePointCalculator(
+                        atoms,
+                        energy=float(energies[i]) * _HARTREE_TO_EV,
+                    )
+                traj.write(atoms)
+        finally:
+            traj.close()
+    except Exception:
+        return None
+    return out_path
+
+
+def export_cube(
+    src_cube_path: Path,
+    result_dir: Path,
+    *,
+    orbital_label: str = "orbital",
+) -> Optional[Path]:
+    """Copy a cube file to the top-level result dir with a friendly name (EXPORT.5).
+
+    Internal cube files live in ``<result_dir>/isosurfaces/`` with
+    timestamped filenames (``H2O_HOMO_2026-05-23_19-30-00.cube``) — fine
+    for replay but verbose to share. This helper makes a copy at
+    ``<result_dir>/<orbital_label>.cube`` so the user can hand a cube
+    to Avogadro / VMD / Multiwfn without scrolling through timestamp
+    suffixes.
+
+    Returns the destination path on success, ``None`` if the source
+    doesn't exist or the copy fails. Overwrites any existing
+    ``<orbital_label>.cube`` at the top level — by design, the user is
+    explicitly asking for "the active cube under a friendly name".
+    """
+    import re as _re
+    import shutil
+
+    if not src_cube_path.exists():
+        return None
+    safe_label = _re.sub(r"[^A-Za-z0-9_.-]+", "_", orbital_label).strip("._")
+    if not safe_label:
+        safe_label = "orbital"
+    dest = result_dir / f"{safe_label}.cube"
+    try:
+        shutil.copy2(src_cube_path, dest)
+    except Exception:
+        return None
+    return dest
+
+
+def export_result_bundle(
+    result_dir: Path,
+    *,
+    output_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """Zip an entire result directory for sharing (EXPORT.5 stretch goal).
+
+    Produces ``<output_dir>/<result_dir_name>.zip`` containing every
+    file the calc wrote — ``result.json``, ``pyscf.log``, ``orbitals.npz``,
+    ``trajectory.json`` / ``.xyz`` / ``.traj``, the ``isosurfaces/``
+    folder, the ``.molden`` companion, every panel-data CSV, etc. The
+    one-zip artifact is what students typically need to email a result
+    to a collaborator or attach to a writeup.
+
+    ``output_dir`` defaults to ``result_dir.parent`` (sibling of the
+    result folder) — keeps the zip next to the original directory so
+    the user finds it from the Files tab.
+
+    Returns the path to the zip on success, ``None`` if the result dir
+    doesn't exist or ``shutil.make_archive`` raises.
+    """
+    import shutil
+
+    if not result_dir.exists() or not result_dir.is_dir():
+        return None
+    base = output_dir if output_dir is not None else result_dir.parent
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    # ``make_archive`` returns the full path of the created archive
+    # (including the extension). It accepts a base name without
+    # extension and the format (``"zip"``); root_dir + base_dir control
+    # what's inside.
+    archive_basename = str(base / result_dir.name)
+    try:
+        archive_path = shutil.make_archive(
+            base_name=archive_basename,
+            format="zip",
+            root_dir=str(result_dir.parent),
+            base_dir=result_dir.name,
+        )
+    except Exception:
+        return None
+    return Path(archive_path)
+
+
 def load_orbitals(result_dir: Path):
     """Reload MO data saved by :func:`save_orbitals`.
 
@@ -246,7 +595,10 @@ def save_trajectory(
         List of total energies in Hartree, parallel to *trajectory*.
     filename:
         Output filename inside *result_dir*. Defaults to ``trajectory.json``.
-        Pass ``preopt_trajectory.json`` for pre-optimisation steps.
+        Pass ``preopt_trajectory.json`` for the DFT-geometry-optimization
+        trajectory that runs before a Frequency / TD-DFT calc. (The
+        filename keeps the historical ``preopt_`` prefix for back-compat
+        with saved-result replay — renaming would break older results.)
     """
     if not trajectory:
         return
@@ -331,7 +683,12 @@ def save_thumbnail(result_dir: Path, data: dict) -> None:
     fg, bg = _colors.get(ct, ("#555555", "#f3f4f6"))
     ct_label = _ct_labels.get(ct, ct.replace("_", " ").title())
 
-    fig = plt.figure(figsize=(2.4, 1.5), facecolor=bg)
+    # POLISH.7 (M-POLISH, 2026-05-25): bumped figsize 2.4→3.6 + dpi 72→144
+    # so the History-card text is readable on 1× displays. Source PNG goes
+    # from 173×108 px (~8 KB) to 518×324 px (~25 KB); the History dropdown
+    # downscales to its native ~250–300 px width, so the user sees crisp
+    # anti-aliased text rather than the blurry letters from the old config.
+    fig = plt.figure(figsize=(3.6, 2.25), facecolor=bg)
     ax = fig.add_axes([0, 0, 1, 1])
     ax.set_facecolor(bg)
     ax.set_xlim(0, 1)
@@ -410,7 +767,7 @@ def save_thumbnail(result_dir: Path, data: dict) -> None:
     try:
         fig.savefig(
             str(result_dir / "thumbnail.png"),
-            dpi=72,
+            dpi=144,
             bbox_inches="tight",
             facecolor=bg,
             pad_inches=0.05,

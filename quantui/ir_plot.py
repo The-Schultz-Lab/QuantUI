@@ -106,7 +106,24 @@ def plot_ir_spectrum(
                 mode="lines",
                 line=dict(color="#2563eb", width=2),
                 name="IR (stick)",
-                hovertemplate="%{x:.0f} cm⁻¹<extra></extra>",
+                hoverinfo="skip",
+            )
+        )
+        # Marker dots at each stick tip — matches the UV-Vis spectrum
+        # affordance and gives users a hover-target that surfaces the
+        # exact frequency / intensity for each mode.
+        fig.add_trace(
+            go.Scatter(
+                x=list(freqs_real),
+                y=list(ints_real),
+                mode="markers",
+                marker=dict(color="#1d4ed8", size=6),
+                name="IR (peaks)",
+                showlegend=False,
+                hovertemplate=(
+                    "Wavenumber: %{x:.1f} cm⁻¹"
+                    "<br>Intensity: %{y:.2f} km/mol<extra></extra>"
+                ),
             )
         )
 

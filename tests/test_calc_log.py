@@ -79,9 +79,24 @@ def test_estimate_time_scopes_by_calc_type(isolated_log_dir):
 def test_estimate_time_non_single_point_ignores_legacy_untyped_records(
     isolated_log_dir,
 ):
+    """Legacy untyped records must not enter the freq pool as *direct* matches.
+
+    Before M-EST / EST.2 (session 55) this asserted ``est_freq is None`` —
+    a strict "no freq records → no freq estimate" rule. EST.2 added a
+    structured cost-model fallback that intentionally reuses the SP
+    history (where legacy untyped records DO count) to derive a freq
+    estimate when no direct freq records exist. So the contract today
+    is two-fold:
+
+    1. Legacy records still don't count as frequency-typed (strategies
+       1-4 produce no direct prediction).
+    2. The cost-model fallback DOES fire — producing a structured
+       SCF-anchor + Hessian + 6N IR estimate — and its value is much
+       larger than the underlying SP time (otherwise we know the
+       cost-model decomposition collapsed to just the SP anchor).
+    """
     import quantui.calc_log as clog
 
-    # Legacy records with no calc_type should not be used for frequency estimates.
     for elapsed in (10.0, 12.0, 15.0):
         clog.log_calculation(
             formula="CH2O",
@@ -105,4 +120,11 @@ def test_estimate_time_non_single_point_ignores_legacy_untyped_records(
         calc_type="frequency",
     )
 
-    assert est_freq is None
+    # EST.2 fallback fires: not None, and noticeably larger than the
+    # bare SP median (~12 s) thanks to the +Hessian + 6×n_atoms × SP term.
+    assert est_freq is not None
+    assert est_freq["seconds"] > 100.0, (
+        f"Expected freq estimate > 100 s (SP ~12 s × ~21 cost-model multiplier "
+        f"for 4 atoms), got {est_freq['seconds']:.1f} s — suggests the cost "
+        "model isn't firing on legacy SP records"
+    )

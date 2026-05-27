@@ -27,9 +27,10 @@ Typical usage
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from dataclasses import dataclass, field
-from typing import IO, List, Optional
+from typing import IO, Any, List, Optional
 
 from .molecule import Molecule
 from .session_calc import HARTREE_TO_EV
@@ -169,11 +170,45 @@ def run_freq_calc(
 
     stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
 
+    # M-STDERR / STDERR.1: see quantui/c_stderr.py — captures fd-2 stderr
+    # from libcint / BLAS / LAPACK / Hessian C code and relays to ``stream``
+    # on exit. POSIX-only; no-op on Windows.
+    from quantui.c_stderr import capture_c_stderr
+
+    with capture_c_stderr(stream):
+        return _run_freq_calc_body(
+            molecule=molecule,
+            method=method,
+            basis=basis,
+            progress_stream=progress_stream,
+            _dft=dft,
+            _gto=gto,
+            _scf=scf,
+            _pyscf_thermo=pyscf_thermo,
+            stream=stream,
+        )
+
+
+def _run_freq_calc_body(
+    *,
+    molecule: Molecule,
+    method: str,
+    basis: str,
+    progress_stream: Optional[IO[str]],
+    _dft: Any,
+    _gto: Any,
+    _scf: Any,
+    _pyscf_thermo: Any,
+    stream: IO[str],
+) -> FreqResult:
+    """Inner body of :func:`run_freq_calc` (split out for STDERR.1 wrap)."""
+    dft, gto, scf, pyscf_thermo = _dft, _gto, _scf, _pyscf_thermo
+
     def _status(msg: str) -> None:
         """Emit a status marker line consumable by QuantUI's log capture."""
         try:
             stream.write(f"\n[QuantUI_STATUS] {msg}\n")
-        except Exception:
+        except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
             pass
 
     # ── Build Mole object ────────────────────────────────────────────────────
@@ -193,8 +228,14 @@ def run_freq_calc(
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
     else:
+        # session 55: route through resolve_xc + maybe_apply_d3 so
+        # methods like wB97X-D (PySCF rejects "wb97x-d") map to the
+        # bare functional + external D3 dispersion.
+        from .session_calc import maybe_apply_d3, resolve_xc
+
         mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
-        mf.xc = method
+        mf.xc = resolve_xc(method)
+        mf = maybe_apply_d3(mf, method, progress_stream=stream)
 
     try:
         energy_hartree = float(mf.kernel())
@@ -226,8 +267,8 @@ def run_freq_calc(
             homo_lumo_gap_ev = float(
                 (mo_e_ref[n_occ] - mo_e_ref[n_occ - 1]) * HARTREE_TO_EV
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("HOMO-LUMO gap extraction failed in freq calc: %s", exc)
 
     # ── MO data for orbital energy diagram (best-effort) ─────────────────────
     mo_energy_hartree: Optional[List] = None
@@ -243,8 +284,15 @@ def run_freq_calc(
         mo_energy_hartree = _np_mo.asarray(_moe, dtype=float).tolist()
         mo_occ_list = _np_mo.asarray(_moo, dtype=float).tolist()
         pyscf_mol_atom = [(str(s), list(map(float, c))) for s, c in mol._atom]
-    except Exception:
-        pass
+    except Exception as exc:
+        # Same class as session_calc bug-A: silent failure here ships
+        # a FreqResult with no MO data, breaking the Energies panel on
+        # history replay. Log to surface in the Log tab.
+        logger.warning(
+            "MO data extraction failed in freq calc for %s: %s",
+            molecule.get_formula(),
+            exc,
+        )
 
     # ── Hessian + frequency analysis ─────────────────────────────────────────
     frequencies_cm1: List[float] = []
@@ -294,7 +342,8 @@ def run_freq_calc(
                 if nm.ndim == 2:
                     nm = nm.reshape(n_modes_out, n_atoms, 3)
                 displacements = nm.tolist()
-        except Exception:
+        except Exception as exc:
+            logger.debug("Normal-mode displacement extraction failed: %s", exc)
             displacements = None
 
         # Numerical IR intensities via finite-difference dipole derivatives.
@@ -324,50 +373,172 @@ def run_freq_calc(
                     f"({_ir_total_solves - _ir_done_solves} remaining)"
                 )
 
+                # Inner-SCF helper: builds the right RHF/UHF/RKS/UKS object
+                # for the current ``mol`` geometry, attempts gpu4pyscf
+                # offload (M-GPU extension to the IR-intensity loop —
+                # without this wrap, the per-displacement SCFs run on CPU
+                # even when the outer SCF was GPU-offloaded), and returns
+                # the dipole moment as a numpy array. Used for both +Δ and
+                # -Δ steps so the +/-/half-loop logic stays compact.
+                from quantui.gpu_offload import try_to_gpu as _try_to_gpu_inner
+
+                def _displaced_scf_dipole() -> _np_ir.ndarray:
+                    if _xc is not None:
+                        _mf_d = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
+                        _mf_d.xc = _xc
+                    else:
+                        _mf_d = scf.RHF(mol) if mol.spin == 0 else scf.UHF(mol)
+                    _mf_d.verbose = 0
+                    _mf_d.stdout = stream
+                    # ``method_upper="RHF"`` is a label — try_to_gpu only
+                    # uses it to skip CCSD(T). For RHF/UHF/DFT the wrapper
+                    # attempts ``mf.to_gpu()`` and falls back to CPU on any
+                    # failure, so this is safe to call unconditionally.
+                    _mf_d, _used_gpu, _gpu_name = _try_to_gpu_inner(_mf_d, "RHF")
+                    _mf_d.kernel(dm0=_dm0)
+                    return _np_ir.array(_mf_d.dip_moment(verbose=0))
+
+                # Opt-in parallel path (Pass B). When (a) the user has
+                # set ``QUANTUI_FREQ_PARALLEL=1``, (b) no GPU is available,
+                # (c) the host has >= 4 cores, and (d) the molecule has >= 2
+                # atoms, we fan the per-displacement SCFs out across a
+                # ProcessPoolExecutor. The decision is centralised in
+                # ``freq_ir_workers.parallel_enabled_for_run`` so tests
+                # can pin the contract.
+                from quantui import freq_ir_workers as _ir_par
+                from quantui.gpu_offload import is_gpu_available
+
+                _gpu_ok, _ = is_gpu_available()
+                _cpu_count = os.cpu_count() or 1
+                _use_parallel = _ir_par.parallel_enabled_for_run(
+                    cpu_count=_cpu_count,
+                    displacement_count=_ir_total_solves,
+                    gpu_available=_gpu_ok,
+                )
+
                 _mol_v = mol.verbose
                 mol.verbose = 0
                 try:
-                    for _I in range(_n_ir):
-                        for _ax in range(3):
-                            _cp = _coords0.copy()
-                            _cp[_I, _ax] += _DELTA
-                            mol.set_geom_(_cp, unit="Bohr")
-                            if _xc is not None:
-                                _mf_d = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
-                                _mf_d.xc = _xc
-                            else:
-                                _mf_d = scf.RHF(mol) if mol.spin == 0 else scf.UHF(mol)
-                            _mf_d.verbose = 0
-                            _mf_d.stdout = stream
-                            _mf_d.kernel(dm0=_dm0)
-                            _ir_done_solves += 1
-                            _status(
-                                "Numerical IR intensities: "
-                                f"{_ir_done_solves}/{_ir_total_solves} extra SCF solves complete "
-                                f"({_ir_total_solves - _ir_done_solves} remaining)"
-                            )
-                            _mu_p = _np_ir.array(_mf_d.dip_moment(verbose=0))
+                    if _use_parallel:
+                        # Stash dm0 once on disk so workers can map-load it
+                        # via initargs (avoids per-task pickling).
+                        import concurrent.futures as _cf
+                        import multiprocessing as _mp
+                        import pickle as _pickle
+                        import tempfile as _tempfile
 
-                            _cm = _coords0.copy()
-                            _cm[_I, _ax] -= _DELTA
-                            mol.set_geom_(_cm, unit="Bohr")
-                            if _xc is not None:
-                                _mf_d = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
-                                _mf_d.xc = _xc
-                            else:
-                                _mf_d = scf.RHF(mol) if mol.spin == 0 else scf.UHF(mol)
-                            _mf_d.verbose = 0
-                            _mf_d.stdout = stream
-                            _mf_d.kernel(dm0=_dm0)
-                            _ir_done_solves += 1
-                            _status(
-                                "Numerical IR intensities: "
-                                f"{_ir_done_solves}/{_ir_total_solves} extra SCF solves complete "
-                                f"({_ir_total_solves - _ir_done_solves} remaining)"
-                            )
-                            _mu_m = _np_ir.array(_mf_d.dip_moment(verbose=0))
+                        _n_workers = _ir_par.pick_worker_count(
+                            _cpu_count, _ir_total_solves
+                        )
+                        _threads_each = _ir_par.threads_per_worker(
+                            _cpu_count, _n_workers
+                        )
 
-                            _dpdx[3 * _I + _ax] = (_mu_p - _mu_m) / (2 * _DELTA)
+                        # Build all 6N task arguments first; pickling-safe
+                        # flat lists per-displacement.
+                        _tasks: list[tuple[int, int, int, list[float]]] = []
+                        for _I in range(_n_ir):
+                            for _ax in range(3):
+                                _cp = _coords0.copy()
+                                _cp[_I, _ax] += _DELTA
+                                _tasks.append((_I, _ax, +1, _cp.flatten().tolist()))
+                                _cm = _coords0.copy()
+                                _cm[_I, _ax] -= _DELTA
+                                _tasks.append((_I, _ax, -1, _cm.flatten().tolist()))
+
+                        _dm0_handle = _tempfile.NamedTemporaryFile(
+                            delete=False, suffix=".dm0.pkl"
+                        )
+                        try:
+                            _pickle.dump(_dm0, _dm0_handle)
+                            _dm0_handle.close()
+
+                            # Pyscf-format atom string for worker rebuild.
+                            _atom_str = molecule.to_pyscf_format()
+                            _spin = molecule.multiplicity - 1
+                            _charge = molecule.charge
+                            _ctx = _mp.get_context("spawn")
+                            with _cf.ProcessPoolExecutor(
+                                max_workers=_n_workers,
+                                mp_context=_ctx,
+                                initializer=_ir_par.init_worker,
+                                initargs=(
+                                    _atom_str,
+                                    basis,
+                                    _charge,
+                                    _spin,
+                                    _xc,
+                                    _dm0_handle.name,
+                                    _threads_each,
+                                ),
+                            ) as _pool:
+                                # Submit all and store futures keyed by task
+                                # index so we can assemble +/- per (I, ax).
+                                _futs = {
+                                    _pool.submit(
+                                        _ir_par.run_displaced_scf, _task[3]
+                                    ): _task
+                                    for _task in _tasks
+                                }
+                                # Accumulate results into a temporary map
+                                # ``(I, ax, sign) -> dipole_array``.
+                                _dipoles: dict = {}
+                                for _fut in _cf.as_completed(_futs):
+                                    _I, _ax, _sign, _coords_done = _futs[_fut]
+                                    _dipoles[(_I, _ax, _sign)] = _fut.result()
+                                    _ir_done_solves += 1
+                                    _status(
+                                        "Numerical IR intensities (parallel ×"
+                                        f"{_n_workers}): "
+                                        f"{_ir_done_solves}/{_ir_total_solves} "
+                                        "extra SCF solves complete "
+                                        f"({_ir_total_solves - _ir_done_solves} "
+                                        "remaining)"
+                                    )
+                        finally:
+                            try:
+                                os.unlink(_dm0_handle.name)
+                            except OSError:
+                                pass
+
+                        # Assemble dpdx now that all dipoles are in hand.
+                        for _I in range(_n_ir):
+                            for _ax in range(3):
+                                _mu_p = _dipoles[(_I, _ax, +1)]
+                                _mu_m = _dipoles[(_I, _ax, -1)]
+                                _dpdx[3 * _I + _ax] = (_mu_p - _mu_m) / (2 * _DELTA)
+                    else:
+                        for _I in range(_n_ir):
+                            for _ax in range(3):
+                                # +Δ displacement
+                                _cp = _coords0.copy()
+                                _cp[_I, _ax] += _DELTA
+                                mol.set_geom_(_cp, unit="Bohr")
+                                _mu_p = _displaced_scf_dipole()
+                                _ir_done_solves += 1
+                                _status(
+                                    "Numerical IR intensities: "
+                                    f"{_ir_done_solves}/{_ir_total_solves} "
+                                    "extra SCF solves complete "
+                                    f"({_ir_total_solves - _ir_done_solves} "
+                                    "remaining)"
+                                )
+
+                                # -Δ displacement
+                                _cm = _coords0.copy()
+                                _cm[_I, _ax] -= _DELTA
+                                mol.set_geom_(_cm, unit="Bohr")
+                                _mu_m = _displaced_scf_dipole()
+                                _ir_done_solves += 1
+                                _status(
+                                    "Numerical IR intensities: "
+                                    f"{_ir_done_solves}/{_ir_total_solves} "
+                                    "extra SCF solves complete "
+                                    f"({_ir_total_solves - _ir_done_solves} "
+                                    "remaining)"
+                                )
+
+                                _dpdx[3 * _I + _ax] = (_mu_p - _mu_m) / (2 * _DELTA)
                 finally:
                     mol.set_geom_(_coords0, unit="Bohr")
                     mol.verbose = _mol_v
@@ -457,7 +628,7 @@ def run_freq_calc(
         if progress_stream is not None:
             try:
                 progress_stream.write(f"\n⚠ Hessian failed: {exc}\n")
-            except Exception:
+            except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
                 pass
 
     return FreqResult(

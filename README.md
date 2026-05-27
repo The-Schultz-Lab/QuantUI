@@ -47,6 +47,11 @@ research and classroom use.
   saved results; script export for a standalone `.py` file
 - **Plot export** — save IR, UV-Vis, PES, and orbital diagrams as standalone
   HTML
+- **Optional GPU acceleration** — when [gpu4pyscf](https://github.com/pyscf/gpu4pyscf)
+  and a CUDA-capable NVIDIA GPU are present, SCF calculations auto-offload
+  via `mf.to_gpu()` (RHF / UHF / RKS / UKS supported; CCSD(T) stays on CPU).
+  The Status tab + every result card show which compute device was used.
+  Set `QUANTUI_DISABLE_GPU=1` to force CPU even when the GPU is available.
 - **Timing calibration** — one-click benchmark suite populates the time
   estimator with real machine data so predictions are accurate from the first run
 - **Voilà app mode** — serve the notebook as a polished widget-only UI (no
@@ -94,6 +99,62 @@ python -m pip install quantui[pyscf,ase,app]
 ### Option C — Apptainer container (Windows / reproducible deployment)
 
 See [apptainer/README.md](apptainer/README.md).
+
+### Optional: GPU acceleration (NVIDIA + Linux / WSL)
+
+If you have an NVIDIA GPU, QuantUI can offload SCF calculations to it
+through [gpu4pyscf](https://github.com/pyscf/gpu4pyscf). This is **fully
+optional** — without these packages QuantUI runs on CPU exactly as
+before, and you can re-disable GPU at any time with
+`export QUANTUI_DISABLE_GPU=1`.
+
+**Step 1 — check your CUDA driver version:**
+
+```bash
+nvidia-smi   # "CUDA Version: 13.x" or "CUDA Version: 12.x" in the top-right
+```
+
+> The `CUDA Version` field reports your **driver's** maximum supported
+> runtime. You do **not** need to install the CUDA Toolkit — the wheels
+> below bundle their own runtime libraries.
+
+**Step 2 — install the CUDA-suffixed wheels matching your driver:**
+
+```bash
+# CUDA 13.x driver
+pip install gpu4pyscf-cuda13x cupy-cuda13x cutensor-cu13
+
+# CUDA 12.x driver
+pip install gpu4pyscf-cuda12x cupy-cuda12x cutensor-cu12
+```
+
+> ⚠ **Do not** `pip install gpu4pyscf` or `pip install cupy` (without a
+> CUDA suffix). Those are source distributions that try to compile
+> against your local CUDA toolkit and will fail with
+> `FileNotFoundError: 'nvcc'` on any machine without the full toolkit
+> installed. The CUDA-suffixed wheels (`-cuda12x`, `-cuda13x`) are
+> prebuilt binaries — no `nvcc`, no compilation, no toolkit required.
+
+**Step 3 — verify the install:**
+
+```bash
+python -c "import gpu4pyscf, cupy; print('GPUs:', cupy.cuda.runtime.getDeviceCount())"
+```
+
+Should print `GPUs: 1` (or more). Once verified, launch QuantUI as usual
+— the Status tab will show "GPU offload: active (NVIDIA {device-name})"
+and result cards will display the compute device.
+
+**Method coverage** (per the gpu4pyscf docs):
+
+| Method | GPU offload |
+| --- | --- |
+| RHF, UHF, RKS, UKS (any DFT functional), TD-DFT | Yes |
+| MP2, CCSD | Experimental on GPU (auto-offload) |
+| CCSD(T) | CPU only (gpu4pyscf doesn't support GPU triples; QuantUI's dispatcher detects this and skips) |
+
+Whenever gpu4pyscf can't offload a particular call, QuantUI falls back
+to CPU automatically and the result card reflects which device ran.
 
 ---
 
@@ -189,6 +250,41 @@ Dock — it just runs the `.command` script under the hood, so any
 > terminal — `./launch-native.command`. To wire it into your desktop
 > environment as a pinned app, create a `.desktop` entry pointing at the
 > script.
+
+---
+
+## Command-line toolkit
+
+QuantUI ships a small CLI for inspecting state and generating reports
+from outside the notebook — useful for verifying GPU offload before a
+long run, tailing the event log, and building a usage / speedup
+dashboard. After installation:
+
+```bash
+quantui log tail -n 50        # last 50 events from event_log.jsonl
+quantui gpu check             # is GPU offload available right now?
+quantui analytics build --open  # build dashboard.html + open in browser
+```
+
+Full reference with all flags and examples: [docs/CLI.md](docs/CLI.md).
+
+---
+
+## Using QuantUI results in other tools
+
+QuantUI's M-EXPORT milestone writes portable companion files alongside
+every result so you can hand-off to Avogadro, IQmol, Jmol, VMD, ASE-GUI,
+or any spreadsheet without screen-scraping. The quick reference:
+
+| Goal | QuantUI file | Tool |
+| --- | --- | --- |
+| MOs in 3D, vibrations | `result.molden` | Avogadro 2, IQmol, Jmol |
+| Geometry-opt / PES replay | `trajectory.xyz` or `.traj` | VMD, Avogadro, ASE-GUI |
+| Orbital isosurface | `isosurfaces/<orb>.cube` | Avogadro, VMD, ChimeraX |
+| Spectrum data in Excel | `*_data_*.csv` | Excel, LibreOffice, pandas |
+| Share whole result | `<result>.zip` (Export bundle) | Any unzip tool |
+
+Full per-tool walkthrough with troubleshooting: [docs/IMPORTING-INTO-AVOGADRO.md](docs/IMPORTING-INTO-AVOGADRO.md).
 
 ---
 
@@ -303,15 +399,6 @@ local-setup/              Conda environment definition
 pyproject.toml            Package metadata and tool config
 CHANGELOG.md              Release history (Keep a Changelog format)
 ```
-
----
-
-## Relationship to the cluster version
-
-QuantUI (this repo) is a downstream port of the cluster-based
-[QuantUI-cluster](https://github.com/The-Schultz-Lab/QuantUI) repository. All SLURM
-infrastructure (job manager, job storage, batch templates) has been removed.
-Bug fixes flow from the cluster repo into this one, not the other way around.
 
 ---
 
