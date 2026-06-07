@@ -45,6 +45,12 @@ quantui = "quantui.cli:main"
 [tool.setuptools]
 packages = ["quantui"]
 
+[tool.setuptools.package-data]
+# Bundled molecule library (M-STRUCT): the indexed SQLite store + the
+# human-readable JSON manifests it is built from. Both ship in the wheel so
+# offline structure lookup works on a fresh install.
+quantui = ["data/library/*.sqlite", "data/manifests/*.json"]
+
 [project.optional-dependencies]
 # PySCF requires Linux/macOS/WSL — not available on Windows natively.
 # Use the Apptainer container (apptainer/quantui.def) for Windows.

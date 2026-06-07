@@ -1,0 +1,816 @@
+[
+  {
+    "id": "H2",
+    "name": "H2",
+    "formula": "H2",
+    "category": "diatomic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Hydrogen molecule (simplest molecule)",
+    "atoms": [
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.74
+      ]
+    ]
+  },
+  {
+    "id": "O2",
+    "name": "O2",
+    "formula": "O2",
+    "category": "diatomic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 3,
+    "description": "Oxygen molecule (triplet ground state)",
+    "atoms": [
+      "O",
+      "O"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.21
+      ]
+    ]
+  },
+  {
+    "id": "N2",
+    "name": "N2",
+    "formula": "N2",
+    "category": "diatomic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Nitrogen molecule (triple bond)",
+    "atoms": [
+      "N",
+      "N"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.1
+      ]
+    ]
+  },
+  {
+    "id": "CO",
+    "name": "CO",
+    "formula": "CO",
+    "category": "diatomic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Carbon monoxide",
+    "atoms": [
+      "C",
+      "O"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.13
+      ]
+    ]
+  },
+  {
+    "id": "HF",
+    "name": "HF",
+    "formula": "HF",
+    "category": "diatomic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Hydrogen fluoride (polar bond)",
+    "atoms": [
+      "H",
+      "F"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.92
+      ]
+    ]
+  },
+  {
+    "id": "HCl",
+    "name": "HCl",
+    "formula": "HCl",
+    "category": "diatomic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Hydrogen chloride",
+    "atoms": [
+      "H",
+      "Cl"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.27
+      ]
+    ]
+  },
+  {
+    "id": "H2O",
+    "name": "H2O",
+    "formula": "H2O",
+    "category": "triatomic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Water molecule (bent geometry)",
+    "atoms": [
+      "O",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.757,
+        0.587
+      ],
+      [
+        0.0,
+        -0.757,
+        0.587
+      ]
+    ]
+  },
+  {
+    "id": "CO2",
+    "name": "CO2",
+    "formula": "CO2",
+    "category": "triatomic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Carbon dioxide (linear)",
+    "atoms": [
+      "C",
+      "O",
+      "O"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.16
+      ],
+      [
+        0.0,
+        0.0,
+        -1.16
+      ]
+    ]
+  },
+  {
+    "id": "O3",
+    "name": "O3",
+    "formula": "O3",
+    "category": "triatomic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Ozone (bent, resonance structure)",
+    "atoms": [
+      "O",
+      "O",
+      "O"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        1.07,
+        0.65,
+        0.0
+      ],
+      [
+        -1.07,
+        0.65,
+        0.0
+      ]
+    ]
+  },
+  {
+    "id": "H2O2",
+    "name": "H2O2",
+    "formula": "H2O2",
+    "category": "triatomic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Hydrogen peroxide (non-planar)",
+    "atoms": [
+      "H",
+      "O",
+      "O",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.74,
+        -0.54,
+        0.48
+      ],
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.45
+      ],
+      [
+        -0.74,
+        -0.54,
+        1.93
+      ]
+    ]
+  },
+  {
+    "id": "CH4",
+    "name": "CH4",
+    "formula": "CH4",
+    "category": "small-organic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Methane (tetrahedral)",
+    "atoms": [
+      "C",
+      "H",
+      "H",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.63,
+        0.63,
+        0.63
+      ],
+      [
+        -0.63,
+        -0.63,
+        0.63
+      ],
+      [
+        -0.63,
+        0.63,
+        -0.63
+      ],
+      [
+        0.63,
+        -0.63,
+        -0.63
+      ]
+    ]
+  },
+  {
+    "id": "NH3",
+    "name": "NH3",
+    "formula": "NH3",
+    "category": "small-organic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Ammonia (pyramidal)",
+    "atoms": [
+      "N",
+      "H",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.94,
+        0.33
+      ],
+      [
+        0.81,
+        -0.47,
+        0.33
+      ],
+      [
+        -0.81,
+        -0.47,
+        0.33
+      ]
+    ]
+  },
+  {
+    "id": "C2H6",
+    "name": "C2H6",
+    "formula": "C2H6",
+    "category": "small-organic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Ethane (single bond)",
+    "atoms": [
+      "C",
+      "C",
+      "H",
+      "H",
+      "H",
+      "H",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        1.54,
+        0.0,
+        0.0
+      ],
+      [
+        -0.51,
+        0.89,
+        0.0
+      ],
+      [
+        -0.51,
+        -0.44,
+        0.89
+      ],
+      [
+        -0.51,
+        -0.44,
+        -0.89
+      ],
+      [
+        2.05,
+        0.89,
+        0.0
+      ],
+      [
+        2.05,
+        -0.44,
+        0.89
+      ],
+      [
+        2.05,
+        -0.44,
+        -0.89
+      ]
+    ]
+  },
+  {
+    "id": "C2H4",
+    "name": "C2H4",
+    "formula": "C2H4",
+    "category": "small-organic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Ethylene (double bond, planar)",
+    "atoms": [
+      "C",
+      "C",
+      "H",
+      "H",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        1.34,
+        0.0,
+        0.0
+      ],
+      [
+        -0.51,
+        0.93,
+        0.0
+      ],
+      [
+        -0.51,
+        -0.93,
+        0.0
+      ],
+      [
+        1.85,
+        0.93,
+        0.0
+      ],
+      [
+        1.85,
+        -0.93,
+        0.0
+      ]
+    ]
+  },
+  {
+    "id": "C2H2",
+    "name": "C2H2",
+    "formula": "C2H2",
+    "category": "small-organic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Acetylene (triple bond, linear)",
+    "atoms": [
+      "C",
+      "C",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        1.2,
+        0.0,
+        0.0
+      ],
+      [
+        -1.06,
+        0.0,
+        0.0
+      ],
+      [
+        2.26,
+        0.0,
+        0.0
+      ]
+    ]
+  },
+  {
+    "id": "CH3OH",
+    "name": "CH3OH",
+    "formula": "CH3OH",
+    "category": "small-organic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Methanol (alcohol)",
+    "atoms": [
+      "C",
+      "O",
+      "H",
+      "H",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.66,
+        -0.02,
+        0.0
+      ],
+      [
+        -0.75,
+        0.09,
+        0.0
+      ],
+      [
+        1.03,
+        -0.54,
+        0.89
+      ],
+      [
+        1.03,
+        -0.54,
+        -0.89
+      ],
+      [
+        1.05,
+        0.99,
+        0.0
+      ],
+      [
+        -1.07,
+        -0.83,
+        0.0
+      ]
+    ]
+  },
+  {
+    "id": "CH2O",
+    "name": "CH2O",
+    "formula": "CH2O",
+    "category": "small-organic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Formaldehyde (carbonyl group)",
+    "atoms": [
+      "C",
+      "O",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.21
+      ],
+      [
+        0.94,
+        0.0,
+        -0.59
+      ],
+      [
+        -0.94,
+        0.0,
+        -0.59
+      ]
+    ]
+  },
+  {
+    "id": "CH3CHO",
+    "name": "CH3CHO",
+    "formula": "CH3CHO",
+    "category": "small-organic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Acetaldehyde (aldehyde group)",
+    "atoms": [
+      "C",
+      "C",
+      "O",
+      "H",
+      "H",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        1.51,
+        0.0,
+        0.0
+      ],
+      [
+        2.17,
+        1.03,
+        0.0
+      ],
+      [
+        -0.36,
+        -0.52,
+        0.89
+      ],
+      [
+        -0.36,
+        -0.52,
+        -0.89
+      ],
+      [
+        -0.39,
+        1.02,
+        0.0
+      ],
+      [
+        1.89,
+        -1.02,
+        0.0
+      ]
+    ]
+  },
+  {
+    "id": "CH3COOH",
+    "name": "CH3COOH",
+    "formula": "CH3COOH",
+    "category": "small-organic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Acetic acid (carboxylic acid)",
+    "atoms": [
+      "C",
+      "C",
+      "O",
+      "O",
+      "H",
+      "H",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        1.51,
+        0.0,
+        0.0
+      ],
+      [
+        2.09,
+        1.09,
+        0.0
+      ],
+      [
+        2.16,
+        -1.18,
+        0.0
+      ],
+      [
+        -0.36,
+        -0.52,
+        0.89
+      ],
+      [
+        -0.36,
+        -0.52,
+        -0.89
+      ],
+      [
+        -0.39,
+        1.02,
+        0.0
+      ],
+      [
+        3.11,
+        -1.09,
+        0.0
+      ]
+    ]
+  },
+  {
+    "id": "C6H6",
+    "name": "C6H6",
+    "formula": "C6H6",
+    "category": "aromatic",
+    "source": "preset",
+    "charge": 0,
+    "multiplicity": 1,
+    "description": "Benzene (aromatic, hexagonal)",
+    "atoms": [
+      "C",
+      "C",
+      "C",
+      "C",
+      "C",
+      "C",
+      "H",
+      "H",
+      "H",
+      "H",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        1.4,
+        0.0
+      ],
+      [
+        1.21,
+        0.7,
+        0.0
+      ],
+      [
+        1.21,
+        -0.7,
+        0.0
+      ],
+      [
+        0.0,
+        -1.4,
+        0.0
+      ],
+      [
+        -1.21,
+        -0.7,
+        0.0
+      ],
+      [
+        -1.21,
+        0.7,
+        0.0
+      ],
+      [
+        0.0,
+        2.48,
+        0.0
+      ],
+      [
+        2.15,
+        1.24,
+        0.0
+      ],
+      [
+        2.15,
+        -1.24,
+        0.0
+      ],
+      [
+        0.0,
+        -2.48,
+        0.0
+      ],
+      [
+        -2.15,
+        -1.24,
+        0.0
+      ],
+      [
+        -2.15,
+        1.24,
+        0.0
+      ]
+    ]
+  }
+]
