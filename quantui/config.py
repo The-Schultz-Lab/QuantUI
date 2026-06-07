@@ -229,6 +229,18 @@ WIDGET_LAYOUT = {
 
 DESCRIPTION_WIDTH = "150px"
 
+# ── External structure resolvers (M-STRUCT) ──────────────────────────────────
+# Network + throttle settings shared by the PubChem client (and, later, the
+# NCI CACTUS resolver). All timeouts/limits live here per constraint #5.
+PUBCHEM_TIMEOUT_S: float = 15.0  # per-request HTTP timeout
+PUBCHEM_AVAILABILITY_TIMEOUT_S: float = 5.0  # quick reachability probe
+PUBCHEM_MAX_RETRIES: int = 3  # bounded retries on 503 / throttling
+PUBCHEM_BACKOFF_BASE_S: float = 0.5  # exponential back-off base (×2**attempt)
+PUBCHEM_BACKOFF_MAX_S: float = 8.0  # cap on a single back-off sleep
+# Proactive client-side rate limit. PUG-REST allows ~5 req/s; stay conservative
+# so a classroom of simultaneous users doesn't trip the server-side throttle.
+PUBCHEM_MIN_REQUEST_INTERVAL_S: float = 0.25
+
 # Molecule presets — 20+ curated educational molecules
 MOLECULE_LIBRARY: Dict[str, Dict[str, Any]] = {
     # ========== SIMPLE DIATOMIC MOLECULES ==========

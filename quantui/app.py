@@ -473,13 +473,13 @@ try:
         RDKIT_AVAILABLE as _PUBCHEM_RDKIT_AVAILABLE,
     )
     from quantui.pubchem import (
-        student_friendly_fetch as _student_friendly_fetch,
+        student_friendly_resolve as _student_friendly_resolve,
     )
 
     PUBCHEM_AVAILABLE = _PUBCHEM_RDKIT_AVAILABLE
 except ImportError:
     PUBCHEM_AVAILABLE = False
-    _student_friendly_fetch = None  # type: ignore[assignment]
+    _student_friendly_resolve = None  # type: ignore[assignment]
 
 try:
     from quantui.session_calc import SessionResult, run_in_session  # noqa: F401
@@ -2558,7 +2558,7 @@ class QuantUIApp:
         if not query:
             self.pubchem_msg.value = "Enter a molecule name or SMILES."
             return
-        if _student_friendly_fetch is None:
+        if _student_friendly_resolve is None:
             self.pubchem_msg.value = "PubChem module not available."
             return
         self.pubchem_msg.value = f'Searching for "{query}"...'
@@ -2568,7 +2568,7 @@ class QuantUIApp:
 
         def _do():
             try:
-                xyz_str, _msg = _student_friendly_fetch(query)
+                xyz_str, _msg = _student_friendly_resolve(query)
                 if xyz_str is None:
                     raise ValueError(_msg)
                 atoms, coords = parse_xyz_input(xyz_str)

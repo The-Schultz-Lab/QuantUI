@@ -6,10 +6,16 @@ for educational use in quantum chemistry calculations.
 """
 
 import logging
+import re
+import threading
+import time
 from functools import lru_cache
 from typing import Any, Dict, Optional, Tuple
+from urllib.parse import quote
 
 import requests
+
+from . import config
 
 try:
     from rdkit import Chem
@@ -24,7 +30,63 @@ logger = logging.getLogger(__name__)
 
 # PubChem API endpoints
 PUBCHEM_BASE_URL = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
-PUBCHEM_TIMEOUT = 10  # seconds
+# Back-compat alias; canonical value lives in config (constraint #5).
+PUBCHEM_TIMEOUT = config.PUBCHEM_TIMEOUT_S
+
+# ── HTTP client: client-side throttle + bounded 503 back-off (STRUCT.2) ──────
+# A single process-wide limiter keeps us under PUG-REST's ~5 req/s ceiling even
+# when several search threads fire at once.
+_request_lock = threading.Lock()
+_last_request_time = 0.0
+
+
+def _throttle() -> None:
+    """Block just long enough to honor the client-side minimum request gap."""
+    global _last_request_time
+    with _request_lock:
+        wait = config.PUBCHEM_MIN_REQUEST_INTERVAL_S - (
+            time.monotonic() - _last_request_time
+        )
+        if wait > 0:
+            time.sleep(wait)
+        _last_request_time = time.monotonic()
+
+
+def _http_get(
+    url: str,
+    *,
+    params: Optional[Dict[str, Any]] = None,
+    timeout: Optional[float] = None,
+) -> requests.Response:
+    """GET with client-side throttle + exponential back-off on 503 throttling.
+
+    Retries only on HTTP 503 (PUG-REST's throttle signal). All other status
+    codes are returned to the caller unchanged; network exceptions
+    (``Timeout`` / ``ConnectionError`` / ...) propagate so callers can map them
+    to :class:`PubChemAPIError` exactly as before.
+    """
+    timeout = timeout if timeout is not None else config.PUBCHEM_TIMEOUT_S
+    response = None
+    for attempt in range(config.PUBCHEM_MAX_RETRIES):
+        _throttle()
+        response = requests.get(url, params=params, timeout=timeout)
+        if response.status_code != 503:
+            return response
+        # Throttled — back off (capped) and retry, unless this was the last try.
+        if attempt < config.PUBCHEM_MAX_RETRIES - 1:
+            backoff = min(
+                config.PUBCHEM_BACKOFF_BASE_S * (2**attempt),
+                config.PUBCHEM_BACKOFF_MAX_S,
+            )
+            logger.warning(
+                "PubChem throttled (503); retrying in %.1fs (attempt %d/%d)",
+                backoff,
+                attempt + 1,
+                config.PUBCHEM_MAX_RETRIES,
+            )
+            time.sleep(backoff)
+    # Exhausted retries — hand the last 503 back; caller raises via raise_for_status.
+    return response  # type: ignore[return-value]
 
 
 class PubChemError(Exception):
@@ -59,11 +121,11 @@ def search_molecule_by_name(name: str) -> int:
         PubChemAPIError: If API request fails
         MoleculeNotFoundError: If molecule not found
     """
-    url = f"{PUBCHEM_BASE_URL}/compound/name/{name}/cids/JSON"
+    url = f"{PUBCHEM_BASE_URL}/compound/name/{quote(name, safe='')}/cids/JSON"
 
     try:
         logger.debug(f"Searching PubChem for: {name}")
-        response = requests.get(url, timeout=PUBCHEM_TIMEOUT)
+        response = _http_get(url)
 
         if response.status_code == 404:
             raise MoleculeNotFoundError(f"Molecule '{name}' not found in PubChem")
@@ -81,6 +143,27 @@ def search_molecule_by_name(name: str) -> int:
 
     except requests.RequestException as e:
         logger.error(f"PubChem API request failed: {e}")
+        raise PubChemAPIError(f"Failed to connect to PubChem: {e}")
+
+
+def search_cid_by_inchikey(inchikey: str) -> int:
+    """Resolve a standard InChIKey to a PubChem CID.
+
+    InChIKeys are hashes and cannot be inverted to a structure locally, so this
+    is the one identifier type that always requires the network.
+    """
+    url = f"{PUBCHEM_BASE_URL}/compound/inchikey/{quote(inchikey, safe='')}/cids/JSON"
+    try:
+        response = _http_get(url)
+        if response.status_code == 404:
+            raise MoleculeNotFoundError(f"InChIKey '{inchikey}' not found in PubChem")
+        response.raise_for_status()
+        cids = response.json().get("IdentifierList", {}).get("CID", [])
+        if not cids:
+            raise MoleculeNotFoundError(f"No CID found for InChIKey '{inchikey}'")
+        return int(cids[0])
+    except requests.RequestException as e:
+        logger.error(f"PubChem InChIKey request failed: {e}")
         raise PubChemAPIError(f"Failed to connect to PubChem: {e}")
 
 
@@ -109,7 +192,7 @@ def get_molecule_sdf(cid: int, conformer_3d: bool = True) -> str:
 
     try:
         logger.debug(f"Fetching {record_type.upper()} SDF for CID {cid}")
-        response = requests.get(url, params=params, timeout=PUBCHEM_TIMEOUT)
+        response = _http_get(url, params=params)
 
         if response.status_code == 404:
             if conformer_3d:
@@ -158,7 +241,8 @@ def sdf_to_xyz(sdf_content: str) -> Tuple[str, Dict[str, Any]]:
         mol = Chem.AddHs(mol)
 
         # Generate 3D coordinates if needed
-        if mol.GetNumConformers() == 0:
+        coords_embedded = mol.GetNumConformers() == 0
+        if coords_embedded:
             AllChem.EmbedMolecule(mol, randomSeed=42)
             AllChem.UFFOptimizeMolecule(mol)
 
@@ -184,6 +268,7 @@ def sdf_to_xyz(sdf_content: str) -> Tuple[str, Dict[str, Any]]:
             "charge": Chem.GetFormalCharge(mol),
             "num_atoms": mol.GetNumAtoms(),
             "num_heavy_atoms": mol.GetNumHeavyAtoms(),
+            "coords_embedded": coords_embedded,
         }
 
         logger.debug(f"Converted SDF to XYZ: {metadata['formula']}")
@@ -422,6 +507,60 @@ def smiles_to_xyz(smiles: str, optimize_3d: bool = True) -> Tuple[str, Dict[str,
     except Exception as e:
         logger.error(f"SMILES to XYZ conversion failed: {e}")
         raise ValueError(f"Failed to convert SMILES to XYZ: {e}")
+
+
+def inchi_to_xyz(inchi: str, optimize_3d: bool = True) -> Tuple[str, Dict[str, Any]]:
+    """Convert an InChI string to XYZ coordinates via RDKit (no network).
+
+    Mirrors :func:`smiles_to_xyz`: parse → add H → embed (ETKDG, seed 42) →
+    UFF-optimize. Returns ``(xyz_string, metadata)``; metadata carries the
+    canonical SMILES so the caller can label provenance consistently.
+    """
+    if not RDKIT_AVAILABLE:
+        raise ImportError("RDKit is required for InChI conversion")
+
+    try:
+        mol = Chem.MolFromInchi(inchi)
+        if mol is None:
+            raise ValueError(f"Invalid InChI string: {inchi}")
+
+        mol = Chem.AddHs(mol)
+        if optimize_3d:
+            result = AllChem.EmbedMolecule(mol, randomSeed=42)
+            if result != 0:
+                AllChem.EmbedMolecule(mol, randomSeed=42, useRandomCoords=True)
+            try:
+                AllChem.UFFOptimizeMolecule(mol)
+            except Exception:
+                logger.warning("UFF optimization failed, using unoptimized coordinates")
+
+        if mol.GetNumConformers() == 0:
+            raise ValueError("Failed to generate 3D coordinates")
+
+        conf = mol.GetConformer()
+        formula = Chem.rdMolDescriptors.CalcMolFormula(mol)
+        xyz_lines = [str(mol.GetNumAtoms()), f"Generated from InChI ({formula})"]
+        for atom in mol.GetAtoms():
+            pos = conf.GetAtomPosition(atom.GetIdx())
+            xyz_lines.append(
+                f"{atom.GetSymbol():3s} {pos.x:12.6f} {pos.y:12.6f} {pos.z:12.6f}"
+            )
+
+        metadata = {
+            "formula": formula,
+            "molecular_weight": Descriptors.MolWt(mol),
+            "charge": Chem.GetFormalCharge(mol),
+            "num_atoms": mol.GetNumAtoms(),
+            "num_heavy_atoms": mol.GetNumHeavyAtoms(),
+            "inchi": inchi,
+            "canonical_smiles": Chem.MolToSmiles(mol),
+        }
+        logger.info(f"Converted InChI to XYZ: {formula}")
+        return "\n".join(xyz_lines), metadata
+
+    except Exception as e:
+        logger.error(f"InChI to XYZ conversion failed: {e}")
+        raise ValueError(f"Failed to convert InChI to XYZ: {e}")
 
 
 def student_friendly_smiles_to_xyz(smiles: str) -> Tuple[Optional[str], str]:
@@ -688,3 +827,165 @@ def validate_smiles(smiles: str) -> Tuple[bool, str]:
 
     except Exception as e:
         return False, f"Validation error: {str(e)}"
+
+
+# ============================================================================
+# Smart input routing (STRUCT.1)
+# ============================================================================
+
+# Standard InChIKey: 14 block chars - 10 block chars - 1 flag char.
+_INCHIKEY_RE = re.compile(r"^[A-Z]{14}-[A-Z]{10}-[A-Z]$")
+# A bare molecular formula, e.g. "H2O", "C6H6", "CO2", "Fe".
+_FORMULA_RE = re.compile(r"^(?:[A-Z][a-z]?\d*)+$")
+# Characters that only appear in SMILES, never in a common/IUPAC molecule name.
+_SMILES_STRUCTURAL = set("=#()[]/\\@.%+")
+
+
+def _looks_like_smiles(query: str) -> bool:
+    """High-precision SMILES check: only ``True`` when RDKit parses it *and* it
+    carries SMILES-only signals (structural punctuation or ring digits).
+
+    Deliberately conservative — bare-letter tokens like ``CCO`` (which are valid
+    SMILES *and* plausible names/formulas) are left for the provider chain
+    (STRUCT.4) to disambiguate, so we never misroute a plain name to a local
+    parse.
+    """
+    if not RDKIT_AVAILABLE or " " in query:
+        return False
+    has_structural = any(c in _SMILES_STRUCTURAL for c in query)
+    has_digit = any(c.isdigit() for c in query)
+    if not (has_structural or has_digit):
+        return False
+    return Chem.MolFromSmiles(query) is not None
+
+
+def classify_query(query: str) -> str:
+    """Classify a user structure query so it can be routed to the right resolver.
+
+    Returns one of ``"cid"``, ``"inchikey"``, ``"inchi"``, ``"smiles"``,
+    ``"formula"``, or ``"name"``. ``smiles`` / ``inchi`` resolve locally via
+    RDKit (no network); the rest go to PubChem. ``formula`` is currently routed
+    like ``name`` (PubChem's async fastformula search is deferred to STRUCT.4).
+    """
+    q = query.strip()
+    if not q:
+        raise ValueError("Empty query")
+    if q.startswith("InChI="):
+        return "inchi"
+    if _INCHIKEY_RE.match(q):
+        return "inchikey"
+    if re.fullmatch(r"(?:CID:?\s*)?\d+", q, flags=re.IGNORECASE):
+        return "cid"
+    if _looks_like_smiles(q):
+        return "smiles"
+    if _FORMULA_RE.match(q):
+        return "formula"
+    return "name"
+
+
+def _coerce_cid(query: str) -> int:
+    """Extract the integer CID from ``123`` / ``CID123`` / ``cid: 123`` forms."""
+    return int(re.sub(r"[^\d]", "", query))
+
+
+def fetch_structure(
+    query: str, conformer_3d: bool = True
+) -> Tuple[str, Dict[str, Any]]:
+    """Resolve any supported query type to ``(xyz_string, metadata)``.
+
+    Routes by :func:`classify_query`: SMILES/InChI resolve locally via RDKit
+    (no network); CID/InChIKey/name/formula go to PubChem. ``metadata`` always
+    carries a ``source`` key (``"rdkit-smiles"`` / ``"rdkit-inchi"`` /
+    ``"pubchem"``) and a ``conformer_origin`` key describing where the 3D
+    coordinates came from, so the UI can be honest about provenance.
+
+    Raises :class:`PubChemError` / :class:`ValueError` on failure (the
+    student-friendly wrapper :func:`student_friendly_resolve` maps these to
+    messages).
+    """
+    qtype = classify_query(query)
+    q = query.strip()
+    logger.info(f"Resolving structure query '{q}' classified as '{qtype}'")
+
+    if qtype == "smiles":
+        xyz, metadata = smiles_to_xyz(q, optimize_3d=conformer_3d)
+        metadata["source"] = "rdkit-smiles"
+        metadata["conformer_origin"] = "rdkit-embedded"
+        return xyz, metadata
+
+    if qtype == "inchi":
+        xyz, metadata = inchi_to_xyz(q, optimize_3d=conformer_3d)
+        metadata["source"] = "rdkit-inchi"
+        metadata["conformer_origin"] = "rdkit-embedded"
+        return xyz, metadata
+
+    # Network branch: resolve to a CID, then fetch + convert the SDF.
+    if qtype == "cid":
+        cid = _coerce_cid(q)
+    elif qtype == "inchikey":
+        cid = search_cid_by_inchikey(q)
+    else:  # "name" or "formula"
+        cid = search_molecule_by_name(q)
+
+    sdf_content = get_molecule_sdf(cid, conformer_3d=conformer_3d)
+    xyz, metadata = sdf_to_xyz(sdf_content)
+    metadata["source"] = "pubchem"
+    metadata["pubchem_cid"] = cid
+    metadata["query_type"] = qtype
+    metadata["conformer_origin"] = (
+        "rdkit-embedded" if metadata.get("coords_embedded") else "pubchem"
+    )
+    return xyz, metadata
+
+
+def student_friendly_resolve(query: str) -> Tuple[Optional[str], str]:
+    """Smart, type-aware structure fetch with student-friendly messages.
+
+    Drop-in replacement for :func:`student_friendly_fetch` that also handles
+    SMILES / InChI / CID / InChIKey input (the plain-name path is unchanged).
+    Returns ``(xyz_string_or_None, message)``.
+    """
+    try:
+        xyz_string, metadata = fetch_structure(query, conformer_3d=True)
+    except (MoleculeNotFoundError, ValueError) as exc:
+        return None, (
+            f"❌ Could not resolve '{query}'.\n"
+            f"   {exc}\n"
+            f"   Try a different name, a SMILES (e.g. CCO), or check spelling.\n"
+            f"   Search manually at: https://pubchem.ncbi.nlm.nih.gov/"
+        )
+    except PubChemAPIError:
+        return None, (
+            "❌ Connection to PubChem failed.\n"
+            "   • Check your internet connection\n"
+            "   • Try again in a moment\n"
+            "   • Use a preset molecule if the problem persists"
+        )
+    except ImportError:
+        return None, (
+            "❌ RDKit is required for SMILES / InChI input.\n"
+            "   Install with: conda install -c conda-forge rdkit"
+        )
+    except Exception as exc:  # pragma: no cover - unexpected
+        logger.error(
+            f"Unexpected error in student_friendly_resolve: {exc}", exc_info=True
+        )
+        return None, f"❌ Error resolving '{query}': {exc}"
+
+    source = {
+        "rdkit-smiles": "generated locally from SMILES",
+        "rdkit-inchi": "generated locally from InChI",
+        "pubchem": "PubChem",
+    }.get(metadata.get("source", ""), metadata.get("source", "?"))
+    origin = metadata.get("conformer_origin", "")
+    origin_note = (
+        " (2D structure embedded by RDKit)" if origin == "rdkit-embedded" else ""
+    )
+    message = (
+        f"✓ Resolved '{query}' via {source}.\n"
+        f"  Formula: {metadata.get('formula', '?')}\n"
+        f"  Atoms: {metadata.get('num_atoms', '?')} "
+        f"({metadata.get('num_heavy_atoms', '?')} heavy)\n"
+        f"  Molecular weight: {metadata.get('molecular_weight', 0):.2f} g/mol{origin_note}"
+    )
+    return xyz_string, message
