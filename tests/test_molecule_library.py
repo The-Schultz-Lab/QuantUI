@@ -60,8 +60,33 @@ class TestStoreBuildAndQuery:
         ml.build_from_manifests(target)
         assert target.exists()
 
-    def test_committed_store_has_20_presets(self):
-        assert ml.count() == 20
+    def test_store_contains_the_original_presets(self):
+        # The store grows as STRUCT.7/.8 add content; assert the original 20
+        # presets are all still present rather than an exact total.
+        preset_ids = {
+            "H2",
+            "O2",
+            "N2",
+            "CO",
+            "HF",
+            "HCl",
+            "H2O",
+            "CO2",
+            "O3",
+            "H2O2",
+            "CH4",
+            "NH3",
+            "C2H6",
+            "C2H4",
+            "C2H2",
+            "CH3OH",
+            "CH2O",
+            "CH3CHO",
+            "CH3COOH",
+            "C6H6",
+        }
+        assert ml.count() >= 20
+        assert all(ml.get(pid) is not None for pid in preset_ids)
 
     def test_categories_present(self):
         cats = ml.categories()
@@ -98,7 +123,7 @@ class TestStoreBuildAndQuery:
 class TestPresetDictBackCompat:
     def test_get_preset_dict_shape(self):
         d = ml.get_preset_dict()
-        assert len(d) == 20
+        assert len(d) >= 20
         h2o = d["H2O"]
         assert set(h2o) == {
             "atoms",
@@ -110,7 +135,7 @@ class TestPresetDictBackCompat:
 
     def test_config_shim_resolves(self):
         lib = config.MOLECULE_LIBRARY
-        assert len(lib) == 20
+        assert len(lib) >= 20
         assert lib["O2"]["multiplicity"] == 3  # triplet preserved
         assert lib["H2O"]["coordinates"][2] == [0.0, -0.757, 0.587]
 

@@ -1026,7 +1026,9 @@ def build_molecule_section(
     hint = '<p style="margin:4px 0 8px;color:#666;font-size:13px">'
     tab_preset = widgets.VBox(
         [
-            widgets.HTML(hint + "Choose from 20+ curated educational molecules.</p>"),
+            widgets.HTML(
+                hint + "Choose from the bundled library of curated molecules.</p>"
+            ),
             app.preset_dd,
         ]
     )

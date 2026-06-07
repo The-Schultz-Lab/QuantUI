@@ -90,11 +90,18 @@ def db_path() -> Path:
 
 
 def manifest_paths() -> List[Path]:
-    """All manifest JSON files that seed the store (STRUCT.7/.8 add more)."""
+    """All manifest JSON files that seed the store (STRUCT.7/.8 add more).
+
+    ``presets.json`` is ordered first so the original teaching molecules lead
+    the (interim) flat dropdown; remaining manifests follow alphabetically.
+    """
     manifest_dir = _data_dir() / "manifests"
     if not manifest_dir.is_dir():
         return []
-    return sorted(manifest_dir.glob("*.json"))
+    return sorted(
+        manifest_dir.glob("*.json"),
+        key=lambda p: (p.name != "presets.json", p.name),
+    )
 
 
 # ── Manifest loading (always-available fallback source) ──────────────────────

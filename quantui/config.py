@@ -245,6 +245,12 @@ PUBCHEM_MIN_REQUEST_INTERVAL_S: float = 0.25
 # (resolves name / CAS / InChI / SMILES → 3D SDF; no API key).
 CACTUS_TIMEOUT_S: float = 15.0
 
+# Bundled-library size budget + heavy-atom ceilings (M-STRUCT STRUCT.7/.8/.10).
+# These are QC *starting* geometries, so keep them runnable in a classroom.
+LIBRARY_SIZE_BUDGET_BYTES: int = 10 * 1024 * 1024  # 10 MB (DEC-015)
+LIBRARY_HEAVY_ATOM_CEILING_CURATED: int = 30  # named drugs run a bit larger
+LIBRARY_HEAVY_ATOM_CEILING_BULK: int = 9  # QM9 caps here anyway
+
 # Molecule presets — bundled library (STRUCT.6).
 # The former inline literal now lives in the indexed package-data store
 # (quantui/data/library/library.sqlite, seeded from
