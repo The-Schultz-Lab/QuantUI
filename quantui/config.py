@@ -241,6 +241,10 @@ PUBCHEM_BACKOFF_MAX_S: float = 8.0  # cap on a single back-off sleep
 # so a classroom of simultaneous users doesn't trip the server-side throttle.
 PUBCHEM_MIN_REQUEST_INTERVAL_S: float = 0.25
 
+# NCI CACTUS Chemical Identifier Resolver — chained fallback after PubChem
+# (resolves name / CAS / InChI / SMILES → 3D SDF; no API key).
+CACTUS_TIMEOUT_S: float = 15.0
+
 # Molecule presets — 20+ curated educational molecules
 MOLECULE_LIBRARY: Dict[str, Dict[str, Any]] = {
     # ========== SIMPLE DIATOMIC MOLECULES ==========

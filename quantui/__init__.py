@@ -123,6 +123,7 @@ except ImportError:
 
 # PubChem integration (optional — requires internet)
 try:
+    from .cactus import fetch_from_cactus
     from .pubchem import (
         MoleculeNotFoundError,
         PubChemError,
@@ -142,6 +143,7 @@ try:
         student_friendly_smiles_to_xyz,
         validate_smiles,
     )
+    from .structure_providers import ResolvedStructure, resolve_structure
 
     PUBCHEM_AVAILABLE = True
 except ImportError:
@@ -247,6 +249,9 @@ __all__ = [
     "classify_query",
     "student_friendly_fetch",
     "student_friendly_resolve",
+    "resolve_structure",
+    "ResolvedStructure",
+    "fetch_from_cactus",
     "inchi_to_xyz",
     "search_cid_by_inchikey",
     "get_common_molecules",

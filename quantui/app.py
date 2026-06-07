@@ -472,7 +472,7 @@ try:
     from quantui.pubchem import (
         RDKIT_AVAILABLE as _PUBCHEM_RDKIT_AVAILABLE,
     )
-    from quantui.pubchem import (
+    from quantui.structure_providers import (
         student_friendly_resolve as _student_friendly_resolve,
     )
 
