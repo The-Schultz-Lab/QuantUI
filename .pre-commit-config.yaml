@@ -14,6 +14,10 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
         args: ["--maxkb=500"]
+        # Bundled molecule-library package data (M-STRUCT) is intentionally
+        # large and governed by its own <=10 MB budget test
+        # (test_*_library.py); keep the 500 KB guard for everything else.
+        exclude: "^quantui/data/"
       - id: debug-statements     # catch leftover breakpoint() / pdb calls
 
   # ── Strip notebook outputs before commit ─────────────────────────────────

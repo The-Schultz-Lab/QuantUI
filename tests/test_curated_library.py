@@ -51,8 +51,25 @@ class TestCuratedManifest:
 
 
 class TestStoreWithCurated:
-    def test_total_count_is_presets_plus_curated(self):
-        assert ml.count() == 20 + len(_curated_entries())
+    def test_total_count_includes_presets_and_curated(self):
+        # Store also holds bulk entries (STRUCT.8); assert the curated tier is
+        # fully present rather than an exact total.
+        assert ml.count() >= 20 + len(_curated_entries())
+        curated_rows = sum(
+            len(ml.search("", category=c, limit=1000))
+            for c in (
+                "amino-acid",
+                "nucleobase",
+                "biomolecule",
+                "solvent",
+                "functional-group",
+                "hydrocarbon",
+                "drug",
+                "inorganic",
+                "ion",
+            )
+        )
+        assert curated_rows == len(_curated_entries())
 
     def test_expected_categories_present(self):
         cats = set(ml.categories())
