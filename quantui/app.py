@@ -476,6 +476,9 @@ try:
         RDKIT_AVAILABLE as _PUBCHEM_RDKIT_AVAILABLE,
     )
     from quantui.structure_providers import (
+        search_candidates as _struct_search_candidates,
+    )
+    from quantui.structure_providers import (
         student_friendly_resolve as _student_friendly_resolve,
     )
 
@@ -483,6 +486,7 @@ try:
 except ImportError:
     PUBCHEM_AVAILABLE = False
     _student_friendly_resolve = None  # type: ignore[assignment]
+    _struct_search_candidates = None  # type: ignore[assignment]
 
 try:
     from quantui.session_calc import SessionResult, run_in_session  # noqa: F401
@@ -777,6 +781,7 @@ class QuantUIApp:
         pubchem_btn: Any
         pubchem_msg: Any
         pubchem_txt: Any
+        pubchem_candidates_dd: Any
         result_output: Any
         result_viz_output: Any
         results_path_lbl: Any
@@ -1469,6 +1474,9 @@ class QuantUIApp:
         self.lib_results_dd.observe(self._safe_cb(self._on_lib_select), names="value")
         self.xyz_btn.on_click(self._on_load_xyz)
         self.pubchem_btn.on_click(self._on_search_pubchem)
+        self.pubchem_candidates_dd.observe(
+            self._safe_cb(self._on_pubchem_candidate_selected), names="value"
+        )
         self.change_mol_btn.on_click(self._on_expand_mol_input)
         # Calc type
         self.calc_type_dd.observe(
@@ -2587,14 +2595,74 @@ class QuantUIApp:
                 pass
         self.pubchem_btn.disabled = False
 
+    def _resolve_and_apply(self, query: str, loop) -> None:
+        """Resolve a single query (background thread) and apply on the main loop."""
+        try:
+            xyz_str, _msg = _student_friendly_resolve(query)
+            if xyz_str is None:
+                raise ValueError(_msg)
+            atoms, coords = parse_xyz_input(xyz_str)
+            mol = Molecule(atoms=atoms, coordinates=coords)
+            loop.call_soon_threadsafe(
+                self._apply_pubchem_search_result, query, mol, None
+            )
+        except Exception as exc:
+            loop.call_soon_threadsafe(
+                self._apply_pubchem_search_result, query, None, exc
+            )
+
+    def _hide_pubchem_candidates(self) -> None:
+        """Clear + hide the disambiguation pick-list."""
+        self._pubchem_cand_refreshing = True
+        try:
+            self.pubchem_candidates_dd.options = [("— pick a match —", "")]
+            self.pubchem_candidates_dd.value = ""
+            self.pubchem_candidates_dd.layout.display = "none"
+        finally:
+            self._pubchem_cand_refreshing = False
+
+    def _show_pubchem_candidates(self, query: str, candidates: list) -> None:
+        """Populate + reveal the pick-list when a query has multiple matches."""
+        opts = [(f"pick one of {len(candidates)} matches…", "")]
+        for c in candidates:
+            mw = c.get("mw") or 0.0
+            opts.append(
+                (f"{c['title']}  ·  {c['formula']}  ·  {mw:.1f} g/mol", str(c["cid"]))
+            )
+        self._pubchem_cand_refreshing = True
+        try:
+            self.pubchem_candidates_dd.options = opts
+            self.pubchem_candidates_dd.value = ""
+            self.pubchem_candidates_dd.layout.display = ""
+        finally:
+            self._pubchem_cand_refreshing = False
+        self.pubchem_msg.value = (
+            f'{len(candidates)} matches for "{query}" — pick one below.'
+        )
+        self.pubchem_btn.disabled = False
+
+    def _on_pubchem_candidate_selected(self, change) -> None:
+        if getattr(self, "_pubchem_cand_refreshing", False):
+            return
+        cid = change["new"]
+        if not cid:
+            return
+        self.pubchem_msg.value = f"Loading CID {cid}…"
+        self.pubchem_btn.disabled = True
+        loop = asyncio.get_running_loop()
+        threading.Thread(
+            target=lambda: self._resolve_and_apply(str(cid), loop), daemon=True
+        ).start()
+
     def _on_search_pubchem(self, btn) -> None:
         query = self.pubchem_txt.value.strip()
         if not query:
-            self.pubchem_msg.value = "Enter a molecule name or SMILES."
+            self.pubchem_msg.value = "Enter a molecule name, SMILES, CID, or InChI."
             return
         if _student_friendly_resolve is None:
-            self.pubchem_msg.value = "PubChem module not available."
+            self.pubchem_msg.value = "Structure search not available."
             return
+        self._hide_pubchem_candidates()
         self.pubchem_msg.value = f'Searching for "{query}"...'
         self.pubchem_btn.disabled = True
 
@@ -2602,24 +2670,21 @@ class QuantUIApp:
 
         def _do():
             try:
-                xyz_str, _msg = _student_friendly_resolve(query)
-                if xyz_str is None:
-                    raise ValueError(_msg)
-                atoms, coords = parse_xyz_input(xyz_str)
-                mol = Molecule(atoms=atoms, coordinates=coords)
-                loop.call_soon_threadsafe(
-                    self._apply_pubchem_search_result,
-                    query,
-                    mol,
-                    None,
+                candidates = (
+                    _struct_search_candidates(query)
+                    if _struct_search_candidates is not None
+                    else []
                 )
-            except Exception as exc:
+            except Exception:
+                candidates = []
+            if len(candidates) > 1:
                 loop.call_soon_threadsafe(
-                    self._apply_pubchem_search_result,
-                    query,
-                    None,
-                    exc,
+                    self._show_pubchem_candidates, query, candidates
                 )
+                return
+            # 0 or 1 match → resolve via the full chain (PubChem → CACTUS →
+            # offline library), which also handles SMILES/InChI/CID locally.
+            self._resolve_and_apply(query, loop)
 
         threading.Thread(target=_do, daemon=True).start()
 

@@ -167,6 +167,71 @@ def search_cid_by_inchikey(inchikey: str) -> int:
         raise PubChemAPIError(f"Failed to connect to PubChem: {e}")
 
 
+def search_cids_by_name(name: str) -> list:
+    """Return ALL PubChem CIDs matching a name (best-match order); [] if none.
+
+    Unlike :func:`search_molecule_by_name` (which returns just the first hit),
+    this exposes every match so the UI can disambiguate (STRUCT.5).
+    """
+    url = f"{PUBCHEM_BASE_URL}/compound/name/{quote(name, safe='')}/cids/JSON"
+    try:
+        response = _http_get(url)
+        if response.status_code == 404:
+            return []
+        response.raise_for_status()
+        return [
+            int(c) for c in response.json().get("IdentifierList", {}).get("CID", [])
+        ]
+    except requests.RequestException as e:
+        logger.error(f"PubChem CID-list request failed: {e}")
+        raise PubChemAPIError(f"Failed to connect to PubChem: {e}")
+
+
+def search_pubchem_candidates(query: str, max_results: int = 10) -> list:
+    """Lightweight candidate descriptors for an ambiguous name query.
+
+    Returns a list of ``{cid, title, formula, mw}`` dicts (best-match order,
+    capped at ``max_results``), or ``[]`` if nothing matches. Uses one batch
+    property request rather than fetching each full structure.
+    """
+    cids = search_cids_by_name(query)[:max_results]
+    if not cids:
+        return []
+    cid_str = ",".join(str(c) for c in cids)
+    url = (
+        f"{PUBCHEM_BASE_URL}/compound/cid/{cid_str}"
+        f"/property/MolecularFormula,MolecularWeight,Title/JSON"
+    )
+    try:
+        response = _http_get(url)
+        response.raise_for_status()
+        props = response.json().get("PropertyTable", {}).get("Properties", [])
+    except requests.RequestException as e:
+        logger.error(f"PubChem property request failed: {e}")
+        raise PubChemAPIError(f"Failed to connect to PubChem: {e}")
+
+    # Preserve the CID search order (the property endpoint may reorder).
+    by_cid = {int(p.get("CID")): p for p in props if p.get("CID") is not None}
+    out = []
+    for cid in cids:
+        p = by_cid.get(cid)
+        if p is None:
+            continue
+        try:
+            mw = float(p.get("MolecularWeight", 0) or 0)
+        except (TypeError, ValueError):
+            mw = 0.0
+        out.append(
+            {
+                "cid": cid,
+                "title": p.get("Title") or f"CID {cid}",
+                "formula": p.get("MolecularFormula", "?"),
+                "mw": mw,
+            }
+        )
+    return out
+
+
 @lru_cache(maxsize=50)
 def get_molecule_sdf(cid: int, conformer_3d: bool = True) -> str:
     """

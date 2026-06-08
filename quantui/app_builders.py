@@ -1080,6 +1080,15 @@ def build_molecule_section(
             else "PubChem unavailable — check internet connection"
         )
     )
+    # Disambiguation pick-list (STRUCT.5) — hidden until a query has >1 match.
+    app.pubchem_candidates_dd = widgets.Dropdown(
+        options=[("— pick a match —", "")],
+        value="",
+        description="Matches:",
+        style={"description_width": "70px"},
+        layout=layout_fn(width="460px"),
+    )
+    app.pubchem_candidates_dd.layout.display = "none"
 
     hint = '<p style="margin:4px 0 8px;color:#666;font-size:13px">'
     tab_preset = widgets.VBox(
@@ -1112,6 +1121,7 @@ def build_molecule_section(
             ),
             widgets.HBox([app.pubchem_txt, app.pubchem_btn]),
             app.pubchem_msg,
+            app.pubchem_candidates_dd,
         ]
     )
     input_tab = widgets.Tab(children=[tab_preset, tab_xyz, tab_pubchem])

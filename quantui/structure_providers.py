@@ -31,6 +31,7 @@ from .pubchem import (
     PubChemAPIError,
     classify_query,
     fetch_structure,
+    search_pubchem_candidates,
 )
 
 logger = logging.getLogger(__name__)
@@ -190,6 +191,22 @@ def resolve_structure(
     raise MoleculeNotFoundError(
         f"Could not resolve '{query}' (tried: {tried}, bundled library)"
     )
+
+
+def search_candidates(query: str) -> List[Dict[str, Any]]:
+    """Return disambiguation candidates for a multi-match name/formula query.
+
+    Only name/formula queries can be ambiguous (SMILES/InChI/CID resolve to a
+    single structure, and the local library is exact). Returns ``[]`` for those
+    types, and ``[]`` on any network failure so the caller falls back to the
+    full single-result chain (PubChem → CACTUS → offline library).
+    """
+    if classify_query(query) not in ("name", "formula"):
+        return []
+    try:
+        return search_pubchem_candidates(query)
+    except (MoleculeNotFoundError, PubChemAPIError):
+        return []
 
 
 def student_friendly_resolve(query: str) -> Tuple[Optional[str], str]:
