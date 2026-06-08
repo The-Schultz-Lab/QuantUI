@@ -10,7 +10,47 @@ import ipywidgets as widgets
 from IPython.display import HTML, display
 
 import quantui
+from quantui import molecule_library as _ml
 from quantui.help_content import HELP_TOPICS
+
+# Friendlier labels for the library category filter (STRUCT.9).
+_CATEGORY_LABELS = {
+    "diatomic": "Diatomics",
+    "triatomic": "Triatomics",
+    "small-organic": "Small organics",
+    "aromatic": "Aromatics",
+    "amino-acid": "Amino acids",
+    "nucleobase": "Nucleobases",
+    "biomolecule": "Biomolecules",
+    "solvent": "Solvents",
+    "functional-group": "Functional groups",
+    "hydrocarbon": "Hydrocarbons",
+    "drug": "Drugs",
+    "inorganic": "Inorganics",
+    "ion": "Ions",
+    "bulk-qm9": "Bulk (QM9)",
+}
+
+
+def _category_label(cat: str) -> str:
+    return _CATEGORY_LABELS.get(cat, cat.replace("-", " ").title())
+
+
+def library_result_options(query: str = "", category: str | None = None):
+    """Build (label, id) options for the library results dropdown + a count note.
+
+    Returns ``(options, note)``. ``options`` always leads with a placeholder so
+    the dropdown's value can be reset without triggering a load.
+    """
+    limit = 200
+    rows = _ml.search(query, category=category, limit=limit)
+    opts = [("— select a molecule —", "")]
+    for r in rows:
+        opts.append((f"{r['name']}  ·  {r['formula']}", r["id"]))
+    note = f"{len(rows)} match" + ("" if len(rows) == 1 else "es")
+    if len(rows) >= limit:
+        note = f"showing first {limit} — narrow with search/category"
+    return opts, note
 
 
 def build_status_panel(
@@ -976,18 +1016,36 @@ def build_molecule_section(
     app: Any,
     *,
     layout_fn: Any,
-    molecule_library: dict[str, Any],
     pubchem_available: bool,
     visualization_available: bool,
 ) -> None:
     """Build molecule input widgets and collapsed summary container."""
-    preset_opts = ["(select a molecule)"] + list(molecule_library.keys())
-    app.preset_dd = widgets.Dropdown(
-        options=preset_opts,
-        value="(select a molecule)",
+    # ── Library browse/search (STRUCT.9) — category filter + search + results.
+    cat_opts = [("All categories", "")] + [
+        (_category_label(c), c) for c in _ml.categories()
+    ]
+    app.lib_category_dd = widgets.Dropdown(
+        options=cat_opts,
+        value="",
+        description="Category:",
+        style={"description_width": "70px"},
+        layout=layout_fn(width="260px"),
+    )
+    app.lib_search_txt = widgets.Text(
+        placeholder="search name or formula (e.g. aspirin, C6H6)",
+        continuous_update=False,  # fire on Enter/blur, not per keystroke
+        layout=layout_fn(width="300px"),
+    )
+    init_opts, init_note = library_result_options()
+    app.lib_results_dd = widgets.Dropdown(
+        options=init_opts,
+        value="",
         description="Molecule:",
-        style={"description_width": "90px"},
-        layout=layout_fn(width="320px"),
+        style={"description_width": "70px"},
+        layout=layout_fn(width="420px"),
+    )
+    app.lib_count_lbl = widgets.HTML(
+        f'<span style="color:#888;font-size:12px">{init_note}</span>'
     )
 
     app.xyz_area = widgets.Textarea(
@@ -1005,7 +1063,7 @@ def build_molecule_section(
     app.xyz_msg = widgets.Label()
 
     app.pubchem_txt = widgets.Text(
-        placeholder="name or SMILES  (e.g. aspirin, caffeine, CC(=O)O)",
+        placeholder="name, SMILES, CID, or InChI  (e.g. aspirin, CC(=O)O, 2244)",
         layout=layout_fn(width="380px"),
     )
     app.pubchem_btn = widgets.Button(
@@ -1027,9 +1085,13 @@ def build_molecule_section(
     tab_preset = widgets.VBox(
         [
             widgets.HTML(
-                hint + "Choose from the bundled library of curated molecules.</p>"
+                hint + "Browse the bundled library — filter by category or "
+                "search by name/formula. Includes thousands of small molecules "
+                "for offline use.</p>"
             ),
-            app.preset_dd,
+            widgets.HBox([app.lib_category_dd, app.lib_search_txt]),
+            app.lib_results_dd,
+            app.lib_count_lbl,
         ]
     )
     tab_xyz = widgets.VBox(
@@ -1044,14 +1106,16 @@ def build_molecule_section(
     tab_pubchem = widgets.VBox(
         [
             widgets.HTML(
-                hint + "Search by name or SMILES. Requires internet connection.</p>"
+                hint + "Search by name, SMILES, CID, or InChI. Tries PubChem "
+                "then NCI CACTUS, and falls back to the bundled library offline."
+                "</p>"
             ),
             widgets.HBox([app.pubchem_txt, app.pubchem_btn]),
             app.pubchem_msg,
         ]
     )
     input_tab = widgets.Tab(children=[tab_preset, tab_xyz, tab_pubchem])
-    for i, title in enumerate(["Preset Library", "XYZ Input", "PubChem Search"]):
+    for i, title in enumerate(["Library", "XYZ Input", "Online Search"]):
         input_tab.set_title(i, title)
 
     app.mol_input_expanded = widgets.VBox(

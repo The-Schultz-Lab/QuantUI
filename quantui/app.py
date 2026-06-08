@@ -31,6 +31,7 @@ from IPython.display import HTML, Javascript, display
 import quantui
 import quantui.calc_log as _calc_log
 import quantui.issue_tracker as _issue_tracker
+from quantui import molecule_library as _ml
 from quantui.app_analysis import (
     activate_ana_panel as _ana_activate_ana_panel,
 )
@@ -117,6 +118,9 @@ from quantui.app_builders import (
 )
 from quantui.app_builders import (
     build_welcome_header as _bld_build_welcome_header,
+)
+from quantui.app_builders import (
+    library_result_options as _bld_library_result_options,
 )
 from quantui.app_exports import (
     export_molecule_and_label as _exp_export_molecule_and_label,
@@ -392,7 +396,6 @@ from quantui.config import (
     DEFAULT_METHOD,
     DEFAULT_MULTIPLICITY,
     DEFAULT_OPT_STEPS,
-    MOLECULE_LIBRARY,
     SUPPORTED_BASIS_SETS,
     SUPPORTED_METHODS,
 )
@@ -767,7 +770,10 @@ class QuantUIApp:
         past_dd: Any
         past_output: Any
         past_refresh_btn: Any
-        preset_dd: Any
+        lib_category_dd: Any
+        lib_search_txt: Any
+        lib_results_dd: Any
+        lib_count_lbl: Any
         pubchem_btn: Any
         pubchem_msg: Any
         pubchem_txt: Any
@@ -1188,7 +1194,6 @@ class QuantUIApp:
         _bld_build_molecule_section(
             self,
             layout_fn=_layout,
-            molecule_library=MOLECULE_LIBRARY,
             pubchem_available=PUBCHEM_AVAILABLE,
             visualization_available=VISUALIZATION_AVAILABLE,
         )
@@ -1454,8 +1459,14 @@ class QuantUIApp:
             )
         # Theme
         self.theme_btn.observe(self._safe_cb(self._on_theme_changed), names="value")
-        # Molecule input
-        self.preset_dd.observe(self._safe_cb(self._on_load_preset), names="value")
+        # Molecule input — library browse/search (STRUCT.9)
+        self.lib_category_dd.observe(
+            self._safe_cb(self._on_lib_filter_changed), names="value"
+        )
+        self.lib_search_txt.observe(
+            self._safe_cb(self._on_lib_filter_changed), names="value"
+        )
+        self.lib_results_dd.observe(self._safe_cb(self._on_lib_select), names="value")
         self.xyz_btn.on_click(self._on_load_xyz)
         self.pubchem_btn.on_click(self._on_search_pubchem)
         self.change_mol_btn.on_click(self._on_expand_mol_input)
@@ -2506,19 +2517,42 @@ class QuantUIApp:
 
     # ── Molecule input ────────────────────────────────────────────────────
 
-    def _on_load_preset(self, change) -> None:
-        name = change["new"]
-        if name.startswith("("):
+    def _refresh_lib_results(self) -> None:
+        """Repopulate the library results dropdown from the current filters."""
+        category = self.lib_category_dd.value or None
+        query = self.lib_search_txt.value.strip()
+        opts, note = _bld_library_result_options(query, category)
+        # Guard so resetting options/value doesn't fire _on_lib_select.
+        self._lib_refreshing = True
+        try:
+            self.lib_results_dd.options = opts
+            self.lib_results_dd.value = ""
+        finally:
+            self._lib_refreshing = False
+        self.lib_count_lbl.value = (
+            f'<span style="color:#888;font-size:12px">{note}</span>'
+        )
+
+    def _on_lib_filter_changed(self, change) -> None:
+        self._refresh_lib_results()
+
+    def _on_lib_select(self, change) -> None:
+        if getattr(self, "_lib_refreshing", False):
             return
-        d = MOLECULE_LIBRARY[name]
+        entry_id = change["new"]
+        if not entry_id:
+            return
+        entry = _ml.get(entry_id)
+        if entry is None:
+            return
         self._set_molecule(
             Molecule(
-                atoms=d["atoms"],
-                coordinates=d["coordinates"],
-                charge=d["charge"],
-                multiplicity=d["multiplicity"],
+                atoms=entry["atoms"],
+                coordinates=entry["coordinates"],
+                charge=entry["charge"],
+                multiplicity=entry["multiplicity"],
             ),
-            d["description"],
+            entry.get("description") or entry["name"],
         )
 
     def _on_load_xyz(self, btn) -> None:
