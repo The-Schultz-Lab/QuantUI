@@ -413,3 +413,21 @@ def count() -> int:
         finally:
             con.close()
     return len(_manifest_entries())
+
+
+def iter_entries():
+    """Yield every entry (full, with decoded coordinates) in store order.
+
+    Single connection — efficient for whole-library governance/round-trip
+    checks (STRUCT.10). Falls back to the JSON manifest if the store is absent.
+    """
+    con = _connect_ro()
+    if con is None:
+        for raw in _manifest_entries():
+            yield _normalize_entry(raw)
+        return
+    try:
+        for row in con.execute("SELECT * FROM molecule ORDER BY rowid"):
+            yield _row_to_entry(row)
+    finally:
+        con.close()

@@ -28,8 +28,10 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
         "body": (
             "<p><b>How to run a calculation:</b></p>"
             "<ol>"
-            "<li>Select or enter a molecule in <b>Molecule Input</b> (XYZ text, "
-            "SMILES string, library preset, or PubChem search)</li>"
+            "<li>Select or enter a molecule in <b>Molecule Input</b> — browse the "
+            "<b>Library</b>, paste <b>XYZ</b>, or use <b>Online Search</b> "
+            "(name, SMILES, CID, or InChI). See the "
+            "<i>Finding a molecule</i> help topic.</li>"
             "<li>Choose a calculation type, method, and basis set in "
             "<b>Calculation Setup</b></li>"
             "<li>Click <b>Run Calculation</b> — results appear in the "
@@ -303,6 +305,36 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "<p>Full guide with per-tool details, troubleshooting, and a sample "
             "result-folder layout: see <code>docs/IMPORTING-INTO-AVOGADRO.md</code> "
             "in the QuantUI repo.</p>"
+        ),
+    },
+    "finding_structures": {
+        "title": "Finding a molecule (library, search, SMILES)",
+        "body": (
+            "<p>The <b>Molecule Input</b> panel offers three ways to get a "
+            "starting structure — all of which work fully offline except the "
+            "Online Search.</p>"
+            "<ul>"
+            "<li><b>Library</b> — browse the bundled offline library: filter by "
+            "<b>category</b> (amino acids, solvents, drugs, …) or type in the "
+            "<b>search</b> box to match by name or formula. It includes a small "
+            "curated set plus thousands of small molecules (QM9), so you can "
+            "work with no internet connection.</li>"
+            "<li><b>XYZ Input</b> — paste raw <code>element x y z</code> "
+            "coordinates, one atom per line.</li>"
+            "<li><b>Online Search</b> — type a <b>name</b> (aspirin), "
+            "<b>SMILES</b> (<code>CC(=O)O</code>), <b>CID</b> (2244), or "
+            "<b>InChI</b>. SMILES/InChI are built locally by RDKit (no network); "
+            "names and CIDs are resolved by trying <b>PubChem</b>, then "
+            "<b>NCI CACTUS</b> (which also understands CAS numbers), and finally "
+            "the bundled library if you are offline. When a name matches several "
+            "compounds (e.g. <i>xylene</i>), a <b>pick-list</b> appears so you "
+            "choose the right one instead of guessing.</li>"
+            "</ul>"
+            "<p><b>Provenance:</b> the status line states where a structure came "
+            "from — the library, a local SMILES build, PubChem, or CACTUS — so "
+            "you know whether coordinates are experimental, DFT-optimized, or "
+            "force-field-embedded. Either way, treat them as a <i>starting "
+            "point</i> and run a geometry optimization for accurate results.</p>"
         ),
     },
 }
