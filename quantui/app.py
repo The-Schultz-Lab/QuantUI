@@ -3402,10 +3402,14 @@ class QuantUIApp:
     def _install_run_output_scroll_guard(self) -> None:
         """Install a JS guard that preserves live-log scroll behavior.
 
-        The Output widget can reset scroll position during high-frequency
-        append_stdout updates in notebook/Voila frontends. This observer keeps
-        the log pinned to the bottom while the user is already at the bottom,
-        and preserves manual scrolling when the user scrolls up.
+        Two parts (BUG-SCROLL, reopened 2026-06-08):
+
+        1. Disable browser **scroll-anchoring** (``overflow-anchor: none``) on the
+           log and its scrollable ancestors — appending a line otherwise makes
+           the browser nudge the *page* scroll, the "screen jumps up on each new
+           output line" symptom.
+        2. Keep the internal log pinned to the bottom while the user is already
+           at the bottom, and preserve manual scroll-up.
         """
         if self._run_output_scroll_guard_installed:
             return
@@ -3444,6 +3448,20 @@ class QuantUIApp:
         }
 
         root.setAttribute(ROOT_MARK, "1");
+
+        // Disable browser scroll-anchoring on the log and every scrollable
+        // ancestor (incl. the page scroller). Without this, appending a line
+        // inside the log makes the browser nudge the *page* scroll to keep an
+        // anchor element stable — the user-visible "screen jumps up" on each
+        // new output line (BUG-SCROLL).
+        try {
+            scroller.style.overflowAnchor = "none";
+            for (let el = root; el && el !== document.documentElement; el = el.parentElement) {
+                el.style.overflowAnchor = "none";
+            }
+            document.documentElement.style.overflowAnchor = "none";
+            if (document.body) document.body.style.overflowAnchor = "none";
+        } catch (e) { /* styling best-effort */ }
 
         const thresholdPx = 24;
         let stickToBottom = true;

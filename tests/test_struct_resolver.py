@@ -237,3 +237,35 @@ class TestCoordsEmbeddedFlag:
         assert "coords_embedded" in meta
         # The fixture SDF already carries 3D coords, so RDKit should not embed.
         assert meta["coords_embedded"] is False
+
+    @rdkit_only
+    def test_2d_sdf_is_reembedded_to_3d_no_atoms_piled(self):
+        """STRUCT.12 regression: a 2D SDF (H added without coords in the old
+        code piled them at the origin → 'valence 13') must come back as a real
+        3D structure with every atom at a distinct position."""
+        import math
+
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+
+        from quantui.pubchem import sdf_to_xyz
+
+        m = Chem.MolFromSmiles("CCO")  # ethanol, no explicit H
+        AllChem.Compute2DCoords(m)  # 2D conformer, flagged 2D
+        sdf_2d = Chem.MolToMolBlock(m)
+
+        xyz, meta = sdf_to_xyz(sdf_2d)
+        assert meta["coords_embedded"] is True  # we re-embedded the 2D input
+
+        coords = [
+            [float(c) for c in line.split()[1:4]]
+            for line in xyz.strip().splitlines()[2:]
+        ]
+        assert len(coords) == meta["num_atoms"] == 9  # C2H6O
+        # No two atoms coincide (the old bug piled all H at 0,0,0).
+        for i in range(len(coords)):
+            for j in range(i + 1, len(coords)):
+                d = math.dist(coords[i], coords[j])
+                assert d > 0.5, f"atoms {i},{j} only {d:.3f} Å apart"
+        # Genuinely 3D, not flat.
+        assert max(abs(c[2]) for c in coords) > 1e-3

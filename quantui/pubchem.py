@@ -296,20 +296,34 @@ def sdf_to_xyz(sdf_content: str) -> Tuple[str, Dict[str, Any]]:
         raise ImportError("RDKit is required for SDF to XYZ conversion")
 
     try:
-        # Parse SDF with RDKit
-        mol = Chem.MolFromMolBlock(sdf_content)
+        # Parse SDF with RDKit, keeping any explicit hydrogens (3D PubChem SDFs
+        # already carry them with real coordinates).
+        mol = Chem.MolFromMolBlock(sdf_content, removeHs=False)
 
         if mol is None:
             raise ValueError("Failed to parse SDF content")
 
-        # Add hydrogens if not present
-        mol = Chem.AddHs(mol)
+        # Add any missing hydrogens *with* coordinates. Without addCoords the
+        # new H default to the origin, which — combined with a 2D SDF — yields a
+        # degenerate geometry (atoms piled at 0,0,0) that bond perception then
+        # reads as absurd valences (STRUCT.12).
+        mol = Chem.AddHs(mol, addCoords=True)
 
-        # Generate 3D coordinates if needed
-        coords_embedded = mol.GetNumConformers() == 0
+        # Re-embed in 3D whenever there is no conformer, or the conformer is 2D
+        # (PubChem's 3D→2D fallback). A flat conformer must not be returned as a
+        # "3D" structure.
+        conf = mol.GetConformer() if mol.GetNumConformers() else None
+        coords_embedded = conf is None or not conf.Is3D()
         if coords_embedded:
-            AllChem.EmbedMolecule(mol, randomSeed=42)
-            AllChem.UFFOptimizeMolecule(mol)
+            if AllChem.EmbedMolecule(mol, randomSeed=42) != 0:
+                AllChem.EmbedMolecule(mol, randomSeed=42, useRandomCoords=True)
+            try:
+                AllChem.MMFFOptimizeMolecule(mol)
+            except Exception:
+                try:
+                    AllChem.UFFOptimizeMolecule(mol)
+                except Exception:
+                    pass
 
         # Extract coordinates and build XYZ string
         conf = mol.GetConformer()
