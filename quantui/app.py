@@ -3416,97 +3416,43 @@ class QuantUIApp:
 
         js_code = r"""
 (() => {
+    // BUG-SCROLL — keep the live calc log pinned to the bottom.
+    //
+    // History: 6 MutationObserver variants failed while an identical console
+    // snippet worked. The difference was that the console snippet RE-QUERIES the
+    // element fresh each time, whereas an install-once observer binds to a node
+    // that ipywidgets later replaces/re-renders — so the guard ends up watching
+    // a stale node and never pins the live one. We therefore poll: on a short
+    // interval, re-find the current ".quantui-run-output" and, if it grew since
+    // last tick (output is streaming), pin it to the bottom on the next animation
+    // frame (rAF beats ipywidgets' synchronous scrollTop=0 reset). When the log
+    // is idle (no growth) we do nothing, so a finished log scrolls freely.
+    // A 120ms poll already followed correctly, but flickered: ipywidgets
+    // resets scrollTop to 0 on each line, and between poll ticks that "at top"
+    // state was visible before the pin yanked it back down. The cure is to pin
+    // on EVERY animation frame while output is streaming — an rAF callback runs
+    // after the per-line reset but before the browser paints, so the reset
+    // never reaches the screen (no flicker). Once the log is idle (no growth for
+    // ~600ms) we stop pinning, so a finished log can be scrolled freely.
     const ROOT_CLASS = "quantui-run-output";
-    const ROOT_MARK = "data-quantui-run-scroll-guard";
+    let lastScrollHeight = -1;
+    let lastChangeTs = 0;
 
-    function selectScroller(root) {
-        const candidates = [
-            root,
-            ...root.querySelectorAll(
-                ".jp-OutputArea-output, .output_scroll, .jupyter-widgets-output-area, .output_subarea"
-            ),
-        ];
-        for (const el of candidates) {
-            const style = window.getComputedStyle(el);
-            const overflowY = (style && style.overflowY) || "";
-            const canScroll = /auto|scroll/.test(overflowY);
-            if (canScroll || el.scrollHeight > el.clientHeight + 2) {
-                return el;
+    function frame(ts) {
+        const el = document.querySelector("." + ROOT_CLASS);
+        if (el) {
+            el.style.overflowAnchor = "none";
+            if (el.scrollHeight !== lastScrollHeight) {
+                lastScrollHeight = el.scrollHeight;
+                lastChangeTs = ts;
+            }
+            if (ts - lastChangeTs < 600) {
+                el.scrollTop = el.scrollHeight;
             }
         }
-        return root;
+        requestAnimationFrame(frame);
     }
-
-    function installForRoot(root) {
-        if (!root || root.getAttribute(ROOT_MARK) === "1") {
-            return;
-        }
-
-        const scroller = selectScroller(root);
-        if (!scroller) {
-            return;
-        }
-
-        root.setAttribute(ROOT_MARK, "1");
-
-        // Disable browser scroll-anchoring on the log and every scrollable
-        // ancestor (incl. the page scroller). Without this, appending a line
-        // inside the log makes the browser nudge the *page* scroll to keep an
-        // anchor element stable — the user-visible "screen jumps up" on each
-        // new output line (BUG-SCROLL).
-        try {
-            scroller.style.overflowAnchor = "none";
-            for (let el = root; el && el !== document.documentElement; el = el.parentElement) {
-                el.style.overflowAnchor = "none";
-            }
-            document.documentElement.style.overflowAnchor = "none";
-            if (document.body) document.body.style.overflowAnchor = "none";
-        } catch (e) { /* styling best-effort */ }
-
-        const thresholdPx = 24;
-        let stickToBottom = true;
-        let lastScrollHeight = scroller.scrollHeight;
-
-        const updateStickFlag = () => {
-            const dist = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
-            stickToBottom = dist <= thresholdPx;
-        };
-
-        const onMutation = () => {
-            // A large shrink means the log was cleared for a new run — re-arm
-            // "follow". Without this, stickToBottom stays false from a previous
-            // manual scroll-up and the new run's output streams while the log
-            // sits at the top (BUG-SCROLL, confirmed via DevTools: scrollTop
-            // stuck at 0 while content grew).
-            if (scroller.scrollHeight < lastScrollHeight - thresholdPx) {
-                stickToBottom = true;
-            }
-            lastScrollHeight = scroller.scrollHeight;
-            if (stickToBottom) {
-                scroller.scrollTop = scroller.scrollHeight;
-            }
-        };
-
-        scroller.addEventListener("scroll", updateStickFlag, { passive: true });
-
-        const obs = new MutationObserver(onMutation);
-        obs.observe(root, { childList: true, subtree: true, characterData: true });
-
-        updateStickFlag();
-        onMutation();
-    }
-
-    function scanAndInstall() {
-        const roots = document.querySelectorAll(`.${ROOT_CLASS}`);
-        roots.forEach(installForRoot);
-    }
-
-    scanAndInstall();
-
-    const bodyObserver = new MutationObserver(() => {
-        scanAndInstall();
-    });
-    bodyObserver.observe(document.body, { childList: true, subtree: true });
+    requestAnimationFrame(frame);
 })();
 """
 
