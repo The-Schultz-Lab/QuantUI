@@ -269,3 +269,27 @@ class TestCoordsEmbeddedFlag:
                 assert d > 0.5, f"atoms {i},{j} only {d:.3f} Å apart"
         # Genuinely 3D, not flat.
         assert max(abs(c[2]) for c in coords) > 1e-3
+
+
+class TestSaltFragmentSeparation:
+    """STRUCT.14 regression: a salt's counterion must not embed jammed into the
+    cation (RDKit otherwise places it ~1.4 Å away → bond perception reads it as
+    a bonded, hypervalent atom and the renderer rejects it, e.g. methylene
+    blue)."""
+
+    @rdkit_only
+    def test_counterion_is_separated(self):
+        import math
+
+        from quantui.pubchem import smiles_to_xyz
+
+        # Ammonium chloride: [NH4+] cation + Cl- counterion (two fragments).
+        xyz, meta = smiles_to_xyz("[NH4+].[Cl-]")
+        atoms = [
+            (line.split()[0], [float(c) for c in line.split()[1:4]])
+            for line in xyz.strip().splitlines()[2:]
+        ]
+        cl = next(p for sym, p in atoms if sym == "Cl")
+        nearest = min(math.dist(cl, p) for sym, p in atoms if sym != "Cl")
+        # A real bond is ~1.3-2.0 Å; the separated counterion must be well beyond.
+        assert nearest > 2.5, f"Cl- only {nearest:.2f} Å from the cation"

@@ -242,8 +242,11 @@ PUBCHEM_BACKOFF_MAX_S: float = 8.0  # cap on a single back-off sleep
 PUBCHEM_MIN_REQUEST_INTERVAL_S: float = 0.25
 
 # NCI CACTUS Chemical Identifier Resolver — chained fallback after PubChem
-# (resolves name / CAS / InChI / SMILES → 3D SDF; no API key).
-CACTUS_TIMEOUT_S: float = 15.0
+# (resolves name / CAS / InChI / SMILES → 3D SDF; no API key). CACTUS is often
+# slow/down, so keep the read timeout short — it's only a fallback and must not
+# hang the search. Connect timeout fails fast when the host is unreachable.
+CACTUS_TIMEOUT_S: float = 8.0
+CACTUS_CONNECT_TIMEOUT_S: float = 4.0
 
 # Bundled-library size budget + heavy-atom ceilings (M-STRUCT STRUCT.7/.8/.10).
 # These are QC *starting* geometries, so keep them runnable in a classroom.

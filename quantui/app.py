@@ -3465,13 +3465,23 @@ class QuantUIApp:
 
         const thresholdPx = 24;
         let stickToBottom = true;
+        let lastScrollHeight = scroller.scrollHeight;
 
         const updateStickFlag = () => {
             const dist = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
             stickToBottom = dist <= thresholdPx;
         };
 
-        const pinIfNeeded = () => {
+        const onMutation = () => {
+            // A large shrink means the log was cleared for a new run — re-arm
+            // "follow". Without this, stickToBottom stays false from a previous
+            // manual scroll-up and the new run's output streams while the log
+            // sits at the top (BUG-SCROLL, confirmed via DevTools: scrollTop
+            // stuck at 0 while content grew).
+            if (scroller.scrollHeight < lastScrollHeight - thresholdPx) {
+                stickToBottom = true;
+            }
+            lastScrollHeight = scroller.scrollHeight;
             if (stickToBottom) {
                 scroller.scrollTop = scroller.scrollHeight;
             }
@@ -3479,11 +3489,11 @@ class QuantUIApp:
 
         scroller.addEventListener("scroll", updateStickFlag, { passive: true });
 
-        const obs = new MutationObserver(pinIfNeeded);
+        const obs = new MutationObserver(onMutation);
         obs.observe(root, { childList: true, subtree: true, characterData: true });
 
         updateStickFlag();
-        pinIfNeeded();
+        onMutation();
     }
 
     function scanAndInstall() {

@@ -51,11 +51,14 @@ def resolve_to_sdf(identifier: str, conformer_3d: bool = True) -> str:
         urls.append(f"{CACTUS_BASE_URL}/{enc}/file?format=sdf&get3d=true")
     urls.append(f"{CACTUS_BASE_URL}/{enc}/sdf")
 
+    # (connect, read) timeouts: fail fast on an unreachable host, and cap the
+    # read so a slow CACTUS can't hang the search (it's only a fallback).
+    timeout = (config.CACTUS_CONNECT_TIMEOUT_S, config.CACTUS_TIMEOUT_S)
     last_status = None
     try:
         for url in urls:
             logger.debug(f"CACTUS resolving: {url}")
-            response = requests.get(url, timeout=config.CACTUS_TIMEOUT_S)
+            response = requests.get(url, timeout=timeout)
             last_status = response.status_code
             if response.status_code == 200 and _looks_like_sdf(response.text):
                 return str(response.text)

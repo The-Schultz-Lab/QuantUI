@@ -277,6 +277,51 @@ def get_molecule_sdf(cid: int, conformer_3d: bool = True) -> str:
         raise PubChemAPIError(f"Failed to retrieve molecule: {e}")
 
 
+def _separate_fragments(mol: Any, min_gap: float = 3.0) -> None:
+    """Push disconnected fragments (e.g. a salt's counterion) apart, in place.
+
+    RDKit's ``EmbedMolecule`` places multiple fragments in one coordinate frame
+    and frequently overlaps them — a counterion can land ~1.4 Å from the cation,
+    which distance-based bond perception then reads as a (hyper)valent bond and
+    the renderer rejects ("Valence of atom N is …, larger than allowed"). This
+    is why salts like methylene blue (cation + Cl⁻) failed (STRUCT.14).
+
+    After embedding, translate every non-largest fragment radially outward from
+    the main fragment so the closest inter-fragment gap is at least ``min_gap``
+    Å. Operates on the existing conformer; atom order is preserved. No-op for
+    single-fragment molecules.
+    """
+    if not RDKIT_AVAILABLE or mol.GetNumConformers() == 0:
+        return
+    frags = Chem.GetMolFrags(mol)  # tuple of atom-index tuples, order preserved
+    if len(frags) <= 1:
+        return
+
+    import numpy as np
+    from rdkit.Geometry import Point3D
+
+    conf = mol.GetConformer()
+    pos = {i: np.array(conf.GetAtomPosition(i)) for i in range(mol.GetNumAtoms())}
+    main = max(frags, key=len)
+    main_c = np.mean([pos[i] for i in main], axis=0)
+    main_r = max((float(np.linalg.norm(pos[i] - main_c)) for i in main), default=0.0)
+    for frag in frags:
+        if frag is main:
+            continue
+        fc = np.mean([pos[i] for i in frag], axis=0)
+        fr = max((float(np.linalg.norm(pos[i] - fc)) for i in frag), default=0.0)
+        direction = fc - main_c
+        norm = float(np.linalg.norm(direction))
+        direction = direction / norm if norm > 1e-6 else np.array([1.0, 0.0, 0.0])
+        shift = (main_c + direction * (main_r + fr + min_gap)) - fc
+        for i in frag:
+            new = pos[i] + shift
+            conf.SetAtomPosition(
+                i, Point3D(float(new[0]), float(new[1]), float(new[2]))
+            )
+            pos[i] = new
+
+
 def sdf_to_xyz(sdf_content: str) -> Tuple[str, Dict[str, Any]]:
     """
     Convert SDF content to XYZ format string.
@@ -324,6 +369,9 @@ def sdf_to_xyz(sdf_content: str) -> Tuple[str, Dict[str, Any]]:
                     AllChem.UFFOptimizeMolecule(mol)
                 except Exception:
                     pass
+            # Salts/counterions embed jammed together — separate them so bond
+            # perception doesn't see a bonded counterion (STRUCT.14).
+            _separate_fragments(mol)
 
         # Extract coordinates and build XYZ string
         conf = mol.GetConformer()
@@ -550,6 +598,8 @@ def smiles_to_xyz(smiles: str, optimize_3d: bool = True) -> Tuple[str, Dict[str,
             except Exception:
                 logger.warning("UFF optimization failed, using unoptimized coordinates")
 
+            _separate_fragments(mol)  # keep salt counterions apart (STRUCT.14)
+
         # Extract coordinates
         if mol.GetNumConformers() == 0:
             raise ValueError("Failed to generate 3D coordinates")
@@ -612,6 +662,8 @@ def inchi_to_xyz(inchi: str, optimize_3d: bool = True) -> Tuple[str, Dict[str, A
                 AllChem.UFFOptimizeMolecule(mol)
             except Exception:
                 logger.warning("UFF optimization failed, using unoptimized coordinates")
+
+            _separate_fragments(mol)  # keep salt counterions apart (STRUCT.14)
 
         if mol.GetNumConformers() == 0:
             raise ValueError("Failed to generate 3D coordinates")

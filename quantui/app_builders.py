@@ -491,12 +491,18 @@ def build_shared_widgets(
         value='<i style="color:#888">No molecule loaded yet.</i>'
     )
     app.mol_summary_compact = widgets.HTML(value="")
-    app.viz_output = widgets.Output(layout=layout_fn(min_height="50px"))
+    # Fixed heights reserve space so swapping content (backend/palette toggle)
+    # or streaming output never resizes the container — which would reflow the
+    # page and jump the scrollbar (BUG-SCROLL). The molecule viewer renders at
+    # render_molecule_html's default 500px; the run log scrolls internally.
+    # overflow hidden (not auto): the 3D viewer is a fixed-size canvas, so it
+    # needs no scrollbar — clipping a few px of margin avoids an internal
+    # scrollbar that resets to the top on every backend/palette swap.
+    app.viz_output = widgets.Output(layout=layout_fn(height="510px", overflow="hidden"))
     app.run_output = widgets.Output(
         layout=layout_fn(
             border="1px solid #c0ccd8",
-            min_height="80px",
-            max_height="400px",
+            height="300px",
             padding="8px",
             overflow_y="auto",
         )
