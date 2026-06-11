@@ -33,7 +33,7 @@ PUBCHEM_BASE_URL = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
 # Back-compat alias; canonical value lives in config (constraint #5).
 PUBCHEM_TIMEOUT = config.PUBCHEM_TIMEOUT_S
 
-# ── HTTP client: client-side throttle + bounded 503 back-off (STRUCT.2) ──────
+# ── HTTP client: client-side throttle + bounded 503 back-off ─────────────────
 # A single process-wide limiter keeps us under PUG-REST's ~5 req/s ceiling even
 # when several search threads fire at once.
 _request_lock = threading.Lock()
@@ -171,7 +171,7 @@ def search_cids_by_name(name: str) -> list:
     """Return ALL PubChem CIDs matching a name (best-match order); [] if none.
 
     Unlike :func:`search_molecule_by_name` (which returns just the first hit),
-    this exposes every match so the UI can disambiguate (STRUCT.5).
+    this exposes every match so the UI can disambiguate.
     """
     url = f"{PUBCHEM_BASE_URL}/compound/name/{quote(name, safe='')}/cids/JSON"
     try:
@@ -284,7 +284,7 @@ def _separate_fragments(mol: Any, min_gap: float = 3.0) -> None:
     and frequently overlaps them — a counterion can land ~1.4 Å from the cation,
     which distance-based bond perception then reads as a (hyper)valent bond and
     the renderer rejects ("Valence of atom N is …, larger than allowed"). This
-    is why salts like methylene blue (cation + Cl⁻) failed (STRUCT.14).
+    is why salts like methylene blue (cation + Cl⁻) failed.
 
     After embedding, translate every non-largest fragment radially outward from
     the main fragment so the closest inter-fragment gap is at least ``min_gap``
@@ -351,7 +351,7 @@ def sdf_to_xyz(sdf_content: str) -> Tuple[str, Dict[str, Any]]:
         # Add any missing hydrogens *with* coordinates. Without addCoords the
         # new H default to the origin, which — combined with a 2D SDF — yields a
         # degenerate geometry (atoms piled at 0,0,0) that bond perception then
-        # reads as absurd valences (STRUCT.12).
+        # reads as absurd valences.
         mol = Chem.AddHs(mol, addCoords=True)
 
         # Re-embed in 3D whenever there is no conformer, or the conformer is 2D
@@ -370,7 +370,7 @@ def sdf_to_xyz(sdf_content: str) -> Tuple[str, Dict[str, Any]]:
                 except Exception:
                     pass
             # Salts/counterions embed jammed together — separate them so bond
-            # perception doesn't see a bonded counterion (STRUCT.14).
+            # perception doesn't see a bonded counterion.
             _separate_fragments(mol)
 
         # Extract coordinates and build XYZ string
@@ -598,7 +598,7 @@ def smiles_to_xyz(smiles: str, optimize_3d: bool = True) -> Tuple[str, Dict[str,
             except Exception:
                 logger.warning("UFF optimization failed, using unoptimized coordinates")
 
-            _separate_fragments(mol)  # keep salt counterions apart (STRUCT.14)
+            _separate_fragments(mol)  # keep salt counterions apart
 
         # Extract coordinates
         if mol.GetNumConformers() == 0:
@@ -663,7 +663,7 @@ def inchi_to_xyz(inchi: str, optimize_3d: bool = True) -> Tuple[str, Dict[str, A
             except Exception:
                 logger.warning("UFF optimization failed, using unoptimized coordinates")
 
-            _separate_fragments(mol)  # keep salt counterions apart (STRUCT.14)
+            _separate_fragments(mol)  # keep salt counterions apart
 
         if mol.GetNumConformers() == 0:
             raise ValueError("Failed to generate 3D coordinates")
@@ -961,7 +961,7 @@ def validate_smiles(smiles: str) -> Tuple[bool, str]:
 
 
 # ============================================================================
-# Smart input routing (STRUCT.1)
+# Smart input routing
 # ============================================================================
 
 # Standard InChIKey: 14 block chars - 10 block chars - 1 flag char.
@@ -978,8 +978,7 @@ def _looks_like_smiles(query: str) -> bool:
 
     Deliberately conservative — bare-letter tokens like ``CCO`` (which are valid
     SMILES *and* plausible names/formulas) are left for the provider chain
-    (STRUCT.4) to disambiguate, so we never misroute a plain name to a local
-    parse.
+    to disambiguate, so we never misroute a plain name to a local parse.
     """
     if not RDKIT_AVAILABLE or " " in query:
         return False
@@ -996,7 +995,7 @@ def classify_query(query: str) -> str:
     Returns one of ``"cid"``, ``"inchikey"``, ``"inchi"``, ``"smiles"``,
     ``"formula"``, or ``"name"``. ``smiles`` / ``inchi`` resolve locally via
     RDKit (no network); the rest go to PubChem. ``formula`` is currently routed
-    like ``name`` (PubChem's async fastformula search is deferred to STRUCT.4).
+    like ``name`` (PubChem's async fastformula search is not used here).
     """
     q = query.strip()
     if not q:

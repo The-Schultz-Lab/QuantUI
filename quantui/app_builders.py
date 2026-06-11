@@ -13,7 +13,7 @@ import quantui
 from quantui import molecule_library as _ml
 from quantui.help_content import HELP_TOPICS
 
-# Friendlier labels for the library category filter (STRUCT.9).
+# Friendlier labels for the library category filter.
 _CATEGORY_LABELS = {
     "diatomic": "Diatomics",
     "triatomic": "Triatomics",
@@ -1026,7 +1026,7 @@ def build_molecule_section(
     visualization_available: bool,
 ) -> None:
     """Build molecule input widgets and collapsed summary container."""
-    # ── Library browse/search (STRUCT.9) — category filter + search + results.
+    # ── Library browse/search — category filter + search + results.
     cat_opts = [("All categories", "")] + [
         (_category_label(c), c) for c in _ml.categories()
     ]
@@ -1086,7 +1086,7 @@ def build_molecule_section(
             else "PubChem unavailable — check internet connection"
         )
     )
-    # Disambiguation pick-list (STRUCT.5) — hidden until a query has >1 match.
+    # Disambiguation pick-list — hidden until a query has >1 match.
     app.pubchem_candidates_dd = widgets.Dropdown(
         options=[("— pick a match —", "")],
         value="",

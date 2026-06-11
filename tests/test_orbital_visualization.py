@@ -291,9 +291,37 @@ class TestPlotCubeIsosurface:
         fig = plot_cube_isosurface(minimal_cube_file)
         assert isinstance(fig, go.Figure)
 
-    def test_has_two_traces(self, minimal_cube_file):
+    def test_has_single_isosurface_trace(self, minimal_cube_file):
+        # Both lobes are drawn by one go.Isosurface trace (surface_count=2) to
+        # halve the figure payload (BUG-ISO-OOM).
         fig = plot_cube_isosurface(minimal_cube_file)
-        assert len(fig.data) == 2
+        iso = [t for t in fig.data if t.type == "isosurface"]
+        assert len(iso) == 1
+        assert iso[0].surface.count == 2  # both lobes via one trace
+
+    def test_large_grid_is_downsampled(self):
+        # The cube is written at a fixed resolution regardless of molecule size;
+        # a full 60^3 = 216k-point grid flattened into the figure could exhaust
+        # browser memory. The render path must stride it under the cap.
+        from unittest.mock import patch
+
+        from quantui import orbital_visualization as ov
+
+        n = 60
+        fake_cube = {
+            "nx": n,
+            "ny": n,
+            "nz": n,
+            "data": np.zeros((n, n, n)),
+            "origin": np.zeros(3),
+            "axes": np.eye(3) * 0.3,
+            "atoms": [],
+        }
+        with patch.object(ov, "parse_cube_file", return_value=fake_cube):
+            fig = ov.plot_cube_isosurface("dummy.cube", isovalue=0.02)
+        iso = [t for t in fig.data if t.type == "isosurface"][0]
+        assert len(iso.x) <= ov._MAX_ISOSURFACE_POINTS
+        assert len(iso.x) < n * n * n  # actually downsampled
 
     def test_custom_title(self, minimal_cube_file):
         fig = plot_cube_isosurface(minimal_cube_file, title="HOMO Isosurface")
@@ -304,8 +332,11 @@ class TestPlotCubeIsosurface:
         assert "Bohr" in fig.layout.scene.xaxis.title.text
 
     def test_show_molecule_adds_overlay_traces(self, minimal_cube_file):
+        # The isosurface is one trace now; show_molecule adds ≥1 scatter3d
+        # overlay (atoms, plus bonds when there are ≥2 atoms).
         fig = plot_cube_isosurface(minimal_cube_file, show_molecule=True)
-        assert len(fig.data) >= 3
+        scatter = [t for t in fig.data if t.type == "scatter3d"]
+        assert len(scatter) >= 1
 
     def test_show_grid_false_hides_scene_grid(self, minimal_cube_file):
         fig = plot_cube_isosurface(minimal_cube_file, show_grid=False)

@@ -1,4 +1,4 @@
-"""NCI CACTUS Chemical Identifier Resolver (M-STRUCT STRUCT.3).
+"""NCI CACTUS Chemical Identifier Resolver.
 
 A chained fallback after PubChem. CACTUS resolves a wide range of identifiers
 (common name, IUPAC name, CAS number, InChI, SMILES, formula) to a 3D SDF with

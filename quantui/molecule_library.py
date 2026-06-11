@@ -1,12 +1,12 @@
-"""Bundled molecule library — indexed package-data store + lazy loader (STRUCT.6).
+"""Bundled molecule library — indexed package-data store + lazy loader.
 
 The library lives in ``quantui/data/`` as two committed artifacts:
 
 - ``manifests/presets.json`` — the human-readable, reviewable source of record.
 - ``library/library.sqlite`` — an indexed, lazily-queried store generated from
   the manifest(s). Coordinates are packed as ``int16`` @ 0.001 Å (7–8 bytes per
-  atom) so the store stays compact enough to hold the eventual ~10 MB hybrid
-  library (STRUCT.7/.8) without bloating import time.
+  atom) so the store stays compact enough to hold the ~10 MB hybrid library
+  without bloating import time.
 
 Design goals:
 
@@ -19,8 +19,8 @@ Design goals:
   point transparently falls back to the JSON manifest, so ``import quantui``
   never fails on a fresh/odd checkout.
 
-When STRUCT.7/.8 add curated + bulk content, they only add manifests + rebuild
-the store; nothing in this module's public API changes.
+Adding curated or bulk content only adds manifests + rebuilds the store;
+nothing in this module's public API changes.
 """
 
 import json
@@ -42,7 +42,7 @@ _ATOM_RECORD = "<BBhhh"
 _ATOM_RECORD_SIZE = struct.calcsize(_ATOM_RECORD)  # 8
 
 # Categories that are NOT part of the browsable preset dict (reached via search
-# only). Bulk QM9 entries (STRUCT.8) will carry "bulk-qm9".
+# only). Bulk QM9 entries carry "bulk-qm9".
 _BULK_CATEGORIES = frozenset({"bulk-qm9"})
 
 
@@ -90,7 +90,7 @@ def db_path() -> Path:
 
 
 def manifest_paths() -> List[Path]:
-    """All manifest JSON files that seed the store (STRUCT.7/.8 add more).
+    """All manifest JSON files that seed the store.
 
     ``presets.json`` is ordered first so the original teaching molecules lead
     the (interim) flat dropdown; remaining manifests follow alphabetically.
@@ -419,7 +419,7 @@ def iter_entries():
     """Yield every entry (full, with decoded coordinates) in store order.
 
     Single connection — efficient for whole-library governance/round-trip
-    checks (STRUCT.10). Falls back to the JSON manifest if the store is absent.
+    checks. Falls back to the JSON manifest if the store is absent.
     """
     con = _connect_ro()
     if con is None:

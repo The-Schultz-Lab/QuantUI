@@ -229,7 +229,7 @@ WIDGET_LAYOUT = {
 
 DESCRIPTION_WIDTH = "150px"
 
-# ── External structure resolvers (M-STRUCT) ──────────────────────────────────
+# ── External structure resolvers ─────────────────────────────────────────────
 # Network + throttle settings shared by the PubChem client (and, later, the
 # NCI CACTUS resolver). All timeouts/limits live here per constraint #5.
 PUBCHEM_TIMEOUT_S: float = 15.0  # per-request HTTP timeout
@@ -248,13 +248,13 @@ PUBCHEM_MIN_REQUEST_INTERVAL_S: float = 0.25
 CACTUS_TIMEOUT_S: float = 8.0
 CACTUS_CONNECT_TIMEOUT_S: float = 4.0
 
-# Bundled-library size budget + heavy-atom ceilings (M-STRUCT STRUCT.7/.8/.10).
+# Bundled-library size budget + heavy-atom ceilings.
 # These are QC *starting* geometries, so keep them runnable in a classroom.
-LIBRARY_SIZE_BUDGET_BYTES: int = 10 * 1024 * 1024  # 10 MB (DEC-015)
+LIBRARY_SIZE_BUDGET_BYTES: int = 10 * 1024 * 1024  # 10 MB
 LIBRARY_HEAVY_ATOM_CEILING_CURATED: int = 30  # named drugs run a bit larger
 LIBRARY_HEAVY_ATOM_CEILING_BULK: int = 9  # QM9 caps here anyway
 
-# Molecule presets — bundled library (STRUCT.6).
+# Molecule presets — bundled library.
 # The former inline literal now lives in the indexed package-data store
 # (quantui/data/library/library.sqlite, seeded from
 # quantui/data/manifests/presets.json). ``config.MOLECULE_LIBRARY`` is a lazy

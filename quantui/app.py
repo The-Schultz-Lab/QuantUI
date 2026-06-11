@@ -935,7 +935,7 @@ class QuantUIApp:
         # Orbital state consumed by the Isosurface panel populator. Always
         # initialized to None so ``pop_isosurface`` can read the attributes
         # via direct access without raising AttributeError on a fresh app
-        # or on a history-replay where ``orbitals.npz`` is missing (BUG.8).
+        # or on a history-replay where ``orbitals.npz`` is missing.
         # ``_apply_analysis_context`` resets these between contexts so stale
         # state from a prior calc cannot leak into the next molecule.
         self._last_orb_mo_coeff: Any = None
@@ -1464,7 +1464,7 @@ class QuantUIApp:
             )
         # Theme
         self.theme_btn.observe(self._safe_cb(self._on_theme_changed), names="value")
-        # Molecule input — library browse/search (STRUCT.9)
+        # Molecule input — library browse/search
         self.lib_category_dd.observe(
             self._safe_cb(self._on_lib_filter_changed), names="value"
         )

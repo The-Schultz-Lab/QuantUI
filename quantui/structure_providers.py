@@ -1,24 +1,24 @@
-"""Unified structure-resolver chain with offline fallback (M-STRUCT STRUCT.4).
+"""Unified structure-resolver chain with offline fallback.
 
 Resolution order (first hit wins):
 
 1. **Local RDKit** for SMILES / InChI input — offline, no network.
 2. **Bundled library** exact hit (formula key) — offline, instant.
-3. **PubChem** (hardened client, STRUCT.2).
-4. **NCI CACTUS** resolver (STRUCT.3).
+3. **PubChem** (hardened client).
+4. **NCI CACTUS** resolver.
 5. **Bundled-library fuzzy fallback** (name/description substring) — the
    last-resort offline answer so the search box is never a dead end, even with
    no network.
 
 Every resolver returns a normalized :class:`ResolvedStructure` so callers
-(and the future disambiguation UI, STRUCT.5) treat all sources uniformly. The
+(and the disambiguation UI) treat all sources uniformly. The
 ``source`` field records which resolver answered, so the UI can be honest about
 provenance.
 
 The bundled-library steps currently search ``config.MOLECULE_LIBRARY`` (the 20
-presets). When STRUCT.6/.7/.8 move the library into an indexed package-data
-store, only :func:`_library_exact` / :func:`_library_fuzzy` change — the chain
-is unaffected.
+presets). The library lives in an indexed package-data store, reached only
+through :func:`_library_exact` / :func:`_library_fuzzy`, so the chain is
+unaffected by how it is stored.
 """
 
 import logging
