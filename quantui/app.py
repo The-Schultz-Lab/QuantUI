@@ -3400,40 +3400,28 @@ class QuantUIApp:
         callback(*args, **kwargs)
 
     def _install_run_output_scroll_guard(self) -> None:
-        """Install a JS guard that preserves live-log scroll behavior.
+        """Install a JS guard that keeps the live calc log scrolled to the bottom.
 
-        Two parts (BUG-SCROLL, reopened 2026-06-08):
-
-        1. Disable browser **scroll-anchoring** (``overflow-anchor: none``) on the
-           log and its scrollable ancestors — appending a line otherwise makes
-           the browser nudge the *page* scroll, the "screen jumps up on each new
-           output line" symptom.
-        2. Keep the internal log pinned to the bottom while the user is already
-           at the bottom, and preserve manual scroll-up.
+        Re-queries the run-output element each animation frame (ipywidgets can
+        replace the node) and pins it to the bottom while output is streaming.
+        Pinning on ``requestAnimationFrame`` runs after ipywidgets' per-line
+        ``scrollTop = 0`` reset but before paint, so the log follows without
+        flicker; pinning stops once the log is idle so a finished log can be
+        scrolled freely.
         """
         if self._run_output_scroll_guard_installed:
             return
 
         js_code = r"""
 (() => {
-    // BUG-SCROLL — keep the live calc log pinned to the bottom.
+    // Keep the live calc log pinned to the bottom while output streams.
     //
-    // History: 6 MutationObserver variants failed while an identical console
-    // snippet worked. The difference was that the console snippet RE-QUERIES the
-    // element fresh each time, whereas an install-once observer binds to a node
-    // that ipywidgets later replaces/re-renders — so the guard ends up watching
-    // a stale node and never pins the live one. We therefore poll: on a short
-    // interval, re-find the current ".quantui-run-output" and, if it grew since
-    // last tick (output is streaming), pin it to the bottom on the next animation
-    // frame (rAF beats ipywidgets' synchronous scrollTop=0 reset). When the log
-    // is idle (no growth) we do nothing, so a finished log scrolls freely.
-    // A 120ms poll already followed correctly, but flickered: ipywidgets
-    // resets scrollTop to 0 on each line, and between poll ticks that "at top"
-    // state was visible before the pin yanked it back down. The cure is to pin
-    // on EVERY animation frame while output is streaming — an rAF callback runs
-    // after the per-line reset but before the browser paints, so the reset
-    // never reaches the screen (no flicker). Once the log is idle (no growth for
-    // ~600ms) we stop pinning, so a finished log can be scrolled freely.
+    // ipywidgets resets scrollTop to 0 on each appended line and may replace the
+    // Output node, so: re-query ".quantui-run-output" every animation frame and,
+    // while it is still growing, pin it to the bottom. Pinning on rAF runs after
+    // the per-line reset but before paint (no flicker); re-querying each frame
+    // avoids binding to a stale node. Idle logs (no growth for ~600ms) are left
+    // alone so they can be scrolled freely.
     const ROOT_CLASS = "quantui-run-output";
     let lastScrollHeight = -1;
     let lastChangeTs = 0;

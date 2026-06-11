@@ -4,7 +4,30 @@ Pytest Configuration and Fixtures
 Shared test fixtures for QuantUI test suite.
 """
 
+import os
+import tempfile
+
 import pytest
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_results_dir():
+    """Redirect the default results directory to a temp dir for the whole suite.
+
+    ``results_storage._default_results_dir()`` falls back to a **cwd-relative**
+    ``Path("results")`` when ``results_dir`` isn't passed (e.g. the calibration
+    runner in ``benchmarks.py`` saves each step that way). Pointing
+    ``QUANTUI_RESULTS_DIR`` at a temp dir keeps every default save isolated, so
+    the suite never writes ``results/`` into the working directory.
+    """
+    prev = os.environ.get("QUANTUI_RESULTS_DIR")
+    with tempfile.TemporaryDirectory(prefix="quantui_test_results_") as tmp:
+        os.environ["QUANTUI_RESULTS_DIR"] = tmp
+        yield
+        if prev is None:
+            os.environ.pop("QUANTUI_RESULTS_DIR", None)
+        else:
+            os.environ["QUANTUI_RESULTS_DIR"] = prev
 
 
 @pytest.fixture(autouse=True, scope="session")
