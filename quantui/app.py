@@ -31,6 +31,7 @@ from IPython.display import HTML, Javascript, display
 import quantui
 import quantui.calc_log as _calc_log
 import quantui.issue_tracker as _issue_tracker
+from quantui import molecule_library as _ml
 from quantui.app_analysis import (
     activate_ana_panel as _ana_activate_ana_panel,
 )
@@ -117,6 +118,9 @@ from quantui.app_builders import (
 )
 from quantui.app_builders import (
     build_welcome_header as _bld_build_welcome_header,
+)
+from quantui.app_builders import (
+    library_result_options as _bld_library_result_options,
 )
 from quantui.app_exports import (
     export_molecule_and_label as _exp_export_molecule_and_label,
@@ -392,7 +396,6 @@ from quantui.config import (
     DEFAULT_METHOD,
     DEFAULT_MULTIPLICITY,
     DEFAULT_OPT_STEPS,
-    MOLECULE_LIBRARY,
     SUPPORTED_BASIS_SETS,
     SUPPORTED_METHODS,
 )
@@ -472,14 +475,18 @@ try:
     from quantui.pubchem import (
         RDKIT_AVAILABLE as _PUBCHEM_RDKIT_AVAILABLE,
     )
-    from quantui.pubchem import (
-        student_friendly_fetch as _student_friendly_fetch,
+    from quantui.structure_providers import (
+        search_candidates as _struct_search_candidates,
+    )
+    from quantui.structure_providers import (
+        student_friendly_resolve as _student_friendly_resolve,
     )
 
     PUBCHEM_AVAILABLE = _PUBCHEM_RDKIT_AVAILABLE
 except ImportError:
     PUBCHEM_AVAILABLE = False
-    _student_friendly_fetch = None  # type: ignore[assignment]
+    _student_friendly_resolve = None  # type: ignore[assignment]
+    _struct_search_candidates = None  # type: ignore[assignment]
 
 try:
     from quantui.session_calc import SessionResult, run_in_session  # noqa: F401
@@ -767,10 +774,14 @@ class QuantUIApp:
         past_dd: Any
         past_output: Any
         past_refresh_btn: Any
-        preset_dd: Any
+        lib_category_dd: Any
+        lib_search_txt: Any
+        lib_results_dd: Any
+        lib_count_lbl: Any
         pubchem_btn: Any
         pubchem_msg: Any
         pubchem_txt: Any
+        pubchem_candidates_dd: Any
         result_output: Any
         result_viz_output: Any
         results_path_lbl: Any
@@ -924,7 +935,7 @@ class QuantUIApp:
         # Orbital state consumed by the Isosurface panel populator. Always
         # initialized to None so ``pop_isosurface`` can read the attributes
         # via direct access without raising AttributeError on a fresh app
-        # or on a history-replay where ``orbitals.npz`` is missing (BUG.8).
+        # or on a history-replay where ``orbitals.npz`` is missing.
         # ``_apply_analysis_context`` resets these between contexts so stale
         # state from a prior calc cannot leak into the next molecule.
         self._last_orb_mo_coeff: Any = None
@@ -1188,7 +1199,6 @@ class QuantUIApp:
         _bld_build_molecule_section(
             self,
             layout_fn=_layout,
-            molecule_library=MOLECULE_LIBRARY,
             pubchem_available=PUBCHEM_AVAILABLE,
             visualization_available=VISUALIZATION_AVAILABLE,
         )
@@ -1454,10 +1464,19 @@ class QuantUIApp:
             )
         # Theme
         self.theme_btn.observe(self._safe_cb(self._on_theme_changed), names="value")
-        # Molecule input
-        self.preset_dd.observe(self._safe_cb(self._on_load_preset), names="value")
+        # Molecule input — library browse/search
+        self.lib_category_dd.observe(
+            self._safe_cb(self._on_lib_filter_changed), names="value"
+        )
+        self.lib_search_txt.observe(
+            self._safe_cb(self._on_lib_filter_changed), names="value"
+        )
+        self.lib_results_dd.observe(self._safe_cb(self._on_lib_select), names="value")
         self.xyz_btn.on_click(self._on_load_xyz)
         self.pubchem_btn.on_click(self._on_search_pubchem)
+        self.pubchem_candidates_dd.observe(
+            self._safe_cb(self._on_pubchem_candidate_selected), names="value"
+        )
         self.change_mol_btn.on_click(self._on_expand_mol_input)
         # Calc type
         self.calc_type_dd.observe(
@@ -2506,19 +2525,42 @@ class QuantUIApp:
 
     # ── Molecule input ────────────────────────────────────────────────────
 
-    def _on_load_preset(self, change) -> None:
-        name = change["new"]
-        if name.startswith("("):
+    def _refresh_lib_results(self) -> None:
+        """Repopulate the library results dropdown from the current filters."""
+        category = self.lib_category_dd.value or None
+        query = self.lib_search_txt.value.strip()
+        opts, note = _bld_library_result_options(query, category)
+        # Guard so resetting options/value doesn't fire _on_lib_select.
+        self._lib_refreshing = True
+        try:
+            self.lib_results_dd.options = opts
+            self.lib_results_dd.value = ""
+        finally:
+            self._lib_refreshing = False
+        self.lib_count_lbl.value = (
+            f'<span style="color:#888;font-size:12px">{note}</span>'
+        )
+
+    def _on_lib_filter_changed(self, change) -> None:
+        self._refresh_lib_results()
+
+    def _on_lib_select(self, change) -> None:
+        if getattr(self, "_lib_refreshing", False):
             return
-        d = MOLECULE_LIBRARY[name]
+        entry_id = change["new"]
+        if not entry_id:
+            return
+        entry = _ml.get(entry_id)
+        if entry is None:
+            return
         self._set_molecule(
             Molecule(
-                atoms=d["atoms"],
-                coordinates=d["coordinates"],
-                charge=d["charge"],
-                multiplicity=d["multiplicity"],
+                atoms=entry["atoms"],
+                coordinates=entry["coordinates"],
+                charge=entry["charge"],
+                multiplicity=entry["multiplicity"],
             ),
-            d["description"],
+            entry.get("description") or entry["name"],
         )
 
     def _on_load_xyz(self, btn) -> None:
@@ -2553,14 +2595,74 @@ class QuantUIApp:
                 pass
         self.pubchem_btn.disabled = False
 
+    def _resolve_and_apply(self, query: str, loop) -> None:
+        """Resolve a single query (background thread) and apply on the main loop."""
+        try:
+            xyz_str, _msg = _student_friendly_resolve(query)
+            if xyz_str is None:
+                raise ValueError(_msg)
+            atoms, coords = parse_xyz_input(xyz_str)
+            mol = Molecule(atoms=atoms, coordinates=coords)
+            loop.call_soon_threadsafe(
+                self._apply_pubchem_search_result, query, mol, None
+            )
+        except Exception as exc:
+            loop.call_soon_threadsafe(
+                self._apply_pubchem_search_result, query, None, exc
+            )
+
+    def _hide_pubchem_candidates(self) -> None:
+        """Clear + hide the disambiguation pick-list."""
+        self._pubchem_cand_refreshing = True
+        try:
+            self.pubchem_candidates_dd.options = [("— pick a match —", "")]
+            self.pubchem_candidates_dd.value = ""
+            self.pubchem_candidates_dd.layout.display = "none"
+        finally:
+            self._pubchem_cand_refreshing = False
+
+    def _show_pubchem_candidates(self, query: str, candidates: list) -> None:
+        """Populate + reveal the pick-list when a query has multiple matches."""
+        opts = [(f"pick one of {len(candidates)} matches…", "")]
+        for c in candidates:
+            mw = c.get("mw") or 0.0
+            opts.append(
+                (f"{c['title']}  ·  {c['formula']}  ·  {mw:.1f} g/mol", str(c["cid"]))
+            )
+        self._pubchem_cand_refreshing = True
+        try:
+            self.pubchem_candidates_dd.options = opts
+            self.pubchem_candidates_dd.value = ""
+            self.pubchem_candidates_dd.layout.display = ""
+        finally:
+            self._pubchem_cand_refreshing = False
+        self.pubchem_msg.value = (
+            f'{len(candidates)} matches for "{query}" — pick one below.'
+        )
+        self.pubchem_btn.disabled = False
+
+    def _on_pubchem_candidate_selected(self, change) -> None:
+        if getattr(self, "_pubchem_cand_refreshing", False):
+            return
+        cid = change["new"]
+        if not cid:
+            return
+        self.pubchem_msg.value = f"Loading CID {cid}…"
+        self.pubchem_btn.disabled = True
+        loop = asyncio.get_running_loop()
+        threading.Thread(
+            target=lambda: self._resolve_and_apply(str(cid), loop), daemon=True
+        ).start()
+
     def _on_search_pubchem(self, btn) -> None:
         query = self.pubchem_txt.value.strip()
         if not query:
-            self.pubchem_msg.value = "Enter a molecule name or SMILES."
+            self.pubchem_msg.value = "Enter a molecule name, SMILES, CID, or InChI."
             return
-        if _student_friendly_fetch is None:
-            self.pubchem_msg.value = "PubChem module not available."
+        if _student_friendly_resolve is None:
+            self.pubchem_msg.value = "Structure search not available."
             return
+        self._hide_pubchem_candidates()
         self.pubchem_msg.value = f'Searching for "{query}"...'
         self.pubchem_btn.disabled = True
 
@@ -2568,24 +2670,21 @@ class QuantUIApp:
 
         def _do():
             try:
-                xyz_str, _msg = _student_friendly_fetch(query)
-                if xyz_str is None:
-                    raise ValueError(_msg)
-                atoms, coords = parse_xyz_input(xyz_str)
-                mol = Molecule(atoms=atoms, coordinates=coords)
-                loop.call_soon_threadsafe(
-                    self._apply_pubchem_search_result,
-                    query,
-                    mol,
-                    None,
+                candidates = (
+                    _struct_search_candidates(query)
+                    if _struct_search_candidates is not None
+                    else []
                 )
-            except Exception as exc:
+            except Exception:
+                candidates = []
+            if len(candidates) > 1:
                 loop.call_soon_threadsafe(
-                    self._apply_pubchem_search_result,
-                    query,
-                    None,
-                    exc,
+                    self._show_pubchem_candidates, query, candidates
                 )
+                return
+            # 0 or 1 match → resolve via the full chain (PubChem → CACTUS →
+            # offline library), which also handles SMILES/InChI/CID locally.
+            self._resolve_and_apply(query, loop)
 
         threading.Thread(target=_do, daemon=True).start()
 
@@ -3301,85 +3400,47 @@ class QuantUIApp:
         callback(*args, **kwargs)
 
     def _install_run_output_scroll_guard(self) -> None:
-        """Install a JS guard that preserves live-log scroll behavior.
+        """Install a JS guard that keeps the live calc log scrolled to the bottom.
 
-        The Output widget can reset scroll position during high-frequency
-        append_stdout updates in notebook/Voila frontends. This observer keeps
-        the log pinned to the bottom while the user is already at the bottom,
-        and preserves manual scrolling when the user scrolls up.
+        Re-queries the run-output element each animation frame (ipywidgets can
+        replace the node) and pins it to the bottom while output is streaming.
+        Pinning on ``requestAnimationFrame`` runs after ipywidgets' per-line
+        ``scrollTop = 0`` reset but before paint, so the log follows without
+        flicker; pinning stops once the log is idle so a finished log can be
+        scrolled freely.
         """
         if self._run_output_scroll_guard_installed:
             return
 
         js_code = r"""
 (() => {
+    // Keep the live calc log pinned to the bottom while output streams.
+    //
+    // ipywidgets resets scrollTop to 0 on each appended line and may replace the
+    // Output node, so: re-query ".quantui-run-output" every animation frame and,
+    // while it is still growing, pin it to the bottom. Pinning on rAF runs after
+    // the per-line reset but before paint (no flicker); re-querying each frame
+    // avoids binding to a stale node. Idle logs (no growth for ~600ms) are left
+    // alone so they can be scrolled freely.
     const ROOT_CLASS = "quantui-run-output";
-    const ROOT_MARK = "data-quantui-run-scroll-guard";
+    let lastScrollHeight = -1;
+    let lastChangeTs = 0;
 
-    function selectScroller(root) {
-        const candidates = [
-            root,
-            ...root.querySelectorAll(
-                ".jp-OutputArea-output, .output_scroll, .jupyter-widgets-output-area, .output_subarea"
-            ),
-        ];
-        for (const el of candidates) {
-            const style = window.getComputedStyle(el);
-            const overflowY = (style && style.overflowY) || "";
-            const canScroll = /auto|scroll/.test(overflowY);
-            if (canScroll || el.scrollHeight > el.clientHeight + 2) {
-                return el;
+    function frame(ts) {
+        const el = document.querySelector("." + ROOT_CLASS);
+        if (el) {
+            el.style.overflowAnchor = "none";
+            if (el.scrollHeight !== lastScrollHeight) {
+                lastScrollHeight = el.scrollHeight;
+                lastChangeTs = ts;
+            }
+            if (ts - lastChangeTs < 600) {
+                el.scrollTop = el.scrollHeight;
             }
         }
-        return root;
+        requestAnimationFrame(frame);
     }
-
-    function installForRoot(root) {
-        if (!root || root.getAttribute(ROOT_MARK) === "1") {
-            return;
-        }
-
-        const scroller = selectScroller(root);
-        if (!scroller) {
-            return;
-        }
-
-        root.setAttribute(ROOT_MARK, "1");
-
-        const thresholdPx = 24;
-        let stickToBottom = true;
-
-        const updateStickFlag = () => {
-            const dist = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
-            stickToBottom = dist <= thresholdPx;
-        };
-
-        const pinIfNeeded = () => {
-            if (stickToBottom) {
-                scroller.scrollTop = scroller.scrollHeight;
-            }
-        };
-
-        scroller.addEventListener("scroll", updateStickFlag, { passive: true });
-
-        const obs = new MutationObserver(pinIfNeeded);
-        obs.observe(root, { childList: true, subtree: true, characterData: true });
-
-        updateStickFlag();
-        pinIfNeeded();
-    }
-
-    function scanAndInstall() {
-        const roots = document.querySelectorAll(`.${ROOT_CLASS}`);
-        roots.forEach(installForRoot);
-    }
-
-    scanAndInstall();
-
-    const bodyObserver = new MutationObserver(() => {
-        scanAndInstall();
-    });
-    bodyObserver.observe(document.body, { childList: true, subtree: true });
+    requestAnimationFrame(frame);
 })();
 """
 

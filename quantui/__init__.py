@@ -7,7 +7,7 @@ Calculations run locally in the Jupyter session — no cluster or SLURM required
 PySCF requires Linux/macOS/WSL. Windows users should use the Apptainer container.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 import logging
 
@@ -123,19 +123,32 @@ except ImportError:
 
 # PubChem integration (optional — requires internet)
 try:
+    from .cactus import fetch_from_cactus
     from .pubchem import (
         MoleculeNotFoundError,
         PubChemError,
         check_pubchem_availability,
+        classify_query,
         display_2d_structure,
         fetch_molecule,
+        fetch_structure,
         generate_2d_structure_svg,
         get_common_molecules,
         get_smiles_examples,
+        inchi_to_xyz,
+        search_cid_by_inchikey,
+        search_cids_by_name,
+        search_pubchem_candidates,
         smiles_to_xyz,
         student_friendly_fetch,
+        student_friendly_resolve,
         student_friendly_smiles_to_xyz,
         validate_smiles,
+    )
+    from .structure_providers import (
+        ResolvedStructure,
+        resolve_structure,
+        search_candidates,
     )
 
     PUBCHEM_AVAILABLE = True
@@ -238,7 +251,18 @@ __all__ = [
     "optimize_geometry",
     # PubChem (optional)
     "fetch_molecule",
+    "fetch_structure",
+    "classify_query",
     "student_friendly_fetch",
+    "student_friendly_resolve",
+    "resolve_structure",
+    "ResolvedStructure",
+    "search_candidates",
+    "fetch_from_cactus",
+    "inchi_to_xyz",
+    "search_cid_by_inchikey",
+    "search_cids_by_name",
+    "search_pubchem_candidates",
     "get_common_molecules",
     "check_pubchem_availability",
     "PubChemError",

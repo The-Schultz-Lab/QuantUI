@@ -168,7 +168,7 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     app._iso_render_token = int(getattr(app, "_iso_render_token", 0)) + 1
     # Orbital state is consumed by pop_isosurface (and ana_pop_iso_generate
     # when the user clicks Generate). Reset here so a context that doesn't
-    # populate these fields (history result without orbitals.npz, BUG.8)
+    # populate these fields (history result without orbitals.npz)
     # cannot leak the prior calc's orbital arrays into the Isosurface panel
     # of an unrelated molecule. Each populate method that wants the panel
     # to activate re-sets these in show_orbital_diagram.
@@ -261,7 +261,7 @@ def pop_isosurface(app: Any, ctx: Any) -> bool:
     are always present in practice, but the defensive read mirrors the
     pattern used by ``render_orbital_isosurface`` and keeps this populator
     robust against future refactors that might call it before the context
-    reset has run (BUG.8 root-cause guard).
+    reset has run.
     """
     return (
         getattr(app, "_last_orb_mo_coeff", None) is not None

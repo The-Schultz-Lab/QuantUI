@@ -130,6 +130,11 @@ def save_result(
         "homo_lumo_gap_ev": getattr(result, "homo_lumo_gap_ev", None),
         "converged": getattr(result, "converged", None),
         "n_iterations": getattr(result, "n_iterations", -1),
+        # Post-HF correlation breakdown — None for HF/DFT. Persisted so the
+        # saved-result card can show the HF reference + correlation rows.
+        "mp2_correlation_hartree": getattr(result, "mp2_correlation_hartree", None),
+        "ccsd_correlation_hartree": getattr(result, "ccsd_correlation_hartree", None),
+        "ccsd_t_correction_hartree": getattr(result, "ccsd_t_correction_hartree", None),
         "spectra": spectra if spectra is not None else {},
     }
     if extras:

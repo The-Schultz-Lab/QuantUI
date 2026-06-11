@@ -229,244 +229,49 @@ WIDGET_LAYOUT = {
 
 DESCRIPTION_WIDTH = "150px"
 
-# Molecule presets — 20+ curated educational molecules
-MOLECULE_LIBRARY: Dict[str, Dict[str, Any]] = {
-    # ========== SIMPLE DIATOMIC MOLECULES ==========
-    "H2": {
-        "atoms": ["H", "H"],
-        "coordinates": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Hydrogen molecule (simplest molecule)",
-    },
-    "O2": {
-        "atoms": ["O", "O"],
-        "coordinates": [[0.0, 0.0, 0.0], [0.0, 0.0, 1.21]],
-        "charge": 0,
-        "multiplicity": 3,  # Triplet ground state
-        "description": "Oxygen molecule (triplet ground state)",
-    },
-    "N2": {
-        "atoms": ["N", "N"],
-        "coordinates": [[0.0, 0.0, 0.0], [0.0, 0.0, 1.10]],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Nitrogen molecule (triple bond)",
-    },
-    "CO": {
-        "atoms": ["C", "O"],
-        "coordinates": [[0.0, 0.0, 0.0], [0.0, 0.0, 1.13]],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Carbon monoxide",
-    },
-    "HF": {
-        "atoms": ["H", "F"],
-        "coordinates": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.92]],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Hydrogen fluoride (polar bond)",
-    },
-    "HCl": {
-        "atoms": ["H", "Cl"],
-        "coordinates": [[0.0, 0.0, 0.0], [0.0, 0.0, 1.27]],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Hydrogen chloride",
-    },
-    # ========== SIMPLE TRIATOMIC MOLECULES ==========
-    "H2O": {
-        "atoms": ["O", "H", "H"],
-        "coordinates": [
-            [0.0, 0.0, 0.0],
-            [0.0, 0.757, 0.587],
-            [0.0, -0.757, 0.587],
-        ],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Water molecule (bent geometry)",
-    },
-    "CO2": {
-        "atoms": ["C", "O", "O"],
-        "coordinates": [
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 1.16],
-            [0.0, 0.0, -1.16],
-        ],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Carbon dioxide (linear)",
-    },
-    "O3": {
-        "atoms": ["O", "O", "O"],
-        "coordinates": [
-            [0.0, 0.0, 0.0],
-            [1.07, 0.65, 0.0],
-            [-1.07, 0.65, 0.0],
-        ],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Ozone (bent, resonance structure)",
-    },
-    "H2O2": {
-        "atoms": ["H", "O", "O", "H"],
-        "coordinates": [
-            [0.74, -0.54, 0.48],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 1.45],
-            [-0.74, -0.54, 1.93],
-        ],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Hydrogen peroxide (non-planar)",
-    },
-    # ========== SIMPLE ORGANIC MOLECULES ==========
-    "CH4": {
-        "atoms": ["C", "H", "H", "H", "H"],
-        "coordinates": [
-            [0.0, 0.0, 0.0],
-            [0.63, 0.63, 0.63],
-            [-0.63, -0.63, 0.63],
-            [-0.63, 0.63, -0.63],
-            [0.63, -0.63, -0.63],
-        ],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Methane (tetrahedral)",
-    },
-    "NH3": {
-        "atoms": ["N", "H", "H", "H"],
-        "coordinates": [
-            [0.0, 0.0, 0.0],
-            [0.0, 0.94, 0.33],
-            [0.81, -0.47, 0.33],
-            [-0.81, -0.47, 0.33],
-        ],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Ammonia (pyramidal)",
-    },
-    "C2H6": {
-        "atoms": ["C", "C", "H", "H", "H", "H", "H", "H"],
-        "coordinates": [
-            [0.0, 0.0, 0.0],
-            [1.54, 0.0, 0.0],
-            [-0.51, 0.89, 0.0],
-            [-0.51, -0.44, 0.89],
-            [-0.51, -0.44, -0.89],
-            [2.05, 0.89, 0.0],
-            [2.05, -0.44, 0.89],
-            [2.05, -0.44, -0.89],
-        ],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Ethane (single bond)",
-    },
-    "C2H4": {
-        "atoms": ["C", "C", "H", "H", "H", "H"],
-        "coordinates": [
-            [0.0, 0.0, 0.0],
-            [1.34, 0.0, 0.0],
-            [-0.51, 0.93, 0.0],
-            [-0.51, -0.93, 0.0],
-            [1.85, 0.93, 0.0],
-            [1.85, -0.93, 0.0],
-        ],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Ethylene (double bond, planar)",
-    },
-    "C2H2": {
-        "atoms": ["C", "C", "H", "H"],
-        "coordinates": [
-            [0.0, 0.0, 0.0],
-            [1.20, 0.0, 0.0],
-            [-1.06, 0.0, 0.0],
-            [2.26, 0.0, 0.0],
-        ],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Acetylene (triple bond, linear)",
-    },
-    "CH3OH": {
-        "atoms": ["C", "O", "H", "H", "H", "H"],
-        "coordinates": [
-            [0.66, -0.02, 0.0],
-            [-0.75, 0.09, 0.0],
-            [1.03, -0.54, 0.89],
-            [1.03, -0.54, -0.89],
-            [1.05, 0.99, 0.0],
-            [-1.07, -0.83, 0.0],
-        ],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Methanol (alcohol)",
-    },
-    "CH2O": {
-        "atoms": ["C", "O", "H", "H"],
-        "coordinates": [
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 1.21],
-            [0.94, 0.0, -0.59],
-            [-0.94, 0.0, -0.59],
-        ],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Formaldehyde (carbonyl group)",
-    },
-    "CH3CHO": {
-        "atoms": ["C", "C", "O", "H", "H", "H", "H"],
-        "coordinates": [
-            [0.0, 0.0, 0.0],
-            [1.51, 0.0, 0.0],
-            [2.17, 1.03, 0.0],
-            [-0.36, -0.52, 0.89],
-            [-0.36, -0.52, -0.89],
-            [-0.39, 1.02, 0.0],
-            [1.89, -1.02, 0.0],
-        ],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Acetaldehyde (aldehyde group)",
-    },
-    "CH3COOH": {
-        "atoms": ["C", "C", "O", "O", "H", "H", "H", "H"],
-        "coordinates": [
-            [0.0, 0.0, 0.0],
-            [1.51, 0.0, 0.0],
-            [2.09, 1.09, 0.0],
-            [2.16, -1.18, 0.0],
-            [-0.36, -0.52, 0.89],
-            [-0.36, -0.52, -0.89],
-            [-0.39, 1.02, 0.0],
-            [3.11, -1.09, 0.0],
-        ],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Acetic acid (carboxylic acid)",
-    },
-    # ========== AROMATIC MOLECULES ==========
-    "C6H6": {
-        "atoms": ["C", "C", "C", "C", "C", "C", "H", "H", "H", "H", "H", "H"],
-        "coordinates": [
-            [0.0, 1.40, 0.0],
-            [1.21, 0.70, 0.0],
-            [1.21, -0.70, 0.0],
-            [0.0, -1.40, 0.0],
-            [-1.21, -0.70, 0.0],
-            [-1.21, 0.70, 0.0],
-            [0.0, 2.48, 0.0],
-            [2.15, 1.24, 0.0],
-            [2.15, -1.24, 0.0],
-            [0.0, -2.48, 0.0],
-            [-2.15, -1.24, 0.0],
-            [-2.15, 1.24, 0.0],
-        ],
-        "charge": 0,
-        "multiplicity": 1,
-        "description": "Benzene (aromatic, hexagonal)",
-    },
-}
+# ── External structure resolvers ─────────────────────────────────────────────
+# Network + throttle settings shared by the PubChem client (and, later, the
+# NCI CACTUS resolver). All timeouts/limits live here per constraint #5.
+PUBCHEM_TIMEOUT_S: float = 15.0  # per-request HTTP timeout
+PUBCHEM_AVAILABILITY_TIMEOUT_S: float = 5.0  # quick reachability probe
+PUBCHEM_MAX_RETRIES: int = 3  # bounded retries on 503 / throttling
+PUBCHEM_BACKOFF_BASE_S: float = 0.5  # exponential back-off base (×2**attempt)
+PUBCHEM_BACKOFF_MAX_S: float = 8.0  # cap on a single back-off sleep
+# Proactive client-side rate limit. PUG-REST allows ~5 req/s; stay conservative
+# so a classroom of simultaneous users doesn't trip the server-side throttle.
+PUBCHEM_MIN_REQUEST_INTERVAL_S: float = 0.25
+
+# NCI CACTUS Chemical Identifier Resolver — chained fallback after PubChem
+# (resolves name / CAS / InChI / SMILES → 3D SDF; no API key). CACTUS is often
+# slow/down, so keep the read timeout short — it's only a fallback and must not
+# hang the search. Connect timeout fails fast when the host is unreachable.
+CACTUS_TIMEOUT_S: float = 8.0
+CACTUS_CONNECT_TIMEOUT_S: float = 4.0
+
+# Bundled-library size budget + heavy-atom ceilings.
+# These are QC *starting* geometries, so keep them runnable in a classroom.
+LIBRARY_SIZE_BUDGET_BYTES: int = 10 * 1024 * 1024  # 10 MB
+LIBRARY_HEAVY_ATOM_CEILING_CURATED: int = 30  # named drugs run a bit larger
+LIBRARY_HEAVY_ATOM_CEILING_BULK: int = 9  # QM9 caps here anyway
+
+# Molecule presets — bundled library.
+# The former inline literal now lives in the indexed package-data store
+# (quantui/data/library/library.sqlite, seeded from
+# quantui/data/manifests/presets.json). ``config.MOLECULE_LIBRARY`` is a lazy
+# back-compat shim resolved via module ``__getattr__`` (PEP 562): on first
+# access it loads the curated/preset entries from the store in the original
+# {formula: {atoms, coordinates, charge, multiplicity, description}} shape, so
+# every existing consumer keeps working unchanged.
+MOLECULE_LIBRARY: Dict[str, Dict[str, Any]]  # populated lazily by __getattr__
+
+
+def __getattr__(name: str) -> Any:
+    if name == "MOLECULE_LIBRARY":
+        from quantui.molecule_library import get_preset_dict
+
+        return get_preset_dict()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # Valid atomic symbols (periodic table subset commonly used)
 VALID_ATOMS = [
