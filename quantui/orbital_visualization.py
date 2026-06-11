@@ -696,6 +696,12 @@ def generate_cube_from_arrays(
 # Cube-file isosurface viewer (plotly — works anywhere)
 # ============================================================================
 
+# Max grid points handed to one go.Isosurface trace. The cube grid is a fixed
+# resolution regardless of molecule size, so the volume is strided down to this
+# cap at render time to keep the figure payload bounded; the saved .cube keeps
+# full resolution.
+_MAX_ISOSURFACE_POINTS = 48_000
+
 
 def parse_cube_file(cube_path: Path) -> dict:
     """
@@ -845,33 +851,25 @@ def plot_cube_isosurface(
     origin = cube["origin"]
     axes = cube["axes"]
 
-    # Build coordinate grids (Bohr)
-    x = origin[0] + np.arange(nx) * axes[0, 0]
-    y = origin[1] + np.arange(ny) * axes[1, 1]
-    z = origin[2] + np.arange(nz) * axes[2, 2]
+    # Downsample so the browser payload + plotly.js isosurfacing stay bounded.
+    # Stride each axis so the total point count stays under _MAX_ISOSURFACE_POINTS.
+    total = nx * ny * nz
+    stride = 1
+    if total > _MAX_ISOSURFACE_POINTS:
+        stride = int(np.ceil((total / _MAX_ISOSURFACE_POINTS) ** (1.0 / 3.0)))
+    data = data[::stride, ::stride, ::stride]
+
+    # Build coordinate grids (Bohr), strided to match the downsampled volume.
+    x = origin[0] + np.arange(nx)[::stride] * axes[0, 0]
+    y = origin[1] + np.arange(ny)[::stride] * axes[1, 1]
+    z = origin[2] + np.arange(nz)[::stride] * axes[2, 2]
     X, Y, Z = np.meshgrid(x, y, z, indexing="ij")
 
     fig = go.Figure()
 
-    # Positive lobe (blue)
-    fig.add_trace(
-        go.Isosurface(
-            x=X.flatten(),
-            y=Y.flatten(),
-            z=Z.flatten(),
-            value=data.flatten(),
-            isomin=isovalue,
-            isomax=isovalue,
-            surface_count=1,
-            opacity=opacity,
-            colorscale=[[0, "rgb(49,130,189)"], [1, "rgb(49,130,189)"]],
-            showscale=False,
-            name=f"+{isovalue}",
-            caps=dict(x_show=False, y_show=False, z_show=False),
-        )
-    )
-
-    # Negative lobe (red)
+    # Both lobes in a single trace (half the payload of two): surfaces at
+    # -isovalue (red) and +isovalue (blue), via a step colorscale split at the
+    # midpoint of [-isovalue, +isovalue].
     fig.add_trace(
         go.Isosurface(
             x=X.flatten(),
@@ -879,12 +877,19 @@ def plot_cube_isosurface(
             z=Z.flatten(),
             value=data.flatten(),
             isomin=-isovalue,
-            isomax=-isovalue,
-            surface_count=1,
+            isomax=isovalue,
+            surface_count=2,
             opacity=opacity,
-            colorscale=[[0, "rgb(222,45,38)"], [1, "rgb(222,45,38)"]],
+            colorscale=[
+                [0.0, "rgb(222,45,38)"],
+                [0.5, "rgb(222,45,38)"],
+                [0.5, "rgb(49,130,189)"],
+                [1.0, "rgb(49,130,189)"],
+            ],
+            cmin=-isovalue,
+            cmax=isovalue,
             showscale=False,
-            name=f"-{isovalue}",
+            name=f"±{isovalue}",
             caps=dict(x_show=False, y_show=False, z_show=False),
         )
     )
