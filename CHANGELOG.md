@@ -7,6 +7,49 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-11
+
+Structure-sourcing release. Repairs the external-database structure search and
+replaces the 20-entry inline molecule list with an indexed, three-tier bundled
+library, alongside visualization and result-card fixes.
+
+### Added
+
+- **External structure search** — resolve molecules by name, PubChem CID, InChI,
+  InChIKey, SMILES, or CAS number. Input is routed by type: SMILES/InChI resolve
+  locally via RDKit with no network, while names and identifiers query PubChem
+  through a hardened client (URL-encoding, request throttling, bounded retry on
+  server throttling). NCI CACTUS acts as a fallback resolver, and an offline
+  bundled-library fallback keeps the search usable without a network connection.
+- **Disambiguation pick-list** — an ambiguous query (e.g. a name with several
+  PubChem matches) presents a selectable list instead of silently choosing the
+  first hit.
+- **Three-tier bundled molecule library** — 20 presets, 156 curated named
+  molecules, and ~1,900 bulk QM9 structures (CC0), held in an indexed,
+  lazily-loaded package-data store. Bulk entries are reachable via search.
+- **Library browse/search tab** — category filter plus name/formula search,
+  replacing the flat preset dropdown.
+
+### Changed
+
+- The molecule preset list moved from an inline `config.py` dictionary into the
+  indexed library store; `config.MOLECULE_LIBRARY` is preserved as a
+  backward-compatible accessor.
+- Frequency / UV-Vis seed-geometry dropdown entries are now labeled as optimized
+  geometries so their source is explicit.
+
+### Fixed
+
+- **Orbital isosurface could exhaust browser memory** — the full volumetric grid
+  was serialized into the Plotly figure. The rendered surface is now downsampled
+  to a bounded point count (the saved cube file remains full-resolution).
+- **CCSD / MP2 result cards** now show the HF reference and correlation-energy
+  breakdown (plus the (T) triples correction for CCSD(T)); these fields are also
+  persisted with saved results.
+- The live calculation log no longer jumps to the top while streaming output.
+- Structures fetched as 2D records are re-embedded in 3D, and salt/counterion
+  fragments are separated so bond perception does not misread them.
+
 ## [0.2.0] - 2026-05-22
 
 First substantial release after `v0.1.0`. The codebase moved from a single
