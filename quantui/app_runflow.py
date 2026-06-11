@@ -303,7 +303,12 @@ def _refresh_seed_options(app: Any, dropdown: Any) -> None:
                 # formula-only match (don't punish the user for a malformed
                 # trajectory.json on an otherwise-matching result).
             ts = data.get("timestamp", d.name[:19])
-            label = f"{data['formula']}  {data['method']}/{data['basis']}" f"  —  {ts}"
+            # Every entry here is a geometry_opt result; prefix the label so the
+            # user can see the seed is an optimized geometry, not a raw input.
+            label = (
+                f"⚙ Geom-opt · {data['formula']}  "
+                f"{data['method']}/{data['basis']}  —  {ts}"
+            )
             options.append((label, str(d)))
         except Exception:
             continue

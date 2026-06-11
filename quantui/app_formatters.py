@@ -401,6 +401,36 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     )
     ts = data.get("timestamp", "")
 
+    # Post-HF correlation breakdown rows (MP2 / CCSD / CCSD(T)). ``energy_hartree``
+    # already includes every correlation contribution, so the HF reference is
+    # the total minus those contributions.
+    _extra = ""
+    _mp2_corr = data.get("mp2_correlation_hartree")
+    if _mp2_corr is not None:
+        _hf_e = data["energy_hartree"] - _mp2_corr
+        _extra += (
+            f'<tr><td style="padding:3px 18px 3px 0;color:#444">HF reference</td>'
+            f'<td style="color:#000">{_hf_e:.8f} Ha</td></tr>'
+            f'<tr><td style="padding:3px 18px 3px 0;color:#444">MP2 correlation</td>'
+            f'<td style="color:#000">{_mp2_corr:.8f} Ha</td></tr>'
+        )
+    _ccsd_corr = data.get("ccsd_correlation_hartree")
+    _ccsd_t_corr = data.get("ccsd_t_correction_hartree")
+    if _ccsd_corr is not None:
+        _hf_e = data["energy_hartree"] - _ccsd_corr - (_ccsd_t_corr or 0.0)
+        _extra += (
+            f'<tr><td style="padding:3px 18px 3px 0;color:#444">HF reference</td>'
+            f'<td style="color:#000">{_hf_e:.8f} Ha</td></tr>'
+            f'<tr><td style="padding:3px 18px 3px 0;color:#444">CCSD correlation</td>'
+            f'<td style="color:#000">{_ccsd_corr:.8f} Ha</td></tr>'
+        )
+        if _ccsd_t_corr is not None:
+            _extra += (
+                f'<tr><td style="padding:3px 18px 3px 0;color:#444">'
+                f"(T) triples correction</td>"
+                f'<td style="color:#000">{_ccsd_t_corr:.8f} Ha</td></tr>'
+            )
+
     # Embed thumbnail if saved
     _thumb_html = ""
     if result_dir is not None:
@@ -421,5 +451,5 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         f'<b>{data["formula"]} &mdash; {data["method"]}/{data["basis"]}</b>'
         f'&ensp;<small style="color:#777">{ts}</small>'
         f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-        f"{_rows}</table></div>"
+        f"{_rows}{_extra}</table></div>"
     )

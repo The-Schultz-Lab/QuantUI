@@ -1251,8 +1251,8 @@ class TestFreqSeedDropdownFilter:
         assert app._molecule is None
         app._refresh_freq_seed_options()
         labels = [lbl for lbl, _ in app._freq_seed_dd.options]
-        assert any(lbl.startswith("H2O") for lbl in labels)
-        assert any(lbl.startswith("CH4") for lbl in labels)
+        assert any("H2O" in lbl for lbl in labels)
+        assert any("CH4" in lbl for lbl in labels)
 
     def test_filtered_to_current_molecule_formula(self, tmp_path, monkeypatch):
         monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
@@ -1263,8 +1263,8 @@ class TestFreqSeedDropdownFilter:
         app._refresh_freq_seed_options()
         labels = [lbl for lbl, _ in app._freq_seed_dd.options]
         assert labels[0] == "(use current molecule)"
-        assert any(lbl.startswith("H2O") for lbl in labels)
-        assert not any(lbl.startswith("CH4") for lbl in labels)
+        assert any("H2O" in lbl for lbl in labels)
+        assert not any("CH4" in lbl for lbl in labels)
 
     def test_set_molecule_triggers_filter(self, tmp_path, monkeypatch):
         # Loading a new molecule should auto-refresh the dropdown so stale
@@ -1275,8 +1275,8 @@ class TestFreqSeedDropdownFilter:
         app = QuantUIApp()
         app._set_molecule(self._water(), label="test")
         labels = [lbl for lbl, _ in app._freq_seed_dd.options]
-        assert any(lbl.startswith("H2O") for lbl in labels)
-        assert not any(lbl.startswith("CH4") for lbl in labels)
+        assert any("H2O" in lbl for lbl in labels)
+        assert not any("CH4" in lbl for lbl in labels)
 
 
 class TestPopIsosurfaceBug8:
@@ -1435,8 +1435,8 @@ class TestTDDFTSeedDropdown:
         app._molecule = self._water()
         app._refresh_tddft_seed_options()
         labels = [lbl for lbl, _ in app._tddft_seed_dd.options]
-        assert any(lbl.startswith("H2O") for lbl in labels)
-        assert not any(lbl.startswith("CH4") for lbl in labels)
+        assert any("H2O" in lbl for lbl in labels)
+        assert not any("CH4" in lbl for lbl in labels)
 
     def test_set_molecule_triggers_tddft_seed_filter(self, tmp_path, monkeypatch):
         monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
@@ -1445,8 +1445,8 @@ class TestTDDFTSeedDropdown:
         app = QuantUIApp()
         app._set_molecule(self._water(), label="test")
         labels = [lbl for lbl, _ in app._tddft_seed_dd.options]
-        assert any(lbl.startswith("H2O") for lbl in labels)
-        assert not any(lbl.startswith("CH4") for lbl in labels)
+        assert any("H2O" in lbl for lbl in labels)
+        assert not any("CH4" in lbl for lbl in labels)
 
     def test_picking_seed_disables_preopt_and_shows_note(self, tmp_path, monkeypatch):
         monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
@@ -1831,7 +1831,7 @@ class TestHistoryHardeningHist6:
         labels = [lbl for lbl, _ in app._freq_seed_dd.options]
         assert len(labels) == 2, labels
         assert labels[0] == "(use current molecule)"
-        assert labels[1].startswith("H2O")
+        assert "H2O" in labels[1]
 
     def test_same_formula_within_tolerance_included(self, tmp_path, monkeypatch):
         monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
@@ -1847,7 +1847,7 @@ class TestHistoryHardeningHist6:
         app._refresh_freq_seed_options()
         labels = [lbl for lbl, _ in app._freq_seed_dd.options]
         assert len(labels) == 3, labels
-        assert sum(1 for lbl in labels if lbl.startswith("H2O")) == 2
+        assert sum(1 for lbl in labels if "H2O" in lbl) == 2
 
     def test_atom_order_mismatch_excluded(self, tmp_path, monkeypatch):
         # Strict atom-order policy: ["H","O","H"] is not the same as
@@ -1864,7 +1864,7 @@ class TestHistoryHardeningHist6:
         app._refresh_freq_seed_options()
         labels = [lbl for lbl, _ in app._freq_seed_dd.options]
         assert len(labels) == 2
-        assert labels[1].startswith("H2O")
+        assert "H2O" in labels[1]
 
     def test_malformed_trajectory_falls_back_to_formula_match(
         self, tmp_path, monkeypatch
@@ -1892,7 +1892,7 @@ class TestHistoryHardeningHist6:
         app._molecule = self._water_molecule()
         app._refresh_freq_seed_options()
         labels = [lbl for lbl, _ in app._freq_seed_dd.options]
-        assert any(lbl.startswith("H2O") for lbl in labels)
+        assert any("H2O" in lbl for lbl in labels)
 
     def test_starting_geometry_cache_hit_avoids_reread(self, tmp_path):
         # _load_starting_geometry must cache per-result so back-to-back

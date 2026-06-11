@@ -161,3 +161,63 @@ def test_format_past_result_contains_calc_type_badge():
     html = format_past_result(data)
     assert "Single Point" in html
     assert "H2O" in html
+
+
+def test_format_past_result_renders_ccsd_breakdown():
+    # The saved-result card (Results tab) must show the HF reference + CCSD
+    # correlation + (T) triples rows when those fields were persisted.
+    data = {
+        "calc_type": "single_point",
+        "converged": True,
+        "homo_lumo_gap_ev": 27.0,
+        "energy_hartree": -75.0139,
+        "energy_ev": -2041.23,
+        "n_iterations": 5,
+        "timestamp": "2026-06-10_15-48-02-285574",
+        "formula": "H2O",
+        "method": "CCSD(T)",
+        "basis": "STO-3G",
+        "ccsd_correlation_hartree": -0.0497,
+        "ccsd_t_correction_hartree": -0.0008,
+    }
+    html = format_past_result(data)
+    assert "HF reference" in html
+    assert "CCSD correlation" in html
+    assert "(T) triples correction" in html
+
+
+def test_format_past_result_renders_mp2_breakdown():
+    data = {
+        "calc_type": "single_point",
+        "converged": True,
+        "homo_lumo_gap_ev": 20.0,
+        "energy_hartree": -75.01,
+        "energy_ev": -2041.0,
+        "n_iterations": 8,
+        "timestamp": "2026-06-10_15-48-02-285574",
+        "formula": "H2O",
+        "method": "MP2",
+        "basis": "STO-3G",
+        "mp2_correlation_hartree": -0.035,
+    }
+    html = format_past_result(data)
+    assert "HF reference" in html
+    assert "MP2 correlation" in html
+
+
+def test_format_past_result_hf_dft_has_no_breakdown():
+    data = {
+        "calc_type": "single_point",
+        "converged": True,
+        "homo_lumo_gap_ev": 10.0,
+        "energy_hartree": -75.0,
+        "energy_ev": -2040.0,
+        "n_iterations": 10,
+        "timestamp": "2026-05-02_12-00-00-000001",
+        "formula": "H2O",
+        "method": "RHF",
+        "basis": "STO-3G",
+    }
+    html = format_past_result(data)
+    assert "correlation" not in html
+    assert "HF reference" not in html
