@@ -21,6 +21,8 @@ echo
 # we try a few common fallback locations before giving up.
 CONDA_SH=""
 for candidate in \
+    "/opt/miniconda3/etc/profile.d/conda.sh" \
+    "/opt/miniconda3/condabin/conda" \
     "$HOME/miniconda3/etc/profile.d/conda.sh" \
     "$HOME/opt/miniconda3/etc/profile.d/conda.sh" \
     "/opt/homebrew/Caskroom/miniconda/base/etc/profile.d/conda.sh" \
