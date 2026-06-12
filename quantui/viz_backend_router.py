@@ -134,8 +134,11 @@ class Decision:
 #     is the only viable real-time trajectory backend in this app.
 #   - TRAJECTORY_EXPORT / VIB_EXPORT: plotlymol produces self-contained HTML
 #     animations with embedded controls, which is the export contract.
-#   - ORBITAL_ISOSURFACE: existing Plotly cube-isosurface path; orthogonal
-#     to the molecule backend policy.
+# ORBITAL_ISOSURFACE is dual-backend: py3Dmol does native, full-resolution
+# in-browser cube isosurfacing (primary); the Plotly cube-isosurface path is the
+# fallback (downsampled). "plotlymol" here is the umbrella for that Plotly path,
+# which only needs plotly itself — the dispatch site treats Plotly as the
+# universal fallback when py3Dmol is not chosen.
 _TASK_POLICY: dict[VizTask, tuple[VizBackend, VizBackend | None]] = {
     VizTask.MOLECULE_PREVIEW: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
     VizTask.STRUCTURE_VIEW_RESULTS: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
@@ -145,7 +148,7 @@ _TASK_POLICY: dict[VizTask, tuple[VizBackend, VizBackend | None]] = {
     VizTask.TRAJECTORY_EXPORT: (VizBackend.PLOTLYMOL, None),
     VizTask.VIB_INTERACTIVE: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
     VizTask.VIB_EXPORT: (VizBackend.PLOTLYMOL, None),
-    VizTask.ORBITAL_ISOSURFACE: (VizBackend.PLOTLYMOL, None),
+    VizTask.ORBITAL_ISOSURFACE: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
 }
 
 

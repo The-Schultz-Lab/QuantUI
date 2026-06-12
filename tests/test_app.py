@@ -2423,6 +2423,10 @@ class TestIsosurfacePersistence:
         app._last_orb_mo_coeff = [[1.0, 0.0], [0.0, 1.0]]
         app._last_orb_mol_atom = [["H", [0.0, 0.0, 0.0]]]
         app._last_orb_mol_basis = "sto-3g"
+        # Force the Plotly fallback path (M-ORBVIZ: the default routes to
+        # py3Dmol when available). Backend is pinned via _resolve_backend so the
+        # test is independent of which backends are installed.
+        app._resolve_backend = lambda task: "plotlymol"
 
         captured: dict[str, object] = {}
 
@@ -2454,6 +2458,49 @@ class TestIsosurfacePersistence:
         assert saved_path.exists()
         mock_gen.assert_called_once()
         mock_plot.assert_called_once()
+
+    def test_render_orbital_isosurface_py3dmol_path(self, tmp_path):
+        # When the backend resolves to py3Dmol, the renderer is the py3Dmol
+        # cube path (not Plotly), and the cube is still saved to disk.
+        app = QuantUIApp()
+        app._last_result_dir = tmp_path
+        app._last_orb_info = MagicMock()
+        app._last_orb_info.n_occupied = 1
+        app._last_orb_info.mo_energies_ev = [-10.0, 2.0]
+        app._last_orb_info.formula = "H2O"
+        app._last_orb_mo_coeff = [[1.0, 0.0], [0.0, 1.0]]
+        app._last_orb_mol_atom = [["H", [0.0, 0.0, 0.0]]]
+        app._last_orb_mol_basis = "sto-3g"
+        app._resolve_backend = lambda task: "py3dmol"
+
+        captured: dict[str, object] = {}
+
+        def _fake_generate(_atom, _basis, _coeff, _idx, out_path):
+            captured["path"] = out_path
+            out_path.write_text("cube", encoding="utf-8")
+            return out_path
+
+        with (
+            patch(
+                "quantui.orbital_visualization.generate_cube_from_arrays",
+                side_effect=_fake_generate,
+            ) as mock_gen,
+            patch(
+                "quantui.orbital_visualization.render_orbital_isosurface_py3dmol",
+                return_value="<div>py3dmol iso</div>",
+            ) as mock_py3dmol,
+            patch(
+                "quantui.orbital_visualization.plot_cube_isosurface",
+                return_value=MagicMock(),
+            ) as mock_plot,
+        ):
+            app._render_orbital_isosurface("HOMO")
+
+        saved_path = captured.get("path")
+        assert saved_path is not None and saved_path.exists()
+        mock_gen.assert_called_once()
+        mock_py3dmol.assert_called_once()
+        mock_plot.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

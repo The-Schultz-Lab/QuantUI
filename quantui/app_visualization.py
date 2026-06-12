@@ -1472,7 +1472,9 @@ def render_orbital_isosurface(
         from quantui.orbital_visualization import (
             generate_cube_from_arrays,
             plot_cube_isosurface,
+            render_orbital_isosurface_py3dmol,
         )
+        from quantui.viz_backend_router import VizTask as _VT
 
         result_dir = getattr(app, "_last_result_dir", None)
         if not isinstance(result_dir, Path):
@@ -1495,26 +1497,43 @@ def render_orbital_isosurface(
         cube_path = cube_dir / f"{safe_formula}_{safe_orb}_{ts}.cube"
 
         generate_cube_from_arrays(mol_atom, mol_basis, mo_coeff, orb_idx, cube_path)
-        is_dark = app.theme_btn.value == "Dark"
-        axis_color = "#dbeafe" if is_dark else "#1f2937"
-        bond_color = "#cbd5e1" if is_dark else "#4b5563"
-        title_color = app._plotly_theme_colors()["font_color"]
-        fig = plot_cube_isosurface(
-            cube_path,
-            title=f"{orbital_label} Isosurface",
-            show_molecule=True,
-            show_grid=False,
-            scene_bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
-            axis_color=axis_color,
-            title_color=title_color,
-            bond_color=bond_color,
-        )
-        html_str = _pio.to_html(
-            fig,
-            include_plotlyjs="require",
-            full_html=False,
-            config={"responsive": True},
-        )
+        scene_bgcolor = app._plotly_theme_colors()["scene_bgcolor"]
+
+        # Route the render: py3Dmol does native, full-resolution in-browser
+        # isosurfacing (primary); the Plotly path is the fallback (downsampled).
+        # Both consume the same full-resolution cube on disk. Plotly is the
+        # universal fallback whenever py3Dmol is not the chosen backend.
+        chosen = app._resolve_backend(_VT.ORBITAL_ISOSURFACE)
+        use_py3dmol = str(chosen) == "py3dmol"
+        backend_label = "py3dmol" if use_py3dmol else "plotlymol"
+
+        with _viz_render_event(app, task=_VT.ORBITAL_ISOSURFACE, backend=backend_label):
+            if use_py3dmol:
+                html_str = render_orbital_isosurface_py3dmol(
+                    cube_path,
+                    bgcolor=scene_bgcolor,
+                )
+            else:
+                is_dark = app.theme_btn.value == "Dark"
+                axis_color = "#dbeafe" if is_dark else "#1f2937"
+                bond_color = "#cbd5e1" if is_dark else "#4b5563"
+                title_color = app._plotly_theme_colors()["font_color"]
+                fig = plot_cube_isosurface(
+                    cube_path,
+                    title=f"{orbital_label} Isosurface",
+                    show_molecule=True,
+                    show_grid=False,
+                    scene_bgcolor=scene_bgcolor,
+                    axis_color=axis_color,
+                    title_color=title_color,
+                    bond_color=bond_color,
+                )
+                html_str = _pio.to_html(
+                    fig,
+                    include_plotlyjs="require",
+                    full_html=False,
+                    config={"responsive": True},
+                )
     except Exception as exc:
         if _is_stale():
             return

@@ -19,6 +19,7 @@ from quantui.orbital_visualization import (
     parse_cube_file,
     plot_cube_isosurface,
     plot_orbital_diagram,
+    render_orbital_isosurface_py3dmol,
 )
 
 try:
@@ -29,6 +30,17 @@ except ImportError:
     _PYSCF_AVAILABLE = False
 
 _pyscf_only = pytest.mark.skipif(not _PYSCF_AVAILABLE, reason="PySCF not available")
+
+try:
+    import py3Dmol  # noqa: F401
+
+    _PY3DMOL_AVAILABLE = True
+except ImportError:
+    _PY3DMOL_AVAILABLE = False
+
+_py3dmol_only = pytest.mark.skipif(
+    not _PY3DMOL_AVAILABLE, reason="py3Dmol not available"
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -360,6 +372,41 @@ class TestPlotCubeIsosurface:
             title_color="#123456",
         )
         assert fig.layout.title.font.color == "#123456"
+
+
+@_py3dmol_only
+class TestRenderOrbitalIsosurfacePy3Dmol:
+    """py3Dmol orbital isosurface renderer (M-ORBVIZ).
+
+    Renders both ± lobes via in-browser cube isosurfacing and returns
+    self-contained HTML through py3Dmol's _make_html — the same offline-safe
+    embedding the molecule viewer uses (no CDN).
+    """
+
+    def test_returns_html_string(self, minimal_cube_file):
+        html = render_orbital_isosurface_py3dmol(minimal_cube_file)
+        assert isinstance(html, str)
+        assert len(html) > 0
+
+    def test_adds_two_volumetric_lobes(self, minimal_cube_file):
+        # Both the positive and negative isosurface calls must be embedded.
+        html = render_orbital_isosurface_py3dmol(minimal_cube_file, isovalue=0.02)
+        assert html.count("addVolumetricData") == 2
+        assert "0.02" in html  # +isovalue
+        assert "-0.02" in html  # -isovalue
+
+    def test_embeds_offline_no_cdn(self, minimal_cube_file):
+        # py3Dmol's _make_html must not pull 3Dmol.js from a remote CDN —
+        # offline Voilà would silently fail to render otherwise.
+        html = render_orbital_isosurface_py3dmol(minimal_cube_file)
+        assert 'src="http' not in html
+        assert "src='http" not in html
+
+    def test_full_resolution_no_downsample(self, minimal_cube_file):
+        # py3Dmol surfaces the cube client-side, so the full cube text is
+        # handed over verbatim (no Python-side stride/downsample).
+        html = render_orbital_isosurface_py3dmol(minimal_cube_file)
+        assert "addModel" in html
 
 
 # ---------------------------------------------------------------------------
