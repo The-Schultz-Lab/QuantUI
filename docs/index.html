@@ -339,7 +339,7 @@
 <nav class="nav" role="navigation">
   <div class="nav__inner">
     <a class="nav__logo" href="#">QuantUI</a>
-    <span class="nav__badge">v0.2 &middot; MIT</span>
+    <span class="nav__badge">v0.3 &middot; MIT</span>
     <a class="nav__link" href="#features">Features</a>
     <a class="nav__link" href="#install">Install</a>
     <a class="nav__link" href="#tutorials">Tutorials</a>
@@ -356,6 +356,7 @@
         <div class="hero__eyebrow">
           <span class="pill">Open-source PySCF frontend</span>
           <span class="pill pill--teal">No cluster required</span>
+          <span class="pill pill--teal">Runs offline</span>
           <span class="pill pill--teal">GPU-ready</span>
         </div>
         <h1 class="hero__title">Free, open, and<br>interactive quantum chemistry</h1>
@@ -376,7 +377,7 @@
         <div class="hero__meta">
           <span class="hero__stat">Python 3.9&ndash;3.11</span>
           <span class="hero__sep">&middot;</span>
-          <span class="hero__stat">1280+ tests</span>
+          <span class="hero__stat">1500+ tests</span>
           <span class="hero__sep">&middot;</span>
           <span class="hero__stat">MIT License</span>
           <span class="hero__sep">&middot;</span>
@@ -440,9 +441,11 @@
         <div class="feature-card__icon">⚗️</div>
         <div class="feature-card__title">Molecule Input</div>
         <p class="feature-card__body">
-          Paste XYZ coordinates, draw from a 20+ molecule preset library,
-          search PubChem by name or SMILES, or load ASE structure files
-          (<code class="inline-code">.xyz</code>, <code class="inline-code">.cif</code>, <code class="inline-code">.mol</code>).
+          Paste XYZ, browse an indexed three-tier bundled library (presets +
+          curated + ~1,900 QM9 structures, searchable by name/formula), or run
+          a structure search by name, SMILES, InChI, CID, or CAS &mdash;
+          PubChem &rarr; NCI CACTUS &rarr; an <strong>offline</strong>
+          bundled-library fallback, so the search still works with no network.
         </p>
       </div>
 
@@ -451,9 +454,11 @@
         <div class="feature-card__title">3D Visualization</div>
         <p class="feature-card__body">
           py3Dmol-first interactive viewer with a capability-aware
-          backend router. Optimization trajectories and vibrational
-          modes animate inline with user-tunable playback FPS and an
-          on-disk cache for instant replay.
+          backend router. Molecules, optimization trajectories,
+          vibrational modes, and orbital isosurfaces all render inline
+          &mdash; and <strong>fully offline</strong> (3Dmol.js is vendored,
+          never fetched from a CDN). Tunable playback FPS + on-disk cache
+          for instant replay.
         </p>
       </div>
 
@@ -576,7 +581,7 @@
           <tr>
             <td><strong>Windows native</strong></td>
             <td><span class="badge badge--partial">Partial</span></td>
-            <td>UI, PubChem search, and 3D visualization work; PySCF calculations require the Apptainer container</td>
+            <td>UI, structure search, and 3D visualization work; PySCF calculations require the Apptainer container</td>
           </tr>
         </tbody>
       </table>
