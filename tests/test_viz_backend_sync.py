@@ -14,7 +14,12 @@ from quantui.app import QuantUIApp
 
 
 @pytest.fixture
-def app():
+def app(tmp_path, monkeypatch):
+    # Isolate settings (reflections/10 Rule 6): these tests set the persisting
+    # Settings-dropdown backend, which would otherwise write the real
+    # ~/.quantui/settings.json and cross-contaminate other tests' QuantUIApp()
+    # construction under pytest-xdist (nondeterministic worker ordering).
+    monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(tmp_path / "settings.json"))
     return QuantUIApp()
 
 

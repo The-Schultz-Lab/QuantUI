@@ -46,6 +46,36 @@ def _safe_name(s: str) -> str:
     return re.sub(r"[^\w\-]", "x", s)
 
 
+def _opt_float(x: object) -> Optional[float]:
+    """Coerce an optional (possibly numpy) scalar to a JSON-safe float or None."""
+    if x is None:
+        return None
+    try:
+        return float(x)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _opt_float_list(x: object) -> Optional[list]:
+    """Coerce an optional iterable of numbers to a JSON-safe list of floats."""
+    if x is None:
+        return None
+    try:
+        return [float(v) for v in x]  # type: ignore[union-attr]
+    except (TypeError, ValueError):
+        return None
+
+
+def _opt_str_list(x: object) -> Optional[list]:
+    """Coerce an optional iterable to a JSON-safe list of strings."""
+    if x is None:
+        return None
+    try:
+        return [str(v) for v in x]  # type: ignore[union-attr]
+    except TypeError:
+        return None
+
+
 def save_result(
     result: object,
     pyscf_log: str = "",
@@ -135,6 +165,16 @@ def save_result(
         "mp2_correlation_hartree": getattr(result, "mp2_correlation_hartree", None),
         "ccsd_correlation_hartree": getattr(result, "ccsd_correlation_hartree", None),
         "ccsd_t_correction_hartree": getattr(result, "ccsd_t_correction_hartree", None),
+        # Persisted so the saved-result card matches the live card (M-CLEAN
+        # formatter-parity fix). Additive — absent on older results, where the
+        # history card falls back exactly as before (CPU / no dipole / no
+        # charges). Coerced JSON-safe (numpy scalars/arrays → float/list).
+        "solvent": getattr(result, "solvent", None),
+        "gpu_used": bool(getattr(result, "gpu_used", False)),
+        "gpu_name": getattr(result, "gpu_name", None),
+        "dipole_moment_debye": _opt_float(getattr(result, "dipole_moment_debye", None)),
+        "mulliken_charges": _opt_float_list(getattr(result, "mulliken_charges", None)),
+        "atom_symbols": _opt_str_list(getattr(result, "atom_symbols", None)),
         "spectra": spectra if spectra is not None else {},
     }
     if extras:

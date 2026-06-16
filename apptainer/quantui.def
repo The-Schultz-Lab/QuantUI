@@ -72,6 +72,10 @@ FROM: continuumio/miniconda3:latest
   python -c "import pyscf; print('PySCF OK')"
   python -c "import rdkit; print('RDKit OK')"
   python -c "import py3Dmol; print('py3Dmol OK')"
+  # Offline 3D: the vendored 3Dmol.js must be bundled and the page bootstrap
+  # must be CDN-free, or every 3D view blanks with no network (the whole point
+  # of the offline build). Fail the build here rather than ship blank viewers.
+  python -c "from quantui.viz_assets import offline_bootstrap_html, _JS_PATH; assert _JS_PATH.exists() and _JS_PATH.stat().st_size > 100000, 'vendored 3Dmol.js missing/too small'; assert 'jsdelivr' not in offline_bootstrap_html() and 'data:text/javascript;base64,' in offline_bootstrap_html(), 'offline 3Dmol bootstrap not CDN-free'; print('offline 3Dmol OK')"
   python -c "import ase; print('ASE OK')"
   python -c "from quantui import optimize_geometry; print('optimize_geometry OK')"
   python -c "from quantui import run_freq_calc, run_tddft_calc; print('freq/tddft OK')"

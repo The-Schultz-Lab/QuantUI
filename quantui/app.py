@@ -3889,7 +3889,7 @@ class QuantUIApp:
                 calc_mol, _rmsd = preoptimize(mol)
                 self._set_molecule_threadsafe(
                     calc_mol,
-                    f"Geometry pre-optimized (LJ, RMSD={_rmsd:.3f} Å)",
+                    f"Geometry pre-optimized (MMFF94/UFF, RMSD={_rmsd:.3f} Å)",
                 )
 
             ct = self.calc_type_dd.value
