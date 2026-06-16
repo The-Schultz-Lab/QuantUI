@@ -369,7 +369,7 @@ def _run_freq_calc_body(
 
                 _status(
                     "Numerical IR intensities: "
-                    f"{_ir_done_solves}/{_ir_total_solves} extra SCF solves complete "
+                    f"{_ir_done_solves}/{_ir_total_solves} finite-difference displacement SCFs done (6 per atom) "
                     f"({_ir_total_solves - _ir_done_solves} remaining)"
                 )
 
@@ -491,7 +491,7 @@ def _run_freq_calc_body(
                                         "Numerical IR intensities (parallel ×"
                                         f"{_n_workers}): "
                                         f"{_ir_done_solves}/{_ir_total_solves} "
-                                        "extra SCF solves complete "
+                                        "finite-difference displacement SCFs done (6 per atom) "
                                         f"({_ir_total_solves - _ir_done_solves} "
                                         "remaining)"
                                     )
@@ -519,7 +519,7 @@ def _run_freq_calc_body(
                                 _status(
                                     "Numerical IR intensities: "
                                     f"{_ir_done_solves}/{_ir_total_solves} "
-                                    "extra SCF solves complete "
+                                    "finite-difference displacement SCFs done (6 per atom) "
                                     f"({_ir_total_solves - _ir_done_solves} "
                                     "remaining)"
                                 )
@@ -533,7 +533,7 @@ def _run_freq_calc_body(
                                 _status(
                                     "Numerical IR intensities: "
                                     f"{_ir_done_solves}/{_ir_total_solves} "
-                                    "extra SCF solves complete "
+                                    "finite-difference displacement SCFs done (6 per atom) "
                                     f"({_ir_total_solves - _ir_done_solves} "
                                     "remaining)"
                                 )

@@ -476,6 +476,9 @@ try:
         RDKIT_AVAILABLE as _PUBCHEM_RDKIT_AVAILABLE,
     )
     from quantui.structure_providers import (
+        resolve_structure_with_message as _resolve_structure_with_message,
+    )
+    from quantui.structure_providers import (
         search_candidates as _struct_search_candidates,
     )
     from quantui.structure_providers import (
@@ -486,7 +489,21 @@ try:
 except ImportError:
     PUBCHEM_AVAILABLE = False
     _student_friendly_resolve = None  # type: ignore[assignment]
+    _resolve_structure_with_message = None  # type: ignore[assignment]
     _struct_search_candidates = None  # type: ignore[assignment]
+
+
+# Provider key → short, accurate label for the loaded-molecule card. Replaces
+# the old hard-coded "PubChem: <query>" which mislabeled offline/library/SMILES
+# hits (manual finding #1b, 2026-06-15).
+_STRUCT_SOURCE_PREFIX = {
+    "pubchem": "PubChem",
+    "cactus": "NCI CACTUS",
+    "rdkit-smiles": "SMILES",
+    "rdkit-inchi": "InChI",
+    "library": "Library",
+    "library-offline-fallback": "Library (offline)",
+}
 
 try:
     from quantui.session_calc import SessionResult, run_in_session  # noqa: F401
@@ -998,8 +1015,14 @@ class QuantUIApp:
         self._assemble_tabs()
 
         # Log startup, but never let optional logging I/O break app startup.
+        # Include the loaded viz backend preference so a "it reset" report (#4a)
+        # can be confirmed against what was actually persisted.
         try:
-            _calc_log.log_event("startup", f"QuantUI {quantui.__version__} started")
+            _calc_log.log_event(
+                "startup",
+                f"QuantUI {quantui.__version__} started "
+                f"(viz backend pref={self._viz_backend_preference})",
+            )
         except OSError:
             pass
 
@@ -2377,12 +2400,12 @@ class QuantUIApp:
     def _set_viz_preference(self, new_pref: str, *, persist: bool) -> None:
         """Single source-of-truth setter for the backend preference.
 
-        ``new_pref`` must be one of "auto" | "py3dmol" | "plotlymol". The
-        Settings widget (Status tab) calls this with ``persist=True``; the
-        Calculate/Analysis effective toggles call it with ``persist=False``
-        (session-only override — clicking either toggle is treated as an
-        explicit commit to a concrete preference, even if the prior
-        preference was "auto").
+        ``new_pref`` must be one of "auto" | "py3dmol" | "plotlymol". All three
+        widgets (Settings dropdown + Calculate/Analysis toggles) edit the same
+        single global preference, so every user-initiated change passes
+        ``persist=True`` (#4a — a backend choice must survive the session).
+        ``persist=False`` remains available for programmatic syncs that must
+        not write settings.
 
         Updates ``self._viz_backend_preference``, resolves the effective
         backend for general static-structure rendering, syncs all three
@@ -2485,16 +2508,23 @@ class QuantUIApp:
         )
 
     def _on_viz_backend_changed(self, change) -> None:
-        """Calculate-tab toggle observer — explicit override of preference."""
+        """Calculate-tab toggle observer — persists the chosen backend.
+
+        Previously ``persist=False`` (session-only). That surprised users: the
+        toggle visibly updated every view + the Settings dropdown, but the
+        choice silently reverted next session (manual finding #4a, 2026-06-15).
+        All three widgets edit the one global preference, so any user-initiated
+        change now persists.
+        """
         if self._viz_sync_in_progress:
             return
-        self._set_viz_preference(change["new"], persist=False)
+        self._set_viz_preference(change["new"], persist=True)
 
     def _on_viz_backend_changed_ana(self, change) -> None:
-        """Analysis-tab toggle observer — explicit override of preference."""
+        """Analysis-tab toggle observer — persists the chosen backend (see #4a)."""
         if self._viz_sync_in_progress:
             return
-        self._set_viz_preference(change["new"], persist=False)
+        self._set_viz_preference(change["new"], persist=True)
 
     def _on_viz_default_backend_changed(self, change) -> None:
         """Settings widget observer — persistent preference change."""
@@ -2590,16 +2620,34 @@ class QuantUIApp:
         query: str,
         mol: Optional[Molecule] = None,
         error: Optional[Exception] = None,
+        source: Optional[str] = None,
     ) -> None:
+        # Runs on the main loop. Terminal point of a search → end the activity
+        # indicator started in the search handler (#2). Best-effort + idempotent
+        # via the counter, so an unbalanced begin can't pin the light "busy".
+        try:
+            self._activity_end(kind="ui")
+        except Exception:
+            pass
         if error is None and mol is not None:
-            self._set_molecule(mol, f"PubChem: {query}")
-            self.pubchem_msg.value = f"Loaded {mol.get_formula()} from PubChem."
+            # Label by where the structure ACTUALLY came from (#1b) — not always
+            # "PubChem". Offline FALLBACK means the network was tried + failed,
+            # so surface a no-network note; a plain library hit is not an error.
+            prefix = _STRUCT_SOURCE_PREFIX.get(source or "", "Structure")
+            self._set_molecule(mol, f"{prefix}: {query}")
+            msg = f"Loaded {mol.get_formula()} from {prefix}."
+            if source == "library-offline-fallback":
+                msg = (
+                    "⚠ No network detected — resolved offline from the bundled "
+                    f"library (not PubChem). {msg}"
+                )
+            self.pubchem_msg.value = msg
         else:
             self.pubchem_msg.value = f"Not found: {error}"
             try:
                 _calc_log.log_event(
-                    "pubchem_search_failed",
-                    f"PubChem query not found: '{query}'",
+                    "structure_search_failed",
+                    f"Structure query not found: '{query}'",
                     query=query,
                     error=str(error)[:200],
                     session_id=self._session_id,
@@ -2611,17 +2659,17 @@ class QuantUIApp:
     def _resolve_and_apply(self, query: str, loop) -> None:
         """Resolve a single query (background thread) and apply on the main loop."""
         try:
-            xyz_str, _msg = _student_friendly_resolve(query)
+            xyz_str, _msg, source, _is_offline = _resolve_structure_with_message(query)
             if xyz_str is None:
                 raise ValueError(_msg)
             atoms, coords = parse_xyz_input(xyz_str)
             mol = Molecule(atoms=atoms, coordinates=coords)
             loop.call_soon_threadsafe(
-                self._apply_pubchem_search_result, query, mol, None
+                self._apply_pubchem_search_result, query, mol, None, source
             )
         except Exception as exc:
             loop.call_soon_threadsafe(
-                self._apply_pubchem_search_result, query, None, exc
+                self._apply_pubchem_search_result, query, None, exc, None
             )
 
     def _hide_pubchem_candidates(self) -> None:
@@ -2653,6 +2701,12 @@ class QuantUIApp:
             f'{len(candidates)} matches for "{query}" — pick one below.'
         )
         self.pubchem_btn.disabled = False
+        # Terminal point of the search phase (awaiting the user's pick) → end
+        # the activity indicator started in _on_search_pubchem (#2).
+        try:
+            self._activity_end(kind="ui")
+        except Exception:
+            pass
 
     def _on_pubchem_candidate_selected(self, change) -> None:
         if getattr(self, "_pubchem_cand_refreshing", False):
@@ -2662,6 +2716,10 @@ class QuantUIApp:
             return
         self.pubchem_msg.value = f"Loading CID {cid}…"
         self.pubchem_btn.disabled = True
+        try:
+            self._activity_begin(f"Loading CID {cid}…", kind="ui")
+        except Exception:
+            pass
         loop = asyncio.get_running_loop()
         threading.Thread(
             target=lambda: self._resolve_and_apply(str(cid), loop), daemon=True
@@ -2678,6 +2736,13 @@ class QuantUIApp:
         self._hide_pubchem_candidates()
         self.pubchem_msg.value = f'Searching for "{query}"...'
         self.pubchem_btn.disabled = True
+        # Light the toolbar activity indicator so the resolver chain
+        # (PubChem → CACTUS → library, up to ~8 s on a CACTUS timeout) doesn't
+        # look like a hang (#2). Ended at every terminal point below.
+        try:
+            self._activity_begin(f'Searching structures for "{query}"…', kind="ui")
+        except Exception:
+            pass
 
         loop = asyncio.get_running_loop()
 
