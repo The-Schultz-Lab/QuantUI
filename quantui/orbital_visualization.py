@@ -824,8 +824,10 @@ def render_orbital_isosurface_py3dmol(
     downsample and the payload is just the cube text. Both lobes are drawn:
     ``+isovalue`` (``pos_color``) and ``-isovalue`` (``neg_color``).
 
-    Returns self-contained HTML via py3Dmol's ``_make_html`` — the same
-    offline-safe embedding the molecule viewer uses (never a CDN).
+    Returns HTML via py3Dmol's ``_make_html``. The viewer is built through
+    :func:`quantui.viz_assets.make_view`, so it loads 3Dmol.js from the
+    vendored bundle (the page bootstrap) rather than the CDN — see
+    ``viz_assets`` for why this matters offline.
 
     Parameters
     ----------
@@ -849,10 +851,10 @@ def render_orbital_isosurface_py3dmol(
     str
         Self-contained HTML for the interactive viewer.
     """
-    import py3Dmol
+    from quantui.viz_assets import make_view
 
     cube_text = Path(cube_path).read_text()
-    view = py3Dmol.view(width=width, height=height)
+    view = make_view(width=width, height=height)
     view.addModel(cube_text, "cube")
     view.setStyle({style: {}})
     view.addVolumetricData(

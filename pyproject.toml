@@ -49,7 +49,14 @@ packages = ["quantui"]
 # Bundled molecule library (M-STRUCT): the indexed SQLite store + the
 # human-readable JSON manifests it is built from. Both ship in the wheel so
 # offline structure lookup works on a fresh install.
-quantui = ["data/library/*.sqlite", "data/manifests/*.json"]
+# Vendored 3Dmol.js: py3Dmol fetches 3Dmol.js from a CDN by default, which
+# fails offline; we ship the bundle so all 3D views render with no network.
+quantui = [
+    "data/library/*.sqlite",
+    "data/manifests/*.json",
+    "data/js/*.js",
+    "data/js/*.txt",
+]
 
 [project.optional-dependencies]
 # PySCF requires Linux/macOS/WSL — not available on Windows natively.

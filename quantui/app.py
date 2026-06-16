@@ -1006,6 +1006,19 @@ class QuantUIApp:
     def display(self) -> None:
         """Inject global CSS and render the application widget."""
         display(HTML(_APP_CSS))
+        # Load 3Dmol.js from the vendored bundle (offline-safe) BEFORE any
+        # py3Dmol viewer renders. py3Dmol otherwise fetches 3Dmol.js from a CDN
+        # per view, which blanks every 3D view offline. This one-time <script>
+        # defines the page-global $3Dmolpromise; all views built via
+        # viz_assets.make_view then reuse it instead of hitting the network.
+        try:
+            from quantui.viz_assets import offline_bootstrap_html
+
+            display(HTML(offline_bootstrap_html()))
+        except Exception as exc:  # noqa: BLE001 — never block app render
+            _calc_log.log_event(
+                "viz_bootstrap_failed", f"offline 3Dmol bootstrap failed: {exc}"
+            )
         display(
             widgets.VBox(
                 [
@@ -1880,12 +1893,12 @@ class QuantUIApp:
             # through to text dispatch on failure (so the user still
             # sees the raw coordinates).
             try:
-                import py3Dmol as _p3d  # type: ignore[import]
+                from quantui.viz_assets import make_view
 
                 model_format = {".xyz": "xyz", ".mol": "mol", ".pdb": "pdb"}[suffix]
                 raw_text = path.read_text(encoding="utf-8", errors="replace")
                 if len(raw_text) <= 256_000:
-                    viewer = _p3d.view(width=500, height=380)
+                    viewer = make_view(width=500, height=380)
                     viewer.addModel(raw_text, model_format)
                     viewer.setStyle({"stick": {}, "sphere": {"scale": 0.25}})
                     viewer.setBackgroundColor("white")

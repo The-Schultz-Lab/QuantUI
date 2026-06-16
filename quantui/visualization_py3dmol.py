@@ -21,7 +21,7 @@ BackendName = Literal["auto", "py3dmol", "plotlymol"]
 
 # Check available visualization backends
 try:
-    import py3Dmol
+    import py3Dmol  # noqa: F401 — availability probe; views build via viz_assets.make_view
 
     PY3DMOL_AVAILABLE = True
 except ImportError:
@@ -164,8 +164,11 @@ def visualize_molecule_py3dmol(
         f"(style={style})"
     )
 
-    # Create viewer
-    view = py3Dmol.view(width=width, height=height)
+    # Create viewer — via the offline-safe factory so 3Dmol.js loads from the
+    # vendored bundle (the page bootstrap), never the CDN (offline classroom).
+    from quantui.viz_assets import make_view
+
+    view = make_view(width=width, height=height)
 
     # Add molecule
     view.addModel(xyz_string, "xyz")

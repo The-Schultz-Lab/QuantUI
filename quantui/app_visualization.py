@@ -369,9 +369,9 @@ def show_opt_trajectory(
     def _try_py3dmol(idx: int):
         """Build frame idx with py3Dmol. Returns (kind, obj) or None."""
         try:
-            import py3Dmol as _p3d
+            from quantui.viz_assets import make_view
 
-            view = _p3d.view(width=frame_w, height=frame_h)
+            view = make_view(width=frame_w, height=frame_h)
             view.addModel(xyzblocks[idx], "xyz")
             view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
             view.setBackgroundColor(
@@ -782,14 +782,14 @@ def render_traj_frame(app: Any, molecule: Any, output_widget: Any) -> None:
 
     # Fallback: py3Dmol
     try:
-        import py3Dmol as _p3d
+        from quantui.viz_assets import make_view
 
         xyz = (
             f"{len(molecule.atoms)}\n"
             f"{molecule.get_formula()}\n"
             f"{molecule.to_xyz_string()}"
         )
-        view = _p3d.view(width=460, height=340)
+        view = make_view(width=460, height=340)
         view.addModel(xyz, "xyz")
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
         view.setBackgroundColor("white")
@@ -1819,7 +1819,7 @@ def _render_vib_mode_py3dmol(
     fps = max(1, int(fps))
 
     try:
-        import py3Dmol
+        import py3Dmol  # noqa: F401 — probe for a friendly error; make_view imports it
     except ImportError as exc:
         if not _is_vib_stale(app, render_token):
             _vib_err(app, f"py3Dmol unavailable: {exc}")
@@ -1908,8 +1908,10 @@ def _render_vib_mode_py3dmol(
     xyz_string = "\n".join(xyz_lines) + "\n"
 
     try:
+        from quantui.viz_assets import make_view
+
         interval_ms = max(1, int(round(1000.0 / fps)))
-        view = py3Dmol.view(width=460, height=420)
+        view = make_view(width=460, height=420)
         view.addModelsAsFrames(xyz_string, "xyz")
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
         bg = "white" if app.theme_btn.value == "Light" else "#1e1e1e"
@@ -2265,7 +2267,7 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
     if availability.py3dmol:
         try:
             import numpy as np
-            import py3Dmol
+            import py3Dmol  # noqa: F401 — probe; make_view imports it for the export
         except ImportError as exc:
             raise ValueError(f"py3Dmol unavailable for fallback export: {exc}")
 
@@ -2307,13 +2309,17 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
                 xyz_lines.append(f"{sym} {xyz[0]:.6f} {xyz[1]:.6f} {xyz[2]:.6f}")
         xyz_string = "\n".join(xyz_lines) + "\n"
 
-        view = py3Dmol.view(width=640, height=520)
+        from quantui.viz_assets import make_view, standalone_html
+
+        view = make_view(width=640, height=520)
         view.addModelsAsFrames(xyz_string, "xyz")
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
         view.setBackgroundColor("white")
         view.zoomTo()
         view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
-        return ("py3dmol", view._make_html())
+        # Exported HTML is opened outside the app (no page bootstrap), so embed
+        # the offline 3Dmol.js loader inline to make the file self-contained.
+        return ("py3dmol", standalone_html(view._make_html()))
 
     raise ValueError(
         "No visualization backend available to export the vibrational "
