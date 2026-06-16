@@ -41,44 +41,38 @@ def test_data_uri_is_base64_javascript():
     assert _CDN not in uri
 
 
-def test_bootstrap_embeds_bundle_not_cdn():
-    html = viz_assets.offline_bootstrap_html()
-    assert "$3Dmolpromise" in html
-    assert "data:text/javascript;base64," in html
-    # The whole point: the bootstrap must NOT reach the network.
-    assert _CDN not in html
-    assert "loadScriptAsync" in html  # mirrors py3Dmol's own loader
-
-
-def test_make_view_is_cdn_free_and_uses_sentinel():
+def test_make_view_loads_vendored_js_not_cdn():
+    """A make_view viewer loads 3Dmol from the local data: URI, never the CDN —
+    and crucially carries NO startup-time page bootstrap (the loader runs
+    per-view, after page load, exactly like py3Dmol's native path)."""
     view = viz_assets.make_view(width=200, height=200)
     view.addModel("3\nH2O\nO 0 0 0\nH 0 0 1\nH 0 1 0", "xyz")
     view.setStyle({"stick": {}})
     view.zoomTo()
     html = view._make_html()
     assert _CDN not in html, "make_view leaked the 3Dmol CDN URL into a view"
-    assert viz_assets._INAPP_SENTINEL in html
-    # The view guards on $3Dmolpromise, so when the bootstrap has run it never
-    # loads the sentinel — it just reuses the page-global promise.
-    assert "if(typeof $3Dmolpromise === 'undefined')" in html
+    assert "data:text/javascript;base64," in html
+    # py3Dmol's own per-view loader (the proven mechanism), local source.
+    assert "loadScriptAsync" in html
 
 
 def test_bare_py3dmol_view_still_uses_cdn_regression():
     """Documents WHY make_view exists: a raw py3Dmol.view DOES embed the CDN.
 
     If a future py3Dmol release stops defaulting to a CDN this test will fail
-    loudly, prompting us to revisit whether the offline bootstrap is still
-    needed (it would then be belt-and-suspenders, not load-bearing)."""
+    loudly, prompting us to revisit whether the local-js override is still
+    load-bearing."""
     view = py3Dmol.view(width=100, height=100)
     view.addModel("1\nH\nH 0 0 0", "xyz")
     assert _CDN in view._make_html()
 
 
-def test_standalone_html_is_self_contained():
+def test_standalone_html_self_contained_via_view():
+    """Views are self-contained (carry the vendored loader), so standalone_html
+    is a pass-through and the exported HTML plays offline."""
     view = viz_assets.make_view(width=200, height=200)
     view.addModel("1\nH\nH 0 0 0", "xyz")
     bundled = viz_assets.standalone_html(view._make_html())
-    # Inline bootstrap travels with the file so it plays offline standalone.
     assert "data:text/javascript;base64," in bundled
     assert _CDN not in bundled
 
@@ -104,6 +98,6 @@ def test_orbital_isosurface_renderer_is_cdn_free(tmp_path):
     )
     html = ov.render_orbital_isosurface_py3dmol(cube, isovalue=0.02)
     assert _CDN not in html
-    # Two lobes (M-ORBVIZ contract) + the offline sentinel.
+    # Two lobes (M-ORBVIZ contract) + loads vendored 3Dmol offline.
     assert html.count("addVolumetricData") == 2
-    assert viz_assets._INAPP_SENTINEL in html
+    assert "data:text/javascript;base64," in html

@@ -1029,19 +1029,11 @@ class QuantUIApp:
     def display(self) -> None:
         """Inject global CSS and render the application widget."""
         display(HTML(_APP_CSS))
-        # Load 3Dmol.js from the vendored bundle (offline-safe) BEFORE any
-        # py3Dmol viewer renders. py3Dmol otherwise fetches 3Dmol.js from a CDN
-        # per view, which blanks every 3D view offline. This one-time <script>
-        # defines the page-global $3Dmolpromise; all views built via
-        # viz_assets.make_view then reuse it instead of hitting the network.
-        try:
-            from quantui.viz_assets import offline_bootstrap_html
-
-            display(HTML(offline_bootstrap_html()))
-        except Exception as exc:  # noqa: BLE001 — never block app render
-            _calc_log.log_event(
-                "viz_bootstrap_failed", f"offline 3Dmol bootstrap failed: {exc}"
-            )
+        # NOTE: 3Dmol.js is loaded offline per-view via py3Dmol's own loader
+        # (``viz_assets.make_view`` passes ``js=<vendored data: URI>``), NOT a
+        # one-time page bootstrap. A startup-time bootstrap ran py3Dmol's
+        # exports/module-juggling loader during Voilà's RequireJS bootstrap and
+        # broke widget startup offline — never reintroduce it here.
         display(
             widgets.VBox(
                 [

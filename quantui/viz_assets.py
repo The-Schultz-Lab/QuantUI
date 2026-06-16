@@ -3,34 +3,34 @@
 py3Dmol's ``view()`` constructor defaults to
 ``js='https://cdn.jsdelivr.net/npm/3dmol@2.5.4/build/3Dmol-min.js'`` and its
 ``_make_html()`` emits a ``loadScriptAsync('<that URL>')`` call. On any host
-with a Content Security Policy, captive portal, or **no network at all**
-(offline classroom deployment — QuantUI's primary target), that fetch fails
-silently and the viewer renders as a blank rectangle with no error anywhere
-in Python. This is the py3Dmol analogue of the Plotly CDN trap documented in
-``reflections/01-voila-rendering-and-display.md`` Rule 1 (never load plotly.js
-from a CDN) — and it is why molecule, trajectory, vibration, and
-orbital-isosurface views all blanked offline (manual finding 2026-06-15).
+with no network (offline classroom — QuantUI's primary target) or a restrictive
+CSP, that fetch fails silently and the viewer renders blank. This is the
+py3Dmol analogue of the Plotly CDN trap in
+``reflections/01-voila-rendering-and-display.md`` Rule 1.
 
-This module makes py3Dmol load fully offline with **zero new dependencies**:
+Approach (no new dependency)
+----------------------------
+The 3Dmol.js bundle is vendored as package data (``data/js/3Dmol-min.js``, the
+exact 2.5.4 build py3Dmol targets). :func:`make_view` builds every viewer with
+``js=<data: URI of the vendored bytes>`` instead of the CDN URL. This reuses
+**py3Dmol's own per-view loader verbatim** — only the source URL changes from a
+remote CDN to a local ``data:`` URI — so the viewer loads 3Dmol.js offline with
+no network.
 
-1. The 3Dmol.js bundle is vendored as package data
-   (``data/js/3Dmol-min.js``, the exact 2.5.4 build py3Dmol targets).
-2. :func:`offline_bootstrap_html` emits a one-time ``<script>`` that defines
-   the page-global ``$3Dmolpromise`` by loading the vendored bytes from a
-   ``data:`` URI. It is **byte-for-byte py3Dmol's own loader** with only the
-   URL swapped — so whatever subtle scope juggling makes py3Dmol resolve the
-   ``$3Dmol`` global online is preserved exactly. Inject it once per page,
-   before any viewer renders (see ``QuantUIApp.display``).
-3. :func:`make_view` builds every in-app viewer with ``js=_INAPP_SENTINEL``
-   (a short, never-fetched string) instead of the CDN URL. Because the
-   bootstrap has already defined ``$3Dmolpromise``, py3Dmol's
-   ``if (typeof $3Dmolpromise === 'undefined')`` guard is false, the sentinel
-   is never loaded, and the viewer reuses the bootstrap's promise. Net effect:
-   the heavy bytes ship **once** per page, not once per render — important for
-   rapid trajectory/vib frame swaps.
-4. :func:`standalone_html` prepends the full inline bootstrap to a viewer's
-   HTML so **exported** files (vib / trajectory animation downloads) are
-   self-contained and play offline outside the app.
+Why per-view and NOT a one-time page bootstrap: an earlier version injected the
+loader once at app startup (the first display output). Running py3Dmol's
+``exports``/``module``-juggling loader during Voilà's own RequireJS/AMD
+bootstrap polluted the global module system at the worst moment and broke widget
+startup offline. The per-view approach runs the identical loader **after** the
+page is up (when a viewer renders) — exactly when py3Dmol normally runs it — so
+it never interferes with startup. py3Dmol's ``$3Dmolpromise`` global guard means
+only the first viewer on a page actually loads 3Dmol; later views reuse it.
+
+Trade-off: the (cached, ~0.7 MB base64) data: URI rides in each viewer's HTML
+payload. Fine for the molecule preview / isosurface / result viewer; heavier for
+rapid trajectory/vib frame swaps (the bytes ship per payload even though only
+the first triggers a load). Correctness and offline support take priority over
+that payload size; optimizing the rapid-swap path is a possible follow-up.
 
 Author: Jonathan Schultz, NCCU
 Created: 2026-06-15
@@ -52,90 +52,50 @@ logger = logging.getLogger(__name__)
 THREEDMOL_VERSION = "2.5.4"
 _JS_PATH = Path(__file__).parent / "data" / "js" / "3Dmol-min.js"
 
-# Passed as ``js=`` to in-app views. It is never fetched: the page bootstrap
-# defines $3Dmolpromise first, so py3Dmol's guard skips loading entirely. If
-# the bootstrap is somehow absent the browser will try (and fail) to load this
-# string and surface py3Dmol's built-in "3Dmol.js failed to load" warning <p>
-# — a visible failure, never a silent CDN dependency.
-_INAPP_SENTINEL = "quantui-3dmol-bundled-offline"
-
-# The CDN URL we are replacing — kept here so a test can assert it never
-# appears in any emitted HTML.
+# The CDN URL we replace — kept so a test can assert it never appears in any
+# emitted HTML.
 CDN_URL = "https://cdn.jsdelivr.net/npm/3dmol@2.5.4/build/3Dmol-min.js"
 
 
 @lru_cache(maxsize=1)
 def _js_data_uri() -> str:
-    """Return the vendored 3Dmol.js as a base64 ``data:`` URI (cached)."""
-    raw = _JS_PATH.read_bytes()
+    """Return the vendored 3Dmol.js as a base64 ``data:`` URI (cached).
+
+    Empty string if the bundle is missing, in which case :func:`make_view`
+    falls back to py3Dmol's default (CDN) ``js`` rather than handing the viewer
+    an unusable source.
+    """
+    try:
+        raw = _JS_PATH.read_bytes()
+    except OSError as exc:
+        logger.warning("Vendored 3Dmol.js unreadable (%s); falling back to CDN", exc)
+        return ""
     b64 = base64.b64encode(raw).decode("ascii")
     return f"data:text/javascript;base64,{b64}"
 
 
-# py3Dmol's loader, verbatim (py3Dmol/__init__.py ``view.__init__`` ``startjs``),
-# with the ``%s`` URL slot filled by our data: URI instead of the CDN. Defining
-# ``$3Dmolpromise`` synchronously here means every later view reuses it.
-_BOOTSTRAP_TEMPLATE = """<script>
-var loadScriptAsync = function(uri){
-  return new Promise((resolve, reject) => {
-    var savedexports, savedmodule;
-    if (typeof exports !== 'undefined') savedexports = exports;
-    else exports = {}
-    if (typeof module !== 'undefined') savedmodule = module;
-    else module = {}
-    var tag = document.createElement('script');
-    tag.src = uri;
-    tag.async = true;
-    tag.onload = () => {
-        exports = savedexports;
-        module = savedmodule;
-        resolve();
-    };
-  var firstScriptTag = document.getElementsByTagName('script')[0];
-  firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-});
-};
-
-if(typeof $3Dmolpromise === 'undefined') {
-$3Dmolpromise = null;
-  $3Dmolpromise = loadScriptAsync('%s');
-}
-</script>
-"""
-
-
-@lru_cache(maxsize=1)
-def offline_bootstrap_html() -> str:
-    """One-time ``<script>`` that loads vendored 3Dmol.js offline (no CDN).
-
-    Display this exactly once per page, *before* any py3Dmol viewer renders
-    (``QuantUIApp.display`` injects it ahead of the app body). It defines the
-    page-global ``$3Dmolpromise`` synchronously, so every viewer built via
-    :func:`make_view` skips its own load and reuses this promise.
-    """
-    return _BOOTSTRAP_TEMPLATE % _js_data_uri()
-
-
 def make_view(**kwargs):
-    """Build a ``py3Dmol.view`` that never reaches the CDN.
+    """Build a ``py3Dmol.view`` that loads 3Dmol.js offline (no CDN).
 
-    Identical to ``py3Dmol.view(**kwargs)`` except ``js`` is forced to the
-    in-app sentinel. Relies on :func:`offline_bootstrap_html` having run on the
-    page. Use this in place of ``py3Dmol.view(...)`` everywhere in the app.
+    Identical to ``py3Dmol.view(**kwargs)`` except ``js`` defaults to a ``data:``
+    URI of the vendored 3Dmol.js, so the viewer never reaches the network. Use
+    this in place of ``py3Dmol.view(...)`` everywhere in the app. If the bundle
+    is missing we leave py3Dmol's default ``js`` (CDN) in place.
     """
     import py3Dmol
 
-    kwargs.setdefault("js", _INAPP_SENTINEL)
+    data_uri = _js_data_uri()
+    if data_uri and "js" not in kwargs:
+        kwargs["js"] = data_uri
     return py3Dmol.view(**kwargs)
 
 
 def standalone_html(view_html: str) -> str:
-    """Wrap viewer HTML so it plays offline as a standalone file.
+    """Return viewer HTML suitable for a standalone (exported) file.
 
-    Exported animation files are opened outside the app, where the page
-    bootstrap is absent. Prepending the full inline bootstrap makes the file
-    self-contained (the vendored 3Dmol.js travels with it, ~0.5 MB). The
-    ``$3Dmolpromise`` guard keeps it from double-loading if combined with other
-    py3Dmol output.
+    Views built via :func:`make_view` already embed the vendored 3Dmol.js
+    loader (``js=<data: URI>``), so an exported file is self-contained and plays
+    offline as-is. Kept as a no-op pass-through for call-site clarity / API
+    stability.
     """
-    return offline_bootstrap_html() + view_html
+    return view_html

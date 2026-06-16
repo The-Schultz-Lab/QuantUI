@@ -16,7 +16,12 @@ REM Clears quantui/__pycache__ on every launch to prevent stale .pyc bytecode
 REM (WSL2 DrvFs does not reliably propagate Windows-side mtime changes, so Python
 REM may load pre-edit bytecode even after source changes — see GOTCHAS.md).
 REM PYTHONDONTWRITEBYTECODE=1 prevents a new stale cache from accumulating.
-start "QuantUI [native]" wsl -d Ubuntu -- bash -c "cd '%WSLPATH%' && source ~/miniconda3/etc/profile.d/conda.sh && conda activate quantui && if [ pyproject.toml -nt .dev_install_stamp ] || ! python -c 'import quantui' 2>/dev/null; then pip install -e . -q && touch .dev_install_stamp; fi && rm -rf quantui/__pycache__ && PYTHONDONTWRITEBYTECODE=1 voila notebooks/molecule_computations.ipynb --no-browser --port=8867 --ServerApp.disable_check_xsrf=True"
+REM The editable reinstall MUST NOT block launch when offline: pip fetches
+REM build deps (setuptools) from PyPI, which hangs/fails with no network. So it
+REM runs with a short timeout + no retries, is made non-fatal (|| echo), and the
+REM chain continues to Voila with `; ` (not `&&`) regardless. quantui/*.py +
+REM package-data are live in editable mode, so a skipped reinstall is harmless.
+start "QuantUI [native]" wsl -d Ubuntu -- bash -c "cd '%WSLPATH%' && source ~/miniconda3/etc/profile.d/conda.sh && conda activate quantui && if [ pyproject.toml -nt .dev_install_stamp ] || ! python -c 'import quantui' 2>/dev/null; then pip install -e . -q --timeout=5 --retries=0 && touch .dev_install_stamp || echo '[QuantUI] editable reinstall skipped (offline?) - using live source'; fi; rm -rf quantui/__pycache__ && PYTHONDONTWRITEBYTECODE=1 voila notebooks/molecule_computations.ipynb --no-browser --port=8867 --ServerApp.disable_check_xsrf=True"
 
 echo Waiting for Voila to start...
 timeout /t 6 /nobreak > nul
