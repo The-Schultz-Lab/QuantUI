@@ -58,7 +58,11 @@ if [ ! -f .dev_install_stamp ] || [ pyproject.toml -nt .dev_install_stamp ]; the
     if pip install -e . -q --timeout=5 --retries=0; then
         touch .dev_install_stamp
     else
+        # Stamp even on failure so offline launches don't retry (and re-delay
+        # on) pip every time. Re-run `pip install -e .` manually when online if
+        # you add a real dependency.
         echo "[QuantUI] editable reinstall skipped (offline?) - using live source"
+        touch .dev_install_stamp
     fi
 fi
 
