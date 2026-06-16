@@ -10,6 +10,7 @@ the vib render dispatcher (``render_vib_mode``), the sync cache hit path
 
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -115,6 +116,17 @@ class TestVibRenderTelemetry:
         app._last_vib_molecule = water_mol
 
         render_vib_mode(app, vib_data=None, molecule=water_mol, mode_number=1)
+
+        # render_vib_mode dispatches the render to a daemon thread
+        # (reflections/02 — render off the main thread). Wait for the terminal
+        # event before asserting; otherwise the test races the worker and fails
+        # intermittently under heavy parallel load (pytest -n=auto).
+        deadline = time.time() + 15.0
+        while time.time() < deadline and not (
+            _events_of(captured_events, "viz_render_done")
+            or _events_of(captured_events, "viz_render_error")
+        ):
+            time.sleep(0.02)
 
         starts = _events_of(captured_events, "viz_render_start")
         dones = _events_of(captured_events, "viz_render_done")
