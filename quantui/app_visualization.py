@@ -2133,6 +2133,43 @@ def on_vib_mode_changed(app: Any, change: dict[str, Any]) -> None:
     ).start()
 
 
+def build_preopt_preview_html(
+    atoms: list[str],
+    frames: list[list[list[float]]],
+    *,
+    bgcolor: str = "white",
+    fps: int = 8,
+) -> str:
+    """Build an animated py3Dmol view of a classical pre-opt relaxation.
+
+    ``frames`` is a list of per-iteration coordinate snapshots (from
+    ``preopt.preoptimize_with_trajectory``); ``atoms`` is the element list.
+    Returns self-contained, offline-safe HTML (3Dmol.js loaded from the vendored
+    bundle via ``make_view``). A single-frame trajectory (no relaxation / FF
+    fallback) renders as a static structure. Used by the interactive
+    "Preview pre-optimization" flow (M-PREOPT PREOPT.2).
+    """
+    from quantui.viz_assets import make_view
+
+    n = len(atoms)
+    lines: list[str] = []
+    for coords in frames:
+        lines.append(str(n))
+        lines.append("preopt")
+        for sym, xyz in zip(atoms, coords):
+            lines.append(f"{sym} {xyz[0]:.6f} {xyz[1]:.6f} {xyz[2]:.6f}")
+    xyz_string = "\n".join(lines) + "\n"
+
+    interval_ms = max(1, int(round(1000.0 / max(1, fps))))
+    view = make_view(width=460, height=300)
+    view.addModelsAsFrames(xyz_string, "xyz")
+    view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
+    view.setBackgroundColor(bgcolor)
+    view.zoomTo()
+    view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
+    return view._make_html()
+
+
 def show_pes_scan_result(app: Any, result: Any) -> bool:
     """Render PES energy profile chart and stash latest PES result."""
     app._last_pes_result = result

@@ -610,6 +610,55 @@ def build_shared_widgets(
         indent=False,
     )
 
+    # Interactive pre-opt (M-PREOPT PREOPT.2/.3): run the bonded-FF pre-opt on
+    # demand, watch it relax in-place, then keep or revert — instead of it being
+    # a silent step buried inside the run.
+    app.preopt_preview_btn = widgets.Button(
+        description="Preview",
+        icon="eye",
+        button_style="",
+        disabled=not preopt_available,
+        layout=layout_fn(width="110px", height="28px"),
+        tooltip="Watch the classical pre-optimization relax this geometry, "
+        "then keep or revert it",
+    )
+    app.preopt_accept_btn = widgets.Button(
+        description="Keep this geometry",
+        icon="check",
+        button_style="success",
+        layout=layout_fn(width="190px", height="30px"),
+        tooltip="Make the relaxed geometry the active molecule",
+    )
+    app.preopt_reset_btn = widgets.Button(
+        description="Revert",
+        icon="undo",
+        button_style="warning",
+        layout=layout_fn(width="110px", height="30px"),
+        tooltip="Discard the preview and keep your original geometry",
+    )
+    app.preopt_preview_status = widgets.HTML("")
+    app.preopt_preview_output = widgets.Output(
+        layout=layout_fn(
+            height="320px",
+            width="100%",
+            max_width="480px",
+            border="1px solid #e2e8f0",
+            overflow="hidden",
+        )
+    )
+    # Whole preview block hidden until the user clicks Preview.
+    app.preopt_preview_box = widgets.VBox(
+        [
+            app.preopt_preview_status,
+            app.preopt_preview_output,
+            widgets.HBox(
+                [app.preopt_accept_btn, app.preopt_reset_btn],
+                layout=layout_fn(gap="8px", margin="6px 0 0"),
+            ),
+        ],
+        layout=layout_fn(display="none", margin="6px 0 4px", max_width="480px"),
+    )
+
     from quantui.config import SOLVENT_OPTIONS as _SOLVENT_OPTS
 
     # POLISH.10: same fix as preopt_cb above — drop the gutter +
@@ -1202,7 +1251,11 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
             ),
             app.calc_type_dd,
             app.calc_extra_opts,
-            app.preopt_cb,
+            widgets.HBox(
+                [app.preopt_cb, app.preopt_preview_btn],
+                layout=layout_fn(align_items="center", gap="10px"),
+            ),
+            app.preopt_preview_box,
             app._freq_preopt_cb,
             widgets.HBox(
                 [app.solvent_cb, app.solvent_dd],

@@ -270,6 +270,15 @@ from quantui.app_runflow import (
     on_past_refresh as _run_on_past_refresh,
 )
 from quantui.app_runflow import (
+    on_preopt_accept as _run_on_preopt_accept,
+)
+from quantui.app_runflow import (
+    on_preopt_preview as _run_on_preopt_preview,
+)
+from quantui.app_runflow import (
+    on_preopt_reset as _run_on_preopt_reset,
+)
+from quantui.app_runflow import (
     on_reset_click as _run_on_reset_click,
 )
 from quantui.app_runflow import (
@@ -938,6 +947,12 @@ class QuantUIApp:
         perf_estimate_html: Any
         post_calc_panel: Any
         preopt_cb: Any
+        preopt_preview_btn: Any
+        preopt_accept_btn: Any
+        preopt_reset_btn: Any
+        preopt_preview_status: Any
+        preopt_preview_output: Any
+        preopt_preview_box: Any
         results_panel: Any
         results_tab_panel: Any
         struct_export_status: Any
@@ -999,6 +1014,8 @@ class QuantUIApp:
         # Clear button from wiping output mid-run.
         self._cancel_event = threading.Event()
         self._calc_running: bool = False
+        # Relaxed molecule from a pending pre-opt preview, awaiting Keep/Revert.
+        self._preopt_relaxed_mol: Optional[Molecule] = None
         # Cache kernel io_loop once on the main thread so worker threads can
         # reliably schedule UI callbacks even when get_ipython() is thread-local.
         self._kernel_io_loop: Any = getattr(
@@ -1563,6 +1580,9 @@ class QuantUIApp:
         # Run
         self.run_btn.on_click(self._on_run_clicked)
         self.cancel_btn.on_click(self._safe_cb(self._on_cancel))
+        self.preopt_preview_btn.on_click(self._safe_cb(self._on_preopt_preview))
+        self.preopt_accept_btn.on_click(self._safe_cb(self._on_preopt_accept))
+        self.preopt_reset_btn.on_click(self._safe_cb(self._on_preopt_reset))
         self.log_clear_btn.on_click(self._on_clear_log)
         self._ir_mode_toggle.observe(
             self._safe_cb(self._on_ir_mode_changed), names="value"
@@ -2845,6 +2865,15 @@ class QuantUIApp:
         self.cancel_btn.disabled = True
         self.run_status.value = "Cancelling — stopping at the next step…"
 
+    def _on_preopt_preview(self, btn=None) -> None:
+        _run_on_preopt_preview(self, btn)
+
+    def _on_preopt_accept(self, btn=None) -> None:
+        _run_on_preopt_accept(self, btn)
+
+    def _on_preopt_reset(self, btn=None) -> None:
+        _run_on_preopt_reset(self, btn)
+
     def _on_solvent_cb_changed(self, change) -> None:
         _run_on_solvent_cb_changed(self, change)
 
@@ -3465,6 +3494,14 @@ class QuantUIApp:
         self._refresh_calc_mol_viewer()
 
         self._update_notes()
+
+        # Any pending pre-opt preview was for the previous geometry — invalidate
+        # it so a stale "Keep/Revert" can't apply to a different molecule.
+        # (Accept captures the relaxed molecule before calling this, so this is
+        # safe there; loading any new structure clears a leftover preview.)
+        if getattr(self, "preopt_preview_box", None) is not None:
+            self._preopt_relaxed_mol = None
+            self.preopt_preview_box.layout.display = "none"
 
         # Advance step indicator
         if self.step_progress._states[2] != "active":
