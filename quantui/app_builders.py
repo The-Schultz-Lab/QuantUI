@@ -808,12 +808,23 @@ def build_shared_widgets(
     )
     app.run_status = widgets.Label()
 
+    # Gracefully stops a running calculation at the next SCF cycle / opt step.
+    # Disabled unless a calc is in flight (toggled by _do_run).
+    app.cancel_btn = widgets.Button(
+        description="Cancel",
+        button_style="danger",
+        icon="stop",
+        disabled=True,
+        layout=layout_fn(width="110px", height="36px"),
+        tooltip="Stop the running calculation (at the next step)",
+    )
+
     app.log_clear_btn = widgets.Button(
         description="Clear",
         button_style="",
         icon="times",
         layout=layout_fn(width="90px", height="26px"),
-        tooltip="Clear calculation output",
+        tooltip="Clear calculation output (disabled while a calc is running)",
     )
 
     app.accumulate_btn = widgets.Button(
@@ -1213,7 +1224,7 @@ def build_run_section(app: Any, *, layout_fn: Any) -> None:
                 "sets may take several minutes on a laptop.</p>"
             ),
             app.perf_estimate_html,
-            widgets.HBox([app.run_btn, app.run_status]),
+            widgets.HBox([app.run_btn, app.cancel_btn, app.run_status]),
             widgets.HBox(
                 [
                     widgets.HTML(

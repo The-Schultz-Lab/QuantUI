@@ -626,6 +626,21 @@ _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
 # ══ LOG CAPTURE ══════════════════════════════════════════════════════════════
 
 
+class _CalcCancelled(BaseException):
+    """Raised to abort a running calculation when the user clicks Cancel.
+
+    The calc streams output line-by-line through ``_LogCapture.write`` (SCF
+    cycles, optimizer steps), so checking a cancel flag there lets us bail at
+    the next output — a cooperative, graceful stop that needs no thread-kill.
+
+    Inherits ``BaseException`` (like ``KeyboardInterrupt``) on purpose: PySCF /
+    session_calc / the optimizer wrap their kernels in ``except Exception``, so
+    a plain ``Exception`` cancel would be swallowed and re-reported as a
+    "Calculation failed" error. As a ``BaseException`` it sails through those
+    handlers and reaches ``_do_run``'s ``except _CalcCancelled`` cleanly.
+    """
+
+
 class _LogCapture:
     """Write PySCF output to an Output widget and capture it to a buffer."""
 
@@ -634,6 +649,7 @@ class _LogCapture:
         output_widget: widgets.Output,
         status_label: Optional[widgets.Label] = None,
         on_scf_converged: Optional[Callable[[], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> None:
         self._w = output_widget
         self._buf = io.StringIO()
@@ -641,10 +657,15 @@ class _LogCapture:
         self._status = status_label
         self._on_scf_converged = on_scf_converged
         self._scf_converged_seen = False
+        self._cancel_check = cancel_check
 
     def write(self, text: str) -> None:
         if not text:
             return
+        # Cooperative cancellation: the calc prints frequently (per SCF cycle /
+        # opt step), so raising here stops it at the next line. See _CalcCancelled.
+        if self._cancel_check is not None and self._cancel_check():
+            raise _CalcCancelled()
         self._w.append_stdout(text)
         self._buf.write(text)
         self._line_buf += text
@@ -803,6 +824,7 @@ class QuantUIApp:
         result_viz_output: Any
         results_path_lbl: Any
         run_btn: Any
+        cancel_btn: Any
         run_output: Any
         run_panel: Any
         run_status: Any
@@ -972,6 +994,11 @@ class QuantUIApp:
         self._activity_count: int = 0
         self._activity_compute_count: int = 0
         self._activity_lock = threading.Lock()
+        # Cancellation + run-in-flight state. ``_cancel_event`` is checked by
+        # the run's _LogCapture each output line; ``_calc_running`` guards the
+        # Clear button from wiping output mid-run.
+        self._cancel_event = threading.Event()
+        self._calc_running: bool = False
         # Cache kernel io_loop once on the main thread so worker threads can
         # reliably schedule UI callbacks even when get_ipython() is thread-local.
         self._kernel_io_loop: Any = getattr(
@@ -1535,6 +1562,7 @@ class QuantUIApp:
         self.basis_help_btn.on_click(self._on_basis_help)
         # Run
         self.run_btn.on_click(self._on_run_clicked)
+        self.cancel_btn.on_click(self._safe_cb(self._on_cancel))
         self.log_clear_btn.on_click(self._on_clear_log)
         self._ir_mode_toggle.observe(
             self._safe_cb(self._on_ir_mode_changed), names="value"
@@ -2803,6 +2831,20 @@ class QuantUIApp:
         )
         _run_on_run_clicked(self, btn)
 
+    def _on_cancel(self, btn=None) -> None:
+        """Request graceful cancellation of the in-flight calculation.
+
+        Sets the cancel event (checked by the run's _LogCapture each output
+        line) and disables the button so a second click can't re-fire. The
+        actual stop + UI reset happens in ``_do_run`` when the next write raises
+        ``_CalcCancelled``.
+        """
+        if not self._calc_running:
+            return
+        self._cancel_event.set()
+        self.cancel_btn.disabled = True
+        self.run_status.value = "Cancelling — stopping at the next step…"
+
     def _on_solvent_cb_changed(self, change) -> None:
         _run_on_solvent_cb_changed(self, change)
 
@@ -3729,6 +3771,12 @@ class QuantUIApp:
         )
         self.run_btn.disabled = True
         self.run_status.value = "Starting..."
+        # Run-in-flight state: arm Cancel, lock out Clear (so it can't wipe the
+        # live output mid-run), reset the cancel flag for this fresh run.
+        self._calc_running = True
+        self._cancel_event.clear()
+        self.cancel_btn.disabled = False
+        self.log_clear_btn.disabled = True
 
         self.step_progress.complete(1)
         self.step_progress.start(2)
@@ -3850,6 +3898,7 @@ class QuantUIApp:
             self.run_output,
             self.run_status,
             on_scf_converged=_on_scf_converged,
+            cancel_check=self._cancel_event.is_set,
         )
 
         # Write structured log header immediately so it appears at the top of output
@@ -4585,6 +4634,33 @@ class QuantUIApp:
             self.step_progress.fail(2, _err_detail[:60])
             _calc_log.log_event("calc_error", _err_detail[:200])
 
+        except _CalcCancelled:
+            _elapsed = time.perf_counter() - _run_wall_t
+            log.write("\n── Calculation cancelled by user ──\n")
+            self.result_output.append_display_data(
+                HTML(
+                    '<div style="background:#fffbeb;border:1px solid #fcd34d;'
+                    'border-radius:8px;padding:14px;margin:8px 0">'
+                    '<b style="color:#92400e">&#9632; Calculation cancelled</b><br>'
+                    '<small style="color:#92400e">Stopped at your request — no '
+                    "results were saved. Adjust the settings and run again.</small>"
+                    "</div>"
+                )
+            )
+            self.run_status.value = "Cancelled."
+            try:
+                self.step_progress.reset()
+            except Exception:
+                pass
+            try:
+                _calc_log.log_event(
+                    "calc_cancelled",
+                    f"{mol.get_formula()} {self.method_dd.value}/{self.basis_dd.value}",
+                    elapsed_s=round(_elapsed, 2),
+                )
+            except OSError:
+                pass
+
         except Exception as exc:
             import traceback as _tb
 
@@ -4653,6 +4729,11 @@ class QuantUIApp:
 
         finally:
             self.run_btn.disabled = False
+            # Disarm Cancel, re-enable Clear, clear run-in-flight state.
+            self._calc_running = False
+            self._cancel_event.clear()
+            self.cancel_btn.disabled = True
+            self.log_clear_btn.disabled = False
             self._activity_end(kind="compute")
 
     def _update_notes(self, change=None) -> None:

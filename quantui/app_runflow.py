@@ -367,7 +367,16 @@ def on_solvent_cb_changed(app: Any, change: Any) -> None:
 
 
 def on_clear_log(app: Any, btn: Any) -> None:
-    """Clear the live run output panel."""
+    """Clear the live run output panel — but never mid-run.
+
+    The button is disabled while a calc runs (``_do_run``), but guard here too:
+    clearing mid-run wipes the header + in-progress output while the background
+    thread keeps appending, leaving a confusing headerless log. Use Cancel to
+    stop a run, then Clear.
+    """
+    if getattr(app, "_calc_running", False):
+        app.run_status.value = "Can't clear while a calculation is running."
+        return
     app.run_output.clear_output()
 
 
