@@ -3503,6 +3503,14 @@ class QuantUIApp:
             self._preopt_relaxed_mol = None
             self.preopt_preview_box.layout.display = "none"
 
+        # Loading a new molecule makes the previous run/preopt status stale
+        # ("Pre-optimized geometry accepted.", "Cancelled.", "Done in …") —
+        # clear it. Guarded on _calc_running so the mid-run pre-opt call to
+        # _set_molecule_threadsafe doesn't wipe the live "Pre-optimizing…"
+        # status. (Accept sets its own status right after this returns.)
+        if not self._calc_running:
+            self.run_status.value = ""
+
         # Advance step indicator
         if self.step_progress._states[2] != "active":
             if self.step_progress._states[2] in ("done", "fail"):
@@ -4673,6 +4681,13 @@ class QuantUIApp:
 
         except _CalcCancelled:
             _elapsed = time.perf_counter() - _run_wall_t
+            # Clear the cancel flag FIRST: the next line writes through
+            # ``log`` (``_LogCapture.write``), which re-raises _CalcCancelled
+            # while the flag is still set — that would propagate out of this
+            # handler and skip the cancelled card + "Cancelled." status below
+            # (only ``finally`` would run, leaving the status stuck on
+            # "Cancelling…"). ``finally`` clears it again (idempotent).
+            self._cancel_event.clear()
             log.write("\n── Calculation cancelled by user ──\n")
             self.result_output.append_display_data(
                 HTML(

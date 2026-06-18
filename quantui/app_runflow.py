@@ -492,6 +492,9 @@ def on_preopt_reset(app: Any, btn: Any = None) -> None:
     app.preopt_preview_box.layout.display = "none"
     app.preopt_preview_output.clear_output()
     app.preopt_preview_status.value = ""
+    # Drop any stale "Pre-optimized geometry accepted." left from a prior accept.
+    if not app._calc_running:
+        app.run_status.value = ""
 
 
 def on_accumulate(app: Any, btn: Any) -> None:

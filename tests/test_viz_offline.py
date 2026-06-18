@@ -101,3 +101,37 @@ def test_orbital_isosurface_renderer_is_cdn_free(tmp_path):
     # Two lobes (M-ORBVIZ contract) + loads vendored 3Dmol offline.
     assert html.count("addVolumetricData") == 2
     assert "data:text/javascript;base64," in html
+
+
+def test_trajectory_viewer_is_single_viewer_stepper():
+    # The trajectory viewer loads ALL steps into ONE viewer (addModelsAsFrames)
+    # and navigates client-side via setFrame, so the camera persists across
+    # steps (vs the old per-frame rebuild). Offline-safe + energy-annotated.
+    from quantui.app_visualization import build_trajectory_viewer_html
+
+    xyzblocks = [
+        "2\nH2\nH 0 0 0\nH 0 0 0.74",
+        "2\nH2\nH 0 0 0\nH 0 0 0.77",
+        "2\nH2\nH 0 0 0\nH 0 0 0.80",
+    ]
+    html = build_trajectory_viewer_html(
+        xyzblocks,
+        formula="H2",
+        energies=[-1.10, -1.13, -1.12],
+        rel_e=[0.0, -18.8, -12.5],
+        bgcolor="white",
+    )
+    assert _CDN not in html  # offline-safe
+    assert "addModelsAsFrames" in html  # one viewer, all frames preloaded
+    assert "setFrame" in html  # client-side navigation
+    assert 'type="range"' in html and 'max="2"' in html  # scrub slider spans frames
+    assert "Final geometry" in html  # start <-> final A/B flip
+    assert "EABS" in html and "EREL" in html  # per-step energy label data
+
+
+def test_trajectory_viewer_single_frame_is_static():
+    from quantui.app_visualization import build_trajectory_viewer_html
+
+    html = build_trajectory_viewer_html(["1\nH\nH 0 0 0"])
+    assert _CDN not in html
+    assert "setFrame" not in html  # nothing to step through

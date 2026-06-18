@@ -271,3 +271,28 @@ class TestPreviewHandlers:
         assert app._molecule is original  # unchanged
         assert app._preopt_relaxed_mol is None
         assert app.preopt_preview_box.layout.display == "none"
+
+
+class TestStaleRunStatus:
+    """Regression: 'Pre-optimized geometry accepted.' lingered next to Run
+    after switching molecules / reverting a later preview."""
+
+    def test_loading_molecule_clears_stale_run_status(self, app):
+        app._calc_running = False
+        app.run_status.value = "Pre-optimized geometry accepted."
+        app._set_molecule(_water(), "new mol")
+        assert app.run_status.value == ""
+
+    def test_loading_molecule_midrun_keeps_run_status(self, app):
+        # The mid-run pre-opt sets the molecule via _set_molecule; it must NOT
+        # wipe the live "Pre-optimizing…" status.
+        app._calc_running = True
+        app.run_status.value = "Pre-optimizing..."
+        app._set_molecule(_water(), "preopt mid-run")
+        assert app.run_status.value == "Pre-optimizing..."
+
+    def test_revert_clears_stale_accepted_status(self, app):
+        app._set_molecule(_water(), "orig")
+        app.run_status.value = "Pre-optimized geometry accepted."
+        app._on_preopt_reset()
+        assert app.run_status.value == ""

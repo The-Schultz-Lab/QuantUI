@@ -90,6 +90,24 @@ class TestCancelHandler:
         # Nothing running at construction → Cancel is inert.
         assert app.cancel_btn.disabled is True
 
+    def test_cancel_cleanup_write_does_not_reraise(self, app):
+        # Regression: _do_run's ``except _CalcCancelled`` writes a footer line
+        # through the same _LogCapture. With the cancel flag STILL set, that
+        # write re-raises _CalcCancelled, propagates out of the handler, and
+        # skips the cancelled card + ``run_status = "Cancelled."`` (only
+        # ``finally`` runs → status stuck on "Cancelling…"). The fix clears the
+        # flag before writing; lock in that order.
+        cap = _LogCapture(
+            app.run_output, app.run_status, cancel_check=app._cancel_event.is_set
+        )
+        app._cancel_event.set()
+        # Buggy order (write while still set) would raise — that was the bug.
+        with pytest.raises(_CalcCancelled):
+            cap.write("step\n")
+        # The fix: clear first, then the cleanup write must NOT raise.
+        app._cancel_event.clear()
+        cap.write("\n── Calculation cancelled by user ──\n")  # no exception
+
 
 class TestClearGuard:
     """Spy on ``clear_output`` rather than asserting an emptied ``.outputs`` —
