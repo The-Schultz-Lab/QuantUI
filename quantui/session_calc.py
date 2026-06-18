@@ -441,15 +441,35 @@ def _run_session_calc_body(
     converged = bool(getattr(mf, "converged", False))
     n_iterations = int(getattr(mf, "cycles", -1))
 
+    import numpy as _np
+
+    def _to_numpy_array(arr: Any) -> Any:
+        """Convert ``arr`` to a NumPy array, transferring from GPU if needed.
+
+        gpu4pyscf returns CuPy arrays (``mf.mo_occ`` / ``mo_energy`` / ``mo_coeff``
+        on a GPU-offloaded run). ``numpy.array(cupy_array)`` raises (NumPy refuses
+        implicit device→host transfers), so probe for CuPy's ``.get()`` host copy
+        first. Returns ``None`` unchanged.
+        """
+        if arr is None:
+            return None
+        # CuPy arrays have a ``.get()`` method (synchronous device→host copy).
+        # Probe for it rather than importing cupy, so the CPU-only path doesn't
+        # pull cupy onto the import graph.
+        get = getattr(arr, "get", None)
+        if callable(get) and type(arr).__module__.startswith("cupy"):
+            return _np.asarray(get())
+        return _np.asarray(arr)
+
     homo_lumo_gap_ev: Optional[float] = None
     try:
-        mo_occ = mf.mo_occ
-        mo_energy = mf.mo_energy
-        import numpy as _np
-
-        if isinstance(mo_energy, (list, _np.ndarray)) and hasattr(
-            mo_energy[0], "__len__"
-        ):
+        # Route through _to_numpy_array: on a GPU-offloaded run mf.mo_occ /
+        # mo_energy are CuPy arrays, and the old ``_np.array(mo_occ_ref)`` here
+        # raised (silently → gap None). Same CuPy fix the MO-array extraction
+        # below already had; this block was overlooked.
+        mo_energy = _to_numpy_array(mf.mo_energy)
+        mo_occ = _to_numpy_array(mf.mo_occ)
+        if mo_energy.ndim == 2:
             # UHF: mo_energy is (2, n_mo) — use alpha spin for the gap estimate
             mo_energy_ref = mo_energy[0]
             mo_occ_ref = mo_occ[0]
@@ -457,7 +477,7 @@ def _run_session_calc_body(
             mo_energy_ref = mo_energy
             mo_occ_ref = mo_occ
 
-        n_occ = int((_np.array(mo_occ_ref) > 0).sum())
+        n_occ = int((mo_occ_ref > 0).sum())
         if 0 < n_occ < len(mo_energy_ref):
             homo_lumo_gap_ev = float(
                 (mo_energy_ref[n_occ] - mo_energy_ref[n_occ - 1]) * HARTREE_TO_EV
@@ -469,47 +489,38 @@ def _run_session_calc_body(
     dipole_moment_debye: Optional[float] = None
     if method_upper != "UHF":
         try:
-            _, chg = mf.mulliken_pop(verbose=0)
-            mulliken_charges = [float(c) for c in chg]
+            # gpu4pyscf doesn't implement population analysis on the GPU object
+            # (``mf.mulliken_pop`` is NotImplemented), so on a GPU-offloaded run
+            # fall back to the host (CPU) object via ``to_cpu()``. ``chg`` is
+            # then host NumPy; _to_numpy_array also covers the CuPy case.
+            mf_pop = mf
+            if not callable(getattr(mf, "mulliken_pop", None)) and callable(
+                getattr(mf, "to_cpu", None)
+            ):
+                mf_pop = mf.to_cpu()
+            _, chg = mf_pop.mulliken_pop(verbose=0)
+            mulliken_charges = [float(c) for c in _to_numpy_array(chg)]
         except Exception as exc:
             logger.debug("Mulliken population extraction failed: %s", exc)
         try:
-            import numpy as _np2
-
-            dip = mf.dip_moment(verbose=0)
-            dipole_moment_debye = float(_np2.linalg.norm(dip))
+            dip = _to_numpy_array(mf.dip_moment(verbose=0))
+            dipole_moment_debye = float(_np.linalg.norm(dip))
         except Exception as exc:
             logger.debug("Dipole moment extraction failed: %s", exc)
 
     # MO arrays for orbital visualization (non-fatal if extraction fails).
-    #
-    # GPU-offload note (BUG fix, 2026-05-25): when ``gpu4pyscf`` migrated
-    # ``mf`` to the GPU, ``mf.mo_energy`` / ``mo_coeff`` / ``mo_occ`` are
-    # CuPy arrays. ``numpy.array(cupy_array)`` raises ``TypeError`` (numpy
-    # refuses implicit device transfers), so the bare ``except`` swallowed
-    # it and we silently shipped a ``SessionResult`` with all MO fields
-    # ``None``. That in turn made ``save_orbitals`` no-op (it short-
-    # circuits when both ``mo_e`` and ``mo_occ`` are None), and history
-    # replay of GPU-run geo-opts / single-points showed "Not available"
-    # in the Energies + Isosurface panels. ``_to_numpy_array`` below
-    # detects CuPy arrays and copies them to host via ``cupy.asnumpy``.
+    # Uses the same ``_to_numpy_array`` CuPy→host helper defined above
+    # (GPU-offload note, BUG fix 2026-05-25):
+    # when gpu4pyscf migrated ``mf`` to the GPU, ``mf.mo_energy`` / ``mo_coeff``
+    # / ``mo_occ`` are CuPy arrays. ``numpy.array(cupy_array)`` raises (numpy
+    # refuses implicit device transfers), which silently shipped a
+    # ``SessionResult`` with all MO fields ``None`` → ``save_orbitals`` no-op
+    # and "Not available" in the Energies + Isosurface panels on replay.
     _mo_energy_ha_arr: Optional[Any] = None
     _mo_occ_arr: Optional[Any] = None
     _mo_coeff_arr: Optional[Any] = None
     _pyscf_mol_atom: Optional[Any] = None
     _pyscf_mol_basis: Optional[str] = None
-
-    def _to_numpy_array(arr: Any) -> Any:
-        """Convert ``arr`` to a NumPy array, transferring from GPU if needed."""
-        if arr is None:
-            return None
-        # CuPy arrays have a ``.get()`` method (synchronous device→host copy).
-        # Probe for it rather than importing cupy, so the CPU-only path
-        # doesn't pull cupy onto the import graph.
-        get = getattr(arr, "get", None)
-        if callable(get) and type(arr).__module__.startswith("cupy"):
-            return _np.asarray(get())
-        return _np.asarray(arr)
 
     try:
         _mo_energy_ha_arr = _to_numpy_array(mf.mo_energy)
