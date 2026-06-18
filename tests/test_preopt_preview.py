@@ -82,14 +82,35 @@ class TestPreviewRenderer:
         html = build_preopt_preview_html(atoms, frames)
         assert "cdn.jsdelivr.net" not in html  # offline-safe (vendored 3Dmol)
         assert "addModelsAsFrames" in html
-        assert "animate" in html
 
-    def test_single_frame_renders(self):
+    def test_multi_frame_has_interactive_stepper(self):
+        pytest.importorskip("py3Dmol")
+        from quantui.app_visualization import build_preopt_preview_html
+
+        atoms = ["O", "H", "H"]
+        # Three frames → real relaxation → stepper controls are wired.
+        frames = [
+            [[0, 0, 0], [1.0, 0, 0], [0, 1.0, 0]],
+            [[0, 0, 0], [0.98, 0, 0], [0, 0.98, 0]],
+            [[0, 0, 0], [0.96, 0, 0], [0, 0.96, 0]],
+        ]
+        html = build_preopt_preview_html(atoms, frames)
+        # Frame navigation is driven client-side via setFrame on the already-
+        # loaded multi-frame view (no per-frame HTML rebuild).
+        assert "setFrame" in html
+        assert 'type="range"' in html  # scrub slider
+        assert "Show input" in html  # input <-> relaxed A/B flip
+        # Slider spans all frames (0 .. n-1).
+        assert 'max="2"' in html
+
+    def test_single_frame_renders_without_controls(self):
         pytest.importorskip("py3Dmol")
         from quantui.app_visualization import build_preopt_preview_html
 
         html = build_preopt_preview_html(["H"], [[[0, 0, 0]]])
         assert "cdn.jsdelivr.net" not in html
+        # Nothing to step through → no stepper controls.
+        assert "setFrame" not in html
 
 
 # ── Handlers: preview / keep / revert ───────────────────────────────────────

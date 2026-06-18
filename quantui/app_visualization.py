@@ -2133,6 +2133,98 @@ def on_vib_mode_changed(app: Any, change: dict[str, Any]) -> None:
     ).start()
 
 
+_PREOPT_BTN_STYLE = (
+    "padding:2px 9px;border:1px solid #cbd5e1;border-radius:4px;"
+    "background:#f8fafc;color:#334155;cursor:pointer;font-size:13px;line-height:1.4;"
+)
+
+
+def _preopt_controls_html(uid: str, n: int, interval_ms: int) -> str:
+    """Build the in-HTML stepper controls for the pre-opt preview.
+
+    All ``n`` relaxation frames are already loaded client-side in the py3Dmol
+    viewer (``addModelsAsFrames``), so navigation is pure ``viewer.setFrame(i)``
+    — instant, offline, no per-frame HTML rebuild. Element ids are namespaced
+    with the viewer's ``uid`` so multiple previews never collide. The script
+    polls for the global ``viewer_<uid>`` (py3Dmol creates it after the async
+    3Dmol.js load resolves) before wiring up.
+    """
+    js = _PREOPT_CONTROLS_JS  # token-substituted template (avoids f-string {} hell)
+    js = (
+        js.replace("__UID__", uid)
+        .replace("__N__", str(n))
+        .replace("__IV__", str(interval_ms))
+    )
+    btn = _PREOPT_BTN_STYLE
+    return (
+        '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;'
+        'margin:4px 0 2px;font-size:13px;">'
+        f'<button id="po_prev_{uid}" type="button" title="Previous frame" '
+        f'style="{btn}">&#9664;</button>'
+        f'<button id="po_play_{uid}" type="button" '
+        f'style="{btn}">&#9654; Play</button>'
+        f'<button id="po_next_{uid}" type="button" title="Next frame" '
+        f'style="{btn}">&#9654;</button>'
+        f'<input id="po_slider_{uid}" type="range" min="0" max="{n - 1}" '
+        f'value="{n - 1}" step="1" title="Scrub the relaxation" '
+        'style="flex:1;min-width:110px;vertical-align:middle;">'
+        f'<button id="po_ab_{uid}" type="button" '
+        'title="Flip between your input geometry and the relaxed result" '
+        f'style="{btn}">&#8644; Show input</button>'
+        "</div>"
+        f'<div id="po_lbl_{uid}" '
+        'style="font-size:12px;color:#64748b;margin:0 0 4px 2px;">'
+        f"Frame {n}/{n} &bull; Relaxed (final)</div>"
+        f"<script>{js}</script>"
+    )
+
+
+# Stepper logic. Drives viewer.setFrame() on the already-loaded multi-frame
+# view; play/pause is a self-managed setInterval (not 3Dmol's animate(), so
+# manual stepping and play never fight). Tokens substituted in _preopt_controls_html.
+_PREOPT_CONTROLS_JS = """
+(function(){
+  var UID="__UID__", N=__N__, IV=__IV__;
+  function g(p){return document.getElementById(p+UID);}
+  var slider=g("po_slider_"), lbl=g("po_lbl_"), prevB=g("po_prev_"),
+      nextB=g("po_next_"), playB=g("po_play_"), abB=g("po_ab_");
+  var cur=N-1, timer=null;
+  function vw(){return window["viewer_"+UID];}
+  function label(i){
+    if(i===0) return "Frame 1/"+N+" \\u2022 Input (your geometry)";
+    if(i===N-1) return "Frame "+N+"/"+N+" \\u2022 Relaxed (final)";
+    return "Frame "+(i+1)+"/"+N+" \\u2022 relaxing\\u2026";
+  }
+  function draw(i){
+    i=Math.max(0,Math.min(N-1,i)); cur=i;
+    var v=vw();
+    if(v){ try{ var p=v.setFrame(i);
+      if(p&&p.then){ p.then(function(){v.render();}); } else { v.render(); }
+    }catch(e){ try{ v.render(); }catch(_){} } }
+    if(slider) slider.value=i;
+    if(lbl) lbl.textContent=label(i);
+    if(prevB) prevB.disabled=(i<=0);
+    if(nextB) nextB.disabled=(i>=N-1);
+    if(abB) abB.innerHTML=(i===0)?"\\u21c4 Show relaxed":"\\u21c4 Show input";
+  }
+  function stop(){ if(timer){clearInterval(timer);timer=null;}
+    if(playB) playB.innerHTML="\\u25b6 Play"; }
+  function play(){ if(N<=1) return; if(playB) playB.innerHTML="\\u23f8 Pause";
+    timer=setInterval(function(){ draw(cur>=N-1?0:cur+1); }, IV); }
+  if(prevB) prevB.onclick=function(){stop();draw(cur-1);};
+  if(nextB) nextB.onclick=function(){stop();draw(cur+1);};
+  if(playB) playB.onclick=function(){ timer?stop():play(); };
+  if(abB)   abB.onclick  =function(){ stop();draw(cur===0?N-1:0); };
+  if(slider)slider.oninput=function(){ stop();draw(parseInt(slider.value,10)); };
+  var t=0, poll=setInterval(function(){ t++;
+    if(vw()){ clearInterval(poll); draw(cur); }
+    else if(t>200){ clearInterval(poll);
+      if(lbl) lbl.textContent="3D viewer failed to load"; }
+  },50);
+})();
+"""
+
+
 def build_preopt_preview_html(
     atoms: list[str],
     frames: list[list[list[float]]],
@@ -2140,15 +2232,21 @@ def build_preopt_preview_html(
     bgcolor: str = "white",
     fps: int = 8,
 ) -> str:
-    """Build an animated py3Dmol view of a classical pre-opt relaxation.
+    """Build an interactive py3Dmol view of a classical pre-opt relaxation.
 
     ``frames`` is a list of per-iteration coordinate snapshots (from
     ``preopt.preoptimize_with_trajectory``); ``atoms`` is the element list.
     Returns self-contained, offline-safe HTML (3Dmol.js loaded from the vendored
-    bundle via ``make_view``). A single-frame trajectory (no relaxation / FF
-    fallback) renders as a static structure. Used by the interactive
-    "Preview pre-optimization" flow (M-PREOPT PREOPT.2).
+    bundle via ``make_view``). All frames are loaded client-side via
+    ``addModelsAsFrames``, and a stepper UI (prev/next, play/pause, scrub
+    slider, and an input&hairsp;&#8644;&hairsp;relaxed A/B flip) drives
+    ``viewer.setFrame`` so the user can compare geometries without re-rendering.
+    A single-frame trajectory (no relaxation / FF fallback) renders as a static
+    structure with no controls. Used by the interactive "Preview
+    pre-optimization" flow (M-PREOPT PREOPT.2).
     """
+    import re
+
     from quantui.viz_assets import make_view
 
     n = len(atoms)
@@ -2160,14 +2258,29 @@ def build_preopt_preview_html(
             lines.append(f"{sym} {xyz[0]:.6f} {xyz[1]:.6f} {xyz[2]:.6f}")
     xyz_string = "\n".join(lines) + "\n"
 
-    interval_ms = max(1, int(round(1000.0 / max(1, fps))))
-    view = make_view(width=460, height=300)
+    view = make_view(width=460, height=290)
     view.addModelsAsFrames(xyz_string, "xyz")
     view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
     view.setBackgroundColor(bgcolor)
     view.zoomTo()
-    view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
-    return view._make_html()
+    view_html = view._make_html()
+
+    n_frames = len(frames)
+    # Single frame (FF no-op / RDKit absent): nothing to step through.
+    if n_frames <= 1:
+        return view_html
+
+    m = re.search(r"3dmolviewer_(\w+)", view_html)
+    if m is None:
+        # Couldn't find the viewer id to wire controls to — fall back to a
+        # plain auto-loop animation so the relaxation is still visible.
+        interval_ms = max(1, int(round(1000.0 / max(1, fps))))
+        view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
+        return view._make_html()
+
+    interval_ms = max(1, int(round(1000.0 / max(1, fps))))
+    controls = _preopt_controls_html(m.group(1), n_frames, interval_ms)
+    return f'<div style="max-width:480px">{view_html}{controls}</div>'
 
 
 def show_pes_scan_result(app: Any, result: Any) -> bool:

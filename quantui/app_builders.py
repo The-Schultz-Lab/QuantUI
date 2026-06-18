@@ -639,7 +639,8 @@ def build_shared_widgets(
     app.preopt_preview_status = widgets.HTML("")
     app.preopt_preview_output = widgets.Output(
         layout=layout_fn(
-            height="320px",
+            # 290px viewer + stepper controls (slider / play / compare) below.
+            height="360px",
             width="100%",
             max_width="480px",
             border="1px solid #e2e8f0",

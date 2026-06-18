@@ -448,7 +448,9 @@ def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> No
     else:
         note = "barely changed — your geometry was already reasonable"
     app.preopt_preview_status.value = _preopt_small(
-        f"Relaxed (MMFF94/UFF): {note}. Keep it, or revert.", "#444"
+        f"Relaxed (MMFF94/UFF): {note}. Use ⇄ or the slider below to compare "
+        "input vs relaxed, then Keep it or revert.",
+        "#444",
     )
     app.preopt_preview_btn.disabled = False
     app.preopt_accept_btn.disabled = False

@@ -337,8 +337,11 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "point</i> and run a geometry optimization for accurate results.</p>"
             "<p><b>Quick clean-up:</b> beside the <i>Classical pre-optimize</i> "
             "checkbox, click <b>Preview</b> to relax the geometry with a fast "
-            "force field (MMFF94/UFF) and watch it animate in place &mdash; then "
-            "<b>Keep this geometry</b> to adopt it or <b>Revert</b> to discard. "
+            "force field (MMFF94/UFF). Use the controls under the viewer to "
+            "play the relaxation, scrub to any step, or click <b>&#8644;</b> to "
+            "flip between your input and the relaxed result for a direct "
+            "comparison &mdash; then <b>Keep this geometry</b> to adopt it or "
+            "<b>Revert</b> to discard. "
             "(Leaving the checkbox ticked without previewing just runs the same "
             "pre-opt silently before your calculation.)</p>"
         ),
