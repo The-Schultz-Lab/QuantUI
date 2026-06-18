@@ -1188,7 +1188,8 @@ def refresh_results_browser(app: Any) -> None:
             calib_marker = "🔧 " if data.get("calibration_run_id") else ""
             label = (
                 f"{ts}  ·  [{calc_badge}]  "
-                f"{calib_marker}{data['formula']}  {data['method']}/{data['basis']}"
+                f"{calib_marker}{data.get('formula', '?')}  "
+                f"{data.get('method', '?')}/{data.get('basis', '?')}"
             )
             options.append((label, str(d)))
         except Exception:
@@ -1239,7 +1240,8 @@ def populate_compare_list(app: Any) -> None:
             calc_badge = _calc_type_badge(data.get("calc_type", ""))
             label = (
                 f"{ts}  [{calc_badge}]  "
-                f"{data['formula']}  {data['method']}/{data['basis']}"
+                f"{data.get('formula', '?')}  "
+                f"{data.get('method', '?')}/{data.get('basis', '?')}"
             )
             options.append((label, str(d)))
         except Exception:

@@ -1070,6 +1070,60 @@ class QuantUIApp:
         except OSError:
             pass
 
+        # Kick off slow startup work (GPU detection, History/Compare loading)
+        # off the synchronous construction path so the UI paints fast.
+        self._start_deferred_startup_tasks()
+
+    def _start_deferred_startup_tasks(self) -> None:
+        """Run slow startup work AFTER widget construction so it doesn't block
+        first paint.
+
+        - **GPU detection** imports gpu4pyscf + cupy and queries CUDA (~7 s); it
+          runs on a daemon thread, then re-renders the Status badge on the kernel
+          loop. ``is_gpu_available`` is lru-cached, so the run dispatcher reuses
+          the result with no extra cost.
+        - **History + Compare** population loads every saved result; deferring it
+          onto the kernel io loop lets it run right after the cell returns (UI
+          already painted), and the summary sidecar keeps it fast. Falls back to
+          inline when there is no kernel loop (tests / plain scripts).
+        """
+
+        def _detect_gpu() -> None:
+            try:
+                from quantui.gpu_offload import is_gpu_available
+
+                state = is_gpu_available()
+            except Exception:  # noqa: BLE001 — treat any failure as "no GPU"
+                state = (False, None)
+            render = getattr(self, "_render_status_html", None)
+            html_widget = getattr(self, "_status_html", None)
+            if render is None or html_widget is None:
+                return
+
+            def _apply() -> None:
+                try:
+                    html_widget.value = render(state)
+                except Exception:
+                    pass
+
+            loop = self._get_kernel_io_loop()
+            if loop is not None:
+                loop.add_callback(_apply)
+            else:
+                _apply()
+
+        threading.Thread(
+            target=_detect_gpu, daemon=True, name="quantui-gpu-detect"
+        ).start()
+
+        loop = self._get_kernel_io_loop()
+        if loop is not None:
+            loop.add_callback(self._refresh_results_browser)
+            loop.add_callback(self._populate_compare_list)
+        else:
+            self._refresh_results_browser()
+            self._populate_compare_list()
+
     def display(self) -> None:
         """Inject global CSS and render the application widget."""
         display(HTML(_APP_CSS))

@@ -82,40 +82,6 @@ def build_status_panel(
         cross = '<span style="color:#ef4444">&#10007;</span>'
         return (tick if flag else cross) + (" " + extra if extra else "")
 
-    # GPU offload indicator (M-GPU / GPU.2). Reuses the runtime detection
-    # helper so this status line tracks the EXACT same logic the dispatcher
-    # uses — no risk of drift between "what the user sees in Status" and
-    # "what actually happens when they click Run".
-    from .gpu_offload import is_gpu_available as _gpu_available_fn
-
-    _gpu_avail, _gpu_name = _gpu_available_fn()
-    if _gpu_avail:
-        _gpu_msg = f"&mdash; <code>{_gpu_name}</code>"
-        _gpu_flag = True
-    else:
-        _gpu_msg = "&mdash; <code>gpu4pyscf</code> not installed or no CUDA device"
-        _gpu_flag = False
-
-    items = [
-        (
-            "PySCF (calculations)",
-            _ok(
-                pyscf_available,
-                "" if pyscf_available else "&mdash; Linux / macOS / WSL required",
-            ),
-        ),
-        ("ASE (structure I/O, opt.)", _ok(ase_available)),
-        ("PubChem search", _ok(pubchem_available)),
-        ("3D viewer (py3Dmol)", _ok(visualization_available)),
-        ("GPU offload (gpu4pyscf)", _ok(_gpu_flag, _gpu_msg)),
-        ("CPU cores / Memory", f"<b>{cores}</b> cores / <b>{mem}</b>"),
-    ]
-    rows = "".join(
-        f'<tr><td style="padding:3px 16px 3px 0;color:#64748b;font-size:13px">{k}</td>'
-        f'<td style="font-size:13px">{v}</td></tr>'
-        for k, v in items
-    )
-
     env_badge = (
         f'&nbsp;&nbsp;<code style="font-size:11px;background:#e0e7ef;'
         f'padding:1px 5px;border-radius:3px;color:#334155">{env}</code>'
@@ -130,17 +96,58 @@ def build_status_panel(
         "Timing calibration: not yet run &mdash; use the Calibrate panel in History</div>"
     )
 
-    app._status_html = widgets.HTML(
-        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid #3b82f6;'
-        f'padding:12px 16px;border-radius:6px;margin:4px 0 8px">'
-        f'<div style="font-weight:600;font-size:14px;color:#1e293b">'
-        f"QuantUI {quantui.__version__}"
-        f'<span style="font-weight:400;font-size:12px;color:#94a3b8;margin-left:10px">'
-        f"Python {py_ver}{env_badge}</span></div>"
-        f'<table style="margin-top:10px;border-collapse:collapse">{rows}</table>'
-        f"{cal_line}"
-        f"</div>"
-    )
+    # GPU offload indicator (M-GPU / GPU.2). Detecting GPUs imports gpu4pyscf +
+    # cupy and queries CUDA, which costs ~7 s — far too slow to block startup.
+    # So the status HTML is rendered via this closure with the GPU row as a
+    # "checking…" placeholder; the app re-renders it (via app._render_status_html)
+    # once a background thread resolves is_gpu_available(). The detection helper
+    # is the same one the run dispatcher uses, so the badge can't drift from
+    # actual behavior.
+    def _gpu_cell(gpu_state: Any) -> str:
+        if gpu_state is None:
+            return '<span style="color:#94a3b8">&#8987; checking&hellip;</span>'
+        avail, name = gpu_state
+        if avail:
+            return _ok(True, f"&mdash; <code>{name}</code>")
+        return _ok(
+            False, "&mdash; <code>gpu4pyscf</code> not installed or no CUDA device"
+        )
+
+    def _render_status(gpu_state: Any) -> str:
+        items = [
+            (
+                "PySCF (calculations)",
+                _ok(
+                    pyscf_available,
+                    "" if pyscf_available else "&mdash; Linux / macOS / WSL required",
+                ),
+            ),
+            ("ASE (structure I/O, opt.)", _ok(ase_available)),
+            ("PubChem search", _ok(pubchem_available)),
+            ("3D viewer (py3Dmol)", _ok(visualization_available)),
+            ("GPU offload (gpu4pyscf)", _gpu_cell(gpu_state)),
+            ("CPU cores / Memory", f"<b>{cores}</b> cores / <b>{mem}</b>"),
+        ]
+        rows = "".join(
+            f'<tr><td style="padding:3px 16px 3px 0;color:#64748b;font-size:13px">'
+            f'{k}</td><td style="font-size:13px">{v}</td></tr>'
+            for k, v in items
+        )
+        return (
+            '<div style="background:#f8fafc;border:1px solid #e2e8f0;'
+            "border-left:4px solid #3b82f6;"
+            'padding:12px 16px;border-radius:6px;margin:4px 0 8px">'
+            '<div style="font-weight:600;font-size:14px;color:#1e293b">'
+            f"QuantUI {quantui.__version__}"
+            '<span style="font-weight:400;font-size:12px;color:#94a3b8;'
+            f'margin-left:10px">Python {py_ver}{env_badge}</span></div>'
+            f'<table style="margin-top:10px;border-collapse:collapse">{rows}</table>'
+            f"{cal_line}</div>"
+        )
+
+    # Exposed so the app's background GPU-detection task can refresh the badge.
+    app._render_status_html = _render_status
+    app._status_html = widgets.HTML(_render_status(None))
 
     # ── Settings section ──────────────────────────────────────────────────
     # "Default 3D backend" — user preference persisted via UserSettings.
@@ -458,7 +465,10 @@ def build_history_section(
         app._perf_accordion,
     )
 
-    app._refresh_results_browser()
+    # History population (loads every saved result) is deferred to a background
+    # task after the UI paints — see app._start_deferred_startup_tasks. Show a
+    # placeholder until then.
+    app.past_dd.options = [("⏳ loading saved results…", "")]
     app._refresh_perf_stats()
 
 
@@ -1940,7 +1950,9 @@ def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) ->
     app.advanced_accordion.set_title(0, "Export")
     app.advanced_accordion.selected_index = None
 
-    app._populate_compare_list()
+    # Deferred to a background startup task (loads every saved result) — see
+    # app._start_deferred_startup_tasks. Placeholder until then.
+    app.compare_select.options = [("⏳ loading saved results…", "")]
 
 
 def build_output_tab(app: Any, *, layout_fn: Any) -> None:
