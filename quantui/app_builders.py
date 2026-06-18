@@ -606,23 +606,20 @@ def build_shared_widgets(
         style={"description_width": "100px"},
         layout=layout_fn(width="190px"),
     )
-    # POLISH.10 (M-POLISH, 2026-05-25): ``style={"description_width":
-    # "initial"}`` removes the default left-side description gutter that
-    # ipywidgets reserves on Checkbox, which was producing both the
-    # indent the user noticed AND the horizontal scrollbar (description
-    # gutter + ``width="100%"`` exceeded the container width). Letting
-    # the checkbox size to its content also drops the scrollbar.
-    app.preopt_cb = widgets.Checkbox(
-        value=False,
-        description="Classical pre-optimize geometry (fast, crude starting point)",
-        disabled=not preopt_available,
-        style={"description_width": "initial"},
-        indent=False,
+    # Classical (MMFF/UFF) pre-optimization is an explicit, transparent tool —
+    # Preview → Keep/Revert — NOT a silent checkbox baked into the run. This
+    # avoids the confusing dual path (accepting a previewed geometry while a
+    # checkbox would re-run the same step) and means nothing pre-optimizes
+    # invisibly. (Distinct from the QM "Geometry optimization before
+    # calculation" checkbox below, which is a full DFT/HF opt.)
+    app.preopt_preview_label = widgets.HTML(
+        '<span style="font-size:13px;color:#334155">'
+        "Classical pre-optimize geometry</span>"
+        '<span style="font-size:11px;color:#94a3b8"> &mdash; fast MMFF/UFF '
+        "cleanup of a rough structure</span>"
     )
-
     # Interactive pre-opt (M-PREOPT PREOPT.2/.3): run the bonded-FF pre-opt on
-    # demand, watch it relax in-place, then keep or revert — instead of it being
-    # a silent step buried inside the run.
+    # demand, watch it relax in-place, then keep or revert.
     app.preopt_preview_btn = widgets.Button(
         description="Preview",
         icon="eye",
@@ -630,7 +627,8 @@ def build_shared_widgets(
         disabled=not preopt_available,
         layout=layout_fn(width="110px", height="28px"),
         tooltip="Watch the classical pre-optimization relax this geometry, "
-        "then keep or revert it",
+        "then keep or revert it"
+        + ("" if preopt_available else " (requires RDKit — not installed)"),
     )
     app.preopt_accept_btn = widgets.Button(
         description="Keep this geometry",
@@ -672,8 +670,9 @@ def build_shared_widgets(
 
     from quantui.config import SOLVENT_OPTIONS as _SOLVENT_OPTS
 
-    # POLISH.10: same fix as preopt_cb above — drop the gutter +
-    # explicit width that produced the indent + scrollbar.
+    # POLISH.10: drop the default Checkbox description gutter + explicit width
+    # (style description_width "initial" + indent=False) that produced the
+    # indent + horizontal scrollbar.
     app.solvent_cb = widgets.Checkbox(
         value=False,
         description="Implicit solvent (PCM)",
@@ -1263,7 +1262,7 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
             app.calc_type_dd,
             app.calc_extra_opts,
             widgets.HBox(
-                [app.preopt_cb, app.preopt_preview_btn],
+                [app.preopt_preview_label, app.preopt_preview_btn],
                 layout=layout_fn(align_items="center", gap="10px"),
             ),
             app.preopt_preview_box,

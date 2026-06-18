@@ -476,9 +476,8 @@ def on_preopt_accept(app: Any, btn: Any = None) -> None:
     if relaxed is None:
         return
     app._set_molecule(relaxed, "Pre-optimized (MMFF94/UFF — accepted from preview)")
-    # The active geometry is now pre-optimized, so turn OFF the auto pre-opt
-    # checkbox to avoid redundantly re-optimizing it inside the run.
-    app.preopt_cb.value = False
+    # The active geometry IS the relaxed one now; the run uses it as-is (there is
+    # no silent pre-opt step to disable — classical pre-opt is Preview-only).
     app._preopt_relaxed_mol = None
     app.preopt_preview_box.layout.display = "none"
     app.preopt_preview_output.clear_output()

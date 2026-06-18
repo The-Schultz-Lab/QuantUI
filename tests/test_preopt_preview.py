@@ -246,16 +246,17 @@ class TestPreviewHandlers:
         assert app.preopt_reset_btn.disabled is False
         assert "0.123" in app.preopt_preview_status.value
 
-    def test_accept_sets_molecule_and_unchecks_autopreopt(self, app):
+    def test_accept_sets_molecule_and_hides_preview(self, app):
+        # Pre-opt is Preview-only: Keep makes the relaxed geometry the active
+        # molecule (which the run then uses as-is). There is no checkbox.
         relaxed = _water()
         app._preopt_relaxed_mol = relaxed
-        app.preopt_cb.value = True
         app.preopt_preview_box.layout.display = ""
 
         app._on_preopt_accept()
 
         assert app._molecule is relaxed
-        assert app.preopt_cb.value is False  # decoupled: no redundant re-opt
+        assert not hasattr(app, "preopt_cb")  # classical-preopt checkbox removed
         assert app._preopt_relaxed_mol is None
         assert app.preopt_preview_box.layout.display == "none"
 

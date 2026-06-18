@@ -522,7 +522,10 @@ except (ImportError, AttributeError):
     _PYSCF_AVAILABLE = False
 
 try:
-    from quantui.preopt import preoptimize
+    # Availability probe only — the classical pre-opt is invoked via the
+    # interactive Preview flow (app_runflow uses preoptimize_with_trajectory),
+    # not from app.py. ``_PREOPT_AVAILABLE`` gates the Preview button.
+    import quantui.preopt  # noqa: F401
 
     _PREOPT_AVAILABLE = True
 except (ImportError, AttributeError):
@@ -946,7 +949,7 @@ class QuantUIApp:
         nstates_si: Any
         perf_estimate_html: Any
         post_calc_panel: Any
-        preopt_cb: Any
+        preopt_preview_label: Any
         preopt_preview_btn: Any
         preopt_accept_btn: Any
         preopt_reset_btn: Any
@@ -4023,14 +4026,12 @@ class QuantUIApp:
             pass
 
         try:
+            # Classical pre-optimization is now an explicit Preview → Keep tool
+            # (it mutates the active molecule before the run when the user keeps
+            # it), not a silent step here. So the run uses the active geometry
+            # as-is. (The QM "Geometry optimization before calculation" path is
+            # separate and handled below per calc type.)
             calc_mol = mol
-            if self.preopt_cb.value and _PREOPT_AVAILABLE:
-                self.run_status.value = "Pre-optimizing..."
-                calc_mol, _rmsd = preoptimize(mol)
-                self._set_molecule_threadsafe(
-                    calc_mol,
-                    f"Geometry pre-optimized (MMFF94/UFF, RMSD={_rmsd:.3f} Å)",
-                )
 
             ct = self.calc_type_dd.value
             result: Any = None
