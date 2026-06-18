@@ -2209,8 +2209,13 @@ _PREOPT_CONTROLS_JS = """
   }
   function stop(){ if(timer){clearInterval(timer);timer=null;}
     if(playB) playB.innerHTML="\\u25b6 Play"; }
-  function play(){ if(N<=1) return; if(playB) playB.innerHTML="\\u23f8 Pause";
-    timer=setInterval(function(){ draw(cur>=N-1?0:cur+1); }, IV); }
+  function play(){ if(N<=1) return;
+    if(cur>=N-1) draw(0);  // at the end → replay from the input geometry
+    if(playB) playB.innerHTML="\\u23f8 Pause";
+    timer=setInterval(function(){
+      if(cur>=N-1){ stop(); return; }  // stop on the relaxed frame, stay there
+      draw(cur+1);
+    }, IV); }
   if(prevB) prevB.onclick=function(){stop();draw(cur-1);};
   if(nextB) nextB.onclick=function(){stop();draw(cur+1);};
   if(playB) playB.onclick=function(){ timer?stop():play(); };

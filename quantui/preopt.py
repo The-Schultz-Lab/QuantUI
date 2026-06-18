@@ -66,9 +66,76 @@ def _copy_molecule(molecule: Molecule) -> Molecule:
     )
 
 
-# Cap on captured preview frames so the relaxation animation stays light
-# (single-iteration steps; reasonable geometries converge well under this).
-_PREVIEW_FRAME_CAP = 40
+# Interactive-preview animation tuning (preoptimize_with_trajectory). The
+# trajectory is captured as fresh minimizations from the input at increasing
+# iteration budgets (see _rdkit_ff_relax). _PREVIEW_FRAMES is how many are shown
+# (selected at even RMSD spacing); _PREVIEW_TIME_BUDGET_S is a wall-clock safety
+# valve so a large molecule can't stall the preview thread building waypoints.
+_PREVIEW_FRAMES = 20
+_PREVIEW_TIME_BUDGET_S = 6.0
+
+
+def _preview_iter_grid(steps: int) -> List[int]:
+    """Iteration budgets to snapshot for the preview animation.
+
+    Fine early, coarser later: small stiff molecules (e.g. water) relax within a
+    handful of iterations, while large molecules' BFGS barely moves for the first
+    iterations then accelerates over tens-to-hundreds. A single fixed spacing
+    serves one regime and misses the other (a coarse step skips a tiny molecule's
+    whole relaxation; a fine step is wasteful for a large one). This grid samples
+    the active region for both without an excessive number of fresh minimizations
+    (budgets past convergence are nearly free — RDKit's Minimize returns early).
+    """
+    grid: List[int] = []
+    k = 0
+    while k < steps:
+        grid.append(k)
+        if k < 16:
+            k += 1
+        elif k < 64:
+            k += 4
+        else:
+            k += 8
+    return grid
+
+
+def _select_even_rmsd_frames(
+    waypoints: List[List[List[float]]], n_frames: int
+) -> List[List[List[float]]]:
+    """Pick ~``n_frames`` waypoints spaced at even RMSD from the final geometry.
+
+    ``waypoints`` is an ordered list of geometries (input first, relaxed last).
+    Returns a sublist (input first, relaxed last) chosen so consecutive frames
+    are roughly equidistant in RMSD. Without this the animation looks weighted
+    to wherever the optimizer took its largest steps (RDKit's BFGS barely moves
+    for the first iterations, then accelerates), playing back as a long static
+    stretch followed by a rush.
+    """
+    import numpy as np
+
+    if len(waypoints) <= 2:
+        return list(waypoints)
+    final = np.asarray(waypoints[-1], dtype=float)
+    to_final = [
+        float(
+            np.sqrt(np.mean(np.sum((np.asarray(w, dtype=float) - final) ** 2, axis=1)))
+        )
+        for w in waypoints
+    ]
+    total = to_final[0]
+    if total < 1e-3:
+        return [waypoints[-1]]  # no meaningful motion → single static frame
+    targets = np.linspace(total, 0.0, max(2, n_frames))
+    chosen: List[int] = []
+    j = 0
+    for t in targets:
+        # to_final decreases as the molecule relaxes; advance to the first
+        # waypoint at or below this RMSD target.
+        while j < len(waypoints) - 1 and to_final[j] > t:
+            j += 1
+        if not chosen or chosen[-1] != j:
+            chosen.append(j)
+    return [waypoints[i] for i in chosen]
 
 
 def _conf_coords(conf, n_atoms: int) -> List[List[float]]:
@@ -133,38 +200,50 @@ def _rdkit_ff_relax(
             raise ValueError("atom count changed during FF relaxation")
         return coords, ff_name, None
 
-    # Frame-capturing path: build the force field and step it one iteration at a
-    # time, snapshotting the geometry, so we can animate the real relaxation.
-    if ff_name == "MMFF94":
-        ff = AllChem.MMFFGetMoleculeForceField(
-            rdmol, AllChem.MMFFGetMoleculeProperties(rdmol)
-        )
-    else:
-        ff = AllChem.UFFGetMoleculeForceField(rdmol)
-    if ff is None:
-        raise ValueError("could not build force field for frame capture")
-    ff.Initialize()
+    # Frame-capturing path. RDKit exposes no per-iteration callback, and calling
+    # Minimize(maxIts=1) repeatedly *restarts* its BFGS optimizer each call (the
+    # inverse-Hessian estimate resets to the identity), so single-step snapshots
+    # barely move while one bulk minimize does ~all the work — an animation that
+    # looks static then snaps on the last frame. Instead, snapshot a set of
+    # fresh minimizations from the input at increasing iteration budgets. BFGS is
+    # deterministic, so minimizing for k iterations is a true waypoint on the
+    # path to minimizing for 2k, and the budget==steps point is identical to the
+    # silent preoptimize() result (so Preview and a silent run agree). Frames are
+    # then selected at even RMSD spacing for a smooth playback.
+    import time as _time
 
-    frames: List[List[List[float]]] = [_conf_coords(conf, n)]
-    converged = False
-    for _ in range(int(steps)):
-        more = ff.Minimize(maxIts=1)  # 0 == converged, 1 == needs more
-        frames.append(_conf_coords(conf, n))
-        if more == 0:
-            converged = True
-            break
-        if len(frames) >= _PREVIEW_FRAME_CAP:
-            break
-    if not converged:
-        # Finish the relaxation in bulk (don't snapshot each remaining step);
-        # append the final geometry so the animation ends at the real minimum.
-        ff.Minimize(maxIts=int(steps))
-        frames.append(_conf_coords(conf, n))
+    def _relax_to(max_its: int) -> List[List[float]]:
+        rd = Chem.Mol(rdmol)  # fresh copy at the input geometry
+        cf = rd.GetConformer()
+        if ff_name == "MMFF94":
+            ff = AllChem.MMFFGetMoleculeForceField(
+                rd, AllChem.MMFFGetMoleculeProperties(rd)
+            )
+        else:
+            ff = AllChem.UFFGetMoleculeForceField(rd)
+        if ff is None:
+            raise ValueError("could not build force field for frame capture")
+        ff.Initialize()
+        if max_its > 0:
+            ff.Minimize(maxIts=max_its)
+        return _conf_coords(cf, n)
 
-    coords = _conf_coords(conf, n)
-    if len(coords) != len(molecule.atoms):
+    final_coords = _relax_to(int(steps))  # == silent preoptimize() geometry
+    if len(final_coords) != len(molecule.atoms):
         raise ValueError("atom count changed during FF relaxation")
-    return coords, ff_name, frames
+
+    # Waypoints at increasing iteration budgets (fresh from input each time;
+    # budgets past convergence cost almost nothing as Minimize returns early).
+    waypoints: List[List[List[float]]] = []
+    t0 = _time.monotonic()
+    for k in _preview_iter_grid(int(steps)):
+        waypoints.append(_relax_to(k))
+        if _time.monotonic() - t0 > _PREVIEW_TIME_BUDGET_S:
+            break
+    waypoints.append(final_coords)
+
+    frames = _select_even_rmsd_frames(waypoints, _PREVIEW_FRAMES)
+    return final_coords, ff_name, frames
 
 
 def preoptimize(
