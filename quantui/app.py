@@ -2645,6 +2645,13 @@ class QuantUIApp:
             _calc_log.log_event("vib_framerate_changed", f"fps={new_fps}")
         except OSError:
             pass
+        # Single-viewer path: update the running animation's interval in place
+        # (no rebuild, camera preserved). The legacy per-mode path re-renders.
+        if getattr(self, "_vib_single_viewer_active", False):
+            from quantui.app_visualization import _vib_bridge_set_fps
+
+            _vib_bridge_set_fps(self, new_fps)
+            return
         # If a vibrational result is currently loaded, re-render the current
         # mode through the new fps so the change is visible immediately.
         if (

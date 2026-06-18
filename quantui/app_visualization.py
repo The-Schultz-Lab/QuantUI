@@ -2156,6 +2156,12 @@ _VIB_VIEWER_JS = """
     var v=vw(); if(!v) return false;
     var xyz=frames(m); if(xyz===null) return false;
     try{
+      // stopAnimate FIRST: setMode may be called more than once for the same
+      // viewer (initial render + the dropdown observer + each mode switch).
+      // Without stopping the running loop, animate() stacks additional loops,
+      // advancing frames several times per tick — glitchy, too-fast playback
+      // that ignores the fps interval. Stopping guarantees exactly one loop.
+      if(v.stopAnimate) v.stopAnimate();
       v.removeAllModels();
       v.addModelsAsFrames(xyz,"xyz");
       v.setStyle({"stick":{},"sphere":{"scale":0.3}});
@@ -2165,6 +2171,15 @@ _VIB_VIEWER_JS = """
       v.render();
     }catch(e){ return false; }
     return true;
+  };
+  // Live framerate change (custom fps setting): update the interval and restart
+  // the loop on the current frames — no rebuild, so the camera is preserved.
+  window.__quantuiVibSetFps=function(fps){
+    IV=Math.max(1,Math.round(1000/Math.max(1,fps)));
+    var v=vw(); if(!v) return;
+    try{ if(v.stopAnimate) v.stopAnimate();
+      v.animate({"loop":"forward","interval":IV,"reps":0}); v.render();
+    }catch(e){}
   };
   var t=0, poll=setInterval(function(){ t++;
     if(vw()){ clearInterval(poll); window.__quantuiVibSetMode(INIT, true); }
@@ -2307,6 +2322,27 @@ def _vib_bridge_set_mode(app: Any, mode_number: int) -> None:
         "(function(){var n=0;function go(){n++;"
         "if(window.__quantuiVibSetMode){window.__quantuiVibSetMode(%d,false);}"
         "else if(n<40){setTimeout(go,50);}}go();})();" % int(mode_number)
+    )
+    try:
+        bridge.clear_output(wait=True)
+        with bridge:
+            display(Javascript(js))
+    except Exception:
+        pass
+
+
+def _vib_bridge_set_fps(app: Any, fps: int) -> None:
+    """Update the live single-viewer's animation framerate client-side (no
+    rebuild, camera preserved) via ``window.__quantuiVibSetFps``."""
+    bridge = getattr(app, "_vib_js_bridge", None)
+    if bridge is None:
+        return
+    from IPython.display import Javascript, display
+
+    js = (
+        "(function(){var n=0;function go(){n++;"
+        "if(window.__quantuiVibSetFps){window.__quantuiVibSetFps(%d);}"
+        "else if(n<40){setTimeout(go,50);}}go();})();" % int(fps)
     )
     try:
         bridge.clear_output(wait=True)

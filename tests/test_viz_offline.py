@@ -164,6 +164,11 @@ def test_vib_viewer_is_single_viewer_all_modes():
     assert "window.__quantuiVibSetMode" in html  # client-side mode switch fn
     assert "removeAllModels" in html  # swaps frames on the SAME viewer instance
     assert "addModelsAsFrames" in html
+    # stopAnimate before each animate() prevents stacked animation loops — the
+    # glitchy / too-fast playback after repeated setMode calls.
+    assert "stopAnimate" in html
+    # Live framerate change without a rebuild (camera preserved).
+    assert "window.__quantuiVibSetFps" in html
     # All three modes' displacement vectors are embedded for client-side frames.
     assert '"1":' in html and '"2":' in html and '"3":' in html
 
