@@ -66,7 +66,7 @@ quantui log tail -n 200 | grep -i error | tail -5
 
 ```
 2026-05-25T13:55:22.421910+00:00  viz_route_decision  task=molecule_preview pref=auto chosen=py3dmol reason=auto -> task primary (py3dmol)
-2026-05-25T13:55:22.470028+00:00  startup             QuantUI 0.2.0 started
+2026-05-25T13:55:22.470028+00:00  startup             QuantUI 0.3.0 started (viz backend pref=auto)
 2026-05-25T14:08:14.102544+00:00  calc_done           B3LYP/STO-3G on H2O  elapsed_s=1.2 converged=True gpu_used=True gpu_name=NVIDIA GeForce RTX 4050 Laptop GPU
 ```
 

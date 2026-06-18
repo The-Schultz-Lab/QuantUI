@@ -270,6 +270,15 @@ from quantui.app_runflow import (
     on_past_refresh as _run_on_past_refresh,
 )
 from quantui.app_runflow import (
+    on_preopt_accept as _run_on_preopt_accept,
+)
+from quantui.app_runflow import (
+    on_preopt_preview as _run_on_preopt_preview,
+)
+from quantui.app_runflow import (
+    on_preopt_reset as _run_on_preopt_reset,
+)
+from quantui.app_runflow import (
     on_reset_click as _run_on_reset_click,
 )
 from quantui.app_runflow import (
@@ -476,6 +485,9 @@ try:
         RDKIT_AVAILABLE as _PUBCHEM_RDKIT_AVAILABLE,
     )
     from quantui.structure_providers import (
+        resolve_structure_with_message as _resolve_structure_with_message,
+    )
+    from quantui.structure_providers import (
         search_candidates as _struct_search_candidates,
     )
     from quantui.structure_providers import (
@@ -486,7 +498,21 @@ try:
 except ImportError:
     PUBCHEM_AVAILABLE = False
     _student_friendly_resolve = None  # type: ignore[assignment]
+    _resolve_structure_with_message = None  # type: ignore[assignment]
     _struct_search_candidates = None  # type: ignore[assignment]
+
+
+# Provider key → short, accurate label for the loaded-molecule card. Replaces
+# the old hard-coded "PubChem: <query>" which mislabeled offline/library/SMILES
+# hits (manual finding #1b, 2026-06-15).
+_STRUCT_SOURCE_PREFIX = {
+    "pubchem": "PubChem",
+    "cactus": "NCI CACTUS",
+    "rdkit-smiles": "SMILES",
+    "rdkit-inchi": "InChI",
+    "library": "Library",
+    "library-offline-fallback": "Library (offline)",
+}
 
 try:
     from quantui.session_calc import SessionResult, run_in_session  # noqa: F401
@@ -496,7 +522,10 @@ except (ImportError, AttributeError):
     _PYSCF_AVAILABLE = False
 
 try:
-    from quantui.preopt import preoptimize
+    # Availability probe only — the classical pre-opt is invoked via the
+    # interactive Preview flow (app_runflow uses preoptimize_with_trajectory),
+    # not from app.py. ``_PREOPT_AVAILABLE`` gates the Preview button.
+    import quantui.preopt  # noqa: F401
 
     _PREOPT_AVAILABLE = True
 except (ImportError, AttributeError):
@@ -609,6 +638,21 @@ _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
 # ══ LOG CAPTURE ══════════════════════════════════════════════════════════════
 
 
+class _CalcCancelled(BaseException):
+    """Raised to abort a running calculation when the user clicks Cancel.
+
+    The calc streams output line-by-line through ``_LogCapture.write`` (SCF
+    cycles, optimizer steps), so checking a cancel flag there lets us bail at
+    the next output — a cooperative, graceful stop that needs no thread-kill.
+
+    Inherits ``BaseException`` (like ``KeyboardInterrupt``) on purpose: PySCF /
+    session_calc / the optimizer wrap their kernels in ``except Exception``, so
+    a plain ``Exception`` cancel would be swallowed and re-reported as a
+    "Calculation failed" error. As a ``BaseException`` it sails through those
+    handlers and reaches ``_do_run``'s ``except _CalcCancelled`` cleanly.
+    """
+
+
 class _LogCapture:
     """Write PySCF output to an Output widget and capture it to a buffer."""
 
@@ -617,6 +661,7 @@ class _LogCapture:
         output_widget: widgets.Output,
         status_label: Optional[widgets.Label] = None,
         on_scf_converged: Optional[Callable[[], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> None:
         self._w = output_widget
         self._buf = io.StringIO()
@@ -624,10 +669,15 @@ class _LogCapture:
         self._status = status_label
         self._on_scf_converged = on_scf_converged
         self._scf_converged_seen = False
+        self._cancel_check = cancel_check
 
     def write(self, text: str) -> None:
         if not text:
             return
+        # Cooperative cancellation: the calc prints frequently (per SCF cycle /
+        # opt step), so raising here stops it at the next line. See _CalcCancelled.
+        if self._cancel_check is not None and self._cancel_check():
+            raise _CalcCancelled()
         self._w.append_stdout(text)
         self._buf.write(text)
         self._line_buf += text
@@ -786,6 +836,7 @@ class QuantUIApp:
         result_viz_output: Any
         results_path_lbl: Any
         run_btn: Any
+        cancel_btn: Any
         run_output: Any
         run_panel: Any
         run_status: Any
@@ -898,7 +949,13 @@ class QuantUIApp:
         nstates_si: Any
         perf_estimate_html: Any
         post_calc_panel: Any
-        preopt_cb: Any
+        preopt_preview_label: Any
+        preopt_preview_btn: Any
+        preopt_accept_btn: Any
+        preopt_reset_btn: Any
+        preopt_preview_status: Any
+        preopt_preview_output: Any
+        preopt_preview_box: Any
         results_panel: Any
         results_tab_panel: Any
         struct_export_status: Any
@@ -955,6 +1012,13 @@ class QuantUIApp:
         self._activity_count: int = 0
         self._activity_compute_count: int = 0
         self._activity_lock = threading.Lock()
+        # Cancellation + run-in-flight state. ``_cancel_event`` is checked by
+        # the run's _LogCapture each output line; ``_calc_running`` guards the
+        # Clear button from wiping output mid-run.
+        self._cancel_event = threading.Event()
+        self._calc_running: bool = False
+        # Relaxed molecule from a pending pre-opt preview, awaiting Keep/Revert.
+        self._preopt_relaxed_mol: Optional[Molecule] = None
         # Cache kernel io_loop once on the main thread so worker threads can
         # reliably schedule UI callbacks even when get_ipython() is thread-local.
         self._kernel_io_loop: Any = getattr(
@@ -998,14 +1062,79 @@ class QuantUIApp:
         self._assemble_tabs()
 
         # Log startup, but never let optional logging I/O break app startup.
+        # Include the loaded viz backend preference so a "it reset" report (#4a)
+        # can be confirmed against what was actually persisted.
         try:
-            _calc_log.log_event("startup", f"QuantUI {quantui.__version__} started")
+            _calc_log.log_event(
+                "startup",
+                f"QuantUI {quantui.__version__} started "
+                f"(viz backend pref={self._viz_backend_preference})",
+            )
         except OSError:
             pass
+
+        # Kick off slow startup work (GPU detection, History/Compare loading)
+        # off the synchronous construction path so the UI paints fast.
+        self._start_deferred_startup_tasks()
+
+    def _start_deferred_startup_tasks(self) -> None:
+        """Run slow startup work AFTER widget construction so it doesn't block
+        first paint.
+
+        - **GPU detection** imports gpu4pyscf + cupy and queries CUDA (~7 s); it
+          runs on a daemon thread, then re-renders the Status badge on the kernel
+          loop. ``is_gpu_available`` is lru-cached, so the run dispatcher reuses
+          the result with no extra cost.
+        - **History + Compare** population loads every saved result; deferring it
+          onto the kernel io loop lets it run right after the cell returns (UI
+          already painted), and the summary sidecar keeps it fast. Falls back to
+          inline when there is no kernel loop (tests / plain scripts).
+        """
+
+        def _detect_gpu() -> None:
+            try:
+                from quantui.gpu_offload import is_gpu_available
+
+                state = is_gpu_available()
+            except Exception:  # noqa: BLE001 — treat any failure as "no GPU"
+                state = (False, None)
+            render = getattr(self, "_render_status_html", None)
+            html_widget = getattr(self, "_status_html", None)
+            if render is None or html_widget is None:
+                return
+
+            def _apply() -> None:
+                try:
+                    html_widget.value = render(state)
+                except Exception:
+                    pass
+
+            loop = self._get_kernel_io_loop()
+            if loop is not None:
+                loop.add_callback(_apply)
+            else:
+                _apply()
+
+        threading.Thread(
+            target=_detect_gpu, daemon=True, name="quantui-gpu-detect"
+        ).start()
+
+        loop = self._get_kernel_io_loop()
+        if loop is not None:
+            loop.add_callback(self._refresh_results_browser)
+            loop.add_callback(self._populate_compare_list)
+        else:
+            self._refresh_results_browser()
+            self._populate_compare_list()
 
     def display(self) -> None:
         """Inject global CSS and render the application widget."""
         display(HTML(_APP_CSS))
+        # NOTE: 3Dmol.js is loaded offline per-view via py3Dmol's own loader
+        # (``viz_assets.make_view`` passes ``js=<vendored data: URI>``), NOT a
+        # one-time page bootstrap. A startup-time bootstrap ran py3Dmol's
+        # exports/module-juggling loader during Voilà's RequireJS bootstrap and
+        # broke widget startup offline — never reintroduce it here.
         display(
             widgets.VBox(
                 [
@@ -1507,6 +1636,10 @@ class QuantUIApp:
         self.basis_help_btn.on_click(self._on_basis_help)
         # Run
         self.run_btn.on_click(self._on_run_clicked)
+        self.cancel_btn.on_click(self._safe_cb(self._on_cancel))
+        self.preopt_preview_btn.on_click(self._safe_cb(self._on_preopt_preview))
+        self.preopt_accept_btn.on_click(self._safe_cb(self._on_preopt_accept))
+        self.preopt_reset_btn.on_click(self._safe_cb(self._on_preopt_reset))
         self.log_clear_btn.on_click(self._on_clear_log)
         self._ir_mode_toggle.observe(
             self._safe_cb(self._on_ir_mode_changed), names="value"
@@ -1880,12 +2013,12 @@ class QuantUIApp:
             # through to text dispatch on failure (so the user still
             # sees the raw coordinates).
             try:
-                import py3Dmol as _p3d  # type: ignore[import]
+                from quantui.viz_assets import make_view
 
                 model_format = {".xyz": "xyz", ".mol": "mol", ".pdb": "pdb"}[suffix]
                 raw_text = path.read_text(encoding="utf-8", errors="replace")
                 if len(raw_text) <= 256_000:
-                    viewer = _p3d.view(width=500, height=380)
+                    viewer = make_view(width=500, height=380)
                     viewer.addModel(raw_text, model_format)
                     viewer.setStyle({"stick": {}, "sphere": {"scale": 0.25}})
                     viewer.setBackgroundColor("white")
@@ -2364,12 +2497,12 @@ class QuantUIApp:
     def _set_viz_preference(self, new_pref: str, *, persist: bool) -> None:
         """Single source-of-truth setter for the backend preference.
 
-        ``new_pref`` must be one of "auto" | "py3dmol" | "plotlymol". The
-        Settings widget (Status tab) calls this with ``persist=True``; the
-        Calculate/Analysis effective toggles call it with ``persist=False``
-        (session-only override — clicking either toggle is treated as an
-        explicit commit to a concrete preference, even if the prior
-        preference was "auto").
+        ``new_pref`` must be one of "auto" | "py3dmol" | "plotlymol". All three
+        widgets (Settings dropdown + Calculate/Analysis toggles) edit the same
+        single global preference, so every user-initiated change passes
+        ``persist=True`` (#4a — a backend choice must survive the session).
+        ``persist=False`` remains available for programmatic syncs that must
+        not write settings.
 
         Updates ``self._viz_backend_preference``, resolves the effective
         backend for general static-structure rendering, syncs all three
@@ -2472,16 +2605,23 @@ class QuantUIApp:
         )
 
     def _on_viz_backend_changed(self, change) -> None:
-        """Calculate-tab toggle observer — explicit override of preference."""
+        """Calculate-tab toggle observer — persists the chosen backend.
+
+        Previously ``persist=False`` (session-only). That surprised users: the
+        toggle visibly updated every view + the Settings dropdown, but the
+        choice silently reverted next session (manual finding #4a, 2026-06-15).
+        All three widgets edit the one global preference, so any user-initiated
+        change now persists.
+        """
         if self._viz_sync_in_progress:
             return
-        self._set_viz_preference(change["new"], persist=False)
+        self._set_viz_preference(change["new"], persist=True)
 
     def _on_viz_backend_changed_ana(self, change) -> None:
-        """Analysis-tab toggle observer — explicit override of preference."""
+        """Analysis-tab toggle observer — persists the chosen backend (see #4a)."""
         if self._viz_sync_in_progress:
             return
-        self._set_viz_preference(change["new"], persist=False)
+        self._set_viz_preference(change["new"], persist=True)
 
     def _on_viz_default_backend_changed(self, change) -> None:
         """Settings widget observer — persistent preference change."""
@@ -2505,6 +2645,13 @@ class QuantUIApp:
             _calc_log.log_event("vib_framerate_changed", f"fps={new_fps}")
         except OSError:
             pass
+        # Single-viewer path: update the running animation's interval in place
+        # (no rebuild, camera preserved). The legacy per-mode path re-renders.
+        if getattr(self, "_vib_single_viewer_active", False):
+            from quantui.app_visualization import _vib_bridge_set_fps
+
+            _vib_bridge_set_fps(self, new_fps)
+            return
         # If a vibrational result is currently loaded, re-render the current
         # mode through the new fps so the change is visible immediately.
         if (
@@ -2577,16 +2724,34 @@ class QuantUIApp:
         query: str,
         mol: Optional[Molecule] = None,
         error: Optional[Exception] = None,
+        source: Optional[str] = None,
     ) -> None:
+        # Runs on the main loop. Terminal point of a search → end the activity
+        # indicator started in the search handler (#2). Best-effort + idempotent
+        # via the counter, so an unbalanced begin can't pin the light "busy".
+        try:
+            self._activity_end(kind="ui")
+        except Exception:
+            pass
         if error is None and mol is not None:
-            self._set_molecule(mol, f"PubChem: {query}")
-            self.pubchem_msg.value = f"Loaded {mol.get_formula()} from PubChem."
+            # Label by where the structure ACTUALLY came from (#1b) — not always
+            # "PubChem". Offline FALLBACK means the network was tried + failed,
+            # so surface a no-network note; a plain library hit is not an error.
+            prefix = _STRUCT_SOURCE_PREFIX.get(source or "", "Structure")
+            self._set_molecule(mol, f"{prefix}: {query}")
+            msg = f"Loaded {mol.get_formula()} from {prefix}."
+            if source == "library-offline-fallback":
+                msg = (
+                    "⚠ No network detected — resolved offline from the bundled "
+                    f"library (not PubChem). {msg}"
+                )
+            self.pubchem_msg.value = msg
         else:
             self.pubchem_msg.value = f"Not found: {error}"
             try:
                 _calc_log.log_event(
-                    "pubchem_search_failed",
-                    f"PubChem query not found: '{query}'",
+                    "structure_search_failed",
+                    f"Structure query not found: '{query}'",
                     query=query,
                     error=str(error)[:200],
                     session_id=self._session_id,
@@ -2598,17 +2763,17 @@ class QuantUIApp:
     def _resolve_and_apply(self, query: str, loop) -> None:
         """Resolve a single query (background thread) and apply on the main loop."""
         try:
-            xyz_str, _msg = _student_friendly_resolve(query)
+            xyz_str, _msg, source, _is_offline = _resolve_structure_with_message(query)
             if xyz_str is None:
                 raise ValueError(_msg)
             atoms, coords = parse_xyz_input(xyz_str)
             mol = Molecule(atoms=atoms, coordinates=coords)
             loop.call_soon_threadsafe(
-                self._apply_pubchem_search_result, query, mol, None
+                self._apply_pubchem_search_result, query, mol, None, source
             )
         except Exception as exc:
             loop.call_soon_threadsafe(
-                self._apply_pubchem_search_result, query, None, exc
+                self._apply_pubchem_search_result, query, None, exc, None
             )
 
     def _hide_pubchem_candidates(self) -> None:
@@ -2640,6 +2805,12 @@ class QuantUIApp:
             f'{len(candidates)} matches for "{query}" — pick one below.'
         )
         self.pubchem_btn.disabled = False
+        # Terminal point of the search phase (awaiting the user's pick) → end
+        # the activity indicator started in _on_search_pubchem (#2).
+        try:
+            self._activity_end(kind="ui")
+        except Exception:
+            pass
 
     def _on_pubchem_candidate_selected(self, change) -> None:
         if getattr(self, "_pubchem_cand_refreshing", False):
@@ -2649,6 +2820,10 @@ class QuantUIApp:
             return
         self.pubchem_msg.value = f"Loading CID {cid}…"
         self.pubchem_btn.disabled = True
+        try:
+            self._activity_begin(f"Loading CID {cid}…", kind="ui")
+        except Exception:
+            pass
         loop = asyncio.get_running_loop()
         threading.Thread(
             target=lambda: self._resolve_and_apply(str(cid), loop), daemon=True
@@ -2665,6 +2840,13 @@ class QuantUIApp:
         self._hide_pubchem_candidates()
         self.pubchem_msg.value = f'Searching for "{query}"...'
         self.pubchem_btn.disabled = True
+        # Light the toolbar activity indicator so the resolver chain
+        # (PubChem → CACTUS → library, up to ~8 s on a CACTUS timeout) doesn't
+        # look like a hang (#2). Ended at every terminal point below.
+        try:
+            self._activity_begin(f'Searching structures for "{query}"…', kind="ui")
+        except Exception:
+            pass
 
         loop = asyncio.get_running_loop()
 
@@ -2732,6 +2914,29 @@ class QuantUIApp:
             kind="compute",
         )
         _run_on_run_clicked(self, btn)
+
+    def _on_cancel(self, btn=None) -> None:
+        """Request graceful cancellation of the in-flight calculation.
+
+        Sets the cancel event (checked by the run's _LogCapture each output
+        line) and disables the button so a second click can't re-fire. The
+        actual stop + UI reset happens in ``_do_run`` when the next write raises
+        ``_CalcCancelled``.
+        """
+        if not self._calc_running:
+            return
+        self._cancel_event.set()
+        self.cancel_btn.disabled = True
+        self.run_status.value = "Cancelling — stopping at the next step…"
+
+    def _on_preopt_preview(self, btn=None) -> None:
+        _run_on_preopt_preview(self, btn)
+
+    def _on_preopt_accept(self, btn=None) -> None:
+        _run_on_preopt_accept(self, btn)
+
+    def _on_preopt_reset(self, btn=None) -> None:
+        _run_on_preopt_reset(self, btn)
 
     def _on_solvent_cb_changed(self, change) -> None:
         _run_on_solvent_cb_changed(self, change)
@@ -3354,6 +3559,22 @@ class QuantUIApp:
 
         self._update_notes()
 
+        # Any pending pre-opt preview was for the previous geometry — invalidate
+        # it so a stale "Keep/Revert" can't apply to a different molecule.
+        # (Accept captures the relaxed molecule before calling this, so this is
+        # safe there; loading any new structure clears a leftover preview.)
+        if getattr(self, "preopt_preview_box", None) is not None:
+            self._preopt_relaxed_mol = None
+            self.preopt_preview_box.layout.display = "none"
+
+        # Loading a new molecule makes the previous run/preopt status stale
+        # ("Pre-optimized geometry accepted.", "Cancelled.", "Done in …") —
+        # clear it. Guarded on _calc_running so the mid-run pre-opt call to
+        # _set_molecule_threadsafe doesn't wipe the live "Pre-optimizing…"
+        # status. (Accept sets its own status right after this returns.)
+        if not self._calc_running:
+            self.run_status.value = ""
+
         # Advance step indicator
         if self.step_progress._states[2] != "active":
             if self.step_progress._states[2] in ("done", "fail"):
@@ -3659,6 +3880,12 @@ class QuantUIApp:
         )
         self.run_btn.disabled = True
         self.run_status.value = "Starting..."
+        # Run-in-flight state: arm Cancel, lock out Clear (so it can't wipe the
+        # live output mid-run), reset the cancel flag for this fresh run.
+        self._calc_running = True
+        self._cancel_event.clear()
+        self.cancel_btn.disabled = False
+        self.log_clear_btn.disabled = True
 
         self.step_progress.complete(1)
         self.step_progress.start(2)
@@ -3780,6 +4007,7 @@ class QuantUIApp:
             self.run_output,
             self.run_status,
             on_scf_converged=_on_scf_converged,
+            cancel_check=self._cancel_event.is_set,
         )
 
         # Write structured log header immediately so it appears at the top of output
@@ -3805,14 +4033,12 @@ class QuantUIApp:
             pass
 
         try:
+            # Classical pre-optimization is now an explicit Preview → Keep tool
+            # (it mutates the active molecule before the run when the user keeps
+            # it), not a silent step here. So the run uses the active geometry
+            # as-is. (The QM "Geometry optimization before calculation" path is
+            # separate and handled below per calc type.)
             calc_mol = mol
-            if self.preopt_cb.value and _PREOPT_AVAILABLE:
-                self.run_status.value = "Pre-optimizing..."
-                calc_mol, _rmsd = preoptimize(mol)
-                self._set_molecule_threadsafe(
-                    calc_mol,
-                    f"Geometry pre-optimized (LJ, RMSD={_rmsd:.3f} Å)",
-                )
 
             ct = self.calc_type_dd.value
             result: Any = None
@@ -4515,6 +4741,40 @@ class QuantUIApp:
             self.step_progress.fail(2, _err_detail[:60])
             _calc_log.log_event("calc_error", _err_detail[:200])
 
+        except _CalcCancelled:
+            _elapsed = time.perf_counter() - _run_wall_t
+            # Clear the cancel flag FIRST: the next line writes through
+            # ``log`` (``_LogCapture.write``), which re-raises _CalcCancelled
+            # while the flag is still set — that would propagate out of this
+            # handler and skip the cancelled card + "Cancelled." status below
+            # (only ``finally`` would run, leaving the status stuck on
+            # "Cancelling…"). ``finally`` clears it again (idempotent).
+            self._cancel_event.clear()
+            log.write("\n── Calculation cancelled by user ──\n")
+            self.result_output.append_display_data(
+                HTML(
+                    '<div style="background:#fffbeb;border:1px solid #fcd34d;'
+                    'border-radius:8px;padding:14px;margin:8px 0">'
+                    '<b style="color:#92400e">&#9632; Calculation cancelled</b><br>'
+                    '<small style="color:#92400e">Stopped at your request — no '
+                    "results were saved. Adjust the settings and run again.</small>"
+                    "</div>"
+                )
+            )
+            self.run_status.value = "Cancelled."
+            try:
+                self.step_progress.reset()
+            except Exception:
+                pass
+            try:
+                _calc_log.log_event(
+                    "calc_cancelled",
+                    f"{mol.get_formula()} {self.method_dd.value}/{self.basis_dd.value}",
+                    elapsed_s=round(_elapsed, 2),
+                )
+            except OSError:
+                pass
+
         except Exception as exc:
             import traceback as _tb
 
@@ -4583,6 +4843,11 @@ class QuantUIApp:
 
         finally:
             self.run_btn.disabled = False
+            # Disarm Cancel, re-enable Clear, clear run-in-flight state.
+            self._calc_running = False
+            self._cancel_event.clear()
+            self.cancel_btn.disabled = True
+            self.log_clear_btn.disabled = False
             self._activity_end(kind="compute")
 
     def _update_notes(self, change=None) -> None:

@@ -1,24 +1,22 @@
-"""
-Tests for quantui.preopt — LJ force-field geometry pre-optimization.
+"""Tests for quantui.preopt — bonded force-field (MMFF94/UFF) pre-optimization.
 
-All tests that call the real ASE LJ optimizer are skipped gracefully
-when ASE is not installed (CI without the 'ase' extra).
+M-PREOPT / PREOPT.1 replaced the geometry-mangling Lennard-Jones potential with
+a bonded RDKit force field and a **non-destructive guarantee**: on any failure
+(RDKit missing, bond perception fails, no FF parameters) the original geometry
+is returned unchanged rather than a distorted one.
 
-WSL / Linux compatibility note
--------------------------------
-This module is pure ASE + NumPy — no PySCF dependency.  All tests run
-on Windows, Linux, and WSL equally.  The preoptimize() function itself
-makes no subprocess calls, no OS-specific syscalls, and relies on no
-compiled extensions beyond NumPy (which ships cross-platform wheels).
+These tests are platform-independent (RDKit is a hard dependency; no PySCF).
 """
+
+import copy
+import math
 
 import pytest
 
-from quantui.ase_bridge import ASE_AVAILABLE
 from quantui.molecule import Molecule
+from quantui.preopt import _RDKIT_AVAILABLE
 
-# Convenience skip marker
-ase_only = pytest.mark.skipif(not ASE_AVAILABLE, reason="ase not installed")
+rdkit_only = pytest.mark.skipif(not _RDKIT_AVAILABLE, reason="rdkit not installed")
 
 
 # ---------------------------------------------------------------------------
@@ -27,23 +25,30 @@ ase_only = pytest.mark.skipif(not ASE_AVAILABLE, reason="ase not installed")
 
 
 def _water() -> Molecule:
-    """Return a water molecule with a reasonable geometry."""
+    """Water with a reasonable (near-equilibrium) geometry."""
     return Molecule(
         atoms=["O", "H", "H"],
         coordinates=[[0.0, 0.0, 0.0], [0.757, 0.587, 0.0], [-0.757, 0.587, 0.0]],
     )
 
 
-def _h2() -> Molecule:
-    """Return a hydrogen molecule."""
+def _stretched_water() -> Molecule:
+    """Water with mildly stretched O–H bonds (~1.05 Å) — distorted but still
+    close enough that RDKit perceives the bonds, so the FF can relax it. (A
+    *wildly* broken geometry where bonds aren't perceivable correctly no-ops;
+    see the non-destructive guarantee.)"""
     return Molecule(
-        atoms=["H", "H"],
-        coordinates=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]],
+        atoms=["O", "H", "H"],
+        coordinates=[[0.0, 0.0, 0.0], [0.81, 0.67, 0.0], [-0.81, 0.67, 0.0]],
     )
 
 
+def _h2() -> Molecule:
+    return Molecule(atoms=["H", "H"], coordinates=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]])
+
+
 def _charged_radical() -> Molecule:
-    """Return a water cation (doublet) for charge/multiplicity round-trip checks."""
+    """Water cation (doublet) for charge/multiplicity round-trip checks."""
     return Molecule(
         atoms=["O", "H", "H"],
         coordinates=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
@@ -52,36 +57,58 @@ def _charged_radical() -> Molecule:
     )
 
 
+def _dist(a, b) -> float:
+    return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
+
+
+def _oh_distances(mol: Molecule):
+    """O–H distances for a water-ordered (O, H, H) molecule."""
+    o = mol.coordinates[0]
+    return [_dist(o, mol.coordinates[1]), _dist(o, mol.coordinates[2])]
+
+
 # ============================================================================
-# ImportError guard
+# Non-destructive guarantee (the whole point of M-PREOPT)
 # ============================================================================
 
 
-class TestPreoptimizeImportGuard:
-    """preoptimize() raises ImportError with helpful message when ASE is absent."""
-
-    def test_raises_import_error_when_ase_unavailable(self, monkeypatch):
+class TestNonDestructive:
+    def test_rdkit_absent_returns_original_unchanged(self, monkeypatch):
+        """RDKit missing → return the original geometry, never raise."""
         import quantui.preopt as preopt_mod
 
-        # Patch ASE_AVAILABLE directly in preopt's namespace — no reload needed;
-        # monkeypatch auto-reverts after the test so later tests are unaffected.
-        monkeypatch.setattr(preopt_mod, "ASE_AVAILABLE", False)
+        monkeypatch.setattr(preopt_mod, "_RDKIT_AVAILABLE", False)
+        original = _water()
+        mol, rmsd = preopt_mod.preoptimize(original)
+        assert isinstance(mol, Molecule)
+        assert rmsd == 0.0
+        assert mol.coordinates == original.coordinates
 
-        mol = _water()
-        with pytest.raises(ImportError, match="pip install ase"):
-            preopt_mod.preoptimize(mol)
+    @rdkit_only
+    def test_good_water_stays_chemically_intact(self):
+        """A good geometry must NOT blow apart (the LJ failure mode)."""
+        from quantui.preopt import preoptimize
 
-    def test_import_error_message_mentions_conda(self, monkeypatch):
-        import quantui.preopt as preopt_mod
+        optimized, rmsd = preoptimize(_water())
+        # Both O–H bonds remain real bonds (LJ pushed these toward ~3.4 Å).
+        for d in _oh_distances(optimized):
+            assert 0.85 <= d <= 1.2, f"O–H bond unphysical after pre-opt: {d:.3f} Å"
+        assert rmsd < 1.0
 
-        monkeypatch.setattr(preopt_mod, "ASE_AVAILABLE", False)
+    @rdkit_only
+    def test_distorted_geometry_improves(self):
+        """A bond-perceivable distortion should relax toward equilibrium."""
+        from quantui.preopt import preoptimize
 
-        with pytest.raises(ImportError) as exc_info:
-            preopt_mod.preoptimize(_water())
-        assert (
-            "conda" in str(exc_info.value).lower()
-            or "pip" in str(exc_info.value).lower()
-        )
+        eq = 0.96  # MMFF equilibrium O–H ≈ 0.96 Å
+        distorted = _stretched_water()
+        before = max(_oh_distances(distorted))
+        optimized, rmsd = preoptimize(distorted)
+        after = max(_oh_distances(optimized))
+        # The FF actually engaged (didn't fall back to the original)…
+        assert rmsd > 0.0
+        # …and the bond ended up closer to equilibrium than it started.
+        assert abs(after - eq) < abs(before - eq)
 
 
 # ============================================================================
@@ -90,36 +117,26 @@ class TestPreoptimizeImportGuard:
 
 
 class TestPreoptimizeReturnTypes:
-    """preoptimize() returns (Molecule, float) with correct types."""
-
-    @ase_only
+    @rdkit_only
     def test_returns_two_tuple(self):
         from quantui.preopt import preoptimize
 
         result = preoptimize(_water())
-        assert isinstance(result, tuple)
-        assert len(result) == 2
+        assert isinstance(result, tuple) and len(result) == 2
 
-    @ase_only
+    @rdkit_only
     def test_first_element_is_molecule(self):
         from quantui.preopt import preoptimize
 
         mol, _ = preoptimize(_water())
         assert isinstance(mol, Molecule)
 
-    @ase_only
-    def test_second_element_is_float(self):
+    @rdkit_only
+    def test_second_element_is_non_negative_float(self):
         from quantui.preopt import preoptimize
 
         _, rmsd = preoptimize(_water())
-        assert isinstance(rmsd, float)
-
-    @ase_only
-    def test_rmsd_is_non_negative(self):
-        from quantui.preopt import preoptimize
-
-        _, rmsd = preoptimize(_water())
-        assert rmsd >= 0.0
+        assert isinstance(rmsd, float) and rmsd >= 0.0
 
 
 # ============================================================================
@@ -128,98 +145,55 @@ class TestPreoptimizeReturnTypes:
 
 
 class TestPreoptimizeGeometry:
-    """The returned molecule should have sane geometry."""
-
-    @ase_only
-    def test_atom_count_preserved(self):
+    @rdkit_only
+    def test_atom_count_and_symbols_preserved(self):
         from quantui.preopt import preoptimize
 
         original = _water()
         optimized, _ = preoptimize(original)
         assert len(optimized.atoms) == len(original.atoms)
-
-    @ase_only
-    def test_atom_symbols_preserved(self):
-        from quantui.preopt import preoptimize
-
-        original = _water()
-        optimized, _ = preoptimize(original)
         assert optimized.atoms == original.atoms
 
-    @ase_only
-    def test_h2_rmsd_is_small_for_good_geometry(self):
-        """H2 with a near-equilibrium bond length should move very little under LJ."""
-        from quantui.preopt import preoptimize
-
-        _, rmsd = preoptimize(_h2())
-        # LJ equilibrium for H-H is ~3.4 Å (sigma); our 0.74 Å bond is tighter,
-        # but BFGS will push it outward — expect a moderate displacement, not zero.
-        # We only assert it is not absurdly large for a 2-atom system.
-        assert rmsd < 10.0
-
-    @ase_only
-    def test_coordinates_are_3d(self):
+    @rdkit_only
+    def test_coordinates_are_3d_floats(self):
         from quantui.preopt import preoptimize
 
         optimized, _ = preoptimize(_water())
         for coord in optimized.coordinates:
             assert len(coord) == 3
-
-    @ase_only
-    def test_coordinates_are_floats(self):
-        from quantui.preopt import preoptimize
-
-        optimized, _ = preoptimize(_water())
-        for coord in optimized.coordinates:
-            for val in coord:
-                assert isinstance(val, float)
+            assert all(isinstance(v, float) for v in coord)
 
 
 # ============================================================================
-# Metadata preservation
+# Metadata preservation (holds whether FF runs or falls back to original)
 # ============================================================================
 
 
 class TestPreoptimizeMetadata:
-    """Charge and multiplicity must survive pre-optimization unchanged."""
-
-    @ase_only
-    def test_charge_preserved_neutral(self):
+    @rdkit_only
+    def test_neutral_charge_and_multiplicity_preserved(self):
         from quantui.preopt import preoptimize
 
         optimized, _ = preoptimize(_water())
         assert optimized.charge == 0
-
-    @ase_only
-    def test_multiplicity_preserved_singlet(self):
-        from quantui.preopt import preoptimize
-
-        optimized, _ = preoptimize(_water())
         assert optimized.multiplicity == 1
 
-    @ase_only
-    def test_charge_preserved_for_radical(self):
+    @rdkit_only
+    def test_charge_and_multiplicity_preserved_for_radical(self):
         from quantui.preopt import preoptimize
 
         original = _charged_radical()
         optimized, _ = preoptimize(original)
         assert optimized.charge == original.charge
-
-    @ase_only
-    def test_multiplicity_preserved_for_radical(self):
-        from quantui.preopt import preoptimize
-
-        original = _charged_radical()
-        optimized, _ = preoptimize(original)
         assert optimized.multiplicity == original.multiplicity
 
-    @ase_only
+    @rdkit_only
     def test_triplet_multiplicity_preserved(self):
         from quantui.preopt import preoptimize
 
         o2 = Molecule(
             atoms=["O", "O"],
-            coordinates=[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+            coordinates=[[0.0, 0.0, 0.0], [1.2, 0.0, 0.0]],
             multiplicity=3,
         )
         optimized, _ = preoptimize(o2)
@@ -232,21 +206,8 @@ class TestPreoptimizeMetadata:
 
 
 class TestPreoptimizeImmutability:
-    """preoptimize() must never mutate the input Molecule."""
-
-    @ase_only
-    def test_original_atoms_unchanged(self):
-        from quantui.preopt import preoptimize
-
-        original = _water()
-        original_atoms = list(original.atoms)
-        preoptimize(original)
-        assert original.atoms == original_atoms
-
-    @ase_only
+    @rdkit_only
     def test_original_coordinates_unchanged(self):
-        import copy
-
         from quantui.preopt import preoptimize
 
         original = _water()
@@ -254,20 +215,13 @@ class TestPreoptimizeImmutability:
         preoptimize(original)
         assert original.coordinates == original_coords
 
-    @ase_only
-    def test_original_charge_unchanged(self):
+    @rdkit_only
+    def test_original_metadata_unchanged(self):
         from quantui.preopt import preoptimize
 
         original = _charged_radical()
         preoptimize(original)
         assert original.charge == 1
-
-    @ase_only
-    def test_original_multiplicity_unchanged(self):
-        from quantui.preopt import preoptimize
-
-        original = _charged_radical()
-        preoptimize(original)
         assert original.multiplicity == 2
 
 
@@ -277,36 +231,26 @@ class TestPreoptimizeImmutability:
 
 
 class TestPreoptimizeParameters:
-    """fmax and steps parameters are accepted without error."""
-
-    @ase_only
-    def test_custom_fmax(self):
+    @rdkit_only
+    def test_custom_fmax_accepted(self):
         from quantui.preopt import preoptimize
 
-        mol, rmsd = preoptimize(_h2(), fmax=0.5)
+        _, rmsd = preoptimize(_h2(), fmax=0.5)
         assert isinstance(rmsd, float)
 
-    @ase_only
-    def test_custom_steps(self):
+    @rdkit_only
+    def test_custom_steps_accepted(self):
         from quantui.preopt import preoptimize
 
-        mol, rmsd = preoptimize(_h2(), steps=10)
+        mol, _ = preoptimize(_h2(), steps=10)
         assert isinstance(mol, Molecule)
 
-    @ase_only
+    @rdkit_only
     def test_single_step_does_not_crash(self):
         from quantui.preopt import preoptimize
 
         mol, rmsd = preoptimize(_water(), steps=1)
-        assert isinstance(mol, Molecule)
-        assert rmsd >= 0.0
-
-    @ase_only
-    def test_tight_fmax_accepted(self):
-        from quantui.preopt import preoptimize
-
-        mol, rmsd = preoptimize(_h2(), fmax=1e-6, steps=50)
-        assert isinstance(mol, Molecule)
+        assert isinstance(mol, Molecule) and rmsd >= 0.0
 
 
 # ============================================================================
@@ -315,23 +259,13 @@ class TestPreoptimizeParameters:
 
 
 class TestPreoptimizePublicAPI:
-    """preoptimize is accessible from the top-level quantui package."""
-
-    @ase_only
-    def test_importable_from_quantui(self):
-        from quantui import preoptimize  # noqa: F401 — import check only
-
-    @ase_only
-    def test_callable_from_quantui(self):
+    @rdkit_only
+    def test_importable_and_callable_from_quantui(self):
         from quantui import preoptimize
 
-        mol, rmsd = preoptimize(_h2())
-        assert isinstance(mol, Molecule)
+        mol, rmsd = preoptimize(_water())
+        assert isinstance(mol, Molecule) and isinstance(rmsd, float)
 
-
-# ============================================================================
-# Run directly
-# ============================================================================
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

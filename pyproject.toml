@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quantui"
-version = "0.3.0"
+version = "0.4.0"
 description = "An open-source frontend for DFT and post-HF quantum chemistry with PySCF"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -49,7 +49,14 @@ packages = ["quantui"]
 # Bundled molecule library (M-STRUCT): the indexed SQLite store + the
 # human-readable JSON manifests it is built from. Both ship in the wheel so
 # offline structure lookup works on a fresh install.
-quantui = ["data/library/*.sqlite", "data/manifests/*.json"]
+# Vendored 3Dmol.js: py3Dmol fetches 3Dmol.js from a CDN by default, which
+# fails offline; we ship the bundle so all 3D views render with no network.
+quantui = [
+    "data/library/*.sqlite",
+    "data/manifests/*.json",
+    "data/js/*.js",
+    "data/js/*.txt",
+]
 
 [project.optional-dependencies]
 # PySCF requires Linux/macOS/WSL — not available on Windows natively.
@@ -111,6 +118,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.10.0",
+    "pytest-xdist>=3.0.0",  # parallel test execution (-n=auto in addopts)
     "mypy>=1.0.0",
     "types-requests>=2.28.0",
     "black>=24.0.0",
@@ -184,14 +192,21 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+# Fast-by-default: quiet output + parallel across cores (pytest-xdist). The
+# full suite ran ~7 min single-threaded with coverage on every invocation;
+# this keeps the common ``pytest`` loop short. Coverage is NOT on by default —
+# it instruments every line and emits 3 reports. Run it explicitly when you
+# want the number (CI does this in .github/workflows/ci.yml):
+#   pytest --cov=quantui --cov-report=term-missing --cov-report=xml
+# Debugging a single test? Run serially (one process, breakpoints work) with:
+#   pytest tests/test_foo.py -n0
+# Skip the slow / notebook tiers in the inner loop:
+#   pytest -m "not slow and not notebook"
 addopts = [
-    "-v",
+    "-q",
     "--strict-markers",
     "--strict-config",
-    "--cov=quantui",
-    "--cov-report=term-missing",
-    "--cov-report=html",
-    "--cov-report=xml",
+    "-n=auto",
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",

@@ -61,3 +61,4 @@ nul
 /.claude/
 /temp - untracked/
 /logs
+.claudeignore

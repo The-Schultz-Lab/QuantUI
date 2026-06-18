@@ -10,6 +10,7 @@ the vib render dispatcher (``render_vib_mode``), the sync cache hit path
 
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -20,13 +21,19 @@ from quantui.app import QuantUIApp
 from quantui.app_visualization import (
     _try_vib_cache_hit_sync,
     _viz_render_event,
+    on_vib_mode_changed,
     render_vib_mode,
 )
 from quantui.molecule import Molecule
 
 
 @pytest.fixture
-def app():
+def app(tmp_path, monkeypatch):
+    # Isolate settings (reflections/10 Rule 6) so the backend preference is a
+    # clean default (auto → py3Dmol) regardless of what another test may have
+    # persisted to the real ~/.quantui/settings.json — these tests assert the
+    # vib render uses the py3Dmol backend.
+    monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(tmp_path / "settings.json"))
     return QuantUIApp()
 
 
@@ -116,12 +123,79 @@ class TestVibRenderTelemetry:
 
         render_vib_mode(app, vib_data=None, molecule=water_mol, mode_number=1)
 
+        # render_vib_mode dispatches the render to a daemon thread
+        # (reflections/02 — render off the main thread). Wait for the terminal
+        # event before asserting; otherwise the test races the worker and fails
+        # intermittently under heavy parallel load (pytest -n=auto).
+        deadline = time.time() + 15.0
+        while time.time() < deadline and not (
+            _events_of(captured_events, "viz_render_done")
+            or _events_of(captured_events, "viz_render_error")
+        ):
+            time.sleep(0.02)
+
         starts = _events_of(captured_events, "viz_render_start")
         dones = _events_of(captured_events, "viz_render_done")
         assert any("task=vib_interactive" in m for _, m in starts)
         assert any("backend=py3dmol" in m for _, m in starts)
         assert any("mode=1" in m for _, m in starts)
         assert any("elapsed_ms=" in m for _, m in dones)
+
+
+class TestVibLoadingIndicatorLifecycle:
+    """HIST.3 / HIST.4 — lock the vib loading-indicator lifecycle so it stays
+    deterministic: cache hits swap with no placeholder flash, cache misses show
+    the ``⏳ Rendering…`` placeholder, and a stale render token is detected so an
+    old worker thread can't stomp a newer render's output."""
+
+    def test_cache_hit_shows_no_rendering_placeholder(
+        self, app, water_mol, fake_freq_result, monkeypatch
+    ):
+        """On a cache hit the mode-switch handler swaps cached HTML directly —
+        no ``⏳ Rendering…`` placeholder flash."""
+        import quantui.app_visualization as av
+
+        swaps: list[str] = []
+        monkeypatch.setattr(av, "_try_vib_cache_hit_sync", lambda *a, **k: True)
+        monkeypatch.setattr(
+            av, "_swap_vib_output", lambda _app, html: swaps.append(html)
+        )
+        app._last_vib_freq_result = fake_freq_result
+        app._last_vib_molecule = water_mol
+
+        on_vib_mode_changed(app, {"new": 1})
+
+        assert not any("Rendering vibrational animation" in h for h in swaps)
+
+    def test_cache_miss_shows_rendering_placeholder(
+        self, app, water_mol, fake_freq_result, monkeypatch
+    ):
+        """On a cache miss the handler shows the placeholder before dispatching
+        the background render."""
+        import quantui.app_visualization as av
+
+        swaps: list[str] = []
+        monkeypatch.setattr(av, "_try_vib_cache_hit_sync", lambda *a, **k: False)
+        monkeypatch.setattr(
+            av, "_swap_vib_output", lambda _app, html: swaps.append(html)
+        )
+        # No-op the worker so the placeholder is the only deterministic output
+        # (no real render-thread race).
+        monkeypatch.setattr(app, "_render_vib_mode", lambda *a, **k: None)
+        app._last_vib_freq_result = fake_freq_result
+        app._last_vib_molecule = water_mol
+
+        on_vib_mode_changed(app, {"new": 2})
+
+        assert any("Rendering vibrational animation" in h for h in swaps)
+
+    def test_stale_render_token_is_detected(self, app):
+        from quantui.app_visualization import _is_vib_stale
+
+        app._vib_render_token = 5
+        assert _is_vib_stale(app, 4) is True  # older worker → bail
+        assert _is_vib_stale(app, 5) is False  # current worker → proceed
+        assert _is_vib_stale(app, None) is False  # opt-out → never stale
 
 
 class TestSyncCacheHitTelemetry:

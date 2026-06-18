@@ -335,6 +335,14 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "you know whether coordinates are experimental, DFT-optimized, or "
             "force-field-embedded. Either way, treat them as a <i>starting "
             "point</i> and run a geometry optimization for accurate results.</p>"
+            "<p><b>Quick clean-up:</b> next to <i>Classical pre-optimize "
+            "geometry</i>, click <b>Preview</b> to relax the structure with a "
+            "fast force field (MMFF94/UFF). Use the controls under the viewer to "
+            "play the relaxation, scrub to any step, or click <b>&#8644;</b> to "
+            "flip between your input and the relaxed result for a direct "
+            "comparison &mdash; then <b>Keep this geometry</b> to adopt it (it "
+            "becomes the active structure your calculation runs on) or "
+            "<b>Revert</b> to discard. Nothing is changed unless you Keep it.</p>"
         ),
     },
 }

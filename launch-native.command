@@ -52,8 +52,18 @@ conda activate quantui
 # changes or on first use.
 if [ ! -f .dev_install_stamp ] || [ pyproject.toml -nt .dev_install_stamp ]; then
     echo "Installing quantui in editable mode (first run or pyproject.toml changed)..."
-    pip install -e . -q
-    touch .dev_install_stamp
+    # Must not abort the launch when offline (set -e) — pip fetches build deps
+    # from PyPI, which hangs/fails with no network. Fail fast + non-fatal; the
+    # editable source is live regardless of whether the reinstall ran.
+    if pip install -e . -q --timeout=5 --retries=0; then
+        touch .dev_install_stamp
+    else
+        # Stamp even on failure so offline launches don't retry (and re-delay
+        # on) pip every time. Re-run `pip install -e .` manually when online if
+        # you add a real dependency.
+        echo "[QuantUI] editable reinstall skipped (offline?) - using live source"
+        touch .dev_install_stamp
+    fi
 fi
 
 # Mirrors the Windows launcher: clear bytecode and disable .pyc writes.

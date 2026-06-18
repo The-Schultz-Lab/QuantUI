@@ -82,40 +82,6 @@ def build_status_panel(
         cross = '<span style="color:#ef4444">&#10007;</span>'
         return (tick if flag else cross) + (" " + extra if extra else "")
 
-    # GPU offload indicator (M-GPU / GPU.2). Reuses the runtime detection
-    # helper so this status line tracks the EXACT same logic the dispatcher
-    # uses — no risk of drift between "what the user sees in Status" and
-    # "what actually happens when they click Run".
-    from .gpu_offload import is_gpu_available as _gpu_available_fn
-
-    _gpu_avail, _gpu_name = _gpu_available_fn()
-    if _gpu_avail:
-        _gpu_msg = f"&mdash; <code>{_gpu_name}</code>"
-        _gpu_flag = True
-    else:
-        _gpu_msg = "&mdash; <code>gpu4pyscf</code> not installed or no CUDA device"
-        _gpu_flag = False
-
-    items = [
-        (
-            "PySCF (calculations)",
-            _ok(
-                pyscf_available,
-                "" if pyscf_available else "&mdash; Linux / macOS / WSL required",
-            ),
-        ),
-        ("ASE (structure I/O, opt.)", _ok(ase_available)),
-        ("PubChem search", _ok(pubchem_available)),
-        ("3D viewer (py3Dmol)", _ok(visualization_available)),
-        ("GPU offload (gpu4pyscf)", _ok(_gpu_flag, _gpu_msg)),
-        ("CPU cores / Memory", f"<b>{cores}</b> cores / <b>{mem}</b>"),
-    ]
-    rows = "".join(
-        f'<tr><td style="padding:3px 16px 3px 0;color:#64748b;font-size:13px">{k}</td>'
-        f'<td style="font-size:13px">{v}</td></tr>'
-        for k, v in items
-    )
-
     env_badge = (
         f'&nbsp;&nbsp;<code style="font-size:11px;background:#e0e7ef;'
         f'padding:1px 5px;border-radius:3px;color:#334155">{env}</code>'
@@ -130,17 +96,58 @@ def build_status_panel(
         "Timing calibration: not yet run &mdash; use the Calibrate panel in History</div>"
     )
 
-    app._status_html = widgets.HTML(
-        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid #3b82f6;'
-        f'padding:12px 16px;border-radius:6px;margin:4px 0 8px">'
-        f'<div style="font-weight:600;font-size:14px;color:#1e293b">'
-        f"QuantUI {quantui.__version__}"
-        f'<span style="font-weight:400;font-size:12px;color:#94a3b8;margin-left:10px">'
-        f"Python {py_ver}{env_badge}</span></div>"
-        f'<table style="margin-top:10px;border-collapse:collapse">{rows}</table>'
-        f"{cal_line}"
-        f"</div>"
-    )
+    # GPU offload indicator (M-GPU / GPU.2). Detecting GPUs imports gpu4pyscf +
+    # cupy and queries CUDA, which costs ~7 s — far too slow to block startup.
+    # So the status HTML is rendered via this closure with the GPU row as a
+    # "checking…" placeholder; the app re-renders it (via app._render_status_html)
+    # once a background thread resolves is_gpu_available(). The detection helper
+    # is the same one the run dispatcher uses, so the badge can't drift from
+    # actual behavior.
+    def _gpu_cell(gpu_state: Any) -> str:
+        if gpu_state is None:
+            return '<span style="color:#94a3b8">&#8987; checking&hellip;</span>'
+        avail, name = gpu_state
+        if avail:
+            return _ok(True, f"&mdash; <code>{name}</code>")
+        return _ok(
+            False, "&mdash; <code>gpu4pyscf</code> not installed or no CUDA device"
+        )
+
+    def _render_status(gpu_state: Any) -> str:
+        items = [
+            (
+                "PySCF (calculations)",
+                _ok(
+                    pyscf_available,
+                    "" if pyscf_available else "&mdash; Linux / macOS / WSL required",
+                ),
+            ),
+            ("ASE (structure I/O, opt.)", _ok(ase_available)),
+            ("PubChem search", _ok(pubchem_available)),
+            ("3D viewer (py3Dmol)", _ok(visualization_available)),
+            ("GPU offload (gpu4pyscf)", _gpu_cell(gpu_state)),
+            ("CPU cores / Memory", f"<b>{cores}</b> cores / <b>{mem}</b>"),
+        ]
+        rows = "".join(
+            f'<tr><td style="padding:3px 16px 3px 0;color:#64748b;font-size:13px">'
+            f'{k}</td><td style="font-size:13px">{v}</td></tr>'
+            for k, v in items
+        )
+        return (
+            '<div style="background:#f8fafc;border:1px solid #e2e8f0;'
+            "border-left:4px solid #3b82f6;"
+            'padding:12px 16px;border-radius:6px;margin:4px 0 8px">'
+            '<div style="font-weight:600;font-size:14px;color:#1e293b">'
+            f"QuantUI {quantui.__version__}"
+            '<span style="font-weight:400;font-size:12px;color:#94a3b8;'
+            f'margin-left:10px">Python {py_ver}{env_badge}</span></div>'
+            f'<table style="margin-top:10px;border-collapse:collapse">{rows}</table>'
+            f"{cal_line}</div>"
+        )
+
+    # Exposed so the app's background GPU-detection task can refresh the badge.
+    app._render_status_html = _render_status
+    app._status_html = widgets.HTML(_render_status(None))
 
     # ── Settings section ──────────────────────────────────────────────────
     # "Default 3D backend" — user preference persisted via UserSettings.
@@ -458,7 +465,10 @@ def build_history_section(
         app._perf_accordion,
     )
 
-    app._refresh_results_browser()
+    # History population (loads every saved result) is deferred to a background
+    # task after the UI paints — see app._start_deferred_startup_tasks. Show a
+    # placeholder until then.
+    app.past_dd.options = [("⏳ loading saved results…", "")]
     app._refresh_perf_stats()
 
 
@@ -596,24 +606,73 @@ def build_shared_widgets(
         style={"description_width": "100px"},
         layout=layout_fn(width="190px"),
     )
-    # POLISH.10 (M-POLISH, 2026-05-25): ``style={"description_width":
-    # "initial"}`` removes the default left-side description gutter that
-    # ipywidgets reserves on Checkbox, which was producing both the
-    # indent the user noticed AND the horizontal scrollbar (description
-    # gutter + ``width="100%"`` exceeded the container width). Letting
-    # the checkbox size to its content also drops the scrollbar.
-    app.preopt_cb = widgets.Checkbox(
-        value=False,
-        description="Classical pre-optimize geometry (fast, crude starting point)",
+    # Classical (MMFF/UFF) pre-optimization is an explicit, transparent tool —
+    # Preview → Keep/Revert — NOT a silent checkbox baked into the run. This
+    # avoids the confusing dual path (accepting a previewed geometry while a
+    # checkbox would re-run the same step) and means nothing pre-optimizes
+    # invisibly. (Distinct from the QM "Geometry optimization before
+    # calculation" checkbox below, which is a full DFT/HF opt.)
+    app.preopt_preview_label = widgets.HTML(
+        '<span style="font-size:13px;color:#334155">'
+        "Classical pre-optimize geometry</span>"
+        '<span style="font-size:11px;color:#94a3b8"> &mdash; fast MMFF/UFF '
+        "cleanup of a rough structure</span>"
+    )
+    # Interactive pre-opt (M-PREOPT PREOPT.2/.3): run the bonded-FF pre-opt on
+    # demand, watch it relax in-place, then keep or revert.
+    app.preopt_preview_btn = widgets.Button(
+        description="Preview",
+        icon="eye",
+        button_style="",
         disabled=not preopt_available,
-        style={"description_width": "initial"},
-        indent=False,
+        layout=layout_fn(width="110px", height="28px"),
+        tooltip="Watch the classical pre-optimization relax this geometry, "
+        "then keep or revert it"
+        + ("" if preopt_available else " (requires RDKit — not installed)"),
+    )
+    app.preopt_accept_btn = widgets.Button(
+        description="Keep this geometry",
+        icon="check",
+        button_style="success",
+        layout=layout_fn(width="190px", height="30px"),
+        tooltip="Make the relaxed geometry the active molecule",
+    )
+    app.preopt_reset_btn = widgets.Button(
+        description="Revert",
+        icon="undo",
+        button_style="warning",
+        layout=layout_fn(width="110px", height="30px"),
+        tooltip="Discard the preview and keep your original geometry",
+    )
+    app.preopt_preview_status = widgets.HTML("")
+    app.preopt_preview_output = widgets.Output(
+        layout=layout_fn(
+            # 290px viewer + stepper controls (slider / play / compare) below.
+            height="360px",
+            width="100%",
+            max_width="480px",
+            border="1px solid #e2e8f0",
+            overflow="hidden",
+        )
+    )
+    # Whole preview block hidden until the user clicks Preview.
+    app.preopt_preview_box = widgets.VBox(
+        [
+            app.preopt_preview_status,
+            app.preopt_preview_output,
+            widgets.HBox(
+                [app.preopt_accept_btn, app.preopt_reset_btn],
+                layout=layout_fn(gap="8px", margin="6px 0 0"),
+            ),
+        ],
+        layout=layout_fn(display="none", margin="6px 0 4px", max_width="480px"),
     )
 
     from quantui.config import SOLVENT_OPTIONS as _SOLVENT_OPTS
 
-    # POLISH.10: same fix as preopt_cb above — drop the gutter +
-    # explicit width that produced the indent + scrollbar.
+    # POLISH.10: drop the default Checkbox description gutter + explicit width
+    # (style description_width "initial" + indent=False) that produced the
+    # indent + horizontal scrollbar.
     app.solvent_cb = widgets.Checkbox(
         value=False,
         description="Implicit solvent (PCM)",
@@ -808,12 +867,23 @@ def build_shared_widgets(
     )
     app.run_status = widgets.Label()
 
+    # Gracefully stops a running calculation at the next SCF cycle / opt step.
+    # Disabled unless a calc is in flight (toggled by _do_run).
+    app.cancel_btn = widgets.Button(
+        description="Cancel",
+        button_style="danger",
+        icon="stop",
+        disabled=True,
+        layout=layout_fn(width="110px", height="36px"),
+        tooltip="Stop the running calculation (at the next step)",
+    )
+
     app.log_clear_btn = widgets.Button(
         description="Clear",
         button_style="",
         icon="times",
         layout=layout_fn(width="90px", height="26px"),
-        tooltip="Clear calculation output",
+        tooltip="Clear calculation output (disabled while a calc is running)",
     )
 
     app.accumulate_btn = widgets.Button(
@@ -1191,7 +1261,11 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
             ),
             app.calc_type_dd,
             app.calc_extra_opts,
-            app.preopt_cb,
+            widgets.HBox(
+                [app.preopt_preview_label, app.preopt_preview_btn],
+                layout=layout_fn(align_items="center", gap="10px"),
+            ),
+            app.preopt_preview_box,
             app._freq_preopt_cb,
             widgets.HBox(
                 [app.solvent_cb, app.solvent_dd],
@@ -1213,7 +1287,7 @@ def build_run_section(app: Any, *, layout_fn: Any) -> None:
                 "sets may take several minutes on a laptop.</p>"
             ),
             app.perf_estimate_html,
-            widgets.HBox([app.run_btn, app.run_status]),
+            widgets.HBox([app.run_btn, app.cancel_btn, app.run_status]),
             widgets.HBox(
                 [
                     widgets.HTML(
@@ -1364,10 +1438,16 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(align_items="center", margin="6px 0 0 0"),
     )
 
+    # Hidden sink for Python→JS calls that switch the single-viewer's mode
+    # client-side (window.__quantuiVibSetMode). Kept in the DOM (not display:none)
+    # so the injected Javascript executes; empty/cleared between calls so it
+    # takes no visible space. See app_visualization._vib_bridge_set_mode.
+    app._vib_js_bridge = widgets.Output(layout=layout_fn(margin="0", padding="0"))
+
     app.vib_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
-                [vib_mode_row, app.vib_output, vib_export_row],
+                [vib_mode_row, app.vib_output, vib_export_row, app._vib_js_bridge],
                 layout=layout_fn(padding="8px"),
             )
         ],
@@ -1869,7 +1949,9 @@ def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) ->
     app.advanced_accordion.set_title(0, "Export")
     app.advanced_accordion.selected_index = None
 
-    app._populate_compare_list()
+    # Deferred to a background startup task (loads every saved result) — see
+    # app._start_deferred_startup_tasks. Placeholder until then.
+    app.compare_select.options = [("⏳ loading saved results…", "")]
 
 
 def build_output_tab(app: Any, *, layout_fn: Any) -> None:

@@ -19,9 +19,16 @@ echo "Using Python: $(command -v python)"
 echo "Using Jupyter: $(command -v jupyter)"
 
 # Reinstall editable package only when pyproject metadata changed, or on first run.
+# Must not abort the launch when offline (set -e) — pip fetches build deps from
+# PyPI; fail fast + non-fatal. The editable source is live regardless.
 if [ ! -f .dev_install_stamp ] || [ pyproject.toml -nt .dev_install_stamp ]; then
-    pip install -e . -q
-    touch .dev_install_stamp
+    if pip install -e . -q --timeout=5 --retries=0; then
+        touch .dev_install_stamp
+    else
+        # Stamp even on failure so offline launches don't retry pip every time.
+        echo "[QuantUI] editable reinstall skipped (offline?) - using live source"
+        touch .dev_install_stamp
+    fi
 fi
 
 # Prevent stale bytecode from WSL2 DrvFs mtime quirks.

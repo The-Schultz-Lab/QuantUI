@@ -19,15 +19,22 @@ research and classroom use.
 
 ## What it does
 
-- **Molecule input** — paste XYZ coordinates, draw from a 20+ preset library,
-  or search PubChem by name or SMILES
+- **Molecule input** — paste XYZ coordinates, browse an indexed three-tier
+  bundled library (20 presets + 156 curated molecules + ~1,900 QM9 structures,
+  searchable by name/formula), or run a structure search by name, SMILES,
+  InChI, PubChem CID, InChIKey, or CAS number (PubChem → NCI CACTUS → offline
+  bundled-library fallback; SMILES/InChI resolve locally with no network)
+- **Offline-first** — runs with no internet: the bundled molecule library and
+  the 3D viewer's JavaScript (3Dmol.js) are vendored, so structure lookup and
+  every 3D view work in an air-gapped classroom. (Network is used only for the
+  optional live PubChem/CACTUS search.)
 - **3D visualization** — interactive py3Dmol viewer (py3Dmol-first; optional
   plotlymol3d fallback for non-trajectory tasks). A capability-aware backend
   router picks the right renderer per task, and a Status-tab toggle persists
   your default-backend preference between sessions
-- **In-session calculations** — RHF, UHF, 9 DFT functionals, MP2, NMR
-  shielding, TD-DFT UV-Vis, and 1D PES scans via PySCF, running in your
-  Python kernel (no batch submission)
+- **In-session calculations** — RHF, UHF, 9 DFT functionals, MP2, CCSD,
+  CCSD(T), NMR shielding, TD-DFT UV-Vis, and 1D PES scans via PySCF, running
+  in your Python kernel (no batch submission)
 - **Implicit solvent** — PCM solvation (Water, Ethanol, THF, DMSO,
   Acetonitrile) via a single checkbox
 - **Rich results** — total energy, HOMO-LUMO gap, Mulliken charges, dipole
@@ -320,6 +327,8 @@ Five step-by-step notebooks in [`notebooks/tutorials/`](notebooks/tutorials/):
 | HSE06 | DFT screened hybrid | Band gaps, large molecules |
 | PBE-D3 | DFT GGA + dispersion | Van der Waals complexes, stacking |
 | MP2 | Post-HF | Accurate energetics for small molecules (O(N⁵)) |
+| CCSD | Post-HF coupled cluster | High-accuracy small-molecule energies (O(N⁶)) |
+| CCSD(T) | Post-HF coupled cluster | Benchmark "gold standard" energies (O(N⁷); CPU only) |
 
 ### Calculation types
 
@@ -378,10 +387,14 @@ quantui/                  Main package
   optimizer.py            QM geometry optimization with trajectory
   visualization_py3dmol.py  3D viewer (py3Dmol-first; plotlymol fallback)
   viz_backend_router.py   Capability-aware backend router (pure function)
+  viz_assets.py           Offline-safe 3Dmol.js loading (vendored, no CDN)
   user_settings.py        Persistent user preferences (~/.quantui/settings.json)
   vib_cache.py            On-disk cache of rendered vib-mode HTML
   orbital_visualization.py  Orbital energy diagrams + cube-file viewer
-  pubchem.py              PubChem molecule search
+  pubchem.py              Structure search client (PubChem + RDKit)
+  cactus.py               NCI CACTUS resolver (fallback structure source)
+  structure_providers.py  Unified resolver chain with offline fallback
+  molecule_library.py     Indexed 3-tier bundled molecule library
   comparison.py           Side-by-side result tables
   results_storage.py      Timestamped result persistence (schema v2)
   calc_log.py             Performance + event logging, time estimation
@@ -389,11 +402,12 @@ quantui/                  Main package
   benchmarks.py           Timing calibration benchmark suite
   config.py               Methods, basis sets, solvent/NMR options, presets
   ase_bridge.py           ASE structure I/O
-  preopt.py               LJ force-field pre-optimization
+  preopt.py               RDKit MMFF94/UFF force-field pre-optimization
+  data/                   Bundled library (SQLite + manifests) + vendored 3Dmol.js
 notebooks/
   molecule_computations.ipynb   Main user-facing interface (3-cell launcher)
   tutorials/                    Step-by-step guided notebooks (01–05)
-tests/                    pytest test suite (~1000 tests)
+tests/                    pytest test suite (~1500 tests; run in parallel via pytest-xdist)
 apptainer/                Container definition for reproducible deployment
 local-setup/              Conda environment definition
 pyproject.toml            Package metadata and tool config

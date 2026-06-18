@@ -805,6 +805,73 @@ def _build_molecule_overlay_data(atoms: list[tuple[int, float, float, float]]) -
     }
 
 
+def render_orbital_isosurface_py3dmol(
+    cube_path: Path,
+    *,
+    isovalue: float = 0.02,
+    opacity: float = 0.85,
+    width: int = 760,
+    height: int = 620,
+    pos_color: str = "blue",
+    neg_color: str = "red",
+    bgcolor: str = "white",
+    style: str = "stick",
+) -> str:
+    """Render an orbital isosurface from a cube file via py3Dmol.
+
+    Unlike :func:`plot_cube_isosurface` (Plotly), py3Dmol isosurfaces the cube
+    *in the browser* at full resolution, so there is no Python-side volume
+    downsample and the payload is just the cube text. Both lobes are drawn:
+    ``+isovalue`` (``pos_color``) and ``-isovalue`` (``neg_color``).
+
+    Returns HTML via py3Dmol's ``_make_html``. The viewer is built through
+    :func:`quantui.viz_assets.make_view`, so it loads 3Dmol.js from the
+    vendored bundle (the page bootstrap) rather than the CDN — see
+    ``viz_assets`` for why this matters offline.
+
+    Parameters
+    ----------
+    cube_path : Path
+        Path to a Gaussian ``.cube`` file (read at full resolution).
+    isovalue : float
+        Isosurface threshold; both ``+`` and ``-`` lobes are drawn.
+    opacity : float
+        Surface opacity (0-1).
+    width, height : int
+        Viewer size in pixels.
+    pos_color, neg_color : str
+        Lobe colors for the positive and negative isosurfaces.
+    bgcolor : str
+        Viewer background color.
+    style : str
+        py3Dmol style for the embedded atoms (e.g. ``"stick"``).
+
+    Returns
+    -------
+    str
+        Self-contained HTML for the interactive viewer.
+    """
+    from quantui.viz_assets import make_view
+
+    cube_text = Path(cube_path).read_text()
+    view = make_view(width=width, height=height)
+    view.addModel(cube_text, "cube")
+    view.setStyle({style: {}})
+    view.addVolumetricData(
+        cube_text,
+        "cube",
+        {"isoval": isovalue, "color": pos_color, "opacity": opacity},
+    )
+    view.addVolumetricData(
+        cube_text,
+        "cube",
+        {"isoval": -isovalue, "color": neg_color, "opacity": opacity},
+    )
+    view.setBackgroundColor(bgcolor)
+    view.zoomTo()
+    return view._make_html()
+
+
 def plot_cube_isosurface(
     cube_path: Path,
     *,

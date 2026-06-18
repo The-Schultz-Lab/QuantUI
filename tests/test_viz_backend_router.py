@@ -33,13 +33,15 @@ _DUAL_BACKEND_TASKS = [
     VizTask.ANALYSIS_STRUCTURE_VIEW,
     VizTask.HISTORY_STRUCTURE_REPLAY,
     VizTask.VIB_INTERACTIVE,
+    # py3Dmol does native in-browser isosurfacing (primary); the Plotly
+    # cube-isosurface path is the fallback.
+    VizTask.ORBITAL_ISOSURFACE,
 ]
 
 # Tasks that require plotlymol3d regardless of preference.
 _PLOTLYMOL_ONLY_TASKS = [
     VizTask.TRAJECTORY_EXPORT,
     VizTask.VIB_EXPORT,
-    VizTask.ORBITAL_ISOSURFACE,
 ]
 
 # Tasks that require py3Dmol regardless of preference.

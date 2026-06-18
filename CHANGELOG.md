@@ -7,6 +7,64 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-18
+
+Interactive-visualization and offline-readiness release. Adds molecular-orbital
+isosurfaces and an interactive pre-optimization preview, reworks the 3D viewers
+to preserve camera orientation across frames, makes all 3D rendering work
+offline, and substantially speeds up startup.
+
+### Added
+
+- **Molecular-orbital isosurfaces (py3Dmol)** — interactive HOMO / LUMO / MO
+  isosurface viewer rendered with py3Dmol; the downsampled Plotly path remains a
+  fallback.
+- **Interactive classical pre-optimization** — a **Preview** button relaxes the
+  geometry with a fast bonded force field (RDKit MMFF94 → UFF) and animates the
+  relaxation in place; **Keep this geometry** adopts it as the active structure
+  or **Revert** discards it. Stepper controls (play/pause, prev/next, scrub
+  slider, and an input ⇄ relaxed flip) let you compare geometries, and the
+  captured trajectory is sampled at even RMSD spacing for smooth playback.
+- **Cancel button** — stop a running calculation cooperatively at the next SCF
+  cycle / optimization step.
+- **Live vibrational-animation framerate** — the Vib fps setting updates the
+  running animation immediately.
+
+### Changed
+
+- **Single persistent 3D viewers** — the trajectory and vibrational-mode viewers
+  now load all frames into one py3Dmol viewer and switch frames/modes
+  client-side, so the camera (rotation/zoom) is preserved across steps and modes
+  and there is no per-frame rebuild or flicker.
+- **Pre-optimization is Preview-only** — the silent "classical pre-optimize"
+  checkbox is gone; pre-optimization happens only through the transparent
+  Preview → Keep/Revert flow, so nothing relaxes the geometry invisibly. (The
+  separate QM "geometry optimization before calculation" option is unchanged.)
+- **Offline-first 3D rendering** — 3Dmol.js is vendored and loaded per-view from
+  a local `data:` URI instead of a CDN, so every 3D view works with no network
+  (the build fails if the vendored asset is missing). Native launchers tolerate
+  offline `pip install`.
+- **Faster startup** — GPU detection and History/Compare population are deferred
+  off the synchronous construction path, so the UI paints in ~1 s instead of
+  ~15 s; the GPU status badge and dropdowns fill in shortly after.
+- **Clear** of the live calculation log is disabled while a calculation runs.
+
+### Fixed
+
+- **GPU-offloaded result extraction** — HOMO–LUMO gap, dipole moment, and
+  Mulliken charges are now reported for GPU runs. CuPy arrays are copied to host
+  before extraction, and Mulliken falls back to the CPU object (gpu4pyscf does
+  not implement population analysis on the GPU).
+- **Vibrational animation glitchiness** — stacked animation loops (a new loop
+  started on every mode switch) made playback jittery and too fast and ignored
+  the framerate setting; exactly one loop now runs.
+- **Cancel status** no longer sticks on "Cancelling…" after a calculation is
+  cancelled.
+- **Stale run status** — "Pre-optimized geometry accepted." is cleared when a new
+  molecule is loaded or a preview is reverted.
+- Structure provenance is reported and the input viewer is persisted across
+  reloads.
+
 ## [0.3.0] - 2026-06-11
 
 Structure-sourcing release. Repairs the external-database structure search and

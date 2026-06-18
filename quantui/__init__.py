@@ -7,7 +7,7 @@ Calculations run locally in the Jupyter session — no cluster or SLURM required
 PySCF requires Linux/macOS/WSL. Windows users should use the Apptainer container.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 import logging
 
