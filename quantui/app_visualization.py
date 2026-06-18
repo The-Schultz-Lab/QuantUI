@@ -622,14 +622,33 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     if not options:
         return False
 
-    app.vib_mode_dd.options = options
-    app.vib_mode_dd.value = options[0][1]
-
     app._last_vib_data = vib_data  # may be None — plotlymol3d optional
     app._last_vib_molecule = molecule
     app._last_vib_freq_result = freq_result
 
     first_label, first_mode = options[0]
+
+    # Decide the render path BEFORE assigning vib_mode_dd.value (which fires
+    # on_vib_mode_changed): set the single-viewer flag first so that observer
+    # takes the client-side-switch branch instead of spawning a redundant
+    # legacy per-mode render. The preferred path is ONE persistent py3Dmol
+    # viewer holding every mode, with client-side mode switching, so the camera
+    # (rotation/zoom) is preserved across modes (matches pre-opt/trajectory).
+    # Falls back to the legacy renderer when py3Dmol isn't selected or
+    # displacements are unavailable (e.g. some history replays).
+    use_single = _vib_single_viewer_supported(app, freq_result)
+    app._vib_single_viewer_active = use_single
+
+    app.vib_mode_dd.options = options
+    app.vib_mode_dd.value = first_mode  # fires on_vib_mode_changed
+
+    if use_single:
+        if _render_vib_single_viewer(
+            app, freq_result, molecule, first_mode, [m for _, m in options]
+        ):
+            return True
+        app._vib_single_viewer_active = False  # build failed → legacy fallback
+
     # Cache-hit fast path: on history replay the cached HTML for the first
     # mode is on disk, so swap it in synchronously without a placeholder.
     # ``reset_camera=True`` clears any stale camera matrix from a previous
@@ -1794,6 +1813,13 @@ def on_vib_mode_changed(app: Any, change: dict[str, Any]) -> None:
     if molecule is None or freq_result is None:
         return
 
+    # Single-viewer path: switch modes client-side on the one persistent viewer
+    # (camera preserved, no rebuild). Export + prev/next still drive vib_mode_dd,
+    # so they keep working unchanged.
+    if getattr(app, "_vib_single_viewer_active", False):
+        _vib_bridge_set_mode(app, mode_number)
+        return
+
     # Cache-hit fast path: swap cached HTML synchronously, no placeholder,
     # no thread. Bumps the render token internally to invalidate any
     # in-flight render.
@@ -2097,6 +2123,197 @@ def build_trajectory_viewer_html(
         extra_decls=f"var EABS={eabs}; var EREL={erel};",
     )
     return f'<div style="max-width:{width + 20}px">{view_html}{controls}</div>'
+
+
+# Single-viewer vibrational animation. ONE py3Dmol viewer holds every mode; the
+# per-mode oscillation frames are computed client-side from the embedded
+# displacement vectors (tiny: n_atoms×3 per mode) on demand, and a mode switch
+# calls ``window.__quantuiVibSetMode`` to swap frames on the SAME viewer instance
+# — so the camera (rotation/zoom) is preserved exactly across modes, with no
+# rebuild/flash. ``fit`` is true only for the initial mode (zoom-to-fit); switches
+# never re-fit. Replaces the old per-mode rebuild + fragile getView/setView hook.
+_VIB_VIEWER_JS = """
+(function(){
+  var UID="__UID__";
+  var SYM=__SYM__, BASE=__BASE__, DISPL=__DISPL__;
+  var NAT=__NAT__, NF=__NF__, AMP=__AMP__, IV=__IV__, BG=__BG__, INIT=__INIT__;
+  function vw(){ return window["viewer_"+UID]; }
+  function frames(m){
+    var d=DISPL[m]; if(!d) return null;
+    var out="";
+    for(var f=0; f<NF; f++){
+      var ph=Math.sin(2*Math.PI*f/NF);
+      out += NAT+"\\nmode "+m+"\\n";
+      for(var a=0; a<NAT; a++){
+        out += SYM[a]+" "+(BASE[a][0]+AMP*ph*d[a][0]).toFixed(5)+" "+
+               (BASE[a][1]+AMP*ph*d[a][1]).toFixed(5)+" "+
+               (BASE[a][2]+AMP*ph*d[a][2]).toFixed(5)+"\\n";
+      }
+    }
+    return out;
+  }
+  window.__quantuiVibSetMode=function(m, fit){
+    var v=vw(); if(!v) return false;
+    var xyz=frames(m); if(xyz===null) return false;
+    try{
+      v.removeAllModels();
+      v.addModelsAsFrames(xyz,"xyz");
+      v.setStyle({"stick":{},"sphere":{"scale":0.3}});
+      v.setBackgroundColor(BG);
+      if(fit) v.zoomTo();   // fit only on first mode; switches keep the camera
+      v.animate({"loop":"forward","interval":IV,"reps":0});
+      v.render();
+    }catch(e){ return false; }
+    return true;
+  };
+  var t=0, poll=setInterval(function(){ t++;
+    if(vw()){ clearInterval(poll); window.__quantuiVibSetMode(INIT, true); }
+    else if(t>200){ clearInterval(poll); }
+  },50);
+})();
+"""
+
+
+def build_vib_viewer_html(
+    molecule: Any,
+    freq_result: Any,
+    mode_numbers: list[int],
+    initial_mode: int,
+    *,
+    amplitude: float = 0.4,
+    n_frames: int = 24,
+    fps: int = 10,
+    bgcolor: str = "white",
+    width: int = 460,
+    height: int = 420,
+) -> str:
+    """Build a single py3Dmol viewer that holds every vibrational mode.
+
+    All modes share ONE viewer instance; oscillation frames are generated
+    client-side from the embedded per-mode displacement vectors, and switching
+    modes (``window.__quantuiVibSetMode``) swaps frames on that same viewer so
+    the camera is preserved across modes. Offline-safe via the vendored 3Dmol
+    loader (``make_view``). Raises if displacements are missing/misshaped so the
+    caller can fall back to the legacy per-mode renderer.
+    """
+    import json
+    import re
+
+    import numpy as np
+
+    from quantui.viz_assets import make_view
+
+    displacements = getattr(freq_result, "displacements", None)
+    if not displacements:
+        raise ValueError("freq_result has no displacements for single-viewer vib")
+
+    atoms = list(molecule.atoms)
+    base = np.asarray(molecule.coordinates, dtype=float)
+    n_atoms = len(atoms)
+    displ_map: dict[int, list] = {}
+    for m in mode_numbers:
+        d = np.asarray(displacements[m - 1], dtype=float)
+        if d.shape != base.shape:
+            raise ValueError(
+                f"mode {m} displacement shape {d.shape} != coords {base.shape}"
+            )
+        displ_map[int(m)] = d.tolist()
+
+    view = make_view(width=width, height=height)
+    view.setBackgroundColor(bgcolor)
+    view_html = view._make_html()  # empty viewer; JS populates the initial mode
+    m_uid = re.search(r"3dmolviewer_(\w+)", view_html)
+    if m_uid is None:
+        raise ValueError("could not find py3Dmol viewer id")
+
+    interval_ms = max(1, int(round(1000.0 / max(1, fps))))
+    js = (
+        _VIB_VIEWER_JS.replace("__UID__", m_uid.group(1))
+        .replace("__SYM__", json.dumps(atoms))
+        .replace("__BASE__", json.dumps(base.tolist()))
+        .replace("__DISPL__", json.dumps(displ_map))
+        .replace("__NAT__", str(n_atoms))
+        .replace("__NF__", str(int(n_frames)))
+        .replace("__AMP__", repr(float(amplitude)))
+        .replace("__IV__", str(interval_ms))
+        .replace("__BG__", json.dumps(bgcolor))
+        .replace("__INIT__", str(int(initial_mode)))
+    )
+    return (
+        f'<div style="max-width:{width + 20}px">{view_html}<script>{js}</script></div>'
+    )
+
+
+def _vib_single_viewer_supported(app: Any, freq_result: Any) -> bool:
+    """True when the single-persistent-viewer vib path applies: py3Dmol backend
+    is selected and the result carries per-mode displacement vectors."""
+    try:
+        from quantui.viz_backend_router import VizBackend as _VB
+        from quantui.viz_backend_router import VizTask as _VT
+
+        if app._resolve_backend(_VT.VIB_INTERACTIVE) != _VB.PY3DMOL:
+            return False
+        return bool(getattr(freq_result, "displacements", None))
+    except Exception:
+        return False
+
+
+def _render_vib_single_viewer(
+    app: Any,
+    freq_result: Any,
+    molecule: Any,
+    initial_mode: int,
+    mode_numbers: list[int],
+) -> bool:
+    """Build + swap in the single-viewer vib animation. Returns True on success
+    (sets ``app._vib_single_viewer_active``); False to fall back to legacy."""
+    try:
+        viz_settings = getattr(getattr(app, "_user_settings", None), "viz", None)
+        fps = max(1, int(getattr(viz_settings, "vib_framerate_fps", 10)))
+        bg = "white" if app.theme_btn.value == "Light" else "#1e1e1e"
+        with _viz_render_event(
+            app, task="vib_interactive", backend="py3dmol", source="single_viewer"
+        ):
+            html = build_vib_viewer_html(
+                molecule, freq_result, mode_numbers, initial_mode, fps=fps, bgcolor=bg
+            )
+    except Exception as exc:  # noqa: BLE001 — fall back to the legacy renderer
+        try:
+            from quantui import calc_log as _clog_sv
+
+            _clog_sv.log_event(
+                "vib_single_viewer_fallback", f"{type(exc).__name__}: {exc}"[:200]
+            )
+        except Exception:
+            pass
+        app._vib_single_viewer_active = False
+        return False
+    _swap_vib_output(app, html)
+    app._vib_single_viewer_active = True
+    return True
+
+
+def _vib_bridge_set_mode(app: Any, mode_number: int) -> None:
+    """Switch the live single-viewer to ``mode_number`` client-side (camera kept).
+
+    Emits a one-shot JS call to ``window.__quantuiVibSetMode`` via a hidden
+    bridge Output; retries briefly in case the viewer is still loading."""
+    bridge = getattr(app, "_vib_js_bridge", None)
+    if bridge is None:
+        return
+    from IPython.display import Javascript, display
+
+    js = (
+        "(function(){var n=0;function go(){n++;"
+        "if(window.__quantuiVibSetMode){window.__quantuiVibSetMode(%d,false);}"
+        "else if(n<40){setTimeout(go,50);}}go();})();" % int(mode_number)
+    )
+    try:
+        bridge.clear_output(wait=True)
+        with bridge:
+            display(Javascript(js))
+    except Exception:
+        pass
 
 
 def show_pes_scan_result(app: Any, result: Any) -> bool:

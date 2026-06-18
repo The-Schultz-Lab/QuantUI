@@ -135,3 +135,48 @@ def test_trajectory_viewer_single_frame_is_static():
     html = build_trajectory_viewer_html(["1\nH\nH 0 0 0"])
     assert _CDN not in html
     assert "setFrame" not in html  # nothing to step through
+
+
+def test_vib_viewer_is_single_viewer_all_modes():
+    # All vibrational modes share ONE viewer; modes switch client-side via
+    # window.__quantuiVibSetMode on the same instance, so the camera persists
+    # across modes (vs the old per-mode rebuild). Offline-safe.
+    from types import SimpleNamespace
+
+    from quantui.app_visualization import build_vib_viewer_html
+    from quantui.molecule import Molecule
+
+    mol = Molecule(
+        atoms=["O", "H", "H"],
+        coordinates=[[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]],
+    )
+    displ = [
+        [[0, 0, 0.1], [0, 0, -0.4], [0, 0, -0.4]],
+        [[0.1, 0, 0], [-0.4, 0.2, 0], [-0.4, -0.2, 0]],
+        [[0, 0.1, 0], [0, -0.4, 0], [0, -0.4, 0]],
+    ]
+    freq = SimpleNamespace(
+        displacements=displ, frequencies_cm1=[1600.0, 3700.0, 3800.0]
+    )
+    html = build_vib_viewer_html(mol, freq, [1, 2, 3], 1, fps=10)
+
+    assert _CDN not in html  # offline-safe
+    assert "window.__quantuiVibSetMode" in html  # client-side mode switch fn
+    assert "removeAllModels" in html  # swaps frames on the SAME viewer instance
+    assert "addModelsAsFrames" in html
+    # All three modes' displacement vectors are embedded for client-side frames.
+    assert '"1":' in html and '"2":' in html and '"3":' in html
+
+
+def test_vib_viewer_requires_displacements():
+    from types import SimpleNamespace
+
+    import pytest
+
+    from quantui.app_visualization import build_vib_viewer_html
+    from quantui.molecule import Molecule
+
+    mol = Molecule(atoms=["H", "H"], coordinates=[[0, 0, 0], [0, 0, 0.74]])
+    freq = SimpleNamespace(displacements=None, frequencies_cm1=[4400.0])
+    with pytest.raises(ValueError):
+        build_vib_viewer_html(mol, freq, [1], 1)

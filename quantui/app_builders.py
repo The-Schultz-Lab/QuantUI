@@ -1429,10 +1429,16 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(align_items="center", margin="6px 0 0 0"),
     )
 
+    # Hidden sink for Python→JS calls that switch the single-viewer's mode
+    # client-side (window.__quantuiVibSetMode). Kept in the DOM (not display:none)
+    # so the injected Javascript executes; empty/cleared between calls so it
+    # takes no visible space. See app_visualization._vib_bridge_set_mode.
+    app._vib_js_bridge = widgets.Output(layout=layout_fn(margin="0", padding="0"))
+
     app.vib_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
-                [vib_mode_row, app.vib_output, vib_export_row],
+                [vib_mode_row, app.vib_output, vib_export_row, app._vib_js_bridge],
                 layout=layout_fn(padding="8px"),
             )
         ],
