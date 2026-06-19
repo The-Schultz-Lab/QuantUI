@@ -735,11 +735,82 @@ def on_basis_help(app: Any, btn: Any) -> None:
     app._show_help_topic("basis_set")
 
 
+# Seconds the "Confirm shutdown" state stays armed before auto-reverting to
+# "Exit". Long enough for a deliberate second click, short enough that a stray
+# arming click doesn't leave the button primed indefinitely.
+_EXIT_CONFIRM_TIMEOUT_S = 6.0
+
+
 def on_exit_clicked(app: Any, _unused: Any = None) -> None:
+    """Two-stage exit: arm a confirmation on first click, shut down on second.
+
+    Exit kills the parent server process (``os.getppid()``). On a laptop that is
+    just Voilà, but on a cluster/NCShare interactive session that parent *is* the
+    job — a single stray click tears down the whole allocation. So the first
+    click only arms a confirmation; the actual shutdown runs on the second click.
+    """
+    if getattr(app, "_exit_armed", False):
+        _perform_exit(app)
+        return
+    _arm_exit(app)
+
+
+def _arm_exit(app: Any) -> None:
+    """Reveal the warning + Cancel and re-label Exit to ``Confirm shutdown``."""
+    app._exit_armed = True
+    app._exit_btn.description = "Confirm shutdown"
+    app._exit_btn.button_style = "danger"
+    app._exit_btn.tooltip = "Click again to stop the server and end this session"
+    app._exit_btn.layout.width = "150px"
+    app._exit_warn_html.value = (
+        '<span style="color:#b91c1c;font-size:12px;align-self:center;'
+        'margin-right:4px">This stops the server and ends your session.</span>'
+    )
+    app._exit_warn_html.layout.display = ""
+    app._exit_cancel_btn.layout.display = ""
+
+    # Auto-disarm after a timeout so a stray arming click doesn't leave Exit
+    # primed to shut down on the next unrelated click. Guard with a token so a
+    # later arm/cancel cycle's timer can't disarm a newer armed state.
+    token = object()
+    app._exit_arm_token = token
+
+    def _auto_disarm() -> None:
+        time.sleep(_EXIT_CONFIRM_TIMEOUT_S)
+        if getattr(app, "_exit_arm_token", None) is token and getattr(
+            app, "_exit_armed", False
+        ):
+            _disarm_exit(app)
+
+    threading.Thread(target=_auto_disarm, daemon=True).start()
+
+
+def _disarm_exit(app: Any) -> None:
+    """Revert the Exit button to its idle state."""
+    app._exit_armed = False
+    app._exit_arm_token = None
+    app._exit_btn.description = "Exit"
+    app._exit_btn.tooltip = "Shut down the QuantUI server and end this session"
+    app._exit_btn.layout.width = "64px"
+    app._exit_warn_html.layout.display = "none"
+    app._exit_warn_html.value = ""
+    app._exit_cancel_btn.layout.display = "none"
+
+
+def on_exit_cancel(app: Any, _unused: Any = None) -> None:
+    """Cancel an armed exit — keep the session running."""
+    _disarm_exit(app)
+
+
+def _perform_exit(app: Any) -> None:
     """Update UI and request shutdown of Voilà/Jupyter parent and kernel."""
     import os
     import signal
 
+    app._exit_armed = False
+    app._exit_arm_token = None
+    app._exit_warn_html.layout.display = "none"
+    app._exit_cancel_btn.layout.display = "none"
     app._exit_btn.description = "Exiting…"
     app._exit_btn.disabled = True
     # POLISH.1 retry-2 (2026-05-25): the welcome logo now lives in its

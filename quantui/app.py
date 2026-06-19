@@ -237,6 +237,9 @@ from quantui.app_runflow import (
     on_copy_results_path as _run_on_copy_results_path,
 )
 from quantui.app_runflow import (
+    on_exit_cancel as _run_on_exit_cancel,
+)
+from quantui.app_runflow import (
     on_exit_clicked as _run_on_exit_clicked,
 )
 from quantui.app_runflow import (
@@ -1145,6 +1148,8 @@ class QuantUIApp:
                             self.theme_btn,
                             self._help_btn,
                             self._issue_btn,
+                            self._exit_warn_html,
+                            self._exit_cancel_btn,
                             self._exit_btn,
                         ],
                         layout=_layout(justify_content="flex-end", margin="0 0 4px"),
@@ -1712,6 +1717,7 @@ class QuantUIApp:
         self._help_btn.on_click(self._on_help_toggle)
         # Exit
         self._exit_btn.on_click(self._on_exit_clicked)
+        self._exit_cancel_btn.on_click(self._on_exit_cancel)
         self.help_topic_dd.observe(
             self._safe_cb(self._on_help_topic_changed), names="value"
         )
@@ -3489,6 +3495,9 @@ class QuantUIApp:
 
     def _on_exit_clicked(self, _=None) -> None:
         _run_on_exit_clicked(self, _)
+
+    def _on_exit_cancel(self, _=None) -> None:
+        _run_on_exit_cancel(self, _)
 
     # ── Help ──────────────────────────────────────────────────────────────
 
