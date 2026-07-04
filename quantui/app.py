@@ -162,6 +162,9 @@ from quantui.app_formatters import (
     format_pes_scan_result as _fmt_pes_scan_result,
 )
 from quantui.app_formatters import (
+    format_reorg_result as _fmt_reorg_result,
+)
+from quantui.app_formatters import (
     format_result as _fmt_result,
 )
 from quantui.app_formatters import (
@@ -1507,6 +1510,7 @@ class QuantUIApp:
         self.basis_help_btn.on_click(self._on_basis_help)
         # Run
         self.run_btn.on_click(self._on_run_clicked)
+        self._reorg_auto_btn.on_click(self._on_reorg_auto_clicked)
         self.log_clear_btn.on_click(self._on_clear_log)
         self._ir_mode_toggle.observe(
             self._safe_cb(self._on_ir_mode_changed), names="value"
@@ -2733,6 +2737,22 @@ class QuantUIApp:
         )
         _run_on_run_clicked(self, btn)
 
+    def _on_reorg_auto_clicked(self, btn) -> None:
+        """One-click reorganization energy: set up the mode, then run.
+
+        Switches the calc-type to "Reorganization Energy" (which reveals the
+        channel selector via the calc-type observer), defaults the channel to
+        both hole + electron, and immediately launches the 4-point run.
+        """
+        if self._molecule is None:
+            self.run_status.value = "Load a molecule first."
+            return
+        # Setting the dropdown value fires _on_calc_type_changed synchronously,
+        # which swaps calc_extra_opts to show the channel selector + note.
+        self.calc_type_dd.value = "Reorganization Energy"
+        self._reorg_mode_dd.value = "both"
+        self._on_run_clicked(btn)
+
     def _on_solvent_cb_changed(self, change) -> None:
         _run_on_solvent_cb_changed(self, change)
 
@@ -3299,6 +3319,7 @@ class QuantUIApp:
         """Update shared state and refresh dependent widgets."""
         self._molecule = mol
         self.run_btn.disabled = False
+        self._reorg_auto_btn.disabled = False
         self.export_btn.disabled = False
         self.export_xyz_btn.disabled = False
         self.export_mol_btn.disabled = not _RDKIT_AVAILABLE
@@ -3658,6 +3679,7 @@ class QuantUIApp:
             kind="compute",
         )
         self.run_btn.disabled = True
+        self._reorg_auto_btn.disabled = True
         self.run_status.value = "Starting..."
 
         self.step_progress.complete(1)
@@ -3689,6 +3711,7 @@ class QuantUIApp:
                 "UV-Vis (TD-DFT)": "tddft",
                 "NMR Shielding": "nmr",
                 "PES Scan": "pes_scan",
+                "Reorganization Energy": "reorganization_energy",
             }.get(self.calc_type_dd.value, "single_point")
             _nb_for_est = _calc_log.count_basis_functions(
                 mol.atoms, self.basis_dd.value
@@ -3792,6 +3815,7 @@ class QuantUIApp:
                 "UV-Vis (TD-DFT)": "tddft",
                 "NMR Shielding": "nmr",
                 "PES Scan": "pes_scan",
+                "Reorganization Energy": "reorganization_energy",
             }.get(self.calc_type_dd.value, "single_point")
             log.write(
                 _fmt_log_hdr(
@@ -4173,6 +4197,26 @@ class QuantUIApp:
                     }
                 }
                 save_type = "pes_scan"
+            elif ct == "Reorganization Energy":
+                self.run_status.value = "Computing reorganization energy..."
+                from quantui.reorganization_energy import (
+                    run_reorganization_energy,
+                )
+
+                _solvent = self.solvent_dd.value if self.solvent_cb.value else None
+                result = run_reorganization_energy(
+                    molecule=calc_mol,
+                    mode=self._reorg_mode_dd.value,
+                    method=self.method_dd.value,
+                    basis=self.basis_dd.value,
+                    fmax=self.fmax_fi.value,
+                    steps=self.max_steps_si.value,
+                    progress_stream=log,  # type: ignore[arg-type]
+                    solvent=_solvent,
+                )
+                result_html = self._format_reorg_result(result)
+                save_spectra = result.to_spectra()
+                save_type = "reorganization_energy"
             else:  # Single Point
                 self.run_status.value = "Calculating..."
                 from quantui import run_in_session
@@ -4212,11 +4256,21 @@ class QuantUIApp:
             self.run_status.value = "Finalizing results..."
 
             # Show 3D structure in the result panel and mirrored in Analysis tab
-            _viz_mol = result.molecule if ct == "Geometry Opt" else calc_mol
+            _viz_mol = (
+                result.molecule
+                if ct in ("Geometry Opt", "Reorganization Energy")
+                else calc_mol
+            )
             if ct == "Geometry Opt":
                 self._viz_label.value = (
                     '<p style="color:#555;font-size:12px;font-weight:600;'
                     'margin:6px 0 2px">Optimized geometry</p>'
+                )
+                self._viz_label.layout.display = ""
+            elif ct == "Reorganization Energy":
+                self._viz_label.value = (
+                    '<p style="color:#555;font-size:12px;font-weight:600;'
+                    'margin:6px 0 2px">Optimized neutral geometry</p>'
                 )
                 self._viz_label.layout.display = ""
             self._queue_main_thread_callback(
@@ -4583,6 +4637,7 @@ class QuantUIApp:
 
         finally:
             self.run_btn.disabled = False
+            self._reorg_auto_btn.disabled = self._molecule is None
             self._activity_end(kind="compute")
 
     def _update_notes(self, change=None) -> None:
@@ -4863,6 +4918,9 @@ class QuantUIApp:
 
     def _format_pes_scan_result(self, r) -> str:
         return _fmt_pes_scan_result(r)
+
+    def _format_reorg_result(self, r) -> str:
+        return _fmt_reorg_result(r)
 
     def _show_pes_scan_result(self, result) -> bool:
         return _viz_show_pes_scan_result(self, result)

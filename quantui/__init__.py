@@ -121,6 +121,15 @@ try:
 except ImportError:
     pass
 
+# Reorganization energy — Marcus 4-point (optional — requires optimizer stack)
+try:
+    from .reorganization_energy import (  # noqa: F401
+        ReorganizationEnergyResult,
+        run_reorganization_energy,
+    )
+except ImportError:
+    pass
+
 # PubChem integration (optional — requires internet)
 try:
     from .cactus import fetch_from_cactus
@@ -249,6 +258,9 @@ __all__ = [
     # QM geometry optimizer (optional — Linux/WSL)
     "OptimizationResult",
     "optimize_geometry",
+    # Reorganization energy — Marcus 4-point (optional — Linux/WSL)
+    "ReorganizationEnergyResult",
+    "run_reorganization_energy",
     # PubChem (optional)
     "fetch_molecule",
     "fetch_structure",

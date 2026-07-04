@@ -896,9 +896,10 @@ class TestNMRWidgets:
         app = QuantUIApp()
         assert "NMR Shielding" in app.calc_type_dd.options
 
-    def test_calc_type_dd_has_six_options(self):
+    def test_calc_type_dd_has_expected_options(self):
         app = QuantUIApp()
-        assert len(app.calc_type_dd.options) == 6
+        assert len(app.calc_type_dd.options) == 7
+        assert "Reorganization Energy" in app.calc_type_dd.options
 
     def test_nmr_calc_type_shows_note(self):
         app = QuantUIApp()
@@ -920,6 +921,41 @@ class TestNMRWidgets:
         app.calc_type_dd.value = "NMR Shielding"
         app.calc_type_dd.value = "Single Point"
         assert len(app.calc_extra_opts.children) == 0
+
+
+class TestReorganizationEnergyUI:
+    """UI wiring for the Reorganization Energy calc-type + auto-setup button."""
+
+    def test_reorg_mode_shows_channel_selector(self):
+        app = QuantUIApp()
+        app.calc_type_dd.value = "Reorganization Energy"
+        kids = app.calc_extra_opts.children
+        assert app._reorg_mode_dd in kids
+        assert app._reorg_note in kids
+        assert app._reorg_mode_dd.value == "both"
+
+    def test_reorg_hides_preopt_checkbox(self):
+        app = QuantUIApp()
+        app.calc_type_dd.value = "Reorganization Energy"
+        assert app._freq_preopt_cb.layout.display == "none"
+
+    def test_auto_button_enabled_after_molecule_load(self):
+        app = QuantUIApp()
+        assert app._reorg_auto_btn.disabled is True
+        mol = Molecule(["H", "H"], [[0, 0, 0], [0, 0, 0.74]])
+        app._set_molecule(mol)
+        assert app._reorg_auto_btn.disabled is False
+
+    def test_auto_button_sets_up_mode(self):
+        app = QuantUIApp()
+        mol = Molecule(["H", "H"], [[0, 0, 0], [0, 0, 0.74]])
+        app._set_molecule(mol)
+        # Drive only the setup portion (not the background run thread) by
+        # replicating what the handler does before dispatch.
+        app.calc_type_dd.value = "Reorganization Energy"
+        app._reorg_mode_dd.value = "both"
+        assert app.calc_type_dd.value == "Reorganization Energy"
+        assert app._reorg_mode_dd in app.calc_extra_opts.children
 
 
 class TestFormatNMRResult:

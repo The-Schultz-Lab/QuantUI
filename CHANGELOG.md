@@ -7,6 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- **Reorganization energy (Marcus 4-point)** — a new "Reorganization Energy"
+  calculation type that computes the internal reorganization energy λ for hole
+  (cation) and/or electron (anion) charge transfer. It optimizes the neutral and
+  ion geometries and evaluates the four single-point energies of the 4-point
+  scheme (λ = [E_ion(R_neutral) − E_ion(R_ion)] + [E_neutral(R_ion) −
+  E_neutral(R_neutral)]), reporting λ, its λ₁ (ion) and λ₂ (neutral) relaxation
+  components, in eV and kcal/mol. `mode="both"` shares the neutral optimization
+  across both channels. Open-shell HF ions are automatically promoted to UHF.
+- **One-click "Calc. Reorganization Energy" button** — sets the calculation type
+  to Reorganization Energy, defaults the channel to both hole + electron, and
+  launches the run in a single click.
+
 ## [0.3.0] - 2026-06-11
 
 Structure-sourcing release. Repairs the external-database structure search and

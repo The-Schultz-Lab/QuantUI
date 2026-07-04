@@ -676,6 +676,7 @@ def save_thumbnail(result_dir: Path, data: dict) -> None:
         "frequency": ("#15803d", "#dcfce7"),
         "tddft": ("#b45309", "#fef3c7"),
         "nmr": ("#0d9488", "#ccfbf1"),
+        "reorganization_energy": ("#be123c", "#ffe4e6"),
     }
     _ct_labels: dict = {
         "single_point": "Single Point",
@@ -683,6 +684,7 @@ def save_thumbnail(result_dir: Path, data: dict) -> None:
         "frequency": "Frequency",
         "tddft": "TD-DFT",
         "nmr": "NMR",
+        "reorganization_energy": "Reorg Energy",
     }
     ct = data.get("calc_type", "")
     fg, bg = _colors.get(ct, ("#555555", "#f3f4f6"))
