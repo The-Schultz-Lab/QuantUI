@@ -682,6 +682,50 @@ class TestExportScriptCallback:
         assert "Error" not in app.export_status.value
 
 
+class TestUpdateNotesBoldRendering:
+    """_update_notes converts every **bold** span, not just the first.
+
+    Regression (M12 audit fix, 2026-07-14): the old implementation was
+    ``notes.replace("**", "<b>", 1).replace("**", "</b>", 1)`` — string
+    .replace(..., 1) only touches the FIRST occurrence in the whole
+    string, so only the first "**bold**" pair converted; every later one
+    (get_educational_notes() typically returns 2-3 separate
+    "**Label**: description" paragraphs) kept its literal "**" markers
+    and leaked into the rendered panel instead of rendering bold.
+    """
+
+    def test_multiple_bold_spans_all_converted(self, monkeypatch):
+        # UHF + 6-31G* + multiplicity 2 -> 3 separate "**Label**" spans
+        # in get_educational_notes()'s output.
+        #
+        # `with app.notes_output: display(HTML(...))` only populates the
+        # widget's `.outputs` under a live IPython display hook, which
+        # isn't present in a plain pytest process — so this test captures
+        # what's passed to `display()` directly instead of inspecting
+        # `notes_output.outputs` (the pattern used by tests of the
+        # newer `_set_html_output` atomic-swap helper, which manipulates
+        # `.outputs` directly and doesn't have this limitation).
+        import quantui.app_runflow as app_runflow
+
+        captured: list = []
+        monkeypatch.setattr(app_runflow, "display", lambda obj: captured.append(obj))
+
+        app = QuantUIApp()
+        mol = Molecule(["O", "H"], [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0]], multiplicity=2)
+        app._set_molecule(mol)
+        app.method_dd.value = "UHF"
+        app.basis_dd.value = "6-31G*"
+
+        captured.clear()  # drop any renders triggered by the value changes above
+        app._update_notes()
+
+        assert len(captured) == 1
+        html = captured[0].data
+        assert "**" not in html, f"literal ** markers leaked into rendered HTML: {html}"
+        assert html.count("<b>") >= 2
+        assert html.count("<b>") == html.count("</b>")
+
+
 class TestExportMoleculeAndLabel:
     """_export_molecule_and_label returns correct molecule and labels."""
 

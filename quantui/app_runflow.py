@@ -1072,10 +1072,16 @@ def update_notes(app: Any, change: Any = None) -> None:
         )
         notes = calc.get_educational_notes()
         if notes:
-            safe = (
-                notes.replace("**", "<b>", 1)
-                .replace("**", "</b>", 1)
-                .replace("\n\n", "<br><br>")
+            # M12 audit fix (2026-07-14): .replace("**", ..., 1) only
+            # converts the FIRST **bold** pair in the whole string — every
+            # note after the first (get_educational_notes() typically
+            # returns 2-3 separate "**Label**: description" paragraphs
+            # joined by "\n\n") kept its literal "**" markers instead of
+            # being rendered bold. A regex replaces every **...** pair.
+            import re as _re
+
+            safe = _re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", notes).replace(
+                "\n\n", "<br><br>"
             )
             with app.notes_output:
                 display(
