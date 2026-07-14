@@ -128,3 +128,215 @@ def test_estimate_time_non_single_point_ignores_legacy_untyped_records(
         f"for 4 atoms), got {est_freq['seconds']:.1f} s — suggests the cost "
         "model isn't firing on legacy SP records"
     )
+
+
+# ============================================================================
+# Event log: append/prune race + throttled pruning (M8 audit fix, 2026-07-14)
+# ============================================================================
+
+
+def test_log_event_basic_roundtrip(isolated_log_dir):
+    import quantui.calc_log as clog
+
+    clog.log_event("test_event", "hello world", extra_field=42)
+    events = clog.get_recent_events(10)
+    assert len(events) == 1
+    assert events[0]["event"] == "test_event"
+    assert events[0]["message"] == "hello world"
+    assert events[0]["extra_field"] == 42
+
+
+def test_prune_events_holds_lock_across_read_and_rewrite(isolated_log_dir):
+    """Concurrent log_event() calls must never lose an append to a
+    concurrent prune_events() rewrite.
+
+    Regression: prune_events() used to read the file (acquiring and
+    releasing the module lock) and only later reacquire the lock to
+    rewrite it. An append landing in that gap got silently discarded when
+    the rewrite replaced the whole file with the (stale) filtered list
+    computed before that append happened. Fixed by making the read +
+    filter + rewrite one lock-held critical section.
+    """
+    import threading
+
+    import quantui.calc_log as clog
+
+    n_threads = 8
+    n_events_per_thread = 30
+
+    def worker(tid: int) -> None:
+        for i in range(n_events_per_thread):
+            clog.log_event("stress_test", f"thread {tid} event {i}")
+
+    threads = [threading.Thread(target=worker, args=(t,)) for t in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    events = clog.get_recent_events(10_000)
+    expected = n_threads * n_events_per_thread
+    assert len(events) == expected, (
+        f"expected {expected} events, got {len(events)} — "
+        f"{expected - len(events)} were lost to the append/prune race"
+    )
+
+
+def test_prune_not_triggered_on_every_single_event(isolated_log_dir, monkeypatch):
+    """log_event() must not call the full prune on every single append.
+
+    Regression: log_event() called prune_events() (a full read + rewrite
+    of the whole file) after every single append — O(file size) work per
+    event, O(N^2) over a session. It should only prune periodically.
+    """
+    import quantui.calc_log as clog
+
+    prune_calls = {"n": 0}
+    real_prune = clog.prune_events
+
+    def _counting_prune(*args, **kwargs):
+        prune_calls["n"] += 1
+        return real_prune(*args, **kwargs)
+
+    monkeypatch.setattr(clog, "prune_events", _counting_prune)
+
+    n_events = clog._PRUNE_EVERY_N_EVENTS * 3 - 1
+    for i in range(n_events):
+        clog.log_event("test_event", f"event {i}")
+
+    # Should prune roughly every _PRUNE_EVERY_N_EVENTS calls, not once per event.
+    assert prune_calls["n"] < n_events
+    assert prune_calls["n"] == n_events // clog._PRUNE_EVERY_N_EVENTS
+
+
+def test_prune_events_still_removes_old_entries(isolated_log_dir):
+    """The periodic-prune change must not break the actual 7-day TTL."""
+    import json
+    from datetime import datetime, timedelta, timezone
+
+    import quantui.calc_log as clog
+
+    path = clog._event_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+    new_ts = datetime.now(timezone.utc).isoformat()
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(
+            json.dumps({"timestamp": old_ts, "event": "old", "message": "stale"}) + "\n"
+        )
+        fh.write(
+            json.dumps({"timestamp": new_ts, "event": "new", "message": "fresh"}) + "\n"
+        )
+
+    clog.prune_events()
+
+    remaining = clog.get_recent_events(10)
+    assert len(remaining) == 1
+    assert remaining[0]["event"] == "new"
+
+
+def test_read_all_caches_between_unchanged_calls(isolated_log_dir):
+    """L audit fix: _read_all must not re-parse the perf log when it hasn't
+    changed since the last call — estimate_time() re-read the entire
+    (indefinitely-kept) file on every UI refresh even when nothing new
+    had been written.
+    """
+    import quantui.calc_log as clog
+
+    clog.log_calculation(
+        formula="H2",
+        n_atoms=2,
+        n_electrons=2,
+        method="RHF",
+        basis="STO-3G",
+        n_iterations=5,
+        elapsed_s=1.0,
+        converged=True,
+        n_basis=2,
+        n_cores=1,
+        calc_type="single_point",
+    )
+
+    first = clog._read_all(clog._perf_path())
+    assert len(first) == 1
+
+    calls = {"n": 0}
+    real_loads = clog.json.loads
+
+    def _counting_loads(s):
+        calls["n"] += 1
+        return real_loads(s)
+
+    clog.json.loads = _counting_loads
+    try:
+        second = clog._read_all(clog._perf_path())
+    finally:
+        clog.json.loads = real_loads
+
+    assert second == first
+    assert calls["n"] == 0  # cache hit: no re-parsing of the unchanged file
+
+
+def test_read_all_cache_invalidates_on_new_write(isolated_log_dir):
+    """The caching fix above must not go stale after a genuine new write."""
+    import quantui.calc_log as clog
+
+    clog.log_calculation(
+        formula="H2",
+        n_atoms=2,
+        n_electrons=2,
+        method="RHF",
+        basis="STO-3G",
+        n_iterations=5,
+        elapsed_s=1.0,
+        converged=True,
+        n_basis=2,
+        n_cores=1,
+        calc_type="single_point",
+    )
+    first = clog._read_all(clog._perf_path())
+    assert len(first) == 1
+
+    clog.log_calculation(
+        formula="H2",
+        n_atoms=2,
+        n_electrons=2,
+        method="RHF",
+        basis="STO-3G",
+        n_iterations=6,
+        elapsed_s=2.0,
+        converged=True,
+        n_basis=2,
+        n_cores=1,
+        calc_type="single_point",
+    )
+    second = clog._read_all(clog._perf_path())
+    assert len(second) == 2
+
+
+def test_6_31gss_he_basis_count_matches_pyscf(isolated_log_dir):
+    """L audit fix: He under 6-31G** must have 5 basis functions, not 2.
+
+    6-31G** adds a p-polarization shell on H/He on top of 6-31G*'s bare
+    s-only He (2 bf), the same way 6-31G* already adds p on the heavy
+    atoms — so He should follow H's pattern (2 -> 5), not stay at 2.
+    Verified against ``pyscf.gto.M(atom="He", basis="6-31g**").nao == 5``.
+    """
+    import quantui.calc_log as clog
+
+    assert clog.count_basis_functions(["He"], "6-31G**") == 5
+
+
+def test_basis_function_table_internally_consistent(isolated_log_dir):
+    """H and He must carry equal counts in every basis in the lookup table.
+
+    Both are period-1 elements with the same shell structure in every
+    basis set this table covers, so a basis that gives H and He different
+    counts indicates a transcription error (this caught the 6-31G** nit).
+    """
+    import quantui.calc_log as clog
+
+    for basis, table in clog._BASIS_FUNCTIONS.items():
+        assert (
+            table["H"] == table["He"]
+        ), f"{basis}: H={table['H']} but He={table['He']}, expected equal"

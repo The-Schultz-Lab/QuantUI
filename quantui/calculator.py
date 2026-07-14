@@ -43,7 +43,18 @@ class PySCFCalculation:
             ValueError: If method is not supported
         """
         self.molecule = molecule
-        self.method = method.upper()
+        # Match case-insensitively against the canonical (mixed-case)
+        # SUPPORTED_METHODS list, but store the CANONICAL spelling — not
+        # method.upper(). Several entries are mixed-case (e.g. "wB97X-D",
+        # "CAM-B3LYP", "M06-L"); uppercasing turned "wB97X-D" into
+        # "WB97X-D", which is in neither SUPPORTED_METHODS nor the xc-alias
+        # tables the generated script relies on, breaking Export Script
+        # and the educational-notes lookup for every mixed-case method.
+        _method_upper = method.strip().upper()
+        self.method = next(
+            (m for m in config.SUPPORTED_METHODS if m.upper() == _method_upper),
+            method,
+        )
         self.basis = basis
 
         if self.method not in config.SUPPORTED_METHODS:

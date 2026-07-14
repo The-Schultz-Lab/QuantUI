@@ -230,7 +230,7 @@ def run_in_session(
             ``'6-31G'``, ``'6-31G*'``, ``'cc-pVDZ'``).  Default: ``'6-31G'``.
         verbose: PySCF verbosity level (0 = silent … 9 = very detailed).
             Level 3 prints per-iteration SCF energies; level 4 adds
-            convergence diagnostics.  Default: 3.
+            convergence diagnostics.  Default: 4.
         progress_stream: Optional writable text stream.  All PySCF output
             during the calculation is written here.  Pass a widget-backed
             stream (e.g. ``_WidgetStream``) in the notebook for live display;
@@ -329,11 +329,21 @@ def _run_session_calc_body(
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
     elif method_upper == "MP2":
-        mf = scf.RHF(mol)  # MP2 runs on top of RHF
+        # ``scf.RHF(mol)`` is a factory: for a closed-shell molecule
+        # (mol.spin == 0) it returns a true RHF object; for an open-shell
+        # molecule it auto-dispatches to ROHF instead (verified against
+        # PySCF's own factory behavior — this is not a QuantUI branch).
+        # ``mp.MP2(mf)`` below then further auto-dispatches: RMP2 on an
+        # RHF reference, UMP2 (ROHF-based) on an ROHF reference. Both are
+        # standard, well-defined methods; MP2 is not restricted to
+        # closed-shell input here.
+        mf = scf.RHF(mol)
     elif method_upper in ("CCSD", "CCSD(T)"):
-        # Coupled cluster builds on an RHF reference (M8.1). The correlation
-        # energy (and optional perturbative-triples correction) is added
-        # post-SCF below.
+        # Same auto-dispatch as MP2 above: scf.RHF(mol) yields RHF for
+        # closed-shell input and ROHF for open-shell input, and
+        # cc.CCSD(mf) below correspondingly dispatches to RCCSD or
+        # ROHF-based UCCSD. The correlation energy (and optional
+        # perturbative-triples correction) is added post-SCF below.
         mf = scf.RHF(mol)
     else:
         # DFT: resolve alias then auto-select RKS / UKS. ``resolve_xc``
@@ -487,26 +497,32 @@ def _run_session_calc_body(
 
     mulliken_charges: Optional[List[float]] = None
     dipole_moment_debye: Optional[float] = None
-    if method_upper != "UHF":
-        try:
-            # gpu4pyscf doesn't implement population analysis on the GPU object
-            # (``mf.mulliken_pop`` is NotImplemented), so on a GPU-offloaded run
-            # fall back to the host (CPU) object via ``to_cpu()``. ``chg`` is
-            # then host NumPy; _to_numpy_array also covers the CuPy case.
-            mf_pop = mf
-            if not callable(getattr(mf, "mulliken_pop", None)) and callable(
-                getattr(mf, "to_cpu", None)
-            ):
-                mf_pop = mf.to_cpu()
-            _, chg = mf_pop.mulliken_pop(verbose=0)
-            mulliken_charges = [float(c) for c in _to_numpy_array(chg)]
-        except Exception as exc:
-            logger.debug("Mulliken population extraction failed: %s", exc)
-        try:
-            dip = _to_numpy_array(mf.dip_moment(verbose=0))
-            dipole_moment_debye = float(_np.linalg.norm(dip))
-        except Exception as exc:
-            logger.debug("Dipole moment extraction failed: %s", exc)
+    # M3 audit fix (2026-07-14): both mf.mulliken_pop() and mf.dip_moment()
+    # are well-defined and work correctly for a genuine UHF object (verified
+    # empirically against PySCF) — the previous ``method_upper != "UHF"``
+    # guard around this whole block was an unnecessary restriction that
+    # left the result card blank for both properties on every UHF run,
+    # while UKS (open-shell DFT) went through the identical extraction
+    # successfully.
+    try:
+        # gpu4pyscf doesn't implement population analysis on the GPU object
+        # (``mf.mulliken_pop`` is NotImplemented), so on a GPU-offloaded run
+        # fall back to the host (CPU) object via ``to_cpu()``. ``chg`` is
+        # then host NumPy; _to_numpy_array also covers the CuPy case.
+        mf_pop = mf
+        if not callable(getattr(mf, "mulliken_pop", None)) and callable(
+            getattr(mf, "to_cpu", None)
+        ):
+            mf_pop = mf.to_cpu()
+        _, chg = mf_pop.mulliken_pop(verbose=0)
+        mulliken_charges = [float(c) for c in _to_numpy_array(chg)]
+    except Exception as exc:
+        logger.debug("Mulliken population extraction failed: %s", exc)
+    try:
+        dip = _to_numpy_array(mf.dip_moment(verbose=0))
+        dipole_moment_debye = float(_np.linalg.norm(dip))
+    except Exception as exc:
+        logger.debug("Dipole moment extraction failed: %s", exc)
 
     # MO arrays for orbital visualization (non-fatal if extraction fails).
     # Uses the same ``_to_numpy_array`` CuPy→host helper defined above

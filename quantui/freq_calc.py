@@ -159,6 +159,22 @@ def run_freq_calc(
             computation fails, frequencies are omitted and a warning is
             written to progress_stream — no exception is raised.
     """
+    # Post-HF methods (MP2/CCSD/CCSD(T)) have no special-casing below —
+    # without this guard, method='CCSD' silently falls into the DFT
+    # branch (sets mf.xc = "CCSD") and fails deep inside PySCF with a
+    # cryptic "LibXCFunctional: name 'CCSD' not found" instead of a clear
+    # message. No post-HF Hessian is wired up here, so these methods are
+    # single-point only (see session_calc.py).
+    from . import config as _config
+
+    if method.strip().upper() in _config.POST_HF_METHODS:
+        raise ValueError(
+            f"'{method}' is a post-HF method and cannot be used for "
+            "frequency analysis — QuantUI only has an analytical Hessian "
+            "wired up for HF/DFT methods here. Use RHF, UHF, or a DFT "
+            "functional instead."
+        )
+
     try:
         from pyscf import dft, gto, scf
         from pyscf.hessian import thermo as pyscf_thermo
@@ -283,7 +299,16 @@ def _run_freq_calc_body(
             _moe, _moo = _moe[0], _moo[0]
         mo_energy_hartree = _np_mo.asarray(_moe, dtype=float).tolist()
         mo_occ_list = _np_mo.asarray(_moo, dtype=float).tolist()
-        pyscf_mol_atom = [(str(s), list(map(float, c))) for s, c in mol._atom]
+        # Build from molecule.atoms/coordinates (Angstrom) rather than
+        # mol._atom, which PySCF always stores internally in Bohr. Every
+        # consumer of pyscf_mol_atom (Molden export, cube generation,
+        # session_calc's/optimizer's own construction of this field)
+        # assumes Angstrom; using mol._atom here silently shipped Bohr
+        # coordinates ~1.89x too large.
+        pyscf_mol_atom = [
+            (atom, list(map(float, coords)))
+            for atom, coords in zip(molecule.atoms, molecule.coordinates)
+        ]
     except Exception as exc:
         # Same class as session_calc bug-A: silent failure here ships
         # a FreqResult with no MO data, breaking the Energies panel on
@@ -355,8 +380,9 @@ def _run_freq_calc_body(
             try:
                 import numpy as _np_ir
 
+                from .config import BOHR_TO_ANGSTROM as _BOHR_TO_ANG
+
                 _DELTA = 0.01  # Bohr
-                _BOHR_TO_ANG = 0.52917721092
                 _KM_MOL_FAC = 42.255  # (D/Å)²/amu → km/mol
 
                 _n_ir = mol.natm
@@ -366,6 +392,20 @@ def _run_freq_calc_body(
                 _dm0 = mf.make_rdm1()
                 _dpdx = _np_ir.zeros((_n_ir * 3, 3))
                 _xc = getattr(mf, "xc", None)
+                # M5 audit fix (2026-07-14): whether the inner displaced-SCF
+                # loop needs an unrestricted (UHF/UKS) object is determined
+                # by _dm0's actual shape — (2, nao, nao) for UHF/UKS/ROHF,
+                # (nao, nao) for RHF/RKS — NOT by mol.spin == 0. Those two
+                # signals only agree when the user's method choice matches
+                # the molecule's natural spin state. They diverge when a
+                # user explicitly selects UHF for a closed-shell molecule
+                # (mol.spin == 0 but the parent mf, and therefore _dm0, is
+                # still UHF-shaped): the inner loop used to build RHF from
+                # mol.spin == 0, then feed it the UHF-shaped _dm0, which
+                # raised a shape-mismatch ValueError inside PySCF and
+                # silently dropped IR intensities for the whole calc (caught
+                # by the broad except below).
+                _dm0_is_unrestricted = _np_ir.asarray(_dm0).ndim == 3
 
                 _status(
                     "Numerical IR intensities: "
@@ -384,10 +424,10 @@ def _run_freq_calc_body(
 
                 def _displaced_scf_dipole() -> _np_ir.ndarray:
                     if _xc is not None:
-                        _mf_d = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
+                        _mf_d = dft.UKS(mol) if _dm0_is_unrestricted else dft.RKS(mol)
                         _mf_d.xc = _xc
                     else:
-                        _mf_d = scf.RHF(mol) if mol.spin == 0 else scf.UHF(mol)
+                        _mf_d = scf.UHF(mol) if _dm0_is_unrestricted else scf.RHF(mol)
                     _mf_d.verbose = 0
                     _mf_d.stdout = stream
                     # ``method_upper="RHF"`` is a label — try_to_gpu only
@@ -418,96 +458,111 @@ def _run_freq_calc_body(
 
                 _mol_v = mol.verbose
                 mol.verbose = 0
+                _parallel_failed = False
                 try:
                     if _use_parallel:
-                        # Stash dm0 once on disk so workers can map-load it
-                        # via initargs (avoids per-task pickling).
-                        import concurrent.futures as _cf
-                        import multiprocessing as _mp
-                        import pickle as _pickle
-                        import tempfile as _tempfile
-
-                        _n_workers = _ir_par.pick_worker_count(
-                            _cpu_count, _ir_total_solves
-                        )
-                        _threads_each = _ir_par.threads_per_worker(
-                            _cpu_count, _n_workers
-                        )
-
-                        # Build all 6N task arguments first; pickling-safe
-                        # flat lists per-displacement.
-                        _tasks: list[tuple[int, int, int, list[float]]] = []
-                        for _I in range(_n_ir):
-                            for _ax in range(3):
-                                _cp = _coords0.copy()
-                                _cp[_I, _ax] += _DELTA
-                                _tasks.append((_I, _ax, +1, _cp.flatten().tolist()))
-                                _cm = _coords0.copy()
-                                _cm[_I, _ax] -= _DELTA
-                                _tasks.append((_I, _ax, -1, _cm.flatten().tolist()))
-
-                        _dm0_handle = _tempfile.NamedTemporaryFile(
-                            delete=False, suffix=".dm0.pkl"
-                        )
                         try:
-                            _pickle.dump(_dm0, _dm0_handle)
-                            _dm0_handle.close()
+                            # Stash dm0 once on disk so workers can map-load it
+                            # via initargs (avoids per-task pickling).
+                            import concurrent.futures as _cf
+                            import multiprocessing as _mp
+                            import pickle as _pickle
+                            import tempfile as _tempfile
 
-                            # Pyscf-format atom string for worker rebuild.
-                            _atom_str = molecule.to_pyscf_format()
-                            _spin = molecule.multiplicity - 1
-                            _charge = molecule.charge
-                            _ctx = _mp.get_context("spawn")
-                            with _cf.ProcessPoolExecutor(
-                                max_workers=_n_workers,
-                                mp_context=_ctx,
-                                initializer=_ir_par.init_worker,
-                                initargs=(
-                                    _atom_str,
-                                    basis,
-                                    _charge,
-                                    _spin,
-                                    _xc,
-                                    _dm0_handle.name,
-                                    _threads_each,
-                                ),
-                            ) as _pool:
-                                # Submit all and store futures keyed by task
-                                # index so we can assemble +/- per (I, ax).
-                                _futs = {
-                                    _pool.submit(
-                                        _ir_par.run_displaced_scf, _task[3]
-                                    ): _task
-                                    for _task in _tasks
-                                }
-                                # Accumulate results into a temporary map
-                                # ``(I, ax, sign) -> dipole_array``.
-                                _dipoles: dict = {}
-                                for _fut in _cf.as_completed(_futs):
-                                    _I, _ax, _sign, _coords_done = _futs[_fut]
-                                    _dipoles[(_I, _ax, _sign)] = _fut.result()
-                                    _ir_done_solves += 1
-                                    _status(
-                                        "Numerical IR intensities (parallel ×"
-                                        f"{_n_workers}): "
-                                        f"{_ir_done_solves}/{_ir_total_solves} "
-                                        "finite-difference displacement SCFs done (6 per atom) "
-                                        f"({_ir_total_solves - _ir_done_solves} "
-                                        "remaining)"
-                                    )
-                        finally:
+                            _n_workers = _ir_par.pick_worker_count(
+                                _cpu_count, _ir_total_solves
+                            )
+                            _threads_each = _ir_par.threads_per_worker(
+                                _cpu_count, _n_workers
+                            )
+
+                            # Build all 6N task arguments first; pickling-safe
+                            # flat lists per-displacement.
+                            _tasks: list[tuple[int, int, int, list[float]]] = []
+                            for _I in range(_n_ir):
+                                for _ax in range(3):
+                                    _cp = _coords0.copy()
+                                    _cp[_I, _ax] += _DELTA
+                                    _tasks.append((_I, _ax, +1, _cp.flatten().tolist()))
+                                    _cm = _coords0.copy()
+                                    _cm[_I, _ax] -= _DELTA
+                                    _tasks.append((_I, _ax, -1, _cm.flatten().tolist()))
+
+                            _dm0_handle = _tempfile.NamedTemporaryFile(
+                                delete=False, suffix=".dm0.pkl"
+                            )
                             try:
-                                os.unlink(_dm0_handle.name)
-                            except OSError:
-                                pass
+                                _pickle.dump(_dm0, _dm0_handle)
+                                _dm0_handle.close()
 
-                        # Assemble dpdx now that all dipoles are in hand.
-                        for _I in range(_n_ir):
-                            for _ax in range(3):
-                                _mu_p = _dipoles[(_I, _ax, +1)]
-                                _mu_m = _dipoles[(_I, _ax, -1)]
-                                _dpdx[3 * _I + _ax] = (_mu_p - _mu_m) / (2 * _DELTA)
-                    else:
+                                # Pyscf-format atom string for worker rebuild.
+                                _atom_str = molecule.to_pyscf_format()
+                                _spin = molecule.multiplicity - 1
+                                _charge = molecule.charge
+                                _ctx = _mp.get_context("spawn")
+                                with _cf.ProcessPoolExecutor(
+                                    max_workers=_n_workers,
+                                    mp_context=_ctx,
+                                    initializer=_ir_par.init_worker,
+                                    initargs=(
+                                        _atom_str,
+                                        basis,
+                                        _charge,
+                                        _spin,
+                                        _xc,
+                                        _dm0_handle.name,
+                                        _threads_each,
+                                    ),
+                                ) as _pool:
+                                    # Submit all and store futures keyed by task
+                                    # index so we can assemble +/- per (I, ax).
+                                    _futs = {
+                                        _pool.submit(
+                                            _ir_par.run_displaced_scf, _task[3]
+                                        ): _task
+                                        for _task in _tasks
+                                    }
+                                    # Accumulate results into a temporary map
+                                    # ``(I, ax, sign) -> dipole_array``.
+                                    _dipoles: dict = {}
+                                    for _fut in _cf.as_completed(_futs):
+                                        _I, _ax, _sign, _coords_done = _futs[_fut]
+                                        _dipoles[(_I, _ax, _sign)] = _fut.result()
+                                        _ir_done_solves += 1
+                                        _status(
+                                            "Numerical IR intensities (parallel ×"
+                                            f"{_n_workers}): "
+                                            f"{_ir_done_solves}/{_ir_total_solves} "
+                                            "finite-difference displacement SCFs done (6 per atom) "
+                                            f"({_ir_total_solves - _ir_done_solves} "
+                                            "remaining)"
+                                        )
+                            finally:
+                                try:
+                                    os.unlink(_dm0_handle.name)
+                                except OSError:
+                                    pass
+
+                            # Assemble dpdx now that all dipoles are in hand.
+                            for _I in range(_n_ir):
+                                for _ax in range(3):
+                                    _mu_p = _dipoles[(_I, _ax, +1)]
+                                    _mu_m = _dipoles[(_I, _ax, -1)]
+                                    _dpdx[3 * _I + _ax] = (_mu_p - _mu_m) / (2 * _DELTA)
+                        except Exception as _par_exc:
+                            logger.warning(
+                                "Parallel IR-intensity computation failed (%s); falling back to serial.",
+                                _par_exc,
+                            )
+                            _status(
+                                "Parallel IR intensities failed; falling back to serial computation."
+                            )
+                            _parallel_failed = True
+                            # Reset so the serial loop's progress messages
+                            # below start clean rather than continuing from
+                            # wherever the failed parallel attempt left off.
+                            _ir_done_solves = 0
+                    if not _use_parallel or _parallel_failed:
                         for _I in range(_n_ir):
                             for _ax in range(3):
                                 # +Δ displacement

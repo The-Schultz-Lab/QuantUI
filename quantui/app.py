@@ -709,6 +709,22 @@ class _LogCapture:
     def flush(self) -> None:
         pass
 
+    def close(self) -> None:
+        """No-op — required so ASE treats this as an already-open stream.
+
+        ASE's ``IOContext.openfile()`` (used by ``BFGS(..., logfile=...)``
+        in optimizer.py / pes_scan.py) checks ``hasattr(file, "close")`` to
+        decide whether *file* is an already-open, file-like object it
+        should leave alone, vs. a path string it should ``open()`` itself.
+        Without this method, ase>=3.22 (the floor this project pins) still
+        happened to work via a later refactor's more lenient check, but
+        ase==3.26.0 (the newest version pip resolves for Python 3.9) hits
+        the stricter ``openfile()`` and raises
+        ``TypeError: expected str, bytes or os.PathLike object`` — a real
+        Python-3.9-specific compatibility gap the L6 audit fix's CI matrix
+        expansion caught.
+        """
+
     def getvalue(self) -> str:
         return self._buf.getvalue()
 
@@ -996,6 +1012,7 @@ class QuantUIApp:
         # ``_apply_analysis_context`` resets these between contexts so stale
         # state from a prior calc cannot leak into the next molecule.
         self._last_orb_mo_coeff: Any = None
+        self._last_orb_mo_occ: Any = None
         self._last_orb_mol_atom: Any = None
         self._last_orb_mol_basis: Any = None
         # Last-generated cube file path + orbital label (M-EXPORT / EXPORT.5).

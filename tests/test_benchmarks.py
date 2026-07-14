@@ -18,6 +18,7 @@ from quantui.benchmarks import (
     BENCHMARK_SUITE,
     BenchmarkStep,
     CalibrationResult,
+    _count_electrons,
     load_last_calibration,
     run_calibration,
 )
@@ -37,6 +38,30 @@ except ImportError:
 pyscf_only = pytest.mark.skipif(
     not _PYSCF_AVAILABLE, reason="PySCF not installed (Linux/macOS/WSL only)"
 )
+
+# ---------------------------------------------------------------------------
+# _count_electrons
+# ---------------------------------------------------------------------------
+
+
+class TestCountElectrons:
+    """L audit fix: _count_electrons used to hand-carry its own truncated
+    (Z=1-18) atomic-number table, silently falling back to carbon's Z=6
+    for every heavier element (e.g. iodine, gold) instead of using the
+    shared, full-periodic-table config.ATOMIC_NUMBERS.
+    """
+
+    def test_light_elements_match_known_z(self):
+        assert _count_electrons(["O", "H", "H"], charge=0) == 10  # water
+
+    def test_charge_is_subtracted(self):
+        assert _count_electrons(["O", "H", "H"], charge=1) == 9
+
+    def test_heavy_element_uses_real_atomic_number_not_carbon_fallback(self):
+        # Iodine: Z=53. The old 18-element table fell back to 6 for any
+        # element past Ar, undercounting badly for anything heavier.
+        assert _count_electrons(["I"], charge=0) == 53
+
 
 # ---------------------------------------------------------------------------
 # BENCHMARK_SUITE contents

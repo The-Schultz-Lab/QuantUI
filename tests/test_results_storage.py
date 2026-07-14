@@ -8,6 +8,7 @@ tmp_path fixtures (no mocking of the storage layer itself).
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -126,6 +127,52 @@ class TestSaveResult:
         assert d1 != d2
 
 
+class TestSaveResultJsonSafeCoercion:
+    """L audit fix: save_result must coerce every numeric/boolean field to a
+    plain Python type before json.dumps.
+
+    numpy.float64 happens to subclass float (so it round-trips through
+    json.dumps by accident), but numpy.float32, numpy.int64, and
+    numpy.bool_ do NOT subclass float/int/bool and raise TypeError
+    unconverted — a real risk for any duck-typed result object (e.g. one
+    carrying GPU-offloaded float32 values) since only
+    dipole_moment_debye/mulliken_charges/atom_symbols were coerced before,
+    while energy_hartree, homo_lumo_gap_ev, converged, n_iterations, and
+    the post-HF correlation fields were written straight from getattr().
+    """
+
+    def test_numpy_scalar_result_saves_without_raising(self, tmp_path):
+        result = SimpleNamespace(
+            formula="H2O",
+            method="RHF",
+            basis="STO-3G",
+            energy_hartree=np.float32(-74.5),
+            energy_ev=np.float32(-2027.3),
+            homo_lumo_gap_ev=np.float32(12.3),
+            converged=np.bool_(True),
+            n_iterations=np.int64(12),
+            mp2_correlation_hartree=np.float32(-0.01),
+        )
+        saved = save_result(result, results_dir=tmp_path)
+        data = json.loads((saved / "result.json").read_text())
+        assert data["energy_hartree"] == pytest.approx(-74.5, rel=1e-5)
+        assert data["converged"] is True
+        assert data["n_iterations"] == 12
+        assert data["mp2_correlation_hartree"] == pytest.approx(-0.01, rel=1e-3)
+
+    def test_numpy_bool_and_int64_fields_are_plain_python_types(self, tmp_path):
+        result = _make_result(converged=np.bool_(False), n_iterations=np.int64(5))
+        saved = save_result(result, results_dir=tmp_path)
+        # Read the raw file text (not json.loads, which normalizes types)
+        # to confirm no numpy repr ever reached the serialized bytes.
+        raw = (saved / "result.json").read_text()
+        assert "np.bool_" not in raw
+        assert "np.int64" not in raw
+        data = json.loads(raw)
+        assert isinstance(data["converged"], bool)
+        assert isinstance(data["n_iterations"], int)
+
+
 class TestLoadResult:
     def test_roundtrip(self, tmp_path):
         saved = save_result(_make_result(), results_dir=tmp_path, calc_type="frequency")
@@ -173,6 +220,24 @@ class TestListResults:
         r2 = save_result(_make_result(), results_dir=tmp_path)
         found = list_results(tmp_path)
         assert found.index(r2) < found.index(r1)
+
+    def test_collision_suffixes_sort_numerically_not_lexicographically(self, tmp_path):
+        """L audit fix: same-microsecond collision counters (…_1 … _10) must
+        sort newest-first by numeric value, not lexicographic string order
+        (which put "…_10" before "…_2").
+        """
+        base = tmp_path / "2026-07-14_00-00-00-000000_H2O_RHF_STO-3G"
+        dirs = [base] + [Path(f"{base}_{n}") for n in (1, 2, 9, 10, 11)]
+        for d in dirs:
+            d.mkdir(parents=True)
+            (d / "result.json").write_text("{}")
+
+        found = list_results(tmp_path)
+        # Newest first: highest collision counter was created most recently.
+        expected_order = [
+            dirs[i] for i in [5, 4, 3, 2, 1, 0]
+        ]  # _11, _10, _9, _2, _1, base
+        assert found == expected_order
 
 
 # ---------------------------------------------------------------------------
@@ -331,3 +396,38 @@ class TestSaveThumbnail:
         }
         save_thumbnail(result_dir, data)
         assert (result_dir / "thumbnail.png").exists()
+
+    def test_savefig_failure_does_not_raise(self, tmp_path):
+        """M9 audit fix (2026-07-14): the docstring's "silently skips ...
+        any error" promise must hold for failures past the matplotlib
+        import — a fig.savefig() failure (disk full, permission denied,
+        a bad font cache, ...) is a real possibility since it's an actual
+        filesystem write, not just figure construction.
+
+        Regression: only the `import matplotlib` block was guarded by
+        try/except; a failure anywhere else in the function (including
+        fig.savefig itself) propagated straight out.
+        """
+        from unittest.mock import MagicMock, patch
+
+        import quantui.results_storage as rs
+
+        fake_fig = MagicMock()
+        fake_fig.savefig.side_effect = OSError("simulated disk full")
+        fake_fig.get_facecolor.return_value = "#ffffff"
+
+        with patch.object(rs, "_build_thumbnail_figure", return_value=fake_fig):
+            rs.save_thumbnail(
+                tmp_path, {"calc_type": "single_point", "formula": "H2O"}
+            )  # must not raise
+
+        assert fake_fig.savefig.called
+        # plt.close() must still run on the figure even though savefig failed.
+        import matplotlib.pyplot as plt
+
+        with patch.object(plt, "close") as mock_close:
+            with patch.object(rs, "_build_thumbnail_figure", return_value=fake_fig):
+                rs.save_thumbnail(
+                    tmp_path, {"calc_type": "single_point", "formula": "H2O"}
+                )
+            mock_close.assert_called_once_with(fake_fig)

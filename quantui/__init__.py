@@ -10,6 +10,7 @@ PySCF requires Linux/macOS/WSL. Windows users should use the Apptainer container
 __version__ = "0.4.0"
 
 import logging
+from typing import Any
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
@@ -40,9 +41,6 @@ from .config import (
     VALID_ATOMS,
     WIDGET_LAYOUT,
 )
-
-# Educational help content (requires ipywidgets at display time)
-from .help_content import HELP_TOPICS, VALID_TOPICS, help_panel
 from .molecule import Molecule, parse_xyz_input
 
 # Orbital visualization (matplotlib energy diagrams, cube-file viewer)
@@ -54,9 +52,6 @@ from .orbital_visualization import (
     parse_cube_file,
     plot_orbital_diagram,
 )
-
-# Progress indicators
-from .progress import StepProgress
 
 # Security — catchable exception for constraint violations
 from .security import SecurityError
@@ -169,10 +164,31 @@ except ImportError:
     VISUALIZATION_AVAILABLE = False
     PY3DMOL_AVAILABLE = False
 
-# App class — imported last so all package symbols are defined first.
-# app.py imports from submodules directly, but placing this last is an
-# extra safeguard against accidental circular-import issues in the future.
-from .app import QuantUIApp
+# App class, StepProgress, and help_content are resolved lazily via
+# module __getattr__ (PEP 562) below. All three unconditionally pull in
+# ipywidgets (app.py additionally pulls in the rest of the GUI stack), and
+# eagerly importing them here defeats lightweight consumers like
+# ``quantui.cli`` that only need pure-Python submodules (calc_log,
+# analytics, gpu_offload) — see cli.py's module docstring.
+_LAZY_ATTRS = {
+    "QuantUIApp": (".app", "QuantUIApp"),
+    "StepProgress": (".progress", "StepProgress"),
+    "HELP_TOPICS": (".help_content", "HELP_TOPICS"),
+    "VALID_TOPICS": (".help_content", "VALID_TOPICS"),
+    "help_panel": (".help_content", "help_panel"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    target = _LAZY_ATTRS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attr_name = target
+    import importlib
+
+    module = importlib.import_module(module_name, __name__)
+    return getattr(module, attr_name)
+
 
 __all__ = [
     # Config constants

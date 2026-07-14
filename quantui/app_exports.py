@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .results_storage import _safe_name
+
 
 def on_export(app: Any, btn: Any) -> None:
     """Export a standalone Python calculation script."""
@@ -19,9 +21,14 @@ def on_export(app: Any, btn: Any) -> None:
             method=app.method_dd.value,
             basis=app.basis_dd.value,
         )
+        # M11 audit fix (2026-07-14): the basis set is embedded verbatim in
+        # the filename (e.g. "6-31G*.py"), and "*" is invalid in a Windows
+        # filename — this export silently failed there. _safe_name (already
+        # used by results_storage for the same purpose) replaces anything
+        # that isn't alphanumeric/underscore/hyphen with "x".
         fname = (
-            f"{app._molecule.get_formula()}"
-            f"_{app.method_dd.value}_{app.basis_dd.value}.py"
+            f"{_safe_name(app._molecule.get_formula())}"
+            f"_{_safe_name(app.method_dd.value)}_{_safe_name(app.basis_dd.value)}.py"
         )
         calc.generate_calculation_script(Path(fname))
         app.export_status.value = f"Saved: {fname}"
@@ -36,7 +43,7 @@ def on_export_xyz(app: Any, btn: Any) -> None:
         return
     try:
         mol, method, basis = export_molecule_and_label(app)
-        fname = f"{mol.get_formula()}_{method}_{basis}.xyz"
+        fname = f"{_safe_name(mol.get_formula())}_{_safe_name(method)}_{_safe_name(basis)}.xyz"
         xyz_body = mol.to_xyz_string()
         full_xyz = (
             f"{len(mol.atoms)}\n{mol.get_formula()} {method}/{basis}\n{xyz_body}\n"
@@ -57,7 +64,7 @@ def on_export_mol(app: Any, btn: Any) -> None:
         from rdkit import Chem
 
         mol, method, basis = export_molecule_and_label(app)
-        fname = f"{mol.get_formula()}_{method}_{basis}.mol"
+        fname = f"{_safe_name(mol.get_formula())}_{_safe_name(method)}_{_safe_name(basis)}.mol"
         rdmol = molecule_to_rdkit(mol)
         if rdmol is None:
             app.struct_export_status.value = "RDKit could not parse the structure."
@@ -79,7 +86,7 @@ def on_export_pdb(app: Any, btn: Any) -> None:
         from rdkit import Chem
 
         mol, method, basis = export_molecule_and_label(app)
-        fname = f"{mol.get_formula()}_{method}_{basis}.pdb"
+        fname = f"{_safe_name(mol.get_formula())}_{_safe_name(method)}_{_safe_name(basis)}.pdb"
         rdmol = molecule_to_rdkit(mol)
         if rdmol is None:
             app.struct_export_status.value = "RDKit could not parse the structure."
