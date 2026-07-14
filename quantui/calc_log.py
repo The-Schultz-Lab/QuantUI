@@ -948,10 +948,33 @@ def clear_event_log() -> None:
 # Event log (7-day TTL)
 # ---------------------------------------------------------------------------
 
+# M8 audit fix (2026-07-14): log_event() used to call prune_events() after
+# every single append, and prune_events() itself read the file (acquiring
+# and releasing _LOCK) and only later reacquired _LOCK to rewrite it. Two
+# problems:
+#
+# 1. Race: an append from another thread landing in the gap between the
+#    read and the rewrite got silently discarded when the rewrite replaced
+#    the whole file with the (now-stale) `kept` list computed before that
+#    append happened.
+# 2. Cost: reading + rewriting the entire event log on every single write
+#    is O(file size) per event, i.e. O(N^2) over a session as the log
+#    grows — noticeable once a session has logged more than a few hundred
+#    events.
+#
+# Fixed by (a) making prune_events() read + filter + rewrite as a single
+# lock-held critical section, so a concurrent append either completes
+# before the prune starts or blocks until it finishes — it can never be
+# silently lost — and (b) only running the full prune every
+# _PRUNE_EVERY_N_EVENTS appends instead of on every single one.
+_PRUNE_EVERY_N_EVENTS = 20
+_events_since_prune = 0
+
 
 def log_event(event_type: str, message: str, **extra: object) -> None:
     """
-    Append one event to ``event_log.jsonl`` and prune entries > 7 days old.
+    Append one event to ``event_log.jsonl``; prune entries > 7 days old
+    periodically (every :data:`_PRUNE_EVERY_N_EVENTS` calls, not every one).
 
     Args:
         event_type: Short category string, e.g. ``"startup"``, ``"calc_done"``,
@@ -959,6 +982,8 @@ def log_event(event_type: str, message: str, **extra: object) -> None:
         message:    Human-readable description.
         **extra:    Any additional key-value pairs to include in the record.
     """
+    global _events_since_prune
+
     record: dict = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "event": event_type,
@@ -966,28 +991,51 @@ def log_event(event_type: str, message: str, **extra: object) -> None:
         **extra,
     }
     _append(_event_path(), record)
-    prune_events()
+
+    with _LOCK:
+        _events_since_prune += 1
+        due_for_prune = _events_since_prune >= _PRUNE_EVERY_N_EVENTS
+        if due_for_prune:
+            _events_since_prune = 0
+    if due_for_prune:
+        prune_events()
 
 
 def prune_events(days: int = 7) -> None:
-    """Remove event-log entries older than *days* days (default: 7)."""
+    """Remove event-log entries older than *days* days (default: 7).
+
+    Reads, filters, and rewrites the file as a single lock-held critical
+    section so a concurrent :func:`log_event` append can never be silently
+    lost between the read and the rewrite (see module-level note above).
+    """
     path = _event_path()
-    if not path.exists():
-        return
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    records = _read_all(path)
-    kept: list[dict] = []
-    for r in records:
-        try:
-            ts = datetime.fromisoformat(r["timestamp"])
-            # fromisoformat on Python < 3.11 doesn't handle 'Z' suffix
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            if ts >= cutoff:
-                kept.append(r)
-        except (KeyError, ValueError):
-            kept.append(r)  # keep malformed entries rather than silently drop
+
     with _LOCK:
+        if not path.exists():
+            return
+        records: list[dict] = []
+        with open(path, encoding="utf-8") as fh:
+            for raw in fh:
+                raw = raw.strip()
+                if raw:
+                    try:
+                        records.append(json.loads(raw))
+                    except json.JSONDecodeError:
+                        pass
+
+        kept: list[dict] = []
+        for r in records:
+            try:
+                ts = datetime.fromisoformat(r["timestamp"])
+                # fromisoformat on Python < 3.11 doesn't handle 'Z' suffix
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                if ts >= cutoff:
+                    kept.append(r)
+            except (KeyError, ValueError):
+                kept.append(r)  # keep malformed entries rather than silently drop
+
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
             for r in kept:

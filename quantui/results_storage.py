@@ -28,7 +28,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     pass  # result types accepted via duck typing; no hard import needed
@@ -721,6 +721,32 @@ def save_thumbnail(result_dir: Path, data: dict) -> None:
     except ImportError:
         return
 
+    # M9 audit fix (2026-07-14): only the matplotlib import itself was
+    # guarded — figure construction, text rendering, and fig.savefig() (a
+    # real filesystem write, so it can hit disk-full / permission errors)
+    # could all raise past this function despite the docstring's promise
+    # to silently skip "any error". Wrap the whole body so that promise
+    # actually holds; fig.close() still runs via finally regardless of
+    # where in the body a failure happened.
+    fig = None
+    try:
+        fig = _build_thumbnail_figure(plt, data)
+        fig.savefig(
+            str(result_dir / "thumbnail.png"),
+            dpi=144,
+            bbox_inches="tight",
+            facecolor=fig.get_facecolor(),
+            pad_inches=0.05,
+        )
+    except Exception:
+        pass
+    finally:
+        if fig is not None:
+            plt.close(fig)
+
+
+def _build_thumbnail_figure(plt: Any, data: dict) -> Any:
+    """Build (but don't save) the thumbnail matplotlib Figure for :func:`save_thumbnail`."""
     _colors: dict = {
         "single_point": ("#2563eb", "#dbeafe"),
         "geometry_opt": ("#7c3aed", "#ede9fe"),
@@ -820,13 +846,4 @@ def save_thumbnail(result_dir: Path, data: dict) -> None:
             transform=ax.transAxes,
         )
 
-    try:
-        fig.savefig(
-            str(result_dir / "thumbnail.png"),
-            dpi=144,
-            bbox_inches="tight",
-            facecolor=bg,
-            pad_inches=0.05,
-        )
-    finally:
-        plt.close(fig)
+    return fig

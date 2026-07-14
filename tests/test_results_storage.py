@@ -331,3 +331,38 @@ class TestSaveThumbnail:
         }
         save_thumbnail(result_dir, data)
         assert (result_dir / "thumbnail.png").exists()
+
+    def test_savefig_failure_does_not_raise(self, tmp_path):
+        """M9 audit fix (2026-07-14): the docstring's "silently skips ...
+        any error" promise must hold for failures past the matplotlib
+        import — a fig.savefig() failure (disk full, permission denied,
+        a bad font cache, ...) is a real possibility since it's an actual
+        filesystem write, not just figure construction.
+
+        Regression: only the `import matplotlib` block was guarded by
+        try/except; a failure anywhere else in the function (including
+        fig.savefig itself) propagated straight out.
+        """
+        from unittest.mock import MagicMock, patch
+
+        import quantui.results_storage as rs
+
+        fake_fig = MagicMock()
+        fake_fig.savefig.side_effect = OSError("simulated disk full")
+        fake_fig.get_facecolor.return_value = "#ffffff"
+
+        with patch.object(rs, "_build_thumbnail_figure", return_value=fake_fig):
+            rs.save_thumbnail(
+                tmp_path, {"calc_type": "single_point", "formula": "H2O"}
+            )  # must not raise
+
+        assert fake_fig.savefig.called
+        # plt.close() must still run on the figure even though savefig failed.
+        import matplotlib.pyplot as plt
+
+        with patch.object(plt, "close") as mock_close:
+            with patch.object(rs, "_build_thumbnail_figure", return_value=fake_fig):
+                rs.save_thumbnail(
+                    tmp_path, {"calc_type": "single_point", "formula": "H2O"}
+                )
+            mock_close.assert_called_once_with(fake_fig)
