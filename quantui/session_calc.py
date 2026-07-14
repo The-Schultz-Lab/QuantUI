@@ -497,26 +497,32 @@ def _run_session_calc_body(
 
     mulliken_charges: Optional[List[float]] = None
     dipole_moment_debye: Optional[float] = None
-    if method_upper != "UHF":
-        try:
-            # gpu4pyscf doesn't implement population analysis on the GPU object
-            # (``mf.mulliken_pop`` is NotImplemented), so on a GPU-offloaded run
-            # fall back to the host (CPU) object via ``to_cpu()``. ``chg`` is
-            # then host NumPy; _to_numpy_array also covers the CuPy case.
-            mf_pop = mf
-            if not callable(getattr(mf, "mulliken_pop", None)) and callable(
-                getattr(mf, "to_cpu", None)
-            ):
-                mf_pop = mf.to_cpu()
-            _, chg = mf_pop.mulliken_pop(verbose=0)
-            mulliken_charges = [float(c) for c in _to_numpy_array(chg)]
-        except Exception as exc:
-            logger.debug("Mulliken population extraction failed: %s", exc)
-        try:
-            dip = _to_numpy_array(mf.dip_moment(verbose=0))
-            dipole_moment_debye = float(_np.linalg.norm(dip))
-        except Exception as exc:
-            logger.debug("Dipole moment extraction failed: %s", exc)
+    # M3 audit fix (2026-07-14): both mf.mulliken_pop() and mf.dip_moment()
+    # are well-defined and work correctly for a genuine UHF object (verified
+    # empirically against PySCF) — the previous ``method_upper != "UHF"``
+    # guard around this whole block was an unnecessary restriction that
+    # left the result card blank for both properties on every UHF run,
+    # while UKS (open-shell DFT) went through the identical extraction
+    # successfully.
+    try:
+        # gpu4pyscf doesn't implement population analysis on the GPU object
+        # (``mf.mulliken_pop`` is NotImplemented), so on a GPU-offloaded run
+        # fall back to the host (CPU) object via ``to_cpu()``. ``chg`` is
+        # then host NumPy; _to_numpy_array also covers the CuPy case.
+        mf_pop = mf
+        if not callable(getattr(mf, "mulliken_pop", None)) and callable(
+            getattr(mf, "to_cpu", None)
+        ):
+            mf_pop = mf.to_cpu()
+        _, chg = mf_pop.mulliken_pop(verbose=0)
+        mulliken_charges = [float(c) for c in _to_numpy_array(chg)]
+    except Exception as exc:
+        logger.debug("Mulliken population extraction failed: %s", exc)
+    try:
+        dip = _to_numpy_array(mf.dip_moment(verbose=0))
+        dipole_moment_debye = float(_np.linalg.norm(dip))
+    except Exception as exc:
+        logger.debug("Dipole moment extraction failed: %s", exc)
 
     # MO arrays for orbital visualization (non-fatal if extraction fails).
     # Uses the same ``_to_numpy_array`` CuPy→host helper defined above

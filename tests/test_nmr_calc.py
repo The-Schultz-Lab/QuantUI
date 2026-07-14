@@ -151,6 +151,44 @@ class TestNMRConfig:
         assert 150.0 < NMR_DEFAULT_REFERENCE["C"] < 220.0
 
 
+class TestResolveNmrReference:
+    """M4 audit fix (2026-07-14): record which reference was actually used.
+
+    Regression: any method/basis combination not in
+    config.NMR_REFERENCE_SHIELDINGS silently used the B3LYP/6-31G*
+    constants with no record anywhere that a substitution happened —
+    chemical shifts could be off by a few ppm with no indication to the
+    student. resolve_nmr_reference() (and the NMRResult.reference_key /
+    is_fallback_reference fields it feeds) makes that substitution visible.
+    No PySCF needed — pure lookup logic.
+    """
+
+    def test_exact_match_is_not_fallback(self):
+        from quantui.nmr_calc import resolve_nmr_reference
+
+        ref_map, key, is_fallback = resolve_nmr_reference("B3LYP", "6-31G*")
+        assert key == "B3LYP/6-31G*"
+        assert is_fallback is False
+        assert ref_map == {"H": 31.72, "C": 183.71}
+
+    def test_unlisted_combination_is_fallback(self):
+        from quantui.nmr_calc import resolve_nmr_reference
+
+        ref_map, key, is_fallback = resolve_nmr_reference("CAM-B3LYP", "6-31G*")
+        assert is_fallback is True
+        assert key == "B3LYP/6-31G*"
+        from quantui.config import NMR_DEFAULT_REFERENCE
+
+        assert ref_map == NMR_DEFAULT_REFERENCE
+
+    def test_lookup_is_case_insensitive(self):
+        from quantui.nmr_calc import resolve_nmr_reference
+
+        ref_map, key, is_fallback = resolve_nmr_reference("rhf", "6-31g*")
+        assert is_fallback is False
+        assert key == "RHF/6-31G*"
+
+
 # ---------------------------------------------------------------------------
 # run_nmr_calc — PySCF-gated
 # ---------------------------------------------------------------------------
@@ -210,6 +248,22 @@ class TestRunNMRCalc:
         mol = _water()
         result = run_nmr_calc(mol, method="RHF", basis="STO-3G")
         assert len(result.shielding_iso_ppm) == len(list(mol.atoms))
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_exact_match_reference_not_flagged_as_fallback(self):
+        """M4 audit fix: RHF/STO-3G is tabulated -> not a fallback."""
+        result = run_nmr_calc(_water(), method="RHF", basis="STO-3G")
+        assert result.reference_key == "RHF/STO-3G"
+        assert result.is_fallback_reference is False
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_untabulated_combination_flagged_as_fallback(self):
+        """M4 audit fix: an untabulated method/basis is flagged, not silent."""
+        result = run_nmr_calc(_water(), method="CAM-B3LYP", basis="6-31G*")
+        assert result.is_fallback_reference is True
+        assert result.reference_key == "B3LYP/6-31G*"
 
 
 # ============================================================================

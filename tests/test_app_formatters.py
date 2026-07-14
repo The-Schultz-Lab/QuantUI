@@ -201,6 +201,46 @@ def test_format_nmr_result_warns_on_small_basis():
     assert "qualitative NMR only" in html
 
 
+def test_format_nmr_result_warns_on_fallback_reference():
+    """M4 audit fix (2026-07-14): fallback reference constants are surfaced.
+
+    Regression: an untabulated method/basis silently substituted the
+    B3LYP/6-31G* reference constants with no indication anywhere in the
+    result card — the student had no way to know their chemical shifts
+    might be off by a few ppm.
+    """
+    result = _NMRStub(
+        converged=True,
+        reference_compound="TMS",
+        atom_symbols=["O", "H", "H"],
+        chemical_shifts_ppm={1: 4.5, 2: 4.5},
+        formula="H2O",
+        method="CAM-B3LYP",
+        basis="6-31G*",
+        reference_key="B3LYP/6-31G*",
+        is_fallback_reference=True,
+    )
+    html = format_nmr_result(result)
+    assert "No calibrated TMS reference" in html
+    assert "CAM-B3LYP/6-31G*" in html
+
+
+def test_format_nmr_result_no_warning_for_exact_reference_match():
+    result = _NMRStub(
+        converged=True,
+        reference_compound="TMS",
+        atom_symbols=["O", "H", "H"],
+        chemical_shifts_ppm={1: 4.5, 2: 4.5},
+        formula="H2O",
+        method="B3LYP",
+        basis="6-31G*",
+        reference_key="B3LYP/6-31G*",
+        is_fallback_reference=False,
+    )
+    html = format_nmr_result(result)
+    assert "No calibrated TMS reference" not in html
+
+
 def test_format_pes_scan_result_reports_range_and_convergence():
     result = SimpleNamespace(
         converged_all=True,

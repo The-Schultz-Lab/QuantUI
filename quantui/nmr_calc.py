@@ -37,6 +37,16 @@ class NMRResult:
     formula: str
     reference_compound: str = "TMS"
     converged: bool = True
+    # M4 audit fix (2026-07-14): which config.NMR_REFERENCE_SHIELDINGS entry
+    # was actually applied, and whether it's an exact match for method/basis
+    # or a fallback. NMR_REFERENCE_SHIELDINGS only tabulates a handful of
+    # method/basis combinations; any other combination previously fell back
+    # to the B3LYP/6-31G* constants with no record of it anywhere, so
+    # chemical shifts could be silently offset by several ppm with no way
+    # for the student to know the reference wasn't calibrated for their
+    # method/basis.
+    reference_key: str = ""
+    is_fallback_reference: bool = False
 
     def h_shifts(self) -> List[Tuple[int, float]]:
         """(atom_index, δ ppm) pairs for all H atoms in molecule order."""
@@ -53,6 +63,31 @@ class NMRResult:
             for i, d in sorted(self.chemical_shifts_ppm.items())
             if self.atom_symbols[i] == "C"
         ]
+
+
+def resolve_nmr_reference(method: str, basis: str) -> Tuple[Dict[str, float], str, bool]:
+    """Resolve TMS reference shielding constants for ``method``/``basis``.
+
+    Looks up ``config.NMR_REFERENCE_SHIELDINGS`` case-insensitively (keys
+    there are declared as e.g. ``"B3LYP/6-31G*"``). Returns
+    ``(ref_map, matched_key, is_fallback)``:
+
+    - ``ref_map``: the ``{"H": ..., "C": ...}`` shielding constants to use.
+    - ``matched_key``: the table key that was actually applied.
+    - ``is_fallback``: ``True`` when no entry exists for this exact
+      method/basis and ``config.NMR_DEFAULT_REFERENCE`` (B3LYP/6-31G*) was
+      substituted instead — chemical shifts computed with a substituted
+      reference can be off by several ppm relative to properly calibrated
+      constants for the requested level of theory.
+    """
+    from . import config as _config
+
+    requested_key = f"{method}/{basis}"
+    requested_upper = requested_key.upper()
+    for table_key, ref_map in _config.NMR_REFERENCE_SHIELDINGS.items():
+        if table_key.upper() == requested_upper:
+            return ref_map, table_key, False
+    return _config.NMR_DEFAULT_REFERENCE, "B3LYP/6-31G*", True
 
 
 def run_nmr_calc(
@@ -329,8 +364,7 @@ def _run_nmr_calc_body(
         else:
             shielding_iso.append(float(arr))
 
-    key = f"{method}/{basis}"
-    ref_map = _config.NMR_REFERENCE_SHIELDINGS.get(key, _config.NMR_DEFAULT_REFERENCE)
+    ref_map, matched_ref_key, is_fallback_ref = resolve_nmr_reference(method, basis)
     ref_H = float(ref_map.get("H", _config.NMR_DEFAULT_REFERENCE["H"]))
     ref_C = float(ref_map.get("C", _config.NMR_DEFAULT_REFERENCE["C"]))
 
@@ -350,4 +384,6 @@ def _run_nmr_calc_body(
         basis=basis,
         formula=molecule.get_formula(),
         converged=converged,
+        reference_key=matched_ref_key,
+        is_fallback_reference=is_fallback_ref,
     )

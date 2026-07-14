@@ -298,6 +298,22 @@ def format_nmr_result(r: Any) -> str:
             "</td></tr>"
         )
 
+    # M4 audit fix (2026-07-14): the reference shielding constants table only
+    # covers a handful of method/basis combinations; any other combination
+    # silently substitutes the B3LYP/6-31G* constants, which can shift the
+    # reported ppm values by several ppm relative to a properly calibrated
+    # reference. Surface that substitution rather than let it pass silently.
+    _ref_warn = ""
+    if getattr(r, "is_fallback_reference", False):
+        _ref_warn = (
+            '<tr><td colspan="2" style="padding:6px 0 0">'
+            '<span style="color:#b45309;font-size:12px">'
+            f"⚠ No calibrated TMS reference for {r.method}/{r.basis} — using "
+            f"{getattr(r, 'reference_key', 'B3LYP/6-31G*')} constants instead. "
+            "Shifts may be off by a few ppm.</span>"
+            "</td></tr>"
+        )
+
     _empty = ""
     if not r.h_shifts() and not r.c_shifts():
         _empty = (
@@ -310,7 +326,7 @@ def format_nmr_result(r: Any) -> str:
         f'padding:10px 14px;border-radius:4px;margin:6px 0">'
         f"<b>NMR Shielding &mdash; {r.formula} ({r.method}/{r.basis})</b>"
         f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-        f"{header_rows}{h_table}{c_table}{_empty}{_basis_warn}</table></div>"
+        f"{header_rows}{h_table}{c_table}{_empty}{_basis_warn}{_ref_warn}</table></div>"
     )
 
 

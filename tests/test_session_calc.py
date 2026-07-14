@@ -193,13 +193,37 @@ class TestMullikenDipolePySCF:
 
     @pyscf_only
     @pytest.mark.slow
-    def test_uhf_leaves_charges_and_dipole_none(self):
+    def test_uhf_populates_mulliken_charges(self):
+        """M3 audit fix (2026-07-14): UHF now gets Mulliken charges too.
+
+        Regression: session_calc.py used to skip this whole extraction
+        block for method_upper == "UHF" specifically, even though
+        mf.mulliken_pop() is well-defined and works correctly for a real
+        UHF object (UKS — open-shell DFT — went through the identical
+        code successfully the whole time). Uses an OH radical (doublet)
+        rather than a lone atom so the charges are chemically meaningful
+        (nonzero), not just trivially zero.
+        """
         from quantui.session_calc import run_in_session
 
-        mol = Molecule(["H"], [[0.0, 0.0, 0.0]], charge=0, multiplicity=2)
+        mol = Molecule(
+            ["O", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 0.96]], charge=0, multiplicity=2
+        )
         result = run_in_session(mol, method="UHF", basis="STO-3G", verbose=0)
-        assert result.mulliken_charges is None
-        assert result.dipole_moment_debye is None
+        assert result.mulliken_charges is not None
+        assert len(result.mulliken_charges) == 2
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_uhf_populates_dipole_moment(self):
+        from quantui.session_calc import run_in_session
+
+        mol = Molecule(
+            ["O", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 0.96]], charge=0, multiplicity=2
+        )
+        result = run_in_session(mol, method="UHF", basis="STO-3G", verbose=0)
+        assert result.dipole_moment_debye is not None
+        assert result.dipole_moment_debye > 0
 
 
 # ============================================================================
