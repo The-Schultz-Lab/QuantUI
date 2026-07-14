@@ -642,6 +642,45 @@ class TestExportXYZCallback:
         app._on_export_xyz(None)
         assert "molecule" in app.struct_export_status.value.lower()
 
+    def test_xyz_filename_sanitizes_basis_with_asterisk(self, tmp_path):
+        """M11 audit fix (2026-07-14): a basis like "6-31G*" embedded
+        verbatim in a filename is invalid on Windows ("*" is a reserved
+        character there) and glob-hostile on POSIX. The exported filename
+        must not contain "*".
+        """
+        app = QuantUIApp()
+        app._set_molecule(_water())
+        app._last_result_dir = tmp_path
+        app.basis_dd.value = "6-31G*"
+
+        app._on_export_xyz(None)
+
+        xyz_files = list(tmp_path.glob("*.xyz"))
+        assert len(xyz_files) == 1
+        assert "*" not in xyz_files[0].name
+        assert "Error" not in app.struct_export_status.value
+
+
+class TestExportScriptCallback:
+    """_on_export (standalone PySCF script) sanitizes its filename too."""
+
+    def test_script_filename_sanitizes_basis_with_asterisk(self, tmp_path, monkeypatch):
+        """M11 audit fix (2026-07-14): same filename-sanitization bug as
+        the XYZ export, for the "Export Script" button — the script is
+        written to a bare relative filename in the current directory.
+        """
+        monkeypatch.chdir(tmp_path)
+        app = QuantUIApp()
+        app._set_molecule(_water())
+        app.basis_dd.value = "6-31G*"
+
+        app._on_export(None)
+
+        py_files = list(tmp_path.glob("*.py"))
+        assert len(py_files) == 1
+        assert "*" not in py_files[0].name
+        assert "Error" not in app.export_status.value
+
 
 class TestExportMoleculeAndLabel:
     """_export_molecule_and_label returns correct molecule and labels."""

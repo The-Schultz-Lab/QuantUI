@@ -295,6 +295,63 @@ class TestCheckPubChemAvailability:
         result = check_pubchem_availability()
         assert result is False
 
+    @patch("quantui.pubchem.requests.get")
+    @patch("quantui.pubchem._throttle")
+    def test_check_uses_shared_throttle(self, mock_throttle, mock_get):
+        """M10 audit fix (2026-07-14): must go through the shared
+        client-side rate limiter like every other PubChem call, not call
+        requests.get() directly. A burst of concurrent availability
+        checks (e.g. several students clicking "check connection" at
+        once) could otherwise exceed PubChem's server-side throttle.
+        """
+        mock_get.return_value = Mock(status_code=200)
+        check_pubchem_availability()
+        assert mock_throttle.called
+
+    @patch("quantui.pubchem.requests.get")
+    def test_check_uses_configured_availability_timeout(self, mock_get):
+        """M10 audit fix: must use config.PUBCHEM_AVAILABILITY_TIMEOUT_S,
+        not a hardcoded value the config constant can't actually control.
+        """
+        from quantui import config
+
+        mock_get.return_value = Mock(status_code=200)
+        check_pubchem_availability()
+        _, kwargs = mock_get.call_args
+        assert kwargs.get("timeout") == config.PUBCHEM_AVAILABILITY_TIMEOUT_S
+
+
+class TestHttpGetMaxRetriesGuard:
+    """M10 audit fix (2026-07-14): _http_get must never return None.
+
+    Regression: `for attempt in range(config.PUBCHEM_MAX_RETRIES):` iterated
+    zero times when PUBCHEM_MAX_RETRIES was 0 (or negative), leaving the
+    ``response`` initializer (None) as the return value — every caller
+    then hit AttributeError on response.status_code / .raise_for_status().
+    """
+
+    @patch("quantui.pubchem.requests.get")
+    def test_zero_max_retries_still_attempts_once(self, mock_get):
+        from quantui import config
+        from quantui.pubchem import _http_get
+
+        mock_get.return_value = Mock(status_code=200)
+        with patch.object(config, "PUBCHEM_MAX_RETRIES", 0):
+            result = _http_get("http://example.com/probe")
+        assert result is not None
+        assert mock_get.call_count == 1
+
+    @patch("quantui.pubchem.requests.get")
+    def test_negative_max_retries_still_attempts_once(self, mock_get):
+        from quantui import config
+        from quantui.pubchem import _http_get
+
+        mock_get.return_value = Mock(status_code=200)
+        with patch.object(config, "PUBCHEM_MAX_RETRIES", -1):
+            result = _http_get("http://example.com/probe")
+        assert result is not None
+        assert mock_get.call_count == 1
+
 
 # ============================================================================
 # Integration Tests (Require Network) - Marked and Skipped by Default

@@ -66,14 +66,21 @@ def _http_get(
     to :class:`PubChemAPIError` exactly as before.
     """
     timeout = timeout if timeout is not None else config.PUBCHEM_TIMEOUT_S
+    # M10 audit fix (2026-07-14): if config.PUBCHEM_MAX_RETRIES were ever 0
+    # (or negative), `range(config.PUBCHEM_MAX_RETRIES)` would iterate zero
+    # times, leaving `response` at its None initializer and returning None
+    # from a function typed to return requests.Response — every caller
+    # then hits AttributeError on response.status_code. Always attempt at
+    # least once regardless of the configured retry count.
+    max_attempts = max(1, config.PUBCHEM_MAX_RETRIES)
     response = None
-    for attempt in range(config.PUBCHEM_MAX_RETRIES):
+    for attempt in range(max_attempts):
         _throttle()
         response = requests.get(url, params=params, timeout=timeout)
         if response.status_code != 503:
             return response
         # Throttled — back off (capped) and retry, unless this was the last try.
-        if attempt < config.PUBCHEM_MAX_RETRIES - 1:
+        if attempt < max_attempts - 1:
             backoff = min(
                 config.PUBCHEM_BACKOFF_BASE_S * (2**attempt),
                 config.PUBCHEM_BACKOFF_MAX_S,
@@ -82,7 +89,7 @@ def _http_get(
                 "PubChem throttled (503); retrying in %.1fs (attempt %d/%d)",
                 backoff,
                 attempt + 1,
-                config.PUBCHEM_MAX_RETRIES,
+                max_attempts,
             )
             time.sleep(backoff)
     # Exhausted retries — hand the last 503 back; caller raises via raise_for_status.
@@ -542,9 +549,21 @@ def check_pubchem_availability() -> bool:
     Returns:
         bool: True if PubChem is accessible, False otherwise
     """
+    # M10 audit fix (2026-07-14): this used to call requests.get() directly,
+    # bypassing the shared client-side rate limiter (_throttle()) that every
+    # other function in this module goes through — a burst of concurrent
+    # availability checks (e.g. several students in a classroom clicking
+    # "check connection" around the same time) could exceed PubChem's
+    # server-side throttle. It also hardcoded timeout=5 instead of the
+    # config.PUBCHEM_AVAILABILITY_TIMEOUT_S constant defined specifically
+    # for this probe, so changing that constant silently had no effect
+    # here. Calls _throttle() directly (not the full _http_get retry loop —
+    # this is meant to be a quick, no-retry reachability probe) and uses
+    # the configured timeout.
     try:
         url = f"{PUBCHEM_BASE_URL}/compound/cid/962/property/MolecularFormula/JSON"
-        response = requests.get(url, timeout=5)
+        _throttle()
+        response = requests.get(url, timeout=config.PUBCHEM_AVAILABILITY_TIMEOUT_S)
         return bool(response.status_code == 200)
     except Exception:
         return False
