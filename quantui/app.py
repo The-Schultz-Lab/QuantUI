@@ -996,6 +996,7 @@ class QuantUIApp:
         # ``_apply_analysis_context`` resets these between contexts so stale
         # state from a prior calc cannot leak into the next molecule.
         self._last_orb_mo_coeff: Any = None
+        self._last_orb_mo_occ: Any = None
         self._last_orb_mol_atom: Any = None
         self._last_orb_mol_basis: Any = None
         # Last-generated cube file path + orbital label (M-EXPORT / EXPORT.5).

@@ -283,7 +283,16 @@ def _run_freq_calc_body(
             _moe, _moo = _moe[0], _moo[0]
         mo_energy_hartree = _np_mo.asarray(_moe, dtype=float).tolist()
         mo_occ_list = _np_mo.asarray(_moo, dtype=float).tolist()
-        pyscf_mol_atom = [(str(s), list(map(float, c))) for s, c in mol._atom]
+        # Build from molecule.atoms/coordinates (Angstrom) rather than
+        # mol._atom, which PySCF always stores internally in Bohr. Every
+        # consumer of pyscf_mol_atom (Molden export, cube generation,
+        # session_calc's/optimizer's own construction of this field)
+        # assumes Angstrom; using mol._atom here silently shipped Bohr
+        # coordinates ~1.89x too large.
+        pyscf_mol_atom = [
+            (atom, list(map(float, coords)))
+            for atom, coords in zip(molecule.atoms, molecule.coordinates)
+        ]
     except Exception as exc:
         # Same class as session_calc bug-A: silent failure here ships
         # a FreqResult with no MO data, breaking the Energies panel on

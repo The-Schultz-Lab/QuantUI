@@ -419,6 +419,56 @@ class TestCaching:
 
 
 # ============================================================================
+# generate_2d_structure_svg — XYZ input path (H4 audit fix, 2026-07-14)
+# ============================================================================
+
+
+class TestGenerate2DStructureSvgFromXyz:
+    """The xyz_string= branch used to always return None.
+
+    Regression: it called AddAtom on an immutable Chem.Mol() (only RWMol
+    supports AddAtom), so every call raised AttributeError internally —
+    silently swallowed by the function's broad except-and-return-None —
+    and a stray Chem.Conformer() with no atom count plus an atom-index
+    that didn't skip malformed lines the same way could desync positions
+    from atoms even if construction had worked.
+    """
+
+    @rdkit_only
+    def test_returns_svg_for_valid_xyz(self):
+        from quantui.pubchem import generate_2d_structure_svg
+
+        xyz = "3\nWater\nO 0.0 0.0 0.0\nH 0.757 0.587 0.0\nH -0.757 0.587 0.0\n"
+        svg = generate_2d_structure_svg(xyz_string=xyz)
+        assert svg is not None
+        assert "<svg" in svg
+
+    @rdkit_only
+    def test_skips_malformed_lines_without_desyncing_positions(self):
+        # A blank/short line interleaved with valid atom lines must not
+        # shift which coordinate lands on which atom.
+        from quantui.pubchem import generate_2d_structure_svg
+
+        xyz = (
+            "3\nWater\n"
+            "O 0.0 0.0 0.0\n"
+            "\n"  # malformed / skippable line
+            "H 0.757 0.587 0.0\n"
+            "H -0.757 0.587 0.0\n"
+        )
+        svg = generate_2d_structure_svg(xyz_string=xyz)
+        assert svg is not None
+        assert "<svg" in svg
+
+    @rdkit_only
+    def test_invalid_xyz_returns_none_not_raises(self):
+        from quantui.pubchem import generate_2d_structure_svg
+
+        svg = generate_2d_structure_svg(xyz_string="not\nxyz")
+        assert svg is None
+
+
+# ============================================================================
 # Run Tests
 # ============================================================================
 

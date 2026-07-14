@@ -965,6 +965,7 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
 
     app._last_orb_info = info
     app._last_orb_mo_coeff = getattr(result, "mo_coeff", None)
+    app._last_orb_mo_occ = mo_occ
     app._last_orb_mol_atom = getattr(result, "pyscf_mol_atom", None)
     app._last_orb_mol_basis = getattr(result, "pyscf_mol_basis", None)
 
@@ -1171,6 +1172,7 @@ def render_orbital_isosurface(
     mo_coeff = getattr(app, "_last_orb_mo_coeff", None)
     mol_atom = getattr(app, "_last_orb_mol_atom", None)
     mol_basis = getattr(app, "_last_orb_mol_basis", None)
+    mo_occ_for_charge = getattr(app, "_last_orb_mo_occ", None)
     if mo_coeff is None or mol_atom is None or mol_basis is None:
         return
 
@@ -1179,6 +1181,7 @@ def render_orbital_isosurface(
 
         from quantui.orbital_visualization import (
             generate_cube_from_arrays,
+            infer_charge_and_spin,
             plot_cube_isosurface,
             render_orbital_isosurface_py3dmol,
         )
@@ -1204,7 +1207,19 @@ def render_orbital_isosurface(
         ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
         cube_path = cube_dir / f"{safe_formula}_{safe_orb}_{ts}.cube"
 
-        generate_cube_from_arrays(mol_atom, mol_basis, mo_coeff, orb_idx, cube_path)
+        # Charge/spin aren't carried on the app's orbital-state attributes —
+        # infer them from the MO occupations so charged/open-shell molecules
+        # (H3O+, OH-, radicals, ...) don't fail to build in PySCF (H1 fix).
+        _charge, _spin = infer_charge_and_spin(mol_atom, mo_occ_for_charge)
+        generate_cube_from_arrays(
+            mol_atom,
+            mol_basis,
+            mo_coeff,
+            orb_idx,
+            cube_path,
+            charge=_charge,
+            spin=_spin,
+        )
         scene_bgcolor = app._plotly_theme_colors()["scene_bgcolor"]
 
         # Route the render: py3Dmol does native, full-resolution in-browser

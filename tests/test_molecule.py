@@ -393,6 +393,57 @@ H  -0.757  -0.587  0.5"""
         assert coords[2][0] == -0.757
 
 
+class TestXyzHeaderTitleLine:
+    """XYZ-file-format header (count + title) edge cases (H5 audit fix, 2026-07-14).
+
+    Regression: blank/comment title lines were stripped by the parser's
+    blank/comment filtering BEFORE header detection ran, which shifted the
+    first real atom line into the "title" slot — silently dropping the
+    first atom for any standard XYZ file whose title line was blank or a
+    "#"/"!" comment (both very common: many tools write an empty title).
+    """
+
+    def test_blank_title_line_keeps_all_atoms(self):
+        xyz_text = "3\n\nO  0.0  0.0  0.0\nH  0.757  0.587  0.0\nH  -0.757  0.587  0.0"
+        atoms, coords = parse_xyz_input(xyz_text)
+        assert atoms == ["O", "H", "H"]
+        assert len(coords) == 3
+        assert coords[0] == [0.0, 0.0, 0.0]
+
+    def test_comment_title_line_keeps_all_atoms(self):
+        xyz_text = (
+            "3\n# Water molecule\nO  0.0  0.0  0.0\n"
+            "H  0.757  0.587  0.0\nH  -0.757  0.587  0.0"
+        )
+        atoms, coords = parse_xyz_input(xyz_text)
+        assert atoms == ["O", "H", "H"]
+        assert len(coords) == 3
+
+    def test_bang_comment_title_line_keeps_all_atoms(self):
+        xyz_text = (
+            "3\n! Water molecule\nO  0.0  0.0  0.0\n"
+            "H  0.757  0.587  0.0\nH  -0.757  0.587  0.0"
+        )
+        atoms, coords = parse_xyz_input(xyz_text)
+        assert atoms == ["O", "H", "H"]
+
+    def test_free_text_title_line_still_works(self):
+        xyz_text = (
+            "3\nWater molecule\nO  0.0  0.0  0.0\n"
+            "H  0.757  0.587  0.0\nH  -0.757  0.587  0.0"
+        )
+        atoms, coords = parse_xyz_input(xyz_text)
+        assert atoms == ["O", "H", "H"]
+
+    def test_leading_blank_line_before_count_still_works(self):
+        xyz_text = (
+            "\n3\ntitle\nO  0.0  0.0  0.0\n"
+            "H  0.757  0.587  0.0\nH  -0.757  0.587  0.0"
+        )
+        atoms, coords = parse_xyz_input(xyz_text)
+        assert atoms == ["O", "H", "H"]
+
+
 class TestEnhancedXYZParser:
     """Test enhanced XYZ parser features."""
 

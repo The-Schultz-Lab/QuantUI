@@ -216,3 +216,40 @@ class TestSaveMoldenWithVibrations:
         assert "[MO]" in text
         assert "[FREQ]" in text
         assert "[FR-NORM-COORD]" in text
+
+
+@pyscf_only
+class TestFrCoordUnits:
+    """[FR-COORD] must be Bohr per the Molden spec, regardless of [Atoms]'s
+    unit tag (theochem.ru.nl/molden/molden_format.html) — a Molden quirk.
+    pyscf_mol_atom is Angstrom throughout QuantUI, so the writer must
+    convert. Regression for a bug where [FR-COORD] was written directly
+    from (Angstrom) pyscf_mol_atom with no conversion, making it
+    inconsistent with [Atoms]/[GTO]/[MO] in the same file.
+    """
+
+    def test_fr_coord_is_bohr_not_angstrom(self, tmp_path):
+        _ANGSTROM_TO_BOHR = 1.8897261254578281
+        atom_list = _water_atom_list()
+        out = save_molden(
+            tmp_path,
+            pyscf_mol_atom=atom_list,
+            pyscf_mol_basis="sto-3g",
+            frequencies_cm1=[1500.0],
+            normal_modes=[[[0.1, 0.0, 0.0], [-0.05, 0.0, 0.0], [-0.05, 0.0, 0.0]]],
+        )
+        text = out.read_text(encoding="utf-8")
+        fr_coord_block = text.split("[FR-COORD]")[1].split("[FR-NORM-COORD]")[0]
+        lines = [ln for ln in fr_coord_block.strip().splitlines() if ln.strip()]
+        assert len(lines) == len(atom_list)
+        for line, (sym, coords) in zip(lines, atom_list):
+            parts = line.split()
+            assert parts[0] == sym
+            got = [float(p) for p in parts[1:4]]
+            expected = [c * _ANGSTROM_TO_BOHR for c in coords]
+            for g, e in zip(got, expected):
+                assert g == pytest.approx(e, abs=1e-5)
+            # Sanity: the Bohr value should NOT equal the raw Angstrom
+            # value (except for the trivial all-zero O atom).
+            if any(abs(c) > 1e-9 for c in coords):
+                assert got != pytest.approx(coords, abs=1e-3)

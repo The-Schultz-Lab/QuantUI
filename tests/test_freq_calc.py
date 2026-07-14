@@ -176,6 +176,36 @@ class TestRunFreqCalcThermo:
 
 
 # ============================================================================
+# pyscf_mol_atom unit convention (H2 audit fix, 2026-07-14)
+# ============================================================================
+
+
+class TestPyscfMolAtomUnits:
+    """``pyscf_mol_atom`` must be Angstrom, matching session_calc/optimizer.
+
+    Regression for a bug where freq_calc built this field from PySCF's
+    internal ``mol._atom`` (always Bohr), while every consumer (Molden
+    export, cube generation, orbital replay) assumes Angstrom — silently
+    inflating exported geometries ~1.89x for Frequency results only.
+    """
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_pyscf_mol_atom_matches_input_geometry_in_angstrom(self):
+        from quantui.freq_calc import run_freq_calc
+
+        molecule = _water()
+        result = run_freq_calc(molecule, method="RHF", basis="STO-3G")
+        assert result.pyscf_mol_atom is not None
+        for (sym, coords), (orig_sym, orig_coords) in zip(
+            result.pyscf_mol_atom, zip(molecule.atoms, molecule.coordinates)
+        ):
+            assert sym == orig_sym
+            for c, orig_c in zip(coords, orig_coords):
+                assert c == pytest.approx(orig_c, abs=1e-9)
+
+
+# ============================================================================
 # IR intensities — PySCF required
 # ============================================================================
 

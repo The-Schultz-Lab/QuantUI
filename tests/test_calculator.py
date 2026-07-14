@@ -88,6 +88,23 @@ class TestPySCFCalculationInit:
         with pytest.raises(ValueError, match="not supported"):
             PySCFCalculation(water_molecule, method="NONEXISTENT", basis="6-31G")
 
+    def test_mixed_case_method_preserved_canonically(self, water_molecule):
+        """Mixed-case SUPPORTED_METHODS entries must not be upper-cased.
+
+        Regression: method.upper() turned "wB97X-D" into "WB97X-D", which
+        matches neither SUPPORTED_METHODS nor the xc-alias tables the
+        generated script depends on — silently breaking Export Script and
+        the educational-notes lookup for every mixed-case method name
+        (wB97X-D, CAM-B3LYP, M06-L, M06-2X, HSE06, PBE-D3).
+        """
+        calc = PySCFCalculation(water_molecule, method="wB97X-D", basis="6-31G")
+        assert calc.method == "wB97X-D"
+
+    def test_mixed_case_method_case_insensitive_input(self, water_molecule):
+        """A differently-cased spelling still resolves to the canonical form."""
+        calc = PySCFCalculation(water_molecule, method="wb97x-d", basis="6-31G")
+        assert calc.method == "wB97X-D"
+
     def test_nonstandard_basis_warning(self, water_molecule, caplog):
         """Test warning for non-standard basis set."""
         calc = PySCFCalculation(water_molecule, method="RHF", basis="custom-basis")

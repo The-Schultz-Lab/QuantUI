@@ -12,6 +12,49 @@ from . import config, utils
 
 logger = logging.getLogger(__name__)
 
+# Atomic numbers for elements QuantUI recognizes (matches config.VALID_ATOMS).
+# Single source of truth — get_electron_count(), suggest_multiplicity(), and
+# orbital_visualization's charge/spin inference all key off this table rather
+# than each keeping their own inline copy.
+ATOMIC_NUMBERS: Dict[str, int] = {
+    "H": 1,
+    "He": 2,
+    "Li": 3,
+    "Be": 4,
+    "B": 5,
+    "C": 6,
+    "N": 7,
+    "O": 8,
+    "F": 9,
+    "Ne": 10,
+    "Na": 11,
+    "Mg": 12,
+    "Al": 13,
+    "Si": 14,
+    "P": 15,
+    "S": 16,
+    "Cl": 17,
+    "Ar": 18,
+    "K": 19,
+    "Ca": 20,
+    "Sc": 21,
+    "Ti": 22,
+    "V": 23,
+    "Cr": 24,
+    "Mn": 25,
+    "Fe": 26,
+    "Co": 27,
+    "Ni": 28,
+    "Cu": 29,
+    "Zn": 30,
+    "Ga": 31,
+    "Ge": 32,
+    "As": 33,
+    "Se": 34,
+    "Br": 35,
+    "Kr": 36,
+}
+
 
 class Molecule:
     """
@@ -135,47 +178,7 @@ class Molecule:
         Returns:
             int: Number of electrons (nuclear charges - charge)
         """
-        # Simple atomic numbers for common elements
-        atomic_numbers = {
-            "H": 1,
-            "He": 2,
-            "Li": 3,
-            "Be": 4,
-            "B": 5,
-            "C": 6,
-            "N": 7,
-            "O": 8,
-            "F": 9,
-            "Ne": 10,
-            "Na": 11,
-            "Mg": 12,
-            "Al": 13,
-            "Si": 14,
-            "P": 15,
-            "S": 16,
-            "Cl": 17,
-            "Ar": 18,
-            "K": 19,
-            "Ca": 20,
-            "Sc": 21,
-            "Ti": 22,
-            "V": 23,
-            "Cr": 24,
-            "Mn": 25,
-            "Fe": 26,
-            "Co": 27,
-            "Ni": 28,
-            "Cu": 29,
-            "Zn": 30,
-            "Ga": 31,
-            "Ge": 32,
-            "As": 33,
-            "Se": 34,
-            "Br": 35,
-            "Kr": 36,
-        }
-
-        nuclear_charge = sum(atomic_numbers.get(atom, 0) for atom in self.atoms)
+        nuclear_charge = sum(ATOMIC_NUMBERS.get(atom, 0) for atom in self.atoms)
         return nuclear_charge - self.charge
 
     def get_formula(self) -> str:
@@ -361,11 +364,45 @@ def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
 
     lines = xyz_text.strip().split("\n")
 
-    # Process lines: remove empty lines and handle comments
+    # ── Step 1: XYZ-file header detection, on RAW lines ──────────────────
+    # The header (count line + title line) is POSITIONAL: whichever raw
+    # line is the first non-blank, non-full-line-comment line, if it
+    # parses as a bare integer, is the atom count — and the very next raw
+    # line is the title, regardless of what that title line itself
+    # contains (blank, "#"/"!"-prefixed, or free text).
+    #
+    # This must run BEFORE the blank/comment filtering below: filtering
+    # first would remove a blank or comment title line from the list,
+    # shifting the next real atom line into the "title" slot, where it
+    # was then silently discarded — dropping the first atom of every
+    # standard XYZ file whose title line happened to be blank or a
+    # comment (both very common in practice).
+    expected_atoms = None
+    body_start = 0
+    for idx, raw in enumerate(lines):
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#") or stripped.startswith("!"):
+            continue
+        try:
+            expected_atoms = int(stripped)
+            body_start = idx + 2  # count line + title line, whatever it is
+            logger.debug(
+                f"Detected XYZ file format expecting {expected_atoms} atoms"
+            )
+        except ValueError:
+            pass  # first content line isn't a bare count -> no header
+        break  # only the first non-blank/non-comment line is eligible
+
+    body_lines = lines[body_start:]
+
+    # ── Step 2: filter blank lines + comments from the body ─────────────
     processed_lines = []
     original_line_numbers = []  # Track original line numbers for error reporting
 
-    for line_num, line in enumerate(lines, start=1):
+    for offset, line in enumerate(body_lines):
+        line_num = body_start + offset + 1  # 1-based original line number
         line = line.strip()
 
         # Skip empty lines
@@ -395,22 +432,10 @@ def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
     atoms = []
     coordinates = []
 
-    # Check if first line is a number (XYZ file format)
-    start_idx = 0
-    expected_atoms = None
-
-    try:
-        expected_atoms = int(processed_lines[0])
-        # Skip first two lines (count and comment/title)
-        start_idx = 2 if len(processed_lines) >= 2 else 1
-        logger.debug(f"Detected XYZ file format expecting {expected_atoms} atoms")
-    except ValueError:
-        # Not XYZ file format, parse all lines as coordinates
-        start_idx = 0
-
-    # Parse coordinate lines
-    for i, line in enumerate(processed_lines[start_idx:]):
-        orig_line_num = original_line_numbers[start_idx + i]
+    # Parse coordinate lines (the header, if any, was already consumed
+    # positionally above, so every processed line here is an atom row).
+    for i, line in enumerate(processed_lines):
+        orig_line_num = original_line_numbers[i]
         parts = line.split()
 
         # Check minimum parts (atom symbol + 3 coordinates)
@@ -550,47 +575,8 @@ def suggest_multiplicity(atoms: List[str], charge: int) -> int:
     """
     # Calculate electron count directly without creating Molecule
     # (to avoid validation errors with incompatible multiplicity)
-    atomic_numbers = {
-        "H": 1,
-        "He": 2,
-        "Li": 3,
-        "Be": 4,
-        "B": 5,
-        "C": 6,
-        "N": 7,
-        "O": 8,
-        "F": 9,
-        "Ne": 10,
-        "Na": 11,
-        "Mg": 12,
-        "Al": 13,
-        "Si": 14,
-        "P": 15,
-        "S": 16,
-        "Cl": 17,
-        "Ar": 18,
-        "K": 19,
-        "Ca": 20,
-        "Sc": 21,
-        "Ti": 22,
-        "V": 23,
-        "Cr": 24,
-        "Mn": 25,
-        "Fe": 26,
-        "Co": 27,
-        "Ni": 28,
-        "Cu": 29,
-        "Zn": 30,
-        "Ga": 31,
-        "Ge": 32,
-        "As": 33,
-        "Se": 34,
-        "Br": 35,
-        "Kr": 36,
-    }
-
     try:
-        nuclear_charge = sum(atomic_numbers.get(atom, 0) for atom in atoms)
+        nuclear_charge = sum(ATOMIC_NUMBERS.get(atom, 0) for atom in atoms)
         num_electrons = nuclear_charge - charge
 
         # Even electrons -> singlet, odd electrons -> doublet

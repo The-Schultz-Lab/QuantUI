@@ -805,21 +805,38 @@ def generate_2d_structure_svg(
             # Build mol from XYZ
             from rdkit.Chem import rdDetermineBonds
 
-            rdkit_mol = Chem.Mol()
-            conf = Chem.Conformer()
-
-            for i, line in enumerate(lines[2:]):  # Skip first 2 lines
+            # Collect valid atom lines first so the conformer can be sized
+            # up front and the atom index used for SetAtomPosition always
+            # matches the just-added atom (skipped malformed lines used to
+            # desync the two).
+            atom_lines = []
+            for line in lines[2:]:  # Skip first 2 lines (count + comment)
                 parts = line.split()
                 if len(parts) < 4:
                     continue
+                atom_lines.append(parts)
+
+            if not atom_lines:
+                raise ValueError("No atom lines found in XYZ string")
+
+            # Chem.Mol() is immutable — AddAtom only exists on RWMol.
+            # Build on RWMol, then convert to an immutable Mol via
+            # GetMol() before DetermineBonds (mirrors the working
+            # Chem.MolFromXYZBlock() + DetermineBonds() pattern used
+            # elsewhere in QuantUI, e.g. preopt.py).
+            rw_mol = Chem.RWMol()
+            conf = Chem.Conformer(len(atom_lines))
+
+            for i, parts in enumerate(atom_lines):
                 symbol = parts[0]
                 x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
 
                 atom = Chem.Atom(symbol)
-                rdkit_mol.AddAtom(atom)  # type: ignore[attr-defined]
+                rw_mol.AddAtom(atom)
                 conf.SetAtomPosition(i, (x, y, z))
 
-            rdkit_mol.AddConformer(conf)  # type: ignore[attr-defined]
+            rw_mol.AddConformer(conf)
+            rdkit_mol = rw_mol.GetMol()
 
             # Determine bonds
             rdDetermineBonds.DetermineBonds(rdkit_mol)

@@ -35,6 +35,14 @@ if TYPE_CHECKING:
 
 _SCHEMA_VERSION = 2
 
+# Molden's [FR-COORD] block is defined (theochem.ru.nl/molden/molden_format.html)
+# to always be in Bohr, regardless of the unit tag on [Atoms] — a Molden-format
+# quirk. pyscf_mol_atom (the source for both blocks) is Angstrom throughout
+# QuantUI, so [FR-COORD] needs an explicit conversion; [Atoms]/[GTO]/[MO] (via
+# molden.from_mo / molden.header, built from a mol with implicit unit="Angstrom")
+# do not.
+_ANGSTROM_TO_BOHR = 1.8897261254578281
+
 
 def _default_results_dir() -> Path:
     env = os.environ.get("QUANTUI_RESULTS_DIR")
@@ -357,7 +365,9 @@ def _append_molden_vibrations(
     ``normal_modes``). ``normal_modes`` is a list of length-N entries,
     each a list of per-atom (x, y, z) displacement triples. The
     ``[FR-COORD]`` block repeats the equilibrium geometry from
-    ``pyscf_mol_atom`` so the file is self-contained.
+    ``pyscf_mol_atom`` (converted Angstrom -> Bohr; the Molden spec
+    requires ``[FR-COORD]`` in Bohr regardless of ``[Atoms]``'s unit tag)
+    so the file is self-contained.
     """
     with open(path, "a", encoding="utf-8") as fh:
         fh.write("\n[FREQ]\n")
@@ -367,8 +377,9 @@ def _append_molden_vibrations(
         fh.write("\n[FR-COORD]\n")
         for sym, coords in pyscf_mol_atom:
             fh.write(
-                f"{sym}  {float(coords[0]):.6f} {float(coords[1]):.6f} "
-                f"{float(coords[2]):.6f}\n"
+                f"{sym}  {float(coords[0]) * _ANGSTROM_TO_BOHR:.6f} "
+                f"{float(coords[1]) * _ANGSTROM_TO_BOHR:.6f} "
+                f"{float(coords[2]) * _ANGSTROM_TO_BOHR:.6f}\n"
             )
 
         fh.write("\n[FR-NORM-COORD]\n")
