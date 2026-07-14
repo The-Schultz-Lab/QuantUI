@@ -329,11 +329,21 @@ def _run_session_calc_body(
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
     elif method_upper == "MP2":
-        mf = scf.RHF(mol)  # MP2 runs on top of RHF
+        # ``scf.RHF(mol)`` is a factory: for a closed-shell molecule
+        # (mol.spin == 0) it returns a true RHF object; for an open-shell
+        # molecule it auto-dispatches to ROHF instead (verified against
+        # PySCF's own factory behavior — this is not a QuantUI branch).
+        # ``mp.MP2(mf)`` below then further auto-dispatches: RMP2 on an
+        # RHF reference, UMP2 (ROHF-based) on an ROHF reference. Both are
+        # standard, well-defined methods; MP2 is not restricted to
+        # closed-shell input here.
+        mf = scf.RHF(mol)
     elif method_upper in ("CCSD", "CCSD(T)"):
-        # Coupled cluster builds on an RHF reference (M8.1). The correlation
-        # energy (and optional perturbative-triples correction) is added
-        # post-SCF below.
+        # Same auto-dispatch as MP2 above: scf.RHF(mol) yields RHF for
+        # closed-shell input and ROHF for open-shell input, and
+        # cc.CCSD(mf) below correspondingly dispatches to RCCSD or
+        # ROHF-based UCCSD. The correlation energy (and optional
+        # perturbative-triples correction) is added post-SCF below.
         mf = scf.RHF(mol)
     else:
         # DFT: resolve alias then auto-select RKS / UKS. ``resolve_xc``

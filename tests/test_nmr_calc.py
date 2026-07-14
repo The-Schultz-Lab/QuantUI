@@ -212,5 +212,26 @@ class TestRunNMRCalc:
         assert len(result.shielding_iso_ppm) == len(list(mol.atoms))
 
 
+# ============================================================================
+# Post-HF method guard (M2 audit fix, 2026-07-14)
+# ============================================================================
+
+
+class TestRunNmrCalcPostHfGuard:
+    """Post-HF methods raise a clear ValueError instead of a cryptic LibXC error.
+
+    Regression: run_nmr_calc() had no special-casing for MP2/CCSD/CCSD(T)
+    — the SCF-selection branch silently treated them as a DFT xc functional
+    (mf.xc = "CCSD"), failing deep inside PySCF with "LibXCFunctional: name
+    'CCSD' not found" instead of a clear message. The guard fires before any
+    PySCF import, so it needs no PySCF.
+    """
+
+    @pytest.mark.parametrize("method", ["MP2", "CCSD", "CCSD(T)"])
+    def test_post_hf_method_raises_value_error(self, method):
+        with pytest.raises(ValueError, match="post-HF"):
+            run_nmr_calc(_water(), method=method, basis="STO-3G")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

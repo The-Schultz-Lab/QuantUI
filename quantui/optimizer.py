@@ -349,6 +349,23 @@ def optimize_geometry(
             "  # or: conda install -c conda-forge ase"
         )
 
+    # Post-HF methods (MP2/CCSD/CCSD(T)) have no special-casing in
+    # _QuantUIPySCFCalc — without this guard, method='CCSD' silently falls
+    # into the DFT branch (sets mf.xc = "CCSD") and fails deep inside PySCF
+    # with a cryptic "LibXCFunctional: name 'CCSD' not found" instead of a
+    # clear message. No analytical post-HF nuclear gradients are wired up
+    # here, so these methods are single-point only (see session_calc.py).
+    from . import config as _config
+
+    if method.strip().upper() in _config.POST_HF_METHODS:
+        raise ValueError(
+            f"'{method}' is a post-HF method and cannot be used for geometry "
+            "optimization — QuantUI only has analytical gradients wired up "
+            "for HF/DFT methods here. Optimize with RHF, UHF, or a DFT "
+            f"functional, then run a Single Point calculation with '{method}' "
+            "on the optimized geometry."
+        )
+
     try:
         import pyscf as _pyscf  # noqa: F401 — presence check
     except ImportError as exc:

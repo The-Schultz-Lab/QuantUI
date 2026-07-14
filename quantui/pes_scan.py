@@ -201,6 +201,22 @@ def run_pes_scan(
             "ASE is not installed — cannot run PES scan.\n"
             "  pip install 'ase>=3.22.0'"
         )
+
+    # Post-HF methods (MP2/CCSD/CCSD(T)) have no special-casing in
+    # _QuantUIPySCFCalc (shared with optimizer.py) — without this guard,
+    # method='CCSD' silently falls into the DFT branch (sets mf.xc =
+    # "CCSD") and fails deep inside PySCF with a cryptic "LibXCFunctional:
+    # name 'CCSD' not found" instead of a clear message.
+    from . import config as _config
+
+    if method.strip().upper() in _config.POST_HF_METHODS:
+        raise ValueError(
+            f"'{method}' is a post-HF method and cannot be used for a PES "
+            "scan — QuantUI only has analytical gradients wired up for "
+            "HF/DFT methods here. Scan with RHF, UHF, or a DFT functional "
+            "instead."
+        )
+
     try:
         import pyscf as _pyscf  # noqa: F401
     except ImportError as exc:

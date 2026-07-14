@@ -159,6 +159,22 @@ def run_freq_calc(
             computation fails, frequencies are omitted and a warning is
             written to progress_stream — no exception is raised.
     """
+    # Post-HF methods (MP2/CCSD/CCSD(T)) have no special-casing below —
+    # without this guard, method='CCSD' silently falls into the DFT
+    # branch (sets mf.xc = "CCSD") and fails deep inside PySCF with a
+    # cryptic "LibXCFunctional: name 'CCSD' not found" instead of a clear
+    # message. No post-HF Hessian is wired up here, so these methods are
+    # single-point only (see session_calc.py).
+    from . import config as _config
+
+    if method.strip().upper() in _config.POST_HF_METHODS:
+        raise ValueError(
+            f"'{method}' is a post-HF method and cannot be used for "
+            "frequency analysis — QuantUI only has an analytical Hessian "
+            "wired up for HF/DFT methods here. Use RHF, UHF, or a DFT "
+            "functional instead."
+        )
+
     try:
         from pyscf import dft, gto, scf
         from pyscf.hessian import thermo as pyscf_thermo

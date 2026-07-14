@@ -12,48 +12,12 @@ from . import config, utils
 
 logger = logging.getLogger(__name__)
 
-# Atomic numbers for elements QuantUI recognizes (matches config.VALID_ATOMS).
-# Single source of truth — get_electron_count(), suggest_multiplicity(), and
-# orbital_visualization's charge/spin inference all key off this table rather
-# than each keeping their own inline copy.
-ATOMIC_NUMBERS: Dict[str, int] = {
-    "H": 1,
-    "He": 2,
-    "Li": 3,
-    "Be": 4,
-    "B": 5,
-    "C": 6,
-    "N": 7,
-    "O": 8,
-    "F": 9,
-    "Ne": 10,
-    "Na": 11,
-    "Mg": 12,
-    "Al": 13,
-    "Si": 14,
-    "P": 15,
-    "S": 16,
-    "Cl": 17,
-    "Ar": 18,
-    "K": 19,
-    "Ca": 20,
-    "Sc": 21,
-    "Ti": 22,
-    "V": 23,
-    "Cr": 24,
-    "Mn": 25,
-    "Fe": 26,
-    "Co": 27,
-    "Ni": 28,
-    "Cu": 29,
-    "Zn": 30,
-    "Ga": 31,
-    "Ge": 32,
-    "As": 33,
-    "Se": 34,
-    "Br": 35,
-    "Kr": 36,
-}
+# Single source of truth lives in config.ATOMIC_NUMBERS (covers the full
+# periodic table, Z=1..118, and derives config.VALID_ATOMS so the two can't
+# drift apart). Re-exported here so existing `from .molecule import
+# ATOMIC_NUMBERS` call sites (e.g. orbital_visualization's charge/spin
+# inference) keep working unchanged.
+ATOMIC_NUMBERS: Dict[str, int] = config.ATOMIC_NUMBERS
 
 
 class Molecule:

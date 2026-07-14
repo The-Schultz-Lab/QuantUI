@@ -80,6 +80,19 @@ def run_nmr_calc(
         ImportError: If PySCF is not installed.
         RuntimeError: If the SCF or GIAO-NMR calculation fails.
     """
+    # Post-HF methods (MP2/CCSD/CCSD(T)) have no special-casing below —
+    # without this guard, method='CCSD' silently falls into the DFT
+    # branch (sets mf.xc = "CCSD") and fails deep inside PySCF with a
+    # cryptic "LibXCFunctional: name 'CCSD' not found" instead of a clear
+    # message. GIAO-NMR shielding is not defined for these methods here.
+    from . import config as _config
+
+    if method.strip().upper() in _config.POST_HF_METHODS:
+        raise ValueError(
+            f"'{method}' is a post-HF method and cannot be used for NMR "
+            "shielding — use RHF, UHF, or a DFT functional instead."
+        )
+
     try:
         from pyscf import dft, gto, scf
     except ImportError as exc:

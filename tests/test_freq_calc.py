@@ -206,6 +206,29 @@ class TestPyscfMolAtomUnits:
 
 
 # ============================================================================
+# Post-HF method guard (M2 audit fix, 2026-07-14)
+# ============================================================================
+
+
+class TestRunFreqCalcPostHfGuard:
+    """Post-HF methods raise a clear ValueError instead of a cryptic LibXC error.
+
+    Regression: run_freq_calc() had no special-casing for MP2/CCSD/CCSD(T)
+    — the SCF-selection branch silently treated them as a DFT xc functional
+    (mf.xc = "CCSD"), failing deep inside PySCF with "LibXCFunctional: name
+    'CCSD' not found" instead of a clear message. The guard fires before any
+    PySCF import, so it needs neither PySCF nor ASE.
+    """
+
+    @pytest.mark.parametrize("method", ["MP2", "CCSD", "CCSD(T)"])
+    def test_post_hf_method_raises_value_error(self, method):
+        from quantui.freq_calc import run_freq_calc
+
+        with pytest.raises(ValueError, match="post-HF"):
+            run_freq_calc(_water(), method=method, basis="STO-3G")
+
+
+# ============================================================================
 # IR intensities — PySCF required
 # ============================================================================
 

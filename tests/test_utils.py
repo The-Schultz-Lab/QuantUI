@@ -161,6 +161,35 @@ class TestValidateAtomSymbol:
         assert utils.validate_atom_symbol("\tC\n") is True
 
 
+class TestValidateAtomSymbolExtendedElements:
+    """M1 audit fix (2026-07-14): VALID_ATOMS covers the full periodic table.
+
+    Regression: VALID_ATOMS previously stopped at Kr (Z=36), rejecting real
+    structures resolved via PubChem/CACTUS/SMILES for any heavier element
+    (iodine in thyroxine, tin/antimony in organometallics, gold/platinum
+    complexes, ...) even though molecule.py's own error text listed iodine
+    as a valid example.
+    """
+
+    def test_iodine_valid(self):
+        assert utils.validate_atom_symbol("I") is True
+
+    def test_heavy_elements_valid(self):
+        for sym in ("Sn", "Sb", "Ag", "Au", "Pt", "Pb", "Bi", "Hg", "Xe"):
+            assert utils.validate_atom_symbol(sym) is True, sym
+
+    def test_full_periodic_table_length(self):
+        from quantui import config
+
+        assert len(config.VALID_ATOMS) == 118
+
+    def test_valid_atoms_derived_from_atomic_numbers(self):
+        """VALID_ATOMS and ATOMIC_NUMBERS must never be able to drift apart."""
+        from quantui import config
+
+        assert config.VALID_ATOMS == list(config.ATOMIC_NUMBERS.keys())
+
+
 class TestValidateCoordinates:
     """Test coordinate validation."""
 

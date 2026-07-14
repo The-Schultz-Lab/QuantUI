@@ -159,6 +159,20 @@ class TestRunPesScanValidation:
         with pytest.raises((ImportError, ValueError)):
             run_pes_scan(_h2(), scan_type="bond", atom_indices=[0, 1], steps=1)
 
+    @pytest.mark.parametrize("method", ["MP2", "CCSD", "CCSD(T)"])
+    def test_post_hf_method_raises(self, method):
+        """M2 audit fix (2026-07-14): post-HF methods raise a clear error.
+
+        Regression: run_pes_scan() had no special-casing for MP2/CCSD/
+        CCSD(T) — _QuantUIPySCFCalc.calculate() (shared with optimizer.py)
+        silently treated them as a DFT xc functional, failing deep inside
+        PySCF with a cryptic "LibXCFunctional" error instead of a clear one.
+        """
+        from quantui.pes_scan import run_pes_scan
+
+        with pytest.raises((ImportError, ValueError), match="post-HF|ASE"):
+            run_pes_scan(_h2(), method=method, scan_type="bond", atom_indices=[0, 1])
+
 
 # ── App widget integration ────────────────────────────────────────────────────
 

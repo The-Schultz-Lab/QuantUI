@@ -190,37 +190,61 @@ class TestModuleConstants:
 
 
 class TestOptimizeGeometryImportGuards:
+    """Patch quantui.optimizer's OWN ``ASE_AVAILABLE`` name directly rather
+    than reloading the module after monkeypatching ase_bridge's copy.
+
+    ``optimize_geometry()`` reads the module-local ``ASE_AVAILABLE`` binding
+    (imported via ``from .ase_bridge import ASE_AVAILABLE`` at module load
+    time) — monkeypatching ``ase_bridge.ASE_AVAILABLE`` doesn't affect that
+    binding at all, which is why the original version of this test used
+    ``importlib.reload(opt_mod)`` to re-execute the import with the patched
+    value in scope. But ``monkeypatch`` only reverts attributes it directly
+    set (``ase_bridge.ASE_AVAILABLE``) — it has no way to know the reload
+    also needs undoing, so ``quantui.optimizer.ASE_AVAILABLE`` stayed stuck
+    at ``False`` for the rest of the test session once this test ran,
+    silently breaking every later test that called ``optimize_geometry()``
+    expecting ASE to be available. Patching the local name directly avoids
+    the reload (and the leak) entirely.
+    """
+
     def test_raises_when_ase_unavailable(self, monkeypatch):
-        import quantui.ase_bridge as bridge
-
-        monkeypatch.setattr(bridge, "ASE_AVAILABLE", False)
-
-        import importlib
-
         import quantui.optimizer as opt_mod
 
-        importlib.reload(opt_mod)
-        from quantui.optimizer import optimize_geometry
+        monkeypatch.setattr(opt_mod, "ASE_AVAILABLE", False)
 
         with pytest.raises(ImportError, match="pip install"):
-            optimize_geometry(_h2())
+            opt_mod.optimize_geometry(_h2())
 
     def test_error_message_is_actionable(self, monkeypatch):
-        import quantui.ase_bridge as bridge
-
-        monkeypatch.setattr(bridge, "ASE_AVAILABLE", False)
-
-        import importlib
-
         import quantui.optimizer as opt_mod
 
-        importlib.reload(opt_mod)
-        from quantui.optimizer import optimize_geometry
+        monkeypatch.setattr(opt_mod, "ASE_AVAILABLE", False)
 
         with pytest.raises(ImportError) as exc_info:
-            optimize_geometry(_h2())
+            opt_mod.optimize_geometry(_h2())
         msg = str(exc_info.value)
         assert "pip install" in msg or "conda install" in msg
+
+
+class TestOptimizeGeometryPostHfGuard:
+    """M2 audit fix (2026-07-14): post-HF methods raise a clear ValueError.
+
+    Regression: optimize_geometry() had no special-casing for MP2/CCSD/
+    CCSD(T) — _QuantUIPySCFCalc.calculate() silently treated them as a DFT
+    xc functional (mf.xc = "CCSD"), failing deep inside PySCF with a cryptic
+    "LibXCFunctional: name 'CCSD' not found" instead of a clear message.
+    The guard fires before any PySCF import, so it needs ASE but not PySCF.
+    """
+
+    ase_only = pytest.mark.skipif(not ASE_AVAILABLE, reason="ase not installed")
+
+    @ase_only
+    @pytest.mark.parametrize("method", ["MP2", "CCSD", "CCSD(T)"])
+    def test_post_hf_method_raises_value_error(self, method):
+        from quantui.optimizer import optimize_geometry
+
+        with pytest.raises(ValueError, match="post-HF"):
+            optimize_geometry(_h2(), method=method, basis="STO-3G")
 
 
 # ============================================================================

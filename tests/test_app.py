@@ -2430,7 +2430,7 @@ class TestIsosurfacePersistence:
 
         captured: dict[str, object] = {}
 
-        def _fake_generate(_atom, _basis, _coeff, _idx, out_path):
+        def _fake_generate(_atom, _basis, _coeff, _idx, out_path, **_kwargs):
             captured["path"] = out_path
             out_path.write_text("cube", encoding="utf-8")
             return out_path
@@ -2475,7 +2475,7 @@ class TestIsosurfacePersistence:
 
         captured: dict[str, object] = {}
 
-        def _fake_generate(_atom, _basis, _coeff, _idx, out_path):
+        def _fake_generate(_atom, _basis, _coeff, _idx, out_path, **_kwargs):
             captured["path"] = out_path
             out_path.write_text("cube", encoding="utf-8")
             return out_path
