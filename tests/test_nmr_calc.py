@@ -266,6 +266,51 @@ class TestRunNMRCalc:
         assert result.reference_key == "B3LYP/6-31G*"
 
 
+class TestNmrCompatPatchIdempotency:
+    """L audit fix: the pyscf.prop.nmr compat patches must apply once per
+    process, not redefine + reassign the same closures on every NMR call.
+    """
+
+    @pyscf_only
+    def test_patch_functions_are_not_redefined_on_repeat_calls(self):
+        import pyscf.prop.nmr.rhf as _prop_nmr_rhf
+        import pyscf.prop.nmr.rks as _prop_nmr_rks
+
+        from quantui.nmr_calc import _ensure_nmr_compat_patches_applied
+
+        _ensure_nmr_compat_patches_applied()
+        gen_vind_first = _prop_nmr_rhf.gen_vind
+        get_vxc_giao_first = _prop_nmr_rks.get_vxc_giao
+
+        _ensure_nmr_compat_patches_applied()
+        # Same function object — the second call must be a no-op, not a
+        # fresh `def` + reassignment (which would install a *different*
+        # (if behaviorally identical) closure each time).
+        assert _prop_nmr_rhf.gen_vind is gen_vind_first
+        assert _prop_nmr_rks.get_vxc_giao is get_vxc_giao_first
+
+    @pyscf_only
+    def test_patched_functions_carry_version_sentinel(self):
+        import pyscf.prop.nmr.rhf as _prop_nmr_rhf
+        import pyscf.prop.nmr.rks as _prop_nmr_rks
+
+        from quantui.nmr_calc import (
+            _NMR_COMPAT_PATCH_VERSION,
+            _NMR_PATCH_VERSION_ATTR,
+            _ensure_nmr_compat_patches_applied,
+        )
+
+        _ensure_nmr_compat_patches_applied()
+        assert (
+            getattr(_prop_nmr_rhf.gen_vind, _NMR_PATCH_VERSION_ATTR, None)
+            == _NMR_COMPAT_PATCH_VERSION
+        )
+        assert (
+            getattr(_prop_nmr_rks.get_vxc_giao, _NMR_PATCH_VERSION_ATTR, None)
+            == _NMR_COMPAT_PATCH_VERSION
+        )
+
+
 # ============================================================================
 # Post-HF method guard (M2 audit fix, 2026-07-14)
 # ============================================================================
