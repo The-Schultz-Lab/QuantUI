@@ -388,7 +388,7 @@ def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
     if not processed_lines:
         raise ValueError(
             "❌ No Data: All lines are empty or comments.\n\n"
-            "Please provide at least 2 atoms with coordinates."
+            "Please provide at least 1 atom with coordinates."
         )
 
     atoms = []
@@ -498,16 +498,6 @@ def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
         raise ValueError(
             "❌ No atoms found in input after parsing.\n\n"
             "Please check your coordinate format."
-        )
-
-    # Check for minimum 2 atoms (molecules need at least 2 atoms)
-    if len(atoms) < 2:
-        raise ValueError(
-            f"❌ Too Few Atoms: Found only {len(atoms)} atom.\n\n"
-            f"Molecules need at least 2 atoms for meaningful calculations.\n\n"
-            f"💡 For single atoms, consider:\n"
-            f"  • Adding a second atom to form a molecule\n"
-            f"  • Using a different computational chemistry tool for atomic calculations"
         )
 
     # Verify expected count if XYZ file format

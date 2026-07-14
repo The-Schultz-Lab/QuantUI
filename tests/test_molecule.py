@@ -489,12 +489,29 @@ H  -0.757  0.587  0.0  # Second H"""
         assert len(coords) == 3
         assert coords[0] == [0.0, 0.0, 0.0]
 
-    def test_parse_minimum_atoms_error(self):
-        """Test error for single atom (need at least 2)."""
-        xyz_text = """H  0.0  0.0  0.0"""
+    def test_parse_single_atom_succeeds(self):
+        """L13 audit fix: single-atom input must parse, not be rejected.
 
-        with pytest.raises(ValueError, match="Too Few Atoms"):
-            parse_xyz_input(xyz_text)
+        Atomic calculations (e.g. a lone Ar atom) are legitimate PySCF
+        targets; parse_xyz_input used to hard-reject anything with fewer
+        than 2 atoms.
+        """
+        xyz_text = """Ar  0.0  0.0  0.0"""
+
+        atoms, coords = parse_xyz_input(xyz_text)
+
+        assert atoms == ["Ar"]
+        assert coords == [[0.0, 0.0, 0.0]]
+
+    def test_parse_single_atom_with_xyz_header_succeeds(self):
+        xyz_text = """1
+Single argon atom
+Ar  0.0  0.0  0.0"""
+
+        atoms, coords = parse_xyz_input(xyz_text)
+
+        assert atoms == ["Ar"]
+        assert coords == [[0.0, 0.0, 0.0]]
 
     def test_parse_invalid_atom_symbol_with_suggestion(self):
         """Test that invalid atom symbol provides helpful suggestion."""

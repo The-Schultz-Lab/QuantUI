@@ -270,6 +270,23 @@ class TestRunInSessionBasic:
 
     @pyscf_only
     @pytest.mark.slow
+    def test_single_atom_calculation_converges(self):
+        """L13 audit fix: single-atom molecules (parse_xyz_input no longer
+        rejects them) must actually run through PySCF end-to-end, not just
+        parse.
+        """
+        from quantui.molecule import parse_xyz_input
+        from quantui.session_calc import run_in_session
+
+        atoms, coords = parse_xyz_input("Ar 0.0 0.0 0.0")
+        argon = Molecule(atoms, coords)
+
+        result = run_in_session(argon, method="RHF", basis="STO-3G", verbose=0)
+        assert result.converged is True
+        assert result.formula == "Ar"
+
+    @pyscf_only
+    @pytest.mark.slow
     def test_result_method_matches_input(self):
         from quantui.session_calc import run_in_session
 
