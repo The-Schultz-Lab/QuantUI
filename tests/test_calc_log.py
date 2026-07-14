@@ -235,6 +235,85 @@ def test_prune_events_still_removes_old_entries(isolated_log_dir):
     assert remaining[0]["event"] == "new"
 
 
+def test_read_all_caches_between_unchanged_calls(isolated_log_dir):
+    """L audit fix: _read_all must not re-parse the perf log when it hasn't
+    changed since the last call — estimate_time() re-read the entire
+    (indefinitely-kept) file on every UI refresh even when nothing new
+    had been written.
+    """
+    import quantui.calc_log as clog
+
+    clog.log_calculation(
+        formula="H2",
+        n_atoms=2,
+        n_electrons=2,
+        method="RHF",
+        basis="STO-3G",
+        n_iterations=5,
+        elapsed_s=1.0,
+        converged=True,
+        n_basis=2,
+        n_cores=1,
+        calc_type="single_point",
+    )
+
+    first = clog._read_all(clog._perf_path())
+    assert len(first) == 1
+
+    calls = {"n": 0}
+    real_loads = clog.json.loads
+
+    def _counting_loads(s):
+        calls["n"] += 1
+        return real_loads(s)
+
+    clog.json.loads = _counting_loads
+    try:
+        second = clog._read_all(clog._perf_path())
+    finally:
+        clog.json.loads = real_loads
+
+    assert second == first
+    assert calls["n"] == 0  # cache hit: no re-parsing of the unchanged file
+
+
+def test_read_all_cache_invalidates_on_new_write(isolated_log_dir):
+    """The caching fix above must not go stale after a genuine new write."""
+    import quantui.calc_log as clog
+
+    clog.log_calculation(
+        formula="H2",
+        n_atoms=2,
+        n_electrons=2,
+        method="RHF",
+        basis="STO-3G",
+        n_iterations=5,
+        elapsed_s=1.0,
+        converged=True,
+        n_basis=2,
+        n_cores=1,
+        calc_type="single_point",
+    )
+    first = clog._read_all(clog._perf_path())
+    assert len(first) == 1
+
+    clog.log_calculation(
+        formula="H2",
+        n_atoms=2,
+        n_electrons=2,
+        method="RHF",
+        basis="STO-3G",
+        n_iterations=6,
+        elapsed_s=2.0,
+        converged=True,
+        n_basis=2,
+        n_cores=1,
+        calc_type="single_point",
+    )
+    second = clog._read_all(clog._perf_path())
+    assert len(second) == 2
+
+
 def test_6_31gss_he_basis_count_matches_pyscf(isolated_log_dir):
     """L audit fix: He under 6-31G** must have 5 basis functions, not 2.
 
@@ -258,6 +337,6 @@ def test_basis_function_table_internally_consistent(isolated_log_dir):
     import quantui.calc_log as clog
 
     for basis, table in clog._BASIS_FUNCTIONS.items():
-        assert table["H"] == table["He"], (
-            f"{basis}: H={table['H']} but He={table['He']}, expected equal"
-        )
+        assert (
+            table["H"] == table["He"]
+        ), f"{basis}: H={table['H']} but He={table['He']}, expected equal"

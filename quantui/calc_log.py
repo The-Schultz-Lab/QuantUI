@@ -290,11 +290,33 @@ def _append(path: Path, record: dict) -> None:
             fh.write(line)
 
 
+_READ_ALL_CACHE: dict[str, tuple[float, int, list[dict]]] = {}
+
+
 def _read_all(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    records: list[dict] = []
+    """Parse every JSON line in *path*, caching on (mtime, size).
+
+    ``estimate_time()`` calls this on every UI refresh (widget-change
+    callback), re-parsing the entire (indefinitely-kept) perf log each
+    time even though it usually hasn't changed since the last call.
+    Cache the parsed records keyed by the file's mtime + size so repeat
+    calls between writes skip the read + per-line ``json.loads`` entirely;
+    a write bumps both, so the cache invalidates correctly.
+    """
+    key = str(path)
     with _LOCK:
+        if not path.exists():
+            _READ_ALL_CACHE.pop(key, None)
+            return []
+        stat = path.stat()
+        cached = _READ_ALL_CACHE.get(key)
+        if (
+            cached is not None
+            and cached[0] == stat.st_mtime
+            and cached[1] == stat.st_size
+        ):
+            return list(cached[2])
+        records: list[dict] = []
         with open(path, encoding="utf-8") as fh:
             for raw in fh:
                 raw = raw.strip()
@@ -303,7 +325,8 @@ def _read_all(path: Path) -> list[dict]:
                         records.append(json.loads(raw))
                     except json.JSONDecodeError:
                         pass
-    return records
+        _READ_ALL_CACHE[key] = (stat.st_mtime, stat.st_size, records)
+        return list(records)
 
 
 # ---------------------------------------------------------------------------
