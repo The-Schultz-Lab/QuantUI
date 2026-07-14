@@ -392,6 +392,30 @@ class TestLogCapture:
         cap.write("")
         assert cap.getvalue() == ""
 
+    def test_close_is_noop_and_does_not_raise(self):
+        """Regression (found via the L6 audit fix's Python 3.9 CI matrix):
+        ase.utils.IOContext.openfile() — used by BFGS(..., logfile=...) in
+        optimizer.py / pes_scan.py — checks hasattr(file, "close") to decide
+        whether *file* is an already-open stream it should leave alone vs. a
+        path string it should open() itself. ase==3.26.0 (the newest version
+        pip resolves for Python 3.9) enforces this strictly and raised
+        TypeError for a _LogCapture instance, which had no close() method;
+        ase==3.29.0 (resolved for 3.10/3.11) happened to tolerate it via a
+        later refactor, masking the gap until 3.9 was added to CI.
+        """
+        cap, _ = self._make_capture()
+        cap.close()  # Must not raise
+        assert hasattr(cap, "close")
+
+    def test_satisfies_ase_openfile_already_open_contract(self):
+        """Directly exercises the exact duck-typing check ASE performs."""
+        cap, _ = self._make_capture()
+        assert hasattr(cap, "close"), (
+            "ase.utils.IOContext.openfile() treats any object without a "
+            "'close' attribute as a path to open() itself, which fails for "
+            "a non-path file-like object like _LogCapture"
+        )
+
 
 # ---------------------------------------------------------------------------
 # _do_run dispatch

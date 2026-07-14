@@ -169,8 +169,8 @@ class TestSaveResultJsonSafeCoercion:
         assert "np.bool_" not in raw
         assert "np.int64" not in raw
         data = json.loads(raw)
-        assert type(data["converged"]) is bool
-        assert type(data["n_iterations"]) is int
+        assert isinstance(data["converged"], bool)
+        assert isinstance(data["n_iterations"], int)
 
 
 class TestLoadResult:

@@ -531,7 +531,7 @@ def orbital_summary_html(info: OrbitalInfo) -> str:
 # ============================================================================
 
 
-def infer_charge_and_spin(mol_atom: list, mo_occ: "np.ndarray | list") -> Tuple[int, int]:
+def infer_charge_and_spin(mol_atom: list, mo_occ: np.ndarray | list) -> Tuple[int, int]:
     """Infer ``(charge, spin)`` for a ``gto.Mole`` from atoms + MO occupations.
 
     Cube/isosurface generation from saved MO data does not have direct access
