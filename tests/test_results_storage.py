@@ -8,6 +8,7 @@ tmp_path fixtures (no mocking of the storage layer itself).
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -219,6 +220,24 @@ class TestListResults:
         r2 = save_result(_make_result(), results_dir=tmp_path)
         found = list_results(tmp_path)
         assert found.index(r2) < found.index(r1)
+
+    def test_collision_suffixes_sort_numerically_not_lexicographically(self, tmp_path):
+        """L audit fix: same-microsecond collision counters (…_1 … _10) must
+        sort newest-first by numeric value, not lexicographic string order
+        (which put "…_10" before "…_2").
+        """
+        base = tmp_path / "2026-07-14_00-00-00-000000_H2O_RHF_STO-3G"
+        dirs = [base] + [Path(f"{base}_{n}") for n in (1, 2, 9, 10, 11)]
+        for d in dirs:
+            d.mkdir(parents=True)
+            (d / "result.json").write_text("{}")
+
+        found = list_results(tmp_path)
+        # Newest first: highest collision counter was created most recently.
+        expected_order = [
+            dirs[i] for i in [5, 4, 3, 2, 1, 0]
+        ]  # _11, _10, _9, _2, _1, base
+        assert found == expected_order
 
 
 # ---------------------------------------------------------------------------

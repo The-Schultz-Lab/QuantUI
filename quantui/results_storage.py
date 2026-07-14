@@ -228,6 +228,23 @@ def save_result(
     return dest
 
 
+_COLLISION_SUFFIX_RE = re.compile(r"^(.*)_(\d+)$")
+
+
+def _result_dir_sort_key(d: Path) -> tuple:
+    """Sort key that orders same-timestamp collision suffixes numerically.
+
+    Directory names are ``<timestamp>_<formula>_<method>_<basis>``, with a
+    ``_<N>`` counter appended on same-microsecond collisions (N=1, 2, ...).
+    A plain string sort put ``..._10`` before ``..._2`` (lexicographic, not
+    numeric); split the trailing counter and sort on it as an int instead.
+    """
+    m = _COLLISION_SUFFIX_RE.match(d.name)
+    if m:
+        return (m.group(1), int(m.group(2)))
+    return (d.name, -1)
+
+
 def list_results(results_dir: Optional[Path] = None) -> list:
     """Return result directories sorted newest-first.
 
@@ -238,6 +255,7 @@ def list_results(results_dir: Optional[Path] = None) -> list:
         return []
     return sorted(
         (d for d in base.iterdir() if d.is_dir() and (d / "result.json").exists()),
+        key=_result_dir_sort_key,
         reverse=True,
     )
 
