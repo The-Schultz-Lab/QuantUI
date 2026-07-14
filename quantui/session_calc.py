@@ -230,7 +230,7 @@ def run_in_session(
             ``'6-31G'``, ``'6-31G*'``, ``'cc-pVDZ'``).  Default: ``'6-31G'``.
         verbose: PySCF verbosity level (0 = silent … 9 = very detailed).
             Level 3 prints per-iteration SCF energies; level 4 adds
-            convergence diagnostics.  Default: 3.
+            convergence diagnostics.  Default: 4.
         progress_stream: Optional writable text stream.  All PySCF output
             during the calculation is written here.  Pass a widget-backed
             stream (e.g. ``_WidgetStream``) in the notebook for live display;

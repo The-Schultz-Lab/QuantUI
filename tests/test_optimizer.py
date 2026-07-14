@@ -183,6 +183,25 @@ class TestModuleConstants:
         assert config.DEFAULT_FMAX == DEFAULT_FMAX
         assert config.DEFAULT_OPT_STEPS == DEFAULT_OPT_STEPS
 
+    def test_bohr_to_angstrom_matches_shared_config_constant(self):
+        """L audit fix: optimizer.py used to hand-type its own Bohr->Angstrom
+        literal (0.529177249, a plain CODATA-2018 rounding) that didn't
+        match freq_calc.py's separately hand-typed literal
+        (0.52917721092, pyscf.data.nist.BOHR). Both now import
+        config.BOHR_TO_ANGSTROM, so force/gradient unit conversions in
+        optimize_geometry are computed with the same constant PySCF itself
+        uses internally.
+        """
+        import quantui.optimizer as opt_mod
+        from quantui import config
+        from quantui.results_storage import _ANGSTROM_TO_BOHR
+
+        assert opt_mod._BOHR_TO_ANG == config.BOHR_TO_ANGSTROM
+        assert config.BOHR_TO_ANGSTROM == pytest.approx(0.52917721092, abs=1e-11)
+        assert _ANGSTROM_TO_BOHR == pytest.approx(
+            1.0 / config.BOHR_TO_ANGSTROM, abs=1e-15
+        )
+
 
 # ============================================================================
 # Import-guard tests — all platforms

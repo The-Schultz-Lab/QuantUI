@@ -380,8 +380,9 @@ def _run_freq_calc_body(
             try:
                 import numpy as _np_ir
 
+                from .config import BOHR_TO_ANGSTROM as _BOHR_TO_ANG
+
                 _DELTA = 0.01  # Bohr
-                _BOHR_TO_ANG = 0.52917721092
                 _KM_MOL_FAC = 42.255  # (D/Å)²/amu → km/mol
 
                 _n_ir = mol.natm

@@ -258,6 +258,12 @@ PUBCHEM_MIN_REQUEST_INTERVAL_S: float = 0.25
 CACTUS_TIMEOUT_S: float = 8.0
 CACTUS_CONNECT_TIMEOUT_S: float = 4.0
 
+# Bohr radius, in Angstrom — the exact value ``pyscf.data.nist.BOHR`` uses
+# internally, so unit conversions here stay consistent with what PySCF
+# actually computed with. (L audit fix: optimizer.py and freq_calc.py each
+# hand-typed their own slightly different literal for this.)
+BOHR_TO_ANGSTROM: float = 0.52917721092
+
 # Bundled-library size budget + heavy-atom ceilings.
 # These are QC *starting* geometries, so keep them runnable in a classroom.
 LIBRARY_SIZE_BUDGET_BYTES: int = 10 * 1024 * 1024  # 10 MB

@@ -233,3 +233,31 @@ def test_prune_events_still_removes_old_entries(isolated_log_dir):
     remaining = clog.get_recent_events(10)
     assert len(remaining) == 1
     assert remaining[0]["event"] == "new"
+
+
+def test_6_31gss_he_basis_count_matches_pyscf(isolated_log_dir):
+    """L audit fix: He under 6-31G** must have 5 basis functions, not 2.
+
+    6-31G** adds a p-polarization shell on H/He on top of 6-31G*'s bare
+    s-only He (2 bf), the same way 6-31G* already adds p on the heavy
+    atoms — so He should follow H's pattern (2 -> 5), not stay at 2.
+    Verified against ``pyscf.gto.M(atom="He", basis="6-31g**").nao == 5``.
+    """
+    import quantui.calc_log as clog
+
+    assert clog.count_basis_functions(["He"], "6-31G**") == 5
+
+
+def test_basis_function_table_internally_consistent(isolated_log_dir):
+    """H and He must carry equal counts in every basis in the lookup table.
+
+    Both are period-1 elements with the same shell structure in every
+    basis set this table covers, so a basis that gives H and He different
+    counts indicates a transcription error (this caught the 6-31G** nit).
+    """
+    import quantui.calc_log as clog
+
+    for basis, table in clog._BASIS_FUNCTIONS.items():
+        assert table["H"] == table["He"], (
+            f"{basis}: H={table['H']} but He={table['He']}, expected equal"
+        )

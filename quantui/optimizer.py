@@ -50,13 +50,11 @@ from pathlib import Path
 from typing import IO, Any, List, Optional
 
 from .ase_bridge import ASE_AVAILABLE, atoms_to_molecule, molecule_to_atoms
+from .config import BOHR_TO_ANGSTROM as _BOHR_TO_ANG
 from .molecule import Molecule
 from .session_calc import HARTREE_TO_EV
 
 logger = logging.getLogger(__name__)
-
-# Unit conversion: 1 Bohr = 0.529177249 Angstrom (NIST 2018 CODATA)
-_BOHR_TO_ANG: float = 0.529177249
 
 # Defaults also exposed in config.py for the notebook UI
 DEFAULT_FMAX: float = 0.05  # eV/Å — tight enough for educational use

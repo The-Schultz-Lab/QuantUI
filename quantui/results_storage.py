@@ -30,6 +30,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
+from .config import BOHR_TO_ANGSTROM as _BOHR_TO_ANGSTROM
+
 if TYPE_CHECKING:
     pass  # result types accepted via duck typing; no hard import needed
 
@@ -40,8 +42,10 @@ _SCHEMA_VERSION = 2
 # quirk. pyscf_mol_atom (the source for both blocks) is Angstrom throughout
 # QuantUI, so [FR-COORD] needs an explicit conversion; [Atoms]/[GTO]/[MO] (via
 # molden.from_mo / molden.header, built from a mol with implicit unit="Angstrom")
-# do not.
-_ANGSTROM_TO_BOHR = 1.8897261254578281
+# do not. Derived from config.BOHR_TO_ANGSTROM (pyscf.data.nist.BOHR) rather
+# than a separately hand-typed literal, so this stays consistent with the
+# other Bohr<->Angstrom conversions in the codebase.
+_ANGSTROM_TO_BOHR = 1.0 / _BOHR_TO_ANGSTROM
 
 
 def _default_results_dir() -> Path:

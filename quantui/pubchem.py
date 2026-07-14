@@ -122,7 +122,7 @@ def search_molecule_by_name(name: str) -> int:
         name: Common name or IUPAC name of the molecule
 
     Returns:
-        int: PubChem Compound ID (CID) if found, None otherwise
+        int: PubChem Compound ID (CID)
 
     Raises:
         PubChemAPIError: If API request fails

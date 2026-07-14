@@ -136,7 +136,7 @@ _BASIS_FUNCTIONS: dict[str, dict[str, int]] = {
     },
     "6-31G**": {
         "H": 5,
-        "He": 2,
+        "He": 5,
         "Li": 9,
         "Be": 9,
         "B": 14,
