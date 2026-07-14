@@ -68,6 +68,22 @@ def _opt_float(x: object) -> Optional[float]:
         return None
 
 
+def _opt_int(x: object) -> Optional[int]:
+    """Coerce an optional (possibly numpy) scalar to a JSON-safe int or None.
+
+    ``json.dumps`` accepts ``numpy.float64``/``numpy.float32`` transparently
+    (they subclass ``float``), but ``numpy.int64``/``numpy.bool_`` do not
+    subclass ``int``/``bool`` and raise ``TypeError`` unconverted — this
+    normalizes any duck-typed result's numpy scalar to a plain ``int``.
+    """
+    if x is None:
+        return None
+    try:
+        return int(x)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 def _opt_float_list(x: object) -> Optional[list]:
     """Coerce an optional iterable of numbers to a JSON-safe list of floats."""
     if x is None:
@@ -155,10 +171,17 @@ def save_result(
         _collision += 1
     dest.mkdir(parents=True)
 
-    _e_ha = getattr(result, "energy_hartree", float("nan"))
+    _e_ha_raw = getattr(result, "energy_hartree", float("nan"))
+    _e_ha = _opt_float(_e_ha_raw)
+    if _e_ha is None:
+        _e_ha = float("nan")
     # energy_ev may be a property (SessionResult) or absent (OptimizationResult
     # and new types also define it as a property, so getattr works for all).
-    _e_ev = getattr(result, "energy_ev", _e_ha * _HARTREE_TO_EV)
+    _e_ev = _opt_float(getattr(result, "energy_ev", _e_ha * _HARTREE_TO_EV))
+    if _e_ev is None:
+        _e_ev = _e_ha * _HARTREE_TO_EV
+
+    _converged = getattr(result, "converged", None)
 
     data: dict = {
         "_schema_version": _SCHEMA_VERSION,
@@ -169,14 +192,20 @@ def save_result(
         "basis": getattr(result, "basis", "?"),
         "energy_hartree": _e_ha,
         "energy_ev": _e_ev,
-        "homo_lumo_gap_ev": getattr(result, "homo_lumo_gap_ev", None),
-        "converged": getattr(result, "converged", None),
-        "n_iterations": getattr(result, "n_iterations", -1),
+        "homo_lumo_gap_ev": _opt_float(getattr(result, "homo_lumo_gap_ev", None)),
+        "converged": None if _converged is None else bool(_converged),
+        "n_iterations": _opt_int(getattr(result, "n_iterations", -1)),
         # Post-HF correlation breakdown — None for HF/DFT. Persisted so the
         # saved-result card can show the HF reference + correlation rows.
-        "mp2_correlation_hartree": getattr(result, "mp2_correlation_hartree", None),
-        "ccsd_correlation_hartree": getattr(result, "ccsd_correlation_hartree", None),
-        "ccsd_t_correction_hartree": getattr(result, "ccsd_t_correction_hartree", None),
+        "mp2_correlation_hartree": _opt_float(
+            getattr(result, "mp2_correlation_hartree", None)
+        ),
+        "ccsd_correlation_hartree": _opt_float(
+            getattr(result, "ccsd_correlation_hartree", None)
+        ),
+        "ccsd_t_correction_hartree": _opt_float(
+            getattr(result, "ccsd_t_correction_hartree", None)
+        ),
         # Persisted so the saved-result card matches the live card (M-CLEAN
         # formatter-parity fix). Additive — absent on older results, where the
         # history card falls back exactly as before (CPU / no dipole / no

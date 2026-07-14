@@ -126,6 +126,52 @@ class TestSaveResult:
         assert d1 != d2
 
 
+class TestSaveResultJsonSafeCoercion:
+    """L audit fix: save_result must coerce every numeric/boolean field to a
+    plain Python type before json.dumps.
+
+    numpy.float64 happens to subclass float (so it round-trips through
+    json.dumps by accident), but numpy.float32, numpy.int64, and
+    numpy.bool_ do NOT subclass float/int/bool and raise TypeError
+    unconverted — a real risk for any duck-typed result object (e.g. one
+    carrying GPU-offloaded float32 values) since only
+    dipole_moment_debye/mulliken_charges/atom_symbols were coerced before,
+    while energy_hartree, homo_lumo_gap_ev, converged, n_iterations, and
+    the post-HF correlation fields were written straight from getattr().
+    """
+
+    def test_numpy_scalar_result_saves_without_raising(self, tmp_path):
+        result = SimpleNamespace(
+            formula="H2O",
+            method="RHF",
+            basis="STO-3G",
+            energy_hartree=np.float32(-74.5),
+            energy_ev=np.float32(-2027.3),
+            homo_lumo_gap_ev=np.float32(12.3),
+            converged=np.bool_(True),
+            n_iterations=np.int64(12),
+            mp2_correlation_hartree=np.float32(-0.01),
+        )
+        saved = save_result(result, results_dir=tmp_path)
+        data = json.loads((saved / "result.json").read_text())
+        assert data["energy_hartree"] == pytest.approx(-74.5, rel=1e-5)
+        assert data["converged"] is True
+        assert data["n_iterations"] == 12
+        assert data["mp2_correlation_hartree"] == pytest.approx(-0.01, rel=1e-3)
+
+    def test_numpy_bool_and_int64_fields_are_plain_python_types(self, tmp_path):
+        result = _make_result(converged=np.bool_(False), n_iterations=np.int64(5))
+        saved = save_result(result, results_dir=tmp_path)
+        # Read the raw file text (not json.loads, which normalizes types)
+        # to confirm no numpy repr ever reached the serialized bytes.
+        raw = (saved / "result.json").read_text()
+        assert "np.bool_" not in raw
+        assert "np.int64" not in raw
+        data = json.loads(raw)
+        assert type(data["converged"]) is bool
+        assert type(data["n_iterations"]) is int
+
+
 class TestLoadResult:
     def test_roundtrip(self, tmp_path):
         saved = save_result(_make_result(), results_dir=tmp_path, calc_type="frequency")
