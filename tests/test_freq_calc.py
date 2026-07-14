@@ -277,5 +277,118 @@ class TestIRIntensities:
             assert max(result.ir_intensities) > 1.0
 
 
+# ============================================================================
+# IR-intensity inner-loop dm0/method dispatch (M5 audit fix, 2026-07-14)
+# ============================================================================
+
+
+class TestIrIntensityUhfClosedShellDispatch:
+    """The inner displaced-SCF loop must dispatch on dm0's actual shape.
+
+    Regression: the serial (_displaced_scf_dipole in freq_calc.py) and
+    parallel (run_displaced_scf in freq_ir_workers.py) inner loops both
+    picked RHF/UHF based on mol.spin == 0 alone. That agrees with the
+    parent SCF's actual type only when the user's method choice matches
+    the molecule's natural spin state. Explicitly selecting UHF for a
+    closed-shell molecule (mol.spin == 0, but the parent mf — and its
+    dm0 — is still UHF-shaped, a legitimate technique for probing
+    symmetry-broken solutions) used to raise a shape-mismatch ValueError
+    deep in PySCF, silently dropping IR intensities for the whole run
+    (caught by the broad except around the entire IR-intensity block).
+    """
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_uhf_on_closed_shell_molecule_still_gets_ir_intensities(self):
+        from quantui.freq_calc import run_freq_calc
+
+        result = run_freq_calc(_water(), method="UHF", basis="STO-3G")
+        assert result.ir_intensities, (
+            "UHF on a closed-shell molecule should still produce IR "
+            "intensities via the serial inner-loop dispatch fix"
+        )
+        assert len(result.ir_intensities) == len(result.frequencies_cm1)
+
+    def test_freq_ir_workers_dispatches_on_dm0_shape_not_spin(self):
+        """Unit-level check of the parallel worker's dispatch logic directly.
+
+        Builds a UHF parent for a closed-shell (spin=0) molecule — the
+        exact scenario that used to crash — and confirms the worker
+        picks UHF (matching the (2, nao, nao) dm0) rather than RHF
+        (which would raise on that dm0 shape).
+        """
+        pytest.importorskip("pyscf")
+        import os
+        import pickle
+        import tempfile
+
+        from pyscf import gto, scf
+
+        from quantui.freq_ir_workers import init_worker, run_displaced_scf
+
+        atom_str = "O 0 0 0.119; H 0 0.763 -0.477; H 0 -0.763 -0.477"
+        mol = gto.M(atom=atom_str, basis="sto-3g", spin=0, charge=0, verbose=0)
+        mf = scf.UHF(mol)
+        mf.kernel()
+        dm0 = mf.make_rdm1()
+        assert dm0.ndim == 3  # UHF-shaped despite mol.spin == 0
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl")
+        try:
+            pickle.dump(dm0, tmp)
+            tmp.close()
+            init_worker(atom_str, "sto-3g", 0, 0, None, tmp.name, 1)
+            coords = mol.atom_coords(unit="Bohr").flatten().tolist()
+            dip = run_displaced_scf(coords)  # must not raise
+            assert len(dip) == 3
+        finally:
+            os.unlink(tmp.name)
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_parallel_failure_falls_back_to_serial(self, monkeypatch):
+        """A parallel-path failure must fall back to serial, not give up.
+
+        Regression: run_displaced_scf's own docstring claims "The
+        freq_calc driver catches such failures and falls back to the
+        serial loop so the user's calc still completes" — but no such
+        fallback existed; any single worker failure propagated out to
+        the broad except around the whole IR-intensity block, dropping
+        IR intensities entirely. Forces the parallel path to be
+        selected and to fail immediately, then checks IR intensities
+        still come out via the serial fallback.
+        """
+        import concurrent.futures as cf
+        import io as _io
+
+        import quantui.freq_ir_workers as ir_workers
+        from quantui.freq_calc import run_freq_calc
+
+        monkeypatch.setattr(ir_workers, "parallel_enabled_for_run", lambda **kw: True)
+
+        class _FailingExecutor:
+            def __init__(self, *a, **kw):
+                pass
+
+            def __enter__(self):
+                raise RuntimeError("simulated worker pool failure")
+
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(cf, "ProcessPoolExecutor", _FailingExecutor)
+
+        buf = _io.StringIO()
+        result = run_freq_calc(
+            _water(), method="RHF", basis="STO-3G", progress_stream=buf
+        )
+        log = buf.getvalue()
+        assert "falling back to serial" in log
+        assert result.ir_intensities, (
+            "IR intensities should still be populated via the serial "
+            "fallback after a simulated parallel-path failure"
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
