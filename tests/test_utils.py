@@ -16,6 +16,8 @@ Removed vs. source repo (SLURM-specific helpers no longer present):
 """
 
 import os
+import subprocess
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -457,3 +459,34 @@ class TestUtilsIntegration:
         assert utils.validate_coordinates([0.0, 0.0]) is False
         assert utils.validate_charge(100) is False
         assert utils.validate_multiplicity(0) is False
+
+
+class TestNoRootLoggerSideEffect:
+    """M14 audit fix: importing quantui must not configure the root logger.
+
+    ``utils.py`` used to call ``logging.basicConfig(...)`` at module import
+    time, which ``quantui/__init__.py`` always triggers — this hijacked the
+    root logger's handlers/level for any host application or notebook that
+    imports quantui, which a library must never do. Must run in a
+    subprocess: the root logger is global process state, and other test
+    modules in the same pytest session may have already imported quantui
+    (or otherwise touched the root logger) before this test runs.
+    """
+
+    def test_import_quantui_leaves_root_logger_unconfigured(self):
+        script = (
+            "import logging\n"
+            "import quantui\n"
+            "root = logging.getLogger()\n"
+            "assert root.handlers == [], f'root logger handlers: {root.handlers}'\n"
+            "assert root.level == logging.WARNING, f'root logger level: {root.level}'\n"
+            "print('OK')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "OK" in result.stdout
