@@ -352,9 +352,7 @@ def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
         try:
             expected_atoms = int(stripped)
             body_start = idx + 2  # count line + title line, whatever it is
-            logger.debug(
-                f"Detected XYZ file format expecting {expected_atoms} atoms"
-            )
+            logger.debug(f"Detected XYZ file format expecting {expected_atoms} atoms")
         except ValueError:
             pass  # first content line isn't a bare count -> no header
         break  # only the first non-blank/non-comment line is eligible
@@ -490,7 +488,7 @@ def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
                 f"💡 Coordinates must be numbers (integers or decimals).\n"
                 f"Examples: 0.0, 1.5, -2.3, 0.757\n\n"
                 f"Error details: {e}"
-            )
+            ) from e
 
         atoms.append(atom_symbol)
         coordinates.append([x, y, z])

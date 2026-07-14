@@ -58,8 +58,11 @@ class TestSearchMoleculeByName:
         """Test API connection failure."""
         mock_get.side_effect = requests.RequestException("Connection failed")
 
-        with pytest.raises(PubChemAPIError):
+        with pytest.raises(PubChemAPIError) as exc_info:
             search_molecule_by_name("water")
+        # L audit fix (ruff B904): must chain the original RequestException
+        # via `raise ... from e` so tracebacks show the real root cause.
+        assert isinstance(exc_info.value.__cause__, requests.RequestException)
 
     @patch("quantui.pubchem.requests.get")
     def test_search_empty_result(self, mock_get):

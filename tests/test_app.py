@@ -1619,6 +1619,29 @@ class TestVibExportAnimation:
         assert isinstance(app._vib_export_status, widgets.HTML)
         assert app._vib_export_status.value == ""
 
+    def test_export_bad_mode_index_chains_original_exception(self):
+        """L audit fix (ruff B904): build_vib_export_html's py3Dmol-fallback
+        path must chain the original IndexError via `raise ... from exc`
+        when displacements[mode_number - 1] is out of range, not swallow it.
+        """
+        from types import SimpleNamespace
+
+        from quantui.app_visualization import build_vib_export_html
+        from quantui.viz_backend_router import BackendAvailability
+
+        if not BackendAvailability.from_environment().py3dmol:
+            pytest.skip("py3Dmol not available for export fallback test")
+
+        freq_stub = SimpleNamespace(displacements=[[[0.1, 0.0, 0.0]]])
+        app_stub = SimpleNamespace(
+            _last_vib_freq_result=freq_stub,
+            _last_vib_molecule=self._water(),
+            _viz_availability=BackendAvailability(py3dmol=True, plotlymol=False),
+        )
+        with pytest.raises(ValueError) as exc_info:
+            build_vib_export_html(app_stub, mode_number=5)  # out of range
+        assert isinstance(exc_info.value.__cause__, IndexError)
+
     def test_export_without_vib_state_shows_error_status(self, tmp_path, monkeypatch):
         monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
         app = QuantUIApp()

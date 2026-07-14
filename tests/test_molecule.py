@@ -378,8 +378,11 @@ H  0.0  0.0  0.74"""  # First line missing z-coordinate
         xyz_text = """H  0.0  0.0  abc
 H  0.0  0.0  0.74"""
 
-        with pytest.raises(ValueError, match="Could not parse coordinates"):
+        with pytest.raises(ValueError, match="Could not parse coordinates") as exc_info:
             parse_xyz_input(xyz_text)
+        # L audit fix (ruff B904): the original ValueError from float()
+        # must be chained via `raise ... from e`.
+        assert isinstance(exc_info.value.__cause__, ValueError)
 
     def test_parse_negative_coordinates(self):
         """Test parsing negative coordinates."""

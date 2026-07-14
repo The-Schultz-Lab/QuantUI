@@ -64,7 +64,7 @@ def resolve_to_sdf(identifier: str, conformer_3d: bool = True) -> str:
                 return str(response.text)
     except requests.RequestException as e:
         logger.error(f"CACTUS request failed: {e}")
-        raise PubChemAPIError(f"Failed to connect to CACTUS: {e}")
+        raise PubChemAPIError(f"Failed to connect to CACTUS: {e}") from e
 
     raise MoleculeNotFoundError(
         f"CACTUS could not resolve '{identifier}' (last status: {last_status})"

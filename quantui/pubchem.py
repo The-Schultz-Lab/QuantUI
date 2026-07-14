@@ -150,7 +150,7 @@ def search_molecule_by_name(name: str) -> int:
 
     except requests.RequestException as e:
         logger.error(f"PubChem API request failed: {e}")
-        raise PubChemAPIError(f"Failed to connect to PubChem: {e}")
+        raise PubChemAPIError(f"Failed to connect to PubChem: {e}") from e
 
 
 def search_cid_by_inchikey(inchikey: str) -> int:
@@ -171,7 +171,7 @@ def search_cid_by_inchikey(inchikey: str) -> int:
         return int(cids[0])
     except requests.RequestException as e:
         logger.error(f"PubChem InChIKey request failed: {e}")
-        raise PubChemAPIError(f"Failed to connect to PubChem: {e}")
+        raise PubChemAPIError(f"Failed to connect to PubChem: {e}") from e
 
 
 def search_cids_by_name(name: str) -> list:
@@ -191,7 +191,7 @@ def search_cids_by_name(name: str) -> list:
         ]
     except requests.RequestException as e:
         logger.error(f"PubChem CID-list request failed: {e}")
-        raise PubChemAPIError(f"Failed to connect to PubChem: {e}")
+        raise PubChemAPIError(f"Failed to connect to PubChem: {e}") from e
 
 
 def search_pubchem_candidates(query: str, max_results: int = 10) -> list:
@@ -215,7 +215,7 @@ def search_pubchem_candidates(query: str, max_results: int = 10) -> list:
         props = response.json().get("PropertyTable", {}).get("Properties", [])
     except requests.RequestException as e:
         logger.error(f"PubChem property request failed: {e}")
-        raise PubChemAPIError(f"Failed to connect to PubChem: {e}")
+        raise PubChemAPIError(f"Failed to connect to PubChem: {e}") from e
 
     # Preserve the CID search order (the property endpoint may reorder).
     by_cid = {int(p.get("CID")): p for p in props if p.get("CID") is not None}
@@ -281,7 +281,7 @@ def get_molecule_sdf(cid: int, conformer_3d: bool = True) -> str:
 
     except requests.RequestException as e:
         logger.error(f"PubChem SDF request failed: {e}")
-        raise PubChemAPIError(f"Failed to retrieve molecule: {e}")
+        raise PubChemAPIError(f"Failed to retrieve molecule: {e}") from e
 
 
 def _separate_fragments(mol: Any, min_gap: float = 3.0) -> None:
@@ -410,7 +410,7 @@ def sdf_to_xyz(sdf_content: str) -> Tuple[str, Dict[str, Any]]:
 
     except Exception as e:
         logger.error(f"SDF to XYZ conversion failed: {e}")
-        raise ValueError(f"Failed to convert SDF to XYZ: {e}")
+        raise ValueError(f"Failed to convert SDF to XYZ: {e}") from e
 
 
 def fetch_molecule(
@@ -654,7 +654,7 @@ def smiles_to_xyz(smiles: str, optimize_3d: bool = True) -> Tuple[str, Dict[str,
 
     except Exception as e:
         logger.error(f"SMILES to XYZ conversion failed: {e}")
-        raise ValueError(f"Failed to convert SMILES to XYZ: {e}")
+        raise ValueError(f"Failed to convert SMILES to XYZ: {e}") from e
 
 
 def inchi_to_xyz(inchi: str, optimize_3d: bool = True) -> Tuple[str, Dict[str, Any]]:
@@ -710,7 +710,7 @@ def inchi_to_xyz(inchi: str, optimize_3d: bool = True) -> Tuple[str, Dict[str, A
 
     except Exception as e:
         logger.error(f"InChI to XYZ conversion failed: {e}")
-        raise ValueError(f"Failed to convert InChI to XYZ: {e}")
+        raise ValueError(f"Failed to convert InChI to XYZ: {e}") from e
 
 
 def student_friendly_smiles_to_xyz(smiles: str) -> Tuple[Optional[str], str]:

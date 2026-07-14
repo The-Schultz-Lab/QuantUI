@@ -67,8 +67,12 @@ class TestCactus:
     @patch("quantui.cactus.requests.get")
     def test_resolve_to_sdf_network_error_raises_api_error(self, mock_get):
         mock_get.side_effect = requests.ConnectionError("down")
-        with pytest.raises(PubChemAPIError):
+        with pytest.raises(PubChemAPIError) as exc_info:
             cactus.resolve_to_sdf("aspirin")
+        # L audit fix (ruff B904): the original ConnectionError must be
+        # chained via `raise ... from e`, not swallowed, so tracebacks show
+        # the real root cause instead of just "during handling of ...".
+        assert isinstance(exc_info.value.__cause__, requests.ConnectionError)
 
     @rdkit_only
     @patch("quantui.cactus.requests.get")

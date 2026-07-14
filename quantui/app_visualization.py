@@ -2503,14 +2503,14 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
             import numpy as np
             import py3Dmol  # noqa: F401 — probe; make_view imports it for the export
         except ImportError as exc:
-            raise ValueError(f"py3Dmol unavailable for fallback export: {exc}")
+            raise ValueError(f"py3Dmol unavailable for fallback export: {exc}") from exc
 
         try:
             displ = np.array(freq_result.displacements[mode_number - 1], dtype=float)
         except (AttributeError, IndexError, ValueError, TypeError) as exc:
             raise ValueError(
                 f"Could not read displacements for mode {mode_number}: {exc}"
-            )
+            ) from exc
 
         atoms = list(molecule.atoms)
         base_coords = np.array(molecule.coordinates, dtype=float)
