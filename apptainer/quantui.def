@@ -21,7 +21,7 @@ FROM: continuumio/miniconda3:latest
 %labels
   Maintainer "Jonathan Schultz"
   Purpose "Local teaching interface for quantum chemistry calculations"
-  Version "0.4.0"
+  Version "0.4.1"
 
 %environment
   export PATH="/opt/conda/bin:${PATH}"
