@@ -2951,6 +2951,7 @@ class QuantUIApp:
         self.calc_type_dd.value = "Reorganization Energy"
         self._reorg_mode_dd.value = "both"
         self._on_run_clicked(btn)
+
     def _on_cancel(self, btn=None) -> None:
         """Request graceful cancellation of the in-flight calculation.
 

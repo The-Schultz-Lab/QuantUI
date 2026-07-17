@@ -903,6 +903,8 @@ def build_shared_widgets(
             "Set up and run the 4-point Marcus reorganization energy "
             "(hole + electron) on the loaded molecule"
         ),
+    )
+
     # Gracefully stops a running calculation at the next SCF cycle / opt step.
     # Disabled unless a calc is in flight (toggled by _do_run).
     app.cancel_btn = widgets.Button(
