@@ -16,7 +16,16 @@ REM Clears quantui/__pycache__ on every launch to prevent stale .pyc bytecode
 REM (WSL2 DrvFs does not reliably propagate Windows-side mtime changes, so Python
 REM may load pre-edit bytecode even after source changes — see GOTCHAS.md).
 REM PYTHONDONTWRITEBYTECODE=1 prevents a new stale cache from accumulating.
-start "QuantUI [native]" wsl -d Ubuntu -- bash -c "cd '%WSLPATH%' && source ~/miniconda3/etc/profile.d/conda.sh && conda activate quantui && if [ pyproject.toml -nt .dev_install_stamp ] || ! python -c 'import quantui' 2>/dev/null; then pip install -e . -q && touch .dev_install_stamp; fi && rm -rf quantui/__pycache__ && PYTHONDONTWRITEBYTECODE=1 voila notebooks/molecule_computations.ipynb --no-browser --port=8867 --ServerApp.disable_check_xsrf=True"
+REM The editable reinstall MUST NOT block launch when offline: pip fetches
+REM build deps (setuptools) from PyPI, which hangs/fails with no network. So it
+REM runs with a short timeout + no retries, is non-fatal, and the chain
+REM continues to Voila with `; ` (not `&&`) regardless. It also stamps
+REM .dev_install_stamp even when skipped, so a one-time pyproject change can't
+REM make EVERY subsequent offline launch retry (and re-delay on) pip — the
+REM reinstall is attempted once, then skipped. quantui/*.py + package-data are
+REM live in editable mode, so a skipped reinstall is harmless offline; re-run
+REM `pip install -e .` manually when online if you add a real dependency.
+start "QuantUI [native]" wsl -d Ubuntu -- bash -c "cd '%WSLPATH%' && source ~/miniconda3/etc/profile.d/conda.sh && conda activate quantui && if [ pyproject.toml -nt .dev_install_stamp ] || ! python -c 'import quantui' 2>/dev/null; then pip install -e . -q --timeout=5 --retries=0 && touch .dev_install_stamp || { echo '[QuantUI] editable reinstall skipped (offline?) - using live source'; touch .dev_install_stamp; }; fi; rm -rf quantui/__pycache__ && PYTHONDONTWRITEBYTECODE=1 voila notebooks/molecule_computations.ipynb --no-browser --port=8867 --ServerApp.disable_check_xsrf=True"
 
 echo Waiting for Voila to start...
 timeout /t 6 /nobreak > nul

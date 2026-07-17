@@ -24,6 +24,7 @@ Usage::
 
 from __future__ import annotations
 
+import html
 from typing import List, Optional
 
 import ipywidgets as widgets
@@ -96,10 +97,10 @@ class StepProgress:
             line = (
                 f'<div style="font-size:13px; padding:2px 0; '
                 f'font-weight:{weight}; color:{color};">'
-                f"{icon} <b>Step {i + 1}:</b> {label}"
+                f"{icon} <b>Step {i + 1}:</b> {html.escape(label)}"
             )
             if self._messages[i]:
-                line += f" — <i>{self._messages[i]}</i>"
+                line += f" — <i>{html.escape(self._messages[i])}</i>"
             line += "</div>"
             lines.append(line)
 

@@ -20,6 +20,134 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - **One-click "Calc. Reorganization Energy" button** — sets the calculation type
   to Reorganization Energy, defaults the channel to both hole + electron, and
   launches the run in a single click.
+## [0.4.1] - 2026-07-16
+
+Bug-fix and hardening release from a full repository audit. No new features and
+no breaking changes — it fixes correctness bugs across orbital isosurfaces,
+Molden export, the XYZ parser, NMR references, PES scans, and IR intensities,
+plus a range of edge-case, packaging, and hygiene issues found by reading the
+codebase end to end.
+
+### Added
+
+- Single-atom molecules (e.g. a lone He or Ne atom) are now accepted as XYZ input
+  and run end to end — atomic calculations are legitimate targets.
+
+### Changed
+
+- **Python 3.9 is now covered by CI.** The minimum supported version was
+  previously claimed but untested; adding it surfaced and fixed real
+  geometry-optimization and frequency failures on the older ASE that resolves for
+  Python 3.9.
+- **Faster `quantui` CLI startup** — the command-line tool no longer imports the
+  full notebook/GUI stack (ipywidgets, IPython, the app module) just to tail a
+  log.
+- **No more logging hijack** — importing `quantui` no longer reconfigures the
+  root logger, so it won't override or duplicate logging in a host application or
+  notebook.
+- **Faster time estimates over long sessions** — the performance log is cached and
+  re-read only when it changes, instead of being fully parsed on every UI update.
+
+### Fixed
+
+- **Orbital isosurfaces for charged and open-shell molecules** — the isosurface
+  viewer previously errored for every odd-electron system (radicals, and ions
+  such as H₃O⁺, NH₄⁺, OH⁻); charge and spin are now carried through to the cube
+  generator.
+- **Molden export from frequency calculations** — the exported geometry was
+  inflated (Bohr coordinates read as Ångström) and internally inconsistent, so it
+  rendered wrong in Avogadro/IQmol; frequency geometries are now stored and
+  written in the correct units. This also fixes history replay of frequency
+  orbital isosurfaces.
+- **Export Script and method notes for `wB97X-D`** — "Export Script" failed with
+  a "method not supported" error and the educational notes silently disappeared
+  for `wB97X-D`; mixed-case method names are now matched correctly.
+- **2D structure images from XYZ input** — this path never worked (it always
+  returned nothing) and now renders.
+- **XYZ files with a blank or comment (`#`) title line** no longer silently drop
+  the first atom — a very common file layout was losing an atom with only a
+  warning.
+- **NMR reference provenance** — chemical shifts no longer silently fall back to
+  the B3LYP/6-31G\* TMS constants for other method/basis combinations; the
+  reference that was actually applied is now recorded, and the lookup is
+  case-insensitive.
+- **IR intensities for open-shell / UHF-singlet frequency runs** no longer abort
+  the whole IR-intensity step.
+- **PES scans** — a failed scan point no longer records a bogus geometry frame or
+  poisons the energy/barrier statistics with NaN, and angle/dihedral scans work
+  with current ASE releases.
+- **UHF calculations** now report a dipole moment and Mulliken charges (these were
+  silently skipped).
+- **Clearer errors for unsupported input** — elements outside the supported H–Kr
+  range, and post-Hartree–Fock methods (MP2 / CCSD / CCSD(T)) requested for
+  calculation types that don't support them, now fail with an explicit message
+  instead of a misleading one or an uninformative crash.
+- **Windows exports** no longer fail when the basis-set name contains `*` (e.g.
+  `6-31G*`) — export filenames are sanitized.
+- **Method-notes panel** renders bold text correctly instead of leaking literal
+  `**` markers.
+- **Robustness** — the event log is no longer subject to lost entries under
+  concurrent writes; a thumbnail-save failure no longer aborts saving a result;
+  PubChem availability checks respect the configured throttle and timeout; and
+  results carrying NumPy scalar values now save correctly.
+
+## [0.4.0] - 2026-06-18
+
+Interactive-visualization and offline-readiness release. Adds molecular-orbital
+isosurfaces and an interactive pre-optimization preview, reworks the 3D viewers
+to preserve camera orientation across frames, makes all 3D rendering work
+offline, and substantially speeds up startup.
+
+### Added
+
+- **Molecular-orbital isosurfaces (py3Dmol)** — interactive HOMO / LUMO / MO
+  isosurface viewer rendered with py3Dmol; the downsampled Plotly path remains a
+  fallback.
+- **Interactive classical pre-optimization** — a **Preview** button relaxes the
+  geometry with a fast bonded force field (RDKit MMFF94 → UFF) and animates the
+  relaxation in place; **Keep this geometry** adopts it as the active structure
+  or **Revert** discards it. Stepper controls (play/pause, prev/next, scrub
+  slider, and an input ⇄ relaxed flip) let you compare geometries, and the
+  captured trajectory is sampled at even RMSD spacing for smooth playback.
+- **Cancel button** — stop a running calculation cooperatively at the next SCF
+  cycle / optimization step.
+- **Live vibrational-animation framerate** — the Vib fps setting updates the
+  running animation immediately.
+
+### Changed
+
+- **Single persistent 3D viewers** — the trajectory and vibrational-mode viewers
+  now load all frames into one py3Dmol viewer and switch frames/modes
+  client-side, so the camera (rotation/zoom) is preserved across steps and modes
+  and there is no per-frame rebuild or flicker.
+- **Pre-optimization is Preview-only** — the silent "classical pre-optimize"
+  checkbox is gone; pre-optimization happens only through the transparent
+  Preview → Keep/Revert flow, so nothing relaxes the geometry invisibly. (The
+  separate QM "geometry optimization before calculation" option is unchanged.)
+- **Offline-first 3D rendering** — 3Dmol.js is vendored and loaded per-view from
+  a local `data:` URI instead of a CDN, so every 3D view works with no network
+  (the build fails if the vendored asset is missing). Native launchers tolerate
+  offline `pip install`.
+- **Faster startup** — GPU detection and History/Compare population are deferred
+  off the synchronous construction path, so the UI paints in ~1 s instead of
+  ~15 s; the GPU status badge and dropdowns fill in shortly after.
+- **Clear** of the live calculation log is disabled while a calculation runs.
+
+### Fixed
+
+- **GPU-offloaded result extraction** — HOMO–LUMO gap, dipole moment, and
+  Mulliken charges are now reported for GPU runs. CuPy arrays are copied to host
+  before extraction, and Mulliken falls back to the CPU object (gpu4pyscf does
+  not implement population analysis on the GPU).
+- **Vibrational animation glitchiness** — stacked animation loops (a new loop
+  started on every mode switch) made playback jittery and too fast and ignored
+  the framerate setting; exactly one loop now runs.
+- **Cancel status** no longer sticks on "Cancelling…" after a calculation is
+  cancelled.
+- **Stale run status** — "Pre-optimized geometry accepted." is cleared when a new
+  molecule is loaded or a preview is reverted.
+- Structure provenance is reported and the input viewer is persisted across
+  reloads.
 
 ## [0.3.0] - 2026-06-11
 
@@ -250,6 +378,9 @@ Initial public scaffolding of the QuantUI package: `quantui` package with
 `calculator.py`, basic notebook launcher, Apptainer container definition,
 MIT license, and project metadata.
 
-[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/The-Schultz-Lab/QuantUI/releases/tag/v0.1.0

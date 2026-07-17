@@ -531,6 +531,47 @@ def orbital_summary_html(info: OrbitalInfo) -> str:
 # ============================================================================
 
 
+def infer_charge_and_spin(mol_atom: list, mo_occ: np.ndarray | list) -> Tuple[int, int]:
+    """Infer ``(charge, spin)`` for a ``gto.Mole`` from atoms + MO occupations.
+
+    Cube/isosurface generation from saved MO data does not have direct access
+    to the original ``Molecule.charge`` / ``Molecule.multiplicity`` — only the
+    atom list and the MO coefficients/occupations that came out of the SCF.
+    PySCF's ``Mole.build()`` requires ``charge``/``spin`` consistent with the
+    actual electron count, so passing the default ``charge=0, spin=0`` fails
+    to build for any charged or open-shell (odd-electron) molecule.
+
+    This reconstructs both from data that's always available:
+
+    - ``spin`` (PySCF's ``2S = n_alpha - n_beta``) is 0 when ``mo_occ`` is
+      1-D (closed-shell RHF/RKS — including the MP2/CCSD/CCSD(T) paths, which
+      always run on an RHF reference), or ``n_alpha - n_beta`` when ``mo_occ``
+      is 2-D (UHF/UKS, shape ``(2, n_mo)``).
+    - ``charge`` is the nuclear charge (sum of atomic numbers in ``mol_atom``)
+      minus the total electron count (``sum(mo_occ)`` over all spin channels).
+
+    Returns ``(0, 0)`` if ``mol_atom`` or ``mo_occ`` is falsy/``None`` so
+    callers can pass through directly without a separate None-check.
+    """
+    if not mol_atom or mo_occ is None:
+        return 0, 0
+    from .molecule import ATOMIC_NUMBERS
+
+    occ = np.asarray(mo_occ, dtype=float)
+    if occ.ndim == 2:
+        n_alpha = float(occ[0].sum())
+        n_beta = float(occ[1].sum())
+        spin = int(round(n_alpha - n_beta))
+        n_electrons = n_alpha + n_beta
+    else:
+        spin = 0
+        n_electrons = float(occ.sum())
+
+    nuclear_charge = sum(ATOMIC_NUMBERS.get(sym, 0) for sym, _ in mol_atom)
+    charge = int(round(nuclear_charge - n_electrons))
+    return charge, spin
+
+
 def generate_cube_file(
     results_path: Path,
     orbital_index: int,
@@ -582,6 +623,7 @@ def generate_cube_file(
 
     data = np.load(results_path, allow_pickle=True)
     mo_coeff = data["mo_coeff"]
+    mo_occ = data["mo_occ"] if "mo_occ" in data else None
     if mo_coeff.ndim == 3:
         mo_coeff = mo_coeff[0]
 
@@ -594,7 +636,22 @@ def generate_cube_file(
             "Re-run the calculation with the updated script template."
         )
 
-    mol = gto.M(atom=atom_str, basis=basis_str, unit="Angstrom")
+    # Charge/spin aren't stored in results.npz — infer them from the MO
+    # occupations (when present) so charged/open-shell molecules don't fail
+    # to build. mol_atom here is a PySCF-format string, not the (symbol,
+    # coords) tuple list infer_charge_and_spin expects, so parse it first.
+    charge, spin = 0, 0
+    if mo_occ is not None:
+        parsed_atoms = [
+            (tok.split()[0], [0.0, 0.0, 0.0])
+            for tok in atom_str.replace(";", "\n").splitlines()
+            if tok.strip()
+        ]
+        charge, spin = infer_charge_and_spin(parsed_atoms, mo_occ)
+
+    mol = gto.M(
+        atom=atom_str, basis=basis_str, unit="Angstrom", charge=charge, spin=spin
+    )
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -623,6 +680,7 @@ def generate_cube_from_arrays(
     ny: int = 60,
     nz: int = 60,
     margin: float = 5.0,
+    charge: int = 0,
     spin: int = 0,
 ) -> Path:
     """
@@ -650,6 +708,13 @@ def generate_cube_from_arrays(
         Grid resolution along each axis.
     margin : float
         Extra space (Bohr) beyond atomic extents.
+    charge : int
+        Total molecular charge. Required for charged species (e.g. H3O+,
+        NH4+, OH-) — without it PySCF's electron-count check fails at
+        ``mol.build()``. Default 0 (neutral).
+    spin : int
+        PySCF's ``2S = n_alpha - n_beta``. Required for open-shell
+        (odd-electron) molecules — default 0 assumes closed-shell.
 
     Returns
     -------
@@ -670,7 +735,9 @@ def generate_cube_from_arrays(
             "  conda install -c conda-forge pyscf"
         ) from exc
 
-    mol = gto.M(atom=mol_atom, basis=mol_basis, unit="Angstrom", spin=spin)
+    mol = gto.M(
+        atom=mol_atom, basis=mol_basis, unit="Angstrom", charge=charge, spin=spin
+    )
 
     coeff = np.asarray(mo_coeff)
     if coeff.ndim == 3:
@@ -803,6 +870,73 @@ def _build_molecule_overlay_data(atoms: list[tuple[int, float, float, float]]) -
         "bond_y": bond_y,
         "bond_z": bond_z,
     }
+
+
+def render_orbital_isosurface_py3dmol(
+    cube_path: Path,
+    *,
+    isovalue: float = 0.02,
+    opacity: float = 0.85,
+    width: int = 760,
+    height: int = 620,
+    pos_color: str = "blue",
+    neg_color: str = "red",
+    bgcolor: str = "white",
+    style: str = "stick",
+) -> str:
+    """Render an orbital isosurface from a cube file via py3Dmol.
+
+    Unlike :func:`plot_cube_isosurface` (Plotly), py3Dmol isosurfaces the cube
+    *in the browser* at full resolution, so there is no Python-side volume
+    downsample and the payload is just the cube text. Both lobes are drawn:
+    ``+isovalue`` (``pos_color``) and ``-isovalue`` (``neg_color``).
+
+    Returns HTML via py3Dmol's ``_make_html``. The viewer is built through
+    :func:`quantui.viz_assets.make_view`, so it loads 3Dmol.js from the
+    vendored bundle (the page bootstrap) rather than the CDN — see
+    ``viz_assets`` for why this matters offline.
+
+    Parameters
+    ----------
+    cube_path : Path
+        Path to a Gaussian ``.cube`` file (read at full resolution).
+    isovalue : float
+        Isosurface threshold; both ``+`` and ``-`` lobes are drawn.
+    opacity : float
+        Surface opacity (0-1).
+    width, height : int
+        Viewer size in pixels.
+    pos_color, neg_color : str
+        Lobe colors for the positive and negative isosurfaces.
+    bgcolor : str
+        Viewer background color.
+    style : str
+        py3Dmol style for the embedded atoms (e.g. ``"stick"``).
+
+    Returns
+    -------
+    str
+        Self-contained HTML for the interactive viewer.
+    """
+    from quantui.viz_assets import make_view
+
+    cube_text = Path(cube_path).read_text()
+    view = make_view(width=width, height=height)
+    view.addModel(cube_text, "cube")
+    view.setStyle({style: {}})
+    view.addVolumetricData(
+        cube_text,
+        "cube",
+        {"isoval": isovalue, "color": pos_color, "opacity": opacity},
+    )
+    view.addVolumetricData(
+        cube_text,
+        "cube",
+        {"isoval": -isovalue, "color": neg_color, "opacity": opacity},
+    )
+    view.setBackgroundColor(bgcolor)
+    view.zoomTo()
+    return view._make_html()
 
 
 def plot_cube_isosurface(

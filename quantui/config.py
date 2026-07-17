@@ -30,6 +30,16 @@ SUPPORTED_METHODS = [
     "CCSD(T)",
 ]
 
+# Post-HF wavefunction methods. Single-point-only in QuantUI: session_calc.py
+# is the only entry point that special-cases them (an RHF/ROHF reference,
+# auto-dispatched by PySCF's scf.RHF() factory for open-shell input, plus an
+# mp.MP2/cc.CCSD post-SCF step). optimizer.py, freq_calc.py, tddft_calc.py,
+# and nmr_calc.py have no such special-casing — without an early guard,
+# selecting one of these methods there falls through to the DFT branch,
+# which sets e.g. mf.xc = "CCSD" and fails deep inside PySCF with a cryptic
+# "LibXCFunctional: name 'CCSD' not found" instead of a clear message.
+POST_HF_METHODS: frozenset = frozenset({"MP2", "CCSD", "CCSD(T)"})
+
 # Educational metadata for each method — shown to students in the UI
 METHOD_INFO = {
     "RHF": {
@@ -248,6 +258,12 @@ PUBCHEM_MIN_REQUEST_INTERVAL_S: float = 0.25
 CACTUS_TIMEOUT_S: float = 8.0
 CACTUS_CONNECT_TIMEOUT_S: float = 4.0
 
+# Bohr radius, in Angstrom — the exact value ``pyscf.data.nist.BOHR`` uses
+# internally, so unit conversions here stay consistent with what PySCF
+# actually computed with. (L audit fix: optimizer.py and freq_calc.py each
+# hand-typed their own slightly different literal for this.)
+BOHR_TO_ANGSTROM: float = 0.52917721092
+
 # Bundled-library size budget + heavy-atom ceilings.
 # These are QC *starting* geometries, so keep them runnable in a classroom.
 LIBRARY_SIZE_BUDGET_BYTES: int = 10 * 1024 * 1024  # 10 MB
@@ -273,45 +289,137 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-# Valid atomic symbols (periodic table subset commonly used)
-VALID_ATOMS = [
-    "H",
-    "He",
-    "Li",
-    "Be",
-    "B",
-    "C",
-    "N",
-    "O",
-    "F",
-    "Ne",
-    "Na",
-    "Mg",
-    "Al",
-    "Si",
-    "P",
-    "S",
-    "Cl",
-    "Ar",
-    "K",
-    "Ca",
-    "Sc",
-    "Ti",
-    "V",
-    "Cr",
-    "Mn",
-    "Fe",
-    "Co",
-    "Ni",
-    "Cu",
-    "Zn",
-    "Ga",
-    "Ge",
-    "As",
-    "Se",
-    "Br",
-    "Kr",
-]
+# Atomic numbers for the full periodic table (Z=1..118). Single source of
+# truth for element validity + electron counting — previously QuantUI only
+# recognized elements up to Kr (Z=36), which rejected valid structures
+# resolved via PubChem/CACTUS/SMILES for any heavier element (iodine in
+# thyroxine, tin/antimony in organometallics, gold/platinum complexes,
+# etc.), even though the "Invalid atom symbol" error text in molecule.py
+# explicitly listed iodine as a supported example.
+ATOMIC_NUMBERS: Dict[str, int] = {
+    "H": 1,
+    "He": 2,
+    "Li": 3,
+    "Be": 4,
+    "B": 5,
+    "C": 6,
+    "N": 7,
+    "O": 8,
+    "F": 9,
+    "Ne": 10,
+    "Na": 11,
+    "Mg": 12,
+    "Al": 13,
+    "Si": 14,
+    "P": 15,
+    "S": 16,
+    "Cl": 17,
+    "Ar": 18,
+    "K": 19,
+    "Ca": 20,
+    "Sc": 21,
+    "Ti": 22,
+    "V": 23,
+    "Cr": 24,
+    "Mn": 25,
+    "Fe": 26,
+    "Co": 27,
+    "Ni": 28,
+    "Cu": 29,
+    "Zn": 30,
+    "Ga": 31,
+    "Ge": 32,
+    "As": 33,
+    "Se": 34,
+    "Br": 35,
+    "Kr": 36,
+    "Rb": 37,
+    "Sr": 38,
+    "Y": 39,
+    "Zr": 40,
+    "Nb": 41,
+    "Mo": 42,
+    "Tc": 43,
+    "Ru": 44,
+    "Rh": 45,
+    "Pd": 46,
+    "Ag": 47,
+    "Cd": 48,
+    "In": 49,
+    "Sn": 50,
+    "Sb": 51,
+    "Te": 52,
+    "I": 53,
+    "Xe": 54,
+    "Cs": 55,
+    "Ba": 56,
+    "La": 57,
+    "Ce": 58,
+    "Pr": 59,
+    "Nd": 60,
+    "Pm": 61,
+    "Sm": 62,
+    "Eu": 63,
+    "Gd": 64,
+    "Tb": 65,
+    "Dy": 66,
+    "Ho": 67,
+    "Er": 68,
+    "Tm": 69,
+    "Yb": 70,
+    "Lu": 71,
+    "Hf": 72,
+    "Ta": 73,
+    "W": 74,
+    "Re": 75,
+    "Os": 76,
+    "Ir": 77,
+    "Pt": 78,
+    "Au": 79,
+    "Hg": 80,
+    "Tl": 81,
+    "Pb": 82,
+    "Bi": 83,
+    "Po": 84,
+    "At": 85,
+    "Rn": 86,
+    "Fr": 87,
+    "Ra": 88,
+    "Ac": 89,
+    "Th": 90,
+    "Pa": 91,
+    "U": 92,
+    "Np": 93,
+    "Pu": 94,
+    "Am": 95,
+    "Cm": 96,
+    "Bk": 97,
+    "Cf": 98,
+    "Es": 99,
+    "Fm": 100,
+    "Md": 101,
+    "No": 102,
+    "Lr": 103,
+    "Rf": 104,
+    "Db": 105,
+    "Sg": 106,
+    "Bh": 107,
+    "Hs": 108,
+    "Mt": 109,
+    "Ds": 110,
+    "Rg": 111,
+    "Cn": 112,
+    "Nh": 113,
+    "Fl": 114,
+    "Mc": 115,
+    "Lv": 116,
+    "Ts": 117,
+    "Og": 118,
+}
+
+# Valid atomic symbols — every element in ATOMIC_NUMBERS. Derived rather
+# than hand-maintained separately so the two can never drift apart again.
+VALID_ATOMS = list(ATOMIC_NUMBERS.keys())
 
 # Quick-start templates for the notebook UI
 # The `notes` and `learning_goals` fields are shown to students.

@@ -113,6 +113,80 @@ def test_format_tddft_result_lists_excitations():
     assert "S1" in html
 
 
+# ---------------------------------------------------------------------------
+# M-CLEAN — live vs history result-card parity (no formatter drift)
+# ---------------------------------------------------------------------------
+
+
+def _full_sp_fields() -> dict:
+    """Every field the SP result card can render, as a plain dict."""
+    return dict(
+        converged=True,
+        homo_lumo_gap_ev=0.4,
+        energy_hartree=-76.3,
+        energy_ev=-2076.2,
+        n_iterations=12,
+        mp2_correlation_hartree=-0.3,
+        solvent="Water",
+        gpu_used=True,
+        gpu_name="NVIDIA A100",
+        dipole_moment_debye=1.85,
+        mulliken_charges=[-0.5, 0.25, 0.25],
+        atom_symbols=["O", "H", "H"],
+        formula="H2O",
+        method="MP2",
+        basis="def2-SVP",
+    )
+
+
+def test_live_and_history_cards_share_the_same_extra_rows():
+    """The live and history cards must render identical 'extra' rows (M-CLEAN).
+
+    Previously the compute-device / dipole / Mulliken rows existed only on the
+    live card; both now flow through the shared ``_result_extra_rows`` builder.
+    """
+    fields = _full_sp_fields()
+    live = format_result(SimpleNamespace(**fields))
+    history = format_past_result({**fields, "calc_type": "single_point"})
+    for marker in (
+        "HF reference",
+        "MP2 correlation",
+        "Solvent (PCM)",
+        "Compute device",
+        "🚀 GPU",
+        "NVIDIA A100",
+        "Dipole moment",
+        "1.8500 D",
+        "Mulliken charges",
+        "O:-0.500",
+    ):
+        assert marker in live, f"live card missing {marker!r}"
+        assert marker in history, f"history card missing {marker!r}"
+
+
+def test_history_card_graceful_on_pre_parity_result():
+    """An old result.json lacking the new fields still renders — device reads
+    CPU, no dipole/Mulliken rows, no crash."""
+    html = format_past_result(
+        {
+            "calc_type": "single_point",
+            "converged": True,
+            "homo_lumo_gap_ev": None,
+            "energy_hartree": -76.0,
+            "energy_ev": -2068.0,
+            "n_iterations": 9,
+            "formula": "H2O",
+            "method": "RHF",
+            "basis": "STO-3G",
+        }
+    )
+    assert "Compute device" in html
+    assert "CPU" in html
+    assert "🚀 GPU" not in html
+    assert "Dipole moment" not in html
+    assert "Mulliken charges" not in html
+
+
 def test_format_nmr_result_warns_on_small_basis():
     result = _NMRStub(
         converged=True,
@@ -125,6 +199,46 @@ def test_format_nmr_result_warns_on_small_basis():
     )
     html = format_nmr_result(result)
     assert "qualitative NMR only" in html
+
+
+def test_format_nmr_result_warns_on_fallback_reference():
+    """M4 audit fix (2026-07-14): fallback reference constants are surfaced.
+
+    Regression: an untabulated method/basis silently substituted the
+    B3LYP/6-31G* reference constants with no indication anywhere in the
+    result card — the student had no way to know their chemical shifts
+    might be off by a few ppm.
+    """
+    result = _NMRStub(
+        converged=True,
+        reference_compound="TMS",
+        atom_symbols=["O", "H", "H"],
+        chemical_shifts_ppm={1: 4.5, 2: 4.5},
+        formula="H2O",
+        method="CAM-B3LYP",
+        basis="6-31G*",
+        reference_key="B3LYP/6-31G*",
+        is_fallback_reference=True,
+    )
+    html = format_nmr_result(result)
+    assert "No calibrated TMS reference" in html
+    assert "CAM-B3LYP/6-31G*" in html
+
+
+def test_format_nmr_result_no_warning_for_exact_reference_match():
+    result = _NMRStub(
+        converged=True,
+        reference_compound="TMS",
+        atom_symbols=["O", "H", "H"],
+        chemical_shifts_ppm={1: 4.5, 2: 4.5},
+        formula="H2O",
+        method="B3LYP",
+        basis="6-31G*",
+        reference_key="B3LYP/6-31G*",
+        is_fallback_reference=False,
+    )
+    html = format_nmr_result(result)
+    assert "No calibrated TMS reference" not in html
 
 
 def test_format_pes_scan_result_reports_range_and_convergence():

@@ -66,14 +66,21 @@ def _http_get(
     to :class:`PubChemAPIError` exactly as before.
     """
     timeout = timeout if timeout is not None else config.PUBCHEM_TIMEOUT_S
+    # M10 audit fix (2026-07-14): if config.PUBCHEM_MAX_RETRIES were ever 0
+    # (or negative), `range(config.PUBCHEM_MAX_RETRIES)` would iterate zero
+    # times, leaving `response` at its None initializer and returning None
+    # from a function typed to return requests.Response — every caller
+    # then hits AttributeError on response.status_code. Always attempt at
+    # least once regardless of the configured retry count.
+    max_attempts = max(1, config.PUBCHEM_MAX_RETRIES)
     response = None
-    for attempt in range(config.PUBCHEM_MAX_RETRIES):
+    for attempt in range(max_attempts):
         _throttle()
         response = requests.get(url, params=params, timeout=timeout)
         if response.status_code != 503:
             return response
         # Throttled — back off (capped) and retry, unless this was the last try.
-        if attempt < config.PUBCHEM_MAX_RETRIES - 1:
+        if attempt < max_attempts - 1:
             backoff = min(
                 config.PUBCHEM_BACKOFF_BASE_S * (2**attempt),
                 config.PUBCHEM_BACKOFF_MAX_S,
@@ -82,7 +89,7 @@ def _http_get(
                 "PubChem throttled (503); retrying in %.1fs (attempt %d/%d)",
                 backoff,
                 attempt + 1,
-                config.PUBCHEM_MAX_RETRIES,
+                max_attempts,
             )
             time.sleep(backoff)
     # Exhausted retries — hand the last 503 back; caller raises via raise_for_status.
@@ -115,7 +122,7 @@ def search_molecule_by_name(name: str) -> int:
         name: Common name or IUPAC name of the molecule
 
     Returns:
-        int: PubChem Compound ID (CID) if found, None otherwise
+        int: PubChem Compound ID (CID)
 
     Raises:
         PubChemAPIError: If API request fails
@@ -143,7 +150,7 @@ def search_molecule_by_name(name: str) -> int:
 
     except requests.RequestException as e:
         logger.error(f"PubChem API request failed: {e}")
-        raise PubChemAPIError(f"Failed to connect to PubChem: {e}")
+        raise PubChemAPIError(f"Failed to connect to PubChem: {e}") from e
 
 
 def search_cid_by_inchikey(inchikey: str) -> int:
@@ -164,7 +171,7 @@ def search_cid_by_inchikey(inchikey: str) -> int:
         return int(cids[0])
     except requests.RequestException as e:
         logger.error(f"PubChem InChIKey request failed: {e}")
-        raise PubChemAPIError(f"Failed to connect to PubChem: {e}")
+        raise PubChemAPIError(f"Failed to connect to PubChem: {e}") from e
 
 
 def search_cids_by_name(name: str) -> list:
@@ -184,7 +191,7 @@ def search_cids_by_name(name: str) -> list:
         ]
     except requests.RequestException as e:
         logger.error(f"PubChem CID-list request failed: {e}")
-        raise PubChemAPIError(f"Failed to connect to PubChem: {e}")
+        raise PubChemAPIError(f"Failed to connect to PubChem: {e}") from e
 
 
 def search_pubchem_candidates(query: str, max_results: int = 10) -> list:
@@ -208,7 +215,7 @@ def search_pubchem_candidates(query: str, max_results: int = 10) -> list:
         props = response.json().get("PropertyTable", {}).get("Properties", [])
     except requests.RequestException as e:
         logger.error(f"PubChem property request failed: {e}")
-        raise PubChemAPIError(f"Failed to connect to PubChem: {e}")
+        raise PubChemAPIError(f"Failed to connect to PubChem: {e}") from e
 
     # Preserve the CID search order (the property endpoint may reorder).
     by_cid = {int(p.get("CID")): p for p in props if p.get("CID") is not None}
@@ -274,7 +281,7 @@ def get_molecule_sdf(cid: int, conformer_3d: bool = True) -> str:
 
     except requests.RequestException as e:
         logger.error(f"PubChem SDF request failed: {e}")
-        raise PubChemAPIError(f"Failed to retrieve molecule: {e}")
+        raise PubChemAPIError(f"Failed to retrieve molecule: {e}") from e
 
 
 def _separate_fragments(mol: Any, min_gap: float = 3.0) -> None:
@@ -403,7 +410,7 @@ def sdf_to_xyz(sdf_content: str) -> Tuple[str, Dict[str, Any]]:
 
     except Exception as e:
         logger.error(f"SDF to XYZ conversion failed: {e}")
-        raise ValueError(f"Failed to convert SDF to XYZ: {e}")
+        raise ValueError(f"Failed to convert SDF to XYZ: {e}") from e
 
 
 def fetch_molecule(
@@ -542,9 +549,21 @@ def check_pubchem_availability() -> bool:
     Returns:
         bool: True if PubChem is accessible, False otherwise
     """
+    # M10 audit fix (2026-07-14): this used to call requests.get() directly,
+    # bypassing the shared client-side rate limiter (_throttle()) that every
+    # other function in this module goes through — a burst of concurrent
+    # availability checks (e.g. several students in a classroom clicking
+    # "check connection" around the same time) could exceed PubChem's
+    # server-side throttle. It also hardcoded timeout=5 instead of the
+    # config.PUBCHEM_AVAILABILITY_TIMEOUT_S constant defined specifically
+    # for this probe, so changing that constant silently had no effect
+    # here. Calls _throttle() directly (not the full _http_get retry loop —
+    # this is meant to be a quick, no-retry reachability probe) and uses
+    # the configured timeout.
     try:
         url = f"{PUBCHEM_BASE_URL}/compound/cid/962/property/MolecularFormula/JSON"
-        response = requests.get(url, timeout=5)
+        _throttle()
+        response = requests.get(url, timeout=config.PUBCHEM_AVAILABILITY_TIMEOUT_S)
         return bool(response.status_code == 200)
     except Exception:
         return False
@@ -635,7 +654,7 @@ def smiles_to_xyz(smiles: str, optimize_3d: bool = True) -> Tuple[str, Dict[str,
 
     except Exception as e:
         logger.error(f"SMILES to XYZ conversion failed: {e}")
-        raise ValueError(f"Failed to convert SMILES to XYZ: {e}")
+        raise ValueError(f"Failed to convert SMILES to XYZ: {e}") from e
 
 
 def inchi_to_xyz(inchi: str, optimize_3d: bool = True) -> Tuple[str, Dict[str, Any]]:
@@ -691,7 +710,7 @@ def inchi_to_xyz(inchi: str, optimize_3d: bool = True) -> Tuple[str, Dict[str, A
 
     except Exception as e:
         logger.error(f"InChI to XYZ conversion failed: {e}")
-        raise ValueError(f"Failed to convert InChI to XYZ: {e}")
+        raise ValueError(f"Failed to convert InChI to XYZ: {e}") from e
 
 
 def student_friendly_smiles_to_xyz(smiles: str) -> Tuple[Optional[str], str]:
@@ -805,21 +824,38 @@ def generate_2d_structure_svg(
             # Build mol from XYZ
             from rdkit.Chem import rdDetermineBonds
 
-            rdkit_mol = Chem.Mol()
-            conf = Chem.Conformer()
-
-            for i, line in enumerate(lines[2:]):  # Skip first 2 lines
+            # Collect valid atom lines first so the conformer can be sized
+            # up front and the atom index used for SetAtomPosition always
+            # matches the just-added atom (skipped malformed lines used to
+            # desync the two).
+            atom_lines = []
+            for line in lines[2:]:  # Skip first 2 lines (count + comment)
                 parts = line.split()
                 if len(parts) < 4:
                     continue
+                atom_lines.append(parts)
+
+            if not atom_lines:
+                raise ValueError("No atom lines found in XYZ string")
+
+            # Chem.Mol() is immutable — AddAtom only exists on RWMol.
+            # Build on RWMol, then convert to an immutable Mol via
+            # GetMol() before DetermineBonds (mirrors the working
+            # Chem.MolFromXYZBlock() + DetermineBonds() pattern used
+            # elsewhere in QuantUI, e.g. preopt.py).
+            rw_mol = Chem.RWMol()
+            conf = Chem.Conformer(len(atom_lines))
+
+            for i, parts in enumerate(atom_lines):
                 symbol = parts[0]
                 x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
 
                 atom = Chem.Atom(symbol)
-                rdkit_mol.AddAtom(atom)  # type: ignore[attr-defined]
+                rw_mol.AddAtom(atom)
                 conf.SetAtomPosition(i, (x, y, z))
 
-            rdkit_mol.AddConformer(conf)  # type: ignore[attr-defined]
+            rw_mol.AddConformer(conf)
+            rdkit_mol = rw_mol.GetMol()
 
             # Determine bonds
             rdDetermineBonds.DetermineBonds(rdkit_mol)

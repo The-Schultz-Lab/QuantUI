@@ -58,8 +58,11 @@ class TestSearchMoleculeByName:
         """Test API connection failure."""
         mock_get.side_effect = requests.RequestException("Connection failed")
 
-        with pytest.raises(PubChemAPIError):
+        with pytest.raises(PubChemAPIError) as exc_info:
             search_molecule_by_name("water")
+        # L audit fix (ruff B904): must chain the original RequestException
+        # via `raise ... from e` so tracebacks show the real root cause.
+        assert isinstance(exc_info.value.__cause__, requests.RequestException)
 
     @patch("quantui.pubchem.requests.get")
     def test_search_empty_result(self, mock_get):
@@ -295,6 +298,63 @@ class TestCheckPubChemAvailability:
         result = check_pubchem_availability()
         assert result is False
 
+    @patch("quantui.pubchem.requests.get")
+    @patch("quantui.pubchem._throttle")
+    def test_check_uses_shared_throttle(self, mock_throttle, mock_get):
+        """M10 audit fix (2026-07-14): must go through the shared
+        client-side rate limiter like every other PubChem call, not call
+        requests.get() directly. A burst of concurrent availability
+        checks (e.g. several students clicking "check connection" at
+        once) could otherwise exceed PubChem's server-side throttle.
+        """
+        mock_get.return_value = Mock(status_code=200)
+        check_pubchem_availability()
+        assert mock_throttle.called
+
+    @patch("quantui.pubchem.requests.get")
+    def test_check_uses_configured_availability_timeout(self, mock_get):
+        """M10 audit fix: must use config.PUBCHEM_AVAILABILITY_TIMEOUT_S,
+        not a hardcoded value the config constant can't actually control.
+        """
+        from quantui import config
+
+        mock_get.return_value = Mock(status_code=200)
+        check_pubchem_availability()
+        _, kwargs = mock_get.call_args
+        assert kwargs.get("timeout") == config.PUBCHEM_AVAILABILITY_TIMEOUT_S
+
+
+class TestHttpGetMaxRetriesGuard:
+    """M10 audit fix (2026-07-14): _http_get must never return None.
+
+    Regression: `for attempt in range(config.PUBCHEM_MAX_RETRIES):` iterated
+    zero times when PUBCHEM_MAX_RETRIES was 0 (or negative), leaving the
+    ``response`` initializer (None) as the return value — every caller
+    then hit AttributeError on response.status_code / .raise_for_status().
+    """
+
+    @patch("quantui.pubchem.requests.get")
+    def test_zero_max_retries_still_attempts_once(self, mock_get):
+        from quantui import config
+        from quantui.pubchem import _http_get
+
+        mock_get.return_value = Mock(status_code=200)
+        with patch.object(config, "PUBCHEM_MAX_RETRIES", 0):
+            result = _http_get("http://example.com/probe")
+        assert result is not None
+        assert mock_get.call_count == 1
+
+    @patch("quantui.pubchem.requests.get")
+    def test_negative_max_retries_still_attempts_once(self, mock_get):
+        from quantui import config
+        from quantui.pubchem import _http_get
+
+        mock_get.return_value = Mock(status_code=200)
+        with patch.object(config, "PUBCHEM_MAX_RETRIES", -1):
+            result = _http_get("http://example.com/probe")
+        assert result is not None
+        assert mock_get.call_count == 1
+
 
 # ============================================================================
 # Integration Tests (Require Network) - Marked and Skipped by Default
@@ -416,6 +476,56 @@ class TestCaching:
         # Different parameters - should hit API again
         _ = get_molecule_sdf(962, conformer_3d=False)
         assert mock_get.call_count == 2
+
+
+# ============================================================================
+# generate_2d_structure_svg — XYZ input path (H4 audit fix, 2026-07-14)
+# ============================================================================
+
+
+class TestGenerate2DStructureSvgFromXyz:
+    """The xyz_string= branch used to always return None.
+
+    Regression: it called AddAtom on an immutable Chem.Mol() (only RWMol
+    supports AddAtom), so every call raised AttributeError internally —
+    silently swallowed by the function's broad except-and-return-None —
+    and a stray Chem.Conformer() with no atom count plus an atom-index
+    that didn't skip malformed lines the same way could desync positions
+    from atoms even if construction had worked.
+    """
+
+    @rdkit_only
+    def test_returns_svg_for_valid_xyz(self):
+        from quantui.pubchem import generate_2d_structure_svg
+
+        xyz = "3\nWater\nO 0.0 0.0 0.0\nH 0.757 0.587 0.0\nH -0.757 0.587 0.0\n"
+        svg = generate_2d_structure_svg(xyz_string=xyz)
+        assert svg is not None
+        assert "<svg" in svg
+
+    @rdkit_only
+    def test_skips_malformed_lines_without_desyncing_positions(self):
+        # A blank/short line interleaved with valid atom lines must not
+        # shift which coordinate lands on which atom.
+        from quantui.pubchem import generate_2d_structure_svg
+
+        xyz = (
+            "3\nWater\n"
+            "O 0.0 0.0 0.0\n"
+            "\n"  # malformed / skippable line
+            "H 0.757 0.587 0.0\n"
+            "H -0.757 0.587 0.0\n"
+        )
+        svg = generate_2d_structure_svg(xyz_string=xyz)
+        assert svg is not None
+        assert "<svg" in svg
+
+    @rdkit_only
+    def test_invalid_xyz_returns_none_not_raises(self):
+        from quantui.pubchem import generate_2d_structure_svg
+
+        svg = generate_2d_structure_svg(xyz_string="not\nxyz")
+        assert svg is None
 
 
 # ============================================================================

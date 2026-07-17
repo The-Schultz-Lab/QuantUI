@@ -45,6 +45,26 @@ def test_no_cdn_plotlyjs():
     )
 
 
+def test_no_bare_py3dmol_view():
+    """py3Dmol.view(...) defaults to a CDN js= URL that blanks views offline.
+
+    All viewers must be built through ``viz_assets.make_view`` (which forces an
+    offline-safe ``js=``) so the vendored bundle is used instead. Only
+    ``viz_assets.py`` is allowed to call ``py3Dmol.view`` directly (the factory
+    itself). See reflections/01 Rule 1 + reflections/06.
+    """
+    # Match ``py3Dmol.view(`` or ``<alias>.view(width=`` style construction.
+    hits = [
+        h
+        for h in _grep(r"\bpy3Dmol\.view\(|\b_p3d\.view\(")
+        if "viz_assets.py" not in h
+    ]
+    assert not hits, (
+        "Direct py3Dmol.view() call found (fetches 3Dmol.js from a CDN, blank "
+        "offline). Use quantui.viz_assets.make_view instead:\n" + "\n".join(hits)
+    )
+
+
 def test_no_bare_except_pass():
     hits = _grep(r"^\s*except\s*(\(\s*\))?\s*:\s*(pass\s*)?$")
     assert not hits, "Bare except/pass detected (swallows all errors):\n" + "\n".join(

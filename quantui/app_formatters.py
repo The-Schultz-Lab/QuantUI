@@ -6,6 +6,79 @@ from pathlib import Path
 from typing import Any, Optional
 
 
+def _result_extra_rows(get: Any) -> str:
+    """Build the shared 'extra' result-card rows from an accessor.
+
+    ``get(key, default=None)`` reads a field from either a result object
+    (``getattr``) or a saved ``result.json`` dict (``dict.get``). Used by BOTH
+    :func:`format_result` (live) and :func:`format_past_result` (history) so the
+    two cards can never drift again — the M-CLEAN regression where the compute
+    device / dipole / Mulliken rows existed only on the live card. Rows:
+    post-HF correlation breakdown (MP2 / CCSD / (T)), solvent, compute device
+    (always shown), dipole moment, Mulliken charges.
+    """
+
+    def _num(label: str, value: str) -> str:
+        return (
+            f'<tr><td style="padding:3px 18px 3px 0;color:#444">{label}</td>'
+            f'<td style="color:#000">{value}</td></tr>'
+        )
+
+    rows = ""
+    energy = get("energy_hartree", 0.0)
+
+    # Post-HF correlation breakdown — energy_hartree already includes every
+    # contribution, so the HF reference is the total minus those.
+    _mp2 = get("mp2_correlation_hartree")
+    if _mp2 is not None:
+        rows += _num("HF reference", f"{energy - _mp2:.8f} Ha")
+        rows += _num("MP2 correlation", f"{_mp2:.8f} Ha")
+    _ccsd = get("ccsd_correlation_hartree")
+    _ccsd_t = get("ccsd_t_correction_hartree")
+    if _ccsd is not None:
+        rows += _num("HF reference", f"{energy - _ccsd - (_ccsd_t or 0.0):.8f} Ha")
+        rows += _num("CCSD correlation", f"{_ccsd:.8f} Ha")
+        if _ccsd_t is not None:
+            rows += _num("(T) triples correction", f"{_ccsd_t:.8f} Ha")
+
+    _solvent = get("solvent")
+    if _solvent is not None:
+        rows += _num("Solvent (PCM)", str(_solvent))
+
+    # Compute device (M-GPU / GPU.2) — always shown; old saved results lack the
+    # field and safely read "CPU".
+    if bool(get("gpu_used", False)):
+        _name = get("gpu_name")
+        _device = (
+            f'<span style="color:#16a34a">🚀 GPU</span>'
+            f' &mdash; <span style="font-family:monospace">{_name}</span>'
+            if _name
+            else '<span style="color:#16a34a">🚀 GPU</span>'
+        )
+    else:
+        _device = '<span style="color:#555">CPU</span>'
+    rows += (
+        f'<tr><td style="padding:3px 18px 3px 0;color:#444">Compute device</td>'
+        f"<td>{_device}</td></tr>"
+    )
+
+    _dip = get("dipole_moment_debye")
+    if _dip is not None:
+        rows += _num("Dipole moment", f"{_dip:.4f} D")
+
+    _chg = get("mulliken_charges")
+    _syms = get("atom_symbols")
+    if _chg is not None and _syms is not None:
+        _charge_str = "  ".join(f"{sym}:{c:+.3f}" for sym, c in zip(_syms, _chg))
+        rows += (
+            f'<tr><td style="padding:3px 18px 3px 0;color:#444;vertical-align:top">'
+            f"Mulliken charges</td>"
+            f'<td style="color:#000;font-family:monospace;font-size:12px;'
+            f'word-break:break-all">{_charge_str}</td></tr>'
+        )
+    return rows
+
+
 def format_result(r: Any) -> str:
     """Format a single-point-style result card."""
     _conv = "Yes" if r.converged else "No (treat results with caution)"
@@ -35,78 +108,7 @@ def format_result(r: Any) -> str:
             ),
         ]
     )
-    _extra = ""
-    # MP2: show HF reference energy separately
-    _mp2_corr = getattr(r, "mp2_correlation_hartree", None)
-    if _mp2_corr is not None:
-        _hf_e = r.energy_hartree - _mp2_corr
-        _extra += (
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">HF reference</td>'
-            f'<td style="color:#000">{_hf_e:.8f} Ha</td></tr>'
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">MP2 correlation</td>'
-            f'<td style="color:#000">{_mp2_corr:.8f} Ha</td></tr>'
-        )
-    # CCSD / CCSD(T) (M8.1): show the HF reference + each correlation
-    # contribution as its own row so the user can read off the cost vs.
-    # accuracy breakdown. ``energy_hartree`` already includes both
-    # contributions (matches the MP2 convention above).
-    _ccsd_corr = getattr(r, "ccsd_correlation_hartree", None)
-    _ccsd_t_corr = getattr(r, "ccsd_t_correction_hartree", None)
-    if _ccsd_corr is not None:
-        _hf_e = r.energy_hartree - _ccsd_corr - (_ccsd_t_corr or 0.0)
-        _extra += (
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">HF reference</td>'
-            f'<td style="color:#000">{_hf_e:.8f} Ha</td></tr>'
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">CCSD correlation</td>'
-            f'<td style="color:#000">{_ccsd_corr:.8f} Ha</td></tr>'
-        )
-        if _ccsd_t_corr is not None:
-            _extra += (
-                f'<tr><td style="padding:3px 18px 3px 0;color:#444">'
-                f"(T) triples correction</td>"
-                f'<td style="color:#000">{_ccsd_t_corr:.8f} Ha</td></tr>'
-            )
-    _solvent = getattr(r, "solvent", None)
-    if _solvent is not None:
-        _extra += (
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">Solvent (PCM)</td>'
-            f'<td style="color:#000">{_solvent}</td></tr>'
-        )
-    # Compute device row (M-GPU / GPU.2). Always shown so the user can tell
-    # at a glance whether the numbers came from CPU or GPU. ``gpu_used``
-    # defaults to False on older saved results (Optional[bool]-style) so
-    # the row safely reads "CPU" for historic entries.
-    _gpu_used = bool(getattr(r, "gpu_used", False))
-    _gpu_name = getattr(r, "gpu_name", None)
-    if _gpu_used:
-        _device = (
-            f'<span style="color:#16a34a">🚀 GPU</span>'
-            f' &mdash; <span style="font-family:monospace">{_gpu_name}</span>'
-            if _gpu_name
-            else '<span style="color:#16a34a">🚀 GPU</span>'
-        )
-    else:
-        _device = '<span style="color:#555">CPU</span>'
-    _extra += (
-        f'<tr><td style="padding:3px 18px 3px 0;color:#444">Compute device</td>'
-        f"<td>{_device}</td></tr>"
-    )
-    _dip = getattr(r, "dipole_moment_debye", None)
-    if _dip is not None:
-        _extra += (
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">Dipole moment</td>'
-            f'<td style="color:#000">{_dip:.4f} D</td></tr>'
-        )
-    _chg = getattr(r, "mulliken_charges", None)
-    _syms = getattr(r, "atom_symbols", None)
-    if _chg is not None and _syms is not None:
-        _charge_str = "  ".join(f"{sym}:{c:+.3f}" for sym, c in zip(_syms, _chg))
-        _extra += (
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444;vertical-align:top">'
-            f"Mulliken charges</td>"
-            f'<td style="color:#000;font-family:monospace;font-size:12px;'
-            f'word-break:break-all">{_charge_str}</td></tr>'
-        )
+    _extra = _result_extra_rows(lambda k, d=None: getattr(r, k, d))
     return (
         f'<div style="background:#f0fff0;border-left:4px solid #4CAF50;'
         f'padding:10px 14px;border-radius:4px;margin:6px 0">'
@@ -296,6 +298,22 @@ def format_nmr_result(r: Any) -> str:
             "</td></tr>"
         )
 
+    # M4 audit fix (2026-07-14): the reference shielding constants table only
+    # covers a handful of method/basis combinations; any other combination
+    # silently substitutes the B3LYP/6-31G* constants, which can shift the
+    # reported ppm values by several ppm relative to a properly calibrated
+    # reference. Surface that substitution rather than let it pass silently.
+    _ref_warn = ""
+    if getattr(r, "is_fallback_reference", False):
+        _ref_warn = (
+            '<tr><td colspan="2" style="padding:6px 0 0">'
+            '<span style="color:#b45309;font-size:12px">'
+            f"⚠ No calibrated TMS reference for {r.method}/{r.basis} — using "
+            f"{getattr(r, 'reference_key', 'B3LYP/6-31G*')} constants instead. "
+            "Shifts may be off by a few ppm.</span>"
+            "</td></tr>"
+        )
+
     _empty = ""
     if not r.h_shifts() and not r.c_shifts():
         _empty = (
@@ -308,7 +326,7 @@ def format_nmr_result(r: Any) -> str:
         f'padding:10px 14px;border-radius:4px;margin:6px 0">'
         f"<b>NMR Shielding &mdash; {r.formula} ({r.method}/{r.basis})</b>"
         f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-        f"{header_rows}{h_table}{c_table}{_empty}{_basis_warn}</table></div>"
+        f"{header_rows}{h_table}{c_table}{_empty}{_basis_warn}{_ref_warn}</table></div>"
     )
 
 
@@ -447,35 +465,9 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     )
     ts = data.get("timestamp", "")
 
-    # Post-HF correlation breakdown rows (MP2 / CCSD / CCSD(T)). ``energy_hartree``
-    # already includes every correlation contribution, so the HF reference is
-    # the total minus those contributions.
-    _extra = ""
-    _mp2_corr = data.get("mp2_correlation_hartree")
-    if _mp2_corr is not None:
-        _hf_e = data["energy_hartree"] - _mp2_corr
-        _extra += (
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">HF reference</td>'
-            f'<td style="color:#000">{_hf_e:.8f} Ha</td></tr>'
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">MP2 correlation</td>'
-            f'<td style="color:#000">{_mp2_corr:.8f} Ha</td></tr>'
-        )
-    _ccsd_corr = data.get("ccsd_correlation_hartree")
-    _ccsd_t_corr = data.get("ccsd_t_correction_hartree")
-    if _ccsd_corr is not None:
-        _hf_e = data["energy_hartree"] - _ccsd_corr - (_ccsd_t_corr or 0.0)
-        _extra += (
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">HF reference</td>'
-            f'<td style="color:#000">{_hf_e:.8f} Ha</td></tr>'
-            f'<tr><td style="padding:3px 18px 3px 0;color:#444">CCSD correlation</td>'
-            f'<td style="color:#000">{_ccsd_corr:.8f} Ha</td></tr>'
-        )
-        if _ccsd_t_corr is not None:
-            _extra += (
-                f'<tr><td style="padding:3px 18px 3px 0;color:#444">'
-                f"(T) triples correction</td>"
-                f'<td style="color:#000">{_ccsd_t_corr:.8f} Ha</td></tr>'
-            )
+    # Shared 'extra' rows (correlation breakdown / solvent / device / dipole /
+    # Mulliken) — same builder as the live card so the two never drift (M-CLEAN).
+    _extra = _result_extra_rows(lambda k, d=None: data.get(k, d))
 
     # Embed thumbnail if saved
     _thumb_html = ""

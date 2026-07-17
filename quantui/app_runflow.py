@@ -376,8 +376,133 @@ def on_solvent_cb_changed(app: Any, change: Any) -> None:
 
 
 def on_clear_log(app: Any, btn: Any) -> None:
-    """Clear the live run output panel."""
+    """Clear the live run output panel — but never mid-run.
+
+    The button is disabled while a calc runs (``_do_run``), but guard here too:
+    clearing mid-run wipes the header + in-progress output while the background
+    thread keeps appending, leaving a confusing headerless log. Use Cancel to
+    stop a run, then Clear.
+    """
+    if getattr(app, "_calc_running", False):
+        app.run_status.value = "Can't clear while a calculation is running."
+        return
     app.run_output.clear_output()
+
+
+def _preopt_small(text: str, color: str = "#555") -> str:
+    return f'<small style="color:{color}">{text}</small>'
+
+
+def on_preopt_preview(app: Any, btn: Any = None) -> None:
+    """Run the classical pre-opt on demand and animate the relaxation in-place.
+
+    M-PREOPT PREOPT.2: instead of the pre-opt being a silent step inside the
+    run, the user previews it here — watches the bonded-FF relaxation animate
+    in the Calculate tab — then Keeps or Reverts it (PREOPT.3). The pre-opt runs
+    on a background thread; UI updates are marshalled back to the main thread.
+    """
+    mol = getattr(app, "_molecule", None)
+    if mol is None:
+        app.preopt_preview_box.layout.display = ""
+        app.preopt_preview_status.value = _preopt_small("Load a molecule first.")
+        return
+    app.preopt_preview_btn.disabled = True
+    app.preopt_accept_btn.disabled = True
+    app.preopt_reset_btn.disabled = True
+    app.preopt_preview_box.layout.display = ""
+    app.preopt_preview_status.value = _preopt_small(
+        "⏳ Pre-optimizing — watch it relax below…"
+    )
+    try:
+        app._activity_begin("Previewing pre-optimization…", kind="ui")
+    except Exception:
+        pass
+    threading.Thread(
+        target=_preopt_preview_worker, args=(app, mol), daemon=True
+    ).start()
+
+
+def _preopt_preview_worker(app: Any, mol: Any) -> None:
+    """Background: run the trajectory-capturing pre-opt, then update UI on main."""
+    from quantui.preopt import preoptimize_with_trajectory
+
+    try:
+        relaxed, rmsd, frames = preoptimize_with_trajectory(mol)
+    except Exception as exc:  # noqa: BLE001 — surface as an inline message
+        app._queue_main_thread_callback(_preopt_preview_failed, app, str(exc))
+        return
+    app._queue_main_thread_callback(_preopt_preview_done, app, relaxed, rmsd, frames)
+
+
+def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> None:
+    """Main thread: animate the relaxation + reveal Keep/Revert."""
+    from quantui.app_visualization import build_preopt_preview_html
+
+    app._preopt_relaxed_mol = relaxed
+    app.preopt_preview_box.layout.display = ""  # ensure visible when results land
+    try:
+        bg = app._plotly_theme_colors()["scene_bgcolor"]
+    except Exception:
+        bg = "white"
+    try:
+        html = build_preopt_preview_html(list(relaxed.atoms), frames, bgcolor=bg)
+        app._set_html_output(app.preopt_preview_output, html)
+    except Exception as exc:  # noqa: BLE001
+        app.preopt_preview_output.clear_output()
+        with app.preopt_preview_output:
+            display(HTML(_preopt_small(f"Preview render failed: {exc}", "#b91c1c")))
+
+    if rmsd > 1e-3:
+        note = f"moved <b>{rmsd:.3f} Å</b> (RMSD) from your input"
+    else:
+        note = "barely changed — your geometry was already reasonable"
+    app.preopt_preview_status.value = _preopt_small(
+        f"Relaxed (MMFF94/UFF): {note}. Use ⇄ or the slider below to compare "
+        "input vs relaxed, then Keep it or revert.",
+        "#444",
+    )
+    app.preopt_preview_btn.disabled = False
+    app.preopt_accept_btn.disabled = False
+    app.preopt_reset_btn.disabled = False
+    try:
+        app._activity_end(kind="ui")
+    except Exception:
+        pass
+
+
+def _preopt_preview_failed(app: Any, msg: str) -> None:
+    app.preopt_preview_status.value = _preopt_small(f"Preview failed: {msg}", "#b91c1c")
+    app.preopt_preview_btn.disabled = False
+    try:
+        app._activity_end(kind="ui")
+    except Exception:
+        pass
+
+
+def on_preopt_accept(app: Any, btn: Any = None) -> None:
+    """Make the previewed relaxed geometry the active molecule (PREOPT.3)."""
+    relaxed = getattr(app, "_preopt_relaxed_mol", None)
+    if relaxed is None:
+        return
+    app._set_molecule(relaxed, "Pre-optimized (MMFF94/UFF — accepted from preview)")
+    # The active geometry IS the relaxed one now; the run uses it as-is (there is
+    # no silent pre-opt step to disable — classical pre-opt is Preview-only).
+    app._preopt_relaxed_mol = None
+    app.preopt_preview_box.layout.display = "none"
+    app.preopt_preview_output.clear_output()
+    app.preopt_preview_status.value = ""
+    app.run_status.value = "Pre-optimized geometry accepted."
+
+
+def on_preopt_reset(app: Any, btn: Any = None) -> None:
+    """Discard the preview; the original active geometry is untouched."""
+    app._preopt_relaxed_mol = None
+    app.preopt_preview_box.layout.display = "none"
+    app.preopt_preview_output.clear_output()
+    app.preopt_preview_status.value = ""
+    # Drop any stale "Pre-optimized geometry accepted." left from a prior accept.
+    if not app._calc_running:
+        app.run_status.value = ""
 
 
 def on_accumulate(app: Any, btn: Any) -> None:
@@ -956,10 +1081,16 @@ def update_notes(app: Any, change: Any = None) -> None:
         )
         notes = calc.get_educational_notes()
         if notes:
-            safe = (
-                notes.replace("**", "<b>", 1)
-                .replace("**", "</b>", 1)
-                .replace("\n\n", "<br><br>")
+            # M12 audit fix (2026-07-14): .replace("**", ..., 1) only
+            # converts the FIRST **bold** pair in the whole string — every
+            # note after the first (get_educational_notes() typically
+            # returns 2-3 separate "**Label**: description" paragraphs
+            # joined by "\n\n") kept its literal "**" markers instead of
+            # being rendered bold. A regex replaces every **...** pair.
+            import re as _re
+
+            safe = _re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", notes).replace(
+                "\n\n", "<br><br>"
             )
             with app.notes_output:
                 display(
@@ -1071,7 +1202,8 @@ def refresh_results_browser(app: Any) -> None:
             calib_marker = "🔧 " if data.get("calibration_run_id") else ""
             label = (
                 f"{ts}  ·  [{calc_badge}]  "
-                f"{calib_marker}{data['formula']}  {data['method']}/{data['basis']}"
+                f"{calib_marker}{data.get('formula', '?')}  "
+                f"{data.get('method', '?')}/{data.get('basis', '?')}"
             )
             options.append((label, str(d)))
         except Exception:
@@ -1122,7 +1254,8 @@ def populate_compare_list(app: Any) -> None:
             calc_badge = _calc_type_badge(data.get("calc_type", ""))
             label = (
                 f"{ts}  [{calc_badge}]  "
-                f"{data['formula']}  {data['method']}/{data['basis']}"
+                f"{data.get('formula', '?')}  "
+                f"{data.get('method', '?')}/{data.get('basis', '?')}"
             )
             options.append((label, str(d)))
         except Exception:

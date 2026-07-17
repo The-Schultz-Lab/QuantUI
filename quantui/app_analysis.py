@@ -174,6 +174,7 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     # to activate re-sets these in show_orbital_diagram.
     app._last_orb_info = None
     app._last_orb_mo_coeff = None
+    app._last_orb_mo_occ = None
     app._last_orb_mol_atom = None
     app._last_orb_mol_basis = None
     app.traj_accordion.set_title(0, "Trajectory Viewer")

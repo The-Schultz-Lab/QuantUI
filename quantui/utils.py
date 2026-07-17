@@ -15,8 +15,14 @@ from typing import List, Optional, Tuple
 
 from . import config
 
-# Configure logging
-logging.basicConfig(level=getattr(logging, config.LOG_LEVEL), format=config.LOG_FORMAT)
+# M14 audit fix (2026-07-14): logging.basicConfig() configures the *root*
+# logger process-wide the moment this module is imported (which
+# quantui/__init__ always does) — a library must never do this, since it
+# silently hijacks/duplicates whatever logging setup the host application
+# or notebook already has. quantui/__init__.py already attaches a
+# NullHandler to the package logger; host apps that want console output
+# can call logging.basicConfig() themselves, optionally using
+# config.LOG_LEVEL / config.LOG_FORMAT as defaults.
 logger = logging.getLogger(__name__)
 
 

@@ -392,6 +392,30 @@ class TestLogCapture:
         cap.write("")
         assert cap.getvalue() == ""
 
+    def test_close_is_noop_and_does_not_raise(self):
+        """Regression (found via the L6 audit fix's Python 3.9 CI matrix):
+        ase.utils.IOContext.openfile() — used by BFGS(..., logfile=...) in
+        optimizer.py / pes_scan.py — checks hasattr(file, "close") to decide
+        whether *file* is an already-open stream it should leave alone vs. a
+        path string it should open() itself. ase==3.26.0 (the newest version
+        pip resolves for Python 3.9) enforces this strictly and raised
+        TypeError for a _LogCapture instance, which had no close() method;
+        ase==3.29.0 (resolved for 3.10/3.11) happened to tolerate it via a
+        later refactor, masking the gap until 3.9 was added to CI.
+        """
+        cap, _ = self._make_capture()
+        cap.close()  # Must not raise
+        assert hasattr(cap, "close")
+
+    def test_satisfies_ase_openfile_already_open_contract(self):
+        """Directly exercises the exact duck-typing check ASE performs."""
+        cap, _ = self._make_capture()
+        assert hasattr(cap, "close"), (
+            "ase.utils.IOContext.openfile() treats any object without a "
+            "'close' attribute as a path to open() itself, which fails for "
+            "a non-path file-like object like _LogCapture"
+        )
+
 
 # ---------------------------------------------------------------------------
 # _do_run dispatch
@@ -641,6 +665,89 @@ class TestExportXYZCallback:
         app = QuantUIApp()
         app._on_export_xyz(None)
         assert "molecule" in app.struct_export_status.value.lower()
+
+    def test_xyz_filename_sanitizes_basis_with_asterisk(self, tmp_path):
+        """M11 audit fix (2026-07-14): a basis like "6-31G*" embedded
+        verbatim in a filename is invalid on Windows ("*" is a reserved
+        character there) and glob-hostile on POSIX. The exported filename
+        must not contain "*".
+        """
+        app = QuantUIApp()
+        app._set_molecule(_water())
+        app._last_result_dir = tmp_path
+        app.basis_dd.value = "6-31G*"
+
+        app._on_export_xyz(None)
+
+        xyz_files = list(tmp_path.glob("*.xyz"))
+        assert len(xyz_files) == 1
+        assert "*" not in xyz_files[0].name
+        assert "Error" not in app.struct_export_status.value
+
+
+class TestExportScriptCallback:
+    """_on_export (standalone PySCF script) sanitizes its filename too."""
+
+    def test_script_filename_sanitizes_basis_with_asterisk(self, tmp_path, monkeypatch):
+        """M11 audit fix (2026-07-14): same filename-sanitization bug as
+        the XYZ export, for the "Export Script" button — the script is
+        written to a bare relative filename in the current directory.
+        """
+        monkeypatch.chdir(tmp_path)
+        app = QuantUIApp()
+        app._set_molecule(_water())
+        app.basis_dd.value = "6-31G*"
+
+        app._on_export(None)
+
+        py_files = list(tmp_path.glob("*.py"))
+        assert len(py_files) == 1
+        assert "*" not in py_files[0].name
+        assert "Error" not in app.export_status.value
+
+
+class TestUpdateNotesBoldRendering:
+    """_update_notes converts every **bold** span, not just the first.
+
+    Regression (M12 audit fix, 2026-07-14): the old implementation was
+    ``notes.replace("**", "<b>", 1).replace("**", "</b>", 1)`` — string
+    .replace(..., 1) only touches the FIRST occurrence in the whole
+    string, so only the first "**bold**" pair converted; every later one
+    (get_educational_notes() typically returns 2-3 separate
+    "**Label**: description" paragraphs) kept its literal "**" markers
+    and leaked into the rendered panel instead of rendering bold.
+    """
+
+    def test_multiple_bold_spans_all_converted(self, monkeypatch):
+        # UHF + 6-31G* + multiplicity 2 -> 3 separate "**Label**" spans
+        # in get_educational_notes()'s output.
+        #
+        # `with app.notes_output: display(HTML(...))` only populates the
+        # widget's `.outputs` under a live IPython display hook, which
+        # isn't present in a plain pytest process — so this test captures
+        # what's passed to `display()` directly instead of inspecting
+        # `notes_output.outputs` (the pattern used by tests of the
+        # newer `_set_html_output` atomic-swap helper, which manipulates
+        # `.outputs` directly and doesn't have this limitation).
+        import quantui.app_runflow as app_runflow
+
+        captured: list = []
+        monkeypatch.setattr(app_runflow, "display", lambda obj: captured.append(obj))
+
+        app = QuantUIApp()
+        mol = Molecule(["O", "H"], [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0]], multiplicity=2)
+        app._set_molecule(mol)
+        app.method_dd.value = "UHF"
+        app.basis_dd.value = "6-31G*"
+
+        captured.clear()  # drop any renders triggered by the value changes above
+        app._update_notes()
+
+        assert len(captured) == 1
+        html = captured[0].data
+        assert "**" not in html, f"literal ** markers leaked into rendered HTML: {html}"
+        assert html.count("<b>") >= 2
+        assert html.count("<b>") == html.count("</b>")
 
 
 class TestExportMoleculeAndLabel:
@@ -1572,6 +1679,29 @@ class TestVibExportAnimation:
         assert isinstance(app._vib_export_status, widgets.HTML)
         assert app._vib_export_status.value == ""
 
+    def test_export_bad_mode_index_chains_original_exception(self):
+        """L audit fix (ruff B904): build_vib_export_html's py3Dmol-fallback
+        path must chain the original IndexError via `raise ... from exc`
+        when displacements[mode_number - 1] is out of range, not swallow it.
+        """
+        from types import SimpleNamespace
+
+        from quantui.app_visualization import build_vib_export_html
+        from quantui.viz_backend_router import BackendAvailability
+
+        if not BackendAvailability.from_environment().py3dmol:
+            pytest.skip("py3Dmol not available for export fallback test")
+
+        freq_stub = SimpleNamespace(displacements=[[[0.1, 0.0, 0.0]]])
+        app_stub = SimpleNamespace(
+            _last_vib_freq_result=freq_stub,
+            _last_vib_molecule=self._water(),
+            _viz_availability=BackendAvailability(py3dmol=True, plotlymol=False),
+        )
+        with pytest.raises(ValueError) as exc_info:
+            build_vib_export_html(app_stub, mode_number=5)  # out of range
+        assert isinstance(exc_info.value.__cause__, IndexError)
+
     def test_export_without_vib_state_shows_error_status(self, tmp_path, monkeypatch):
         monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
         app = QuantUIApp()
@@ -2459,10 +2589,14 @@ class TestIsosurfacePersistence:
         app._last_orb_mo_coeff = [[1.0, 0.0], [0.0, 1.0]]
         app._last_orb_mol_atom = [["H", [0.0, 0.0, 0.0]]]
         app._last_orb_mol_basis = "sto-3g"
+        # Force the Plotly fallback path (M-ORBVIZ: the default routes to
+        # py3Dmol when available). Backend is pinned via _resolve_backend so the
+        # test is independent of which backends are installed.
+        app._resolve_backend = lambda task: "plotlymol"
 
         captured: dict[str, object] = {}
 
-        def _fake_generate(_atom, _basis, _coeff, _idx, out_path):
+        def _fake_generate(_atom, _basis, _coeff, _idx, out_path, **_kwargs):
             captured["path"] = out_path
             out_path.write_text("cube", encoding="utf-8")
             return out_path
@@ -2490,6 +2624,49 @@ class TestIsosurfacePersistence:
         assert saved_path.exists()
         mock_gen.assert_called_once()
         mock_plot.assert_called_once()
+
+    def test_render_orbital_isosurface_py3dmol_path(self, tmp_path):
+        # When the backend resolves to py3Dmol, the renderer is the py3Dmol
+        # cube path (not Plotly), and the cube is still saved to disk.
+        app = QuantUIApp()
+        app._last_result_dir = tmp_path
+        app._last_orb_info = MagicMock()
+        app._last_orb_info.n_occupied = 1
+        app._last_orb_info.mo_energies_ev = [-10.0, 2.0]
+        app._last_orb_info.formula = "H2O"
+        app._last_orb_mo_coeff = [[1.0, 0.0], [0.0, 1.0]]
+        app._last_orb_mol_atom = [["H", [0.0, 0.0, 0.0]]]
+        app._last_orb_mol_basis = "sto-3g"
+        app._resolve_backend = lambda task: "py3dmol"
+
+        captured: dict[str, object] = {}
+
+        def _fake_generate(_atom, _basis, _coeff, _idx, out_path, **_kwargs):
+            captured["path"] = out_path
+            out_path.write_text("cube", encoding="utf-8")
+            return out_path
+
+        with (
+            patch(
+                "quantui.orbital_visualization.generate_cube_from_arrays",
+                side_effect=_fake_generate,
+            ) as mock_gen,
+            patch(
+                "quantui.orbital_visualization.render_orbital_isosurface_py3dmol",
+                return_value="<div>py3dmol iso</div>",
+            ) as mock_py3dmol,
+            patch(
+                "quantui.orbital_visualization.plot_cube_isosurface",
+                return_value=MagicMock(),
+            ) as mock_plot,
+        ):
+            app._render_orbital_isosurface("HOMO")
+
+        saved_path = captured.get("path")
+        assert saved_path is not None and saved_path.exists()
+        mock_gen.assert_called_once()
+        mock_py3dmol.assert_called_once()
+        mock_plot.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,16 @@
 # QuantUI — Apptainer Container
 
-The Apptainer container packages Python, PySCF, ASE, py3Dmol, and Voilà
+The Apptainer container packages Python, PySCF, RDKit, ASE, py3Dmol, and Voilà
 into a single portable `.sif` file. It is the **recommended path for Windows
 users** (via WSL) and for anyone who wants a zero-installation experience —
 students copy one file and run it.
+
+**Runs fully offline.** The container bundles everything it needs — the
+3-tier molecule library and the 3D viewer's JavaScript (3Dmol.js) are vendored,
+so structure lookup and every 3D view (molecules, trajectories, vibrations,
+orbital isosurfaces) work with **no internet connection**. Network is only ever
+used for the optional live PubChem/CACTUS structure search. Ideal for an
+air-gapped or restricted-network classroom.
 
 ---
 
@@ -85,8 +92,8 @@ bash apptainer/build.sh --clean --test
 bash apptainer/build.sh --fakeroot
 ```
 
-Build time: **~6 minutes** on a modern laptop with a good internet connection.
-Final image size: **~4–5 GB**.
+Build time: **~20–40 minutes** (dominated by the conda solve + PySCF download)
+on a modern laptop with a good internet connection. Final image size: **~4–5 GB**.
 
 The script must be run from the **repo root** (not from `apptainer/`) because
 the `.def` file copies the entire repo root into the container with
@@ -247,6 +254,14 @@ B3LYP/STO-3G: -75.312587 Ha  converged: True
 | `PBE` | DFT GGA | Large molecules, speed-critical |
 | `PBE0` | DFT hybrid | Charge transfer, band gaps |
 | `M06-2X` | DFT meta-hybrid | Reaction barriers, thermochemistry |
+| `wB97X-D`, `CAM-B3LYP` | DFT range-separated | Non-covalent / charge-transfer / UV-Vis |
+| `M06-L`, `HSE06`, `PBE-D3` | DFT (meta-GGA / screened / dispersion) | Large systems, band gaps, vdW complexes |
+| `MP2` | Post-HF | Accurate small-molecule energetics (O(N⁵)) |
+| `CCSD`, `CCSD(T)` | Post-HF coupled cluster | Benchmark-quality energies (O(N⁶)/O(N⁷); (T) is CPU-only) |
+
+Six calculation types run over these: Single Point, Geometry Opt, Frequency
+(+ thermochemistry / IR), UV-Vis (TD-DFT), NMR shielding, and 1D PES scan; PCM
+implicit solvent (Water, Ethanol, THF, DMSO, Acetonitrile) is a single checkbox.
 
 ### Basis sets
 
@@ -377,12 +392,14 @@ sudo apt-get install -y apptainer
 | Layer | Contents |
 | --- | --- |
 | Base | `continuumio/miniconda3:latest` (Debian + conda) |
-| conda-forge | jupyter, jupyterlab, ipywidgets, pyscf, numpy, scipy, matplotlib, plotly, h5py |
+| conda-forge | jupyter, jupyterlab, ipywidgets, notebook, pyscf, numpy, scipy, matplotlib, plotly, h5py, rdkit |
 | pip | voila, ase, py3dmol, requests |
-| QuantUI | installed from `/opt/quantui` (the repo root, copied at build time) |
+| QuantUI | installed from `/opt/quantui` (the repo root, copied at build time) — bundles the molecule library + vendored 3Dmol.js for offline use |
 
-The `.git` directory and `__pycache__` folders are removed during build to
-keep the image lean.
+The `.git` directory, `__pycache__` folders, and internal dev files are removed
+during build to keep the image lean. A build-time check asserts the vendored
+3Dmol.js is present and the viewer is CDN-free, so a broken offline build fails
+fast instead of shipping blank 3D views.
 
 ---
 
@@ -392,12 +409,12 @@ Edit `%labels` in `quantui.def` to bump the version string, then rebuild:
 
 ```singularity
 %labels
-  Version "0.2.0"
+  Version "0.3.0"
 ```
 
 Tag the git commit and push so the version is traceable:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```

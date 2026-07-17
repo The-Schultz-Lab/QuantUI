@@ -125,5 +125,18 @@ class TestStepProgressEdgeCases:
     def test_html_special_chars_in_message(self):
         sp = StepProgress(["A"])
         sp.complete(0, "Found <3 atoms & 2 bonds")
-        # Should not crash — message included as-is
-        assert sp.widget.value
+        # L audit fix: labels/messages must be HTML-escaped, not embedded
+        # as-is — a message containing "<"/">" (e.g. echoing a parse error
+        # back from user input) used to break the widget's markup instead
+        # of rendering as literal text.
+        assert "Found &lt;3 atoms &amp; 2 bonds" in sp.widget.value
+        assert "<3 atoms" not in sp.widget.value
+
+    def test_html_escapes_script_tag_in_label_and_message(self):
+        sp = StepProgress(["Parse <script>alert(1)</script>"])
+        sp.fail(0, "<img src=x onerror=alert(2)>")
+        value = sp.widget.value
+        assert "<script>" not in value
+        assert "<img" not in value
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in value
+        assert "&lt;img src=x onerror=alert(2)&gt;" in value

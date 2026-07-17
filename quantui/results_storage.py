@@ -28,12 +28,24 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+from .config import BOHR_TO_ANGSTROM as _BOHR_TO_ANGSTROM
 
 if TYPE_CHECKING:
     pass  # result types accepted via duck typing; no hard import needed
 
 _SCHEMA_VERSION = 2
+
+# Molden's [FR-COORD] block is defined (theochem.ru.nl/molden/molden_format.html)
+# to always be in Bohr, regardless of the unit tag on [Atoms] — a Molden-format
+# quirk. pyscf_mol_atom (the source for both blocks) is Angstrom throughout
+# QuantUI, so [FR-COORD] needs an explicit conversion; [Atoms]/[GTO]/[MO] (via
+# molden.from_mo / molden.header, built from a mol with implicit unit="Angstrom")
+# do not. Derived from config.BOHR_TO_ANGSTROM (pyscf.data.nist.BOHR) rather
+# than a separately hand-typed literal, so this stays consistent with the
+# other Bohr<->Angstrom conversions in the codebase.
+_ANGSTROM_TO_BOHR = 1.0 / _BOHR_TO_ANGSTROM
 
 
 def _default_results_dir() -> Path:
@@ -44,6 +56,52 @@ def _default_results_dir() -> Path:
 def _safe_name(s: str) -> str:
     """Replace characters that are unsafe in directory names with 'x'."""
     return re.sub(r"[^\w\-]", "x", s)
+
+
+def _opt_float(x: object) -> Optional[float]:
+    """Coerce an optional (possibly numpy) scalar to a JSON-safe float or None."""
+    if x is None:
+        return None
+    try:
+        return float(x)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _opt_int(x: object) -> Optional[int]:
+    """Coerce an optional (possibly numpy) scalar to a JSON-safe int or None.
+
+    ``json.dumps`` accepts ``numpy.float64``/``numpy.float32`` transparently
+    (they subclass ``float``), but ``numpy.int64``/``numpy.bool_`` do not
+    subclass ``int``/``bool`` and raise ``TypeError`` unconverted — this
+    normalizes any duck-typed result's numpy scalar to a plain ``int``.
+    """
+    if x is None:
+        return None
+    try:
+        return int(x)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _opt_float_list(x: object) -> Optional[list]:
+    """Coerce an optional iterable of numbers to a JSON-safe list of floats."""
+    if x is None:
+        return None
+    try:
+        return [float(v) for v in x]  # type: ignore[union-attr]
+    except (TypeError, ValueError):
+        return None
+
+
+def _opt_str_list(x: object) -> Optional[list]:
+    """Coerce an optional iterable to a JSON-safe list of strings."""
+    if x is None:
+        return None
+    try:
+        return [str(v) for v in x]  # type: ignore[union-attr]
+    except TypeError:
+        return None
 
 
 def save_result(
@@ -113,10 +171,17 @@ def save_result(
         _collision += 1
     dest.mkdir(parents=True)
 
-    _e_ha = getattr(result, "energy_hartree", float("nan"))
+    _e_ha_raw = getattr(result, "energy_hartree", float("nan"))
+    _e_ha = _opt_float(_e_ha_raw)
+    if _e_ha is None:
+        _e_ha = float("nan")
     # energy_ev may be a property (SessionResult) or absent (OptimizationResult
     # and new types also define it as a property, so getattr works for all).
-    _e_ev = getattr(result, "energy_ev", _e_ha * _HARTREE_TO_EV)
+    _e_ev = _opt_float(getattr(result, "energy_ev", _e_ha * _HARTREE_TO_EV))
+    if _e_ev is None:
+        _e_ev = _e_ha * _HARTREE_TO_EV
+
+    _converged = getattr(result, "converged", None)
 
     data: dict = {
         "_schema_version": _SCHEMA_VERSION,
@@ -127,14 +192,30 @@ def save_result(
         "basis": getattr(result, "basis", "?"),
         "energy_hartree": _e_ha,
         "energy_ev": _e_ev,
-        "homo_lumo_gap_ev": getattr(result, "homo_lumo_gap_ev", None),
-        "converged": getattr(result, "converged", None),
-        "n_iterations": getattr(result, "n_iterations", -1),
+        "homo_lumo_gap_ev": _opt_float(getattr(result, "homo_lumo_gap_ev", None)),
+        "converged": None if _converged is None else bool(_converged),
+        "n_iterations": _opt_int(getattr(result, "n_iterations", -1)),
         # Post-HF correlation breakdown — None for HF/DFT. Persisted so the
         # saved-result card can show the HF reference + correlation rows.
-        "mp2_correlation_hartree": getattr(result, "mp2_correlation_hartree", None),
-        "ccsd_correlation_hartree": getattr(result, "ccsd_correlation_hartree", None),
-        "ccsd_t_correction_hartree": getattr(result, "ccsd_t_correction_hartree", None),
+        "mp2_correlation_hartree": _opt_float(
+            getattr(result, "mp2_correlation_hartree", None)
+        ),
+        "ccsd_correlation_hartree": _opt_float(
+            getattr(result, "ccsd_correlation_hartree", None)
+        ),
+        "ccsd_t_correction_hartree": _opt_float(
+            getattr(result, "ccsd_t_correction_hartree", None)
+        ),
+        # Persisted so the saved-result card matches the live card (M-CLEAN
+        # formatter-parity fix). Additive — absent on older results, where the
+        # history card falls back exactly as before (CPU / no dipole / no
+        # charges). Coerced JSON-safe (numpy scalars/arrays → float/list).
+        "solvent": getattr(result, "solvent", None),
+        "gpu_used": bool(getattr(result, "gpu_used", False)),
+        "gpu_name": getattr(result, "gpu_name", None),
+        "dipole_moment_debye": _opt_float(getattr(result, "dipole_moment_debye", None)),
+        "mulliken_charges": _opt_float_list(getattr(result, "mulliken_charges", None)),
+        "atom_symbols": _opt_str_list(getattr(result, "atom_symbols", None)),
         "spectra": spectra if spectra is not None else {},
     }
     if extras:
@@ -147,6 +228,23 @@ def save_result(
     return dest
 
 
+_COLLISION_SUFFIX_RE = re.compile(r"^(.*)_(\d+)$")
+
+
+def _result_dir_sort_key(d: Path) -> tuple:
+    """Sort key that orders same-timestamp collision suffixes numerically.
+
+    Directory names are ``<timestamp>_<formula>_<method>_<basis>``, with a
+    ``_<N>`` counter appended on same-microsecond collisions (N=1, 2, ...).
+    A plain string sort put ``..._10`` before ``..._2`` (lexicographic, not
+    numeric); split the trailing counter and sort on it as an int instead.
+    """
+    m = _COLLISION_SUFFIX_RE.match(d.name)
+    if m:
+        return (m.group(1), int(m.group(2)))
+    return (d.name, -1)
+
+
 def list_results(results_dir: Optional[Path] = None) -> list:
     """Return result directories sorted newest-first.
 
@@ -157,6 +255,7 @@ def list_results(results_dir: Optional[Path] = None) -> list:
         return []
     return sorted(
         (d for d in base.iterdir() if d.is_dir() and (d / "result.json").exists()),
+        key=_result_dir_sort_key,
         reverse=True,
     )
 
@@ -317,7 +416,9 @@ def _append_molden_vibrations(
     ``normal_modes``). ``normal_modes`` is a list of length-N entries,
     each a list of per-atom (x, y, z) displacement triples. The
     ``[FR-COORD]`` block repeats the equilibrium geometry from
-    ``pyscf_mol_atom`` so the file is self-contained.
+    ``pyscf_mol_atom`` (converted Angstrom -> Bohr; the Molden spec
+    requires ``[FR-COORD]`` in Bohr regardless of ``[Atoms]``'s unit tag)
+    so the file is self-contained.
     """
     with open(path, "a", encoding="utf-8") as fh:
         fh.write("\n[FREQ]\n")
@@ -327,8 +428,9 @@ def _append_molden_vibrations(
         fh.write("\n[FR-COORD]\n")
         for sym, coords in pyscf_mol_atom:
             fh.write(
-                f"{sym}  {float(coords[0]):.6f} {float(coords[1]):.6f} "
-                f"{float(coords[2]):.6f}\n"
+                f"{sym}  {float(coords[0]) * _ANGSTROM_TO_BOHR:.6f} "
+                f"{float(coords[1]) * _ANGSTROM_TO_BOHR:.6f} "
+                f"{float(coords[2]) * _ANGSTROM_TO_BOHR:.6f}\n"
             )
 
         fh.write("\n[FR-NORM-COORD]\n")
@@ -670,6 +772,32 @@ def save_thumbnail(result_dir: Path, data: dict) -> None:
     except ImportError:
         return
 
+    # M9 audit fix (2026-07-14): only the matplotlib import itself was
+    # guarded — figure construction, text rendering, and fig.savefig() (a
+    # real filesystem write, so it can hit disk-full / permission errors)
+    # could all raise past this function despite the docstring's promise
+    # to silently skip "any error". Wrap the whole body so that promise
+    # actually holds; fig.close() still runs via finally regardless of
+    # where in the body a failure happened.
+    fig = None
+    try:
+        fig = _build_thumbnail_figure(plt, data)
+        fig.savefig(
+            str(result_dir / "thumbnail.png"),
+            dpi=144,
+            bbox_inches="tight",
+            facecolor=fig.get_facecolor(),
+            pad_inches=0.05,
+        )
+    except Exception:
+        pass
+    finally:
+        if fig is not None:
+            plt.close(fig)
+
+
+def _build_thumbnail_figure(plt: Any, data: dict) -> Any:
+    """Build (but don't save) the thumbnail matplotlib Figure for :func:`save_thumbnail`."""
     _colors: dict = {
         "single_point": ("#2563eb", "#dbeafe"),
         "geometry_opt": ("#7c3aed", "#ede9fe"),
@@ -771,13 +899,4 @@ def save_thumbnail(result_dir: Path, data: dict) -> None:
             transform=ax.transAxes,
         )
 
-    try:
-        fig.savefig(
-            str(result_dir / "thumbnail.png"),
-            dpi=144,
-            bbox_inches="tight",
-            facecolor=bg,
-            pad_inches=0.05,
-        )
-    finally:
-        plt.close(fig)
+    return fig

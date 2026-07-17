@@ -209,24 +209,38 @@ def search_candidates(query: str) -> List[Dict[str, Any]]:
         return []
 
 
-def student_friendly_resolve(query: str) -> Tuple[Optional[str], str]:
-    """Chain-backed, student-friendly resolve. Drop-in for the UI handler.
+def resolve_structure_with_message(
+    query: str,
+) -> Tuple[Optional[str], str, Optional[str], bool]:
+    """Chain-backed resolve that also reports provenance.
 
-    Returns ``(xyz_string_or_None, message)``.
+    Returns ``(xyz_or_None, message, source_or_None, is_offline)``. ``source``
+    is the raw provider key (``"pubchem"`` / ``"cactus"`` / ``"library"`` /
+    ``"library-offline-fallback"`` / ``"rdkit-smiles"`` / ``"rdkit-inchi"``) so
+    the UI can label the loaded molecule by where it *actually* came from
+    rather than always saying "PubChem". ``is_offline`` is True when the
+    structure was produced without a network call (local RDKit or the bundled
+    library) — the UI surfaces a no-network note for the offline *fallback*
+    (network was attempted and failed).
     """
     try:
         result = resolve_structure(query, conformer_3d=True)
     except (MoleculeNotFoundError, ValueError) as exc:
-        return None, (
-            f"❌ Could not resolve '{query}'.\n"
-            f"   {exc}\n"
-            f"   Try a different name, a SMILES (e.g. CC(=O)O), a CAS number, "
-            f"or check spelling.\n"
-            f"   Search manually at: https://pubchem.ncbi.nlm.nih.gov/"
+        return (
+            None,
+            (
+                f"❌ Could not resolve '{query}'.\n"
+                f"   {exc}\n"
+                f"   Try a different name, a SMILES (e.g. CC(=O)O), a CAS "
+                f"number, or check spelling.\n"
+                f"   Search manually at: https://pubchem.ncbi.nlm.nih.gov/"
+            ),
+            None,
+            False,
         )
     except Exception as exc:  # pragma: no cover - unexpected
         logger.error(f"Unexpected error resolving '{query}': {exc}", exc_info=True)
-        return None, f"❌ Error resolving '{query}': {exc}"
+        return None, f"❌ Error resolving '{query}': {exc}", None, False
 
     source_label = {
         "rdkit-smiles": "generated locally from SMILES",
@@ -250,4 +264,14 @@ def student_friendly_resolve(query: str) -> Tuple[Optional[str], str]:
         f"  Atoms: {result.num_atoms} ({result.num_heavy_atoms} heavy)\n"
         f"  Molecular weight: {mw}{embedded}"
     )
-    return result.xyz, message
+    return result.xyz, message, result.source, result.is_offline
+
+
+def student_friendly_resolve(query: str) -> Tuple[Optional[str], str]:
+    """Chain-backed, student-friendly resolve. Drop-in for the UI handler.
+
+    Returns ``(xyz_string_or_None, message)``. Thin wrapper over
+    :func:`resolve_structure_with_message` (which also reports provenance).
+    """
+    xyz, message, _source, _is_offline = resolve_structure_with_message(query)
+    return xyz, message

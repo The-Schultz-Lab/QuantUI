@@ -226,41 +226,25 @@ def show_opt_trajectory(
     layout_fn: Any,
     render_token: int | None = None,
 ) -> None:
-    """Build trajectory carousel and energy chart in trajectory panel."""
-    import concurrent.futures
+    """Build the trajectory viewer + energy chart in the trajectory panel.
+
+    All optimization steps are loaded once into ONE py3Dmol viewer
+    (``addModelsAsFrames``) and navigated client-side with ``setFrame`` via an
+    in-HTML stepper (prev/next, play/pause, scrub slider, start↔final flip,
+    per-step energy label). Because the viewer instance never changes, the
+    camera (rotation/zoom) stays put across steps and there is no per-frame HTML
+    rebuild — the previous carousel rebuilt a fresh viewer each frame, which
+    reset the camera and flickered. py3Dmol-only per the viz routing policy; the
+    energy-convergence chart and Export button are unchanged.
+    """
 
     def _is_stale() -> bool:
         return render_token is not None and render_token != int(
             getattr(app, "_traj_render_token", 0)
         )
 
-    def _set_cache_label(value: str) -> None:
-        if _is_stale():
-            return
-        cache_label.value = value
-
-    def _swap_frame_out(html_str: str) -> None:
-        """Atomically replace frame_out's content in a single widget-state
-        update so the browser never sees an intermediate empty state.
-        Combined with the fixed `height` on frame_out, this prevents the
-        layout-flash that otherwise happens between clear+append on every
-        frame switch (visible as a page-scroll jump in the previous build)."""
-        frame_out.outputs = (
-            {
-                "output_type": "display_data",
-                "data": {"text/html": html_str},
-                "metadata": {},
-            },
-        )
-
-    def _show_frame_error(message: str) -> None:
-        if _is_stale():
-            return
-        _swap_frame_out(
-            f'<p style="color:#b91c1c;padding:8px">Frame render failed: {message}</p>'
-        )
-
-    # Support both OptimizationResult (.trajectory) and PESScanResult (.coordinates_list)
+    # Support both OptimizationResult (.trajectory) and PESScanResult
+    # (.coordinates_list).
     traj = getattr(opt_result, "trajectory", None) or getattr(
         opt_result, "coordinates_list", []
     )
@@ -307,265 +291,55 @@ def show_opt_trajectory(
     except ImportError:
         pass
 
-    # --- Pre-build XYZ blocks (reused by carousel, fast path, and export) ---
+    # --- Pre-build XYZ blocks (reused by the viewer and the export) ---
     charge = traj[0].charge
     xyzblocks = [
         f"{len(m.atoms)}\n{m.get_formula()}\n{m.to_xyz_string()}" for m in traj
     ]
-    frame_w, frame_h, frame_res = 460, 340, 8
-
-    # --- Attempt fast-path: bond perception once on frame 0 ---
-    ref_mol = None
-    plotlymol_fast = False
+    formula = traj[0].get_formula()
     try:
-        from plotlymol3d import (
-            draw_3D_mol as _draw_3D_mol,
-        )
-        from plotlymol3d import (
-            format_figure as _fmt_fig,
-        )
-        from plotlymol3d import (
-            format_lighting as _fmt_light,
-        )
-        from plotlymol3d import (
-            make_subplots as _make_subplots,
-        )
-        from plotlymol3d import (
-            xyzblock_to_rdkitmol as _xyz_to_rdkit,
-        )
-        from rdkit import Chem as _Chem
-
-        from quantui.visualization_py3dmol import LIGHTING_PRESETS as _LP
-
-        ref_mol = _xyz_to_rdkit(xyzblocks[0], charge=charge)
-        plotlymol_fast = ref_mol is not None
+        bgcolor = app._plotly_theme_colors()["scene_bgcolor"]
     except Exception:
-        pass
+        bgcolor = "white"
 
-    def _build_fig_fast(idx: int):
-        """Reuse frame-0 bond topology; only swap in new atom positions."""
-        mol_xyz = _Chem.MolFromXYZBlock(xyzblocks[idx] + "\n")
-        if mol_xyz is None:
-            return None
-        rw = _Chem.RWMol(ref_mol)
-        conf_src = mol_xyz.GetConformer()
-        conf_dst = rw.GetConformer()
-        for atom_idx in range(rw.GetNumAtoms()):
-            conf_dst.SetAtomPosition(atom_idx, conf_src.GetAtomPosition(atom_idx))
-        fig = _make_subplots(rows=1, cols=1, specs=[[{"type": "scene"}]])
-        _draw_3D_mol(fig, rw.GetMol(), frame_res, "ball+stick")
-        fig = _fmt_fig(fig)
-        fig = _fmt_light(fig, **_LP.get("soft", _LP["soft"]))
-        scene_bg = app._plotly_theme_colors()["scene_bgcolor"]
-        fig.update_layout(
-            width=frame_w,
-            height=frame_h,
-            paper_bgcolor="white",
-            scene=dict(bgcolor=scene_bg),
-            margin=dict(l=0, r=0, t=0, b=0),
+    if _is_stale():
+        return
+
+    # --- Single-viewer trajectory stepper (all frames preloaded) ---
+    viewer_output = widgets.Output(
+        layout=layout_fn(
+            height="410px", width="100%", max_width="500px", overflow="hidden"
         )
-        return fig
-
-    def _try_py3dmol(idx: int):
-        """Build frame idx with py3Dmol. Returns (kind, obj) or None."""
-        try:
-            import py3Dmol as _p3d
-
-            view = _p3d.view(width=frame_w, height=frame_h)
-            view.addModel(xyzblocks[idx], "xyz")
-            view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
-            view.setBackgroundColor(
-                "white" if app.theme_btn.value == "Light" else "#1e1e1e"
-            )
-            view.zoomTo()
-            return ("py3dmol", view)
-        except Exception:
-            return None
-
-    def _try_plotlymol(idx: int):
-        """Build frame idx with plotlymol3d. Tries fast bond-cached path
-        first, falls back to slow path. Returns (kind, obj) or None."""
-        if plotlymol_fast:
-            try:
-                fig = _build_fig_fast(idx)
-                if fig is not None:
-                    return ("plotly", fig)
-            except Exception:
-                pass
-        try:
-            from quantui.visualization_py3dmol import visualize_molecule_plotlymol
-
-            fig = visualize_molecule_plotlymol(
-                traj[idx],
-                mode="ball+stick",
-                resolution=frame_res,
-                width=frame_w,
-                height=frame_h,
-            )
-            scene_bg = app._plotly_theme_colors()["scene_bgcolor"]
-            fig.update_layout(paper_bgcolor="white", scene=dict(bgcolor=scene_bg))
-            return ("plotly", fig)
-        except ImportError:
-            return None
-
-    def _build_fig(idx: int):
-        """Return (kind, obj) for frame idx. Trajectory frame rendering is
-        py3Dmol-only per the routing policy: plotlymol is blocked from
-        real-time trajectory use to avoid its RequireJS flicker pattern.
-        If py3Dmol is unavailable on this host, returns an error frame
-        rather than silently falling back to plotlymol."""
-        from quantui.viz_backend_router import VizBackend as _VB
-        from quantui.viz_backend_router import VizTask as _VT
-
-        chosen = app._resolve_backend(_VT.TRAJECTORY_FRAME)
-        if chosen != _VB.PY3DMOL:
-            return (
-                "error",
-                "Trajectory rendering requires py3Dmol (plotlymol blocked "
-                "for real-time use to avoid flicker). py3Dmol is unavailable.",
-            )
-        with _viz_render_event(
-            app, task="trajectory_frame", backend="py3dmol", idx=idx
-        ):
-            result = _try_py3dmol(idx)
-        if result is not None:
-            return result
-        return ("error", "py3Dmol failed to build trajectory frame")
-
-    frame_cache: dict[int, Any] = {}
-
-    # --- Carousel controls ---
-    step_slider = widgets.IntSlider(
-        value=0,
-        min=0,
-        max=n - 1,
-        description="Step:",
-        continuous_update=False,
-        style={"description_width": "40px"},
-        layout=layout_fn(width="360px"),
     )
-    step_info = widgets.HTML(value=app._traj_step_html(0, traj, energies, rel_e))
-    # Fixed height (not just min_height) so the container box never resizes
-    # between frame swaps — eliminates the layout flash / page-scroll jump
-    # the user reported on each arrow/slider click.
-    frame_out = widgets.Output(
-        layout=layout_fn(height=f"{frame_h}px", width=f"{frame_w}px")
-    )
-    cache_label = widgets.HTML(
-        value=f'<span style="color:#888;font-size:11px;font-style:italic">'
-        f"Pre-rendering frames… 0 / {n}</span>"
-    )
-
-    def _display_frame(idx: int) -> None:
-        if _is_stale():
-            return
-        kind, obj = frame_cache[idx]
-        try:
-            from quantui import calc_log as _clog_df
-
-            _clog_df.log_event("traj_frame_display", f"idx={idx} kind={kind}")
-        except Exception:
-            pass
-        if kind == "error":
-            _swap_frame_out(
-                f'<p style="color:#b91c1c;padding:8px">'
-                f"Frame render failed: {obj}</p>"
+    try:
+        with _viz_render_event(app, task="trajectory", backend="py3dmol", n_frames=n):
+            html = build_trajectory_viewer_html(
+                xyzblocks,
+                formula=formula,
+                energies=list(energies) if energies else None,
+                rel_e=rel_e or None,
+                bgcolor=bgcolor,
             )
-            return
-        if kind == "plotly":
-            # Render via Plotly HTML serialization. The atomic outputs swap
-            # avoids the brief empty state between clear+append, eliminating
-            # the layout-flash visible on rapid frame switches.
-            import plotly.io as _pio
-
-            _swap_frame_out(
-                _pio.to_html(
-                    obj,
-                    full_html=False,
-                    include_plotlyjs="require",
-                    config={"responsive": True},
-                )
-            )
-            return
-        # py3Dmol view object — convert to its HTML repr and atomic-swap.
-        make_html = getattr(obj, "_make_html", None)
-        if callable(make_html):
-            try:
-                _swap_frame_out(obj._make_html())
-                return
-            except Exception as exc:
-                _swap_frame_out(
-                    f'<p style="color:#b91c1c;padding:8px">'
-                    f"py3Dmol render failed: {exc}</p>"
-                )
-                return
-        _swap_frame_out(
-            '<p style="color:#b91c1c;padding:8px">'
-            "Frame object missing HTML representation</p>"
+        app._set_html_output(viewer_output, html)
+    except Exception as exc:  # noqa: BLE001 — surface inline, never crash the tab
+        viewer_output.outputs = (
+            {
+                "output_type": "display_data",
+                "data": {
+                    "text/html": (
+                        '<p style="color:#b91c1c;padding:8px">'
+                        f"Trajectory viewer failed: {exc}</p>"
+                    )
+                },
+                "metadata": {},
+            },
         )
 
-    def _update_frame(change: dict[str, Any]) -> None:
-        if _is_stale():
-            return
-        idx = change["new"]
-        step_info.value = app._traj_step_html(idx, traj, energies, rel_e)
-        if idx in frame_cache:
-            _display_frame(idx)
-            return
-        _swap_frame_out(
-            '<p style="color:#555;font-style:italic;padding:8px">Rendering…</p>'
-        )
-
-        def _on_demand() -> None:
-            try:
-                frame_cache[idx] = _build_fig(idx)
-                app._queue_main_thread_callback(_display_frame, idx)
-            except Exception as exc:
-                if _is_stale():
-                    return
-                app._queue_main_thread_callback(_show_frame_error, str(exc))
-
-        threading.Thread(target=_on_demand, daemon=True).start()
-
-    step_slider.observe(app._safe_cb(_update_frame), names="value")
-
-    # --- Prev/next arrow buttons for one-step navigation ---
-    prev_btn = widgets.Button(
-        icon="arrow-left",
-        tooltip="Previous frame",
-        layout=layout_fn(width="40px", margin="0 4px 0 0"),
-        disabled=True,  # starts at frame 0
-    )
-    next_btn = widgets.Button(
-        icon="arrow-right",
-        tooltip="Next frame",
-        layout=layout_fn(width="40px", margin="0 8px 0 4px"),
-        disabled=(n <= 1),
-    )
-
-    def _on_prev_clicked(_btn) -> None:
-        if step_slider.value > 0:
-            step_slider.value -= 1
-
-    def _on_next_clicked(_btn) -> None:
-        if step_slider.value < n - 1:
-            step_slider.value += 1
-
-    prev_btn.on_click(_on_prev_clicked)
-    next_btn.on_click(_on_next_clicked)
-
-    def _update_nav_buttons(change: dict[str, Any]) -> None:
-        idx = change["new"]
-        prev_btn.disabled = idx <= 0
-        next_btn.disabled = idx >= n - 1
-
-    step_slider.observe(app._safe_cb(_update_nav_buttons), names="value")
-
-    # --- Export button ---
+    # --- Export button (standalone HTML animation; plotlymol3d) ---
     export_btn = widgets.Button(
         description="Export Animation",
         icon="download",
-        layout=layout_fn(width="160px", margin="0 0 0 12px"),
+        layout=layout_fn(width="160px"),
         tooltip="Generate a standalone HTML animation file (may take a minute)",
     )
     export_status = widgets.HTML()
@@ -619,48 +393,11 @@ def show_opt_trajectory(
 
     export_btn.on_click(_on_export)
 
-    # --- Assemble layout ---
-    header = widgets.HBox(
-        [prev_btn, step_slider, next_btn, export_btn],
-        layout=layout_fn(align_items="center", margin="4px 0"),
-    )
-    panel = widgets.VBox([header, step_info, cache_label, frame_out, export_status])
-
-    # Build and render frame 0 SYNCHRONOUSLY on the main thread before
-    # displaying the panel, so the Output widget arrives at the browser with
-    # frame 0 already in its outputs list. This avoids the io_loop-callback
-    # latency that left frame 0 invisible until the first slider click.
+    # --- Assemble: energy chart (HTML in an Output so RequireJS runs) +
+    # viewer + export row, set atomically as traj_output's children. ---
     if _is_stale():
         return
-    try:
-        frame_cache[0] = _build_fig(0)
-        _display_frame(0)
-        sync_frame0_ok = True
-    except Exception as _f0_exc:
-        sync_frame0_ok = False
-        try:
-            from quantui import calc_log as _clog_f0
-
-            _clog_f0.log_event(
-                "traj_frame0_sync_error",
-                f"{type(_f0_exc).__name__}: {_f0_exc}"[:300],
-            )
-        except Exception:
-            pass
-        _swap_frame_out(
-            '<p style="color:#555;font-style:italic;padding:8px">'
-            "Rendering frame 0…</p>"
-        )
-
-    # Display panel.
-    if _is_stale():
-        return
-    # Build the energy figure as HTML inside an Output widget so RequireJS
-    # / Plotly scripts execute, and put the panel widget directly as a
-    # sibling child of traj_output. Setting traj_output.children atomically
-    # avoids the deferred-display-via-Output issue that was emptying the
-    # accordion in BUG-FRESH-TRAJ.
-    new_children = []
+    new_children: list[Any] = []
     if has_plotly and rel_e:
         import plotly.io as _pio_e
 
@@ -679,69 +416,21 @@ def show_opt_trajectory(
             },
         )
         new_children.append(energy_holder)
-    new_children.append(panel)
+    new_children.append(viewer_output)
+    new_children.append(
+        widgets.HBox(
+            [export_btn, export_status],
+            layout=layout_fn(align_items="center", margin="4px 0"),
+        )
+    )
     app.traj_output.children = tuple(new_children)
+
     try:
         from quantui import calc_log as _clog_sp
 
-        _clog_sp.log_event(
-            "traj_show_panel",
-            f"n={n} plotlymol_fast={plotlymol_fast} "
-            f"sync_frame0_ok={sync_frame0_ok} "
-            f"traj_children_n={len(getattr(app.traj_output, 'children', ()))}",
-        )
+        _clog_sp.log_event("traj_show_panel", f"n={n} single_viewer=1")
     except Exception:
         pass
-
-    def _prerender_all() -> None:
-        """Render remaining frames in a background thread (frame 0 already
-        built+displayed synchronously above when sync_frame0_ok)."""
-        if _is_stale():
-            return
-        try:
-            if 0 not in frame_cache:
-                frame_cache[0] = _build_fig(0)
-                app._queue_main_thread_callback(_display_frame, 0)
-            app._queue_main_thread_callback(
-                _set_cache_label,
-                f'<span style="color:#888;font-size:11px;font-style:italic">'
-                f"Pre-rendering frames… 1 / {n}</span>",
-            )
-            if n > 1:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-                    futures = {pool.submit(_build_fig, i): i for i in range(1, n)}
-                    done = 1
-                    for fut in concurrent.futures.as_completed(futures):
-                        if _is_stale():
-                            return
-                        i = futures[fut]
-                        try:
-                            frame_cache[i] = fut.result()
-                        except Exception:
-                            pass
-                        done += 1
-                        app._queue_main_thread_callback(
-                            _set_cache_label,
-                            f'<span style="color:#888;font-size:11px;font-style:italic">'
-                            f"Pre-rendering frames… {done} / {n}</span>",
-                        )
-        except Exception:
-            pass
-        app._queue_main_thread_callback(
-            _set_cache_label,
-            f'<span style="color:#16a34a;font-size:11px">'
-            f"✓ All {n} frames ready</span>",
-        )
-        try:
-            from quantui import calc_log as _clog_pre
-
-            _clog_pre.log_event(
-                "traj_prerender_complete", f"n={n} cached={len(frame_cache)}"
-            )
-        except Exception:
-            pass
-
-    threading.Thread(target=_prerender_all, daemon=True).start()
 
 
 def traj_step_html(
@@ -782,14 +471,14 @@ def render_traj_frame(app: Any, molecule: Any, output_widget: Any) -> None:
 
     # Fallback: py3Dmol
     try:
-        import py3Dmol as _p3d
+        from quantui.viz_assets import make_view
 
         xyz = (
             f"{len(molecule.atoms)}\n"
             f"{molecule.get_formula()}\n"
             f"{molecule.to_xyz_string()}"
         )
-        view = _p3d.view(width=460, height=340)
+        view = make_view(width=460, height=340)
         view.addModel(xyz, "xyz")
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
         view.setBackgroundColor("white")
@@ -933,14 +622,33 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     if not options:
         return False
 
-    app.vib_mode_dd.options = options
-    app.vib_mode_dd.value = options[0][1]
-
     app._last_vib_data = vib_data  # may be None — plotlymol3d optional
     app._last_vib_molecule = molecule
     app._last_vib_freq_result = freq_result
 
     first_label, first_mode = options[0]
+
+    # Decide the render path BEFORE assigning vib_mode_dd.value (which fires
+    # on_vib_mode_changed): set the single-viewer flag first so that observer
+    # takes the client-side-switch branch instead of spawning a redundant
+    # legacy per-mode render. The preferred path is ONE persistent py3Dmol
+    # viewer holding every mode, with client-side mode switching, so the camera
+    # (rotation/zoom) is preserved across modes (matches pre-opt/trajectory).
+    # Falls back to the legacy renderer when py3Dmol isn't selected or
+    # displacements are unavailable (e.g. some history replays).
+    use_single = _vib_single_viewer_supported(app, freq_result)
+    app._vib_single_viewer_active = use_single
+
+    app.vib_mode_dd.options = options
+    app.vib_mode_dd.value = first_mode  # fires on_vib_mode_changed
+
+    if use_single:
+        if _render_vib_single_viewer(
+            app, freq_result, molecule, first_mode, [m for _, m in options]
+        ):
+            return True
+        app._vib_single_viewer_active = False  # build failed → legacy fallback
+
     # Cache-hit fast path: on history replay the cached HTML for the first
     # mode is on disk, so swap it in synchronously without a placeholder.
     # ``reset_camera=True`` clears any stale camera matrix from a previous
@@ -1257,6 +965,7 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
 
     app._last_orb_info = info
     app._last_orb_mo_coeff = getattr(result, "mo_coeff", None)
+    app._last_orb_mo_occ = mo_occ
     app._last_orb_mol_atom = getattr(result, "pyscf_mol_atom", None)
     app._last_orb_mol_basis = getattr(result, "pyscf_mol_basis", None)
 
@@ -1463,6 +1172,7 @@ def render_orbital_isosurface(
     mo_coeff = getattr(app, "_last_orb_mo_coeff", None)
     mol_atom = getattr(app, "_last_orb_mol_atom", None)
     mol_basis = getattr(app, "_last_orb_mol_basis", None)
+    mo_occ_for_charge = getattr(app, "_last_orb_mo_occ", None)
     if mo_coeff is None or mol_atom is None or mol_basis is None:
         return
 
@@ -1471,8 +1181,11 @@ def render_orbital_isosurface(
 
         from quantui.orbital_visualization import (
             generate_cube_from_arrays,
+            infer_charge_and_spin,
             plot_cube_isosurface,
+            render_orbital_isosurface_py3dmol,
         )
+        from quantui.viz_backend_router import VizTask as _VT
 
         result_dir = getattr(app, "_last_result_dir", None)
         if not isinstance(result_dir, Path):
@@ -1494,27 +1207,56 @@ def render_orbital_isosurface(
         ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
         cube_path = cube_dir / f"{safe_formula}_{safe_orb}_{ts}.cube"
 
-        generate_cube_from_arrays(mol_atom, mol_basis, mo_coeff, orb_idx, cube_path)
-        is_dark = app.theme_btn.value == "Dark"
-        axis_color = "#dbeafe" if is_dark else "#1f2937"
-        bond_color = "#cbd5e1" if is_dark else "#4b5563"
-        title_color = app._plotly_theme_colors()["font_color"]
-        fig = plot_cube_isosurface(
+        # Charge/spin aren't carried on the app's orbital-state attributes —
+        # infer them from the MO occupations so charged/open-shell molecules
+        # (H3O+, OH-, radicals, ...) don't fail to build in PySCF (H1 fix).
+        _charge, _spin = infer_charge_and_spin(mol_atom, mo_occ_for_charge)
+        generate_cube_from_arrays(
+            mol_atom,
+            mol_basis,
+            mo_coeff,
+            orb_idx,
             cube_path,
-            title=f"{orbital_label} Isosurface",
-            show_molecule=True,
-            show_grid=False,
-            scene_bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
-            axis_color=axis_color,
-            title_color=title_color,
-            bond_color=bond_color,
+            charge=_charge,
+            spin=_spin,
         )
-        html_str = _pio.to_html(
-            fig,
-            include_plotlyjs="require",
-            full_html=False,
-            config={"responsive": True},
-        )
+        scene_bgcolor = app._plotly_theme_colors()["scene_bgcolor"]
+
+        # Route the render: py3Dmol does native, full-resolution in-browser
+        # isosurfacing (primary); the Plotly path is the fallback (downsampled).
+        # Both consume the same full-resolution cube on disk. Plotly is the
+        # universal fallback whenever py3Dmol is not the chosen backend.
+        chosen = app._resolve_backend(_VT.ORBITAL_ISOSURFACE)
+        use_py3dmol = str(chosen) == "py3dmol"
+        backend_label = "py3dmol" if use_py3dmol else "plotlymol"
+
+        with _viz_render_event(app, task=_VT.ORBITAL_ISOSURFACE, backend=backend_label):
+            if use_py3dmol:
+                html_str = render_orbital_isosurface_py3dmol(
+                    cube_path,
+                    bgcolor=scene_bgcolor,
+                )
+            else:
+                is_dark = app.theme_btn.value == "Dark"
+                axis_color = "#dbeafe" if is_dark else "#1f2937"
+                bond_color = "#cbd5e1" if is_dark else "#4b5563"
+                title_color = app._plotly_theme_colors()["font_color"]
+                fig = plot_cube_isosurface(
+                    cube_path,
+                    title=f"{orbital_label} Isosurface",
+                    show_molecule=True,
+                    show_grid=False,
+                    scene_bgcolor=scene_bgcolor,
+                    axis_color=axis_color,
+                    title_color=title_color,
+                    bond_color=bond_color,
+                )
+                html_str = _pio.to_html(
+                    fig,
+                    include_plotlyjs="require",
+                    full_html=False,
+                    config={"responsive": True},
+                )
     except Exception as exc:
         if _is_stale():
             return
@@ -1800,7 +1542,7 @@ def _render_vib_mode_py3dmol(
     fps = max(1, int(fps))
 
     try:
-        import py3Dmol
+        import py3Dmol  # noqa: F401 — probe for a friendly error; make_view imports it
     except ImportError as exc:
         if not _is_vib_stale(app, render_token):
             _vib_err(app, f"py3Dmol unavailable: {exc}")
@@ -1889,8 +1631,10 @@ def _render_vib_mode_py3dmol(
     xyz_string = "\n".join(xyz_lines) + "\n"
 
     try:
+        from quantui.viz_assets import make_view
+
         interval_ms = max(1, int(round(1000.0 / fps)))
-        view = py3Dmol.view(width=460, height=420)
+        view = make_view(width=460, height=420)
         view.addModelsAsFrames(xyz_string, "xyz")
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
         bg = "white" if app.theme_btn.value == "Light" else "#1e1e1e"
@@ -2084,6 +1828,13 @@ def on_vib_mode_changed(app: Any, change: dict[str, Any]) -> None:
     if molecule is None or freq_result is None:
         return
 
+    # Single-viewer path: switch modes client-side on the one persistent viewer
+    # (camera preserved, no rebuild). Export + prev/next still drive vib_mode_dd,
+    # so they keep working unchanged.
+    if getattr(app, "_vib_single_viewer_active", False):
+        _vib_bridge_set_mode(app, mode_number)
+        return
+
     # Cache-hit fast path: swap cached HTML synchronously, no placeholder,
     # no thread. Bumps the render token internally to invalidate any
     # in-flight render.
@@ -2110,6 +1861,510 @@ def on_vib_mode_changed(app: Any, change: dict[str, Any]) -> None:
         kwargs={"render_token": token},
         daemon=True,
     ).start()
+
+
+_STEPPER_BTN_STYLE = (
+    "padding:2px 9px;border:1px solid #cbd5e1;border-radius:4px;"
+    "background:#f8fafc;color:#334155;cursor:pointer;font-size:13px;line-height:1.4;"
+)
+
+# Shared single-viewer stepper logic. Drives ``viewer.setFrame()`` on a viewer
+# whose frames are ALL already loaded client-side via ``addModelsAsFrames`` — so
+# navigation never rebuilds the viewer, the camera (rotation/zoom) stays put
+# across frames, and there is no per-frame HTML/network round-trip. Play/pause is
+# a self-managed setInterval (not 3Dmol's animate(), so manual stepping and play
+# never fight). Tokens are substituted in :func:`_frame_stepper_controls`.
+_STEPPER_JS = """
+(function(){
+  var UID="__UID__", N=__N__, IV=__IV__, LOOP=__LOOP__;
+  var AB_START=__AB_START__, AB_OTHER=__AB_OTHER__;
+  __EXTRA__
+  function g(p){return document.getElementById(p+UID);}
+  var slider=g("st_slider_"), lbl=g("st_lbl_"), prevB=g("st_prev_"),
+      nextB=g("st_next_"), playB=g("st_play_"), abB=g("st_ab_");
+  var cur=__START__, timer=null;
+  function vw(){return window["viewer_"+UID];}
+  function label(i){ __LABEL_BODY__ }
+  function draw(i){
+    i=Math.max(0,Math.min(N-1,i)); cur=i;
+    var v=vw();
+    if(v){ try{ var p=v.setFrame(i);
+      if(p&&p.then){ p.then(function(){v.render();}); } else { v.render(); }
+    }catch(e){ try{ v.render(); }catch(_){} } }
+    if(slider) slider.value=i;
+    if(lbl) lbl.innerHTML=label(i);
+    if(prevB) prevB.disabled=(i<=0);
+    if(nextB) nextB.disabled=(i>=N-1);
+    if(abB) abB.innerHTML=(i===0)?AB_START:AB_OTHER;
+  }
+  function stop(){ if(timer){clearInterval(timer);timer=null;}
+    if(playB) playB.innerHTML="\\u25b6 Play"; }
+  function play(){ if(N<=1) return;
+    if(cur>=N-1) draw(0);  // at the end → replay from the first frame
+    if(playB) playB.innerHTML="\\u23f8 Pause";
+    timer=setInterval(function(){
+      if(cur>=N-1){ if(LOOP){ draw(0); return; } stop(); return; }
+      draw(cur+1);
+    }, IV); }
+  if(prevB) prevB.onclick=function(){stop();draw(cur-1);};
+  if(nextB) nextB.onclick=function(){stop();draw(cur+1);};
+  if(playB) playB.onclick=function(){ timer?stop():play(); };
+  if(abB)   abB.onclick  =function(){ stop();draw(cur===0?N-1:0); };
+  if(slider)slider.oninput=function(){ stop();draw(parseInt(slider.value,10)); };
+  var t=0, poll=setInterval(function(){ t++;
+    if(vw()){ clearInterval(poll); draw(cur); }
+    else if(t>200){ clearInterval(poll);
+      if(lbl) lbl.innerHTML="3D viewer failed to load"; }
+  },50);
+})();
+"""
+
+
+def _frame_stepper_controls(
+    uid: str,
+    n: int,
+    interval_ms: int,
+    *,
+    label_js: str,
+    initial_label: str,
+    loop: bool,
+    ab_at_start: str | None = None,
+    ab_other: str | None = None,
+    scrub_title: str = "Scrub frames",
+    start_index: int | None = None,
+    extra_decls: str = "",
+) -> str:
+    """Build in-HTML stepper controls (prev/play/next, scrub slider, optional
+    A/B flip, live label) for a single multi-frame py3Dmol viewer.
+
+    Element ids are namespaced with the viewer's ``uid`` so multiple viewers on
+    one page never collide. The script polls for the global ``viewer_<uid>``
+    (py3Dmol creates it after the async 3Dmol.js load resolves) before wiring up.
+
+    ``label_js`` is the JS body of ``function label(i){…}`` returning the label
+    HTML for frame ``i``; ``extra_decls`` is JS injected at the top of the IIFE
+    (e.g. per-frame energy arrays). ``loop`` makes Play cycle forever, else it
+    runs once and stops on the last frame.
+    """
+    import json
+
+    btn = _STEPPER_BTN_STYLE
+    start = (n - 1) if start_index is None else start_index
+    ab_html = ""
+    if ab_at_start is not None:
+        ab_html = (
+            f'<button id="st_ab_{uid}" type="button" '
+            'title="Jump between the first and last frame" '
+            # start index is the last frame, so the button initially offers the
+            # "other" (first-frame) action.
+            f'style="{btn}">{ab_other}</button>'
+        )
+    bar = (
+        '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;'
+        'margin:4px 0 2px;font-size:13px;">'
+        f'<button id="st_prev_{uid}" type="button" title="Previous frame" '
+        f'style="{btn}">&#9664;</button>'
+        f'<button id="st_play_{uid}" type="button" '
+        f'style="{btn}">&#9654; Play</button>'
+        f'<button id="st_next_{uid}" type="button" title="Next frame" '
+        f'style="{btn}">&#9654;</button>'
+        f'<input id="st_slider_{uid}" type="range" min="0" max="{n - 1}" '
+        f'value="{start}" step="1" title="{scrub_title}" '
+        'style="flex:1;min-width:110px;vertical-align:middle;">'
+        f"{ab_html}"
+        "</div>"
+        f'<div id="st_lbl_{uid}" '
+        'style="font-size:12px;color:#64748b;margin:0 0 4px 2px;">'
+        f"{initial_label}</div>"
+    )
+    js = (
+        _STEPPER_JS.replace("__UID__", uid)
+        .replace("__N__", str(n))
+        .replace("__IV__", str(interval_ms))
+        .replace("__LOOP__", "1" if loop else "0")
+        .replace("__START__", str(start))
+        .replace("__AB_START__", json.dumps(ab_at_start or ""))
+        .replace("__AB_OTHER__", json.dumps(ab_other or ""))
+        .replace("__EXTRA__", extra_decls)
+        .replace("__LABEL_BODY__", label_js)
+    )
+    return bar + f"<script>{js}</script>"
+
+
+def _preopt_controls_html(uid: str, n: int, interval_ms: int) -> str:
+    """Stepper controls for the pre-opt preview (input → relaxed)."""
+    label_js = (
+        'if(i===0) return "Frame 1/"+N+" \\u2022 Input (your geometry)";'
+        'if(i===N-1) return "Frame "+N+"/"+N+" \\u2022 Relaxed (final)";'
+        'return "Frame "+(i+1)+"/"+N+" \\u2022 relaxing\\u2026";'
+    )
+    return _frame_stepper_controls(
+        uid,
+        n,
+        interval_ms,
+        label_js=label_js,
+        initial_label="Frame %d/%d &bull; Relaxed (final)" % (n, n),
+        loop=False,  # one-shot: stop on the relaxed frame (no lingering "relaxing…")
+        ab_at_start="⇄ Show relaxed",
+        ab_other="⇄ Show input",
+        scrub_title="Scrub the relaxation",
+    )
+
+
+def build_preopt_preview_html(
+    atoms: list[str],
+    frames: list[list[list[float]]],
+    *,
+    bgcolor: str = "white",
+    fps: int = 8,
+) -> str:
+    """Build an interactive py3Dmol view of a classical pre-opt relaxation.
+
+    ``frames`` is a list of per-iteration coordinate snapshots (from
+    ``preopt.preoptimize_with_trajectory``); ``atoms`` is the element list.
+    Returns self-contained, offline-safe HTML (3Dmol.js loaded from the vendored
+    bundle via ``make_view``). All frames are loaded client-side via
+    ``addModelsAsFrames``, and a stepper UI (prev/next, play/pause, scrub
+    slider, and an input&hairsp;&#8644;&hairsp;relaxed A/B flip) drives
+    ``viewer.setFrame`` so the user can compare geometries without re-rendering.
+    A single-frame trajectory (no relaxation / FF fallback) renders as a static
+    structure with no controls. Used by the interactive "Preview
+    pre-optimization" flow (M-PREOPT PREOPT.2).
+    """
+    import re
+
+    from quantui.viz_assets import make_view
+
+    n = len(atoms)
+    lines: list[str] = []
+    for coords in frames:
+        lines.append(str(n))
+        lines.append("preopt")
+        for sym, xyz in zip(atoms, coords):
+            lines.append(f"{sym} {xyz[0]:.6f} {xyz[1]:.6f} {xyz[2]:.6f}")
+    xyz_string = "\n".join(lines) + "\n"
+
+    view = make_view(width=460, height=290)
+    view.addModelsAsFrames(xyz_string, "xyz")
+    view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
+    view.setBackgroundColor(bgcolor)
+    view.zoomTo()
+    view_html = view._make_html()
+
+    n_frames = len(frames)
+    # Single frame (FF no-op / RDKit absent): nothing to step through.
+    if n_frames <= 1:
+        return view_html
+
+    m = re.search(r"3dmolviewer_(\w+)", view_html)
+    if m is None:
+        # Couldn't find the viewer id to wire controls to — fall back to a
+        # plain auto-loop animation so the relaxation is still visible.
+        interval_ms = max(1, int(round(1000.0 / max(1, fps))))
+        view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
+        return view._make_html()
+
+    interval_ms = max(1, int(round(1000.0 / max(1, fps))))
+    controls = _preopt_controls_html(m.group(1), n_frames, interval_ms)
+    return f'<div style="max-width:480px">{view_html}{controls}</div>'
+
+
+def build_trajectory_viewer_html(
+    xyzblocks: list[str],
+    *,
+    formula: str = "",
+    energies: list[float] | None = None,
+    rel_e: list[float] | None = None,
+    bgcolor: str = "white",
+    width: int = 460,
+    height: int = 340,
+    fps: int = 8,
+) -> str:
+    """Build an interactive py3Dmol view of a geometry-optimization trajectory.
+
+    Loads every step as a frame of ONE viewer (``addModelsAsFrames``) and wires
+    an in-HTML stepper (prev/next, play/pause, scrub slider, start↔final flip,
+    per-step energy label) that navigates with ``viewer.setFrame`` — so the
+    camera stays put across steps and there is no per-frame HTML rebuild
+    (the previous carousel rebuilt a fresh viewer each step, resetting the
+    rotation/zoom and flickering). Offline-safe via the vendored 3Dmol loader
+    (``make_view``). ``energies`` (Hartree) and ``rel_e`` (kcal/mol) are optional
+    per-step annotations; a <2-frame trajectory renders as a static structure.
+    """
+    import json
+    import re
+
+    from quantui.viz_assets import make_view
+
+    n = len(xyzblocks)
+    xyz_string = "\n".join(b.rstrip("\n") for b in xyzblocks) + "\n"
+
+    view = make_view(width=width, height=height)
+    view.addModelsAsFrames(xyz_string, "xyz")
+    view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
+    view.setBackgroundColor(bgcolor)
+    view.zoomTo()
+    view_html = view._make_html()
+
+    if n <= 1:
+        return view_html
+
+    m = re.search(r"3dmolviewer_(\w+)", view_html)
+    if m is None:
+        return view_html  # can't wire controls without the viewer id
+
+    interval_ms = max(1, int(round(1000.0 / max(1, fps))))
+    eabs = json.dumps([float(e) for e in energies]) if energies else "null"
+    erel = json.dumps([float(e) for e in rel_e]) if rel_e else "null"
+    fjs = json.dumps(formula or "")
+    label_js = (
+        'var s="Step "+i+" / "+(N-1);'
+        f'if({fjs}) s+=" \\u00b7 "+{fjs};'
+        'if(EABS&&EABS[i]!=null) s+=" \\u00b7 E = "+EABS[i].toFixed(8)+" Ha";'
+        "if(EREL&&EREL[i]!=null) s+="
+        '" \\u00b7 \\u0394E = "+(EREL[i]>=0?"+":"")+EREL[i].toFixed(3)+" kcal/mol";'
+        "return s;"
+    )
+    controls = _frame_stepper_controls(
+        m.group(1),
+        n,
+        interval_ms,
+        label_js=label_js,
+        initial_label="Step %d / %d" % (n - 1, n - 1),
+        loop=True,  # optimization animation: loop continuously
+        ab_at_start="⇄ Final geometry",
+        ab_other="⇄ First step (input)",
+        scrub_title="Scrub the optimization steps",
+        extra_decls=f"var EABS={eabs}; var EREL={erel};",
+    )
+    return f'<div style="max-width:{width + 20}px">{view_html}{controls}</div>'
+
+
+# Single-viewer vibrational animation. ONE py3Dmol viewer holds every mode; the
+# per-mode oscillation frames are computed client-side from the embedded
+# displacement vectors (tiny: n_atoms×3 per mode) on demand, and a mode switch
+# calls ``window.__quantuiVibSetMode`` to swap frames on the SAME viewer instance
+# — so the camera (rotation/zoom) is preserved exactly across modes, with no
+# rebuild/flash. ``fit`` is true only for the initial mode (zoom-to-fit); switches
+# never re-fit. Replaces the old per-mode rebuild + fragile getView/setView hook.
+_VIB_VIEWER_JS = """
+(function(){
+  var UID="__UID__";
+  var SYM=__SYM__, BASE=__BASE__, DISPL=__DISPL__;
+  var NAT=__NAT__, NF=__NF__, AMP=__AMP__, IV=__IV__, BG=__BG__, INIT=__INIT__;
+  function vw(){ return window["viewer_"+UID]; }
+  function frames(m){
+    var d=DISPL[m]; if(!d) return null;
+    var out="";
+    for(var f=0; f<NF; f++){
+      var ph=Math.sin(2*Math.PI*f/NF);
+      out += NAT+"\\nmode "+m+"\\n";
+      for(var a=0; a<NAT; a++){
+        out += SYM[a]+" "+(BASE[a][0]+AMP*ph*d[a][0]).toFixed(5)+" "+
+               (BASE[a][1]+AMP*ph*d[a][1]).toFixed(5)+" "+
+               (BASE[a][2]+AMP*ph*d[a][2]).toFixed(5)+"\\n";
+      }
+    }
+    return out;
+  }
+  window.__quantuiVibSetMode=function(m, fit){
+    var v=vw(); if(!v) return false;
+    var xyz=frames(m); if(xyz===null) return false;
+    try{
+      // stopAnimate FIRST: setMode may be called more than once for the same
+      // viewer (initial render + the dropdown observer + each mode switch).
+      // Without stopping the running loop, animate() stacks additional loops,
+      // advancing frames several times per tick — glitchy, too-fast playback
+      // that ignores the fps interval. Stopping guarantees exactly one loop.
+      if(v.stopAnimate) v.stopAnimate();
+      v.removeAllModels();
+      v.addModelsAsFrames(xyz,"xyz");
+      v.setStyle({"stick":{},"sphere":{"scale":0.3}});
+      v.setBackgroundColor(BG);
+      if(fit) v.zoomTo();   // fit only on first mode; switches keep the camera
+      v.animate({"loop":"forward","interval":IV,"reps":0});
+      v.render();
+    }catch(e){ return false; }
+    return true;
+  };
+  // Live framerate change (custom fps setting): update the interval and restart
+  // the loop on the current frames — no rebuild, so the camera is preserved.
+  window.__quantuiVibSetFps=function(fps){
+    IV=Math.max(1,Math.round(1000/Math.max(1,fps)));
+    var v=vw(); if(!v) return;
+    try{ if(v.stopAnimate) v.stopAnimate();
+      v.animate({"loop":"forward","interval":IV,"reps":0}); v.render();
+    }catch(e){}
+  };
+  var t=0, poll=setInterval(function(){ t++;
+    if(vw()){ clearInterval(poll); window.__quantuiVibSetMode(INIT, true); }
+    else if(t>200){ clearInterval(poll); }
+  },50);
+})();
+"""
+
+
+def build_vib_viewer_html(
+    molecule: Any,
+    freq_result: Any,
+    mode_numbers: list[int],
+    initial_mode: int,
+    *,
+    amplitude: float = 0.4,
+    n_frames: int = 24,
+    fps: int = 10,
+    bgcolor: str = "white",
+    width: int = 460,
+    height: int = 420,
+) -> str:
+    """Build a single py3Dmol viewer that holds every vibrational mode.
+
+    All modes share ONE viewer instance; oscillation frames are generated
+    client-side from the embedded per-mode displacement vectors, and switching
+    modes (``window.__quantuiVibSetMode``) swaps frames on that same viewer so
+    the camera is preserved across modes. Offline-safe via the vendored 3Dmol
+    loader (``make_view``). Raises if displacements are missing/misshaped so the
+    caller can fall back to the legacy per-mode renderer.
+    """
+    import json
+    import re
+
+    import numpy as np
+
+    from quantui.viz_assets import make_view
+
+    displacements = getattr(freq_result, "displacements", None)
+    if not displacements:
+        raise ValueError("freq_result has no displacements for single-viewer vib")
+
+    atoms = list(molecule.atoms)
+    base = np.asarray(molecule.coordinates, dtype=float)
+    n_atoms = len(atoms)
+    displ_map: dict[int, list] = {}
+    for m in mode_numbers:
+        d = np.asarray(displacements[m - 1], dtype=float)
+        if d.shape != base.shape:
+            raise ValueError(
+                f"mode {m} displacement shape {d.shape} != coords {base.shape}"
+            )
+        displ_map[int(m)] = d.tolist()
+
+    view = make_view(width=width, height=height)
+    view.setBackgroundColor(bgcolor)
+    view_html = view._make_html()  # empty viewer; JS populates the initial mode
+    m_uid = re.search(r"3dmolviewer_(\w+)", view_html)
+    if m_uid is None:
+        raise ValueError("could not find py3Dmol viewer id")
+
+    interval_ms = max(1, int(round(1000.0 / max(1, fps))))
+    js = (
+        _VIB_VIEWER_JS.replace("__UID__", m_uid.group(1))
+        .replace("__SYM__", json.dumps(atoms))
+        .replace("__BASE__", json.dumps(base.tolist()))
+        .replace("__DISPL__", json.dumps(displ_map))
+        .replace("__NAT__", str(n_atoms))
+        .replace("__NF__", str(int(n_frames)))
+        .replace("__AMP__", repr(float(amplitude)))
+        .replace("__IV__", str(interval_ms))
+        .replace("__BG__", json.dumps(bgcolor))
+        .replace("__INIT__", str(int(initial_mode)))
+    )
+    return (
+        f'<div style="max-width:{width + 20}px">{view_html}<script>{js}</script></div>'
+    )
+
+
+def _vib_single_viewer_supported(app: Any, freq_result: Any) -> bool:
+    """True when the single-persistent-viewer vib path applies: py3Dmol backend
+    is selected and the result carries per-mode displacement vectors."""
+    try:
+        from quantui.viz_backend_router import VizBackend as _VB
+        from quantui.viz_backend_router import VizTask as _VT
+
+        if app._resolve_backend(_VT.VIB_INTERACTIVE) != _VB.PY3DMOL:
+            return False
+        return bool(getattr(freq_result, "displacements", None))
+    except Exception:
+        return False
+
+
+def _render_vib_single_viewer(
+    app: Any,
+    freq_result: Any,
+    molecule: Any,
+    initial_mode: int,
+    mode_numbers: list[int],
+) -> bool:
+    """Build + swap in the single-viewer vib animation. Returns True on success
+    (sets ``app._vib_single_viewer_active``); False to fall back to legacy."""
+    try:
+        viz_settings = getattr(getattr(app, "_user_settings", None), "viz", None)
+        fps = max(1, int(getattr(viz_settings, "vib_framerate_fps", 10)))
+        bg = "white" if app.theme_btn.value == "Light" else "#1e1e1e"
+        with _viz_render_event(
+            app, task="vib_interactive", backend="py3dmol", source="single_viewer"
+        ):
+            html = build_vib_viewer_html(
+                molecule, freq_result, mode_numbers, initial_mode, fps=fps, bgcolor=bg
+            )
+    except Exception as exc:  # noqa: BLE001 — fall back to the legacy renderer
+        try:
+            from quantui import calc_log as _clog_sv
+
+            _clog_sv.log_event(
+                "vib_single_viewer_fallback", f"{type(exc).__name__}: {exc}"[:200]
+            )
+        except Exception:
+            pass
+        app._vib_single_viewer_active = False
+        return False
+    _swap_vib_output(app, html)
+    app._vib_single_viewer_active = True
+    return True
+
+
+def _vib_bridge_set_mode(app: Any, mode_number: int) -> None:
+    """Switch the live single-viewer to ``mode_number`` client-side (camera kept).
+
+    Emits a one-shot JS call to ``window.__quantuiVibSetMode`` via a hidden
+    bridge Output; retries briefly in case the viewer is still loading."""
+    bridge = getattr(app, "_vib_js_bridge", None)
+    if bridge is None:
+        return
+    from IPython.display import Javascript, display
+
+    js = (
+        "(function(){var n=0;function go(){n++;"
+        "if(window.__quantuiVibSetMode){window.__quantuiVibSetMode(%d,false);}"
+        "else if(n<40){setTimeout(go,50);}}go();})();" % int(mode_number)
+    )
+    try:
+        bridge.clear_output(wait=True)
+        with bridge:
+            display(Javascript(js))
+    except Exception:
+        pass
+
+
+def _vib_bridge_set_fps(app: Any, fps: int) -> None:
+    """Update the live single-viewer's animation framerate client-side (no
+    rebuild, camera preserved) via ``window.__quantuiVibSetFps``."""
+    bridge = getattr(app, "_vib_js_bridge", None)
+    if bridge is None:
+        return
+    from IPython.display import Javascript, display
+
+    js = (
+        "(function(){var n=0;function go(){n++;"
+        "if(window.__quantuiVibSetFps){window.__quantuiVibSetFps(%d);}"
+        "else if(n<40){setTimeout(go,50);}}go();})();" % int(fps)
+    )
+    try:
+        bridge.clear_output(wait=True)
+        with bridge:
+            display(Javascript(js))
+    except Exception:
+        pass
 
 
 def show_pes_scan_result(app: Any, result: Any) -> bool:
@@ -2246,16 +2501,16 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
     if availability.py3dmol:
         try:
             import numpy as np
-            import py3Dmol
+            import py3Dmol  # noqa: F401 — probe; make_view imports it for the export
         except ImportError as exc:
-            raise ValueError(f"py3Dmol unavailable for fallback export: {exc}")
+            raise ValueError(f"py3Dmol unavailable for fallback export: {exc}") from exc
 
         try:
             displ = np.array(freq_result.displacements[mode_number - 1], dtype=float)
         except (AttributeError, IndexError, ValueError, TypeError) as exc:
             raise ValueError(
                 f"Could not read displacements for mode {mode_number}: {exc}"
-            )
+            ) from exc
 
         atoms = list(molecule.atoms)
         base_coords = np.array(molecule.coordinates, dtype=float)
@@ -2288,13 +2543,17 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
                 xyz_lines.append(f"{sym} {xyz[0]:.6f} {xyz[1]:.6f} {xyz[2]:.6f}")
         xyz_string = "\n".join(xyz_lines) + "\n"
 
-        view = py3Dmol.view(width=640, height=520)
+        from quantui.viz_assets import make_view, standalone_html
+
+        view = make_view(width=640, height=520)
         view.addModelsAsFrames(xyz_string, "xyz")
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
         view.setBackgroundColor("white")
         view.zoomTo()
         view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
-        return ("py3dmol", view._make_html())
+        # Exported HTML is opened outside the app (no page bootstrap), so embed
+        # the offline 3Dmol.js loader inline to make the file self-contained.
+        return ("py3dmol", standalone_html(view._make_html()))
 
     raise ValueError(
         "No visualization backend available to export the vibrational "

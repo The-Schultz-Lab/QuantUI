@@ -132,6 +132,20 @@ def run_tddft_calc(
             TD calculation fails, excitation lists are empty and a warning
             is written to progress_stream — no exception is raised.
     """
+    # Post-HF methods (MP2/CCSD/CCSD(T)) have no special-casing below —
+    # without this guard, method='CCSD' silently falls into the DFT
+    # branch (sets mf.xc = "CCSD") and fails deep inside PySCF with a
+    # cryptic "LibXCFunctional: name 'CCSD' not found" instead of a clear
+    # message. TD-DFT/TDHF is not defined for these methods here.
+    from . import config as _config
+
+    if method.strip().upper() in _config.POST_HF_METHODS:
+        raise ValueError(
+            f"'{method}' is a post-HF method and cannot be used for "
+            "TD-DFT/UV-Vis — use RHF/UHF (TDHF) or a DFT functional "
+            "instead."
+        )
+
     try:
         from pyscf import dft, gto, scf
     except ImportError as exc:
