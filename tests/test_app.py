@@ -706,6 +706,50 @@ class TestExportScriptCallback:
         assert "Error" not in app.export_status.value
 
 
+class TestCalcTypeHelp:
+    """A '?' help button next to Calc. Type opens the calc_type help topic."""
+
+    def test_calc_type_help_topic_exists(self):
+        from quantui.help_content import HELP_TOPICS
+
+        assert "calc_type" in HELP_TOPICS
+        # Covers every calc type the dropdown offers.
+        body = HELP_TOPICS["calc_type"]["body"]
+        for label in ("Single Point", "Geometry Opt", "Reorganization Energy"):
+            assert label in body
+
+    def test_help_button_opens_calc_type_topic(self):
+        app = QuantUIApp()
+        app._on_calc_type_help(None)
+        assert app.help_topic_dd.value == "calc_type"
+
+
+class TestOpenShellHint:
+    """The open-shell hint appears only when multiplicity > 1 (UXP.7 restore)."""
+
+    def test_hidden_for_singlet(self):
+        app = QuantUIApp()
+        app.mult_si.value = 1
+        assert app._open_shell_hint.layout.display == "none"
+
+    def test_shown_and_warns_for_rhf_open_shell(self):
+        app = QuantUIApp()
+        app.method_dd.value = "RHF"
+        app.mult_si.value = 2
+        assert app._open_shell_hint.layout.display == ""
+        val = app._open_shell_hint.value
+        assert "UHF" in val
+        assert "unpaired electron" in val
+
+    def test_informational_for_uhf_open_shell(self):
+        app = QuantUIApp()
+        app.method_dd.value = "UHF"
+        app.mult_si.value = 3
+        assert app._open_shell_hint.layout.display == ""
+        # UHF already handles open-shell → no "switch to UHF" nag.
+        assert "unrestricted" in app._open_shell_hint.value
+
+
 class TestDescriptorCards:
     """UXP.7: method / basis descriptor cards replace the inline notes block.
 

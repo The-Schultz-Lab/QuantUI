@@ -784,6 +784,12 @@ def on_basis_help(app: Any, btn: Any) -> None:
     app._show_help_topic("basis_set")
 
 
+def on_calc_type_help(app: Any, btn: Any) -> None:
+    """Open help overlay focused on calculation-type guidance."""
+    _ = btn
+    app._show_help_topic("calc_type")
+
+
 def on_exit_clicked(app: Any, _unused: Any = None) -> None:
     """Update UI and request shutdown of Voilà/Jupyter parent and kernel."""
     import os
@@ -1107,11 +1113,12 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
 
 
 def update_notes(app: Any, change: Any = None) -> None:
-    """Refresh the method / basis descriptor cards (UXP.7).
+    """Refresh the method / basis descriptor cards + open-shell hint.
 
-    Replaces the old inline educational-notes text block. The cards describe
-    the *method* and *basis* themselves, so — unlike the old notes — they
-    refresh independently of whether a molecule is loaded.
+    Replaces the old inline educational-notes text block (UXP.7). The cards
+    describe the *method* and *basis* themselves, so — unlike the old notes —
+    they refresh independently of whether a molecule is loaded. The open-shell
+    hint (restored from the old notes) appears only when multiplicity > 1.
     """
     try:
         from quantui.descriptor_cards import basis_card_html, method_card_html
@@ -1120,6 +1127,37 @@ def update_notes(app: Any, change: Any = None) -> None:
         app._basis_card_html.value = basis_card_html(app.basis_dd.value)
     except Exception:
         pass
+    _update_open_shell_hint(app)
+
+
+def _update_open_shell_hint(app: Any) -> None:
+    """Show/hide the open-shell (multiplicity > 1 → UHF) guidance hint."""
+    try:
+        mult = int(app.mult_si.value)
+    except Exception:
+        mult = 1
+    if mult <= 1:
+        app._open_shell_hint.value = ""
+        app._open_shell_hint.layout.display = "none"
+        return
+    n_unpaired = mult - 1
+    plural = "s" if n_unpaired != 1 else ""
+    if app.method_dd.value.upper() == "RHF":
+        # Actionable: RHF is the one method that will misbehave for open-shell.
+        app._open_shell_hint.value = (
+            '<span style="font-size:12px;color:#b45309">'
+            f"⚠ Open-shell: {n_unpaired} unpaired electron{plural} "
+            f"(multiplicity {mult}). RHF assumes all electrons are paired — "
+            "switch to <b>UHF</b> (or a DFT method) for this system.</span>"
+        )
+    else:
+        # Informational: UHF / DFT already handle open-shell correctly.
+        app._open_shell_hint.value = (
+            '<span style="font-size:12px;color:#64748b">'
+            f"Open-shell: {n_unpaired} unpaired electron{plural} "
+            f"(multiplicity {mult}) — running unrestricted.</span>"
+        )
+    app._open_shell_hint.layout.display = ""
 
 
 def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:

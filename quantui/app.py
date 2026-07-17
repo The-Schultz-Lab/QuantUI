@@ -210,6 +210,9 @@ from quantui.app_runflow import (
     on_calc_type_changed as _run_on_calc_type_changed,
 )
 from quantui.app_runflow import (
+    on_calc_type_help as _run_on_calc_type_help,
+)
+from quantui.app_runflow import (
     on_clear as _run_on_clear,
 )
 from quantui.app_runflow import (
@@ -972,6 +975,7 @@ class QuantUIApp:
         basis_help_btn: Any
         calc_extra_opts: Any
         calc_type_dd: Any
+        calc_type_help_btn: Any
         charge_si: Any
         clear_btn: Any
         _completion_banner: Any
@@ -993,6 +997,7 @@ class QuantUIApp:
         _method_card_html: Any
         _basis_card_html: Any
         _descriptor_cards_box: Any
+        _open_shell_hint: Any
         nstates_si: Any
         perf_estimate_html: Any
         post_calc_panel: Any
@@ -1677,11 +1682,14 @@ class QuantUIApp:
         # Notes + estimate
         self.method_dd.observe(self._safe_cb(self._update_notes), names="value")
         self.basis_dd.observe(self._safe_cb(self._update_notes), names="value")
+        # Multiplicity drives the open-shell hint (part of _update_notes).
+        self.mult_si.observe(self._safe_cb(self._update_notes), names="value")
         self.method_dd.observe(self._safe_cb(self._update_estimate), names="value")
         self.basis_dd.observe(self._safe_cb(self._update_estimate), names="value")
         # Help buttons
         self.method_help_btn.on_click(self._on_method_help)
         self.basis_help_btn.on_click(self._on_basis_help)
+        self.calc_type_help_btn.on_click(self._on_calc_type_help)
         # Run
         self.run_btn.on_click(self._on_run_clicked)
         self.cancel_btn.on_click(self._safe_cb(self._on_cancel))
@@ -3012,6 +3020,9 @@ class QuantUIApp:
 
     def _on_basis_help(self, btn) -> None:
         _run_on_basis_help(self, btn)
+
+    def _on_calc_type_help(self, btn) -> None:
+        _run_on_calc_type_help(self, btn)
 
     # ── Run ───────────────────────────────────────────────────────────────
 

@@ -590,6 +590,11 @@ def build_shared_widgets(
             margin="0 0 0 4px",
         ),
     )
+    # Open-shell hint — shown only when multiplicity > 1 (updated by
+    # ``update_notes``). Restores the guidance the old notes block carried.
+    app._open_shell_hint = widgets.HTML(
+        value="", layout=layout_fn(display="none", margin="2px 0 0 0")
+    )
     app.perf_estimate_html = widgets.HTML()
 
     app.step_progress = step_progress_cls(
@@ -900,6 +905,12 @@ def build_shared_widgets(
         button_style="",
         layout=layout_fn(width="28px", height="28px"),
         tooltip="Choosing a basis set — opens Help tab",
+    )
+    app.calc_type_help_btn = widgets.Button(
+        description="?",
+        button_style="",
+        layout=layout_fn(width="28px", height="28px"),
+        tooltip="What each calculation type computes — opens Help tab",
     )
 
     app.run_btn = widgets.Button(
@@ -1308,7 +1319,11 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
                 ],
                 layout=layout_fn(flex_wrap="wrap", align_items="flex-start"),
             ),
-            app.calc_type_dd,
+            app._open_shell_hint,
+            widgets.HBox(
+                [app.calc_type_dd, app.calc_type_help_btn],
+                layout=layout_fn(align_items="center", gap="4px"),
+            ),
             app.calc_extra_opts,
             widgets.HBox(
                 [app.preopt_preview_label, app.preopt_preview_btn],
