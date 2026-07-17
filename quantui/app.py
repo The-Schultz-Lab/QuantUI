@@ -1684,7 +1684,6 @@ class QuantUIApp:
         self.basis_help_btn.on_click(self._on_basis_help)
         # Run
         self.run_btn.on_click(self._on_run_clicked)
-        self._reorg_auto_btn.on_click(self._on_reorg_auto_clicked)
         self.cancel_btn.on_click(self._safe_cb(self._on_cancel))
         self.preopt_preview_btn.on_click(self._safe_cb(self._on_preopt_preview))
         self.preopt_accept_btn.on_click(self._safe_cb(self._on_preopt_accept))
@@ -3024,22 +3023,6 @@ class QuantUIApp:
         )
         _run_on_run_clicked(self, btn)
 
-    def _on_reorg_auto_clicked(self, btn) -> None:
-        """One-click reorganization energy: set up the mode, then run.
-
-        Switches the calc-type to "Reorganization Energy" (which reveals the
-        channel selector via the calc-type observer), defaults the channel to
-        both hole + electron, and immediately launches the 4-point run.
-        """
-        if self._molecule is None:
-            self.run_status.value = "Load a molecule first."
-            return
-        # Setting the dropdown value fires _on_calc_type_changed synchronously,
-        # which swaps calc_extra_opts to show the channel selector + note.
-        self.calc_type_dd.value = "Reorganization Energy"
-        self._reorg_mode_dd.value = "both"
-        self._on_run_clicked(btn)
-
     def _on_cancel(self, btn=None) -> None:
         """Request graceful cancellation of the in-flight calculation.
 
@@ -3639,7 +3622,6 @@ class QuantUIApp:
         """Update shared state and refresh dependent widgets."""
         self._molecule = mol
         self.run_btn.disabled = False
-        self._reorg_auto_btn.disabled = False
         self.export_btn.disabled = False
         self.export_xyz_btn.disabled = False
         self.export_mol_btn.disabled = not _RDKIT_AVAILABLE
@@ -4021,7 +4003,6 @@ class QuantUIApp:
             kind="compute",
         )
         self.run_btn.disabled = True
-        self._reorg_auto_btn.disabled = True
         self.run_status.value = "Starting..."
         # Run-in-flight state: arm Cancel, lock out Clear (so it can't wipe the
         # live output mid-run), reset the cancel flag for this fresh run.
@@ -5018,7 +4999,6 @@ class QuantUIApp:
 
         finally:
             self.run_btn.disabled = False
-            self._reorg_auto_btn.disabled = self._molecule is None
             # Disarm Cancel, re-enable Clear, clear run-in-flight state.
             self._calc_running = False
             self._cancel_event.clear()

@@ -1019,7 +1019,14 @@ class TestNMRWidgets:
 
 
 class TestReorganizationEnergyUI:
-    """UI wiring for the Reorganization Energy calc-type + auto-setup button."""
+    """UI wiring for the Reorganization Energy calc-type.
+
+    The reorg run is driven entirely through the calc-type dropdown + the
+    channel-mode selector it reveals + the shared Run Calculation button
+    (``_do_run`` has a ``reorganization_energy`` branch). The old dedicated
+    "Calc. Reorganization Energy" auto-button was removed as a redundant
+    duplicate of that path.
+    """
 
     def test_reorg_mode_shows_channel_selector(self):
         app = QuantUIApp()
@@ -1034,19 +1041,12 @@ class TestReorganizationEnergyUI:
         app.calc_type_dd.value = "Reorganization Energy"
         assert app._freq_preopt_cb.layout.display == "none"
 
-    def test_auto_button_enabled_after_molecule_load(self):
-        app = QuantUIApp()
-        assert app._reorg_auto_btn.disabled is True
-        mol = Molecule(["H", "H"], [[0, 0, 0], [0, 0, 0.74]])
-        app._set_molecule(mol)
-        assert app._reorg_auto_btn.disabled is False
-
-    def test_auto_button_sets_up_mode(self):
+    def test_reorg_calc_type_sets_up_mode(self):
         app = QuantUIApp()
         mol = Molecule(["H", "H"], [[0, 0, 0], [0, 0, 0.74]])
         app._set_molecule(mol)
-        # Drive only the setup portion (not the background run thread) by
-        # replicating what the handler does before dispatch.
+        # Selecting the calc type reveals the channel selector; Run Calculation
+        # then dispatches the reorg run via _do_run's reorg branch.
         app.calc_type_dd.value = "Reorganization Energy"
         app._reorg_mode_dd.value = "both"
         assert app.calc_type_dd.value == "Reorganization Energy"
