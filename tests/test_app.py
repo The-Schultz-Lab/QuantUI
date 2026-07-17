@@ -2444,13 +2444,29 @@ class TestOrbitalAccordionWidgets:
         assert isinstance(app._orb_export_fmt_dd, widgets.Dropdown)
         assert app._orb_export_fmt_dd.value == "html"
 
-    def test_orb_toggle_has_four_options(self):
+    def test_orb_toggle_has_preset_options(self):
+        # UXP.4: the four HOMO/LUMO presets plus a free-entry "By index" mode.
         app = QuantUIApp()
-        assert set(app._orb_toggle.options) == {"HOMO-1", "HOMO", "LUMO", "LUMO+1"}
+        assert set(app._orb_toggle.options) == {
+            "HOMO-1",
+            "HOMO",
+            "LUMO",
+            "LUMO+1",
+            "By index",
+        }
 
     def test_orb_toggle_default_homo(self):
         app = QuantUIApp()
         assert app._orb_toggle.value == "HOMO"
+
+    def test_orb_index_input_hidden_until_by_index(self):
+        # UXP.4: the arbitrary MO-index input is revealed only in "By index".
+        app = QuantUIApp()
+        assert app._orb_index_input.layout.display == "none"
+        app._orb_toggle.value = "By index"
+        assert app._orb_index_input.layout.display == ""
+        app._orb_toggle.value = "HOMO"
+        assert app._orb_index_input.layout.display == "none"
 
     def test_orb_iso_controls_hidden_initially(self):
         app = QuantUIApp()

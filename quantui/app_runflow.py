@@ -21,6 +21,45 @@ def _calc_type_badge(calc_type: str) -> str:
     }.get(calc_type, calc_type or "Unknown")
 
 
+_RUN_HEADER_CALC_LABELS = {
+    "Single Point": "Single Point Energy",
+    "Geometry Opt": "Geometry Optimization",
+    "Frequency": "Frequency Analysis",
+    "UV-Vis (TD-DFT)": "TD-DFT (UV-Vis)",
+    "NMR Shielding": "NMR Shielding",
+    "PES Scan": "PES Scan",
+}
+
+
+def _write_provisional_run_header(app: Any) -> None:
+    """Print an immediate one-line header the instant Run is clicked (UXP.6).
+
+    The full structured banner (``format_log_header``) is written from the
+    background ``_do_run`` thread and can lag behind the first observable
+    output because it calls ``get_system_info()`` (which may shell out to
+    ``nvidia-smi``) and only runs once the thread has spun up. This provisional
+    line runs synchronously on the main thread so the user gets instant
+    feedback that the click registered; the full banner follows and augments it.
+    """
+    mol = getattr(app, "_molecule", None)
+    if mol is None:
+        return
+    try:
+        formula = mol.get_formula()
+    except Exception:
+        formula = "?"
+    ct_label = _RUN_HEADER_CALC_LABELS.get(
+        app.calc_type_dd.value, app.calc_type_dd.value
+    )
+    try:
+        app.run_output.append_stdout(
+            f"▶ Starting {ct_label} — {formula} · "
+            f"{app.method_dd.value}/{app.basis_dd.value} …\n"
+        )
+    except Exception:
+        pass
+
+
 def on_run_clicked(app: Any, btn: Any) -> None:
     """Reset result panes and start the background run thread."""
     app.run_output.clear_output()
@@ -39,6 +78,7 @@ def on_run_clicked(app: Any, btn: Any) -> None:
     app._completion_banner.layout.display = "none"
     app._to_analysis_btn.layout.display = "none"
     app._analysis_empty_html.layout.display = "none"
+    _write_provisional_run_header(app)
     threading.Thread(target=app._do_run, daemon=True).start()
 
 

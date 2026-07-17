@@ -1040,10 +1040,23 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
 def on_iso_generate(app: Any, btn: Any) -> None:
     """Generate orbital isosurface for currently selected orbital."""
     orbital_label = app._orb_toggle.value
+    # UXP.4: "By index" mode renders an arbitrary 0-based MO index. Encode it
+    # into the label as "MO <n>"; render_orbital_isosurface parses it back.
+    if orbital_label == "By index":
+        orbital_label = f"MO {int(app._orb_index_input.value)}"
     app._iso_render_token = int(getattr(app, "_iso_render_token", 0)) + 1
     render_token = app._iso_render_token
     btn.disabled = True
     btn.description = "Generating…"
+    # UXP.3: reveal the inline spinner + light the toolbar activity indicator
+    # so the (slow) cube generation reads as busy, not hung.
+    _spinner = getattr(app, "_iso_spinner", None)
+    if _spinner is not None:
+        _spinner.layout.display = ""
+    try:
+        app._activity_begin("Generating orbital isosurface…", kind="compute")
+    except Exception:
+        pass
     try:
         from quantui import calc_log as _clog
 
@@ -1061,8 +1074,27 @@ def on_iso_generate(app: Any, btn: Any) -> None:
         )
 
     done = threading.Event()
+    # UXP.3: balance the single _activity_begin above exactly once, across
+    # both the normal-completion and timeout paths (idempotent).
+    _finished = threading.Event()
+
+    def _finish_activity() -> None:
+        if _finished.is_set():
+            return
+        _finished.set()
+        try:
+            app._activity_end(kind="compute")
+        except Exception:
+            pass
+        # Only hide the spinner if no newer generation superseded this one
+        # (a newer render still wants the spinner visible).
+        if render_token == int(getattr(app, "_iso_render_token", 0)):
+            _sp = getattr(app, "_iso_spinner", None)
+            if _sp is not None:
+                _sp.layout.display = "none"
 
     def _reset_button() -> None:
+        _finish_activity()
         if render_token != int(getattr(app, "_iso_render_token", 0)):
             return
         btn.disabled = False
@@ -1080,6 +1112,7 @@ def on_iso_generate(app: Any, btn: Any) -> None:
             return
 
         def _show_timeout() -> None:
+            _finish_activity()
             if render_token != int(getattr(app, "_iso_render_token", 0)):
                 return
             try:
@@ -1166,7 +1199,29 @@ def render_orbital_isosurface(
         "LUMO+1": n_occ + 1,
     }
     orb_idx = idx_map.get(orbital_label)
+    # UXP.4: "MO <n>" labels carry an explicit 0-based index from By-index mode.
+    if orb_idx is None:
+        _m = _re.match(r"MO\s+(\d+)$", orbital_label)
+        if _m:
+            orb_idx = int(_m.group(1))
     if orb_idx is None or orb_idx < 0 or orb_idx >= n_total:
+        # Out-of-range (now user-reachable via free index entry) — surface it
+        # instead of silently leaving the "Generating…" placeholder in place.
+        def _show_range_err() -> None:
+            if _is_stale():
+                return
+            app._orb_iso_output.clear_output()
+            with app._orb_iso_output:
+                display(
+                    HTML(
+                        '<p style="color:#b91c1c;padding:8px">'
+                        f"⚠ Orbital index out of range. This calculation has "
+                        f"{n_total} molecular orbitals (valid indices 0–"
+                        f"{n_total - 1}; HOMO = {n_occ - 1}).</p>"
+                    )
+                )
+
+        app._queue_main_thread_callback(_show_range_err)
         return
 
     mo_coeff = getattr(app, "_last_orb_mo_coeff", None)
