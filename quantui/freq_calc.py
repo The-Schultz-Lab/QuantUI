@@ -253,6 +253,12 @@ def _run_freq_calc_body(
         mf.xc = resolve_xc(method)
         mf = maybe_apply_d3(mf, method, progress_stream=stream)
 
+    # UXP.5: cooperative cancel between SCF cycles (the Hessian block that
+    # follows is a single long native call the callback can't interrupt).
+    from .cancellation import attach_scf_cancel_callback, cancel_check_from_stream
+
+    attach_scf_cancel_callback(mf, cancel_check_from_stream(stream))
+
     try:
         energy_hartree = float(mf.kernel())
     except Exception as exc:

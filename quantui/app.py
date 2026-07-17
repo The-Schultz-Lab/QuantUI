@@ -392,6 +392,7 @@ from quantui.app_visualization import (
 from quantui.app_visualization import (
     wire_uv_controls as _viz_wire_uv_controls,
 )
+from quantui.cancellation import CalcCancelled as _CalcCancelled
 
 # Import directly from submodules to avoid circular-import issues.
 # quantui/__init__.py imports this module (app.py), so using
@@ -667,19 +668,12 @@ _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
 # ══ LOG CAPTURE ══════════════════════════════════════════════════════════════
 
 
-class _CalcCancelled(BaseException):
-    """Raised to abort a running calculation when the user clicks Cancel.
-
-    The calc streams output line-by-line through ``_LogCapture.write`` (SCF
-    cycles, optimizer steps), so checking a cancel flag there lets us bail at
-    the next output — a cooperative, graceful stop that needs no thread-kill.
-
-    Inherits ``BaseException`` (like ``KeyboardInterrupt``) on purpose: PySCF /
-    session_calc / the optimizer wrap their kernels in ``except Exception``, so
-    a plain ``Exception`` cancel would be swallowed and re-reported as a
-    "Calculation failed" error. As a ``BaseException`` it sails through those
-    handlers and reaches ``_do_run``'s ``except _CalcCancelled`` cleanly.
-    """
+# ``_CalcCancelled`` is defined in quantui.cancellation (imported at the top of
+# this module) so the calc modules (session_calc / optimizer / freq / tddft /
+# nmr / pes) can raise the SAME class from their SCF callbacks + optimizer
+# observers (UXP.5) without importing the app layer. ``_do_run``'s
+# ``except _CalcCancelled`` catches it whether it was raised by
+# ``_LogCapture.write`` or by one of those hooks.
 
 
 class _LogCapture:
@@ -699,6 +693,9 @@ class _LogCapture:
         self._on_scf_converged = on_scf_converged
         self._scf_converged_seen = False
         self._cancel_check = cancel_check
+        # Public alias so calc modules can duck-type the predicate off the
+        # progress stream (see quantui.cancellation.cancel_check_from_stream).
+        self.cancel_check = cancel_check
 
     def write(self, text: str) -> None:
         if not text:
@@ -990,7 +987,9 @@ class QuantUIApp:
         mol_info_html: Any
         mol_summary_compact: Any
         mult_si: Any
-        notes_output: Any
+        _method_card_html: Any
+        _basis_card_html: Any
+        _descriptor_cards_box: Any
         nstates_si: Any
         perf_estimate_html: Any
         post_calc_panel: Any
@@ -3033,7 +3032,17 @@ class QuantUIApp:
             return
         self._cancel_event.set()
         self.cancel_btn.disabled = True
-        self.run_status.value = "Cancelling — stopping at the next step…"
+        self.cancel_btn.description = "Cancelling…"
+        self.run_status.value = "Cancelling — stopping at the next cycle/step…"
+        # UXP.5: write an immediate marker to the live log so the click reads as
+        # acknowledged even if the next cooperative checkpoint is a moment away.
+        try:
+            self.run_output.append_stdout(
+                "\n⏹ Cancel requested — stopping at the next SCF cycle / "
+                "optimizer step…\n"
+            )
+        except Exception:
+            pass
 
     def _on_preopt_preview(self, btn=None) -> None:
         _run_on_preopt_preview(self, btn)
@@ -4959,6 +4968,7 @@ class QuantUIApp:
             self._calc_running = False
             self._cancel_event.clear()
             self.cancel_btn.disabled = True
+            self.cancel_btn.description = "Cancel"
             self.log_clear_btn.disabled = False
             self._activity_end(kind="compute")
 

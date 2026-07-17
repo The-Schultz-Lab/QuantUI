@@ -570,7 +570,18 @@ def build_shared_widgets(
         [app.viz_style_dd, app.viz_lighting_dd],
         layout=layout_fn(gap="8px", margin="2px 0 0 0", align_items="center"),
     )
-    app.notes_output = widgets.Output()
+    # UXP.7: method / basis descriptor cards replace the old inline
+    # ``notes_output`` educational-notes block. Two compact HTML cards
+    # (icon + one-line) sit to the right of the dropdowns; populated here with
+    # the defaults and refreshed by ``update_notes`` on every dropdown change.
+    from quantui.descriptor_cards import basis_card_html, method_card_html
+
+    app._method_card_html = widgets.HTML(value=method_card_html(default_method))
+    app._basis_card_html = widgets.HTML(value=basis_card_html(default_basis))
+    app._descriptor_cards_box = widgets.VBox(
+        [app._method_card_html, app._basis_card_html],
+        layout=layout_fn(margin="0 0 0 4px"),
+    )
     app.perf_estimate_html = widgets.HTML()
 
     app.step_progress = step_progress_cls(
@@ -877,7 +888,7 @@ def build_shared_widgets(
         icon="stop",
         disabled=True,
         layout=layout_fn(width="110px", height="36px"),
-        tooltip="Stop the running calculation (at the next step)",
+        tooltip=("Stop the running calculation at the next SCF cycle / optimizer step"),
     )
 
     app.log_clear_btn = widgets.Button(
@@ -1259,7 +1270,12 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
                     ),
                     widgets.HTML("&ensp;&ensp;"),
                     widgets.VBox([app.charge_si, app.mult_si]),
-                ]
+                    widgets.HTML("&ensp;"),
+                    # UXP.7 descriptor cards — to the right of the inputs so
+                    # they don't displace charge/multiplicity.
+                    app._descriptor_cards_box,
+                ],
+                layout=layout_fn(flex_wrap="wrap", align_items="flex-start"),
             ),
             app.calc_type_dd,
             app.calc_extra_opts,
@@ -1273,7 +1289,6 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
                 [app.solvent_cb, app.solvent_dd],
                 layout=layout_fn(align_items="center", gap="4px"),
             ),
-            app.notes_output,
         ]
     )
 

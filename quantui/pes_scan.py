@@ -290,6 +290,13 @@ def run_pes_scan(
     _stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
     _null = io.StringIO()
 
+    # UXP.5: cooperative cancel — checked between scan points, per BFGS step,
+    # and inside each point's SCF (via the shared calculator).
+    from .cancellation import cancel_check_from_stream, raise_if_cancelled
+
+    _cancel_check = cancel_check_from_stream(_stream)
+    atoms.calc.cancel_check = _cancel_check
+
     import numpy as np
 
     scan_values = np.linspace(start, stop, steps).tolist()
@@ -310,6 +317,7 @@ def run_pes_scan(
     i4 = atom_indices[3] if len(atom_indices) >= 4 else 0
 
     for step_num, val in enumerate(scan_values, start=1):
+        raise_if_cancelled(_cancel_check)
         _stream.write(
             f"\nScan point {step_num}/{steps}: "
             f"{scan_type} = {val:.4f} {('Å' if scan_type == 'bond' else '°')}\n"
@@ -351,6 +359,8 @@ def run_pes_scan(
                 atoms.set_constraint(constraint)
 
                 dyn = BFGS(atoms, logfile=_stream)
+                if _cancel_check is not None:
+                    dyn.attach(lambda: raise_if_cancelled(_cancel_check), interval=1)
                 # M-STDERR / STDERR.1: capture fd-2 stderr from PySCF C
                 # extensions for the duration of this scan-point optimisation.
                 from quantui.c_stderr import capture_c_stderr

@@ -706,48 +706,36 @@ class TestExportScriptCallback:
         assert "Error" not in app.export_status.value
 
 
-class TestUpdateNotesBoldRendering:
-    """_update_notes converts every **bold** span, not just the first.
+class TestDescriptorCards:
+    """UXP.7: method / basis descriptor cards replace the inline notes block.
 
-    Regression (M12 audit fix, 2026-07-14): the old implementation was
-    ``notes.replace("**", "<b>", 1).replace("**", "</b>", 1)`` — string
-    .replace(..., 1) only touches the FIRST occurrence in the whole
-    string, so only the first "**bold**" pair converted; every later one
-    (get_educational_notes() typically returns 2-3 separate
-    "**Label**: description" paragraphs) kept its literal "**" markers
-    and leaked into the rendered panel instead of rendering bold.
+    ``_update_notes`` now sets the ``_method_card_html`` / ``_basis_card_html``
+    widget values (icon + one-line) instead of rendering a markdown block into
+    an Output — and does so independently of whether a molecule is loaded.
     """
 
-    def test_multiple_bold_spans_all_converted(self, monkeypatch):
-        # UHF + 6-31G* + multiplicity 2 -> 3 separate "**Label**" spans
-        # in get_educational_notes()'s output.
-        #
-        # `with app.notes_output: display(HTML(...))` only populates the
-        # widget's `.outputs` under a live IPython display hook, which
-        # isn't present in a plain pytest process — so this test captures
-        # what's passed to `display()` directly instead of inspecting
-        # `notes_output.outputs` (the pattern used by tests of the
-        # newer `_set_html_output` atomic-swap helper, which manipulates
-        # `.outputs` directly and doesn't have this limitation).
-        import quantui.app_runflow as app_runflow
-
-        captured: list = []
-        monkeypatch.setattr(app_runflow, "display", lambda obj: captured.append(obj))
-
+    def test_cards_populated_at_construction(self):
         app = QuantUIApp()
-        mol = Molecule(["O", "H"], [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0]], multiplicity=2)
-        app._set_molecule(mol)
-        app.method_dd.value = "UHF"
-        app.basis_dd.value = "6-31G*"
+        assert "<svg" in app._method_card_html.value
+        assert "<svg" in app._basis_card_html.value
 
-        captured.clear()  # drop any renders triggered by the value changes above
+    def test_cards_update_without_molecule(self):
+        # No molecule loaded — the cards still describe the method/basis.
+        app = QuantUIApp()
+        app.method_dd.value = "B3LYP"
+        app.basis_dd.value = "cc-pVDZ"
         app._update_notes()
+        assert "B3LYP" in app._method_card_html.value
+        assert "cc-pVDZ" in app._basis_card_html.value
+        # No literal markdown markers leak into the rendered card.
+        assert "**" not in app._method_card_html.value
 
-        assert len(captured) == 1
-        html = captured[0].data
-        assert "**" not in html, f"literal ** markers leaked into rendered HTML: {html}"
-        assert html.count("<b>") >= 2
-        assert html.count("<b>") == html.count("</b>")
+    def test_cards_reflect_dropdown_change(self):
+        app = QuantUIApp()
+        app.method_dd.value = "MP2"
+        assert "MP2" in app._method_card_html.value
+        app.basis_dd.value = "def2-SVP"
+        assert "def2-SVP" in app._basis_card_html.value
 
 
 class TestExportMoleculeAndLabel:
