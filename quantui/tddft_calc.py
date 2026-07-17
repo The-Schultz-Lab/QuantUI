@@ -227,6 +227,11 @@ def _run_tddft_calc_body(
         except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
             pass
 
+    # UXP.5: cooperative cancel between SCF cycles.
+    from .cancellation import attach_scf_cancel_callback, cancel_check_from_stream
+
+    attach_scf_cancel_callback(mf, cancel_check_from_stream(stream))
+
     try:
         energy_hartree = float(mf.kernel())
     except Exception as exc:

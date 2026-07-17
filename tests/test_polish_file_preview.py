@@ -75,6 +75,17 @@ class TestFilePreviewDispatch:
         app._preview_file_path(p)
         assert "Cube file metadata" in app._files_status_html.value
 
+    def test_jsonl_preview_tails_log(self, app, tmp_path):
+        # UXP.1: JSONL logs are previewed by tailing the file (newest last),
+        # not by the generic first-200KB text dump.
+        p = tmp_path / "event_log.jsonl"
+        lines = [json.dumps({"event": "e", "n": i}) for i in range(1000)]
+        p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        app._preview_file_path(p)
+        status = app._files_status_html.value
+        assert "Log preview" in status
+        assert "tail" in status.lower()
+
     def test_text_fallback_for_unknown_extension(self, app, tmp_path):
         p = tmp_path / "notes.txt"
         p.write_text("line one\nline two\n", encoding="utf-8")
@@ -131,6 +142,26 @@ class TestFilePreviewAutoOnSelect:
         assert "click Open" in status
         assert "JSON preview" not in status
         assert "CSV preview" not in status
+
+
+class TestLogDirRoot:
+    """UXP.1: the app's log dir is an allowed Files-tab root."""
+
+    def test_log_dir_in_allowed_roots(self, tmp_path, monkeypatch):
+        logs = tmp_path / "logs"
+        logs.mkdir()
+        monkeypatch.setenv("QUANTUI_LOG_DIR", str(logs))
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path / "results"))
+        a = QuantUIApp()
+        roots = a._files_allowed_roots()
+        assert logs.resolve() in roots
+
+    def test_log_dir_root_label_is_logs(self, tmp_path, monkeypatch):
+        logs = tmp_path / "logs"
+        logs.mkdir()
+        monkeypatch.setenv("QUANTUI_LOG_DIR", str(logs))
+        a = QuantUIApp()
+        assert a._format_files_root_label(logs.resolve()).startswith("Logs")
 
 
 class TestFilePreviewSafety:

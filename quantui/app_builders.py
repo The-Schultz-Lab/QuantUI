@@ -509,6 +509,7 @@ def build_shared_widgets(
     # needs no scrollbar — clipping a few px of margin avoids an internal
     # scrollbar that resets to the top on every backend/palette swap.
     app.viz_output = widgets.Output(layout=layout_fn(height="510px", overflow="hidden"))
+    app.viz_output.add_class("quantui-viewer-frame")
     app.run_output = widgets.Output(
         layout=layout_fn(
             border="1px solid #c0ccd8",
@@ -528,6 +529,7 @@ def build_shared_widgets(
         )
     app.result_output = widgets.Output()
     app.result_viz_output = widgets.Output()
+    app.result_viz_output.add_class("quantui-viewer-frame")
     app.comparison_output = widgets.Output()
     app._last_result_dir = None
 
@@ -568,7 +570,18 @@ def build_shared_widgets(
         [app.viz_style_dd, app.viz_lighting_dd],
         layout=layout_fn(gap="8px", margin="2px 0 0 0", align_items="center"),
     )
-    app.notes_output = widgets.Output()
+    # UXP.7: method / basis descriptor cards replace the old inline
+    # ``notes_output`` educational-notes block. Two compact HTML cards
+    # (icon + one-line) sit to the right of the dropdowns; populated here with
+    # the defaults and refreshed by ``update_notes`` on every dropdown change.
+    from quantui.descriptor_cards import basis_card_html, method_card_html
+
+    app._method_card_html = widgets.HTML(value=method_card_html(default_method))
+    app._basis_card_html = widgets.HTML(value=basis_card_html(default_basis))
+    app._descriptor_cards_box = widgets.VBox(
+        [app._method_card_html, app._basis_card_html],
+        layout=layout_fn(margin="0 0 0 4px"),
+    )
     app.perf_estimate_html = widgets.HTML()
 
     app.step_progress = step_progress_cls(
@@ -913,7 +926,7 @@ def build_shared_widgets(
         icon="stop",
         disabled=True,
         layout=layout_fn(width="110px", height="36px"),
-        tooltip="Stop the running calculation (at the next step)",
+        tooltip=("Stop the running calculation at the next SCF cycle / optimizer step"),
     )
 
     app.log_clear_btn = widgets.Button(
@@ -1295,7 +1308,12 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
                     ),
                     widgets.HTML("&ensp;&ensp;"),
                     widgets.VBox([app.charge_si, app.mult_si]),
-                ]
+                    widgets.HTML("&ensp;"),
+                    # UXP.7 descriptor cards — to the right of the inputs so
+                    # they don't displace charge/multiplicity.
+                    app._descriptor_cards_box,
+                ],
+                layout=layout_fn(flex_wrap="wrap", align_items="flex-start"),
             ),
             app.calc_type_dd,
             app.calc_extra_opts,
@@ -1309,7 +1327,6 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
                 [app.solvent_cb, app.solvent_dd],
                 layout=layout_fn(align_items="center", gap="4px"),
             ),
-            app.notes_output,
         ]
     )
 
@@ -1603,11 +1620,23 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         orb_diagram_content,
         layout=layout_fn(width="100%"),
     )
+    # UXP.4: widen the preset buttons and add a "By index" mode that reveals a
+    # free-entry 0-based MO index input, so any orbital (not just the HOMO/LUMO
+    # neighbourhood) can be rendered as an isosurface.
     app._orb_toggle = widgets.ToggleButtons(
-        options=["HOMO-1", "HOMO", "LUMO", "LUMO+1"],
+        options=["HOMO-1", "HOMO", "LUMO", "LUMO+1", "By index"],
         value="HOMO",
-        style={"button_width": "70px"},
+        style={"button_width": "92px"},
         layout=layout_fn(margin="8px 0 4px 0"),
+    )
+    app._orb_index_input = widgets.BoundedIntText(
+        value=0,
+        min=0,
+        max=100000,
+        description="MO #",
+        tooltip="0-based molecular-orbital index (0 = lowest-energy MO)",
+        style={"description_width": "40px"},
+        layout=layout_fn(display="none", width="150px", margin="0 0 4px 0"),
     )
     app._orb_iso_output = widgets.Output()
     app._orb_iso_controls = widgets.VBox(
@@ -1617,6 +1646,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 "Orbital isosurface:</span>"
             ),
             app._orb_toggle,
+            app._orb_index_input,
             app._orb_iso_output,
         ],
         layout=layout_fn(display="none", margin="8px 0 0 0"),
@@ -1661,6 +1691,12 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._iso_export_status = widgets.HTML(
         value="", layout=layout_fn(margin="0 0 0 8px")
     )
+    # UXP.3: inline "calculating" spinner shown while a cube is being computed.
+    # Hidden until on_iso_generate reveals it; hidden again on completion.
+    app._iso_spinner = widgets.HTML(
+        value='<span class="quantui-spinner"></span>',
+        layout=layout_fn(display="none", margin="0 0 0 4px"),
+    )
     iso_body = widgets.VBox(
         [
             widgets.HTML(
@@ -1673,6 +1709,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             widgets.HBox(
                 [
                     app._iso_generate_btn,
+                    app._iso_spinner,
                     app._iso_export_cube_btn,
                     app._iso_export_status,
                 ],
@@ -1814,6 +1851,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app.results_panel = app.results_tab_panel
 
     app._analysis_mol_output = widgets.Output()
+    app._analysis_mol_output.add_class("quantui-viewer-frame")
 
     # Analysis-tab backend toggle — mirrors the Calculate-tab `viz_backend_toggle`.
     # Created only when both backends are available (matches Calculate-tab

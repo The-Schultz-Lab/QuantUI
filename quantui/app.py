@@ -395,6 +395,7 @@ from quantui.app_visualization import (
 from quantui.app_visualization import (
     wire_uv_controls as _viz_wire_uv_controls,
 )
+from quantui.cancellation import CalcCancelled as _CalcCancelled
 
 # Import directly from submodules to avoid circular-import issues.
 # quantui/__init__.py imports this module (app.py), so using
@@ -609,6 +610,35 @@ h3 {
 .jp-OutputArea-stderr, .output_stderr {
     background: transparent !important;
 }
+
+/* 3D molecule-viewer frames (UXP.2) — a subtle bounding box so the viewer
+   extent reads clearly. The light border inverts to dark automatically under
+   the global dark-mode invert filter. */
+.quantui-viewer-frame {
+    border: 1px solid #c0ccd8 !important;
+    border-radius: 6px !important;
+    overflow: hidden !important;
+}
+/* Collapse the frame to nothing when the viewer output is empty (e.g. before
+   a calc runs) so no hollow box shows. Degrades to an always-on border where
+   :has() is unsupported. */
+.quantui-viewer-frame:not(:has(.jp-OutputArea-child)) {
+    border-color: transparent !important;
+}
+
+/* Inline "calculating" spinner (UXP.3) — shown next to slow on-demand
+   controls (e.g. orbital-isosurface generation) while work is in flight. */
+@keyframes quantui-spin { to { transform: rotate(360deg); } }
+.quantui-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid #c0ccd8;
+    border-top-color: #2563eb;
+    border-radius: 50%;
+    animation: quantui-spin 0.7s linear infinite;
+    vertical-align: middle;
+}
 </style>"""
 
 _LAYOUT_TRAITS: frozenset[str] = frozenset(widgets.Layout.class_trait_names())
@@ -641,19 +671,12 @@ _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
 # ══ LOG CAPTURE ══════════════════════════════════════════════════════════════
 
 
-class _CalcCancelled(BaseException):
-    """Raised to abort a running calculation when the user clicks Cancel.
-
-    The calc streams output line-by-line through ``_LogCapture.write`` (SCF
-    cycles, optimizer steps), so checking a cancel flag there lets us bail at
-    the next output — a cooperative, graceful stop that needs no thread-kill.
-
-    Inherits ``BaseException`` (like ``KeyboardInterrupt``) on purpose: PySCF /
-    session_calc / the optimizer wrap their kernels in ``except Exception``, so
-    a plain ``Exception`` cancel would be swallowed and re-reported as a
-    "Calculation failed" error. As a ``BaseException`` it sails through those
-    handlers and reaches ``_do_run``'s ``except _CalcCancelled`` cleanly.
-    """
+# ``_CalcCancelled`` is defined in quantui.cancellation (imported at the top of
+# this module) so the calc modules (session_calc / optimizer / freq / tddft /
+# nmr / pes) can raise the SAME class from their SCF callbacks + optimizer
+# observers (UXP.5) without importing the app layer. ``_do_run``'s
+# ``except _CalcCancelled`` catches it whether it was raised by
+# ``_LogCapture.write`` or by one of those hooks.
 
 
 class _LogCapture:
@@ -673,6 +696,9 @@ class _LogCapture:
         self._on_scf_converged = on_scf_converged
         self._scf_converged_seen = False
         self._cancel_check = cancel_check
+        # Public alias so calc modules can duck-type the predicate off the
+        # progress stream (see quantui.cancellation.cancel_check_from_stream).
+        self.cancel_check = cancel_check
 
     def write(self, text: str) -> None:
         if not text:
@@ -964,7 +990,9 @@ class QuantUIApp:
         mol_info_html: Any
         mol_summary_compact: Any
         mult_si: Any
-        notes_output: Any
+        _method_card_html: Any
+        _basis_card_html: Any
+        _descriptor_cards_box: Any
         nstates_si: Any
         perf_estimate_html: Any
         post_calc_panel: Any
@@ -1761,6 +1789,10 @@ class QuantUIApp:
         )
         # Orbital isosurface generate button
         self._iso_generate_btn.on_click(self._on_iso_generate)
+        # UXP.4: reveal the free-entry MO-index input only in "By index" mode.
+        self._orb_toggle.observe(
+            self._safe_cb(self._on_orb_toggle_changed), names="value"
+        )
         # M-EXPORT / EXPORT.5: cube + bundle exports
         self._iso_export_cube_btn.on_click(self._on_iso_export_cube)
         self._export_bundle_btn.on_click(self._on_export_bundle)
@@ -1774,6 +1806,13 @@ class QuantUIApp:
         _last_dir = getattr(self, "_last_result_dir", None)
         if isinstance(_last_dir, Path):
             candidates.append(_last_dir)
+        # UXP.1: expose the app's own log dir (~/.quantui/logs) so the event
+        # log is reachable in-app. Resolves inside the runtime process, so it
+        # correctly points at the WSL home when the app runs under WSL.
+        try:
+            candidates.append(_calc_log._log_dir())
+        except Exception:
+            pass
 
         for candidate in candidates:
             if candidate is None:
@@ -1833,6 +1872,10 @@ class QuantUIApp:
                 labels.append(("Current Result", _last_dir.resolve()))
             except OSError:
                 pass
+        try:
+            labels.append(("Logs", _calc_log._log_dir().resolve()))
+        except OSError:
+            pass
 
         for prefix, known_root in labels:
             if root == known_root:
@@ -1994,6 +2037,7 @@ class QuantUIApp:
             ".txt",
             ".log",
             ".json",
+            ".jsonl",
             ".md",
             ".py",
             ".csv",
@@ -2080,6 +2124,50 @@ class QuantUIApp:
                         )
                     )
                 self._set_files_status(f"JSON preview: {path.name}")
+                return
+            except Exception:  # noqa: BLE001 — fall through to text preview
+                pass
+
+        if suffix == ".jsonl":
+            # UXP.1: JSONL logs (event_log.jsonl) grow append-only, so the
+            # newest — and most useful — records are at the END. The generic
+            # text dispatch keeps the FIRST 200 KB (oldest events), so tail
+            # the file here instead: show the last N lines, newest last.
+            try:
+                _MAX_TAIL_LINES = 300
+                raw = path.read_bytes()
+                total_bytes = len(raw)
+                # Cap the decode window so a multi-MB log stays responsive;
+                # the tail is all we render anyway.
+                tail_raw = raw[-400_000:]
+                text = tail_raw.decode("utf-8", errors="replace")
+                lines = text.splitlines()
+                # A leading partial line can appear after byte-slicing — drop it.
+                if len(tail_raw) < total_bytes and lines:
+                    lines = lines[1:]
+                total_lines_shown = min(len(lines), _MAX_TAIL_LINES)
+                shown = lines[-_MAX_TAIL_LINES:]
+                rendered = "\n".join(shown)
+                note = (
+                    f"Showing the last {total_lines_shown} record(s)"
+                    + (
+                        " (file tail — older records not shown)"
+                        if len(lines) > _MAX_TAIL_LINES or len(tail_raw) < total_bytes
+                        else ""
+                    )
+                    + "."
+                )
+                with self._files_preview_output:
+                    display(
+                        HTML(
+                            "<p style='font-size:11px;color:#64748b;margin:0 0 4px'>"
+                            f"{_html.escape(note)}</p>"
+                            "<pre style='white-space:pre-wrap;word-break:break-word;"
+                            "font-size:12px;line-height:1.35;margin:0'>"
+                            f"{_html.escape(rendered)}</pre>"
+                        )
+                    )
+                self._set_files_status(f"Log preview (tail): {path.name}")
                 return
             except Exception:  # noqa: BLE001 — fall through to text preview
                 pass
@@ -2964,7 +3052,17 @@ class QuantUIApp:
             return
         self._cancel_event.set()
         self.cancel_btn.disabled = True
-        self.run_status.value = "Cancelling — stopping at the next step…"
+        self.cancel_btn.description = "Cancelling…"
+        self.run_status.value = "Cancelling — stopping at the next cycle/step…"
+        # UXP.5: write an immediate marker to the live log so the click reads as
+        # acknowledged even if the next cooperative checkpoint is a moment away.
+        try:
+            self.run_output.append_stdout(
+                "\n⏹ Cancel requested — stopping at the next SCF cycle / "
+                "optimizer step…\n"
+            )
+        except Exception:
+            pass
 
     def _on_preopt_preview(self, btn=None) -> None:
         _run_on_preopt_preview(self, btn)
@@ -3844,6 +3942,12 @@ class QuantUIApp:
 
     def _on_iso_generate(self, btn) -> None:
         _viz_on_iso_generate(self, btn)
+
+    def _on_orb_toggle_changed(self, change) -> None:
+        """Show/hide the free-entry MO-index input for the 'By index' mode."""
+        self._orb_index_input.layout.display = (
+            "" if change["new"] == "By index" else "none"
+        )
 
     def _on_orb_range_changed(self, _change=None) -> None:
         _viz_on_orb_range_changed(self, _change)
@@ -4919,6 +5023,7 @@ class QuantUIApp:
             self._calc_running = False
             self._cancel_event.clear()
             self.cancel_btn.disabled = True
+            self.cancel_btn.description = "Cancel"
             self.log_clear_btn.disabled = False
             self._activity_end(kind="compute")
 

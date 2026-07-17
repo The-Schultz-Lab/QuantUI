@@ -93,6 +93,7 @@ try:
             basis: str = "STO-3G",
             charge: int = 0,
             spin: int = 0,
+            cancel_check=None,
             **kwargs,
         ) -> None:
             super().__init__(**kwargs)
@@ -100,6 +101,10 @@ try:
             self.basis = basis
             self.charge = charge
             self.spin = spin
+            # UXP.5: cooperative-cancel predicate; checked per step + wired into
+            # the per-step SCF callback (the SCF runs silent here, so the
+            # stream-based cancel can't see it).
+            self.cancel_check = cancel_check
 
         def calculate(
             self,
@@ -108,6 +113,15 @@ try:
             system_changes=all_changes,
         ) -> None:
             super().calculate(atoms, properties, system_changes)
+
+            # UXP.5: bail before starting this step's SCF if cancel was clicked
+            # (fires between BFGS force evaluations, independent of ASE output).
+            from .cancellation import (
+                attach_scf_cancel_callback,
+                raise_if_cancelled,
+            )
+
+            raise_if_cancelled(self.cancel_check)
 
             import numpy as np
             from pyscf import dft, gto, scf
@@ -152,6 +166,7 @@ try:
 
             mf.verbose = 0
             mf.stdout = _sink
+            attach_scf_cancel_callback(mf, self.cancel_check)
             mf.kernel()
 
             # Save final SCF state for orbital visualization
@@ -381,17 +396,21 @@ def optimize_geometry(
             "Ensure ASE >= 3.22.0: pip install 'ase>=3.22.0'"
         ) from exc
 
+    _stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
+    _null = io.StringIO()
+
     # --- Set up ASE Atoms + PySCF calculator ---
+    from .cancellation import cancel_check_from_stream, raise_if_cancelled
+
+    _cancel_check = cancel_check_from_stream(_stream)
     atoms = molecule_to_atoms(molecule)
     atoms.calc = _QuantUIPySCFCalc(
         method=method,
         basis=basis,
         charge=molecule.charge,
         spin=molecule.multiplicity - 1,
+        cancel_check=_cancel_check,
     )
-
-    _stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
-    _null = io.StringIO()
 
     # M-STDERR / STDERR.1: PySCF gradients (called by ASE-BFGS at every
     # step) emit fd-2 stderr from libcint / BLAS. Wrap the full BFGS run
@@ -410,6 +429,10 @@ def optimize_geometry(
                 trajectory=str(traj_path),
                 logfile=_stream,  # BFGS step table → progress_stream
             )
+            # UXP.5: check cancel after every BFGS step (belt-and-suspenders
+            # with the per-step calculator check above).
+            if _cancel_check is not None:
+                dyn.attach(lambda: raise_if_cancelled(_cancel_check), interval=1)
 
             with capture_c_stderr(_stream), contextlib.redirect_stdout(_null):
                 converged = bool(dyn.run(fmax=fmax, steps=steps))

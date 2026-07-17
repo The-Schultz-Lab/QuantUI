@@ -706,48 +706,36 @@ class TestExportScriptCallback:
         assert "Error" not in app.export_status.value
 
 
-class TestUpdateNotesBoldRendering:
-    """_update_notes converts every **bold** span, not just the first.
+class TestDescriptorCards:
+    """UXP.7: method / basis descriptor cards replace the inline notes block.
 
-    Regression (M12 audit fix, 2026-07-14): the old implementation was
-    ``notes.replace("**", "<b>", 1).replace("**", "</b>", 1)`` — string
-    .replace(..., 1) only touches the FIRST occurrence in the whole
-    string, so only the first "**bold**" pair converted; every later one
-    (get_educational_notes() typically returns 2-3 separate
-    "**Label**: description" paragraphs) kept its literal "**" markers
-    and leaked into the rendered panel instead of rendering bold.
+    ``_update_notes`` now sets the ``_method_card_html`` / ``_basis_card_html``
+    widget values (icon + one-line) instead of rendering a markdown block into
+    an Output — and does so independently of whether a molecule is loaded.
     """
 
-    def test_multiple_bold_spans_all_converted(self, monkeypatch):
-        # UHF + 6-31G* + multiplicity 2 -> 3 separate "**Label**" spans
-        # in get_educational_notes()'s output.
-        #
-        # `with app.notes_output: display(HTML(...))` only populates the
-        # widget's `.outputs` under a live IPython display hook, which
-        # isn't present in a plain pytest process — so this test captures
-        # what's passed to `display()` directly instead of inspecting
-        # `notes_output.outputs` (the pattern used by tests of the
-        # newer `_set_html_output` atomic-swap helper, which manipulates
-        # `.outputs` directly and doesn't have this limitation).
-        import quantui.app_runflow as app_runflow
-
-        captured: list = []
-        monkeypatch.setattr(app_runflow, "display", lambda obj: captured.append(obj))
-
+    def test_cards_populated_at_construction(self):
         app = QuantUIApp()
-        mol = Molecule(["O", "H"], [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0]], multiplicity=2)
-        app._set_molecule(mol)
-        app.method_dd.value = "UHF"
-        app.basis_dd.value = "6-31G*"
+        assert "<svg" in app._method_card_html.value
+        assert "<svg" in app._basis_card_html.value
 
-        captured.clear()  # drop any renders triggered by the value changes above
+    def test_cards_update_without_molecule(self):
+        # No molecule loaded — the cards still describe the method/basis.
+        app = QuantUIApp()
+        app.method_dd.value = "B3LYP"
+        app.basis_dd.value = "cc-pVDZ"
         app._update_notes()
+        assert "B3LYP" in app._method_card_html.value
+        assert "cc-pVDZ" in app._basis_card_html.value
+        # No literal markdown markers leak into the rendered card.
+        assert "**" not in app._method_card_html.value
 
-        assert len(captured) == 1
-        html = captured[0].data
-        assert "**" not in html, f"literal ** markers leaked into rendered HTML: {html}"
-        assert html.count("<b>") >= 2
-        assert html.count("<b>") == html.count("</b>")
+    def test_cards_reflect_dropdown_change(self):
+        app = QuantUIApp()
+        app.method_dd.value = "MP2"
+        assert "MP2" in app._method_card_html.value
+        app.basis_dd.value = "def2-SVP"
+        assert "def2-SVP" in app._basis_card_html.value
 
 
 class TestExportMoleculeAndLabel:
@@ -2480,13 +2468,29 @@ class TestOrbitalAccordionWidgets:
         assert isinstance(app._orb_export_fmt_dd, widgets.Dropdown)
         assert app._orb_export_fmt_dd.value == "html"
 
-    def test_orb_toggle_has_four_options(self):
+    def test_orb_toggle_has_preset_options(self):
+        # UXP.4: the four HOMO/LUMO presets plus a free-entry "By index" mode.
         app = QuantUIApp()
-        assert set(app._orb_toggle.options) == {"HOMO-1", "HOMO", "LUMO", "LUMO+1"}
+        assert set(app._orb_toggle.options) == {
+            "HOMO-1",
+            "HOMO",
+            "LUMO",
+            "LUMO+1",
+            "By index",
+        }
 
     def test_orb_toggle_default_homo(self):
         app = QuantUIApp()
         assert app._orb_toggle.value == "HOMO"
+
+    def test_orb_index_input_hidden_until_by_index(self):
+        # UXP.4: the arbitrary MO-index input is revealed only in "By index".
+        app = QuantUIApp()
+        assert app._orb_index_input.layout.display == "none"
+        app._orb_toggle.value = "By index"
+        assert app._orb_index_input.layout.display == ""
+        app._orb_toggle.value = "HOMO"
+        assert app._orb_index_input.layout.display == "none"
 
     def test_orb_iso_controls_hidden_initially(self):
         app = QuantUIApp()

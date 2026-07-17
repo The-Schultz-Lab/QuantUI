@@ -22,6 +22,45 @@ def _calc_type_badge(calc_type: str) -> str:
     }.get(calc_type, calc_type or "Unknown")
 
 
+_RUN_HEADER_CALC_LABELS = {
+    "Single Point": "Single Point Energy",
+    "Geometry Opt": "Geometry Optimization",
+    "Frequency": "Frequency Analysis",
+    "UV-Vis (TD-DFT)": "TD-DFT (UV-Vis)",
+    "NMR Shielding": "NMR Shielding",
+    "PES Scan": "PES Scan",
+}
+
+
+def _write_provisional_run_header(app: Any) -> None:
+    """Print an immediate one-line header the instant Run is clicked (UXP.6).
+
+    The full structured banner (``format_log_header``) is written from the
+    background ``_do_run`` thread and can lag behind the first observable
+    output because it calls ``get_system_info()`` (which may shell out to
+    ``nvidia-smi``) and only runs once the thread has spun up. This provisional
+    line runs synchronously on the main thread so the user gets instant
+    feedback that the click registered; the full banner follows and augments it.
+    """
+    mol = getattr(app, "_molecule", None)
+    if mol is None:
+        return
+    try:
+        formula = mol.get_formula()
+    except Exception:
+        formula = "?"
+    ct_label = _RUN_HEADER_CALC_LABELS.get(
+        app.calc_type_dd.value, app.calc_type_dd.value
+    )
+    try:
+        app.run_output.append_stdout(
+            f"▶ Starting {ct_label} — {formula} · "
+            f"{app.method_dd.value}/{app.basis_dd.value} …\n"
+        )
+    except Exception:
+        pass
+
+
 def on_run_clicked(app: Any, btn: Any) -> None:
     """Reset result panes and start the background run thread."""
     app.run_output.clear_output()
@@ -40,6 +79,7 @@ def on_run_clicked(app: Any, btn: Any) -> None:
     app._completion_banner.layout.display = "none"
     app._to_analysis_btn.layout.display = "none"
     app._analysis_empty_html.layout.display = "none"
+    _write_provisional_run_header(app)
     threading.Thread(target=app._do_run, daemon=True).start()
 
 
@@ -1067,40 +1107,17 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
 
 
 def update_notes(app: Any, change: Any = None) -> None:
-    """Refresh educational method notes for the active molecule/method."""
-    app.notes_output.clear_output(wait=True)
-    if app._molecule is None:
-        return
+    """Refresh the method / basis descriptor cards (UXP.7).
+
+    Replaces the old inline educational-notes text block. The cards describe
+    the *method* and *basis* themselves, so — unlike the old notes — they
+    refresh independently of whether a molecule is loaded.
+    """
     try:
-        from quantui import PySCFCalculation
+        from quantui.descriptor_cards import basis_card_html, method_card_html
 
-        calc = PySCFCalculation(
-            app._molecule,
-            method=app.method_dd.value,
-            basis=app.basis_dd.value,
-        )
-        notes = calc.get_educational_notes()
-        if notes:
-            # M12 audit fix (2026-07-14): .replace("**", ..., 1) only
-            # converts the FIRST **bold** pair in the whole string — every
-            # note after the first (get_educational_notes() typically
-            # returns 2-3 separate "**Label**: description" paragraphs
-            # joined by "\n\n") kept its literal "**" markers instead of
-            # being rendered bold. A regex replaces every **...** pair.
-            import re as _re
-
-            safe = _re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", notes).replace(
-                "\n\n", "<br><br>"
-            )
-            with app.notes_output:
-                display(
-                    HTML(
-                        '<div style="background:#fffbf0;padding:8px 12px;'
-                        'border-radius:4px;font-size:13px;margin-top:6px">'
-                        + safe
-                        + "</div>"
-                    )
-                )
+        app._method_card_html.value = method_card_html(app.method_dd.value)
+        app._basis_card_html.value = basis_card_html(app.basis_dd.value)
     except Exception:
         pass
 

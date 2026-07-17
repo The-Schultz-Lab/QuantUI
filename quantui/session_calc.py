@@ -393,6 +393,15 @@ def _run_session_calc_body(
         except Exception:  # noqa: BLE001 — cleanup (progress stream may be closed)
             pass
 
+    # --- Cooperative cancellation (UXP.5) ---
+    # Attach the run's cancel predicate (carried on the progress stream) to
+    # the SCF callback so a Cancel click stops between SCF cycles even when the
+    # calc is running with sparse/no streamed output.
+    from .cancellation import attach_scf_cancel_callback, cancel_check_from_stream
+
+    _cancel_check = cancel_check_from_stream(stream)
+    attach_scf_cancel_callback(mf, _cancel_check)
+
     # --- Run SCF ---
     try:
         energy_hartree = float(mf.kernel())
