@@ -365,6 +365,52 @@ def format_pes_scan_result(r: Any) -> str:
     )
 
 
+def format_reorg_result(r: Any) -> str:
+    """Format a reorganization-energy (Marcus 4-point) result card."""
+    _conv = "Yes" if r.converged else "No (some steps did not converge)"
+    _cc = "green" if r.converged else "#c00"
+
+    def _channel_block(ch: Any) -> str:
+        rows = "".join(
+            f'<tr><td style="padding:2px 18px 2px 0;color:#444">{k}</td>'
+            f'<td style="color:#000;font-family:monospace">{v}</td></tr>'
+            for k, v in [
+                ("λ", f"{ch.lambda_ev:.4f} eV ({ch.lambda_kcal:.2f} kcal/mol)"),
+                ("λ₁ ion relaxation", f"{ch.lambda1_hartree * 27.211386245988:.4f} eV"),
+                (
+                    "λ₂ neutral relaxation",
+                    f"{ch.lambda2_hartree * 27.211386245988:.4f} eV",
+                ),
+                (
+                    "Ion state",
+                    f"charge {ch.ion_charge:+d}, mult {ch.ion_multiplicity}",
+                ),
+            ]
+        )
+        return (
+            f'<div style="margin-top:8px">'
+            f'<b style="font-size:13px;color:#166534">{ch.label}</b>'
+            f'<table style="margin-top:2px;font-size:13px;border-collapse:collapse">'
+            f"{rows}</table></div>"
+        )
+
+    _channels_html = "".join(_channel_block(ch) for ch in r.channels)
+    return (
+        f'<div style="background:#f0fff0;border-left:4px solid #4CAF50;'
+        f'padding:10px 14px;border-radius:4px;margin:6px 0">'
+        f"<b>Reorganization Energy (Marcus 4-point) &mdash; "
+        f"{r.formula} ({r.method}/{r.basis})</b>"
+        f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
+        f'<tr><td style="padding:3px 18px 3px 0;color:#444">Neutral energy</td>'
+        f'<td style="color:#000">{r.neutral_energy_hartree:.8f} Ha</td></tr>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:#444">Total opt steps</td>'
+        f'<td style="color:#000">{r.n_total_opt_steps}</td></tr>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:#444">All converged</td>'
+        f'<td style="color:{_cc}">{_conv}</td></tr>'
+        f"</table>{_channels_html}</div>"
+    )
+
+
 def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) -> str:
     """Format a saved result.json payload as an HTML result card."""
     import base64 as _b64

@@ -695,6 +695,7 @@ def build_shared_widgets(
             "UV-Vis (TD-DFT)",
             "NMR Shielding",
             "PES Scan",
+            "Reorganization Energy",
         ],
         value="Single Point",
         description="Calc. Type:",
@@ -843,6 +844,28 @@ def build_shared_widgets(
         '<span style="font-size:12px;color:#555">Å</span>'
     )
 
+    # Reorganization energy (Marcus 4-point). The mode selector chooses which
+    # charge-transfer channel(s) to compute; "Both" shares the neutral geometry
+    # optimization across the hole and electron channels.
+    app._reorg_mode_dd = widgets.Dropdown(
+        options=[
+            ("Both (hole + electron)", "both"),
+            ("Hole (cation, +1)", "hole"),
+            ("Electron (anion, −1)", "electron"),
+        ],
+        value="both",
+        description="Channel:",
+        style={"description_width": "80px"},
+        layout=layout_fn(width="320px"),
+        tooltip="Which reorganization energy channel(s) to compute",
+    )
+    app._reorg_note = widgets.HTML(
+        '<span style="color:#555;font-size:12px">'
+        "4-point Marcus scheme: optimizes the neutral and ion geometries, then "
+        "evaluates the four single-point energies to obtain λ. Runs 2–3 geometry "
+        "optimizations, so it is slower than a single calculation.</span>"
+    )
+
     app.calc_extra_opts = widgets.VBox([])
 
     app.method_help_btn = widgets.Button(
@@ -866,6 +889,21 @@ def build_shared_widgets(
         layout=layout_fn(width="200px", height="36px"),
     )
     app.run_status = widgets.Label()
+
+    # One-click reorganization energy: switches the calc type to
+    # "Reorganization Energy", applies sensible defaults (both channels), and
+    # immediately launches the 4-point run.
+    app._reorg_auto_btn = widgets.Button(
+        description="Calc. Reorganization Energy",
+        button_style="warning",
+        icon="bolt",
+        disabled=True,
+        layout=layout_fn(width="250px", height="36px"),
+        tooltip=(
+            "Set up and run the 4-point Marcus reorganization energy "
+            "(hole + electron) on the loaded molecule"
+        ),
+    )
 
     # Gracefully stops a running calculation at the next SCF cycle / opt step.
     # Disabled unless a calc is in flight (toggled by _do_run).
@@ -1287,6 +1325,10 @@ def build_run_section(app: Any, *, layout_fn: Any) -> None:
                 "sets may take several minutes on a laptop.</p>"
             ),
             app.perf_estimate_html,
+            widgets.HBox(
+                [app.run_btn, app._reorg_auto_btn, app.run_status],
+                layout=layout_fn(align_items="center", gap="8px"),
+            ),
             widgets.HBox([app.run_btn, app.cancel_btn, app.run_status]),
             widgets.HBox(
                 [

@@ -155,6 +155,8 @@ _CALC_TYPE_LABELS: Dict[str, str] = {
     "frequency": "Frequency Analysis",
     "tddft": "TD-DFT (UV-Vis)",
     "nmr": "NMR Shielding",
+    "pes_scan": "PES Scan",
+    "reorganization_energy": "Reorganization Energy (4-point)",
 }
 
 

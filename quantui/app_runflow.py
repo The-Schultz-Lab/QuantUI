@@ -18,6 +18,7 @@ def _calc_type_badge(calc_type: str) -> str:
         "tddft": "UV-Vis",
         "nmr": "NMR",
         "pes_scan": "PES",
+        "reorganization_energy": "Reorg",
     }.get(calc_type, calc_type or "Unknown")
 
 
@@ -51,7 +52,10 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     # workflow). POLISH.9: this was called "pre-optimisation" pre-2026-05-25;
     # the underlying operation is a full DFT geom-opt — distinct from the
     # LJ classical pre-opt in quantui/preopt.py.
-    if ct == "Geometry Opt":
+    # Reorganization Energy runs its own neutral + ion optimizations, so the
+    # standalone "geometry optimization before this calc" checkbox is
+    # meaningless there too (as with Geometry Opt itself).
+    if ct in ("Geometry Opt", "Reorganization Energy"):
         app._freq_preopt_cb.value = False
         app._freq_preopt_cb.layout.display = "none"
     else:
@@ -96,6 +100,11 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
                 "STO-3G and 3-21G give qualitative results only. "
                 "Start from an optimised geometry for best accuracy.</span>"
             ),
+        ]
+    elif ct == "Reorganization Energy":
+        app.calc_extra_opts.children = [
+            app._reorg_mode_dd,
+            app._reorg_note,
         ]
     elif ct == "PES Scan":
         app._update_scan_widgets()
