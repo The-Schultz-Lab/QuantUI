@@ -706,6 +706,42 @@ class TestExportScriptCallback:
         assert "Error" not in app.export_status.value
 
 
+class TestRunHeader:
+    """The run header is written atomically on the main thread (2026-07-18 fix).
+
+    Regression: the header used clear_output()+append and a background-thread
+    append, so for large molecules the pre-step-1 stream was dropped and the
+    log jumped straight to the first optimizer step. The fix writes the whole
+    banner in one atomic ``run_output.outputs = (...)`` on click.
+    """
+
+    def test_header_written_atomically_with_molecule(self):
+        from quantui.app_runflow import _write_run_header
+
+        app = QuantUIApp()
+        app._set_molecule(_water())
+        app.method_dd.value = "B3LYP"
+        app.basis_dd.value = "6-31G*"
+        _write_run_header(app)
+        outs = app.run_output.outputs
+        # A single atomic stream output — not a clear + multiple appends.
+        assert len(outs) == 1
+        assert outs[0]["output_type"] == "stream"
+        text = outs[0]["text"]
+        assert "B3LYP" in text and "6-31G*" in text
+
+    def test_header_clears_stale_log_when_no_molecule(self):
+        from quantui.app_runflow import _write_run_header
+
+        app = QuantUIApp()
+        app.run_output.outputs = (
+            {"output_type": "stream", "name": "stdout", "text": "old run\n"},
+        )
+        app._molecule = None
+        _write_run_header(app)
+        assert app.run_output.outputs == ()
+
+
 class TestCalcTypeHelp:
     """A '?' help button next to Calc. Type opens the calc_type help topic."""
 

@@ -1145,6 +1145,15 @@ class QuantUIApp:
         """
 
         def _detect_gpu() -> None:
+            # Warm the run-header's system-info cache (lru_cache; may shell out
+            # to nvidia-smi) off the main thread so the synchronous header write
+            # in on_run_clicked stays instant on the first calc (UXP.6).
+            try:
+                from quantui.log_utils import get_system_info
+
+                get_system_info()
+            except Exception:  # noqa: BLE001 — warm-up is best-effort
+                pass
             try:
                 from quantui.gpu_offload import is_gpu_available
 
@@ -4146,28 +4155,13 @@ class QuantUIApp:
             cancel_check=self._cancel_event.is_set,
         )
 
-        # Write structured log header immediately so it appears at the top of output
-        try:
-            from quantui.log_utils import format_log_header as _fmt_log_hdr
-
-            _hdr_calc_type = {
-                "Geometry Opt": "geometry_opt",
-                "Frequency": "frequency",
-                "UV-Vis (TD-DFT)": "tddft",
-                "NMR Shielding": "nmr",
-                "PES Scan": "pes_scan",
-                "Reorganization Energy": "reorganization_energy",
-            }.get(self.calc_type_dd.value, "single_point")
-            log.write(
-                _fmt_log_hdr(
-                    formula=mol.get_formula(),
-                    method=self.method_dd.value,
-                    basis=self.basis_dd.value,
-                    calc_type=_hdr_calc_type,
-                )
-            )
-        except Exception:
-            pass
+        # The run header (structured banner) is written synchronously + atomically
+        # on the main thread by ``on_run_clicked`` → ``_write_run_header`` BEFORE
+        # this background thread starts. Writing it here (bg thread) instead was
+        # the pre-step-1 "blank window" bug (2026-07-18): for a large molecule the
+        # long gap before the first optimizer/SCF line exposed a lost-early-output
+        # race in the bg-thread ``append_stdout`` path. All later PySCF / optimizer
+        # output appends onto that header via ``log`` as usual.
 
         try:
             # Classical pre-optimization is now an explicit Preview → Keep tool
