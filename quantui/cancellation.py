@@ -45,20 +45,41 @@ def cancel_check_from_stream(stream: Any) -> Optional[CancelCheck]:
     return cc if callable(cc) else None
 
 
-def attach_scf_cancel_callback(mf: Any, cancel_check: Optional[CancelCheck]) -> None:
-    """Attach a cancel check to a PySCF SCF object's per-cycle ``callback``.
+def attach_scf_cancel_callback(
+    mf: Any,
+    cancel_check: Optional[CancelCheck],
+    *,
+    progress_cb: Optional[Callable[[Any], None]] = None,
+) -> None:
+    """Attach cancel + progress hooks to a PySCF SCF object's ``callback``.
 
-    PySCF invokes ``mf.callback(envs)`` once per SCF macro-iteration. Raising
-    :class:`CalcCancelled` there stops the run between cycles regardless of
-    whether output is being streamed. No-op when *cancel_check* is ``None`` or
-    the object doesn't accept a callback (best-effort — cooperative
-    output-line cancellation still applies).
+    PySCF invokes ``mf.callback(envs)`` once per SCF macro-iteration (``envs``
+    is the kernel's locals dict — cycle index, ``e_tot``, etc.). We use that
+    single hook for two things:
+
+    - **Cancel** (UXP.5): raise :class:`CalcCancelled` between cycles so a
+      Cancel click stops the run regardless of whether output is streamed.
+    - **Progress** (M-PROGRESS A3): call *progress_cb(envs)* each cycle so the
+      caller can surface a live "SCF cycle N" status even when the SCF runs at
+      ``verbose=0`` (the optimizer/PES per-step SCF, which streams nothing).
+
+    No-op when both hooks are ``None`` or the object doesn't accept a callback
+    (best-effort — cooperative output-line cancellation still applies).
     """
-    if cancel_check is None or mf is None:
+    if mf is None or (cancel_check is None and progress_cb is None):
         return
 
-    def _cb(_envs: Any, _cc: CancelCheck = cancel_check) -> None:
-        if _cc():
+    def _cb(
+        envs: Any,
+        _cc: Optional[CancelCheck] = cancel_check,
+        _pc: Optional[Callable[[Any], None]] = progress_cb,
+    ) -> None:
+        if _pc is not None:
+            try:
+                _pc(envs)
+            except Exception:  # noqa: BLE001 — progress is best-effort
+                pass
+        if _cc is not None and _cc():
             raise CalcCancelled()
 
     try:

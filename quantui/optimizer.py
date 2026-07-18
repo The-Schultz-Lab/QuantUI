@@ -184,7 +184,21 @@ try:
 
             mf.verbose = 0
             mf.stdout = _sink
-            attach_scf_cancel_callback(mf, self.cancel_check)
+
+            # M-PROGRESS A3: per-SCF-cycle heartbeat during the (silent) step,
+            # so the status advances mid-SCF, not just per optimizer step.
+            _k = self._eval_count
+
+            def _scf_progress(envs, _k=_k) -> None:
+                cyc = envs.get("cycle") if hasattr(envs, "get") else None
+                if cyc is None:
+                    return
+                emit_status(
+                    self.progress_stream,
+                    f"{self.status_label} — step {_k}, SCF cycle {cyc + 1}…",
+                )
+
+            attach_scf_cancel_callback(mf, self.cancel_check, progress_cb=_scf_progress)
             mf.kernel()
 
             # Save final SCF state for orbital visualization

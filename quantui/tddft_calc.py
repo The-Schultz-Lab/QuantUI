@@ -229,9 +229,11 @@ def _run_tddft_calc_body(
 
     # UXP.5: cooperative cancel between SCF cycles.
     from .cancellation import attach_scf_cancel_callback, cancel_check_from_stream
+    from .log_utils import emit_status
 
     attach_scf_cancel_callback(mf, cancel_check_from_stream(stream))
 
+    emit_status(stream, "Running SCF (ground state)…")  # M-PROGRESS A4
     try:
         energy_hartree = float(mf.kernel())
     except Exception as exc:
@@ -268,6 +270,11 @@ def _run_tddft_calc_body(
     oscillator_strengths: List[float] = []
 
     try:
+        emit_status(  # M-PROGRESS A4
+            stream,
+            f"Solving {'TDHF (CIS)' if using_hf else 'TD-DFT'} "
+            f"excited states ({nstates})…",
+        )
         td = mf.TDHF() if using_hf else mf.TDDFT()
         td.nstates = nstates
         td.verbose = 3
