@@ -702,6 +702,9 @@ class _LogCapture:
         # Public alias so calc modules can duck-type the predicate off the
         # progress stream (see quantui.cancellation.cancel_check_from_stream).
         self.cancel_check = cancel_check
+        # B2: completion fraction (0..1) reported by calc modules via
+        # log_utils.emit_progress; read by the elapsed ticker. None = unknown.
+        self._fraction: Optional[float] = None
 
     def write(self, text: str) -> None:
         if not text:
@@ -751,6 +754,21 @@ class _LogCapture:
                 self._status.value = message
             except Exception:
                 pass
+
+    def set_progress_fraction(self, fraction: float) -> None:
+        """Record a completion fraction (0..1) for the live remaining-time chip.
+
+        M-PROGRESS B2: calc modules call this via ``log_utils.emit_progress``
+        when they know a real completion fraction (PES points, optimizer fmax
+        trend). The elapsed ticker reads it off the active log and prefers a
+        self-correcting ``elapsed·(1−f)/f`` estimate over the B1 static total.
+        """
+        try:
+            f = float(fraction)
+        except (TypeError, ValueError):
+            return
+        # Clamp below 1.0 so the chip never claims "0s left" while work remains.
+        self._fraction = max(0.0, min(f, 0.999))
 
     def flush(self) -> None:
         pass
@@ -1091,6 +1109,9 @@ class QuantUIApp:
         # remaining"; set by _do_run once estimate_time() has run.
         self._run_estimate_s: Optional[float] = None
         self._run_estimate_conf: str = "unknown"
+        # M-PROGRESS B2: the active run's _LogCapture, so the ticker can read the
+        # completion fraction calc modules report onto it. None between runs.
+        self._active_log: Optional[_LogCapture] = None
         # Relaxed molecule from a pending pre-opt preview, awaiting Keep/Revert.
         self._preopt_relaxed_mol: Optional[Molecule] = None
         # Cache kernel io_loop once on the main thread so worker threads can
@@ -4181,6 +4202,9 @@ class QuantUIApp:
             on_scf_converged=_on_scf_converged,
             cancel_check=self._cancel_event.is_set,
         )
+        # B2: expose this run's log to the elapsed ticker so it can read the
+        # completion fraction calc modules report via emit_progress.
+        self._active_log = log
 
         # The run header (structured banner) is written synchronously + atomically
         # on the main thread by ``on_run_clicked`` → ``_write_run_header`` BEFORE
@@ -5054,6 +5078,9 @@ class QuantUIApp:
         # B1: reset the runtime estimate; _do_run fills it in once computed.
         self._run_estimate_s = None
         self._run_estimate_conf = "unknown"
+        # B2: drop any prior run's log so a stale fraction can't leak into the
+        # new run's chip before this run's _LogCapture is created.
+        self._active_log = None
         stop_event = threading.Event()
         self._elapsed_stop_event = stop_event
 
@@ -5083,6 +5110,20 @@ class QuantUIApp:
         from quantui.log_utils import format_elapsed
 
         base = f"⏱ {format_elapsed(elapsed)}"
+
+        # B2: prefer a self-correcting fraction-based estimate when a calc module
+        # reports real progress (PES points, optimizer fmax trend). Only trust it
+        # once past a small floor so early-run noise doesn't spike the estimate.
+        log = getattr(self, "_active_log", None)
+        frac = getattr(log, "_fraction", None) if log is not None else None
+        if frac is not None and frac >= 0.03 and elapsed > 0:
+            remaining = elapsed * (1.0 - frac) / frac
+            return (
+                '<span style="color:#64748b;font-size:13px">'
+                f"{base} · ~{format_elapsed(remaining)} left</span>"
+            )
+
+        # B1 fallback: static total estimate minus elapsed.
         est = getattr(self, "_run_estimate_s", None)
         if est and est > 0:
             remaining = est - elapsed

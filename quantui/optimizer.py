@@ -341,6 +341,7 @@ def optimize_geometry(
     steps: int = DEFAULT_OPT_STEPS,
     progress_stream: Optional[IO[str]] = None,
     status_label: str = "Optimizing geometry",
+    report_fraction: bool = True,
 ) -> OptimizationResult:
     """
     Optimize a molecular geometry at the QM level using ASE-BFGS + PySCF.
@@ -468,6 +469,35 @@ def optimize_geometry(
             # with the per-step calculator check above).
             if _cancel_check is not None:
                 dyn.attach(lambda: raise_if_cancelled(_cancel_check), interval=1)
+
+            # M-PROGRESS B2: estimate completion from the fmax-convergence trend
+            # (log-scale between the first step's fmax and the target). Data-free
+            # and self-correcting. Skipped when report_fraction is False (e.g.
+            # reorg drives several sub-optimizations, whose 0→1 resets would make
+            # an overall remaining-time estimate oscillate).
+            if report_fraction:
+                from .log_utils import emit_progress
+
+                _fmax0: list = []  # first-step fmax, captured on first callback
+
+                def _report_opt_fraction() -> None:
+                    try:
+                        forces = atoms.get_forces()
+                        fmax_now = float(math.sqrt((forces**2).sum(axis=1).max()))
+                    except Exception:  # noqa: BLE001 — progress is best-effort
+                        return
+                    if fmax_now <= 0:
+                        return
+                    if not _fmax0:
+                        _fmax0.append(fmax_now)
+                        return
+                    denom = math.log(_fmax0[0] / fmax) if fmax > 0 else 0.0
+                    if denom <= 0:
+                        return
+                    frac = math.log(_fmax0[0] / fmax_now) / denom
+                    emit_progress(_stream, max(0.0, min(frac, 0.99)))
+
+                dyn.attach(_report_opt_fraction, interval=1)
 
             with capture_c_stderr(_stream), contextlib.redirect_stdout(_null):
                 converged = bool(dyn.run(fmax=fmax, steps=steps))

@@ -198,6 +198,24 @@ def emit_status(stream: Any, message: str) -> None:
         pass
 
 
+def emit_progress(stream: Any, fraction: float) -> None:
+    """Report a completion fraction (0..1) via a progress stream, if supported.
+
+    M-PROGRESS B2: calc modules that know a real completion fraction (PES scan
+    points, optimizer fmax-convergence trend) call this so the live ticker can
+    show a *self-correcting* ``elapsed·(1−f)/f`` remaining-time estimate instead
+    of the static B1 total. Duck-typed on ``stream.set_progress_fraction`` — a
+    no-op for plain streams, keeping calc modules decoupled from the widget layer.
+    """
+    setter = getattr(stream, "set_progress_fraction", None)
+    if setter is None:
+        return
+    try:
+        setter(fraction)
+    except Exception:  # noqa: BLE001 — progress is best-effort
+        pass
+
+
 def format_elapsed(seconds: float) -> str:
     """Compact elapsed-time label for the live ticker: ``0:42`` / ``1:03:22``."""
     if seconds < 0:
