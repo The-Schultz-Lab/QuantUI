@@ -398,11 +398,13 @@ def _run_session_calc_body(
     # the SCF callback so a Cancel click stops between SCF cycles even when the
     # calc is running with sparse/no streamed output.
     from .cancellation import attach_scf_cancel_callback, cancel_check_from_stream
+    from .log_utils import emit_status
 
     _cancel_check = cancel_check_from_stream(stream)
     attach_scf_cancel_callback(mf, _cancel_check)
 
     # --- Run SCF ---
+    emit_status(stream, "Running SCF…")  # M-PROGRESS A4
     try:
         energy_hartree = float(mf.kernel())
     except Exception as exc:
@@ -417,6 +419,7 @@ def _run_session_calc_body(
         try:
             from pyscf import mp as _mp
 
+            emit_status(stream, "Running MP2 correlation…")  # M-PROGRESS A4
             _mp2 = _mp.MP2(mf)
             _e_corr, _ = _mp2.kernel()
             mp2_correlation_hartree = float(_e_corr)
@@ -437,6 +440,7 @@ def _run_session_calc_body(
         try:
             from pyscf import cc as _cc
 
+            emit_status(stream, "Running CCSD correlation…")  # M-PROGRESS A4
             _ccsd_obj = _cc.CCSD(mf)
             _e_corr_ccsd, _t1, _t2 = _ccsd_obj.kernel()
             ccsd_correlation_hartree = float(_e_corr_ccsd)
@@ -447,6 +451,7 @@ def _run_session_calc_body(
             ) from exc
         if method_upper == "CCSD(T)":
             try:
+                emit_status(stream, "Computing CCSD(T) triples…")  # M-PROGRESS A4
                 _e_t = _ccsd_obj.ccsd_t()
                 ccsd_t_correction_hartree = float(_e_t)
                 energy_hartree += float(_e_t)

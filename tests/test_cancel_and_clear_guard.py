@@ -82,6 +82,35 @@ class TestCancellationHooks:
         attach_scf_cancel_callback(mf, None)
         assert mf.callback is None
 
+    def test_progress_cb_called_each_cycle(self):
+        # M-PROGRESS A3: the same callback drives a per-cycle progress hook.
+        class _FakeMF:
+            callback = None
+
+        mf = _FakeMF()
+        seen = []
+        attach_scf_cancel_callback(
+            mf, None, progress_cb=lambda envs: seen.append(envs.get("cycle"))
+        )
+        assert callable(mf.callback)
+        mf.callback({"cycle": 0})
+        mf.callback({"cycle": 1})
+        assert seen == [0, 1]
+
+    def test_progress_and_cancel_compose(self):
+        # progress_cb runs, THEN cancel raises — both on the one callback.
+        class _FakeMF:
+            callback = None
+
+        mf = _FakeMF()
+        seen = []
+        attach_scf_cancel_callback(
+            mf, lambda: True, progress_cb=lambda envs: seen.append(1)
+        )
+        with pytest.raises(CalcCancelled):
+            mf.callback({"cycle": 0})
+        assert seen == [1]  # progress fired before the cancel raise
+
 
 # ── _LogCapture cancellation mechanism ──────────────────────────────────────
 

@@ -22,48 +22,96 @@ def _calc_type_badge(calc_type: str) -> str:
     }.get(calc_type, calc_type or "Unknown")
 
 
-_RUN_HEADER_CALC_LABELS = {
-    "Single Point": "Single Point Energy",
-    "Geometry Opt": "Geometry Optimization",
-    "Frequency": "Frequency Analysis",
-    "UV-Vis (TD-DFT)": "TD-DFT (UV-Vis)",
-    "NMR Shielding": "NMR Shielding",
-    "PES Scan": "PES Scan",
+# Calc-type dropdown label → canonical schema key (used for the header banner).
+_CALC_TYPE_CANON = {
+    "Geometry Opt": "geometry_opt",
+    "Frequency": "frequency",
+    "UV-Vis (TD-DFT)": "tddft",
+    "NMR Shielding": "nmr",
+    "PES Scan": "pes_scan",
+    "Reorganization Energy": "reorganization_energy",
 }
 
 
-def _write_provisional_run_header(app: Any) -> None:
-    """Print an immediate one-line header the instant Run is clicked (UXP.6).
+def _write_run_header(app: Any) -> None:
+    """Write the full run header to the live log — synchronously, atomically.
 
-    The full structured banner (``format_log_header``) is written from the
-    background ``_do_run`` thread and can lag behind the first observable
-    output because it calls ``get_system_info()`` (which may shell out to
-    ``nvidia-smi``) and only runs once the thread has spun up. This provisional
-    line runs synchronously on the main thread so the user gets instant
-    feedback that the click registered; the full banner follows and augments it.
+    UXP.6 + bug fix (2026-07-18): the header used to be written two ways, both
+    unreliable in Voilà — a provisional line via ``clear_output()`` +
+    ``append_stdout()`` (the non-atomic combo ``_set_html_output`` exists to
+    avoid) and the structured banner via ``append_stdout`` from the *background*
+    ``_do_run`` thread (a bg-thread ``.outputs`` mutation, which this app
+    marshals through the io_loop everywhere else). For a large molecule the long
+    gap before the first optimizer/SCF step exposed the race: the pre-step-1
+    stream (both headers) was dropped and the log jumped straight to ``BFGS: 0``.
+
+    Fix: build the whole banner and assign it in a single atomic
+    ``run_output.outputs = (…)`` on the main thread (the click handler). No
+    ``clear_output``, no bg-thread write, no intermediate empty state.
+    ``get_system_info()`` is ``lru_cache``d (warmed at startup) so this stays
+    instant. Later PySCF / optimizer output appends onto this header as before.
     """
     mol = getattr(app, "_molecule", None)
     if mol is None:
+        # Nothing will run; just clear the previous log atomically.
+        _set_run_output(app, ())
         return
     try:
-        formula = mol.get_formula()
-    except Exception:
-        formula = "?"
-    ct_label = _RUN_HEADER_CALC_LABELS.get(
-        app.calc_type_dd.value, app.calc_type_dd.value
-    )
-    try:
-        app.run_output.append_stdout(
-            f"▶ Starting {ct_label} — {formula} · "
-            f"{app.method_dd.value}/{app.basis_dd.value} …\n"
+        from quantui.log_utils import format_log_header
+
+        calc_type = _CALC_TYPE_CANON.get(app.calc_type_dd.value, "single_point")
+        try:
+            _n_atoms = len(mol.atoms)
+        except Exception:
+            _n_atoms = None
+        _solvent = app.solvent_dd.value if app.solvent_cb.value else None
+        try:
+            _out_dir = str(app._get_results_dir())
+        except Exception:
+            _out_dir = None
+        banner = format_log_header(
+            formula=mol.get_formula(),
+            method=app.method_dd.value,
+            basis=app.basis_dd.value,
+            calc_type=calc_type,
+            n_atoms=_n_atoms,
+            multiplicity=int(app.mult_si.value),
+            solvent=_solvent,
+            output_dir=_out_dir,
         )
     except Exception:
-        pass
+        # Fallback: a minimal one-liner still beats a blank window.
+        try:
+            banner = (
+                f"▶ Starting {app.calc_type_dd.value} — {mol.get_formula()} · "
+                f"{app.method_dd.value}/{app.basis_dd.value} …\n"
+            )
+        except Exception:
+            banner = "▶ Starting calculation …\n"
+    _set_run_output(
+        app,
+        ({"output_type": "stream", "name": "stdout", "text": banner},),
+    )
+
+
+def _set_run_output(app: Any, outputs: tuple) -> None:
+    """Atomically set ``run_output.outputs`` (fallback to clear_output)."""
+    try:
+        app.run_output.outputs = outputs
+    except Exception:
+        try:
+            app.run_output.clear_output()
+            for o in outputs:
+                app.run_output.append_stdout(o.get("text", ""))
+        except Exception:
+            pass
 
 
 def on_run_clicked(app: Any, btn: Any) -> None:
     """Reset result panes and start the background run thread."""
-    app.run_output.clear_output()
+    # Write the header FIRST (atomic, main thread) — this also clears the
+    # previous run's log via the single ``outputs`` assignment.
+    _write_run_header(app)
     app.result_output.clear_output()
     app.result_viz_output.clear_output()
     app._analysis_mol_output.clear_output()
@@ -79,7 +127,6 @@ def on_run_clicked(app: Any, btn: Any) -> None:
     app._completion_banner.layout.display = "none"
     app._to_analysis_btn.layout.display = "none"
     app._analysis_empty_html.layout.display = "none"
-    _write_provisional_run_header(app)
     threading.Thread(target=app._do_run, daemon=True).start()
 
 

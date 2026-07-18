@@ -706,6 +706,131 @@ class TestExportScriptCallback:
         assert "Error" not in app.export_status.value
 
 
+class TestRunHeader:
+    """The run header is written atomically on the main thread (2026-07-18 fix).
+
+    Regression: the header used clear_output()+append and a background-thread
+    append, so for large molecules the pre-step-1 stream was dropped and the
+    log jumped straight to the first optimizer step. The fix writes the whole
+    banner in one atomic ``run_output.outputs = (...)`` on click.
+    """
+
+    def test_header_written_atomically_with_molecule(self):
+        from quantui.app_runflow import _write_run_header
+
+        app = QuantUIApp()
+        app._set_molecule(_water())
+        app.method_dd.value = "B3LYP"
+        app.basis_dd.value = "6-31G*"
+        _write_run_header(app)
+        outs = app.run_output.outputs
+        # A single atomic stream output — not a clear + multiple appends.
+        assert len(outs) == 1
+        assert outs[0]["output_type"] == "stream"
+        text = outs[0]["text"]
+        assert "B3LYP" in text and "6-31G*" in text
+
+    def test_header_clears_stale_log_when_no_molecule(self):
+        from quantui.app_runflow import _write_run_header
+
+        app = QuantUIApp()
+        app.run_output.outputs = (
+            {"output_type": "stream", "name": "stdout", "text": "old run\n"},
+        )
+        app._molecule = None
+        _write_run_header(app)
+        assert app.run_output.outputs == ()
+
+
+class TestProgressTicker:
+    """M-PROGRESS A1: the live elapsed-time ticker."""
+
+    def test_format_elapsed(self):
+        from quantui.log_utils import format_elapsed
+
+        assert format_elapsed(0) == "0:00"
+        assert format_elapsed(65) == "1:05"
+        assert format_elapsed(3725) == "1:02:05"
+        assert format_elapsed(-3) == "0:00"
+
+    def test_start_sets_stop_event_and_stop_clears(self):
+        app = QuantUIApp()
+        import time as _t
+
+        app._start_elapsed_ticker(_t.perf_counter())
+        assert app._elapsed_stop_event is not None
+        app._stop_elapsed_ticker()
+        assert app._elapsed_stop_event is None
+        assert app._run_elapsed_lbl.value == ""
+
+    def test_ticker_updates_the_chip(self):
+        app = QuantUIApp()
+        import time as _t
+
+        app._start_elapsed_ticker(_t.perf_counter())
+        try:
+            _t.sleep(1.2)
+            assert "⏱" in app._run_elapsed_lbl.value
+        finally:
+            app._stop_elapsed_ticker()
+
+
+class TestRemainingTimeChip:
+    """M-PROGRESS B1: fold the total estimate into a 'time remaining' readout."""
+
+    def test_elapsed_only_when_no_estimate(self):
+        app = QuantUIApp()
+        app._run_estimate_s = None
+        chip = app._format_elapsed_chip(30)
+        assert "⏱" in chip
+        assert "left" not in chip and "estimated" not in chip
+
+    def test_shows_remaining_when_estimate_present(self):
+        app = QuantUIApp()
+        app._run_estimate_s = 120.0
+        app._run_estimate_conf = "high"
+        chip = app._format_elapsed_chip(30)
+        assert "~1:30 left" in chip
+        assert "(rough)" not in chip  # high confidence → no rough marker
+
+    def test_low_confidence_marked_rough(self):
+        app = QuantUIApp()
+        app._run_estimate_s = 120.0
+        app._run_estimate_conf = "low"
+        assert "(rough)" in app._format_elapsed_chip(30)
+
+    def test_overdue_estimate_switches_message(self):
+        app = QuantUIApp()
+        app._run_estimate_s = 60.0
+        chip = app._format_elapsed_chip(200)
+        assert "longer than estimated" in chip
+        assert "left" not in chip
+
+
+class TestStatusHeartbeat:
+    """M-PROGRESS A2: emit_status drives run_status without touching the log."""
+
+    def test_emit_status_sets_label_via_logcapture(self):
+        from quantui.app import _LogCapture
+        from quantui.log_utils import emit_status
+
+        out = widgets.Output()
+        status = widgets.Label()
+        cap = _LogCapture(out, status)
+        emit_status(cap, "Optimizing geometry — SCF + gradient (step 3)…")
+        assert "step 3" in status.value
+        # set_status must NOT append anything to the output log.
+        assert out.outputs == ()
+
+    def test_emit_status_noop_on_plain_stream(self):
+        import io
+
+        from quantui.log_utils import emit_status
+
+        # A plain stream has no set_status — must be a safe no-op.
+        emit_status(io.StringIO(), "ignored")
+
+
 class TestCalcTypeHelp:
     """A '?' help button next to Calc. Type opens the calc_type help topic."""
 

@@ -738,6 +738,20 @@ class _LogCapture:
                     except Exception:
                         pass
 
+    def set_status(self, message: str) -> None:
+        """Update the live status label WITHOUT appending to the log.
+
+        M-PROGRESS A2: calc modules (optimizer / pes / reorg) call this via
+        ``log_utils.emit_status`` to surface a stage label ("Optimizing —
+        step k…") during silent (``verbose=0``) phases, without cluttering the
+        output log the way a ``[QuantUI_STATUS]`` stream line would.
+        """
+        if self._status is not None:
+            try:
+                self._status.value = message
+            except Exception:
+                pass
+
     def flush(self) -> None:
         pass
 
@@ -888,6 +902,7 @@ class QuantUIApp:
         run_output: Any
         run_panel: Any
         run_status: Any
+        _run_elapsed_lbl: Any
         solvent_cb: Any
         solvent_dd: Any
         step_progress: Any
@@ -1070,6 +1085,12 @@ class QuantUIApp:
         # Clear button from wiping output mid-run.
         self._cancel_event = threading.Event()
         self._calc_running: bool = False
+        # M-PROGRESS A1: stop signal for the live elapsed-time ticker thread.
+        self._elapsed_stop_event: Optional[threading.Event] = None
+        # M-PROGRESS B1: total run estimate the ticker turns into "time
+        # remaining"; set by _do_run once estimate_time() has run.
+        self._run_estimate_s: Optional[float] = None
+        self._run_estimate_conf: str = "unknown"
         # Relaxed molecule from a pending pre-opt preview, awaiting Keep/Revert.
         self._preopt_relaxed_mol: Optional[Molecule] = None
         # Cache kernel io_loop once on the main thread so worker threads can
@@ -1145,6 +1166,15 @@ class QuantUIApp:
         """
 
         def _detect_gpu() -> None:
+            # Warm the run-header's system-info cache (lru_cache; may shell out
+            # to nvidia-smi) off the main thread so the synchronous header write
+            # in on_run_clicked stays instant on the first calc (UXP.6).
+            try:
+                from quantui.log_utils import get_system_info
+
+                get_system_info()
+            except Exception:  # noqa: BLE001 — warm-up is best-effort
+                pass
             try:
                 from quantui.gpu_offload import is_gpu_available
 
@@ -4032,6 +4062,8 @@ class QuantUIApp:
         )
         _run_wall_t = time.perf_counter()
         _run_cpu_t = time.process_time()
+        # M-PROGRESS A1: start the live elapsed-time ticker.
+        self._start_elapsed_ticker(_run_wall_t)
         _scf_converged_t: Optional[float] = None
         _tail_marks: dict[str, float] = {}
 
@@ -4088,6 +4120,10 @@ class QuantUIApp:
             if _est is not None:
                 _predicted_run_s = float(_est["seconds"])
                 _predicted_run_confidence = str(_est.get("confidence", "unknown"))
+                # B1: hand the estimate to the live ticker so it can show a
+                # "time remaining" readout alongside elapsed.
+                self._run_estimate_s = _predicted_run_s
+                self._run_estimate_conf = _predicted_run_confidence
         except Exception as _est_exc:
             # Estimator failure here is non-fatal — we just won't have a
             # predicted_s to compare against. Log to event_log so the
@@ -4146,28 +4182,13 @@ class QuantUIApp:
             cancel_check=self._cancel_event.is_set,
         )
 
-        # Write structured log header immediately so it appears at the top of output
-        try:
-            from quantui.log_utils import format_log_header as _fmt_log_hdr
-
-            _hdr_calc_type = {
-                "Geometry Opt": "geometry_opt",
-                "Frequency": "frequency",
-                "UV-Vis (TD-DFT)": "tddft",
-                "NMR Shielding": "nmr",
-                "PES Scan": "pes_scan",
-                "Reorganization Energy": "reorganization_energy",
-            }.get(self.calc_type_dd.value, "single_point")
-            log.write(
-                _fmt_log_hdr(
-                    formula=mol.get_formula(),
-                    method=self.method_dd.value,
-                    basis=self.basis_dd.value,
-                    calc_type=_hdr_calc_type,
-                )
-            )
-        except Exception:
-            pass
+        # The run header (structured banner) is written synchronously + atomically
+        # on the main thread by ``on_run_clicked`` → ``_write_run_header`` BEFORE
+        # this background thread starts. Writing it here (bg thread) instead was
+        # the pre-step-1 "blank window" bug (2026-07-18): for a large molecule the
+        # long gap before the first optimizer/SCF line exposed a lost-early-output
+        # race in the bg-thread ``append_stdout`` path. All later PySCF / optimizer
+        # output appends onto that header via ``log`` as usual.
 
         try:
             # Classical pre-optimization is now an explicit Preview → Keep tool
@@ -5016,7 +5037,76 @@ class QuantUIApp:
             self.cancel_btn.disabled = True
             self.cancel_btn.description = "Cancel"
             self.log_clear_btn.disabled = False
+            self._stop_elapsed_ticker()
             self._activity_end(kind="compute")
+
+    # ── Live elapsed ticker (M-PROGRESS A1) ───────────────────────────────
+
+    def _start_elapsed_ticker(self, start_t: float) -> None:
+        """Spin up a daemon thread that updates the elapsed chip every ~1 s.
+
+        Writes only to ``_run_elapsed_lbl`` (never ``run_status``), so it never
+        fights the stage labels set by ``_LogCapture`` / the calc modules.
+        ``Label``/``HTML`` ``.value`` writes are thread-safe (reflection 02
+        Rule 1), so no io_loop marshaling is needed.
+        """
+        self._stop_elapsed_ticker()  # ensure no prior ticker is still running
+        # B1: reset the runtime estimate; _do_run fills it in once computed.
+        self._run_estimate_s = None
+        self._run_estimate_conf = "unknown"
+        stop_event = threading.Event()
+        self._elapsed_stop_event = stop_event
+
+        def _tick() -> None:
+            while not stop_event.wait(1.0):
+                try:
+                    self._run_elapsed_lbl.value = self._format_elapsed_chip(
+                        time.perf_counter() - start_t
+                    )
+                except Exception:
+                    break
+
+        threading.Thread(
+            target=_tick, daemon=True, name="quantui-elapsed-ticker"
+        ).start()
+
+    def _format_elapsed_chip(self, elapsed: float) -> str:
+        """Compose the live chip: ``⏱ <elapsed>`` + ``· ~<remaining> left``.
+
+        B1 (M-PROGRESS): folds the pre-run total estimate (``_run_estimate_s``,
+        set by ``_do_run``) into a remaining-time readout. Degrades to
+        elapsed-only when there's no estimate (cold history) and switches to
+        "longer than estimated" once elapsed passes the estimate — never shows a
+        negative or false-precise number. Low-confidence estimates are marked
+        "(rough)" so the readout stays honest (the estimator is Phase C's job).
+        """
+        from quantui.log_utils import format_elapsed
+
+        base = f"⏱ {format_elapsed(elapsed)}"
+        est = getattr(self, "_run_estimate_s", None)
+        if est and est > 0:
+            remaining = est - elapsed
+            if remaining > 0:
+                rough = (
+                    " (rough)"
+                    if getattr(self, "_run_estimate_conf", "") == "low"
+                    else ""
+                )
+                base = f"{base} · ~{format_elapsed(remaining)} left{rough}"
+            else:
+                base = f"{base} · longer than estimated"
+        return f'<span style="color:#64748b;font-size:13px">{base}</span>'
+
+    def _stop_elapsed_ticker(self) -> None:
+        """Stop the elapsed ticker and clear the chip."""
+        ev = getattr(self, "_elapsed_stop_event", None)
+        if ev is not None:
+            ev.set()
+            self._elapsed_stop_event = None
+        try:
+            self._run_elapsed_lbl.value = ""
+        except Exception:
+            pass
 
     def _update_notes(self, change=None) -> None:
         _run_update_notes(self, change)

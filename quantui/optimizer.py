@@ -94,6 +94,8 @@ try:
             charge: int = 0,
             spin: int = 0,
             cancel_check=None,
+            progress_stream=None,
+            status_label: str = "Optimizing geometry",
             **kwargs,
         ) -> None:
             super().__init__(**kwargs)
@@ -105,6 +107,12 @@ try:
             # the per-step SCF callback (the SCF runs silent here, so the
             # stream-based cancel can't see it).
             self.cancel_check = cancel_check
+            # M-PROGRESS A2: progress stream + label for per-step status
+            # heartbeats (the SCF runs at verbose=0, so nothing else surfaces
+            # progress during a step). ``_eval_count`` counts force evaluations.
+            self.progress_stream = progress_stream
+            self.status_label = status_label
+            self._eval_count = 0
 
         def calculate(
             self,
@@ -122,6 +130,16 @@ try:
             )
 
             raise_if_cancelled(self.cancel_check)
+
+            # M-PROGRESS A2: heartbeat so the status line advances during the
+            # (silent) per-step SCF + gradient.
+            self._eval_count += 1
+            from .log_utils import emit_status
+
+            emit_status(
+                self.progress_stream,
+                f"{self.status_label} — SCF + gradient (step {self._eval_count})…",
+            )
 
             import numpy as np
             from pyscf import dft, gto, scf
@@ -166,7 +184,21 @@ try:
 
             mf.verbose = 0
             mf.stdout = _sink
-            attach_scf_cancel_callback(mf, self.cancel_check)
+
+            # M-PROGRESS A3: per-SCF-cycle heartbeat during the (silent) step,
+            # so the status advances mid-SCF, not just per optimizer step.
+            _k = self._eval_count
+
+            def _scf_progress(envs, _k=_k) -> None:
+                cyc = envs.get("cycle") if hasattr(envs, "get") else None
+                if cyc is None:
+                    return
+                emit_status(
+                    self.progress_stream,
+                    f"{self.status_label} — step {_k}, SCF cycle {cyc + 1}…",
+                )
+
+            attach_scf_cancel_callback(mf, self.cancel_check, progress_cb=_scf_progress)
             mf.kernel()
 
             # Save final SCF state for orbital visualization
@@ -308,6 +340,7 @@ def optimize_geometry(
     fmax: float = DEFAULT_FMAX,
     steps: int = DEFAULT_OPT_STEPS,
     progress_stream: Optional[IO[str]] = None,
+    status_label: str = "Optimizing geometry",
 ) -> OptimizationResult:
     """
     Optimize a molecular geometry at the QM level using ASE-BFGS + PySCF.
@@ -410,6 +443,8 @@ def optimize_geometry(
         charge=molecule.charge,
         spin=molecule.multiplicity - 1,
         cancel_check=_cancel_check,
+        progress_stream=_stream,
+        status_label=status_label,
     )
 
     # M-STDERR / STDERR.1: PySCF gradients (called by ASE-BFGS at every

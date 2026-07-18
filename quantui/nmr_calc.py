@@ -362,9 +362,11 @@ def _run_nmr_calc_body(
 
     # UXP.5: cooperative cancel between SCF cycles.
     from .cancellation import attach_scf_cancel_callback, cancel_check_from_stream
+    from .log_utils import emit_status
 
     attach_scf_cancel_callback(mf, cancel_check_from_stream(stream))
 
+    emit_status(stream, "Running SCF…")  # M-PROGRESS A4
     try:
         mf.kernel()
     except Exception as exc:
@@ -388,6 +390,7 @@ def _run_nmr_calc_body(
 
     _ensure_nmr_compat_patches_applied()
 
+    emit_status(stream, "Computing NMR shielding tensors (GIAO)…")  # M-PROGRESS A4
     try:
         if method_upper == "RHF":
             nmr_obj = _pyscf_nmr.RHF(mf)
