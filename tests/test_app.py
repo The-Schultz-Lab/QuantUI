@@ -775,6 +775,38 @@ class TestProgressTicker:
             app._stop_elapsed_ticker()
 
 
+class TestRemainingTimeChip:
+    """M-PROGRESS B1: fold the total estimate into a 'time remaining' readout."""
+
+    def test_elapsed_only_when_no_estimate(self):
+        app = QuantUIApp()
+        app._run_estimate_s = None
+        chip = app._format_elapsed_chip(30)
+        assert "⏱" in chip
+        assert "left" not in chip and "estimated" not in chip
+
+    def test_shows_remaining_when_estimate_present(self):
+        app = QuantUIApp()
+        app._run_estimate_s = 120.0
+        app._run_estimate_conf = "high"
+        chip = app._format_elapsed_chip(30)
+        assert "~1:30 left" in chip
+        assert "(rough)" not in chip  # high confidence → no rough marker
+
+    def test_low_confidence_marked_rough(self):
+        app = QuantUIApp()
+        app._run_estimate_s = 120.0
+        app._run_estimate_conf = "low"
+        assert "(rough)" in app._format_elapsed_chip(30)
+
+    def test_overdue_estimate_switches_message(self):
+        app = QuantUIApp()
+        app._run_estimate_s = 60.0
+        chip = app._format_elapsed_chip(200)
+        assert "longer than estimated" in chip
+        assert "left" not in chip
+
+
 class TestStatusHeartbeat:
     """M-PROGRESS A2: emit_status drives run_status without touching the log."""
 

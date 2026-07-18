@@ -1087,6 +1087,10 @@ class QuantUIApp:
         self._calc_running: bool = False
         # M-PROGRESS A1: stop signal for the live elapsed-time ticker thread.
         self._elapsed_stop_event: Optional[threading.Event] = None
+        # M-PROGRESS B1: total run estimate the ticker turns into "time
+        # remaining"; set by _do_run once estimate_time() has run.
+        self._run_estimate_s: Optional[float] = None
+        self._run_estimate_conf: str = "unknown"
         # Relaxed molecule from a pending pre-opt preview, awaiting Keep/Revert.
         self._preopt_relaxed_mol: Optional[Molecule] = None
         # Cache kernel io_loop once on the main thread so worker threads can
@@ -4116,6 +4120,10 @@ class QuantUIApp:
             if _est is not None:
                 _predicted_run_s = float(_est["seconds"])
                 _predicted_run_confidence = str(_est.get("confidence", "unknown"))
+                # B1: hand the estimate to the live ticker so it can show a
+                # "time remaining" readout alongside elapsed.
+                self._run_estimate_s = _predicted_run_s
+                self._run_estimate_conf = _predicted_run_confidence
         except Exception as _est_exc:
             # Estimator failure here is non-fatal — we just won't have a
             # predicted_s to compare against. Log to event_log so the
@@ -5043,17 +5051,17 @@ class QuantUIApp:
         Rule 1), so no io_loop marshaling is needed.
         """
         self._stop_elapsed_ticker()  # ensure no prior ticker is still running
+        # B1: reset the runtime estimate; _do_run fills it in once computed.
+        self._run_estimate_s = None
+        self._run_estimate_conf = "unknown"
         stop_event = threading.Event()
         self._elapsed_stop_event = stop_event
 
         def _tick() -> None:
-            from quantui.log_utils import format_elapsed
-
             while not stop_event.wait(1.0):
                 try:
-                    self._run_elapsed_lbl.value = (
-                        '<span style="color:#64748b;font-size:13px">'
-                        f"⏱ {format_elapsed(time.perf_counter() - start_t)}</span>"
+                    self._run_elapsed_lbl.value = self._format_elapsed_chip(
+                        time.perf_counter() - start_t
                     )
                 except Exception:
                     break
@@ -5061,6 +5069,33 @@ class QuantUIApp:
         threading.Thread(
             target=_tick, daemon=True, name="quantui-elapsed-ticker"
         ).start()
+
+    def _format_elapsed_chip(self, elapsed: float) -> str:
+        """Compose the live chip: ``⏱ <elapsed>`` + ``· ~<remaining> left``.
+
+        B1 (M-PROGRESS): folds the pre-run total estimate (``_run_estimate_s``,
+        set by ``_do_run``) into a remaining-time readout. Degrades to
+        elapsed-only when there's no estimate (cold history) and switches to
+        "longer than estimated" once elapsed passes the estimate — never shows a
+        negative or false-precise number. Low-confidence estimates are marked
+        "(rough)" so the readout stays honest (the estimator is Phase C's job).
+        """
+        from quantui.log_utils import format_elapsed
+
+        base = f"⏱ {format_elapsed(elapsed)}"
+        est = getattr(self, "_run_estimate_s", None)
+        if est and est > 0:
+            remaining = est - elapsed
+            if remaining > 0:
+                rough = (
+                    " (rough)"
+                    if getattr(self, "_run_estimate_conf", "") == "low"
+                    else ""
+                )
+                base = f"{base} · ~{format_elapsed(remaining)} left{rough}"
+            else:
+                base = f"{base} · longer than estimated"
+        return f'<span style="color:#64748b;font-size:13px">{base}</span>'
 
     def _stop_elapsed_ticker(self) -> None:
         """Stop the elapsed ticker and clear the chip."""
