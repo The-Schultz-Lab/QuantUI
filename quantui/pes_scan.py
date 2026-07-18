@@ -318,6 +318,13 @@ def run_pes_scan(
 
     for step_num, val in enumerate(scan_values, start=1):
         raise_if_cancelled(_cancel_check)
+        # M-PROGRESS A2: live per-point status (the per-point SCF is silent).
+        from .log_utils import emit_status
+
+        emit_status(
+            _stream,
+            f"Scan point {step_num}/{steps} — relaxing (SCF + gradient)…",
+        )
         _stream.write(
             f"\nScan point {step_num}/{steps}: "
             f"{scan_type} = {val:.4f} {('Å' if scan_type == 'bond' else '°')}\n"

@@ -738,6 +738,20 @@ class _LogCapture:
                     except Exception:
                         pass
 
+    def set_status(self, message: str) -> None:
+        """Update the live status label WITHOUT appending to the log.
+
+        M-PROGRESS A2: calc modules (optimizer / pes / reorg) call this via
+        ``log_utils.emit_status`` to surface a stage label ("Optimizing —
+        step k…") during silent (``verbose=0``) phases, without cluttering the
+        output log the way a ``[QuantUI_STATUS]`` stream line would.
+        """
+        if self._status is not None:
+            try:
+                self._status.value = message
+            except Exception:
+                pass
+
     def flush(self) -> None:
         pass
 
@@ -888,6 +902,7 @@ class QuantUIApp:
         run_output: Any
         run_panel: Any
         run_status: Any
+        _run_elapsed_lbl: Any
         solvent_cb: Any
         solvent_dd: Any
         step_progress: Any
@@ -1070,6 +1085,8 @@ class QuantUIApp:
         # Clear button from wiping output mid-run.
         self._cancel_event = threading.Event()
         self._calc_running: bool = False
+        # M-PROGRESS A1: stop signal for the live elapsed-time ticker thread.
+        self._elapsed_stop_event: Optional[threading.Event] = None
         # Relaxed molecule from a pending pre-opt preview, awaiting Keep/Revert.
         self._preopt_relaxed_mol: Optional[Molecule] = None
         # Cache kernel io_loop once on the main thread so worker threads can
@@ -4041,6 +4058,8 @@ class QuantUIApp:
         )
         _run_wall_t = time.perf_counter()
         _run_cpu_t = time.process_time()
+        # M-PROGRESS A1: start the live elapsed-time ticker.
+        self._start_elapsed_ticker(_run_wall_t)
         _scf_converged_t: Optional[float] = None
         _tail_marks: dict[str, float] = {}
 
@@ -5010,7 +5029,49 @@ class QuantUIApp:
             self.cancel_btn.disabled = True
             self.cancel_btn.description = "Cancel"
             self.log_clear_btn.disabled = False
+            self._stop_elapsed_ticker()
             self._activity_end(kind="compute")
+
+    # ── Live elapsed ticker (M-PROGRESS A1) ───────────────────────────────
+
+    def _start_elapsed_ticker(self, start_t: float) -> None:
+        """Spin up a daemon thread that updates the elapsed chip every ~1 s.
+
+        Writes only to ``_run_elapsed_lbl`` (never ``run_status``), so it never
+        fights the stage labels set by ``_LogCapture`` / the calc modules.
+        ``Label``/``HTML`` ``.value`` writes are thread-safe (reflection 02
+        Rule 1), so no io_loop marshaling is needed.
+        """
+        self._stop_elapsed_ticker()  # ensure no prior ticker is still running
+        stop_event = threading.Event()
+        self._elapsed_stop_event = stop_event
+
+        def _tick() -> None:
+            from quantui.log_utils import format_elapsed
+
+            while not stop_event.wait(1.0):
+                try:
+                    self._run_elapsed_lbl.value = (
+                        '<span style="color:#64748b;font-size:13px">'
+                        f"⏱ {format_elapsed(time.perf_counter() - start_t)}</span>"
+                    )
+                except Exception:
+                    break
+
+        threading.Thread(
+            target=_tick, daemon=True, name="quantui-elapsed-ticker"
+        ).start()
+
+    def _stop_elapsed_ticker(self) -> None:
+        """Stop the elapsed ticker and clear the chip."""
+        ev = getattr(self, "_elapsed_stop_event", None)
+        if ev is not None:
+            ev.set()
+            self._elapsed_stop_event = None
+        try:
+            self._run_elapsed_lbl.value = ""
+        except Exception:
+            pass
 
     def _update_notes(self, change=None) -> None:
         _run_update_notes(self, change)

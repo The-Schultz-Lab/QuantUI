@@ -921,6 +921,10 @@ def build_shared_widgets(
         layout=layout_fn(width="200px", height="36px"),
     )
     app.run_status = widgets.Label()
+    # M-PROGRESS A1: live elapsed-time chip next to the status text — a bg-thread
+    # ticker updates it every ~1 s while a calc runs, so even a fully silent
+    # native phase (first gradient / Hessian) visibly advances.
+    app._run_elapsed_lbl = widgets.HTML(value="")
 
     # Gracefully stops a running calculation at the next SCF cycle / opt step.
     # Disabled unless a calc is in flight (toggled by _do_run).
@@ -1351,7 +1355,7 @@ def build_run_section(app: Any, *, layout_fn: Any) -> None:
             ),
             app.perf_estimate_html,
             widgets.HBox(
-                [app.run_btn, app.cancel_btn, app.run_status],
+                [app.run_btn, app.cancel_btn, app.run_status, app._run_elapsed_lbl],
                 layout=layout_fn(align_items="center", gap="8px"),
             ),
             widgets.HBox(

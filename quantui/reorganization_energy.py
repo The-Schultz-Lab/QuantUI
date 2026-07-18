@@ -319,6 +319,7 @@ def run_reorganization_energy(
         fmax=fmax,
         steps=steps,
         progress_stream=stream,  # type: ignore[arg-type]
+        status_label="Reorg: optimizing neutral geometry",
     )
     neutral_mol = neutral_opt.molecule
     n_total_steps = neutral_opt.n_steps
@@ -361,6 +362,7 @@ def run_reorganization_energy(
             fmax=fmax,
             steps=steps,
             progress_stream=stream,  # type: ignore[arg-type]
+            status_label=f"Reorg: optimizing {kind} ion geometry",
         )
         ion_mol = ion_opt.molecule
         n_total_steps += ion_opt.n_steps

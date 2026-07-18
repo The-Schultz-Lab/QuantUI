@@ -742,6 +742,63 @@ class TestRunHeader:
         assert app.run_output.outputs == ()
 
 
+class TestProgressTicker:
+    """M-PROGRESS A1: the live elapsed-time ticker."""
+
+    def test_format_elapsed(self):
+        from quantui.log_utils import format_elapsed
+
+        assert format_elapsed(0) == "0:00"
+        assert format_elapsed(65) == "1:05"
+        assert format_elapsed(3725) == "1:02:05"
+        assert format_elapsed(-3) == "0:00"
+
+    def test_start_sets_stop_event_and_stop_clears(self):
+        app = QuantUIApp()
+        import time as _t
+
+        app._start_elapsed_ticker(_t.perf_counter())
+        assert app._elapsed_stop_event is not None
+        app._stop_elapsed_ticker()
+        assert app._elapsed_stop_event is None
+        assert app._run_elapsed_lbl.value == ""
+
+    def test_ticker_updates_the_chip(self):
+        app = QuantUIApp()
+        import time as _t
+
+        app._start_elapsed_ticker(_t.perf_counter())
+        try:
+            _t.sleep(1.2)
+            assert "⏱" in app._run_elapsed_lbl.value
+        finally:
+            app._stop_elapsed_ticker()
+
+
+class TestStatusHeartbeat:
+    """M-PROGRESS A2: emit_status drives run_status without touching the log."""
+
+    def test_emit_status_sets_label_via_logcapture(self):
+        from quantui.app import _LogCapture
+        from quantui.log_utils import emit_status
+
+        out = widgets.Output()
+        status = widgets.Label()
+        cap = _LogCapture(out, status)
+        emit_status(cap, "Optimizing geometry — SCF + gradient (step 3)…")
+        assert "step 3" in status.value
+        # set_status must NOT append anything to the output log.
+        assert out.outputs == ()
+
+    def test_emit_status_noop_on_plain_stream(self):
+        import io
+
+        from quantui.log_utils import emit_status
+
+        # A plain stream has no set_status — must be a safe no-op.
+        emit_status(io.StringIO(), "ignored")
+
+
 class TestCalcTypeHelp:
     """A '?' help button next to Calc. Type opens the calc_type help topic."""
 

@@ -176,6 +176,41 @@ def get_system_info() -> Dict[str, Any]:
 
 
 # ============================================================================
+# Live run-status helpers (M-PROGRESS Phase A)
+# ============================================================================
+
+
+def emit_status(stream: Any, message: str) -> None:
+    """Set the live run-status label via a progress stream, if it supports it.
+
+    The run's ``_LogCapture`` exposes a ``set_status`` method; calc modules
+    call this to update the status line during otherwise-silent phases (e.g. an
+    optimizer step's SCF running at ``verbose=0``) WITHOUT appending a line to
+    the log. No-op for plain streams (``sys.stdout``) — duck-typed, so calc
+    modules stay decoupled from the widget layer.
+    """
+    setter = getattr(stream, "set_status", None)
+    if setter is None:
+        return
+    try:
+        setter(message)
+    except Exception:  # noqa: BLE001 — status update is best-effort
+        pass
+
+
+def format_elapsed(seconds: float) -> str:
+    """Compact elapsed-time label for the live ticker: ``0:42`` / ``1:03:22``."""
+    if seconds < 0:
+        seconds = 0.0
+    s = int(seconds)
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h:
+        return f"{h}:{m:02d}:{sec:02d}"
+    return f"{m}:{sec:02d}"
+
+
+# ============================================================================
 # Duration formatter
 # ============================================================================
 
