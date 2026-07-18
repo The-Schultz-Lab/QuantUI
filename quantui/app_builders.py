@@ -1355,7 +1355,16 @@ def build_run_section(app: Any, *, layout_fn: Any) -> None:
             ),
             app.perf_estimate_html,
             widgets.HBox(
-                [app.run_btn, app.cancel_btn, app.run_status, app._run_elapsed_lbl],
+                [
+                    app.run_btn,
+                    app.cancel_btn,
+                    # Status + elapsed/remaining chip stacked vertically so the
+                    # timer never crowds/truncates the (longer) status line.
+                    widgets.VBox(
+                        [app.run_status, app._run_elapsed_lbl],
+                        layout=layout_fn(gap="0px"),
+                    ),
+                ],
                 layout=layout_fn(align_items="center", gap="8px"),
             ),
             widgets.HBox(
