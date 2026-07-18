@@ -706,6 +706,50 @@ class TestExportScriptCallback:
         assert "Error" not in app.export_status.value
 
 
+class TestCalcTypeHelp:
+    """A '?' help button next to Calc. Type opens the calc_type help topic."""
+
+    def test_calc_type_help_topic_exists(self):
+        from quantui.help_content import HELP_TOPICS
+
+        assert "calc_type" in HELP_TOPICS
+        # Covers every calc type the dropdown offers.
+        body = HELP_TOPICS["calc_type"]["body"]
+        for label in ("Single Point", "Geometry Opt", "Reorganization Energy"):
+            assert label in body
+
+    def test_help_button_opens_calc_type_topic(self):
+        app = QuantUIApp()
+        app._on_calc_type_help(None)
+        assert app.help_topic_dd.value == "calc_type"
+
+
+class TestOpenShellHint:
+    """The open-shell hint appears only when multiplicity > 1 (UXP.7 restore)."""
+
+    def test_hidden_for_singlet(self):
+        app = QuantUIApp()
+        app.mult_si.value = 1
+        assert app._open_shell_hint.layout.display == "none"
+
+    def test_shown_and_warns_for_rhf_open_shell(self):
+        app = QuantUIApp()
+        app.method_dd.value = "RHF"
+        app.mult_si.value = 2
+        assert app._open_shell_hint.layout.display == ""
+        val = app._open_shell_hint.value
+        assert "UHF" in val
+        assert "unpaired electron" in val
+
+    def test_informational_for_uhf_open_shell(self):
+        app = QuantUIApp()
+        app.method_dd.value = "UHF"
+        app.mult_si.value = 3
+        assert app._open_shell_hint.layout.display == ""
+        # UHF already handles open-shell → no "switch to UHF" nag.
+        assert "unrestricted" in app._open_shell_hint.value
+
+
 class TestDescriptorCards:
     """UXP.7: method / basis descriptor cards replace the inline notes block.
 
@@ -1019,7 +1063,14 @@ class TestNMRWidgets:
 
 
 class TestReorganizationEnergyUI:
-    """UI wiring for the Reorganization Energy calc-type + auto-setup button."""
+    """UI wiring for the Reorganization Energy calc-type.
+
+    The reorg run is driven entirely through the calc-type dropdown + the
+    channel-mode selector it reveals + the shared Run Calculation button
+    (``_do_run`` has a ``reorganization_energy`` branch). The old dedicated
+    "Calc. Reorganization Energy" auto-button was removed as a redundant
+    duplicate of that path.
+    """
 
     def test_reorg_mode_shows_channel_selector(self):
         app = QuantUIApp()
@@ -1034,19 +1085,12 @@ class TestReorganizationEnergyUI:
         app.calc_type_dd.value = "Reorganization Energy"
         assert app._freq_preopt_cb.layout.display == "none"
 
-    def test_auto_button_enabled_after_molecule_load(self):
-        app = QuantUIApp()
-        assert app._reorg_auto_btn.disabled is True
-        mol = Molecule(["H", "H"], [[0, 0, 0], [0, 0, 0.74]])
-        app._set_molecule(mol)
-        assert app._reorg_auto_btn.disabled is False
-
-    def test_auto_button_sets_up_mode(self):
+    def test_reorg_calc_type_sets_up_mode(self):
         app = QuantUIApp()
         mol = Molecule(["H", "H"], [[0, 0, 0], [0, 0, 0.74]])
         app._set_molecule(mol)
-        # Drive only the setup portion (not the background run thread) by
-        # replicating what the handler does before dispatch.
+        # Selecting the calc type reveals the channel selector; Run Calculation
+        # then dispatches the reorg run via _do_run's reorg branch.
         app.calc_type_dd.value = "Reorganization Energy"
         app._reorg_mode_dd.value = "both"
         assert app.calc_type_dd.value == "Reorganization Energy"

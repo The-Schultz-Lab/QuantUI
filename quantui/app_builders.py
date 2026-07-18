@@ -578,9 +578,22 @@ def build_shared_widgets(
 
     app._method_card_html = widgets.HTML(value=method_card_html(default_method))
     app._basis_card_html = widgets.HTML(value=basis_card_html(default_basis))
-    app._descriptor_cards_box = widgets.VBox(
+    # Cards sit side-by-side (horizontal) so the setup row stays short — a
+    # vertical stack made the row tall and left a large gap above Calc. Type.
+    # flex_wrap lets the pair wrap gracefully on a narrow window.
+    app._descriptor_cards_box = widgets.HBox(
         [app._method_card_html, app._basis_card_html],
-        layout=layout_fn(margin="0 0 0 4px"),
+        layout=layout_fn(
+            gap="8px",
+            align_items="flex-start",
+            flex_wrap="wrap",
+            margin="0 0 0 4px",
+        ),
+    )
+    # Open-shell hint — shown only when multiplicity > 1 (updated by
+    # ``update_notes``). Restores the guidance the old notes block carried.
+    app._open_shell_hint = widgets.HTML(
+        value="", layout=layout_fn(display="none", margin="2px 0 0 0")
     )
     app.perf_estimate_html = widgets.HTML()
 
@@ -893,6 +906,12 @@ def build_shared_widgets(
         layout=layout_fn(width="28px", height="28px"),
         tooltip="Choosing a basis set — opens Help tab",
     )
+    app.calc_type_help_btn = widgets.Button(
+        description="?",
+        button_style="",
+        layout=layout_fn(width="28px", height="28px"),
+        tooltip="What each calculation type computes — opens Help tab",
+    )
 
     app.run_btn = widgets.Button(
         description="Run Calculation",
@@ -902,21 +921,6 @@ def build_shared_widgets(
         layout=layout_fn(width="200px", height="36px"),
     )
     app.run_status = widgets.Label()
-
-    # One-click reorganization energy: switches the calc type to
-    # "Reorganization Energy", applies sensible defaults (both channels), and
-    # immediately launches the 4-point run.
-    app._reorg_auto_btn = widgets.Button(
-        description="Calc. Reorganization Energy",
-        button_style="warning",
-        icon="bolt",
-        disabled=True,
-        layout=layout_fn(width="250px", height="36px"),
-        tooltip=(
-            "Set up and run the 4-point Marcus reorganization energy "
-            "(hole + electron) on the loaded molecule"
-        ),
-    )
 
     # Gracefully stops a running calculation at the next SCF cycle / opt step.
     # Disabled unless a calc is in flight (toggled by _do_run).
@@ -1315,7 +1319,11 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
                 ],
                 layout=layout_fn(flex_wrap="wrap", align_items="flex-start"),
             ),
-            app.calc_type_dd,
+            app._open_shell_hint,
+            widgets.HBox(
+                [app.calc_type_dd, app.calc_type_help_btn],
+                layout=layout_fn(align_items="center", gap="4px"),
+            ),
             app.calc_extra_opts,
             widgets.HBox(
                 [app.preopt_preview_label, app.preopt_preview_btn],
@@ -1343,10 +1351,9 @@ def build_run_section(app: Any, *, layout_fn: Any) -> None:
             ),
             app.perf_estimate_html,
             widgets.HBox(
-                [app.run_btn, app._reorg_auto_btn, app.run_status],
+                [app.run_btn, app.cancel_btn, app.run_status],
                 layout=layout_fn(align_items="center", gap="8px"),
             ),
-            widgets.HBox([app.run_btn, app.cancel_btn, app.run_status]),
             widgets.HBox(
                 [
                     widgets.HTML(

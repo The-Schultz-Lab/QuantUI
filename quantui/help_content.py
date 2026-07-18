@@ -48,6 +48,51 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "context-sensitive help on that specific option.</p>"
         ),
     },
+    "calc_type": {
+        "title": "Calculation types — what does each one do?",
+        "body": (
+            "<p>The <b>Calc. Type</b> dropdown chooses what QuantUI computes for "
+            "your molecule at the selected method / basis.</p>"
+            "<table style='border-collapse:collapse; margin:6px 0;'>"
+            "<tr style='border-bottom:1px solid #ccc;'>"
+            "  <th style='padding:3px 12px; text-align:left;'>Type</th>"
+            "  <th style='padding:3px 12px; text-align:left;'>Computes</th>"
+            "  <th style='padding:3px 12px; text-align:left;'>Cost</th></tr>"
+            "<tr><td style='padding:3px 12px;'><b>Single Point</b></td>"
+            "  <td style='padding:3px 12px;'>Energy + properties at the input "
+            "geometry (no atoms move)</td>"
+            "  <td style='padding:3px 12px;'>Fastest</td></tr>"
+            "<tr><td style='padding:3px 12px;'><b>Geometry Opt</b></td>"
+            "  <td style='padding:3px 12px;'>Relaxes the structure to a minimum-"
+            "energy geometry</td>"
+            "  <td style='padding:3px 12px;'>Moderate</td></tr>"
+            "<tr><td style='padding:3px 12px;'><b>Frequency</b></td>"
+            "  <td style='padding:3px 12px;'>Vibrational modes + IR spectrum; "
+            "confirms a true minimum (no imaginary modes)</td>"
+            "  <td style='padding:3px 12px;'>Higher</td></tr>"
+            "<tr><td style='padding:3px 12px;'><b>UV-Vis (TD-DFT)</b></td>"
+            "  <td style='padding:3px 12px;'>Electronic excitations / absorption "
+            "spectrum (needs a DFT functional)</td>"
+            "  <td style='padding:3px 12px;'>Higher</td></tr>"
+            "<tr><td style='padding:3px 12px;'><b>NMR Shielding</b></td>"
+            "  <td style='padding:3px 12px;'>Isotropic shielding → predicted "
+            "¹H / ¹³C chemical shifts</td>"
+            "  <td style='padding:3px 12px;'>Higher</td></tr>"
+            "<tr><td style='padding:3px 12px;'><b>PES Scan</b></td>"
+            "  <td style='padding:3px 12px;'>Energy profile along one bond / "
+            "angle / dihedral coordinate</td>"
+            "  <td style='padding:3px 12px;'>Many points</td></tr>"
+            "<tr><td style='padding:3px 12px;'><b>Reorganization Energy</b></td>"
+            "  <td style='padding:3px 12px;'>Marcus 4-point λ for charge transfer "
+            "(hole / electron channels)</td>"
+            "  <td style='padding:3px 12px;'>Slowest (2–3 optimizations)</td></tr>"
+            "</table>"
+            "<p><b>Typical workflow:</b> optimize the geometry first "
+            "(<b>Geometry Opt</b>), then run <b>Frequency</b>, <b>UV-Vis</b>, or "
+            "<b>NMR</b> on the optimized structure for meaningful results — most "
+            "spectra are only valid at a minimum-energy geometry.</p>"
+        ),
+    },
     "method": {
         "title": "RHF vs UHF — which method should I use?",
         "body": (
