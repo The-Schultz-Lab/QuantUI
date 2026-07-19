@@ -156,7 +156,7 @@ def run_tddft_calc(
 
     stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
 
-    # M-STDERR / STDERR.1: see quantui/c_stderr.py — captures fd-2 stderr
+    # See quantui/c_stderr.py — captures fd-2 stderr
     # from libcint / BLAS / LAPACK / TDA solver C code and relays to
     # ``stream`` on exit. POSIX-only; no-op on Windows.
     from quantui.c_stderr import capture_c_stderr
@@ -187,7 +187,7 @@ def _run_tddft_calc_body(
     _scf: Any,
     stream: IO[str],
 ) -> TDDFTResult:
-    """Inner body of :func:`run_tddft_calc` (split out for STDERR.1 wrap)."""
+    """Inner body of :func:`run_tddft_calc` (split out for stderr-capture wrap)."""
     dft, gto, scf = _dft, _gto, _scf
 
     # ── Build Mole object ────────────────────────────────────────────────────
@@ -209,7 +209,7 @@ def _run_tddft_calc_body(
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
     else:
-        # session 55: route through resolve_xc + maybe_apply_d3 so
+        # Route through resolve_xc + maybe_apply_d3 so
         # methods like wB97X-D (PySCF rejects "wb97x-d") map cleanly.
         from .session_calc import maybe_apply_d3, resolve_xc
 
@@ -227,13 +227,13 @@ def _run_tddft_calc_body(
         except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
             pass
 
-    # UXP.5: cooperative cancel between SCF cycles.
+    # Cooperative cancel between SCF cycles.
     from .cancellation import attach_scf_cancel_callback, cancel_check_from_stream
     from .log_utils import emit_status
 
     attach_scf_cancel_callback(mf, cancel_check_from_stream(stream))
 
-    emit_status(stream, "Running SCF (ground state)…")  # M-PROGRESS A4
+    emit_status(stream, "Running SCF (ground state)…")
     try:
         energy_hartree = float(mf.kernel())
     except Exception as exc:
@@ -270,7 +270,7 @@ def _run_tddft_calc_body(
     oscillator_strengths: List[float] = []
 
     try:
-        emit_status(  # M-PROGRESS A4
+        emit_status(
             stream,
             f"Solving {'TDHF (CIS)' if using_hf else 'TD-DFT'} "
             f"excited states ({nstates})…",

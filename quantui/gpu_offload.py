@@ -1,9 +1,9 @@
-"""GPU offload helpers (M-GPU / GPU.1).
+"""GPU offload helpers.
 
 Wraps the runtime decision "should this SCF object be migrated to GPU?".
 Detection probes ``gpu4pyscf`` + ``cupy`` for a CUDA-capable device; if
 anything is missing or broken the helpers silently report "no GPU" so the
-caller falls back to CPU. This means M-GPU integration is safe to leave
+caller falls back to CPU. This means GPU integration is safe to leave
 enabled by default on every platform — Windows users without CUDA, WSL
 users without gpu4pyscf installed, and remote machines with broken NVIDIA
 drivers all converge to the same "CPU" outcome with no exception leakage.
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 #
 # - ``CCSD(T)`` is documented as unsupported in the gpu4pyscf README.
 # - ``MP2`` and ``CCSD`` are labelled "experimental" by gpu4pyscf and
-#   were observed (session 55, 2026-05-25 user tier-4 run) to fail
+#   were observed (2026-05-25) to fail
 #   immediately after a successful RHF reference on GPU — the failure
 #   fingerprint was "step completed in RHF wall time + small delta,
 #   then errored", which fits the post-HF code choking on a

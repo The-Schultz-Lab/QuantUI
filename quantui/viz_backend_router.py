@@ -5,8 +5,7 @@ Resolves which 3D rendering backend (py3Dmol or plotlymol3d) to use for a given
 render task, taking into account user preference and installed-package
 availability. Pure function — no I/O, no widget state, no app reference.
 
-The routing policy mirrors the Capability Routing Policy table in
-`M-VIZ-BACKEND` roadmap (`22-m-viz-backend-routing-roadmap.md`).
+The routing policy mirrors a capability-based routing policy table.
 
 Typical usage
 -------------

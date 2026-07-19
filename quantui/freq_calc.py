@@ -186,7 +186,7 @@ def run_freq_calc(
 
     stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
 
-    # M-STDERR / STDERR.1: see quantui/c_stderr.py — captures fd-2 stderr
+    # See quantui/c_stderr.py — captures fd-2 stderr
     # from libcint / BLAS / LAPACK / Hessian C code and relays to ``stream``
     # on exit. POSIX-only; no-op on Windows.
     from quantui.c_stderr import capture_c_stderr
@@ -217,7 +217,7 @@ def _run_freq_calc_body(
     _pyscf_thermo: Any,
     stream: IO[str],
 ) -> FreqResult:
-    """Inner body of :func:`run_freq_calc` (split out for STDERR.1 wrap)."""
+    """Inner body of :func:`run_freq_calc` (split out for stderr-capture wrap)."""
     dft, gto, scf, pyscf_thermo = _dft, _gto, _scf, _pyscf_thermo
 
     def _status(msg: str) -> None:
@@ -244,7 +244,7 @@ def _run_freq_calc_body(
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
     else:
-        # session 55: route through resolve_xc + maybe_apply_d3 so
+        # Route through resolve_xc + maybe_apply_d3 so
         # methods like wB97X-D (PySCF rejects "wb97x-d") map to the
         # bare functional + external D3 dispersion.
         from .session_calc import maybe_apply_d3, resolve_xc
@@ -253,7 +253,7 @@ def _run_freq_calc_body(
         mf.xc = resolve_xc(method)
         mf = maybe_apply_d3(mf, method, progress_stream=stream)
 
-    # UXP.5: cooperative cancel between SCF cycles (the Hessian block that
+    # Cooperative cancel between SCF cycles (the Hessian block that
     # follows is a single long native call the callback can't interrupt).
     from .cancellation import attach_scf_cancel_callback, cancel_check_from_stream
 
@@ -316,9 +316,9 @@ def _run_freq_calc_body(
             for atom, coords in zip(molecule.atoms, molecule.coordinates)
         ]
     except Exception as exc:
-        # Same class as session_calc bug-A: silent failure here ships
-        # a FreqResult with no MO data, breaking the Energies panel on
-        # history replay. Log to surface in the Log tab.
+        # Silent failure here ships a FreqResult with no MO data,
+        # breaking the Energies panel on history replay. Log to surface
+        # in the Log tab.
         logger.warning(
             "MO data extraction failed in freq calc for %s: %s",
             molecule.get_formula(),
@@ -398,7 +398,7 @@ def _run_freq_calc_body(
                 _dm0 = mf.make_rdm1()
                 _dpdx = _np_ir.zeros((_n_ir * 3, 3))
                 _xc = getattr(mf, "xc", None)
-                # M5 audit fix (2026-07-14): whether the inner displaced-SCF
+                # Fix (2026-07-14): whether the inner displaced-SCF
                 # loop needs an unrestricted (UHF/UKS) object is determined
                 # by _dm0's actual shape — (2, nao, nao) for UHF/UKS/ROHF,
                 # (nao, nao) for RHF/RKS — NOT by mol.spin == 0. Those two
@@ -421,7 +421,7 @@ def _run_freq_calc_body(
 
                 # Inner-SCF helper: builds the right RHF/UHF/RKS/UKS object
                 # for the current ``mol`` geometry, attempts gpu4pyscf
-                # offload (M-GPU extension to the IR-intensity loop —
+                # offload (GPU extension to the IR-intensity loop —
                 # without this wrap, the per-displacement SCFs run on CPU
                 # even when the outer SCF was GPU-offloaded), and returns
                 # the dipole moment as a numpy array. Used for both +Δ and

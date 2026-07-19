@@ -807,6 +807,55 @@ class TestRemainingTimeChip:
         assert "left" not in chip
 
 
+class TestFractionProgress:
+    """M-PROGRESS B2: fraction-complete drives a self-correcting remaining time."""
+
+    def test_emit_progress_sets_and_clamps_fraction(self):
+        from quantui.app import _LogCapture
+        from quantui.log_utils import emit_progress
+
+        cap = _LogCapture(widgets.Output())
+        emit_progress(cap, 0.4)
+        assert cap._fraction == 0.4
+        emit_progress(cap, 1.5)  # clamped below 1.0
+        assert cap._fraction == 0.999
+        emit_progress(cap, -0.2)  # clamped at 0
+        assert cap._fraction == 0.0
+
+    def test_emit_progress_noop_on_plain_stream(self):
+        import io
+
+        from quantui.log_utils import emit_progress
+
+        emit_progress(io.StringIO(), 0.5)  # must not raise
+
+    def test_chip_prefers_fraction_over_total(self):
+        from quantui.app import _LogCapture
+
+        app = QuantUIApp()
+        # A total estimate is present, but a real fraction should win.
+        app._run_estimate_s = 9999.0
+        cap = _LogCapture(widgets.Output())
+        cap.set_progress_fraction(0.5)
+        app._active_log = cap
+        # 50% done at 60 s elapsed → ~60 s remaining (elapsed·(1−f)/f).
+        chip = app._format_elapsed_chip(60)
+        assert "~1:00 left" in chip
+        assert "(rough)" not in chip  # fraction path is not "rough"
+
+    def test_chip_ignores_tiny_fraction_and_falls_back(self):
+        from quantui.app import _LogCapture
+
+        app = QuantUIApp()
+        app._run_estimate_s = 120.0
+        cap = _LogCapture(widgets.Output())
+        cap.set_progress_fraction(0.01)  # below the 0.03 floor
+        app._active_log = cap
+        chip = app._format_elapsed_chip(30)
+        # Falls back to B1 total: 120 − 30 = 90 s.
+        assert "~1:30 left" in chip
+
+
 class TestStatusHeartbeat:
     """M-PROGRESS A2: emit_status drives run_status without touching the log."""
 

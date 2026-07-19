@@ -1,5 +1,5 @@
 """
-Vibrational animation disk cache (VIZBACK.9).
+Vibrational animation disk cache.
 
 Caches rendered vibrational-animation HTML per calculation result directory
 so mode switches on repeat visits and history replay are instant — no

@@ -270,9 +270,9 @@ def _event_path() -> Path:
 
 
 def _prediction_log_path() -> Path:
-    """Path to ``prediction_log.jsonl`` — the M-EST / EST.6 file
-    capturing one record per ``_do_run`` invocation with the
-    estimator's pre-run prediction and the actual wall-clock outcome.
+    """Path to ``prediction_log.jsonl`` — the file capturing one record
+    per ``_do_run`` invocation with the estimator's pre-run prediction
+    and the actual wall-clock outcome.
 
     Kept indefinitely (like ``perf_log.jsonl``) so the analytics
     dashboard can plot prediction accuracy over time without manual
@@ -359,7 +359,7 @@ def count_basis_functions(atoms: list[str], basis: str) -> Optional[int]:
 
 
 # ---------------------------------------------------------------------------
-# Statistical helpers (M-EST / EST.3, 2026-05-25)
+# Statistical helpers (2026-05-25)
 # ---------------------------------------------------------------------------
 
 
@@ -407,7 +407,7 @@ def _coefficient_of_variation(values: list[float]) -> float:
 
 
 def _confidence_label(values: list[float], n_samples: int) -> str:
-    """Variance-aware confidence label (M-EST / EST.3).
+    """Variance-aware confidence label.
 
     Combines coefficient of variation (CV) with sample count:
 
@@ -456,11 +456,12 @@ def log_calculation(
     calc_type: Optional[str] = None,
     gpu_used: Optional[bool] = None,
     gpu_name: Optional[str] = None,
+    n_steps: Optional[int] = None,
 ) -> None:
     """Append one performance record to ``perf_log.jsonl``.
 
-    ``gpu_used`` / ``gpu_name`` (added M-GPU follow-up, 2026-05-25) record
-    whether GPU offload was active for the run; reading these back lets
+    ``gpu_used`` / ``gpu_name`` (added 2026-05-25) record whether GPU
+    offload was active for the run; reading these back lets
     ``quantui.analytics.build_dashboard`` compute GPU-vs-CPU speedups
     across runs of the same (method, basis, formula) tuple.
     """
@@ -485,10 +486,14 @@ def log_calculation(
         record["gpu_used"] = bool(gpu_used)
     if gpu_name is not None:
         record["gpu_name"] = gpu_name
+    # Outer-loop step count (geom-opt BFGS steps / PES scan points). Enables
+    # a history-based "step k / ~N" prior for the live progress fraction.
+    if n_steps is not None:
+        record["n_steps"] = n_steps
     _append(_perf_path(), record)
 
 
-#: Hessian-cost multipliers used by the EST.2 frequency cost model.
+#: Hessian-cost multipliers used by the frequency cost model.
 #: PySCF's analytical Hessian for HF/DFT runs in ~2-3× SCF time; for
 #: post-HF methods it falls back to numerical Hessian which is much
 #: more expensive (effectively 6N SCFs by itself, on top of the IR
@@ -511,7 +516,7 @@ def _estimate_frequency_cost(
     n_cores: Optional[int] = None,
     gpu_used: Optional[bool] = None,
 ) -> Optional[dict]:
-    """EST.2: structured frequency-time estimate from an SP anchor.
+    """Structured frequency-time estimate from an SP anchor.
 
     Decomposition::
 
@@ -641,13 +646,13 @@ def estimate_time(
     (for example, Single Point). Legacy records without ``calc_type`` are
     only included when estimating ``single_point``.
 
-    **GPU-aware filtering** (M-EST / EST.1, 2026-05-25): when ``gpu_used``
+    **GPU-aware filtering** (2026-05-25): when ``gpu_used``
     is passed, the candidate pool is partitioned by device — GPU-history
-    predicts GPU runs and CPU-history predicts CPU runs. Records written
-    before session 55 don't have ``gpu_used`` at all; those are treated
+    predicts GPU runs and CPU-history predicts CPU runs. Older records
+    don't have ``gpu_used`` at all; those are treated
     as "device unknown" and admitted only when ``gpu_used=False`` is
     requested (the conservative assumption, since QuantUI was CPU-only
-    before M-GPU shipped). When ``gpu_used=None`` (default), the device
+    before GPU offload shipped). When ``gpu_used=None`` (default), the device
     axis is ignored and all records are eligible — back-compat with
     callers that don't know which device the upcoming run will use.
 
@@ -677,7 +682,7 @@ def estimate_time(
         scoped = [r for r in converged if r.get("calc_type") == calc_type]
 
     if len(scoped) < 2:
-        # EST.2: frequency calcs can still produce a prediction via the
+        # Frequency calcs can still produce a prediction via the
         # SP-anchored cost model even when direct freq history is empty.
         # The cost model lives at the end of this function — fall through
         # for freq, bail for everything else.
@@ -687,8 +692,8 @@ def estimate_time(
         # will all no-op (their pool checks require len >= 2), and the
         # freq cost-model fallback at the end will fire.
 
-    # M-EST / EST.1: partition by device when the caller specified one.
-    # Records pre-dating session 55 don't carry ``gpu_used`` — admit them
+    # Partition by device when the caller specified one.
+    # Older records don't carry ``gpu_used`` — admit them
     # only into the CPU pool, since QuantUI was CPU-only when they were
     # written. Track whether we downgraded for the fall-back path below.
     _gpu_filtered = False
@@ -738,7 +743,7 @@ def estimate_time(
         ]
         effs = [e for r in exact_nb for e in [_eff(r)] if e is not None]
         if len(effs) >= 2:
-            # EST.3: drop Tukey outliers before computing the predictor.
+            # Drop Tukey outliers before computing the predictor.
             # The variance of the *filtered* pool drives confidence.
             filtered_effs = _iqr_filter(effs)
             predicted = (
@@ -818,7 +823,7 @@ def estimate_time(
             "n_samples": len(same_basis),
         }
 
-    # ── EST.2 frequency cost-model fallback ───────────────────────────────────
+    # ── Frequency cost-model fallback ─────────────────────────────────────────
     # When all four direct-history strategies fail for a freq calc, fall
     # back to the structural decomposition: SP anchor + Hessian + 6N
     # inner SCFs. The SP anchor comes from the much richer single-point
@@ -838,6 +843,47 @@ def estimate_time(
             return cost_est
 
     return None
+
+
+def estimate_opt_steps(
+    method: str, basis: str, calc_type: str = "geometry_opt"
+) -> Optional[float]:
+    """Median historical outer-step count for *calc_type* (progress prior).
+
+    Reads ``perf_log`` for converged records of *calc_type* that recorded
+    ``n_steps``. Prefers exact method+basis (>= 2 records), falls back
+    to same-basis (>= 2), then to all matching-calc_type records. Returns the
+    median or ``None`` when there is no usable history — a rough prior used only
+    to seed / floor the live progress fraction, not a hard prediction.
+    """
+    try:
+        records = _read_all(_perf_path())
+    except Exception:
+        return None
+
+    def _usable(r: dict) -> bool:
+        return (
+            r.get("calc_type") == calc_type
+            and bool(r.get("converged"))
+            and isinstance(r.get("n_steps"), (int, float))
+            and r["n_steps"] > 0
+        )
+
+    pool = [r for r in records if _usable(r)]
+    if not pool:
+        return None
+    exact = [r for r in pool if r.get("method") == method and r.get("basis") == basis]
+    same_basis = [r for r in pool if r.get("basis") == basis]
+    if len(exact) >= 2:
+        chosen = exact
+    elif len(same_basis) >= 2:
+        chosen = same_basis
+    else:
+        chosen = pool
+    try:
+        return float(statistics.median(r["n_steps"] for r in chosen))
+    except Exception:
+        return None
 
 
 def format_estimate(est: Optional[dict]) -> str:
@@ -876,7 +922,7 @@ def get_perf_history() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Prediction log (M-EST / EST.6, 2026-05-25)
+# Prediction log (2026-05-25)
 # ---------------------------------------------------------------------------
 #
 # Captures one record per ``_do_run`` invocation with the estimator's
@@ -971,7 +1017,7 @@ def clear_event_log() -> None:
 # Event log (7-day TTL)
 # ---------------------------------------------------------------------------
 
-# M8 audit fix (2026-07-14): log_event() used to call prune_events() after
+# Audit fix (2026-07-14): log_event() used to call prune_events() after
 # every single append, and prune_events() itself read the file (acquiring
 # and releasing _LOCK) and only later reacquired _LOCK to rewrite it. Two
 # problems:

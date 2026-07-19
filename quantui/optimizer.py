@@ -96,6 +96,7 @@ try:
             cancel_check=None,
             progress_stream=None,
             status_label: str = "Optimizing geometry",
+            expected_steps=None,
             **kwargs,
         ) -> None:
             super().__init__(**kwargs)
@@ -103,15 +104,16 @@ try:
             self.basis = basis
             self.charge = charge
             self.spin = spin
-            # UXP.5: cooperative-cancel predicate; checked per step + wired into
+            # Cooperative-cancel predicate; checked per step + wired into
             # the per-step SCF callback (the SCF runs silent here, so the
             # stream-based cancel can't see it).
             self.cancel_check = cancel_check
-            # M-PROGRESS A2: progress stream + label for per-step status
+            # Progress stream + label for per-step status
             # heartbeats (the SCF runs at verbose=0, so nothing else surfaces
             # progress during a step). ``_eval_count`` counts force evaluations.
             self.progress_stream = progress_stream
             self.status_label = status_label
+            self.expected_steps = expected_steps  # history-based ~N prior
             self._eval_count = 0
 
         def calculate(
@@ -122,7 +124,7 @@ try:
         ) -> None:
             super().calculate(atoms, properties, system_changes)
 
-            # UXP.5: bail before starting this step's SCF if cancel was clicked
+            # Bail before starting this step's SCF if cancel was clicked
             # (fires between BFGS force evaluations, independent of ASE output).
             from .cancellation import (
                 attach_scf_cancel_callback,
@@ -131,14 +133,19 @@ try:
 
             raise_if_cancelled(self.cancel_check)
 
-            # M-PROGRESS A2: heartbeat so the status line advances during the
+            # Heartbeat so the status line advances during the
             # (silent) per-step SCF + gradient.
             self._eval_count += 1
             from .log_utils import emit_status
 
+            _step_of = (
+                f"{self._eval_count}/~{int(self.expected_steps)}"
+                if self.expected_steps
+                else f"{self._eval_count}"
+            )
             emit_status(
                 self.progress_stream,
-                f"{self.status_label} — SCF + gradient (step {self._eval_count})…",
+                f"{self.status_label} — SCF + gradient (step {_step_of})…",
             )
 
             import numpy as np
@@ -174,7 +181,7 @@ try:
             elif method_upper == "UHF":
                 mf = scf.UHF(mol)
             else:
-                # DFT functional. session 55: route through resolve_xc +
+                # DFT functional. Route through resolve_xc +
                 # maybe_apply_d3 so wB97X-D / PBE-D3 work mid-optimization.
                 from .session_calc import maybe_apply_d3, resolve_xc
 
@@ -185,7 +192,7 @@ try:
             mf.verbose = 0
             mf.stdout = _sink
 
-            # M-PROGRESS A3: per-SCF-cycle heartbeat during the (silent) step,
+            # Per-SCF-cycle heartbeat during the (silent) step,
             # so the status advances mid-SCF, not just per optimizer step.
             _k = self._eval_count
 
@@ -341,6 +348,8 @@ def optimize_geometry(
     steps: int = DEFAULT_OPT_STEPS,
     progress_stream: Optional[IO[str]] = None,
     status_label: str = "Optimizing geometry",
+    report_fraction: bool = True,
+    expected_steps: Optional[int] = None,
 ) -> OptimizationResult:
     """
     Optimize a molecular geometry at the QM level using ASE-BFGS + PySCF.
@@ -445,9 +454,10 @@ def optimize_geometry(
         cancel_check=_cancel_check,
         progress_stream=_stream,
         status_label=status_label,
+        expected_steps=expected_steps,
     )
 
-    # M-STDERR / STDERR.1: PySCF gradients (called by ASE-BFGS at every
+    # PySCF gradients (called by ASE-BFGS at every
     # step) emit fd-2 stderr from libcint / BLAS. Wrap the full BFGS run
     # in capture_c_stderr so those bytes go to _stream instead of the red-
     # text channel. POSIX-only; no-op on Windows.
@@ -464,10 +474,42 @@ def optimize_geometry(
                 trajectory=str(traj_path),
                 logfile=_stream,  # BFGS step table → progress_stream
             )
-            # UXP.5: check cancel after every BFGS step (belt-and-suspenders
+            # Check cancel after every BFGS step (belt-and-suspenders
             # with the per-step calculator check above).
             if _cancel_check is not None:
                 dyn.attach(lambda: raise_if_cancelled(_cancel_check), interval=1)
+
+            # Estimate completion from the fmax-convergence trend
+            # (log-scale between the first step's fmax and the target). Data-free
+            # and self-correcting. Skipped when report_fraction is False (e.g.
+            # reorg drives several sub-optimizations, whose 0→1 resets would make
+            # an overall remaining-time estimate oscillate).
+            if report_fraction:
+                from .log_utils import emit_progress
+
+                _fmax0: list = []  # first-step fmax, captured on first callback
+
+                def _report_opt_fraction() -> None:
+                    try:
+                        forces = atoms.get_forces()
+                        fmax_now = float(math.sqrt((forces**2).sum(axis=1).max()))
+                    except Exception:  # noqa: BLE001 — progress is best-effort
+                        return
+                    if fmax_now <= 0:
+                        return
+                    if not _fmax0:
+                        _fmax0.append(fmax_now)
+                        return
+                    denom = math.log(_fmax0[0] / fmax) if fmax > 0 else 0.0
+                    frac = math.log(_fmax0[0] / fmax_now) / denom if denom > 0 else 0.0
+                    # Floor with the history-based step prior so early steps
+                    # (where the fmax trend is noisy / near 0) still advance.
+                    if expected_steps:
+                        step = getattr(atoms.calc, "_eval_count", 0)
+                        frac = max(frac, min(step / float(expected_steps), 0.9))
+                    emit_progress(_stream, max(0.0, min(frac, 0.99)))
+
+                dyn.attach(_report_opt_fraction, interval=1)
 
             with capture_c_stderr(_stream), contextlib.redirect_stdout(_null):
                 converged = bool(dyn.run(fmax=fmax, steps=steps))
@@ -530,9 +572,9 @@ def optimize_geometry(
             _opt_mol_atom = _last_atom_list
             _opt_mol_basis = basis
     except Exception as exc:
-        # Bug-A class — silent failure here ships an OptimizationResult
-        # with no MO data, breaking Energies + Isosurface panels on
-        # history replay. (Same root-cause class as session_calc.)
+        # Silent failure here ships an OptimizationResult with no MO data,
+        # breaking Energies + Isosurface panels on history replay.
+        # (Same root-cause class as session_calc.)
         logger.warning(
             "Final-step MO extraction failed in optimizer for %s: %s",
             molecule.get_formula(),

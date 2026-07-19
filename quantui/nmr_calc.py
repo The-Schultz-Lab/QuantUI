@@ -37,7 +37,7 @@ class NMRResult:
     formula: str
     reference_compound: str = "TMS"
     converged: bool = True
-    # M4 audit fix (2026-07-14): which config.NMR_REFERENCE_SHIELDINGS entry
+    # Fix (2026-07-14): which config.NMR_REFERENCE_SHIELDINGS entry
     # was actually applied, and whether it's an exact match for method/basis
     # or a fallback. NMR_REFERENCE_SHIELDINGS only tabulates a handful of
     # method/basis combinations; any other combination previously fell back
@@ -140,7 +140,7 @@ def run_nmr_calc(
 
     stream = progress_stream if progress_stream is not None else sys.stdout
 
-    # M-STDERR / STDERR.1: see quantui/c_stderr.py — captures fd-2 stderr
+    # See quantui/c_stderr.py — captures fd-2 stderr
     # from libcint / BLAS / LAPACK / GIAO / NMR-CPHF C code and relays to
     # ``stream`` on exit. POSIX-only; no-op on Windows.
     from quantui.c_stderr import capture_c_stderr
@@ -158,7 +158,7 @@ def run_nmr_calc(
         )
 
 
-# L audit fix (2026-07-14): bump this whenever the patch bodies below
+# Fix (2026-07-14): bump this whenever the patch bodies below
 # change — it doubles as the idempotency sentinel's value, so a bumped
 # version forces re-patching instead of silently keeping stale closures
 # from an older QuantUI version installed earlier in the process.
@@ -329,7 +329,7 @@ def _run_nmr_calc_body(
     _scf: Any,
     stream: Any,
 ) -> NMRResult:
-    """Inner body of :func:`run_nmr_calc` (split out for STDERR.1 wrap)."""
+    """Inner body of :func:`run_nmr_calc` (split out for stderr-capture wrap)."""
     dft, gto, scf = _dft, _gto, _scf
 
     import numpy as _np
@@ -352,7 +352,7 @@ def _run_nmr_calc_body(
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
     else:
-        # session 55: route through resolve_xc + maybe_apply_d3 so
+        # Route through resolve_xc + maybe_apply_d3 so
         # wB97X-D / PBE-D3 work for NMR calcs (was using raw _XC_ALIAS
         # lookup before, which would fail for wB97X-D after the alias
         # change to "wb97x" + external D3).
@@ -360,13 +360,13 @@ def _run_nmr_calc_body(
         mf.xc = resolve_xc(method)
         mf = maybe_apply_d3(mf, method, progress_stream=stream)
 
-    # UXP.5: cooperative cancel between SCF cycles.
+    # Cooperative cancel between SCF cycles.
     from .cancellation import attach_scf_cancel_callback, cancel_check_from_stream
     from .log_utils import emit_status
 
     attach_scf_cancel_callback(mf, cancel_check_from_stream(stream))
 
-    emit_status(stream, "Running SCF…")  # M-PROGRESS A4
+    emit_status(stream, "Running SCF…")
     try:
         mf.kernel()
     except Exception as exc:
@@ -390,7 +390,7 @@ def _run_nmr_calc_body(
 
     _ensure_nmr_compat_patches_applied()
 
-    emit_status(stream, "Computing NMR shielding tensors (GIAO)…")  # M-PROGRESS A4
+    emit_status(stream, "Computing NMR shielding tensors (GIAO)…")
     try:
         if method_upper == "RHF":
             nmr_obj = _pyscf_nmr.RHF(mf)

@@ -340,3 +340,69 @@ def test_basis_function_table_internally_consistent(isolated_log_dir):
         assert (
             table["H"] == table["He"]
         ), f"{basis}: H={table['H']} but He={table['He']}, expected equal"
+
+
+# ── B3: outer-step telemetry + geom-opt step prior ──────────────────────────
+
+
+def _log_geom_opt(clog, *, n_steps, method="B3LYP", basis="6-31G", converged=True):
+    clog.log_calculation(
+        formula="CH2O",
+        n_atoms=4,
+        n_electrons=16,
+        method=method,
+        basis=basis,
+        n_iterations=10,
+        elapsed_s=30.0,
+        converged=converged,
+        n_basis=44,
+        n_cores=1,
+        calc_type="geometry_opt",
+        n_steps=n_steps,
+    )
+
+
+def test_log_calculation_records_n_steps(isolated_log_dir):
+    import quantui.calc_log as clog
+
+    _log_geom_opt(clog, n_steps=7)
+    records = clog._read_all(clog._perf_path())
+    assert records and records[-1]["n_steps"] == 7
+
+
+def test_estimate_opt_steps_returns_median(isolated_log_dir):
+    import quantui.calc_log as clog
+
+    for n in (5, 7, 9):
+        _log_geom_opt(clog, n_steps=n)
+    assert clog.estimate_opt_steps("B3LYP", "6-31G") == 7.0
+
+
+def test_estimate_opt_steps_none_without_history(isolated_log_dir):
+    import quantui.calc_log as clog
+
+    assert clog.estimate_opt_steps("B3LYP", "6-31G") is None
+
+
+def test_estimate_opt_steps_excludes_unconverged_and_other_types(isolated_log_dir):
+    import quantui.calc_log as clog
+
+    # Unconverged geom-opt + a single-point with n_steps must be ignored.
+    _log_geom_opt(clog, n_steps=99, converged=False)
+    clog.log_calculation(
+        formula="CH2O",
+        n_atoms=4,
+        n_electrons=16,
+        method="B3LYP",
+        basis="6-31G",
+        n_iterations=10,
+        elapsed_s=12.0,
+        converged=True,
+        n_basis=44,
+        calc_type="single_point",
+        n_steps=42,
+    )
+    assert clog.estimate_opt_steps("B3LYP", "6-31G") is None
+    # One valid converged geom-opt → still None (needs the record to exist).
+    _log_geom_opt(clog, n_steps=6)
+    assert clog.estimate_opt_steps("B3LYP", "6-31G") == 6.0

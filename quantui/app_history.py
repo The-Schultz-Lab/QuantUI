@@ -13,14 +13,14 @@ from IPython.display import HTML, display
 
 
 class _LoadTimer:
-    """Per-stage timing collector for a history-load operation (HIST.2).
+    """Per-stage timing collector for a history-load operation.
 
     Used as: open one ``_LoadTimer`` at the top of each loader, wrap each
     interesting sub-stage in ``with timer.stage("name"):``, then call
     ``timer.emit(status=...)`` exactly once (from the loader's ``finally``
     block). One ``history_load_timing`` event is appended to
     ``event_log.jsonl`` per load with the total elapsed time and a per-stage
-    breakdown. The data drives the HIST.2 latency-optimization pass — until
+    breakdown. The data drives the latency-optimization pass — until
     we know which stage dominates, we don't know which to optimize.
 
     Failures inside ``calc_log.log_event`` are swallowed: telemetry must
@@ -223,7 +223,7 @@ def mol_from_result_dir(result_dir: Path, data: dict[str, Any]) -> Any:
 
 
 def _begin_history_load(app: Any, message: str, source_btns: tuple) -> None:
-    """Show immediate feedback when a history-load action starts (HIST.1).
+    """Show immediate feedback when a history-load action starts.
 
     Lights the toolbar activity indicator and disables the source buttons so
     a second click can't fire a parallel load. Both actions are best-effort —
@@ -242,7 +242,7 @@ def _begin_history_load(app: Any, message: str, source_btns: tuple) -> None:
 
 
 def _end_history_load(app: Any, source_btns: tuple) -> None:
-    """Restore UI state after a history-load action finishes (HIST.1).
+    """Restore UI state after a history-load action finishes.
 
     Mirrors :func:`_begin_history_load`. Called from the loader's ``finally``
     block so the activity indicator + buttons are always restored, even when
@@ -269,11 +269,11 @@ def history_load_results(
     """Display a history result card in the Results tab and navigate there.
 
     ``source_btns`` is an optional tuple of button widgets to disable while
-    the load is in flight (HIST.1 immediate-loading-feedback contract). Tests
+    the load is in flight (immediate-loading-feedback contract). Tests
     and callers that don't have a button reference can omit it.
 
     Stage timings are emitted as a single ``history_load_timing`` event on
-    completion (HIST.2 — drives latency-optimization decisions).
+    completion (drives latency-optimization decisions).
     """
     _begin_history_load(app, "Loading history result…", source_btns)
     timer = _LoadTimer("history_load_results", result_dir)
@@ -330,11 +330,11 @@ def history_load_analysis(
     """Load analysis panels for a history result and navigate to Analysis tab.
 
     ``source_btns`` is an optional tuple of button widgets to disable while
-    the load is in flight (HIST.1 immediate-loading-feedback contract). Tests
+    the load is in flight (immediate-loading-feedback contract). Tests
     and callers that don't have a button reference can omit it.
 
     Stage timings are emitted as a single ``history_load_timing`` event on
-    completion (HIST.2 — drives latency-optimization decisions). Stages cover
+    completion (drives latency-optimization decisions). Stages cover
     the four expected hotspots: pyscf.log read, context build, molecule
     reconstruction, 3D viewer render, and the analysis-context registry walk.
     """

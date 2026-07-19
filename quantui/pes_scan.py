@@ -79,7 +79,7 @@ class PESScanResult:
     def _finite_energies(self) -> List[float]:
         """``energies_hartree`` with failed-point NaN placeholders dropped.
 
-        M6 audit fix (2026-07-14): a failed scan point appends
+        Fix (2026-07-14): a failed scan point appends
         ``float("nan")`` to ``energies_hartree`` (see :func:`run_pes_scan`).
         Python's ``min``/``max`` are order-dependent with NaN present — a
         NaN as the first element "wins" (everything compares False against
@@ -290,7 +290,7 @@ def run_pes_scan(
     _stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
     _null = io.StringIO()
 
-    # UXP.5: cooperative cancel — checked between scan points, per BFGS step,
+    # Cooperative cancel — checked between scan points, per BFGS step,
     # and inside each point's SCF (via the shared calculator).
     from .cancellation import cancel_check_from_stream, raise_if_cancelled
 
@@ -304,7 +304,7 @@ def run_pes_scan(
     energies_hartree: List[float] = []
     coordinates_list: List[Molecule] = []
     converged_all = True
-    # M6 audit fix (2026-07-14): on a failed scan point, fall back to the
+    # Fix (2026-07-14): on a failed scan point, fall back to the
     # last successfully-computed geometry rather than the original input
     # molecule. Snapping every failed frame back to the starting geometry
     # produced a bogus discontinuity in the trajectory animation/plot —
@@ -318,13 +318,15 @@ def run_pes_scan(
 
     for step_num, val in enumerate(scan_values, start=1):
         raise_if_cancelled(_cancel_check)
-        # M-PROGRESS A2: live per-point status (the per-point SCF is silent).
-        from .log_utils import emit_status
+        # Live per-point status + exact completion fraction
+        # (points already done / total) for the self-correcting time estimate.
+        from .log_utils import emit_progress, emit_status
 
         emit_status(
             _stream,
             f"Scan point {step_num}/{steps} — relaxing (SCF + gradient)…",
         )
+        emit_progress(_stream, (step_num - 1) / steps)
         _stream.write(
             f"\nScan point {step_num}/{steps}: "
             f"{scan_type} = {val:.4f} {('Å' if scan_type == 'bond' else '°')}\n"
@@ -346,7 +348,7 @@ def run_pes_scan(
                     constraint = FixInternals(bonds=[[val, [i1, i2]]])
                 elif scan_type == "angle":
                     atoms.set_angle(i1, i2, i3, val)
-                    # M7 audit fix (2026-07-14): ASE's radian-based `angles=`
+                    # (2026-07-14): ASE's radian-based `angles=`
                     # kwarg is not just deprecated, it's flat-out broken with
                     # the currently-targeted ASE (>=3.22, verified against
                     # 3.29.0) — internally it does
@@ -368,7 +370,7 @@ def run_pes_scan(
                 dyn = BFGS(atoms, logfile=_stream)
                 if _cancel_check is not None:
                     dyn.attach(lambda: raise_if_cancelled(_cancel_check), interval=1)
-                # M-STDERR / STDERR.1: capture fd-2 stderr from PySCF C
+                # Capture fd-2 stderr from PySCF C
                 # extensions for the duration of this scan-point optimisation.
                 from quantui.c_stderr import capture_c_stderr
 

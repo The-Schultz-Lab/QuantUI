@@ -19,7 +19,7 @@ What the dashboard shows
    compute device (CPU grey, GPU green), so a user can spot regressions
    or speedups visually as they run more calcs.
 
-Older perf-log records that pre-date the M-GPU follow-up don't have
+Older perf-log records that pre-date GPU support don't have
 ``gpu_used`` set — those are treated as "device unknown" and counted in
 their own bucket rather than guessed CPU.
 
@@ -46,7 +46,7 @@ from quantui.calc_log import _log_dir, get_perf_history, get_prediction_history
 def _classify_device(record: dict) -> str:
     """Return ``"GPU"``, ``"CPU"``, or ``"Unknown"`` for one perf record.
 
-    Records written before the M-GPU follow-up (2026-05-25) don't have
+    Records written before GPU support (2026-05-25) don't have
     ``gpu_used`` at all — we don't backfill those as CPU because they
     pre-date GPU support entirely, so calling them "CPU" would muddy any
     speedup comparison. ``"Unknown"`` is the honest bucket.
@@ -353,7 +353,7 @@ def _timeline_html(records: list[dict], *, include_plotlyjs: bool) -> Optional[s
 
 
 # ---------------------------------------------------------------------------
-# Prediction-accuracy section (M-EST / EST.6, 2026-05-25)
+# Prediction-accuracy section (2026-05-25)
 # ---------------------------------------------------------------------------
 
 
@@ -555,7 +555,7 @@ def build_dashboard(out_path: Optional[Path] = None) -> Optional[Path]:
     method_counts = _counts_by(records, "method")
     calc_type_counts = _counts_by(records, "calc_type")
 
-    # M-EST / EST.6: prediction-accuracy data lives in its own log file.
+    # Prediction-accuracy data lives in its own log file.
     # Best-effort read — older installs without the file produce an
     # empty list and the section degrades to an empty-state message.
     try:
