@@ -456,6 +456,7 @@ def log_calculation(
     calc_type: Optional[str] = None,
     gpu_used: Optional[bool] = None,
     gpu_name: Optional[str] = None,
+    n_steps: Optional[int] = None,
 ) -> None:
     """Append one performance record to ``perf_log.jsonl``.
 
@@ -485,6 +486,10 @@ def log_calculation(
         record["gpu_used"] = bool(gpu_used)
     if gpu_name is not None:
         record["gpu_name"] = gpu_name
+    # B3: outer-loop step count (geom-opt BFGS steps / PES scan points). Enables
+    # a history-based "step k / ~N" prior for the live progress fraction.
+    if n_steps is not None:
+        record["n_steps"] = n_steps
     _append(_perf_path(), record)
 
 
@@ -838,6 +843,47 @@ def estimate_time(
             return cost_est
 
     return None
+
+
+def estimate_opt_steps(
+    method: str, basis: str, calc_type: str = "geometry_opt"
+) -> Optional[float]:
+    """Median historical outer-step count for *calc_type* (B3 progress prior).
+
+    Reads ``perf_log`` for converged records of *calc_type* that recorded
+    ``n_steps`` (added B3). Prefers exact method+basis (>= 2 records), falls back
+    to same-basis (>= 2), then to all matching-calc_type records. Returns the
+    median or ``None`` when there is no usable history — a rough prior used only
+    to seed / floor the live progress fraction, not a hard prediction.
+    """
+    try:
+        records = _read_all(_perf_path())
+    except Exception:
+        return None
+
+    def _usable(r: dict) -> bool:
+        return (
+            r.get("calc_type") == calc_type
+            and bool(r.get("converged"))
+            and isinstance(r.get("n_steps"), (int, float))
+            and r["n_steps"] > 0
+        )
+
+    pool = [r for r in records if _usable(r)]
+    if not pool:
+        return None
+    exact = [r for r in pool if r.get("method") == method and r.get("basis") == basis]
+    same_basis = [r for r in pool if r.get("basis") == basis]
+    if len(exact) >= 2:
+        chosen = exact
+    elif len(same_basis) >= 2:
+        chosen = same_basis
+    else:
+        chosen = pool
+    try:
+        return float(statistics.median(r["n_steps"] for r in chosen))
+    except Exception:
+        return None
 
 
 def format_estimate(est: Optional[dict]) -> str:

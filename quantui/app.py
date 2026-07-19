@@ -4291,6 +4291,11 @@ class QuantUIApp:
                 self.run_status.value = "Optimizing geometry..."
                 from quantui import optimize_geometry
 
+                # B3: history-based expected step count → "step k/~N" + a floor
+                # for the live progress fraction. None on cold history.
+                _expected_steps = _calc_log.estimate_opt_steps(
+                    self.method_dd.value, self.basis_dd.value
+                )
                 result = optimize_geometry(
                     molecule=calc_mol,
                     method=self.method_dd.value,
@@ -4298,6 +4303,9 @@ class QuantUIApp:
                     fmax=self.fmax_fi.value,
                     steps=self.max_steps_si.value,
                     progress_stream=log,  # type: ignore[arg-type]
+                    expected_steps=(
+                        int(round(_expected_steps)) if _expected_steps else None
+                    ),
                 )
                 _sp_result = _run_required_final_single_point(
                     result.molecule,
@@ -4863,6 +4871,7 @@ class QuantUIApp:
                     calc_type=save_type,
                     gpu_used=getattr(result, "gpu_used", None),
                     gpu_name=getattr(result, "gpu_name", None),
+                    n_steps=getattr(result, "n_steps", None),
                 )
                 _calc_log.log_event(
                     "calc_done",

@@ -96,6 +96,7 @@ try:
             cancel_check=None,
             progress_stream=None,
             status_label: str = "Optimizing geometry",
+            expected_steps=None,
             **kwargs,
         ) -> None:
             super().__init__(**kwargs)
@@ -112,6 +113,7 @@ try:
             # progress during a step). ``_eval_count`` counts force evaluations.
             self.progress_stream = progress_stream
             self.status_label = status_label
+            self.expected_steps = expected_steps  # B3: history-based ~N prior
             self._eval_count = 0
 
         def calculate(
@@ -136,9 +138,14 @@ try:
             self._eval_count += 1
             from .log_utils import emit_status
 
+            _step_of = (
+                f"{self._eval_count}/~{int(self.expected_steps)}"
+                if self.expected_steps
+                else f"{self._eval_count}"
+            )
             emit_status(
                 self.progress_stream,
-                f"{self.status_label} — SCF + gradient (step {self._eval_count})…",
+                f"{self.status_label} — SCF + gradient (step {_step_of})…",
             )
 
             import numpy as np
@@ -342,6 +349,7 @@ def optimize_geometry(
     progress_stream: Optional[IO[str]] = None,
     status_label: str = "Optimizing geometry",
     report_fraction: bool = True,
+    expected_steps: Optional[int] = None,
 ) -> OptimizationResult:
     """
     Optimize a molecular geometry at the QM level using ASE-BFGS + PySCF.
@@ -446,6 +454,7 @@ def optimize_geometry(
         cancel_check=_cancel_check,
         progress_stream=_stream,
         status_label=status_label,
+        expected_steps=expected_steps,
     )
 
     # M-STDERR / STDERR.1: PySCF gradients (called by ASE-BFGS at every
@@ -492,9 +501,12 @@ def optimize_geometry(
                         _fmax0.append(fmax_now)
                         return
                     denom = math.log(_fmax0[0] / fmax) if fmax > 0 else 0.0
-                    if denom <= 0:
-                        return
-                    frac = math.log(_fmax0[0] / fmax_now) / denom
+                    frac = math.log(_fmax0[0] / fmax_now) / denom if denom > 0 else 0.0
+                    # B3: floor with the history-based step prior so early steps
+                    # (where the fmax trend is noisy / near 0) still advance.
+                    if expected_steps:
+                        step = getattr(atoms.calc, "_eval_count", 0)
+                        frac = max(frac, min(step / float(expected_steps), 0.9))
                     emit_progress(_stream, max(0.0, min(frac, 0.99)))
 
                 dyn.attach(_report_opt_fraction, interval=1)
