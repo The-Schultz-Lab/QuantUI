@@ -96,7 +96,7 @@ def build_status_panel(
         "Timing calibration: not yet run &mdash; use the Calibrate panel in History</div>"
     )
 
-    # GPU offload indicator (M-GPU / GPU.2). Detecting GPUs imports gpu4pyscf +
+    # GPU offload indicator. Detecting GPUs imports gpu4pyscf +
     # cupy and queries CUDA, which costs ~7 s — far too slow to block startup.
     # So the status HTML is rendered via this closure with the GPU row as a
     # "checking…" placeholder; the app re-renders it (via app._render_status_html)
@@ -259,7 +259,7 @@ def build_history_section(
         tooltip="Open the full PySCF output log in the Output tab",
     )
 
-    # M-EST / EST.4: 4-tier calibration selector. ToggleButtons works for
+    # 4-tier calibration selector. ToggleButtons works for
     # 4 options; switch to a Dropdown if a 5th tier is ever added. Tier 3
     # / tier 4 require PySCF (the geom-opt + freq dispatch); tier 1 / 2
     # are SP-only and gated separately by the run button.
@@ -295,10 +295,9 @@ def build_history_section(
         tooltip="Abandon the rest of the calibration (current step is also killed).",
         layout=layout_fn(width="90px", display="none"),
     )
-    # session 55 user request: replaced the hard 1800 s per-step timeout
-    # with a Skip button so the user can abandon ONE step that's running
-    # too long without losing the whole run. Distinct from Stop (which
-    # abandons everything remaining).
+    # Replaced the hard 1800 s per-step timeout with a Skip button so the
+    # user can abandon ONE step that's running too long without losing the
+    # whole run. Distinct from Stop (which abandons everything remaining).
     app._cal_skip_btn = widgets.Button(
         description="Skip step",
         button_style="info",
@@ -391,7 +390,7 @@ def build_history_section(
         if cal_last
         else ""
     )
-    # M-EST / EST.4: import tier sizes lazily so we can refer to all four
+    # Import tier sizes lazily so we can refer to all four
     # in the panel blurb. ``benchmark_suite`` / ``benchmark_suite_long``
     # are kept as positional args for back-compat but new code prefers
     # the four named tiers.
@@ -431,10 +430,9 @@ def build_history_section(
     app._cal_accordion = widgets.Accordion(children=[cal_panel], selected_index=None)
     app._cal_accordion.set_title(0, "Calibrate time estimates")
 
-    # POLISH.3 (M-POLISH, 2026-05-25): the History tab is now purely
-    # the result-browser. Performance stats + Calibrate accordions
-    # moved to the System Settings tab — see below — so the user finds
-    # benchmarking + system state in one logical place.
+    # The History tab is now purely the result-browser. Performance stats
+    # + Calibrate accordions moved to the System Settings tab — see below —
+    # so the user finds benchmarking + system state in one logical place.
     app.history_panel = widgets.VBox(
         [
             widgets.HTML(
@@ -455,7 +453,7 @@ def build_history_section(
         ]
     )
 
-    # POLISH.3: now that the calibration + performance accordions exist
+    # Now that the calibration + performance accordions exist
     # (created above in this function), append them to the System
     # Settings tab. ``_status_tab_panel`` was built earlier in
     # ``build_status_panel`` without these — extend its children tuple.
@@ -503,7 +501,7 @@ def build_shared_widgets(
     app.mol_summary_compact = widgets.HTML(value="")
     # Fixed heights reserve space so swapping content (backend/palette toggle)
     # or streaming output never resizes the container — which would reflow the
-    # page and jump the scrollbar (BUG-SCROLL). The molecule viewer renders at
+    # page and jump the scrollbar. The molecule viewer renders at
     # render_molecule_html's default 500px; the run log scrolls internally.
     # overflow hidden (not auto): the 3D viewer is a fixed-size canvas, so it
     # needs no scrollbar — clipping a few px of margin avoids an internal
@@ -570,7 +568,7 @@ def build_shared_widgets(
         [app.viz_style_dd, app.viz_lighting_dd],
         layout=layout_fn(gap="8px", margin="2px 0 0 0", align_items="center"),
     )
-    # UXP.7: method / basis descriptor cards replace the old inline
+    # Method / basis descriptor cards replace the old inline
     # ``notes_output`` educational-notes block. Two compact HTML cards
     # (icon + one-line) sit to the right of the dropdowns; populated here with
     # the defaults and refreshed by ``update_notes`` on every dropdown change.
@@ -644,7 +642,7 @@ def build_shared_widgets(
         '<span style="font-size:11px;color:#94a3b8"> &mdash; fast MMFF/UFF '
         "cleanup of a rough structure</span>"
     )
-    # Interactive pre-opt (M-PREOPT PREOPT.2/.3): run the bonded-FF pre-opt on
+    # Interactive pre-opt: run the bonded-FF pre-opt on
     # demand, watch it relax in-place, then keep or revert.
     app.preopt_preview_btn = widgets.Button(
         description="Preview",
@@ -696,7 +694,7 @@ def build_shared_widgets(
 
     from quantui.config import SOLVENT_OPTIONS as _SOLVENT_OPTS
 
-    # POLISH.10: drop the default Checkbox description gutter + explicit width
+    # Drop the default Checkbox description gutter + explicit width
     # (style description_width "initial" + indent=False) that produced the
     # indent + horizontal scrollbar.
     app.solvent_cb = widgets.Checkbox(
@@ -921,7 +919,7 @@ def build_shared_widgets(
         layout=layout_fn(width="200px", height="36px"),
     )
     app.run_status = widgets.Label()
-    # M-PROGRESS A1: live elapsed-time chip next to the status text — a bg-thread
+    # Live elapsed-time chip next to the status text — a bg-thread
     # ticker updates it every ~1 s while a calc runs, so even a fully silent
     # native phase (first gradient / Hessian) visibly advances.
     app._run_elapsed_lbl = widgets.HTML(value="")
@@ -990,7 +988,7 @@ def build_shared_widgets(
         layout=layout_fn(width="130px"),
     )
     app.struct_export_status = widgets.Label()
-    # M-EXPORT / EXPORT.5: zip the entire result folder for emailing /
+    # Zip the entire result folder for emailing /
     # attaching to a writeup. Disabled until ``_last_result_dir`` is set.
     app._export_bundle_btn = widgets.Button(
         description="Export bundle (.zip)",
@@ -1031,7 +1029,7 @@ def build_theme_selector(app: Any, *, layout_fn: Any) -> None:
 def build_welcome_header(app: Any, *, layout_fn: Any = None) -> None:
     """Build the QuantUI welcome banner.
 
-    POLISH.1 third iteration (M-POLISH, 2026-05-25): the
+    Third iteration (2026-05-25): the
     ``<img src="data:image/svg+xml;base64,...">`` approach failed too
     — Voilà's HTML sanitizer (stricter than JupyterLab's) strips
     ``data:`` URIs from ``<img src>`` attributes. The third iteration
@@ -1317,7 +1315,7 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
                     widgets.HTML("&ensp;&ensp;"),
                     widgets.VBox([app.charge_si, app.mult_si]),
                     widgets.HTML("&ensp;"),
-                    # UXP.7 descriptor cards — to the right of the inputs so
+                    # Descriptor cards — to the right of the inputs so
                     # they don't displace charge/multiplicity.
                     app._descriptor_cards_box,
                 ],
@@ -1404,7 +1402,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             layout=layout_fn(width="130px"),
             tooltip="Export the current plot as HTML or PNG",
         )
-        # M-EXPORT / EXPORT.4: per-panel "Copy data" button that exports
+        # Per-panel "Copy data" button that exports
         # the underlying numerical data to CSV (saved to result_dir) and
         # also attempts to copy to the system clipboard via the browser
         # API. Status widget below is shared with the Save Plot path —
@@ -1447,7 +1445,6 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     # Using `widgets.Output` here previously caused widget references inside
     # `with output: display(widget)` to be deferred/asynchronous, leaving the
     # accordion visibly empty even after _show_opt_trajectory logged success.
-    # See BUG-FRESH-TRAJ root-cause analysis in session 48.
     app.traj_output = widgets.VBox(layout=layout_fn(margin="0"))
     app.traj_accordion = widgets.Accordion(
         children=[app.traj_output],
@@ -1551,7 +1548,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         style={"description_width": "120px"},
         layout=layout_fn(width="300px", display="none"),
         # continuous_update=False so dragging the slider only fires on
-        # release, not 30-60 times per second during the drag (BUG.9 fix).
+        # release, not 30-60 times per second during the drag.
         # Combined with the atomic outputs swap in _set_html_output this
         # eliminates the IR re-render storm that caused visible flicker.
         continuous_update=False,
@@ -1640,7 +1637,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         orb_diagram_content,
         layout=layout_fn(width="100%"),
     )
-    # UXP.4: widen the preset buttons and add a "By index" mode that reveals a
+    # Widen the preset buttons and add a "By index" mode that reveals a
     # free-entry 0-based MO index input, so any orbital (not just the HOMO/LUMO
     # neighbourhood) can be rendered as an isosurface.
     app._orb_toggle = widgets.ToggleButtons(
@@ -1694,7 +1691,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         ),
         layout=layout_fn(width="200px", margin="8px 0 4px 0"),
     )
-    # M-EXPORT / EXPORT.5: copy the last-generated cube to the top-level
+    # Copy the last-generated cube to the top-level
     # result dir under a friendly name (HOMO.cube / LUMO.cube / etc.).
     # Disabled until the first isosurface generation populates
     # ``app._last_cube_path``.
@@ -1711,7 +1708,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._iso_export_status = widgets.HTML(
         value="", layout=layout_fn(margin="0 0 0 8px")
     )
-    # UXP.3: inline "calculating" spinner shown while a cube is being computed.
+    # Inline "calculating" spinner shown while a cube is being computed.
     # Hidden until on_iso_generate reveals it; hidden again on completion.
     app._iso_spinner = widgets.HTML(
         value='<span class="quantui-spinner"></span>',
@@ -2083,8 +2080,7 @@ def build_output_tab(app: Any, *, layout_fn: Any) -> None:
         button_style="danger",
         layout=layout_fn(width="140px", display="none"),
     )
-    # POLISH.8 (M-POLISH, 2026-05-25): the Log tab moved to be an
-    # Accordion inside the History tab — rationale in the roadmap. The
+    # The Log tab moved to be an Accordion inside the History tab. The
     # explanatory text no longer needs to say "Use View log in the
     # History tab" since the user IS in the History tab now.
     app.log_tab_panel = widgets.VBox(
@@ -2117,7 +2113,7 @@ def build_output_tab(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(padding="8px 0"),
     )
 
-    # POLISH.8: wrap the log panel in an Accordion + append to the
+    # Wrap the log panel in an Accordion + append to the
     # History tab. ``history_panel`` was built in
     # ``build_history_section`` earlier in the app-init sequence
     # (see app.py: _build_history_section runs BEFORE _build_output_tab).
@@ -2222,8 +2218,8 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
     app.help_content_html = widgets.HTML()
     app._render_help_topic()
 
-    # POLISH.2 (M-POLISH, 2026-05-25): the single-character "?" was
-    # visually noisy and hard to recognise as the global help toggle.
+    # The single-character "?" was visually noisy and hard to recognise
+    # as the global help toggle.
     # Field-level "?" buttons (method_help_btn / basis_help_btn earlier
     # in this file) keep the symbol — for inline-with-input help it's
     # universally understood.

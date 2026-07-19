@@ -176,7 +176,7 @@ def get_system_info() -> Dict[str, Any]:
 
 
 # ============================================================================
-# Live run-status helpers (M-PROGRESS Phase A)
+# Live run-status helpers
 # ============================================================================
 
 
@@ -201,10 +201,10 @@ def emit_status(stream: Any, message: str) -> None:
 def emit_progress(stream: Any, fraction: float) -> None:
     """Report a completion fraction (0..1) via a progress stream, if supported.
 
-    M-PROGRESS B2: calc modules that know a real completion fraction (PES scan
+    Calc modules that know a real completion fraction (PES scan
     points, optimizer fmax-convergence trend) call this so the live ticker can
     show a *self-correcting* ``elapsed·(1−f)/f`` remaining-time estimate instead
-    of the static B1 total. Duck-typed on ``stream.set_progress_fraction`` — a
+    of the static total. Duck-typed on ``stream.set_progress_fraction`` — a
     no-op for plain streams, keeping calc modules decoupled from the widget layer.
     """
     setter = getattr(stream, "set_progress_fraction", None)

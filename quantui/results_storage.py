@@ -206,8 +206,8 @@ def save_result(
         "ccsd_t_correction_hartree": _opt_float(
             getattr(result, "ccsd_t_correction_hartree", None)
         ),
-        # Persisted so the saved-result card matches the live card (M-CLEAN
-        # formatter-parity fix). Additive — absent on older results, where the
+        # Persisted so the saved-result card matches the live card
+        # (formatter-parity fix). Additive — absent on older results, where the
         # history card falls back exactly as before (CPU / no dipole / no
         # charges). Coerced JSON-safe (numpy scalars/arrays → float/list).
         "solvent": getattr(result, "solvent", None),
@@ -318,7 +318,7 @@ def save_molden(
     normal_modes=None,
     filename: str = "result.molden",
 ) -> Optional[Path]:
-    """Write a Molden-format file alongside ``result.json`` (M-EXPORT / EXPORT.1+2).
+    """Write a Molden-format file alongside ``result.json``.
 
     Molden is the lingua franca for orbital + vibration interop with
     Avogadro / IQmol / Jmol / Multiwfn. This helper writes whichever data
@@ -450,7 +450,7 @@ def save_trajectory_xyz(
     energies: list,
     filename: str = "trajectory.xyz",
 ) -> Optional[Path]:
-    """Write a multi-frame XYZ trajectory file (M-EXPORT / EXPORT.3).
+    """Write a multi-frame XYZ trajectory file.
 
     Universal format readable by Avogadro, VMD, OVITO, Jmol, Pymol,
     OpenBabel, ASE (``ase.io.read``), and basically any molecular tool
@@ -508,7 +508,7 @@ def save_trajectory_ase(
     energies: list,
     filename: str = "trajectory.traj",
 ) -> Optional[Path]:
-    """Write an ASE Trajectory (.traj) file (M-EXPORT / EXPORT.7).
+    """Write an ASE Trajectory (.traj) file.
 
     Lets users open the result in ``ase gui trajectory.traj``, slice
     frames (``trajectory.traj@0:10:2``), and use ASE-GUI's interactive
@@ -568,7 +568,7 @@ def export_cube(
     *,
     orbital_label: str = "orbital",
 ) -> Optional[Path]:
-    """Copy a cube file to the top-level result dir with a friendly name (EXPORT.5).
+    """Copy a cube file to the top-level result dir with a friendly name.
 
     Internal cube files live in ``<result_dir>/isosurfaces/`` with
     timestamped filenames (``H2O_HOMO_2026-05-23_19-30-00.cube``) — fine
@@ -603,7 +603,7 @@ def export_result_bundle(
     *,
     output_dir: Optional[Path] = None,
 ) -> Optional[Path]:
-    """Zip an entire result directory for sharing (EXPORT.5 stretch goal).
+    """Zip an entire result directory for sharing.
 
     Produces ``<output_dir>/<result_dir_name>.zip`` containing every
     file the calc wrote — ``result.json``, ``pyscf.log``, ``orbitals.npz``,
@@ -772,7 +772,7 @@ def save_thumbnail(result_dir: Path, data: dict) -> None:
     except ImportError:
         return
 
-    # M9 audit fix (2026-07-14): only the matplotlib import itself was
+    # Fix (2026-07-14): only the matplotlib import itself was
     # guarded — figure construction, text rendering, and fig.savefig() (a
     # real filesystem write, so it can hit disk-full / permission errors)
     # could all raise past this function despite the docstring's promise
@@ -818,7 +818,7 @@ def _build_thumbnail_figure(plt: Any, data: dict) -> Any:
     fg, bg = _colors.get(ct, ("#555555", "#f3f4f6"))
     ct_label = _ct_labels.get(ct, ct.replace("_", " ").title())
 
-    # POLISH.7 (M-POLISH, 2026-05-25): bumped figsize 2.4→3.6 + dpi 72→144
+    # (2026-05-25): bumped figsize 2.4→3.6 + dpi 72→144
     # so the History-card text is readable on 1× displays. Source PNG goes
     # from 173×108 px (~8 KB) to 518×324 px (~25 KB); the History dropdown
     # downscales to its native ~250–300 px width, so the user sees crisp

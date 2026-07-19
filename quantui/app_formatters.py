@@ -12,7 +12,7 @@ def _result_extra_rows(get: Any) -> str:
     ``get(key, default=None)`` reads a field from either a result object
     (``getattr``) or a saved ``result.json`` dict (``dict.get``). Used by BOTH
     :func:`format_result` (live) and :func:`format_past_result` (history) so the
-    two cards can never drift again — the M-CLEAN regression where the compute
+    two cards can never drift again — a past regression had the compute
     device / dipole / Mulliken rows existed only on the live card. Rows:
     post-HF correlation breakdown (MP2 / CCSD / (T)), solvent, compute device
     (always shown), dipole moment, Mulliken charges.
@@ -45,7 +45,7 @@ def _result_extra_rows(get: Any) -> str:
     if _solvent is not None:
         rows += _num("Solvent (PCM)", str(_solvent))
 
-    # Compute device (M-GPU / GPU.2) — always shown; old saved results lack the
+    # Compute device — always shown; old saved results lack the
     # field and safely read "CPU".
     if bool(get("gpu_used", False)):
         _name = get("gpu_name")
@@ -466,7 +466,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     ts = data.get("timestamp", "")
 
     # Shared 'extra' rows (correlation breakdown / solvent / device / dipole /
-    # Mulliken) — same builder as the live card so the two never drift (M-CLEAN).
+    # Mulliken) — same builder as the live card so the two never drift.
     _extra = _result_extra_rows(lambda k, d=None: data.get(k, d))
 
     # Embed thumbnail if saved

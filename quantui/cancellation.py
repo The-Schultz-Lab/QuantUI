@@ -1,9 +1,9 @@
-"""Shared cancellation primitive for in-flight calculations (UXP.5).
+"""Shared cancellation primitive for in-flight calculations.
 
 The Cancel button sets a ``threading.Event`` on the app; the run's
 ``_LogCapture`` checks it on every output line and raises
 :class:`CalcCancelled` at the next line — a cooperative stop that needs no
-(unsafe) thread-kill. UXP.5 tightens that latency by also attaching the same
+(unsafe) thread-kill. This module tightens that latency by also attaching the same
 check to PySCF SCF callbacks and ASE optimizer observers, so cancellation
 fires between SCF cycles / optimizer steps even when the calc is running
 silently (verbose=0) and no output line is triggering the stream check.
@@ -57,9 +57,9 @@ def attach_scf_cancel_callback(
     is the kernel's locals dict — cycle index, ``e_tot``, etc.). We use that
     single hook for two things:
 
-    - **Cancel** (UXP.5): raise :class:`CalcCancelled` between cycles so a
+    - **Cancel**: raise :class:`CalcCancelled` between cycles so a
       Cancel click stops the run regardless of whether output is streamed.
-    - **Progress** (M-PROGRESS A3): call *progress_cb(envs)* each cycle so the
+    - **Progress**: call *progress_cb(envs)* each cycle so the
       caller can surface a live "SCF cycle N" status even when the SCF runs at
       ``verbose=0`` (the optimizer/PES per-step SCF, which streams nothing).
 

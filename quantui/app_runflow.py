@@ -36,7 +36,7 @@ _CALC_TYPE_CANON = {
 def _write_run_header(app: Any) -> None:
     """Write the full run header to the live log — synchronously, atomically.
 
-    UXP.6 + bug fix (2026-07-18): the header used to be written two ways, both
+    Bug fix (2026-07-18): the header used to be written two ways, both
     unreliable in Voilà — a provisional line via ``clear_output()`` +
     ``append_stdout()`` (the non-atomic combo ``_set_html_output`` exists to
     avoid) and the structured banner via ``append_stdout`` from the *background*
@@ -136,8 +136,8 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
 
     # The "geometry optimization before this calc" checkbox is meaningful
     # for all workflows except Geometry Opt itself (which IS the geom-opt
-    # workflow). POLISH.9: this was called "pre-optimisation" pre-2026-05-25;
-    # the underlying operation is a full DFT geom-opt — distinct from the
+    # workflow). This was previously called "pre-optimisation"; the
+    # underlying operation is a full DFT geom-opt — distinct from the
     # LJ classical pre-opt in quantui/preopt.py.
     # Reorganization Energy runs its own neutral + ion optimizations, so the
     # standalone "geometry optimization before this calc" checkbox is
@@ -237,7 +237,7 @@ def update_scan_widgets(app: Any, _change: Any = None) -> None:
         app._scan_unit_lbl.value = '<span style="font-size:12px;color:#555">°</span>'
 
 
-# Default RMSD tolerance for the seed-geometry "same molecule" check (HIST.6).
+# Default RMSD tolerance for the seed-geometry "same molecule" check.
 # 0.1 Å is generous enough to admit slight conformational differences (e.g.
 # re-importing the same SMILES, which can produce ~0.05 Å float-precision
 # drift in RDKit's embedding) but tight enough to reject distinct isomers,
@@ -302,7 +302,7 @@ def _geometries_match(
     *,
     rmsd_tol: float = _SEED_GEOMETRY_RMSD_TOLERANCE,
 ) -> bool:
-    """Strict atom-order + RMSD-based geometry comparison (HIST.6).
+    """Strict atom-order + RMSD-based geometry comparison.
 
     Returns ``True`` iff the atom symbol lists are equal in order AND the
     structures' RMSD (no rigid alignment) is at or below ``rmsd_tol`` Å.
@@ -340,7 +340,7 @@ def _refresh_seed_options(app: Any, dropdown: Any) -> None:
     """Populate a geo-opt seed dropdown filtered by strict atom+coord match.
 
     Shared helper used by both Frequency and UV-Vis (TD-DFT) seed dropdowns.
-    Filter cascade (HIST.6):
+    Filter cascade:
 
     1. No active molecule → list every geo-opt result (no filter; lets the
        user browse history before loading anything).
@@ -483,10 +483,10 @@ def _preopt_small(text: str, color: str = "#555") -> str:
 def on_preopt_preview(app: Any, btn: Any = None) -> None:
     """Run the classical pre-opt on demand and animate the relaxation in-place.
 
-    M-PREOPT PREOPT.2: instead of the pre-opt being a silent step inside the
-    run, the user previews it here — watches the bonded-FF relaxation animate
-    in the Calculate tab — then Keeps or Reverts it (PREOPT.3). The pre-opt runs
-    on a background thread; UI updates are marshalled back to the main thread.
+    Instead of the pre-opt being a silent step inside the run, the user
+    previews it here — watches the bonded-FF relaxation animate in the
+    Calculate tab — then Keeps or Reverts it. The pre-opt runs on a
+    background thread; UI updates are marshalled back to the main thread.
     """
     mol = getattr(app, "_molecule", None)
     if mol is None:
@@ -567,7 +567,7 @@ def _preopt_preview_failed(app: Any, msg: str) -> None:
 
 
 def on_preopt_accept(app: Any, btn: Any = None) -> None:
-    """Make the previewed relaxed geometry the active molecule (PREOPT.3)."""
+    """Make the previewed relaxed geometry the active molecule."""
     relaxed = getattr(app, "_preopt_relaxed_mol", None)
     if relaxed is None:
         return
@@ -844,9 +844,9 @@ def on_exit_clicked(app: Any, _unused: Any = None) -> None:
 
     app._exit_btn.description = "Exiting…"
     app._exit_btn.disabled = True
-    # POLISH.1 retry-2 (2026-05-25): the welcome logo now lives in its
-    # own ``widgets.Image`` next to the text. At shutdown hide the logo
-    # so the centered "QuantUI has shut down" message isn't off-center.
+    # The welcome logo now lives in its own ``widgets.Image`` next to the
+    # text. At shutdown hide the logo so the centered "QuantUI has shut
+    # down" message isn't off-center.
     if hasattr(app, "_welcome_logo"):
         try:
             app._welcome_logo.layout.display = "none"
@@ -883,8 +883,8 @@ def on_cal_run(
     """Start async calibration run and initialize calibration UI state."""
     _ = btn
     mode = app._cal_mode_toggle.value
-    # session 55 hotfix: the old ``"short" else "long"`` two-tier dispatch
-    # silently routed tier 3 / tier 4 (and tier 1!) to the tier-2 suite,
+    # The old ``"short" else "long"`` two-tier dispatch silently routed
+    # tier 3 / tier 4 (and tier 1!) to the tier-2 suite,
     # which set ``progress_bar.max = 20`` while tier 1 only ran 8 steps
     # — the bar froze at 40% on completion. Use the 4-tier lookup so
     # ``max`` matches the actual step count.
@@ -892,8 +892,8 @@ def on_cal_run(
 
     suite = _MODE_TO_SUITE.get(mode, benchmark_suite)
     app._cal_stop_event = threading.Event()
-    # session 55 user request: skip-current-step event, separate from
-    # the whole-run stop event. Replaces the hard per-step timeout.
+    # Skip-current-step event, separate from the whole-run stop event.
+    # Replaces the hard per-step timeout.
     app._cal_skip_event = threading.Event()
     app._cal_run_btn.disabled = True
     app._cal_mode_toggle.disabled = True
@@ -906,7 +906,7 @@ def on_cal_run(
     app._cal_step_label.value = (
         '<span style="font-size:12px;color:#475569">Starting…</span>'
         # Reserve a second invisible line so the live-message ticker
-        # doesn't jump the accordion height (session 55 user report).
+        # doesn't jump the accordion height.
         '<br><span style="font-size:11px;color:transparent">.</span>'
     )
     app._cal_results_html.value = ""
@@ -924,9 +924,9 @@ def on_cal_stop(app: Any, btn: Any) -> None:
 def on_cal_skip(app: Any, btn: Any) -> None:
     """Signal the active calibration to skip the CURRENT step + continue.
 
-    Replaces the per-step timeout (session 55 user request after a
-    near-finishing benzene B3LYP/6-31G* freq calc got cut off at the
-    1800 s tier-4 cap). The worker is killed, the step is marked
+    Replaces the per-step timeout (added after a near-finishing benzene
+    B3LYP/6-31G* freq calc got cut off at the 1800 s tier-4 cap). The
+    worker is killed, the step is marked
     ``skipped``, the event is cleared inside ``run_calibration``, and
     the loop moves on to the next step.
     """
@@ -952,7 +952,7 @@ def _cal_table_html(steps_so_far, total: int, *, in_flight_step=None) -> str:
 
     Called incrementally — after every completed step — so the user sees
     rows accumulate in real time instead of waiting for the whole tier
-    to finish (session 55 user request). ``steps_so_far`` is the list of
+    to finish. ``steps_so_far`` is the list of
     ``BenchmarkStep`` objects completed; ``in_flight_step`` (optional)
     is a dict ``{label, n_electrons, n_basis, status, elapsed_s}`` that
     appends a "running" row at the bottom while a step is mid-execution.
@@ -960,8 +960,8 @@ def _cal_table_html(steps_so_far, total: int, *, in_flight_step=None) -> str:
     For failed steps (error / timeout / skipped) we render an inline
     italic line below the status cell with a truncated ``error_msg``,
     so the user can see WHY a step failed without having to open
-    ``calibration.json`` (session 55 user request after MP2/CCSD on
-    H₂O/cc-pVDZ silently 'errored' with no on-screen explanation).
+    ``calibration.json`` (added after MP2/CCSD on H₂O/cc-pVDZ silently
+    'errored' with no on-screen explanation).
     """
     import html as _html_mod
 
@@ -1029,7 +1029,7 @@ def _cal_table_html(steps_so_far, total: int, *, in_flight_step=None) -> str:
 def do_calibration(app: Any, *, pyscf_available: bool) -> None:
     """Run calibration suite and render calibration summary table.
 
-    Fixes shipped 2026-05-25 (session 55 user reports):
+    Fixes shipped 2026-05-25:
 
     - Wraps the whole run in ``_activity_begin/_end`` so the toolbar
       activity badge stops reading "Idle" while calibration is busy.
@@ -1049,15 +1049,15 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
     # callback; no need to compute it locally. (The earlier draft pulled
     # it from ``_MODE_TO_SUITE`` but never used it — ruff F841.)
 
-    # session 55 user request (after a near-finishing benzene
-    # B3LYP/6-31G* freq got cut off at the old 1800 s tier-4 cap):
-    # no automatic timeout — the user controls long-running steps via
-    # the Skip button. If they walk away from a runaway calc, the
-    # Stop button is still available. Headless callers that genuinely
-    # want a wall-clock cap can pass timeout_per_step explicitly.
+    # No automatic timeout — the user controls long-running steps via
+    # the Skip button (added after a near-finishing benzene B3LYP/6-31G*
+    # freq got cut off at the old 1800 s tier-4 cap). If they walk away
+    # from a runaway calc, the Stop button is still available. Headless
+    # callers that genuinely want a wall-clock cap can pass
+    # timeout_per_step explicitly.
     timeout_per_step: Optional[float] = None
 
-    # M-EST follow-up: keep the toolbar activity badge red for the
+    # Keep the toolbar activity badge red for the
     # duration of the calibration so the user knows the kernel is busy.
     app._activity_begin(f"Calibrating ({mode})…", kind="compute")
 
@@ -1162,7 +1162,7 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
 def update_notes(app: Any, change: Any = None) -> None:
     """Refresh the method / basis descriptor cards + open-shell hint.
 
-    Replaces the old inline educational-notes text block (UXP.7). The cards
+    Replaces the old inline educational-notes text block. The cards
     describe the *method* and *basis* themselves, so — unlike the old notes —
     they refresh independently of whether a molecule is loaded. The open-shell
     hint (restored from the old notes) appears only when multiplicity > 1.
@@ -1224,7 +1224,7 @@ def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
         n_basis = calc_log_mod.count_basis_functions(
             app._molecule.atoms, app.basis_dd.value
         )
-        # M-EST / EST.1: predict the device the upcoming run will use so
+        # Predict the device the upcoming run will use so
         # the estimator can partition history by GPU vs CPU. The method
         # also matters — gpu4pyscf doesn't support CCSD(T), so even on a
         # GPU machine that calc will run CPU-side.
@@ -1262,7 +1262,7 @@ def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
 def refresh_results_browser(app: Any) -> None:
     """Refresh the History dropdown with saved result directories.
 
-    POLISH.6 (M-POLISH, 2026-05-25): prepends a
+    Prepends a
     ``"(select a calculation to view)"`` placeholder so the dropdown
     opens in an explicit "no calc loaded yet" state. Without the
     placeholder, ipywidgets auto-selected the most-recent entry as the
@@ -1297,10 +1297,10 @@ def refresh_results_browser(app: Any) -> None:
             data = load_result(d)
             ts = data.get("timestamp", d.name)
             calc_badge = _calc_type_badge(data.get("calc_type", ""))
-            # M-EST follow-up (2026-05-25): calibration-produced results
-            # get a 🔧 marker so the user can tell them apart from
-            # user-initiated calcs. The marker comes from result.json's
-            # ``calibration_run_id`` extras field written by the worker.
+            # Calibration-produced results get a 🔧 marker so the user
+            # can tell them apart from user-initiated calcs. The marker
+            # comes from result.json's ``calibration_run_id`` extras field
+            # written by the worker.
             calib_marker = "🔧 " if data.get("calibration_run_id") else ""
             label = (
                 f"{ts}  ·  [{calc_badge}]  "

@@ -1,4 +1,4 @@
-"""Method / basis descriptor cards (UXP.7 — FR-DESCRIPTOR-CARDS).
+"""Method / basis descriptor cards.
 
 Replaces the inline multi-paragraph educational-notes block next to the
 method / basis dropdowns with two compact "descriptor cards" — an icon, a

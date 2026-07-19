@@ -127,7 +127,7 @@ def export_molecule_and_label(app: Any) -> tuple[Any, str, str]:
 
 
 def on_iso_export_cube(app: Any, btn: Any) -> None:
-    """Copy the last-generated cube file to the result folder (EXPORT.5).
+    """Copy the last-generated cube file to the result folder.
 
     Reads ``app._last_cube_path`` (set by the isosurface render path in
     ``app_visualization.py``) and copies it to
@@ -160,7 +160,7 @@ def on_iso_export_cube(app: Any, btn: Any) -> None:
 
 
 def on_export_bundle(app: Any, btn: Any) -> None:
-    """Zip the entire result folder for sharing (EXPORT.5)."""
+    """Zip the entire result folder for sharing."""
     from quantui.results_storage import export_result_bundle
 
     result_dir = getattr(app, "_last_result_dir", None)

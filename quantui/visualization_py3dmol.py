@@ -426,8 +426,9 @@ def render_molecule_html(
     Mirrors :func:`display_molecule` but emits a single HTML string so callers
     can route through an atomic ``Output.outputs`` swap (Rule 6 in
     ``reflections/01-voila-rendering-and-display.md``) rather than
-    ``with output: display(viz)`` — the latter is the BUG.6/BUG.7 root cause
-    family. Errors are caught and returned as inline HTML so the caller sees a
+    ``with output: display(viz)`` — the latter is a known root-cause
+    family for trajectory and Analysis-tab rendering regressions. Errors are
+    caught and returned as inline HTML so the caller sees a
     visible failure message in the viewer slot instead of a blank 🙁 panel.
     """
     if not is_visualization_available():
