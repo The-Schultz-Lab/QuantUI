@@ -3,8 +3,10 @@ echo QuantUI NATIVE MODE — Local conda env in WSL, no container
 echo Use this when you have edited quantui/*.py and want to test immediately.
 echo.
 
-REM Convert the Windows repo path to a WSL path for portability
-for /f "delims=" %%i in ('wsl wslpath -a "%~dp0"') do set WSLPATH=%%i
+REM Repo root is one level up from this launchers/ folder; convert it to a WSL
+REM path for portability.
+for %%i in ("%~dp0..") do set "REPO=%%~fi"
+for /f "delims=" %%i in ('wsl wslpath -a "%REPO%"') do set WSLPATH=%%i
 
 REM Runs Voila directly from the quantui conda env inside WSL.
 REM pip install -e . is skipped when pyproject.toml has not changed since the

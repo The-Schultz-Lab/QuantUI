@@ -11,7 +11,8 @@ set -eu
 
 # Resolve script directory so double-click from any location works.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+# Repo root is one level up from this launchers/ folder.
+cd "$SCRIPT_DIR/.."
 
 echo "QuantUI NATIVE MODE — Local conda env on macOS, no container"
 echo "Use this when you have edited quantui/*.py and want to test immediately."

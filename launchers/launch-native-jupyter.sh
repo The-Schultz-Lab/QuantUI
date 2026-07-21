@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Repo root is one level up from this launchers/ folder. cd there so every
+# relative path below (logs/, pyproject.toml, quantui/, notebooks/) resolves
+# regardless of the caller's working directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/.."
+
 LOG_FILE="logs/native-jupyter.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 

@@ -3,18 +3,19 @@ echo QuantUI NATIVE JUPYTER MODE -- Local conda env in WSL, no container
 echo Use this when you have edited quantui/*.py and want JupyterLab.
 echo.
 
-REM Convert the Windows repo path to a WSL path for portability
-set "WIN_REPO=%~dp0."
-for /f "delims=" %%i in ('wsl wslpath -a "%WIN_REPO%"') do set WSLPATH=%%i
+REM Repo root is one level up from this launchers/ folder; convert it to a WSL
+REM path for portability.
+for %%i in ("%~dp0..") do set "REPO=%%~fi"
+for /f "delims=" %%i in ('wsl wslpath -a "%REPO%"') do set WSLPATH=%%i
 if not defined WSLPATH (
-	echo ERROR: Could not resolve a WSL path for %WIN_REPO%
+	echo ERROR: Could not resolve a WSL path for %REPO%
 	echo Try this command manually:
-	echo   wsl wslpath -a "%WIN_REPO%"
+	echo   wsl wslpath -a "%REPO%"
 	echo.
 	pause
 	exit /b 1
 )
-set LOGFILE=%~dp0logs\native-jupyter.log
+set "LOGFILE=%REPO%\logs\native-jupyter.log"
 
 echo Startup log: %LOGFILE%
 echo.
@@ -30,7 +31,7 @@ REM Clears quantui/__pycache__ on every launch to prevent stale .pyc bytecode
 REM (WSL2 DrvFs does not reliably propagate Windows-side mtime changes, so Python
 REM may load pre-edit bytecode even after source changes -- see GOTCHAS.md).
 REM PYTHONDONTWRITEBYTECODE=1 prevents a new stale cache from accumulating.
-start "QuantUI [native-jupyter]" wsl -d Ubuntu --cd "%WSLPATH%" -- bash ./launch-native-jupyter.sh
+start "QuantUI [native-jupyter]" wsl -d Ubuntu --cd "%WSLPATH%" -- bash ./launchers/launch-native-jupyter.sh
 
 echo Waiting for JupyterLab to start on localhost:8868...
 set MAX_WAIT=45

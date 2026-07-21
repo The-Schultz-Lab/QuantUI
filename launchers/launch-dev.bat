@@ -2,7 +2,10 @@
 echo QuantUI DEV MODE — Using local notebook (no rebuild needed)
 echo.
 
-if not exist "%~dp0quantui.sif" (
+REM Repo root is one level up from this launchers/ folder.
+for %%i in ("%~dp0..") do set "REPO=%%~fi"
+
+if not exist "%REPO%\quantui.sif" (
     echo ERROR: quantui.sif not found.
     pause
     exit /b 1
@@ -14,8 +17,8 @@ echo       Edits to quantui/*.py require a container rebuild to take effect.
 echo       For package-level dev, use launch-native.bat instead.
 echo.
 
-REM Convert the Windows repo path to a WSL path for portability
-for /f "delims=" %%i in ('wsl wslpath -a "%~dp0"') do set WSLPATH=%%i
+REM Convert the repo root to a WSL path for portability
+for /f "delims=" %%i in ('wsl wslpath -a "%REPO%"') do set WSLPATH=%%i
 
 REM Uses the local notebook on disk instead of the baked-in copy.
 REM Edits to notebooks/ take effect immediately — no container rebuild needed.

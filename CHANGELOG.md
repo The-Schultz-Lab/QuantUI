@@ -20,6 +20,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - **One-click "Calc. Reorganization Energy" button** — sets the calculation type
   to Reorganization Energy, defaults the channel to both hole + electron, and
   launches the run in a single click.
+
+### Changed
+
+- **All launcher scripts moved into a `launchers/` folder** to declutter the repo
+  root. Behaviour is unchanged — each launcher now resolves the repo root as its
+  parent directory. `launchers/launch-app.bat` still finds `quantui.sif` next to
+  itself (student download) or in the repo root (dev build). Docs and shortcuts
+  that referenced the old top-level paths were updated.
+
 ## [0.4.1] - 2026-07-16
 
 Bug-fix and hardening release from a full repository audit. No new features and
