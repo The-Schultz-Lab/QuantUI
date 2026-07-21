@@ -67,7 +67,8 @@ echo "============================================================"
 echo "Building: $SIF"
 echo "From:     $DEF"
 echo "Options:  ${BUILD_OPTS:-none}"
-echo "This takes 20–40 minutes. Go make a coffee."
+echo "This takes ~15–30 minutes (download + extract dominate; the mamba"
+echo "solve is fast). Go make a coffee."
 echo "============================================================"
 
 START=$(date +%s)
