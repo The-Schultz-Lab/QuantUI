@@ -12,7 +12,30 @@ mkdir -p "$(dirname "$LOG_FILE")"
 
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-source ~/miniconda3/etc/profile.d/conda.sh
+# Locate conda.sh. Detect the install rather than assuming one location:
+# miniforge (recommended for WSL), miniconda, and anaconda are all supported.
+# Falls back to an already-configured conda via $CONDA_EXE.
+CONDA_SH=""
+for candidate in \
+    "$HOME/miniforge3/etc/profile.d/conda.sh" \
+    "$HOME/miniconda3/etc/profile.d/conda.sh" \
+    "$HOME/anaconda3/etc/profile.d/conda.sh" \
+    "/opt/miniforge3/etc/profile.d/conda.sh" \
+    "/opt/miniconda3/etc/profile.d/conda.sh" \
+    "/opt/conda/etc/profile.d/conda.sh"; do
+    [ -f "$candidate" ] && CONDA_SH="$candidate" && break
+done
+if [ -z "$CONDA_SH" ] && [ -n "${CONDA_EXE:-}" ]; then
+    fallback="$(dirname "$(dirname "$CONDA_EXE")")/etc/profile.d/conda.sh"
+    [ -f "$fallback" ] && CONDA_SH="$fallback"
+fi
+if [ -z "$CONDA_SH" ]; then
+    echo "ERROR: Could not locate conda.sh. Install Miniforge to ~/miniforge3."
+    echo "       https://github.com/conda-forge/miniforge"
+    exit 1
+fi
+# shellcheck disable=SC1090
+source "$CONDA_SH"
 conda activate quantui
 
 echo "Using Python: $(command -v python)"
