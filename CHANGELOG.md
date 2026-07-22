@@ -28,6 +28,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   parent directory. `launchers/launch-app.bat` still finds `quantui.sif` next to
   itself (student download) or in the repo root (dev build). Docs and shortcuts
   that referenced the old top-level paths were updated.
+- **Apptainer container now builds on `condaforge/miniforge3` with the `mamba`
+  (libmamba) solver.** The previous `continuumio/miniconda3` base used conda's
+  classic solver, which could hang for hours resolving the PySCF + RDKit +
+  JupyterLab dependency set. The build now installs from conda-forge only
+  (`--override-channels`, strict channel priority), which resolves in minutes and
+  avoids the base image's implicit `defaults` channel. No change to the shipped
+  package set or runtime behavior.
 
 ## [0.4.1] - 2026-07-16
 
