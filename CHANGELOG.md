@@ -23,6 +23,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- **All launcher scripts moved into a `launchers/` folder** to declutter the repo
+  root. Behaviour is unchanged — each launcher now resolves the repo root as its
+  parent directory. `launchers/launch-app.bat` still finds `quantui.sif` next to
+  itself (student download) or in the repo root (dev build). Docs and shortcuts
+  that referenced the old top-level paths were updated.
 - **Apptainer container now builds on `condaforge/miniforge3` with the `mamba`
   (libmamba) solver.** The previous `continuumio/miniconda3` base used conda's
   classic solver, which could hang for hours resolving the PySCF + RDKit +

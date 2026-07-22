@@ -1,4 +1,4 @@
-# Dev launcher stamp (written by launch-native.bat to skip redundant pip install)
+# Dev launcher stamp (written by launchers/launch-native.* to skip redundant pip install)
 .dev_install_stamp
 
 # Python

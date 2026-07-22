@@ -11,16 +11,22 @@ set -eu
 
 # Resolve script directory so double-click from any location works.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+# Repo root is one level up from this launchers/ folder.
+cd "$SCRIPT_DIR/.."
 
 echo "QuantUI NATIVE MODE — Local conda env on macOS, no container"
 echo "Use this when you have edited quantui/*.py and want to test immediately."
 echo
 
-# Locate conda.sh. Miniconda at ~/miniconda3 is the documented install;
-# we try a few common fallback locations before giving up.
+# Locate conda.sh. Detect the install rather than assuming one location:
+# miniforge, miniconda, and anaconda are all supported, in home, /opt, and
+# Homebrew Caskroom prefixes. Falls back to an already-configured conda via
+# $CONDA_EXE.
 CONDA_SH=""
 for candidate in \
+    "$HOME/miniforge3/etc/profile.d/conda.sh" \
+    "/opt/miniforge3/etc/profile.d/conda.sh" \
+    "/opt/homebrew/Caskroom/miniforge/base/etc/profile.d/conda.sh" \
     "/opt/miniconda3/etc/profile.d/conda.sh" \
     "/opt/miniconda3/condabin/conda" \
     "$HOME/miniconda3/etc/profile.d/conda.sh" \
@@ -34,11 +40,15 @@ for candidate in \
         break
     fi
 done
+if [ -z "$CONDA_SH" ] && [ -n "${CONDA_EXE:-}" ]; then
+    fallback="$(dirname "$(dirname "$CONDA_EXE")")/etc/profile.d/conda.sh"
+    [ -f "$fallback" ] && CONDA_SH="$fallback"
+fi
 
 if [ -z "$CONDA_SH" ]; then
     echo "ERROR: Could not locate conda.sh."
-    echo "       Install Miniconda to ~/miniconda3 and re-run."
-    echo "       https://docs.conda.io/projects/miniconda/en/latest/"
+    echo "       Install Miniforge to ~/miniforge3 and re-run."
+    echo "       https://github.com/conda-forge/miniforge"
     echo
     read -n 1 -s -r -p "Press any key to close this window..."
     exit 1

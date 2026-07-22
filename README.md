@@ -194,16 +194,35 @@ no rebuild.
 
 | Platform | File | Action |
 | --- | --- | --- |
-| Windows | [`launch-native.bat`](launch-native.bat) | Activates the `quantui` conda env inside WSL Ubuntu, runs Voilà, and opens `http://localhost:8867` |
-| macOS / Linux | [`launch-native.command`](launch-native.command) | Activates the local `quantui` conda env directly (no WSL needed) and does the same |
+| Windows | [`launchers/launch-native.bat`](launchers/launch-native.bat) | Activates the `quantui` conda env inside WSL Ubuntu, runs Voilà, and opens `http://localhost:8867` |
+| macOS | [`launchers/launch-native.command`](launchers/launch-native.command) | Activates the local `quantui` conda env directly (no WSL needed) and does the same |
+| Linux / WSL | [`launchers/launch-native.sh`](launchers/launch-native.sh) | Run `./launchers/launch-native.sh` from a Linux or WSL terminal; activates `quantui` and does the same |
 
-Both launchers reuse port `8867`, so you can keep the same browser tab pinned
-across platforms.
+All launchers reuse port `8867`, so you can keep the same browser tab pinned
+across platforms. They **auto-detect your conda installation** — miniforge
+(recommended), miniconda, or anaconda, in your home directory or a system
+prefix — so no path editing is needed regardless of which you installed.
+
+> **WSL users — clone into the Linux filesystem, not `/mnt/c`.** Running
+> `pip install -e .` (or the launchers) against a repo on the Windows drive
+> (`/mnt/c/...`) fails with `error: [Errno 1] Operation not permitted` because
+> the 9P bridge WSL uses for Windows files doesn't support the file operations
+> an editable build needs — and it's ~10× slower besides. Clone the repo into
+> your WSL home instead and work from there:
+>
+> ```bash
+> git clone https://github.com/The-Schultz-Lab/QuantUI.git ~/GitHub/QuantUI
+> cd ~/GitHub/QuantUI
+> ```
+>
+> Then open it in VS Code with `code .` (installs the WSL server and reopens
+> the window connected to WSL). `launchers/launch-native.sh` resolves its own
+> location, so it works from any clone path.
 
 ### Windows — pin to the Start menu
 
-1. Right-click [`launch-native.bat`](launch-native.bat) in File Explorer
-   → **Send to** → **Desktop (create shortcut)**.
+1. Right-click [`launchers/launch-native.bat`](launchers/launch-native.bat) in
+   File Explorer → **Send to** → **Desktop (create shortcut)**.
 2. Rename the shortcut to something friendly like `QuantUI`.
 3. *(Optional)* Right-click the shortcut → **Properties** → **Change Icon...**
    and point at `docs\logo.ico` for a proper app icon.
@@ -222,7 +241,8 @@ in your browser.
 
 ### macOS — pin to the Dock / Launchpad
 
-**Quickest:** double-click [`launch-native.command`](launch-native.command)
+**Quickest:** double-click
+[`launchers/launch-native.command`](launchers/launch-native.command)
 from Finder. macOS will open Terminal, run the script, and pop the app open
 in your browser. The first launch is gated by Gatekeeper: right-click the
 file → **Open** → **Open** to clear it (one time only).
@@ -239,7 +259,7 @@ application so it lives in Launchpad and pins to the Dock.
    your clone lives elsewhere):
 
    ```bash
-   "$HOME/path/to/QuantUI/launch-native.command"
+   "$HOME/path/to/QuantUI/launchers/launch-native.command"
    ```
 
 4. **File → Save** → name it `QuantUI` → save into `/Applications`.
@@ -253,8 +273,8 @@ You now have a real `.app` you can launch from Spotlight, Launchpad, or the
 Dock — it just runs the `.command` script under the hood, so any
 `quantui/*.py` edits take effect immediately on the next launch.
 
-> **Linux users:** the same `launch-native.command` script works from a
-> terminal — `./launch-native.command`. To wire it into your desktop
+> **Linux users:** the same `launchers/launch-native.command` script works from
+> a terminal — `./launchers/launch-native.command`. To wire it into your desktop
 > environment as a pinned app, create a `.desktop` entry pointing at the
 > script.
 

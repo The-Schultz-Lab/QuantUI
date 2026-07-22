@@ -76,8 +76,7 @@ QuantUI/
 │   ├── quantui.def     ← Apptainer container definition
 │   └── build.sh              ← Build script
 ├── local-setup/              ← Conda environment YAMLs
-├── launch-app.bat            ← Windows double-click launcher (Voilà app mode)
-├── launch-dev.bat            ← Windows double-click launcher (JupyterLab mode)
+├── launchers/                ← Double-click launchers (Windows .bat, macOS .command, Linux/WSL .sh)
 ├── CHANGELOG.md              ← Release history (Keep a Changelog format)
 ├── pyproject.toml            ← Package config (name: quantui, imports as quantui)
 └── pytest.ini                ← pytest configuration
