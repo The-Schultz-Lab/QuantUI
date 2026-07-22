@@ -1,5 +1,5 @@
 Bootstrap: docker
-FROM: continuumio/miniconda3:latest
+FROM: condaforge/miniforge3:latest
 
 %help
   QuantUI — Educational Quantum Chemistry Interface
@@ -42,8 +42,13 @@ FROM: continuumio/miniconda3:latest
 %post
   export PATH="/opt/conda/bin:${PATH}"
 
-  echo "Installing dependencies via conda..."
-  conda install -y -c conda-forge \
+  echo "Installing dependencies via mamba (libmamba solver — the old classic"
+  echo "conda solver hangs for hours on this pyscf + rdkit + jupyterlab spec)..."
+  # conda-forge only, strict priority: avoids mixing in the base image's
+  # implicit 'defaults' channel, which both slows the solve and pulls from a
+  # channel with separate terms of service.
+  conda config --system --set channel_priority strict
+  mamba install -y --override-channels -c conda-forge \
     jupyter \
     jupyterlab \
     ipywidgets \

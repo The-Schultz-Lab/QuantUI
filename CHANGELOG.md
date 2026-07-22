@@ -20,6 +20,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - **One-click "Calc. Reorganization Energy" button** — sets the calculation type
   to Reorganization Energy, defaults the channel to both hole + electron, and
   launches the run in a single click.
+
+### Changed
+
+- **Apptainer container now builds on `condaforge/miniforge3` with the `mamba`
+  (libmamba) solver.** The previous `continuumio/miniconda3` base used conda's
+  classic solver, which could hang for hours resolving the PySCF + RDKit +
+  JupyterLab dependency set. The build now installs from conda-forge only
+  (`--override-channels`, strict channel priority), which resolves in minutes and
+  avoids the base image's implicit `defaults` channel. No change to the shipped
+  package set or runtime behavior.
+
 ## [0.4.1] - 2026-07-16
 
 Bug-fix and hardening release from a full repository audit. No new features and
