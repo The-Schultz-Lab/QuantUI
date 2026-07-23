@@ -430,6 +430,105 @@ def build_history_section(
     app._cal_accordion = widgets.Accordion(children=[cal_panel], selected_index=None)
     app._cal_accordion.set_title(0, "Calibrate time estimates")
 
+    # ── Search / faceted filters (HIST.7) ──────────────────────────────
+    # All filtering is client-side over the cached ``app._history_entries``
+    # list; widgets here only hold facet state. See app_history.apply_history_filter.
+    from quantui.app_history import HISTORY_CALC_TYPE_FACETS, HISTORY_STATUS_FACETS
+
+    app._history_entries = []
+    app._history_filter_suspend = False
+    app.history_search = widgets.Text(
+        placeholder="search name or formula (e.g. benzene, C6H6)",
+        continuous_update=True,  # type-to-narrow
+        layout=layout_fn(width="300px"),
+    )
+    app.history_filter_clear_btn = widgets.Button(
+        icon="times",
+        tooltip="Clear all history filters",
+        layout=layout_fn(width="40px"),
+    )
+    app.history_count_lbl = widgets.HTML(
+        '<span style="color:#888;font-size:12px"></span>'
+    )
+    app._history_calc_chips = {
+        key: widgets.ToggleButton(
+            value=False,
+            description=label,
+            tooltip=f"Show only {label} calculations",
+            layout=layout_fn(width="auto"),
+        )
+        for label, key in HISTORY_CALC_TYPE_FACETS
+    }
+    app.history_method_dd = widgets.Dropdown(
+        options=[("Any method", "")],
+        value="",
+        description="Method:",
+        style={"description_width": "55px"},
+        layout=layout_fn(width="200px"),
+    )
+    app.history_basis_dd = widgets.Dropdown(
+        options=[("Any basis", "")],
+        value="",
+        description="Basis:",
+        style={"description_width": "55px"},
+        layout=layout_fn(width="200px"),
+    )
+    app.history_date_from = widgets.DatePicker(
+        description="From:",
+        style={"description_width": "45px"},
+        layout=layout_fn(width="200px"),
+    )
+    app.history_date_to = widgets.DatePicker(
+        description="To:",
+        style={"description_width": "35px"},
+        layout=layout_fn(width="190px"),
+    )
+    app._history_status_chips = {
+        key: widgets.ToggleButton(
+            value=False,
+            description=label,
+            layout=layout_fn(width="auto"),
+        )
+        for label, key in HISTORY_STATUS_FACETS
+    }
+
+    def _facet_label(text: str, width: str = "60px") -> widgets.HTML:
+        return widgets.HTML(
+            f'<span style="color:#555;font-size:12px;width:{width};'
+            f'display:inline-block">{text}</span>'
+        )
+
+    app._history_filter_box = widgets.VBox(
+        [
+            widgets.HBox(
+                [
+                    app.history_search,
+                    app.history_filter_clear_btn,
+                    app.history_count_lbl,
+                ],
+                layout=layout_fn(align_items="center", gap="6px"),
+            ),
+            widgets.HBox(
+                [_facet_label("Type:"), *app._history_calc_chips.values()],
+                layout=layout_fn(align_items="center", gap="4px", flex_wrap="wrap"),
+            ),
+            widgets.HBox(
+                [app.history_method_dd, app.history_basis_dd],
+                layout=layout_fn(align_items="center", gap="8px"),
+            ),
+            widgets.HBox(
+                [
+                    app.history_date_from,
+                    app.history_date_to,
+                    _facet_label("Status:", "55px"),
+                    *app._history_status_chips.values(),
+                ],
+                layout=layout_fn(align_items="center", gap="6px", flex_wrap="wrap"),
+            ),
+        ],
+        layout=layout_fn(margin="0 0 8px", gap="4px"),
+    )
+
     # The History tab is now purely the result-browser. Performance stats
     # + Calibrate accordions moved to the System Settings tab — see below —
     # so the user finds benchmarking + system state in one logical place.
@@ -437,8 +536,10 @@ def build_history_section(
         [
             widgets.HTML(
                 '<p style="color:#555;font-size:13px;margin:0 0 8px">'
-                "Calculations are saved automatically. Select one below to view its results.</p>"
+                "Calculations are saved automatically. Filter below, then select "
+                "one to view its results.</p>"
             ),
+            app._history_filter_box,
             widgets.HBox(
                 [
                     app.past_dd,
