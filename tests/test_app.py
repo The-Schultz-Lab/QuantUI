@@ -3120,3 +3120,308 @@ class TestCompletionBanner:
     def test_help_panel_initially_hidden(self):
         app = QuantUIApp()
         assert app.help_tab_panel.layout.display == "none"
+
+
+class TestHistoryHardeningHist7:
+    """HIST.7: searchable + faceted History filtering.
+
+    The History browser caches parsed ``result.json`` dicts on
+    ``app._history_entries`` and filters that list client-side. Most coverage
+    targets the pure ``filter_history_entries`` function; a couple of tests
+    exercise ``apply_history_filter`` end-to-end against a lightweight fake app.
+    """
+
+    def _entries(self):
+        from quantui.app_history import entry_date
+
+        raw = [
+            # (path, calc_type, formula, method, basis, ts, converged, name)
+            (
+                "d1",
+                "single_point",
+                "H2O",
+                "RHF",
+                "STO-3G",
+                "2026-05-01_10-00-00-000001",
+                True,
+                "water",
+            ),
+            (
+                "d2",
+                "geometry_opt",
+                "C6H6",
+                "B3LYP",
+                "6-31G*",
+                "2026-06-15_11-00-00-000001",
+                True,
+                "benzene",
+            ),
+            (
+                "d3",
+                "frequency",
+                "H2O",
+                "B3LYP",
+                "6-31G*",
+                "2026-07-01_09-30-00-000001",
+                False,
+                "water",
+            ),
+            (
+                "d4",
+                "tddft",
+                "C6H6",
+                "PBE0",
+                "cc-pVDZ",
+                "2026-07-20_08-00-00-000001",
+                True,
+                "benzene",
+            ),
+        ]
+        return [
+            {
+                "path": p,
+                "label": f"{ts} {ct} {f} {m}/{b}",
+                "calc_type": ct,
+                "formula": f,
+                "name": nm,
+                "method": m,
+                "basis": b,
+                "timestamp": ts,
+                "date": entry_date(ts),
+                "converged": conv,
+            }
+            for (p, ct, f, m, b, ts, conv, nm) in raw
+        ]
+
+    # ── pure filter function ────────────────────────────────────────────
+
+    def test_no_facets_returns_all(self):
+        from quantui.app_history import filter_history_entries
+
+        entries = self._entries()
+        assert filter_history_entries(entries) == entries
+
+    def test_text_matches_formula_case_insensitive(self):
+        from quantui.app_history import filter_history_entries
+
+        got = filter_history_entries(self._entries(), text="c6h6")
+        assert {e["path"] for e in got} == {"d2", "d4"}
+
+    def test_text_matches_molecule_name(self):
+        from quantui.app_history import filter_history_entries
+
+        got = filter_history_entries(self._entries(), text="benzene")
+        assert {e["path"] for e in got} == {"d2", "d4"}
+
+    def test_text_no_match_returns_empty(self):
+        from quantui.app_history import filter_history_entries
+
+        assert filter_history_entries(self._entries(), text="zzz") == []
+
+    def test_calc_type_facet(self):
+        from quantui.app_history import filter_history_entries
+
+        got = filter_history_entries(self._entries(), calc_types=["frequency", "tddft"])
+        assert {e["path"] for e in got} == {"d3", "d4"}
+
+    def test_method_and_basis_facets_combine(self):
+        from quantui.app_history import filter_history_entries
+
+        got = filter_history_entries(self._entries(), method="B3LYP", basis="6-31G*")
+        assert {e["path"] for e in got} == {"d2", "d3"}
+
+    def test_date_range_inclusive(self):
+        import datetime as dt
+
+        from quantui.app_history import filter_history_entries
+
+        got = filter_history_entries(
+            self._entries(),
+            date_from=dt.date(2026, 6, 1),
+            date_to=dt.date(2026, 7, 1),
+        )
+        assert {e["path"] for e in got} == {"d2", "d3"}
+
+    def test_status_facet_converged_only(self):
+        from quantui.app_history import filter_history_entries
+
+        got = filter_history_entries(self._entries(), statuses=["converged"])
+        assert {e["path"] for e in got} == {"d1", "d2", "d4"}
+
+    def test_status_facet_not_converged_only(self):
+        from quantui.app_history import filter_history_entries
+
+        got = filter_history_entries(self._entries(), statuses=["not_converged"])
+        assert {e["path"] for e in got} == {"d3"}
+
+    def test_facets_are_anded_together(self):
+        from quantui.app_history import filter_history_entries
+
+        got = filter_history_entries(
+            self._entries(), text="H2O", calc_types=["frequency"]
+        )
+        assert {e["path"] for e in got} == {"d3"}
+
+    def test_unparseable_date_excluded_when_bound_set(self):
+        import datetime as dt
+
+        from quantui.app_history import filter_history_entries
+
+        entries = self._entries()
+        entries.append(
+            {
+                "path": "bad",
+                "label": "bad",
+                "calc_type": "single_point",
+                "formula": "X",
+                "name": "",
+                "method": "RHF",
+                "basis": "STO-3G",
+                "timestamp": "not-a-date",
+                "date": None,
+                "converged": True,
+            }
+        )
+        got = filter_history_entries(entries, date_from=dt.date(2026, 1, 1))
+        assert "bad" not in {e["path"] for e in got}
+
+    # ── apply_history_filter end-to-end (fake app) ──────────────────────
+
+    def _fake_app(self):
+        import types
+
+        entries = self._entries()
+
+        def _chip(val=False):
+            return types.SimpleNamespace(value=val)
+
+        app = types.SimpleNamespace(
+            _history_entries=entries,
+            _history_filter_suspend=False,
+            history_search=_chip(""),
+            history_method_dd=_chip(""),
+            history_basis_dd=_chip(""),
+            history_date_from=_chip(None),
+            history_date_to=_chip(None),
+            _history_calc_chips={
+                "single_point": _chip(),
+                "geometry_opt": _chip(),
+                "frequency": _chip(),
+                "tddft": _chip(),
+            },
+            _history_status_chips={"converged": _chip(), "not_converged": _chip()},
+            past_dd=types.SimpleNamespace(options=[]),
+            history_count_lbl=_chip(""),
+        )
+        return app
+
+    def test_apply_filter_populates_options_with_placeholder(self):
+        from quantui.app_history import apply_history_filter
+
+        app = self._fake_app()
+        apply_history_filter(app)
+        # index-0 placeholder + all 4 entries
+        assert app.past_dd.options[0] == ("(select a calculation to view)", "")
+        assert len(app.past_dd.options) == 5
+        assert "4 of 4 shown" in app.history_count_lbl.value
+
+    def test_apply_filter_text_narrows_and_counts(self):
+        from quantui.app_history import apply_history_filter
+
+        app = self._fake_app()
+        app.history_search.value = "benzene"
+        apply_history_filter(app)
+        paths = [v for _, v in app.past_dd.options[1:]]
+        assert set(paths) == {"d2", "d4"}
+        assert "2 of 4 shown" in app.history_count_lbl.value
+
+    def test_apply_filter_no_match_shows_message(self):
+        from quantui.app_history import apply_history_filter
+
+        app = self._fake_app()
+        app.history_search.value = "zzz"
+        apply_history_filter(app)
+        assert app.past_dd.options == [
+            ("(select a calculation to view)", ""),
+            ("(no matches for current filters)", ""),
+        ]
+        assert "0 of 4 shown" in app.history_count_lbl.value
+
+    def test_apply_filter_suspended_is_noop(self):
+        from quantui.app_history import apply_history_filter
+
+        app = self._fake_app()
+        app.past_dd.options = ["sentinel"]
+        app._history_filter_suspend = True
+        apply_history_filter(app)
+        assert app.past_dd.options == ["sentinel"]
+
+    # ── chemical-name search (name → formula resolution) ────────────────
+
+    def test_text_name_resolution_matches_formula(self):
+        """A name query resolves to formulas so entries with no stored name
+        still match (e.g. 'benzene' → C6H6)."""
+        from quantui.app_history import filter_history_entries
+
+        entries = self._entries()
+        for e in entries:
+            e["name"] = ""  # simulate results without a stored chemical name
+        got = filter_history_entries(entries, text="benzene", name_formulas={"C6H6"})
+        assert {e["path"] for e in got} == {"d2", "d4"}
+
+    def test_text_substring_still_wins_without_resolution(self):
+        from quantui.app_history import filter_history_entries
+
+        # No name_formulas: falls back to substring over formula + name.
+        got = filter_history_entries(self._entries(), text="c6h6")
+        assert {e["path"] for e in got} == {"d2", "d4"}
+
+    def test_resolve_query_formulas_benzene_precise(self):
+        """'benzene' resolves to C6H6 via the curated map, and does NOT pull in
+        substituted benzenes (toluene C7H8, aniline C6H7N) that only match on
+        synonyms."""
+        from quantui.app_history import resolve_query_formulas
+
+        formulas = resolve_query_formulas("benzene")
+        assert "C6H6" in formulas
+        assert "C7H8" not in formulas  # toluene must not sneak in
+        assert "C6H7N" not in formulas  # aniline must not sneak in
+        assert "C8H10" not in formulas  # ethylbenzene must not sneak in
+
+    def test_resolve_query_formulas_curated_map(self):
+        from quantui.app_history import resolve_query_formulas
+
+        assert "H2O" in resolve_query_formulas("water")
+        assert "H3N" in resolve_query_formulas("ammonia")
+        assert "CH4" in resolve_query_formulas("methane")
+
+    def test_resolve_query_formulas_library_exact_name(self):
+        """Named organics the library carries resolve via exact library name
+        (skips if the bundled library is unavailable)."""
+        from quantui import molecule_library as ml
+        from quantui.app_history import resolve_query_formulas
+
+        if not [
+            r for r in ml.search("toluene", limit=5) if r["name"].lower() == "toluene"
+        ]:
+            pytest.skip("molecule library unavailable")
+        assert "C7H8" in resolve_query_formulas("toluene")
+
+    def test_resolve_query_formulas_blank_is_empty(self):
+        from quantui.app_history import resolve_query_formulas
+
+        assert resolve_query_formulas("") == set()
+        assert resolve_query_formulas("   ") == set()
+
+    def test_apply_filter_name_search_via_resolver(self, monkeypatch):
+        import quantui.app_history as ah
+        from quantui.app_history import apply_history_filter
+
+        app = self._fake_app()
+        for e in app._history_entries:
+            e["name"] = ""  # no stored names → must rely on the resolver
+        monkeypatch.setattr(ah, "resolve_query_formulas", lambda q: {"C6H6"})
+        app.history_search.value = "benzene"
+        apply_history_filter(app)
+        paths = [v for _, v in app.past_dd.options[1:]]
+        assert set(paths) == {"d2", "d4"}

@@ -1282,40 +1282,74 @@ def refresh_results_browser(app: Any) -> None:
         from quantui import list_results, load_result
     except ImportError:
         return
+    from quantui.app_history import (
+        apply_history_filter,
+        entry_date,
+        refresh_history_facet_options,
+    )
+
     app.results_path_lbl.value = (
         f'<span style="font-size:13px;color:#64748b">'
         f"{app._get_results_dir()}</span>"
     )
     dirs = list_results()
     if not dirs:
+        app._history_entries = []
         app.past_dd.options = [("(no saved results)", "")]
         return
-    placeholder = ("(select a calculation to view)", "")
-    options = [placeholder]
+    # Build the entry cache once. Each entry keeps both the display label and
+    # the parsed facet keys so HIST.7 filtering never re-reads disk.
+    entries: list[dict[str, Any]] = []
     for d in dirs:
         try:
             data = load_result(d)
             ts = data.get("timestamp", d.name)
-            calc_badge = _calc_type_badge(data.get("calc_type", ""))
+            calc_type = data.get("calc_type", "")
+            calc_badge = _calc_type_badge(calc_type)
             # Calibration-produced results get a 🔧 marker so the user
             # can tell them apart from user-initiated calcs. The marker
             # comes from result.json's ``calibration_run_id`` extras field
             # written by the worker.
             calib_marker = "🔧 " if data.get("calibration_run_id") else ""
+            formula = data.get("formula", "?")
+            method = data.get("method", "?")
+            basis = data.get("basis", "?")
             label = (
                 f"{ts}  ·  [{calc_badge}]  "
-                f"{calib_marker}{data.get('formula', '?')}  "
-                f"{data.get('method', '?')}/{data.get('basis', '?')}"
+                f"{calib_marker}{formula}  "
+                f"{method}/{basis}"
             )
-            options.append((label, str(d)))
+            entries.append(
+                {
+                    "path": str(d),
+                    "label": label,
+                    "calc_type": calc_type,
+                    "formula": formula,
+                    "name": data.get("name", "") or data.get("molecule_name", ""),
+                    "method": method,
+                    "basis": basis,
+                    "timestamp": ts,
+                    "date": entry_date(ts),
+                    "converged": bool(data.get("converged", False)),
+                }
+            )
         except Exception:
             pass
-    # If the only entry is the placeholder, fall back to the empty-list
-    # message — the loop above silently swallowed every load_result call.
-    if len(options) == 1:
+    # If every load_result call was silently swallowed above, fall back to the
+    # empty-list message.
+    if not entries:
+        app._history_entries = []
         app.past_dd.options = [("(no saved results)", "")]
         return
-    app.past_dd.options = options
+    app._history_entries = entries
+    # Repopulate facet dropdowns + apply the current filter as one atomic step
+    # so the option/value churn doesn't fire a filter pass per widget.
+    app._history_filter_suspend = True
+    try:
+        refresh_history_facet_options(app, entries)
+    finally:
+        app._history_filter_suspend = False
+    apply_history_filter(app)
     if app.calc_type_dd.value == "Frequency":
         app._refresh_freq_seed_options()
 

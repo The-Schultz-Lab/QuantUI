@@ -904,6 +904,13 @@ class QuantUIApp:
         past_dd: Any
         past_output: Any
         past_refresh_btn: Any
+        history_search: Any
+        history_filter_clear_btn: Any
+        history_count_lbl: Any
+        history_method_dd: Any
+        history_basis_dd: Any
+        history_date_from: Any
+        history_date_to: Any
         lib_category_dd: Any
         lib_search_txt: Any
         lib_results_dd: Any
@@ -1788,6 +1795,21 @@ class QuantUIApp:
         self.past_refresh_btn.on_click(self._on_past_refresh)
         self.copy_path_btn.on_click(self._on_copy_results_path)
         self.view_log_btn.on_click(self._on_view_log)
+        # History search / faceted filters (HIST.7)
+        for _w in (
+            self.history_search,
+            self.history_method_dd,
+            self.history_basis_dd,
+            self.history_date_from,
+            self.history_date_to,
+        ):
+            _w.observe(self._safe_cb(self._on_history_filter_changed), names="value")
+        for _chip in (
+            *self._history_calc_chips.values(),
+            *self._history_status_chips.values(),
+        ):
+            _chip.observe(self._safe_cb(self._on_history_filter_changed), names="value")
+        self.history_filter_clear_btn.on_click(self._on_history_filter_clear)
         # Perf stats reset
         self._reset_btn.on_click(self._on_reset_click)
         self._reset_confirm_yes.on_click(self._on_confirm_yes)
@@ -3511,6 +3533,32 @@ class QuantUIApp:
 
     def _on_past_dd_changed(self, change) -> None:
         _hist_on_past_dd_changed(self, change, layout_fn=_layout)
+
+    def _on_history_filter_changed(self, change=None) -> None:
+        from quantui.app_history import apply_history_filter
+
+        apply_history_filter(self)
+
+    def _on_history_filter_clear(self, btn=None) -> None:
+        from quantui.app_history import apply_history_filter
+
+        # Reset every facet widget, suspending the observer so we run a single
+        # filter pass at the end instead of one per widget reset.
+        self._history_filter_suspend = True
+        try:
+            self.history_search.value = ""
+            self.history_method_dd.value = ""
+            self.history_basis_dd.value = ""
+            self.history_date_from.value = None
+            self.history_date_to.value = None
+            for chip in (
+                *self._history_calc_chips.values(),
+                *self._history_status_chips.values(),
+            ):
+                chip.value = False
+        finally:
+            self._history_filter_suspend = False
+        apply_history_filter(self)
 
     def _on_past_refresh(self, btn) -> None:
         self._activity_begin("Refreshing history list...")

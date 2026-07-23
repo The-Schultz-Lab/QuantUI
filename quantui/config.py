@@ -270,6 +270,58 @@ LIBRARY_SIZE_BUDGET_BYTES: int = 10 * 1024 * 1024  # 10 MB
 LIBRARY_HEAVY_ATOM_CEILING_CURATED: int = 30  # named drugs run a bit larger
 LIBRARY_HEAVY_ATOM_CEILING_BULK: int = 9  # QM9 caps here anyway
 
+# Common chemical name → Hill formula, for History search (HIST.7).
+# The bundled QM9-derived library names its simplest molecules by formula
+# (benzene is stored as "C6H6", water as "H2O", …), so a name search can't
+# resolve them via the library. This curated map fills that gap for classroom
+# staples; named organics the library *does* carry (toluene, aspirin, caffeine)
+# resolve via an exact library-name lookup instead — see
+# ``app_history.resolve_query_formulas``. Formulas are Hill notation matching
+# ``Molecule.get_formula`` exactly (no-carbon formulas are fully alphabetical,
+# so ammonia is "H3N", sulfur dioxide "O2S", hydrogen fluoride "FH").
+COMMON_NAME_TO_FORMULA: Dict[str, str] = {
+    "hydrogen": "H2",
+    "oxygen": "O2",
+    "nitrogen": "N2",
+    "chlorine": "Cl2",
+    "fluorine": "F2",
+    "water": "H2O",
+    "ammonia": "H3N",
+    "methane": "CH4",
+    "carbon dioxide": "CO2",
+    "carbon monoxide": "CO",
+    "hydrogen fluoride": "FH",
+    "hydrogen chloride": "ClH",
+    "hydrogen peroxide": "H2O2",
+    "hydrogen cyanide": "CHN",
+    "ozone": "O3",
+    "nitric oxide": "NO",
+    "nitrogen dioxide": "NO2",
+    "sulfur dioxide": "O2S",
+    "hydrogen sulfide": "H2S",
+    "benzene": "C6H6",
+    "ethane": "C2H6",
+    "ethylene": "C2H4",
+    "ethene": "C2H4",
+    "acetylene": "C2H2",
+    "ethyne": "C2H2",
+    "propane": "C3H8",
+    "butane": "C4H10",
+    "methanol": "CH4O",
+    "ethanol": "C2H6O",
+    "formaldehyde": "CH2O",
+    "acetaldehyde": "C2H4O",
+    "formic acid": "CH2O2",
+    "acetic acid": "C2H4O2",
+    "acetone": "C3H6O",
+    "propene": "C3H6",
+    "propyne": "C3H4",
+    "glycine": "C2H5NO2",
+    "urea": "CH4N2O",
+    "phosphine": "H3P",
+    "silane": "H4Si",
+}
+
 # Molecule presets — bundled library.
 # The former inline literal now lives in the indexed package-data store
 # (quantui/data/library/library.sqlite, seeded from
