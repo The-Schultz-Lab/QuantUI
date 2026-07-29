@@ -7,8 +7,8 @@ method/basis/molecule-size space.  Each completed step is logged to
 :func:`~quantui.calc_log.estimate_time` immediately becomes useful on a
 fresh install.
 
-Four tiers (M-EST / EST.4, 2026-05-25)
---------------------------------------
+Four tiers (2026-05-25)
+-----------------------
 
 The calibration suite is now a **four-tier cascade** rather than the
 original short/long pair. Users pick the depth that matches their setup-
@@ -320,7 +320,7 @@ BENCHMARK_SUITE_LONG: list[tuple] = [
         "RHF",
         "STO-3G",
     ),
-    # ── M-EST / EST.4 expansion (2026-05-25) ──────────────────────────────
+    # ── Expansion (2026-05-25) ────────────────────────────────────────────
     # Additional SP entries that broaden the method × basis grid coverage,
     # extending tier 2's expected wall-clock to the 3-5 min target.
     (
@@ -641,7 +641,7 @@ def _normalize_entry(entry: tuple) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Cross-device probe (M-EST / EST.5, 2026-05-25)
+# Cross-device probe (2026-05-25)
 # ---------------------------------------------------------------------------
 #
 # When GPU offload is available, tier 3 and tier 4 calibrations should run
@@ -727,10 +727,10 @@ class BenchmarkStep:
     elapsed_s: float = 0.0
     error_msg: str = ""
     n_basis: Optional[int] = None
-    # M-EST / EST.4: track which calc-type this step ran so tier 3+4
+    # Track which calc-type this step ran so tier 3+4
     # entries can be distinguished in summaries.
     calc_type: str = "single_point"
-    # M-EST follow-up (2026-05-25 user request): the calibration worker
+    # Follow-up (2026-05-25): the calibration worker
     # now saves each step as a real result directory (via save_result)
     # so users can re-open them from the History tab like any other
     # calc. ``None`` when save_result failed (best-effort) or the step
@@ -746,7 +746,7 @@ class CalibrationResult:
     steps: List[BenchmarkStep] = field(default_factory=list)
     stopped_early: bool = False
     mode: str = "tier1"
-    # EST.5 cross-device probe expands the execution plan beyond
+    # The cross-device probe expands the execution plan beyond
     # ``len(_MODE_TO_SUITE[mode])`` for tier 3/4 on GPU hosts. Store
     # the plan length explicitly so progress denominators stay correct;
     # 0 (default) means "fall back to suite size" for back-compat with
@@ -774,36 +774,18 @@ ProgressCallback = Callable[[int, int, str, str, float], None]
 
 def _count_electrons(atoms: list[str], charge: int) -> int:
     """Rough electron count: sum of atomic numbers minus charge."""
-    _Z = {
-        "H": 1,
-        "He": 2,
-        "Li": 3,
-        "Be": 4,
-        "B": 5,
-        "C": 6,
-        "N": 7,
-        "O": 8,
-        "F": 9,
-        "Ne": 10,
-        "Na": 11,
-        "Mg": 12,
-        "Al": 13,
-        "Si": 14,
-        "P": 15,
-        "S": 16,
-        "Cl": 17,
-        "Ar": 18,
-    }
-    return sum(_Z.get(a, 6) for a in atoms) - charge
+    from .config import ATOMIC_NUMBERS
+
+    return sum(ATOMIC_NUMBERS.get(a, 6) for a in atoms) - charge
 
 
 # ---------------------------------------------------------------------------
-# Subprocess worker (M-EST follow-up, 2026-05-25)
+# Subprocess worker (2026-05-25)
 # ---------------------------------------------------------------------------
 #
 # Originally calibration ran each step in a ThreadPoolExecutor with a
 # ``future.result(timeout=...)`` block. That had three blockers exposed by
-# the user's tier-4 attempt (session 55):
+# a tier-4 attempt:
 #
 #   1. The Stop button only checked between steps, so an in-flight 5-minute
 #      freq calc could not be killed mid-run.
@@ -1002,7 +984,7 @@ def _calibration_worker(
     ``force_cpu=True`` sets ``QUANTUI_DISABLE_GPU=1`` in the worker's
     environment BEFORE any quantui / gpu4pyscf import so the cached
     ``is_gpu_available()`` probe sees the override and the calc actually
-    runs on CPU. Used by the EST.5 cross-device probe — tier 3/4 on a
+    runs on CPU. Used by the cross-device probe — tier 3/4 on a
     GPU host runs selected entries twice (once forced-CPU, once GPU) so
     the analytics speedup table is populated from one calibration run.
 
@@ -1020,7 +1002,7 @@ def _calibration_worker(
     from datetime import datetime as _dt
     from pathlib import Path as _P
 
-    # EST.5: must run BEFORE any quantui / pyscf / gpu4pyscf import so
+    # Must run BEFORE any quantui / pyscf / gpu4pyscf import so
     # the ``is_gpu_available()`` cache sees the override on first probe.
     if force_cpu:
         _os.environ["QUANTUI_DISABLE_GPU"] = "1"
@@ -1075,7 +1057,7 @@ def _calibration_worker(
 
                 # verbose=3 gives per-iteration SCF energies in the log —
                 # enough signal to confirm the worker hasn't frozen on a
-                # slow tier-4 entry. (Was verbose=0 pre-session-55.)
+                # slow tier-4 entry. (Was verbose=0 previously.)
                 res = _sp(
                     mol,
                     method=method,
@@ -1090,9 +1072,9 @@ def _calibration_worker(
             elapsed = _t.perf_counter() - t0
             log_fh.write(f"\n[QuantUI_STATUS] COMPLETED in {elapsed:.2f} s\n")
 
-            # Save as a regular result directory (M-EST follow-up,
-            # 2026-05-25 user request — tier 4's MP2 + CCSD + benzene
-            # freq are scientifically valuable; don't discard them).
+            # Save as a regular result directory (2026-05-25 — tier 4's
+            # MP2 + CCSD + benzene freq are scientifically valuable;
+            # don't discard them).
             saved_dir = _save_calibration_step(
                 res,
                 calc_type=calc_type,
@@ -1248,10 +1230,10 @@ def run_calibration(
             steps are abandoned (no further work).
         timeout_per_step: Wall-clock seconds allowed per step.
             ``None`` (default) means no timeout — the user controls
-            stoppage via the Stop / Skip buttons. The session-55 tier-4
+            stoppage via the Stop / Skip buttons. A tier-4
             run had a benzene B3LYP/6-31G* freq calc finish at
             ~1500 s but be cut off at the old 1800 s hard cap, losing
-            the data; the no-timeout default removes that footgun.
+            the data; the no-timeout default removes that hazard.
             Pass a numeric value only when running headlessly (e.g. CI)
             where you genuinely want a wall-clock cap.
         mode: One of ``"tier1"`` / ``"tier2"`` / ``"tier3"`` / ``"tier4"``.
@@ -1288,7 +1270,7 @@ def run_calibration(
         mode = "tier1"
     suite = _MODE_TO_SUITE[mode]
 
-    # EST.5: probe GPU availability once in the parent so we know whether
+    # Probe GPU availability once in the parent so we know whether
     # to duplicate cross-device entries. Failure (e.g. gpu_offload import
     # error on a misconfigured install) defaults to "no GPU" — the
     # calibration still runs, it just doesn't collect speedup pairs.
@@ -1327,7 +1309,7 @@ def run_calibration(
         # the per-step progress trail.
         pass
 
-    # Use ``spawn`` everywhere (session 55 follow-up): ``fork`` from a
+    # Use ``spawn`` everywhere: ``fork`` from a
     # background thread (run_calibration runs inside ``_do_calibration``
     # which is itself a daemon thread) collides hard with CUDA contexts
     # that the parent process may have initialized via the GPU-detection
@@ -1412,7 +1394,7 @@ def run_calibration(
                 str(log_path),
                 result_queue,
                 timestamp,  # calibration_run_id — the parent's run timestamp
-                force_cpu,  # EST.5 cross-device probe flag
+                force_cpu,  # cross-device probe flag
             ),
             daemon=True,
         )
@@ -1431,7 +1413,7 @@ def run_calibration(
                 break
 
             # Timeout is now opt-in (was a hard 1800 s for tier 4 which
-            # cut off a near-finishing benzene freq in session 55).
+            # cut off a near-finishing benzene freq).
             # ``None`` means "user controls; never auto-kill".
             if timeout_per_step is not None and elapsed > timeout_per_step:
                 worker.terminate()
@@ -1453,8 +1435,8 @@ def run_calibration(
             # Skip = "abandon THIS step, continue to the next." Distinct
             # from Stop. Clear the event after consuming so the next
             # step starts fresh — the UI re-sets it if the user clicks
-            # Skip again. (session 55 user request — replaces the
-            # hard timeout that was cutting off near-finishing calcs.)
+            # Skip again. (Replaces the hard timeout that was cutting
+            # off near-finishing calcs.)
             if skip_event is not None and skip_event.is_set():
                 worker.terminate()
                 worker.join(timeout=5)
@@ -1480,8 +1462,8 @@ def run_calibration(
                 # the queue. Capture the exit code + the tail of the
                 # calibration log so the user can see what actually
                 # happened — "worker exited without result" alone is
-                # useless for diagnosis (the original session-55
-                # symptom of every step failing at 0.04 s).
+                # useless for diagnosis (the original symptom of every
+                # step failing at 0.04 s).
                 _exitcode = getattr(worker, "exitcode", None)
                 _tail = _tail_last_status_line(log_path) or "(no log output)"
                 _hint = ""
@@ -1530,7 +1512,7 @@ def run_calibration(
                 )
 
         result.steps.append(step)
-        # Fix 2: persist after EVERY step so an interrupt at step N
+        # Persist after EVERY step so an interrupt at step N
         # still leaves a partial-state record on disk.
         _save_calibration_json(result, log_path)
 

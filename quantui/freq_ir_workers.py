@@ -141,14 +141,27 @@ def run_displaced_scf(coords_bohr_flat) -> Any:
     mol.build()
     mol.set_geom_(coords, unit="Bohr")
 
+    # M5 audit fix (2026-07-14): whether this displaced SCF needs an
+    # unrestricted (UHF/UKS) object is determined by the shared dm0's
+    # actual shape -- (2, nao, nao) for UHF/UKS/ROHF, (nao, nao) for
+    # RHF/RKS -- NOT by mol.spin == 0. Those two signals only agree when
+    # the user's method choice matches the molecule's natural spin state.
+    # They diverge when a user explicitly selects UHF for a closed-shell
+    # molecule (mol.spin == 0 but the parent mf, and therefore dm0, is
+    # still UHF-shaped): building RHF from mol.spin == 0 and then feeding
+    # it the UHF-shaped dm0 raises a shape-mismatch ValueError inside
+    # PySCF. Mirrors the serial-path fix in freq_calc.py.
+    dm0 = state.get("dm0")
+    dm0_is_unrestricted = dm0 is not None and np.asarray(dm0).ndim == 3
+
     xc = state.get("xc")
     if xc is not None:
-        mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
+        mf = dft.UKS(mol) if dm0_is_unrestricted else dft.RKS(mol)
         mf.xc = xc
     else:
-        mf = scf.RHF(mol) if mol.spin == 0 else scf.UHF(mol)
+        mf = scf.UHF(mol) if dm0_is_unrestricted else scf.RHF(mol)
     mf.verbose = 0
-    mf.kernel(dm0=state.get("dm0"))
+    mf.kernel(dm0=dm0)
     return np.array(mf.dip_moment(verbose=0))
 
 

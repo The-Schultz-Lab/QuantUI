@@ -378,8 +378,11 @@ H  0.0  0.0  0.74"""  # First line missing z-coordinate
         xyz_text = """H  0.0  0.0  abc
 H  0.0  0.0  0.74"""
 
-        with pytest.raises(ValueError, match="Could not parse coordinates"):
+        with pytest.raises(ValueError, match="Could not parse coordinates") as exc_info:
             parse_xyz_input(xyz_text)
+        # L audit fix (ruff B904): the original ValueError from float()
+        # must be chained via `raise ... from e`.
+        assert isinstance(exc_info.value.__cause__, ValueError)
 
     def test_parse_negative_coordinates(self):
         """Test parsing negative coordinates."""
@@ -391,6 +394,57 @@ H  -0.757  -0.587  0.5"""
 
         assert coords[1][2] == -0.5
         assert coords[2][0] == -0.757
+
+
+class TestXyzHeaderTitleLine:
+    """XYZ-file-format header (count + title) edge cases (H5 audit fix, 2026-07-14).
+
+    Regression: blank/comment title lines were stripped by the parser's
+    blank/comment filtering BEFORE header detection ran, which shifted the
+    first real atom line into the "title" slot — silently dropping the
+    first atom for any standard XYZ file whose title line was blank or a
+    "#"/"!" comment (both very common: many tools write an empty title).
+    """
+
+    def test_blank_title_line_keeps_all_atoms(self):
+        xyz_text = "3\n\nO  0.0  0.0  0.0\nH  0.757  0.587  0.0\nH  -0.757  0.587  0.0"
+        atoms, coords = parse_xyz_input(xyz_text)
+        assert atoms == ["O", "H", "H"]
+        assert len(coords) == 3
+        assert coords[0] == [0.0, 0.0, 0.0]
+
+    def test_comment_title_line_keeps_all_atoms(self):
+        xyz_text = (
+            "3\n# Water molecule\nO  0.0  0.0  0.0\n"
+            "H  0.757  0.587  0.0\nH  -0.757  0.587  0.0"
+        )
+        atoms, coords = parse_xyz_input(xyz_text)
+        assert atoms == ["O", "H", "H"]
+        assert len(coords) == 3
+
+    def test_bang_comment_title_line_keeps_all_atoms(self):
+        xyz_text = (
+            "3\n! Water molecule\nO  0.0  0.0  0.0\n"
+            "H  0.757  0.587  0.0\nH  -0.757  0.587  0.0"
+        )
+        atoms, coords = parse_xyz_input(xyz_text)
+        assert atoms == ["O", "H", "H"]
+
+    def test_free_text_title_line_still_works(self):
+        xyz_text = (
+            "3\nWater molecule\nO  0.0  0.0  0.0\n"
+            "H  0.757  0.587  0.0\nH  -0.757  0.587  0.0"
+        )
+        atoms, coords = parse_xyz_input(xyz_text)
+        assert atoms == ["O", "H", "H"]
+
+    def test_leading_blank_line_before_count_still_works(self):
+        xyz_text = (
+            "\n3\ntitle\nO  0.0  0.0  0.0\n"
+            "H  0.757  0.587  0.0\nH  -0.757  0.587  0.0"
+        )
+        atoms, coords = parse_xyz_input(xyz_text)
+        assert atoms == ["O", "H", "H"]
 
 
 class TestEnhancedXYZParser:
@@ -435,12 +489,29 @@ H  -0.757  0.587  0.0  # Second H"""
         assert len(coords) == 3
         assert coords[0] == [0.0, 0.0, 0.0]
 
-    def test_parse_minimum_atoms_error(self):
-        """Test error for single atom (need at least 2)."""
-        xyz_text = """H  0.0  0.0  0.0"""
+    def test_parse_single_atom_succeeds(self):
+        """L13 audit fix: single-atom input must parse, not be rejected.
 
-        with pytest.raises(ValueError, match="Too Few Atoms"):
-            parse_xyz_input(xyz_text)
+        Atomic calculations (e.g. a lone Ar atom) are legitimate PySCF
+        targets; parse_xyz_input used to hard-reject anything with fewer
+        than 2 atoms.
+        """
+        xyz_text = """Ar  0.0  0.0  0.0"""
+
+        atoms, coords = parse_xyz_input(xyz_text)
+
+        assert atoms == ["Ar"]
+        assert coords == [[0.0, 0.0, 0.0]]
+
+    def test_parse_single_atom_with_xyz_header_succeeds(self):
+        xyz_text = """1
+Single argon atom
+Ar  0.0  0.0  0.0"""
+
+        atoms, coords = parse_xyz_input(xyz_text)
+
+        assert atoms == ["Ar"]
+        assert coords == [[0.0, 0.0, 0.0]]
 
     def test_parse_invalid_atom_symbol_with_suggestion(self):
         """Test that invalid atom symbol provides helpful suggestion."""

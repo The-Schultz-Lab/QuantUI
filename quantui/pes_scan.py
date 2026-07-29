@@ -76,10 +76,24 @@ class PESScanResult:
 
     # ── Convenience properties ──────────────────────────────────────────────
 
+    def _finite_energies(self) -> List[float]:
+        """``energies_hartree`` with failed-point NaN placeholders dropped.
+
+        Fix (2026-07-14): a failed scan point appends
+        ``float("nan")`` to ``energies_hartree`` (see :func:`run_pes_scan`).
+        Python's ``min``/``max`` are order-dependent with NaN present — a
+        NaN as the first element "wins" (everything compares False against
+        it) and poisons the result; a NaN later in the list is correctly
+        ignored. Filtering NaN out before any min/max call makes the result
+        deterministic regardless of *which* scan point failed.
+        """
+        return [e for e in self.energies_hartree if math.isfinite(e)]
+
     @property
     def energy_hartree(self) -> float:
-        """Minimum SCF energy across all scan points (Hartrees)."""
-        return min(self.energies_hartree) if self.energies_hartree else float("nan")
+        """Minimum SCF energy across all *successful* scan points (Hartrees)."""
+        finite = self._finite_energies()
+        return min(finite) if finite else float("nan")
 
     @property
     def energy_ev(self) -> float:
@@ -98,10 +112,15 @@ class PESScanResult:
 
     @property
     def energies_relative_kcal(self) -> List[float]:
-        """Energy relative to the lowest scan point, in kcal/mol."""
-        if not self.energies_hartree:
+        """Energy relative to the lowest successful scan point, in kcal/mol.
+
+        Failed points (NaN in ``energies_hartree``) stay NaN here too —
+        callers plotting this list should skip non-finite entries.
+        """
+        finite = self._finite_energies()
+        if not finite:
             return []
-        e_min = min(self.energies_hartree)
+        e_min = min(finite)
         return [(e - e_min) * _HARTREE_TO_KCAL for e in self.energies_hartree]
 
     @property
@@ -121,10 +140,11 @@ class PESScanResult:
 
     def summary(self) -> str:
         """Return a multi-line human-readable result summary."""
-        if not self.energies_hartree:
+        finite = self._finite_energies()
+        if not finite:
             return "No scan points computed."
-        e_min = min(self.energies_hartree)
-        e_max = max(self.energies_hartree)
+        e_min = min(finite)
+        e_max = max(finite)
         barrier = (e_max - e_min) * _HARTREE_TO_KCAL
         min_idx = self.energies_hartree.index(e_min)
         lines = [
@@ -201,6 +221,22 @@ def run_pes_scan(
             "ASE is not installed — cannot run PES scan.\n"
             "  pip install 'ase>=3.22.0'"
         )
+
+    # Post-HF methods (MP2/CCSD/CCSD(T)) have no special-casing in
+    # _QuantUIPySCFCalc (shared with optimizer.py) — without this guard,
+    # method='CCSD' silently falls into the DFT branch (sets mf.xc =
+    # "CCSD") and fails deep inside PySCF with a cryptic "LibXCFunctional:
+    # name 'CCSD' not found" instead of a clear message.
+    from . import config as _config
+
+    if method.strip().upper() in _config.POST_HF_METHODS:
+        raise ValueError(
+            f"'{method}' is a post-HF method and cannot be used for a PES "
+            "scan — QuantUI only has analytical gradients wired up for "
+            "HF/DFT methods here. Scan with RHF, UHF, or a DFT functional "
+            "instead."
+        )
+
     try:
         import pyscf as _pyscf  # noqa: F401
     except ImportError as exc:
@@ -254,6 +290,13 @@ def run_pes_scan(
     _stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
     _null = io.StringIO()
 
+    # Cooperative cancel — checked between scan points, per BFGS step,
+    # and inside each point's SCF (via the shared calculator).
+    from .cancellation import cancel_check_from_stream, raise_if_cancelled
+
+    _cancel_check = cancel_check_from_stream(_stream)
+    atoms.calc.cancel_check = _cancel_check
+
     import numpy as np
 
     scan_values = np.linspace(start, stop, steps).tolist()
@@ -261,12 +304,29 @@ def run_pes_scan(
     energies_hartree: List[float] = []
     coordinates_list: List[Molecule] = []
     converged_all = True
+    # Fix (2026-07-14): on a failed scan point, fall back to the
+    # last successfully-computed geometry rather than the original input
+    # molecule. Snapping every failed frame back to the starting geometry
+    # produced a bogus discontinuity in the trajectory animation/plot —
+    # the last-good geometry is a far more sensible placeholder for "we
+    # don't know where this point landed, but it wasn't back at the start."
+    _last_good_molecule = molecule
 
     i1, i2 = atom_indices[0], atom_indices[1]
     i3 = atom_indices[2] if len(atom_indices) >= 3 else 0
     i4 = atom_indices[3] if len(atom_indices) >= 4 else 0
 
     for step_num, val in enumerate(scan_values, start=1):
+        raise_if_cancelled(_cancel_check)
+        # Live per-point status + exact completion fraction
+        # (points already done / total) for the self-correcting time estimate.
+        from .log_utils import emit_progress, emit_status
+
+        emit_status(
+            _stream,
+            f"Scan point {step_num}/{steps} — relaxing (SCF + gradient)…",
+        )
+        emit_progress(_stream, (step_num - 1) / steps)
         _stream.write(
             f"\nScan point {step_num}/{steps}: "
             f"{scan_type} = {val:.4f} {('Å' if scan_type == 'bond' else '°')}\n"
@@ -285,22 +345,32 @@ def run_pes_scan(
                 ok = True
             else:
                 if scan_type == "bond":
-                    constraint = FixInternals(bonds=[(val, [i1, i2])])
+                    constraint = FixInternals(bonds=[[val, [i1, i2]]])
                 elif scan_type == "angle":
                     atoms.set_angle(i1, i2, i3, val)
-                    constraint = FixInternals(
-                        angles=[(math.radians(val), [i1, i2, i3])]
-                    )
+                    # (2026-07-14): ASE's radian-based `angles=`
+                    # kwarg is not just deprecated, it's flat-out broken with
+                    # the currently-targeted ASE (>=3.22, verified against
+                    # 3.29.0) — internally it does
+                    # ``np.asarray(angles); angles[:, 0] = ...`` to convert
+                    # to degrees, which raises "setting an array element
+                    # with a sequence" for any real angle constraint (the
+                    # per-entry [value, [3 indices]] shape isn't
+                    # rectangular). Every angle/dihedral PES scan silently
+                    # failed at 100% of its points as a result. `angles_deg`
+                    # takes the value directly in degrees and skips that
+                    # broken reshape entirely.
+                    constraint = FixInternals(angles_deg=[[val, [i1, i2, i3]]])
                 else:  # dihedral
                     atoms.set_dihedral(i1, i2, i3, i4, val)
-                    constraint = FixInternals(
-                        dihedrals=[(math.radians(val), [i1, i2, i3, i4])]
-                    )
+                    constraint = FixInternals(dihedrals_deg=[[val, [i1, i2, i3, i4]]])
 
                 atoms.set_constraint(constraint)
 
                 dyn = BFGS(atoms, logfile=_stream)
-                # M-STDERR / STDERR.1: capture fd-2 stderr from PySCF C
+                if _cancel_check is not None:
+                    dyn.attach(lambda: raise_if_cancelled(_cancel_check), interval=1)
+                # Capture fd-2 stderr from PySCF C
                 # extensions for the duration of this scan-point optimisation.
                 from quantui.c_stderr import capture_c_stderr
 
@@ -321,6 +391,7 @@ def run_pes_scan(
                 atoms, charge=molecule.charge, multiplicity=molecule.multiplicity
             )
             coordinates_list.append(mol_at_point)
+            _last_good_molecule = mol_at_point
 
             _stream.write(
                 f"  E = {e_ha:.8f} Ha  ({'converged' if ok else 'not converged'})\n"
@@ -329,7 +400,7 @@ def run_pes_scan(
         except Exception as exc:
             _stream.write(f"  ⚠ Scan point {step_num} failed: {exc}\n")
             energies_hartree.append(float("nan"))
-            coordinates_list.append(molecule)
+            coordinates_list.append(_last_good_molecule)
             converged_all = False
 
         finally:

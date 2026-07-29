@@ -13,7 +13,7 @@ constructor phones home (a CDN, a version check, a structure-DB warmup) and
 blocks waiting for a connect timeout when there's no network. It runs without a
 browser or a server, so it's fast and deterministic.
 
-NOTE: this checks the *app*. The native launchers (``launch-native.bat`` etc.)
+NOTE: this checks the *app*. The native launchers (``launchers/launch-native.bat`` etc.)
 also run ``pip install -e .`` when ``pyproject.toml`` changes — that step
 fetches build deps from PyPI and will hang/fail offline, so the launchers run it
 fail-fast + non-fatal. If "doesn't start up offline" recurs, check BOTH: this

@@ -3,8 +3,10 @@ echo QuantUI NATIVE MODE — Local conda env in WSL, no container
 echo Use this when you have edited quantui/*.py and want to test immediately.
 echo.
 
-REM Convert the Windows repo path to a WSL path for portability
-for /f "delims=" %%i in ('wsl wslpath -a "%~dp0"') do set WSLPATH=%%i
+REM Repo root is one level up from this launchers/ folder; convert it to a WSL
+REM path for portability.
+for %%i in ("%~dp0..") do set "REPO=%%~fi"
+for /f "delims=" %%i in ('wsl wslpath -a "%REPO%"') do set WSLPATH=%%i
 
 REM Runs Voila directly from the quantui conda env inside WSL.
 REM pip install -e . is skipped when pyproject.toml has not changed since the
@@ -25,7 +27,7 @@ REM make EVERY subsequent offline launch retry (and re-delay on) pip — the
 REM reinstall is attempted once, then skipped. quantui/*.py + package-data are
 REM live in editable mode, so a skipped reinstall is harmless offline; re-run
 REM `pip install -e .` manually when online if you add a real dependency.
-start "QuantUI [native]" wsl -d Ubuntu -- bash -c "cd '%WSLPATH%' && source ~/miniconda3/etc/profile.d/conda.sh && conda activate quantui && if [ pyproject.toml -nt .dev_install_stamp ] || ! python -c 'import quantui' 2>/dev/null; then pip install -e . -q --timeout=5 --retries=0 && touch .dev_install_stamp || { echo '[QuantUI] editable reinstall skipped (offline?) - using live source'; touch .dev_install_stamp; }; fi; rm -rf quantui/__pycache__ && PYTHONDONTWRITEBYTECODE=1 voila notebooks/molecule_computations.ipynb --no-browser --port=8867 --ServerApp.disable_check_xsrf=True"
+start "QuantUI [native]" wsl -d Ubuntu -- bash -c "cd '%WSLPATH%' && for c in ~/miniforge3 ~/miniconda3 ~/anaconda3 /opt/conda; do [ -f $c/etc/profile.d/conda.sh ] && . $c/etc/profile.d/conda.sh && break; done && conda activate quantui && if [ pyproject.toml -nt .dev_install_stamp ] || ! python -c 'import quantui' 2>/dev/null; then pip install -e . -q --timeout=5 --retries=0 && touch .dev_install_stamp || { echo '[QuantUI] editable reinstall skipped (offline?) - using live source'; touch .dev_install_stamp; }; fi; rm -rf quantui/__pycache__ && PYTHONDONTWRITEBYTECODE=1 voila notebooks/molecule_computations.ipynb --no-browser --port=8867 --ServerApp.disable_check_xsrf=True"
 
 echo Waiting for Voila to start...
 timeout /t 6 /nobreak > nul

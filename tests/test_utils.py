@@ -16,6 +16,8 @@ Removed vs. source repo (SLURM-specific helpers no longer present):
 """
 
 import os
+import subprocess
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -159,6 +161,35 @@ class TestValidateAtomSymbol:
         """Test validation strips whitespace."""
         assert utils.validate_atom_symbol(" H ") is True
         assert utils.validate_atom_symbol("\tC\n") is True
+
+
+class TestValidateAtomSymbolExtendedElements:
+    """M1 audit fix (2026-07-14): VALID_ATOMS covers the full periodic table.
+
+    Regression: VALID_ATOMS previously stopped at Kr (Z=36), rejecting real
+    structures resolved via PubChem/CACTUS/SMILES for any heavier element
+    (iodine in thyroxine, tin/antimony in organometallics, gold/platinum
+    complexes, ...) even though molecule.py's own error text listed iodine
+    as a valid example.
+    """
+
+    def test_iodine_valid(self):
+        assert utils.validate_atom_symbol("I") is True
+
+    def test_heavy_elements_valid(self):
+        for sym in ("Sn", "Sb", "Ag", "Au", "Pt", "Pb", "Bi", "Hg", "Xe"):
+            assert utils.validate_atom_symbol(sym) is True, sym
+
+    def test_full_periodic_table_length(self):
+        from quantui import config
+
+        assert len(config.VALID_ATOMS) == 118
+
+    def test_valid_atoms_derived_from_atomic_numbers(self):
+        """VALID_ATOMS and ATOMIC_NUMBERS must never be able to drift apart."""
+        from quantui import config
+
+        assert config.VALID_ATOMS == list(config.ATOMIC_NUMBERS.keys())
 
 
 class TestValidateCoordinates:
@@ -428,3 +459,34 @@ class TestUtilsIntegration:
         assert utils.validate_coordinates([0.0, 0.0]) is False
         assert utils.validate_charge(100) is False
         assert utils.validate_multiplicity(0) is False
+
+
+class TestNoRootLoggerSideEffect:
+    """M14 audit fix: importing quantui must not configure the root logger.
+
+    ``utils.py`` used to call ``logging.basicConfig(...)`` at module import
+    time, which ``quantui/__init__.py`` always triggers — this hijacked the
+    root logger's handlers/level for any host application or notebook that
+    imports quantui, which a library must never do. Must run in a
+    subprocess: the root logger is global process state, and other test
+    modules in the same pytest session may have already imported quantui
+    (or otherwise touched the root logger) before this test runs.
+    """
+
+    def test_import_quantui_leaves_root_logger_unconfigured(self):
+        script = (
+            "import logging\n"
+            "import quantui\n"
+            "root = logging.getLogger()\n"
+            "assert root.handlers == [], f'root logger handlers: {root.handlers}'\n"
+            "assert root.level == logging.WARNING, f'root logger level: {root.level}'\n"
+            "print('OK')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "OK" in result.stdout

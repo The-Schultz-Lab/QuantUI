@@ -7,6 +7,106 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- **Reorganization energy (Marcus 4-point)** — a new "Reorganization Energy"
+  calculation type that computes the internal reorganization energy λ for hole
+  (cation) and/or electron (anion) charge transfer. It optimizes the neutral and
+  ion geometries and evaluates the four single-point energies of the 4-point
+  scheme (λ = [E_ion(R_neutral) − E_ion(R_ion)] + [E_neutral(R_ion) −
+  E_neutral(R_neutral)]), reporting λ, its λ₁ (ion) and λ₂ (neutral) relaxation
+  components, in eV and kcal/mol. `mode="both"` shares the neutral optimization
+  across both channels. Open-shell HF ions are automatically promoted to UHF.
+- **One-click "Calc. Reorganization Energy" button** — sets the calculation type
+  to Reorganization Energy, defaults the channel to both hole + electron, and
+  launches the run in a single click.
+
+### Changed
+
+- **All launcher scripts moved into a `launchers/` folder** to declutter the repo
+  root. Behaviour is unchanged — each launcher now resolves the repo root as its
+  parent directory. `launchers/launch-app.bat` still finds `quantui.sif` next to
+  itself (student download) or in the repo root (dev build). Docs and shortcuts
+  that referenced the old top-level paths were updated.
+- **Apptainer container now builds on `condaforge/miniforge3` with the `mamba`
+  (libmamba) solver.** The previous `continuumio/miniconda3` base used conda's
+  classic solver, which could hang for hours resolving the PySCF + RDKit +
+  JupyterLab dependency set. The build now installs from conda-forge only
+  (`--override-channels`, strict channel priority), which resolves in minutes and
+  avoids the base image's implicit `defaults` channel. No change to the shipped
+  package set or runtime behavior.
+
+## [0.4.1] - 2026-07-16
+
+Bug-fix and hardening release from a full repository audit. No new features and
+no breaking changes — it fixes correctness bugs across orbital isosurfaces,
+Molden export, the XYZ parser, NMR references, PES scans, and IR intensities,
+plus a range of edge-case, packaging, and hygiene issues found by reading the
+codebase end to end.
+
+### Added
+
+- Single-atom molecules (e.g. a lone He or Ne atom) are now accepted as XYZ input
+  and run end to end — atomic calculations are legitimate targets.
+
+### Changed
+
+- **Python 3.9 is now covered by CI.** The minimum supported version was
+  previously claimed but untested; adding it surfaced and fixed real
+  geometry-optimization and frequency failures on the older ASE that resolves for
+  Python 3.9.
+- **Faster `quantui` CLI startup** — the command-line tool no longer imports the
+  full notebook/GUI stack (ipywidgets, IPython, the app module) just to tail a
+  log.
+- **No more logging hijack** — importing `quantui` no longer reconfigures the
+  root logger, so it won't override or duplicate logging in a host application or
+  notebook.
+- **Faster time estimates over long sessions** — the performance log is cached and
+  re-read only when it changes, instead of being fully parsed on every UI update.
+
+### Fixed
+
+- **Orbital isosurfaces for charged and open-shell molecules** — the isosurface
+  viewer previously errored for every odd-electron system (radicals, and ions
+  such as H₃O⁺, NH₄⁺, OH⁻); charge and spin are now carried through to the cube
+  generator.
+- **Molden export from frequency calculations** — the exported geometry was
+  inflated (Bohr coordinates read as Ångström) and internally inconsistent, so it
+  rendered wrong in Avogadro/IQmol; frequency geometries are now stored and
+  written in the correct units. This also fixes history replay of frequency
+  orbital isosurfaces.
+- **Export Script and method notes for `wB97X-D`** — "Export Script" failed with
+  a "method not supported" error and the educational notes silently disappeared
+  for `wB97X-D`; mixed-case method names are now matched correctly.
+- **2D structure images from XYZ input** — this path never worked (it always
+  returned nothing) and now renders.
+- **XYZ files with a blank or comment (`#`) title line** no longer silently drop
+  the first atom — a very common file layout was losing an atom with only a
+  warning.
+- **NMR reference provenance** — chemical shifts no longer silently fall back to
+  the B3LYP/6-31G\* TMS constants for other method/basis combinations; the
+  reference that was actually applied is now recorded, and the lookup is
+  case-insensitive.
+- **IR intensities for open-shell / UHF-singlet frequency runs** no longer abort
+  the whole IR-intensity step.
+- **PES scans** — a failed scan point no longer records a bogus geometry frame or
+  poisons the energy/barrier statistics with NaN, and angle/dihedral scans work
+  with current ASE releases.
+- **UHF calculations** now report a dipole moment and Mulliken charges (these were
+  silently skipped).
+- **Clearer errors for unsupported input** — elements outside the supported H–Kr
+  range, and post-Hartree–Fock methods (MP2 / CCSD / CCSD(T)) requested for
+  calculation types that don't support them, now fail with an explicit message
+  instead of a misleading one or an uninformative crash.
+- **Windows exports** no longer fail when the basis-set name contains `*` (e.g.
+  `6-31G*`) — export filenames are sanitized.
+- **Method-notes panel** renders bold text correctly instead of leaking literal
+  `**` markers.
+- **Robustness** — the event log is no longer subject to lost entries under
+  concurrent writes; a thumbnail-save failure no longer aborts saving a result;
+  PubChem availability checks respect the configured throttle and timeout; and
+  results carrying NumPy scalar values now save correctly.
+
 ## [0.4.0] - 2026-06-18
 
 Interactive-visualization and offline-readiness release. Adds molecular-orbital
@@ -294,6 +394,9 @@ Initial public scaffolding of the QuantUI package: `quantui` package with
 `calculator.py`, basic notebook launcher, Apptainer container definition,
 MIT license, and project metadata.
 
-[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/The-Schultz-Lab/QuantUI/releases/tag/v0.1.0

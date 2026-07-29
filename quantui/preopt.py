@@ -17,7 +17,7 @@ Non-destructive guarantee
 If RDKit is unavailable, bond perception fails, or no force field has parameters
 for the molecule, :func:`preoptimize` returns the **original** geometry
 unchanged (RMSD 0.0) rather than a mangled one. Pre-opt can only improve or
-no-op — never degrade. (M-PREOPT / PREOPT.1.)
+no-op — never degrade.
 
 Limitation: bond perception is distance-based, so a *wildly* broken input (atoms
 so far apart or so clashed that bonds can't be inferred) yields the no-op rather
@@ -314,8 +314,8 @@ def preoptimize_with_trajectory(
     Like :func:`preoptimize`, but returns ``(optimized_molecule, rmsd, frames)``
     where ``frames`` is a list of per-iteration coordinate snapshots (the
     starting geometry first, the relaxed geometry last) for animating the
-    relaxation in the interactive "Preview pre-optimization" flow (M-PREOPT
-    PREOPT.2). Same non-destructive guarantee: on any failure the original
+    relaxation in the interactive "Preview pre-optimization" flow. Same
+    non-destructive guarantee: on any failure the original
     geometry is returned unchanged with ``rmsd = 0.0`` and a single-frame
     trajectory (just the input), so the viewer always has something to show.
     """

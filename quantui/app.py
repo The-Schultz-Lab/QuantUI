@@ -162,6 +162,9 @@ from quantui.app_formatters import (
     format_pes_scan_result as _fmt_pes_scan_result,
 )
 from quantui.app_formatters import (
+    format_reorg_result as _fmt_reorg_result,
+)
+from quantui.app_formatters import (
     format_result as _fmt_result,
 )
 from quantui.app_formatters import (
@@ -205,6 +208,9 @@ from quantui.app_runflow import (
 )
 from quantui.app_runflow import (
     on_calc_type_changed as _run_on_calc_type_changed,
+)
+from quantui.app_runflow import (
+    on_calc_type_help as _run_on_calc_type_help,
 )
 from quantui.app_runflow import (
     on_clear as _run_on_clear,
@@ -395,6 +401,7 @@ from quantui.app_visualization import (
 from quantui.app_visualization import (
     wire_uv_controls as _viz_wire_uv_controls,
 )
+from quantui.cancellation import CalcCancelled as _CalcCancelled
 
 # Import directly from submodules to avoid circular-import issues.
 # quantui/__init__.py imports this module (app.py), so using
@@ -507,7 +514,7 @@ except ImportError:
 
 # Provider key → short, accurate label for the loaded-molecule card. Replaces
 # the old hard-coded "PubChem: <query>" which mislabeled offline/library/SMILES
-# hits (manual finding #1b, 2026-06-15).
+# hits (2026-06-15).
 _STRUCT_SOURCE_PREFIX = {
     "pubchem": "PubChem",
     "cactus": "NCI CACTUS",
@@ -609,6 +616,35 @@ h3 {
 .jp-OutputArea-stderr, .output_stderr {
     background: transparent !important;
 }
+
+/* 3D molecule-viewer frames — a subtle bounding box so the viewer
+   extent reads clearly. The light border inverts to dark automatically under
+   the global dark-mode invert filter. */
+.quantui-viewer-frame {
+    border: 1px solid #c0ccd8 !important;
+    border-radius: 6px !important;
+    overflow: hidden !important;
+}
+/* Collapse the frame to nothing when the viewer output is empty (e.g. before
+   a calc runs) so no hollow box shows. Degrades to an always-on border where
+   :has() is unsupported. */
+.quantui-viewer-frame:not(:has(.jp-OutputArea-child)) {
+    border-color: transparent !important;
+}
+
+/* Inline "calculating" spinner — shown next to slow on-demand
+   controls (e.g. orbital-isosurface generation) while work is in flight. */
+@keyframes quantui-spin { to { transform: rotate(360deg); } }
+.quantui-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid #c0ccd8;
+    border-top-color: #2563eb;
+    border-radius: 50%;
+    animation: quantui-spin 0.7s linear infinite;
+    vertical-align: middle;
+}
 </style>"""
 
 _LAYOUT_TRAITS: frozenset[str] = frozenset(widgets.Layout.class_trait_names())
@@ -641,19 +677,12 @@ _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
 # ══ LOG CAPTURE ══════════════════════════════════════════════════════════════
 
 
-class _CalcCancelled(BaseException):
-    """Raised to abort a running calculation when the user clicks Cancel.
-
-    The calc streams output line-by-line through ``_LogCapture.write`` (SCF
-    cycles, optimizer steps), so checking a cancel flag there lets us bail at
-    the next output — a cooperative, graceful stop that needs no thread-kill.
-
-    Inherits ``BaseException`` (like ``KeyboardInterrupt``) on purpose: PySCF /
-    session_calc / the optimizer wrap their kernels in ``except Exception``, so
-    a plain ``Exception`` cancel would be swallowed and re-reported as a
-    "Calculation failed" error. As a ``BaseException`` it sails through those
-    handlers and reaches ``_do_run``'s ``except _CalcCancelled`` cleanly.
-    """
+# ``_CalcCancelled`` is defined in quantui.cancellation (imported at the top of
+# this module) so the calc modules (session_calc / optimizer / freq / tddft /
+# nmr / pes) can raise the SAME class from their SCF callbacks + optimizer
+# observers without importing the app layer. ``_do_run``'s
+# ``except _CalcCancelled`` catches it whether it was raised by
+# ``_LogCapture.write`` or by one of those hooks.
 
 
 class _LogCapture:
@@ -673,6 +702,12 @@ class _LogCapture:
         self._on_scf_converged = on_scf_converged
         self._scf_converged_seen = False
         self._cancel_check = cancel_check
+        # Public alias so calc modules can duck-type the predicate off the
+        # progress stream (see quantui.cancellation.cancel_check_from_stream).
+        self.cancel_check = cancel_check
+        # Completion fraction (0..1) reported by calc modules via
+        # log_utils.emit_progress; read by the elapsed ticker. None = unknown.
+        self._fraction: Optional[float] = None
 
     def write(self, text: str) -> None:
         if not text:
@@ -709,8 +744,53 @@ class _LogCapture:
                     except Exception:
                         pass
 
+    def set_status(self, message: str) -> None:
+        """Update the live status label WITHOUT appending to the log.
+
+        Calc modules (optimizer / pes / reorg) call this via
+        ``log_utils.emit_status`` to surface a stage label ("Optimizing —
+        step k…") during silent (``verbose=0``) phases, without cluttering the
+        output log the way a ``[QuantUI_STATUS]`` stream line would.
+        """
+        if self._status is not None:
+            try:
+                self._status.value = message
+            except Exception:
+                pass
+
+    def set_progress_fraction(self, fraction: float) -> None:
+        """Record a completion fraction (0..1) for the live remaining-time chip.
+
+        Calc modules call this via ``log_utils.emit_progress``
+        when they know a real completion fraction (PES points, optimizer fmax
+        trend). The elapsed ticker reads it off the active log and prefers a
+        self-correcting ``elapsed·(1−f)/f`` estimate over the static total.
+        """
+        try:
+            f = float(fraction)
+        except (TypeError, ValueError):
+            return
+        # Clamp below 1.0 so the chip never claims "0s left" while work remains.
+        self._fraction = max(0.0, min(f, 0.999))
+
     def flush(self) -> None:
         pass
+
+    def close(self) -> None:
+        """No-op — required so ASE treats this as an already-open stream.
+
+        ASE's ``IOContext.openfile()`` (used by ``BFGS(..., logfile=...)``
+        in optimizer.py / pes_scan.py) checks ``hasattr(file, "close")`` to
+        decide whether *file* is an already-open, file-like object it
+        should leave alone, vs. a path string it should ``open()`` itself.
+        Without this method, ase>=3.22 (the floor this project pins) still
+        happened to work via a later refactor's more lenient check, but
+        ase==3.26.0 (the newest version pip resolves for Python 3.9) hits
+        the stricter ``openfile()`` and raises
+        ``TypeError: expected str, bytes or os.PathLike object`` — a real
+        Python-3.9-specific compatibility gap the CI matrix
+        expansion caught.
+        """
 
     def getvalue(self) -> str:
         return self._buf.getvalue()
@@ -827,6 +907,13 @@ class QuantUIApp:
         past_dd: Any
         past_output: Any
         past_refresh_btn: Any
+        history_search: Any
+        history_filter_clear_btn: Any
+        history_count_lbl: Any
+        history_method_dd: Any
+        history_basis_dd: Any
+        history_date_from: Any
+        history_date_to: Any
         lib_category_dd: Any
         lib_search_txt: Any
         lib_results_dd: Any
@@ -843,6 +930,7 @@ class QuantUIApp:
         run_output: Any
         run_panel: Any
         run_status: Any
+        _run_elapsed_lbl: Any
         solvent_cb: Any
         solvent_dd: Any
         step_progress: Any
@@ -930,6 +1018,7 @@ class QuantUIApp:
         basis_help_btn: Any
         calc_extra_opts: Any
         calc_type_dd: Any
+        calc_type_help_btn: Any
         charge_si: Any
         clear_btn: Any
         _completion_banner: Any
@@ -948,7 +1037,10 @@ class QuantUIApp:
         mol_info_html: Any
         mol_summary_compact: Any
         mult_si: Any
-        notes_output: Any
+        _method_card_html: Any
+        _basis_card_html: Any
+        _descriptor_cards_box: Any
+        _open_shell_hint: Any
         nstates_si: Any
         perf_estimate_html: Any
         post_calc_panel: Any
@@ -999,9 +1091,10 @@ class QuantUIApp:
         # ``_apply_analysis_context`` resets these between contexts so stale
         # state from a prior calc cannot leak into the next molecule.
         self._last_orb_mo_coeff: Any = None
+        self._last_orb_mo_occ: Any = None
         self._last_orb_mol_atom: Any = None
         self._last_orb_mol_basis: Any = None
-        # Last-generated cube file path + orbital label (M-EXPORT / EXPORT.5).
+        # Last-generated cube file path + orbital label.
         # Set by the isosurface render path; consumed by the Export cube
         # button. Initialized here so the button handler reads ``None``
         # cleanly when no isosurface has been generated yet.
@@ -1020,6 +1113,15 @@ class QuantUIApp:
         # Clear button from wiping output mid-run.
         self._cancel_event = threading.Event()
         self._calc_running: bool = False
+        # Stop signal for the live elapsed-time ticker thread.
+        self._elapsed_stop_event: Optional[threading.Event] = None
+        # Total run estimate the ticker turns into "time
+        # remaining"; set by _do_run once estimate_time() has run.
+        self._run_estimate_s: Optional[float] = None
+        self._run_estimate_conf: str = "unknown"
+        # The active run's _LogCapture, so the ticker can read the
+        # completion fraction calc modules report onto it. None between runs.
+        self._active_log: Optional[_LogCapture] = None
         # Relaxed molecule from a pending pre-opt preview, awaiting Keep/Revert.
         self._preopt_relaxed_mol: Optional[Molecule] = None
         # Cache kernel io_loop once on the main thread so worker threads can
@@ -1036,7 +1138,7 @@ class QuantUIApp:
 
         # User settings (persisted in ~/.quantui/settings.json) + viz
         # backend availability snapshot. The router consumes these; render
-        # call sites will be migrated to the router in VIZBACK.4 ff.
+        # call sites will be migrated to the router.
         self._user_settings: UserSettings = UserSettings.load()
         self._viz_availability: BackendAvailability = (
             BackendAvailability.from_environment()
@@ -1065,7 +1167,7 @@ class QuantUIApp:
         self._assemble_tabs()
 
         # Log startup, but never let optional logging I/O break app startup.
-        # Include the loaded viz backend preference so a "it reset" report (#4a)
+        # Include the loaded viz backend preference so a "it reset" report
         # can be confirmed against what was actually persisted.
         try:
             _calc_log.log_event(
@@ -1095,6 +1197,15 @@ class QuantUIApp:
         """
 
         def _detect_gpu() -> None:
+            # Warm the run-header's system-info cache (lru_cache; may shell out
+            # to nvidia-smi) off the main thread so the synchronous header write
+            # in on_run_clicked stays instant on the first calc.
+            try:
+                from quantui.log_utils import get_system_info
+
+                get_system_info()
+            except Exception:  # noqa: BLE001 — warm-up is best-effort
+                pass
             try:
                 from quantui.gpu_offload import is_gpu_available
 
@@ -1536,7 +1647,7 @@ class QuantUIApp:
         _rtp.insert(_rtp.index(self._to_analysis_btn), self.advanced_accordion)
         self.results_tab_panel.children = tuple(_rtp)
 
-        # POLISH.8 (M-POLISH, 2026-05-25): Log moved to be an
+        # Log moved to be an
         # Accordion inside the History tab — see build_output_tab for
         # the wrap. Tab indices renumbered: Files 6→5, System Settings
         # 7→6. Update any caller that depended on tab-index 5 being
@@ -1559,7 +1670,7 @@ class QuantUIApp:
         self.root_tab.set_title(3, "History")
         self.root_tab.set_title(4, "Compare")
         self.root_tab.set_title(5, "Files")
-        # POLISH.4 (M-POLISH, 2026-05-25): "Status" was ambiguous —
+        # "Status" was ambiguous —
         # status of what? "System Settings" is what the tab actually
         # holds (env info + calibration + GPU status + UI prefs).
         self.root_tab.set_title(6, "System Settings")
@@ -1634,11 +1745,14 @@ class QuantUIApp:
         # Notes + estimate
         self.method_dd.observe(self._safe_cb(self._update_notes), names="value")
         self.basis_dd.observe(self._safe_cb(self._update_notes), names="value")
+        # Multiplicity drives the open-shell hint (part of _update_notes).
+        self.mult_si.observe(self._safe_cb(self._update_notes), names="value")
         self.method_dd.observe(self._safe_cb(self._update_estimate), names="value")
         self.basis_dd.observe(self._safe_cb(self._update_estimate), names="value")
         # Help buttons
         self.method_help_btn.on_click(self._on_method_help)
         self.basis_help_btn.on_click(self._on_basis_help)
+        self.calc_type_help_btn.on_click(self._on_calc_type_help)
         # Run
         self.run_btn.on_click(self._on_run_clicked)
         self.cancel_btn.on_click(self._safe_cb(self._on_cancel))
@@ -1663,7 +1777,7 @@ class QuantUIApp:
         self._orb_export_btn.on_click(self._on_orb_export_plot)
         self._pes_export_btn.on_click(self._on_pes_export_plot)
         self._vib_export_btn.on_click(self._on_vib_export_animation)
-        # M-EXPORT / EXPORT.4: per-panel CSV-to-clipboard / file buttons.
+        # Per-panel CSV-to-clipboard / file buttons.
         self._ir_copy_data_btn.on_click(self._on_ir_copy_data)
         self._uv_copy_data_btn.on_click(self._on_uv_copy_data)
         self._orb_copy_data_btn.on_click(self._on_orb_copy_data)
@@ -1686,6 +1800,21 @@ class QuantUIApp:
         self.past_refresh_btn.on_click(self._on_past_refresh)
         self.copy_path_btn.on_click(self._on_copy_results_path)
         self.view_log_btn.on_click(self._on_view_log)
+        # History search / faceted filters (HIST.7)
+        for _w in (
+            self.history_search,
+            self.history_method_dd,
+            self.history_basis_dd,
+            self.history_date_from,
+            self.history_date_to,
+        ):
+            _w.observe(self._safe_cb(self._on_history_filter_changed), names="value")
+        for _chip in (
+            *self._history_calc_chips.values(),
+            *self._history_status_chips.values(),
+        ):
+            _chip.observe(self._safe_cb(self._on_history_filter_changed), names="value")
+        self.history_filter_clear_btn.on_click(self._on_history_filter_clear)
         # Perf stats reset
         self._reset_btn.on_click(self._on_reset_click)
         self._reset_confirm_yes.on_click(self._on_confirm_yes)
@@ -1746,7 +1875,11 @@ class QuantUIApp:
         )
         # Orbital isosurface generate button
         self._iso_generate_btn.on_click(self._on_iso_generate)
-        # M-EXPORT / EXPORT.5: cube + bundle exports
+        # Reveal the free-entry MO-index input only in "By index" mode.
+        self._orb_toggle.observe(
+            self._safe_cb(self._on_orb_toggle_changed), names="value"
+        )
+        # Cube + bundle exports
         self._iso_export_cube_btn.on_click(self._on_iso_export_cube)
         self._export_bundle_btn.on_click(self._on_export_bundle)
 
@@ -1759,6 +1892,13 @@ class QuantUIApp:
         _last_dir = getattr(self, "_last_result_dir", None)
         if isinstance(_last_dir, Path):
             candidates.append(_last_dir)
+        # Expose the app's own log dir (~/.quantui/logs) so the event
+        # log is reachable in-app. Resolves inside the runtime process, so it
+        # correctly points at the WSL home when the app runs under WSL.
+        try:
+            candidates.append(_calc_log._log_dir())
+        except Exception:
+            pass
 
         for candidate in candidates:
             if candidate is None:
@@ -1818,6 +1958,10 @@ class QuantUIApp:
                 labels.append(("Current Result", _last_dir.resolve()))
             except OSError:
                 pass
+        try:
+            labels.append(("Logs", _calc_log._log_dir().resolve()))
+        except OSError:
+            pass
 
         for prefix, known_root in labels:
             if root == known_root:
@@ -1979,6 +2123,7 @@ class QuantUIApp:
             ".txt",
             ".log",
             ".json",
+            ".jsonl",
             ".md",
             ".py",
             ".csv",
@@ -2006,7 +2151,7 @@ class QuantUIApp:
             self._set_files_status(f"Previewing SVG: {path.name}")
             return
 
-        # POLISH.5 (M-POLISH, 2026-05-25): specialized previews for
+        # Specialized previews for
         # extensions where the generic text dump is unhelpful. Each
         # handler caps file reads at 256 KB. On any exception inside a
         # handler, fall through to the generic text dispatch below so
@@ -2065,6 +2210,50 @@ class QuantUIApp:
                         )
                     )
                 self._set_files_status(f"JSON preview: {path.name}")
+                return
+            except Exception:  # noqa: BLE001 — fall through to text preview
+                pass
+
+        if suffix == ".jsonl":
+            # JSONL logs (event_log.jsonl) grow append-only, so the
+            # newest — and most useful — records are at the END. The generic
+            # text dispatch keeps the FIRST 200 KB (oldest events), so tail
+            # the file here instead: show the last N lines, newest last.
+            try:
+                _MAX_TAIL_LINES = 300
+                raw = path.read_bytes()
+                total_bytes = len(raw)
+                # Cap the decode window so a multi-MB log stays responsive;
+                # the tail is all we render anyway.
+                tail_raw = raw[-400_000:]
+                text = tail_raw.decode("utf-8", errors="replace")
+                lines = text.splitlines()
+                # A leading partial line can appear after byte-slicing — drop it.
+                if len(tail_raw) < total_bytes and lines:
+                    lines = lines[1:]
+                total_lines_shown = min(len(lines), _MAX_TAIL_LINES)
+                shown = lines[-_MAX_TAIL_LINES:]
+                rendered = "\n".join(shown)
+                note = (
+                    f"Showing the last {total_lines_shown} record(s)"
+                    + (
+                        " (file tail — older records not shown)"
+                        if len(lines) > _MAX_TAIL_LINES or len(tail_raw) < total_bytes
+                        else ""
+                    )
+                    + "."
+                )
+                with self._files_preview_output:
+                    display(
+                        HTML(
+                            "<p style='font-size:11px;color:#64748b;margin:0 0 4px'>"
+                            f"{_html.escape(note)}</p>"
+                            "<pre style='white-space:pre-wrap;word-break:break-word;"
+                            "font-size:12px;line-height:1.35;margin:0'>"
+                            f"{_html.escape(rendered)}</pre>"
+                        )
+                    )
+                self._set_files_status(f"Log preview (tail): {path.name}")
                 return
             except Exception:  # noqa: BLE001 — fall through to text preview
                 pass
@@ -2350,8 +2539,8 @@ class QuantUIApp:
         The assignment is a single ``out.outputs = (display_data,)`` rather
         than ``clear_output() + append_display_data()`` so the browser never
         observes an intermediate empty state. This eliminates the flicker
-        users were seeing on IR Stick/Broadened toggle and FWHM slider drag
-        (BUG.9) and matches the atomic-swap pattern already used by
+        users were seeing on IR Stick/Broadened toggle and FWHM slider drag,
+        and matches the atomic-swap pattern already used by
         ``_swap_frame_out`` (trajectory) and ``_swap_vib_output`` (vib).
         """
         if threading.current_thread() is not threading.main_thread():
@@ -2371,20 +2560,20 @@ class QuantUIApp:
         """Re-render the Calculate-tab molecule viewer via an atomic HTML swap.
 
         Replaces the ``with self.viz_output: display_molecule(...)`` pattern
-        that surfaced BUG B1/B2/B3 (2026-05-25 user report):
+        that surfaced three viewer issues (2026-05-25):
 
-        - **B1** "viewer doesn't update on PubChem load until I toggle the
+        - "viewer doesn't update on PubChem load until I toggle the
           backend" — the Output-context render path was racing the kernel's
           comms flush, so the initial display was sometimes never emitted.
           Atomic ``outputs = (display_data,)`` is a single synchronous
           assignment that the front-end always picks up.
-        - **B3** "red log lines around the viewer on the Calculate tab" —
+        - "red log lines around the viewer on the Calculate tab" —
           ``with self.viz_output:`` captured every ``logger.info`` /
           ``logger.error`` line that ``display_molecule`` emitted while it
           ran. ``render_molecule_html`` returns the HTML string OUTSIDE any
           Output context, so the only thing that lands in the widget is
           the viewer itself.
-        - **B2** "PlotlyMol valence error spills as red text" — the same
+        - "PlotlyMol valence error spills as red text" — the same
           helper wraps render failures into an inline error <div>, so
           plotlymol's RDKit-bond-perception failure on aromatic systems
           shows up as a friendly inline message instead of a logger.error
@@ -2506,7 +2695,7 @@ class QuantUIApp:
         ``new_pref`` must be one of "auto" | "py3dmol" | "plotlymol". All three
         widgets (Settings dropdown + Calculate/Analysis toggles) edit the same
         single global preference, so every user-initiated change passes
-        ``persist=True`` (#4a — a backend choice must survive the session).
+        ``persist=True`` (a backend choice must survive the session).
         ``persist=False`` remains available for programmatic syncs that must
         not write settings.
 
@@ -2615,7 +2804,7 @@ class QuantUIApp:
 
         Previously ``persist=False`` (session-only). That surprised users: the
         toggle visibly updated every view + the Settings dropdown, but the
-        choice silently reverted next session (manual finding #4a, 2026-06-15).
+        choice silently reverted next session (2026-06-15).
         All three widgets edit the one global preference, so any user-initiated
         change now persists.
         """
@@ -2624,7 +2813,7 @@ class QuantUIApp:
         self._set_viz_preference(change["new"], persist=True)
 
     def _on_viz_backend_changed_ana(self, change) -> None:
-        """Analysis-tab toggle observer — persists the chosen backend (see #4a)."""
+        """Analysis-tab toggle observer — persists the chosen backend."""
         if self._viz_sync_in_progress:
             return
         self._set_viz_preference(change["new"], persist=True)
@@ -2733,14 +2922,14 @@ class QuantUIApp:
         source: Optional[str] = None,
     ) -> None:
         # Runs on the main loop. Terminal point of a search → end the activity
-        # indicator started in the search handler (#2). Best-effort + idempotent
+        # indicator started in the search handler. Best-effort + idempotent
         # via the counter, so an unbalanced begin can't pin the light "busy".
         try:
             self._activity_end(kind="ui")
         except Exception:
             pass
         if error is None and mol is not None:
-            # Label by where the structure ACTUALLY came from (#1b) — not always
+            # Label by where the structure ACTUALLY came from — not always
             # "PubChem". Offline FALLBACK means the network was tried + failed,
             # so surface a no-network note; a plain library hit is not an error.
             prefix = _STRUCT_SOURCE_PREFIX.get(source or "", "Structure")
@@ -2812,7 +3001,7 @@ class QuantUIApp:
         )
         self.pubchem_btn.disabled = False
         # Terminal point of the search phase (awaiting the user's pick) → end
-        # the activity indicator started in _on_search_pubchem (#2).
+        # the activity indicator started in _on_search_pubchem.
         try:
             self._activity_end(kind="ui")
         except Exception:
@@ -2848,7 +3037,7 @@ class QuantUIApp:
         self.pubchem_btn.disabled = True
         # Light the toolbar activity indicator so the resolver chain
         # (PubChem → CACTUS → library, up to ~8 s on a CACTUS timeout) doesn't
-        # look like a hang (#2). Ended at every terminal point below.
+        # look like a hang. Ended at every terminal point below.
         try:
             self._activity_begin(f'Searching structures for "{query}"…', kind="ui")
         except Exception:
@@ -2911,6 +3100,9 @@ class QuantUIApp:
     def _on_basis_help(self, btn) -> None:
         _run_on_basis_help(self, btn)
 
+    def _on_calc_type_help(self, btn) -> None:
+        _run_on_calc_type_help(self, btn)
+
     # ── Run ───────────────────────────────────────────────────────────────
 
     def _on_run_clicked(self, btn) -> None:
@@ -2933,7 +3125,17 @@ class QuantUIApp:
             return
         self._cancel_event.set()
         self.cancel_btn.disabled = True
-        self.run_status.value = "Cancelling — stopping at the next step…"
+        self.cancel_btn.description = "Cancelling…"
+        self.run_status.value = "Cancelling — stopping at the next cycle/step…"
+        # Write an immediate marker to the live log so the click reads as
+        # acknowledged even if the next cooperative checkpoint is a moment away.
+        try:
+            self.run_output.append_stdout(
+                "\n⏹ Cancel requested — stopping at the next SCF cycle / "
+                "optimizer step…\n"
+            )
+        except Exception:
+            pass
 
     def _on_preopt_preview(self, btn=None) -> None:
         _run_on_preopt_preview(self, btn)
@@ -3170,7 +3372,6 @@ class QuantUIApp:
         see (e.g.) Stick + Broadened spectra in one file. Returns the
         empty string if the figure has no extractable data — caller treats
         that as "nothing to copy" rather than writing an empty file.
-        (M-EXPORT / EXPORT.4)
         """
         if fig is None:
             return ""
@@ -3210,7 +3411,6 @@ class QuantUIApp:
         a secure context + user-gesture in some browsers; failures are
         invisible by design). Status widget surfaces the saved path so
         the user can find the file even when clipboard is unavailable.
-        (M-EXPORT / EXPORT.4)
         """
         if fig is None:
             status_widget.value = (
@@ -3340,6 +3540,32 @@ class QuantUIApp:
     def _on_past_dd_changed(self, change) -> None:
         _hist_on_past_dd_changed(self, change, layout_fn=_layout)
 
+    def _on_history_filter_changed(self, change=None) -> None:
+        from quantui.app_history import apply_history_filter
+
+        apply_history_filter(self)
+
+    def _on_history_filter_clear(self, btn=None) -> None:
+        from quantui.app_history import apply_history_filter
+
+        # Reset every facet widget, suspending the observer so we run a single
+        # filter pass at the end instead of one per widget reset.
+        self._history_filter_suspend = True
+        try:
+            self.history_search.value = ""
+            self.history_method_dd.value = ""
+            self.history_basis_dd.value = ""
+            self.history_date_from.value = None
+            self.history_date_to.value = None
+            for chip in (
+                *self._history_calc_chips.values(),
+                *self._history_status_chips.values(),
+            ):
+                chip.value = False
+        finally:
+            self._history_filter_suspend = False
+        apply_history_filter(self)
+
     def _on_past_refresh(self, btn) -> None:
         self._activity_begin("Refreshing history list...")
         try:
@@ -3369,7 +3595,7 @@ class QuantUIApp:
         self, data: dict, result_dir: Path, *, source_btns: tuple = ()
     ) -> None:
         # Activity indicator + button-disable feedback are handled inside the
-        # inner ``history_load_results`` helper now (HIST.1). The wrapper just
+        # inner ``history_load_results`` helper now. The wrapper just
         # forwards source_btns and refreshes the Files tab after the load.
         try:
             _hist_history_load_results(self, data, result_dir, source_btns=source_btns)
@@ -3559,10 +3785,10 @@ class QuantUIApp:
         if mol.multiplicity > 1 and self.method_dd.value == "RHF":
             self.method_dd.value = "UHF"
 
-        # BUG B1/B2/B3 (2026-05-25): route through ``_refresh_calc_mol_viewer``
+        # Route through ``_refresh_calc_mol_viewer`` (2026-05-25)
         # so the viewer renders via an atomic outputs swap rather than the
-        # ``with self.viz_output: display(...)`` pattern that the BUG.7 fix
-        # already replaced for the Analysis tab. The molecule attribute on
+        # ``with self.viz_output: display(...)`` pattern already replaced
+        # for the Analysis tab. The molecule attribute on
         # the app was set just above; the helper reads it.
         self._refresh_calc_mol_viewer()
 
@@ -3816,6 +4042,12 @@ class QuantUIApp:
     def _on_iso_generate(self, btn) -> None:
         _viz_on_iso_generate(self, btn)
 
+    def _on_orb_toggle_changed(self, change) -> None:
+        """Show/hide the free-entry MO-index input for the 'By index' mode."""
+        self._orb_index_input.layout.display = (
+            "" if change["new"] == "By index" else "none"
+        )
+
     def _on_orb_range_changed(self, _change=None) -> None:
         _viz_on_orb_range_changed(self, _change)
 
@@ -3906,10 +4138,12 @@ class QuantUIApp:
         )
         _run_wall_t = time.perf_counter()
         _run_cpu_t = time.process_time()
+        # Start the live elapsed-time ticker.
+        self._start_elapsed_ticker(_run_wall_t)
         _scf_converged_t: Optional[float] = None
         _tail_marks: dict[str, float] = {}
 
-        # M-EST / EST.6 (2026-05-25): capture the estimator's pre-run
+        # Capture the estimator's pre-run (2026-05-25)
         # prediction so we can write a (predicted, actual) record to
         # ``prediction_log.jsonl`` after the calc completes. The
         # estimator may return None (insufficient history); we record
@@ -3925,6 +4159,7 @@ class QuantUIApp:
                 "UV-Vis (TD-DFT)": "tddft",
                 "NMR Shielding": "nmr",
                 "PES Scan": "pes_scan",
+                "Reorganization Energy": "reorganization_energy",
             }.get(self.calc_type_dd.value, "single_point")
             _nb_for_est = _calc_log.count_basis_functions(
                 mol.atoms, self.basis_dd.value
@@ -3961,6 +4196,10 @@ class QuantUIApp:
             if _est is not None:
                 _predicted_run_s = float(_est["seconds"])
                 _predicted_run_confidence = str(_est.get("confidence", "unknown"))
+                # Hand the estimate to the live ticker so it can show a
+                # "time remaining" readout alongside elapsed.
+                self._run_estimate_s = _predicted_run_s
+                self._run_estimate_conf = _predicted_run_confidence
         except Exception as _est_exc:
             # Estimator failure here is non-fatal — we just won't have a
             # predicted_s to compare against. Log to event_log so the
@@ -4018,28 +4257,17 @@ class QuantUIApp:
             on_scf_converged=_on_scf_converged,
             cancel_check=self._cancel_event.is_set,
         )
+        # Expose this run's log to the elapsed ticker so it can read the
+        # completion fraction calc modules report via emit_progress.
+        self._active_log = log
 
-        # Write structured log header immediately so it appears at the top of output
-        try:
-            from quantui.log_utils import format_log_header as _fmt_log_hdr
-
-            _hdr_calc_type = {
-                "Geometry Opt": "geometry_opt",
-                "Frequency": "frequency",
-                "UV-Vis (TD-DFT)": "tddft",
-                "NMR Shielding": "nmr",
-                "PES Scan": "pes_scan",
-            }.get(self.calc_type_dd.value, "single_point")
-            log.write(
-                _fmt_log_hdr(
-                    formula=mol.get_formula(),
-                    method=self.method_dd.value,
-                    basis=self.basis_dd.value,
-                    calc_type=_hdr_calc_type,
-                )
-            )
-        except Exception:
-            pass
+        # The run header (structured banner) is written synchronously + atomically
+        # on the main thread by ``on_run_clicked`` → ``_write_run_header`` BEFORE
+        # this background thread starts. Writing it here (bg thread) instead was
+        # the pre-step-1 "blank window" bug (2026-07-18): for a large molecule the
+        # long gap before the first optimizer/SCF line exposed a lost-early-output
+        # race in the bg-thread ``append_stdout`` path. All later PySCF / optimizer
+        # output appends onto that header via ``log`` as usual.
 
         try:
             # Classical pre-optimization is now an explicit Preview → Keep tool
@@ -4067,7 +4295,7 @@ class QuantUIApp:
             ):
                 from quantui import optimize_geometry
 
-                # POLISH.9 (M-POLISH, 2026-05-25): rename user-facing
+                # Rename user-facing
                 # "Pre-optimisation" → "Geometry optimization". The
                 # wrapped operation is the full DFT geom-opt at the
                 # user's selected method/basis — same code path as the
@@ -4078,10 +4306,9 @@ class QuantUIApp:
                     f"\n── Geometry optimization (before {ct}) "
                     f"────────────────────────────\n"
                 )
-                # BUG C (2026-05-25): catch numerical failures (e.g.
-                # singular matrix in cho_solve on tight rings) and fall
-                # back to the user's input geometry rather than killing
-                # the whole calc.
+                # Catch numerical failures (e.g. singular matrix in
+                # cho_solve on tight rings) and fall back to the user's
+                # input geometry rather than killing the whole calc.
                 try:
                     _pre_opt = optimize_geometry(
                         molecule=calc_mol,
@@ -4118,6 +4345,11 @@ class QuantUIApp:
                 self.run_status.value = "Optimizing geometry..."
                 from quantui import optimize_geometry
 
+                # History-based expected step count → "step k/~N" + a floor
+                # for the live progress fraction. None on cold history.
+                _expected_steps = _calc_log.estimate_opt_steps(
+                    self.method_dd.value, self.basis_dd.value
+                )
                 result = optimize_geometry(
                     molecule=calc_mol,
                     method=self.method_dd.value,
@@ -4125,6 +4357,9 @@ class QuantUIApp:
                     fmax=self.fmax_fi.value,
                     steps=self.max_steps_si.value,
                     progress_stream=log,  # type: ignore[arg-type]
+                    expected_steps=(
+                        int(round(_expected_steps)) if _expected_steps else None
+                    ),
                 )
                 _sp_result = _run_required_final_single_point(
                     result.molecule,
@@ -4178,13 +4413,13 @@ class QuantUIApp:
 
                 # ── Step 2: optional geometry optimization ────────────────────
                 #
-                # POLISH.9 (M-POLISH, 2026-05-25): renamed from
+                # Renamed from
                 # "pre-optimisation" — the wrapped operation is a full
                 # DFT geometry optimization at the user's selected
                 # method/basis. The LJ-classical pre-opt is in
                 # quantui/preopt.py and keeps its "pre-opt" name.
                 #
-                # BUG C (2026-05-25): geom-opt can hit a singular matrix
+                # Geom-opt can hit a singular matrix
                 # in PySCF's ``cho_solve`` on tight rings (e.g. aromatic
                 # benzene with B3LYP/6-31G). That raises out of the
                 # optimizer and used to kill the whole calc. Wrap it: on
@@ -4286,7 +4521,7 @@ class QuantUIApp:
                     )
 
                 # ── Step 2: optional geometry optimization ────────────────────
-                # POLISH.9 (M-POLISH, 2026-05-25): renamed from
+                # Renamed from
                 # "pre-optimisation" — DFT geom-opt is just geom-opt.
                 if self._freq_preopt_cb.value:
                     from quantui import optimize_geometry
@@ -4298,9 +4533,9 @@ class QuantUIApp:
                         "\n── Geometry optimization (before UV-Vis (TD-DFT)) "
                         "─────────────\n"
                     )
-                    # BUG C (2026-05-25): catch numerical failures and
-                    # fall back to the user's seed geometry rather than
-                    # killing the whole TD-DFT calc.
+                    # Catch numerical failures and fall back to the
+                    # user's seed geometry rather than killing the whole
+                    # TD-DFT calc.
                     try:
                         _pre_opt = optimize_geometry(
                             molecule=calc_mol,
@@ -4408,6 +4643,26 @@ class QuantUIApp:
                     }
                 }
                 save_type = "pes_scan"
+            elif ct == "Reorganization Energy":
+                self.run_status.value = "Computing reorganization energy..."
+                from quantui.reorganization_energy import (
+                    run_reorganization_energy,
+                )
+
+                _solvent = self.solvent_dd.value if self.solvent_cb.value else None
+                result = run_reorganization_energy(
+                    molecule=calc_mol,
+                    mode=self._reorg_mode_dd.value,
+                    method=self.method_dd.value,
+                    basis=self.basis_dd.value,
+                    fmax=self.fmax_fi.value,
+                    steps=self.max_steps_si.value,
+                    progress_stream=log,  # type: ignore[arg-type]
+                    solvent=_solvent,
+                )
+                result_html = self._format_reorg_result(result)
+                save_spectra = result.to_spectra()
+                save_type = "reorganization_energy"
             else:  # Single Point
                 self.run_status.value = "Calculating..."
                 from quantui import run_in_session
@@ -4447,11 +4702,21 @@ class QuantUIApp:
             self.run_status.value = "Finalizing results..."
 
             # Show 3D structure in the result panel and mirrored in Analysis tab
-            _viz_mol = result.molecule if ct == "Geometry Opt" else calc_mol
+            _viz_mol = (
+                result.molecule
+                if ct in ("Geometry Opt", "Reorganization Energy")
+                else calc_mol
+            )
             if ct == "Geometry Opt":
                 self._viz_label.value = (
                     '<p style="color:#555;font-size:12px;font-weight:600;'
                     'margin:6px 0 2px">Optimized geometry</p>'
+                )
+                self._viz_label.layout.display = ""
+            elif ct == "Reorganization Energy":
+                self._viz_label.value = (
+                    '<p style="color:#555;font-size:12px;font-weight:600;'
+                    'margin:6px 0 2px">Optimized neutral geometry</p>'
                 )
                 self._viz_label.layout.display = ""
             self._queue_main_thread_callback(
@@ -4519,7 +4784,7 @@ class QuantUIApp:
                     spectra=save_spectra,
                 )
                 self._last_result_dir = _saved_dir
-                # M-EXPORT / EXPORT.5: result folder is now on disk —
+                # Result folder is now on disk —
                 # the "Export bundle (.zip)" button has something to zip.
                 try:
                     self._export_bundle_btn.disabled = False
@@ -4539,7 +4804,7 @@ class QuantUIApp:
                     _e_list = getattr(result, "energies_hartree", [])
                     if _traj:
                         save_trajectory(_saved_dir, _traj, _e_list or [])
-                        # M-EXPORT / EXPORT.3 + EXPORT.7: also write
+                        # Also write
                         # external-tool-friendly trajectory formats.
                         # Multi-frame XYZ (any viewer) and ASE .traj
                         # (ASE-GUI + ASE Python post-processing). Both
@@ -4565,7 +4830,7 @@ class QuantUIApp:
                             )
                         except Exception:
                             pass
-                # Persist pre-opt geometry trajectory for Frequency runs (DEC-007).
+                # Persist pre-opt geometry trajectory for Frequency runs.
                 if ct == "Frequency" and _pre_opt is not None:
                     _pre_traj = getattr(_pre_opt, "trajectory", None)
                     _pre_e = list(getattr(_pre_opt, "energies_hartree", []))
@@ -4579,7 +4844,7 @@ class QuantUIApp:
                 # Persist MO data for orbital diagram + isosurface replay.
                 if ct in ("Single Point", "Geometry Opt", "Frequency"):
                     save_orbitals(_saved_dir, result)
-                # M-EXPORT / EXPORT.1+2: write a Molden-format companion
+                # Write a Molden-format companion
                 # file so users can open results in Avogadro / IQmol /
                 # Jmol. Best-effort — failures are swallowed by the
                 # outer try block above and the calc still completes.
@@ -4660,6 +4925,7 @@ class QuantUIApp:
                     calc_type=save_type,
                     gpu_used=getattr(result, "gpu_used", None),
                     gpu_name=getattr(result, "gpu_name", None),
+                    n_steps=getattr(result, "n_steps", None),
                 )
                 _calc_log.log_event(
                     "calc_done",
@@ -4669,7 +4935,7 @@ class QuantUIApp:
                     gpu_used=bool(getattr(result, "gpu_used", False)),
                     gpu_name=getattr(result, "gpu_name", None),
                 )
-                # M-EST / EST.6: persist the (predicted, actual) pair to
+                # Persist the (predicted, actual) pair to
                 # ``prediction_log.jsonl``. ``_predicted_run_s`` was
                 # captured at the top of _do_run via the same
                 # estimate_time(...) call that drives the UI estimate;
@@ -4856,8 +5122,95 @@ class QuantUIApp:
             self._calc_running = False
             self._cancel_event.clear()
             self.cancel_btn.disabled = True
+            self.cancel_btn.description = "Cancel"
             self.log_clear_btn.disabled = False
+            self._stop_elapsed_ticker()
             self._activity_end(kind="compute")
+
+    # ── Live elapsed ticker ────────────────────────────────────────────────
+
+    def _start_elapsed_ticker(self, start_t: float) -> None:
+        """Spin up a daemon thread that updates the elapsed chip every ~1 s.
+
+        Writes only to ``_run_elapsed_lbl`` (never ``run_status``), so it never
+        fights the stage labels set by ``_LogCapture`` / the calc modules.
+        ``Label``/``HTML`` ``.value`` writes are thread-safe, so no io_loop
+        marshaling is needed.
+        """
+        self._stop_elapsed_ticker()  # ensure no prior ticker is still running
+        # Reset the runtime estimate; _do_run fills it in once computed.
+        self._run_estimate_s = None
+        self._run_estimate_conf = "unknown"
+        # Drop any prior run's log so a stale fraction can't leak into the
+        # new run's chip before this run's _LogCapture is created.
+        self._active_log = None
+        stop_event = threading.Event()
+        self._elapsed_stop_event = stop_event
+
+        def _tick() -> None:
+            while not stop_event.wait(1.0):
+                try:
+                    self._run_elapsed_lbl.value = self._format_elapsed_chip(
+                        time.perf_counter() - start_t
+                    )
+                except Exception:
+                    break
+
+        threading.Thread(
+            target=_tick, daemon=True, name="quantui-elapsed-ticker"
+        ).start()
+
+    def _format_elapsed_chip(self, elapsed: float) -> str:
+        """Compose the live chip: ``⏱ <elapsed>`` + ``· ~<remaining> left``.
+
+        Folds the pre-run total estimate (``_run_estimate_s``,
+        set by ``_do_run``) into a remaining-time readout. Degrades to
+        elapsed-only when there's no estimate (cold history) and switches to
+        "longer than estimated" once elapsed passes the estimate — never shows a
+        negative or false-precise number. Low-confidence estimates are marked
+        "(rough)" so the readout stays honest.
+        """
+        from quantui.log_utils import format_elapsed
+
+        base = f"⏱ {format_elapsed(elapsed)}"
+
+        # Prefer a self-correcting fraction-based estimate when a calc module
+        # reports real progress (PES points, optimizer fmax trend). Only trust it
+        # once past a small floor so early-run noise doesn't spike the estimate.
+        log = getattr(self, "_active_log", None)
+        frac = getattr(log, "_fraction", None) if log is not None else None
+        if frac is not None and frac >= 0.03 and elapsed > 0:
+            remaining = elapsed * (1.0 - frac) / frac
+            return (
+                '<span style="color:#64748b;font-size:13px">'
+                f"{base} · ~{format_elapsed(remaining)} left</span>"
+            )
+
+        # Fallback: static total estimate minus elapsed.
+        est = getattr(self, "_run_estimate_s", None)
+        if est and est > 0:
+            remaining = est - elapsed
+            if remaining > 0:
+                rough = (
+                    " (rough)"
+                    if getattr(self, "_run_estimate_conf", "") == "low"
+                    else ""
+                )
+                base = f"{base} · ~{format_elapsed(remaining)} left{rough}"
+            else:
+                base = f"{base} · longer than estimated"
+        return f'<span style="color:#64748b;font-size:13px">{base}</span>'
+
+    def _stop_elapsed_ticker(self) -> None:
+        """Stop the elapsed ticker and clear the chip."""
+        ev = getattr(self, "_elapsed_stop_event", None)
+        if ev is not None:
+            ev.set()
+            self._elapsed_stop_event = None
+        try:
+            self._run_elapsed_lbl.value = ""
+        except Exception:
+            pass
 
     def _update_notes(self, change=None) -> None:
         _run_update_notes(self, change)
@@ -4911,7 +5264,7 @@ class QuantUIApp:
         return _wrapper
 
     def _goto_output_tab(self) -> None:
-        # POLISH.8 (M-POLISH, 2026-05-25): the standalone Log tab is
+        # The standalone Log tab is
         # gone; the PySCF output log now lives in an Accordion inside
         # the History tab (index 3). Switch tabs + expand the log
         # accordion so the user lands directly on the log content.
@@ -5137,6 +5490,9 @@ class QuantUIApp:
 
     def _format_pes_scan_result(self, r) -> str:
         return _fmt_pes_scan_result(r)
+
+    def _format_reorg_result(self, r) -> str:
+        return _fmt_reorg_result(r)
 
     def _show_pes_scan_result(self, result) -> bool:
         return _viz_show_pes_scan_result(self, result)

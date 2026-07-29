@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quantui"
-version = "0.4.0"
+version = "0.4.1"
 description = "An open-source frontend for DFT and post-HF quantum chemistry with PySCF"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -61,10 +61,11 @@ quantui = [
 [project.optional-dependencies]
 # PySCF requires Linux/macOS/WSL — not available on Windows natively.
 # Use the Apptainer container (apptainer/quantui.def) for Windows.
-# pyscf>=2.13.0: pyscf.prop.infrared is in pyscf 2.13.0+ core (creates the
-# pyscf.prop namespace that infrared lives under).
-# pyscf-properties: provides additional pyscf.prop.* modules (EFG, IR, etc.).
-# NMR is accessed via pyscf.nmr (core, not overwritten by pyscf-properties).
+# pyscf.prop.infrared is NOT in pyscf/pyscf-properties as of pyscf 2.13 —
+# freq_calc.py computes IR intensities itself via finite-difference dipole
+# displacement instead (see the comment there). NMR is NOT accessed via
+# pyscf.nmr (that module doesn't exist in released pyscf); it's
+# pyscf.prop.nmr, provided by pyscf-properties below.
 pyscf = [
     "pyscf>=2.13.0",
     "pyscf-properties",

@@ -28,12 +28,24 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+from .config import BOHR_TO_ANGSTROM as _BOHR_TO_ANGSTROM
 
 if TYPE_CHECKING:
     pass  # result types accepted via duck typing; no hard import needed
 
 _SCHEMA_VERSION = 2
+
+# Molden's [FR-COORD] block is defined (theochem.ru.nl/molden/molden_format.html)
+# to always be in Bohr, regardless of the unit tag on [Atoms] — a Molden-format
+# quirk. pyscf_mol_atom (the source for both blocks) is Angstrom throughout
+# QuantUI, so [FR-COORD] needs an explicit conversion; [Atoms]/[GTO]/[MO] (via
+# molden.from_mo / molden.header, built from a mol with implicit unit="Angstrom")
+# do not. Derived from config.BOHR_TO_ANGSTROM (pyscf.data.nist.BOHR) rather
+# than a separately hand-typed literal, so this stays consistent with the
+# other Bohr<->Angstrom conversions in the codebase.
+_ANGSTROM_TO_BOHR = 1.0 / _BOHR_TO_ANGSTROM
 
 
 def _default_results_dir() -> Path:
@@ -52,6 +64,22 @@ def _opt_float(x: object) -> Optional[float]:
         return None
     try:
         return float(x)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _opt_int(x: object) -> Optional[int]:
+    """Coerce an optional (possibly numpy) scalar to a JSON-safe int or None.
+
+    ``json.dumps`` accepts ``numpy.float64``/``numpy.float32`` transparently
+    (they subclass ``float``), but ``numpy.int64``/``numpy.bool_`` do not
+    subclass ``int``/``bool`` and raise ``TypeError`` unconverted — this
+    normalizes any duck-typed result's numpy scalar to a plain ``int``.
+    """
+    if x is None:
+        return None
+    try:
+        return int(x)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
 
@@ -143,10 +171,17 @@ def save_result(
         _collision += 1
     dest.mkdir(parents=True)
 
-    _e_ha = getattr(result, "energy_hartree", float("nan"))
+    _e_ha_raw = getattr(result, "energy_hartree", float("nan"))
+    _e_ha = _opt_float(_e_ha_raw)
+    if _e_ha is None:
+        _e_ha = float("nan")
     # energy_ev may be a property (SessionResult) or absent (OptimizationResult
     # and new types also define it as a property, so getattr works for all).
-    _e_ev = getattr(result, "energy_ev", _e_ha * _HARTREE_TO_EV)
+    _e_ev = _opt_float(getattr(result, "energy_ev", _e_ha * _HARTREE_TO_EV))
+    if _e_ev is None:
+        _e_ev = _e_ha * _HARTREE_TO_EV
+
+    _converged = getattr(result, "converged", None)
 
     data: dict = {
         "_schema_version": _SCHEMA_VERSION,
@@ -157,16 +192,22 @@ def save_result(
         "basis": getattr(result, "basis", "?"),
         "energy_hartree": _e_ha,
         "energy_ev": _e_ev,
-        "homo_lumo_gap_ev": getattr(result, "homo_lumo_gap_ev", None),
-        "converged": getattr(result, "converged", None),
-        "n_iterations": getattr(result, "n_iterations", -1),
+        "homo_lumo_gap_ev": _opt_float(getattr(result, "homo_lumo_gap_ev", None)),
+        "converged": None if _converged is None else bool(_converged),
+        "n_iterations": _opt_int(getattr(result, "n_iterations", -1)),
         # Post-HF correlation breakdown — None for HF/DFT. Persisted so the
         # saved-result card can show the HF reference + correlation rows.
-        "mp2_correlation_hartree": getattr(result, "mp2_correlation_hartree", None),
-        "ccsd_correlation_hartree": getattr(result, "ccsd_correlation_hartree", None),
-        "ccsd_t_correction_hartree": getattr(result, "ccsd_t_correction_hartree", None),
-        # Persisted so the saved-result card matches the live card (M-CLEAN
-        # formatter-parity fix). Additive — absent on older results, where the
+        "mp2_correlation_hartree": _opt_float(
+            getattr(result, "mp2_correlation_hartree", None)
+        ),
+        "ccsd_correlation_hartree": _opt_float(
+            getattr(result, "ccsd_correlation_hartree", None)
+        ),
+        "ccsd_t_correction_hartree": _opt_float(
+            getattr(result, "ccsd_t_correction_hartree", None)
+        ),
+        # Persisted so the saved-result card matches the live card
+        # (formatter-parity fix). Additive — absent on older results, where the
         # history card falls back exactly as before (CPU / no dipole / no
         # charges). Coerced JSON-safe (numpy scalars/arrays → float/list).
         "solvent": getattr(result, "solvent", None),
@@ -187,6 +228,23 @@ def save_result(
     return dest
 
 
+_COLLISION_SUFFIX_RE = re.compile(r"^(.*)_(\d+)$")
+
+
+def _result_dir_sort_key(d: Path) -> tuple:
+    """Sort key that orders same-timestamp collision suffixes numerically.
+
+    Directory names are ``<timestamp>_<formula>_<method>_<basis>``, with a
+    ``_<N>`` counter appended on same-microsecond collisions (N=1, 2, ...).
+    A plain string sort put ``..._10`` before ``..._2`` (lexicographic, not
+    numeric); split the trailing counter and sort on it as an int instead.
+    """
+    m = _COLLISION_SUFFIX_RE.match(d.name)
+    if m:
+        return (m.group(1), int(m.group(2)))
+    return (d.name, -1)
+
+
 def list_results(results_dir: Optional[Path] = None) -> list:
     """Return result directories sorted newest-first.
 
@@ -197,6 +255,7 @@ def list_results(results_dir: Optional[Path] = None) -> list:
         return []
     return sorted(
         (d for d in base.iterdir() if d.is_dir() and (d / "result.json").exists()),
+        key=_result_dir_sort_key,
         reverse=True,
     )
 
@@ -259,7 +318,7 @@ def save_molden(
     normal_modes=None,
     filename: str = "result.molden",
 ) -> Optional[Path]:
-    """Write a Molden-format file alongside ``result.json`` (M-EXPORT / EXPORT.1+2).
+    """Write a Molden-format file alongside ``result.json``.
 
     Molden is the lingua franca for orbital + vibration interop with
     Avogadro / IQmol / Jmol / Multiwfn. This helper writes whichever data
@@ -357,7 +416,9 @@ def _append_molden_vibrations(
     ``normal_modes``). ``normal_modes`` is a list of length-N entries,
     each a list of per-atom (x, y, z) displacement triples. The
     ``[FR-COORD]`` block repeats the equilibrium geometry from
-    ``pyscf_mol_atom`` so the file is self-contained.
+    ``pyscf_mol_atom`` (converted Angstrom -> Bohr; the Molden spec
+    requires ``[FR-COORD]`` in Bohr regardless of ``[Atoms]``'s unit tag)
+    so the file is self-contained.
     """
     with open(path, "a", encoding="utf-8") as fh:
         fh.write("\n[FREQ]\n")
@@ -367,8 +428,9 @@ def _append_molden_vibrations(
         fh.write("\n[FR-COORD]\n")
         for sym, coords in pyscf_mol_atom:
             fh.write(
-                f"{sym}  {float(coords[0]):.6f} {float(coords[1]):.6f} "
-                f"{float(coords[2]):.6f}\n"
+                f"{sym}  {float(coords[0]) * _ANGSTROM_TO_BOHR:.6f} "
+                f"{float(coords[1]) * _ANGSTROM_TO_BOHR:.6f} "
+                f"{float(coords[2]) * _ANGSTROM_TO_BOHR:.6f}\n"
             )
 
         fh.write("\n[FR-NORM-COORD]\n")
@@ -388,7 +450,7 @@ def save_trajectory_xyz(
     energies: list,
     filename: str = "trajectory.xyz",
 ) -> Optional[Path]:
-    """Write a multi-frame XYZ trajectory file (M-EXPORT / EXPORT.3).
+    """Write a multi-frame XYZ trajectory file.
 
     Universal format readable by Avogadro, VMD, OVITO, Jmol, Pymol,
     OpenBabel, ASE (``ase.io.read``), and basically any molecular tool
@@ -446,7 +508,7 @@ def save_trajectory_ase(
     energies: list,
     filename: str = "trajectory.traj",
 ) -> Optional[Path]:
-    """Write an ASE Trajectory (.traj) file (M-EXPORT / EXPORT.7).
+    """Write an ASE Trajectory (.traj) file.
 
     Lets users open the result in ``ase gui trajectory.traj``, slice
     frames (``trajectory.traj@0:10:2``), and use ASE-GUI's interactive
@@ -506,7 +568,7 @@ def export_cube(
     *,
     orbital_label: str = "orbital",
 ) -> Optional[Path]:
-    """Copy a cube file to the top-level result dir with a friendly name (EXPORT.5).
+    """Copy a cube file to the top-level result dir with a friendly name.
 
     Internal cube files live in ``<result_dir>/isosurfaces/`` with
     timestamped filenames (``H2O_HOMO_2026-05-23_19-30-00.cube``) — fine
@@ -541,7 +603,7 @@ def export_result_bundle(
     *,
     output_dir: Optional[Path] = None,
 ) -> Optional[Path]:
-    """Zip an entire result directory for sharing (EXPORT.5 stretch goal).
+    """Zip an entire result directory for sharing.
 
     Produces ``<output_dir>/<result_dir_name>.zip`` containing every
     file the calc wrote — ``result.json``, ``pyscf.log``, ``orbitals.npz``,
@@ -710,12 +772,39 @@ def save_thumbnail(result_dir: Path, data: dict) -> None:
     except ImportError:
         return
 
+    # Fix (2026-07-14): only the matplotlib import itself was
+    # guarded — figure construction, text rendering, and fig.savefig() (a
+    # real filesystem write, so it can hit disk-full / permission errors)
+    # could all raise past this function despite the docstring's promise
+    # to silently skip "any error". Wrap the whole body so that promise
+    # actually holds; fig.close() still runs via finally regardless of
+    # where in the body a failure happened.
+    fig = None
+    try:
+        fig = _build_thumbnail_figure(plt, data)
+        fig.savefig(
+            str(result_dir / "thumbnail.png"),
+            dpi=144,
+            bbox_inches="tight",
+            facecolor=fig.get_facecolor(),
+            pad_inches=0.05,
+        )
+    except Exception:
+        pass
+    finally:
+        if fig is not None:
+            plt.close(fig)
+
+
+def _build_thumbnail_figure(plt: Any, data: dict) -> Any:
+    """Build (but don't save) the thumbnail matplotlib Figure for :func:`save_thumbnail`."""
     _colors: dict = {
         "single_point": ("#2563eb", "#dbeafe"),
         "geometry_opt": ("#7c3aed", "#ede9fe"),
         "frequency": ("#15803d", "#dcfce7"),
         "tddft": ("#b45309", "#fef3c7"),
         "nmr": ("#0d9488", "#ccfbf1"),
+        "reorganization_energy": ("#be123c", "#ffe4e6"),
     }
     _ct_labels: dict = {
         "single_point": "Single Point",
@@ -723,12 +812,13 @@ def save_thumbnail(result_dir: Path, data: dict) -> None:
         "frequency": "Frequency",
         "tddft": "TD-DFT",
         "nmr": "NMR",
+        "reorganization_energy": "Reorg Energy",
     }
     ct = data.get("calc_type", "")
     fg, bg = _colors.get(ct, ("#555555", "#f3f4f6"))
     ct_label = _ct_labels.get(ct, ct.replace("_", " ").title())
 
-    # POLISH.7 (M-POLISH, 2026-05-25): bumped figsize 2.4→3.6 + dpi 72→144
+    # (2026-05-25): bumped figsize 2.4→3.6 + dpi 72→144
     # so the History-card text is readable on 1× displays. Source PNG goes
     # from 173×108 px (~8 KB) to 518×324 px (~25 KB); the History dropdown
     # downscales to its native ~250–300 px width, so the user sees crisp
@@ -809,13 +899,4 @@ def save_thumbnail(result_dir: Path, data: dict) -> None:
             transform=ax.transAxes,
         )
 
-    try:
-        fig.savefig(
-            str(result_dir / "thumbnail.png"),
-            dpi=144,
-            bbox_inches="tight",
-            facecolor=bg,
-            pad_inches=0.05,
-        )
-    finally:
-        plt.close(fig)
+    return fig

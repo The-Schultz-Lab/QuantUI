@@ -17,6 +17,100 @@ import pytest
 
 from quantui.app import _CalcCancelled, _LogCapture
 from quantui.app_runflow import on_clear_log
+from quantui.cancellation import (
+    CalcCancelled,
+    attach_scf_cancel_callback,
+    cancel_check_from_stream,
+    raise_if_cancelled,
+)
+
+# ── UXP.5 cancel hooks (SCF callback + optimizer observer plumbing) ──────────
+
+
+class TestCancellationHooks:
+    def test_shared_class_is_app_class(self):
+        # app._CalcCancelled must be the SAME class the calc modules raise, or
+        # _do_run's ``except _CalcCancelled`` won't catch a hook-raised cancel.
+        assert _CalcCancelled is CalcCancelled
+        assert issubclass(CalcCancelled, BaseException)
+        assert not issubclass(CalcCancelled, Exception)
+
+    def test_raise_if_cancelled_raises_when_true(self):
+        with pytest.raises(CalcCancelled):
+            raise_if_cancelled(lambda: True)
+
+    def test_raise_if_cancelled_noop_when_false_or_none(self):
+        raise_if_cancelled(lambda: False)  # no raise
+        raise_if_cancelled(None)  # no raise
+
+    def test_cancel_check_extracted_from_logcapture(self):
+        out = widgets.Output()
+        cap = _LogCapture(out, cancel_check=lambda: True)
+        cc = cancel_check_from_stream(cap)
+        assert callable(cc) and cc() is True
+
+    def test_cancel_check_none_when_stream_has_no_predicate(self):
+        import io
+
+        assert cancel_check_from_stream(io.StringIO()) is None
+
+    def test_attach_scf_callback_raises_on_cancel(self):
+        # Fake PySCF SCF object: attach sets a .callback PySCF would invoke
+        # once per cycle. With the flag set, invoking it raises CalcCancelled.
+        class _FakeMF:
+            callback = None
+
+        mf = _FakeMF()
+        attach_scf_cancel_callback(mf, lambda: True)
+        assert callable(mf.callback)
+        with pytest.raises(CalcCancelled):
+            mf.callback({"cycle": 1})
+
+    def test_attach_scf_callback_noop_when_not_cancelled(self):
+        class _FakeMF:
+            callback = None
+
+        mf = _FakeMF()
+        attach_scf_cancel_callback(mf, lambda: False)
+        mf.callback({"cycle": 1})  # must not raise
+
+    def test_attach_scf_callback_noop_when_check_none(self):
+        class _FakeMF:
+            callback = None
+
+        mf = _FakeMF()
+        attach_scf_cancel_callback(mf, None)
+        assert mf.callback is None
+
+    def test_progress_cb_called_each_cycle(self):
+        # M-PROGRESS A3: the same callback drives a per-cycle progress hook.
+        class _FakeMF:
+            callback = None
+
+        mf = _FakeMF()
+        seen = []
+        attach_scf_cancel_callback(
+            mf, None, progress_cb=lambda envs: seen.append(envs.get("cycle"))
+        )
+        assert callable(mf.callback)
+        mf.callback({"cycle": 0})
+        mf.callback({"cycle": 1})
+        assert seen == [0, 1]
+
+    def test_progress_and_cancel_compose(self):
+        # progress_cb runs, THEN cancel raises — both on the one callback.
+        class _FakeMF:
+            callback = None
+
+        mf = _FakeMF()
+        seen = []
+        attach_scf_cancel_callback(
+            mf, lambda: True, progress_cb=lambda envs: seen.append(1)
+        )
+        with pytest.raises(CalcCancelled):
+            mf.callback({"cycle": 0})
+        assert seen == [1]  # progress fired before the cancel raise
+
 
 # ── _LogCapture cancellation mechanism ──────────────────────────────────────
 

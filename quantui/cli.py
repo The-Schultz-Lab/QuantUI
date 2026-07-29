@@ -223,7 +223,7 @@ def _cmd_analytics_build(args: argparse.Namespace) -> int:
         # Cross-platform open: WSL → wslview / explorer.exe; otherwise
         # stdlib webbrowser. Failure is non-fatal (the path was already
         # printed) so users can always copy-paste manually.
-        opened, tool = _open_in_browser(result)
+        opened, _tool = _open_in_browser(result)
         if not opened:
             print(
                 f"(could not auto-open browser — open {result} manually)",

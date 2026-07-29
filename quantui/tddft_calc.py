@@ -132,6 +132,20 @@ def run_tddft_calc(
             TD calculation fails, excitation lists are empty and a warning
             is written to progress_stream — no exception is raised.
     """
+    # Post-HF methods (MP2/CCSD/CCSD(T)) have no special-casing below —
+    # without this guard, method='CCSD' silently falls into the DFT
+    # branch (sets mf.xc = "CCSD") and fails deep inside PySCF with a
+    # cryptic "LibXCFunctional: name 'CCSD' not found" instead of a clear
+    # message. TD-DFT/TDHF is not defined for these methods here.
+    from . import config as _config
+
+    if method.strip().upper() in _config.POST_HF_METHODS:
+        raise ValueError(
+            f"'{method}' is a post-HF method and cannot be used for "
+            "TD-DFT/UV-Vis — use RHF/UHF (TDHF) or a DFT functional "
+            "instead."
+        )
+
     try:
         from pyscf import dft, gto, scf
     except ImportError as exc:
@@ -142,7 +156,7 @@ def run_tddft_calc(
 
     stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
 
-    # M-STDERR / STDERR.1: see quantui/c_stderr.py — captures fd-2 stderr
+    # See quantui/c_stderr.py — captures fd-2 stderr
     # from libcint / BLAS / LAPACK / TDA solver C code and relays to
     # ``stream`` on exit. POSIX-only; no-op on Windows.
     from quantui.c_stderr import capture_c_stderr
@@ -173,7 +187,7 @@ def _run_tddft_calc_body(
     _scf: Any,
     stream: IO[str],
 ) -> TDDFTResult:
-    """Inner body of :func:`run_tddft_calc` (split out for STDERR.1 wrap)."""
+    """Inner body of :func:`run_tddft_calc` (split out for stderr-capture wrap)."""
     dft, gto, scf = _dft, _gto, _scf
 
     # ── Build Mole object ────────────────────────────────────────────────────
@@ -195,7 +209,7 @@ def _run_tddft_calc_body(
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
     else:
-        # session 55: route through resolve_xc + maybe_apply_d3 so
+        # Route through resolve_xc + maybe_apply_d3 so
         # methods like wB97X-D (PySCF rejects "wb97x-d") map cleanly.
         from .session_calc import maybe_apply_d3, resolve_xc
 
@@ -213,6 +227,13 @@ def _run_tddft_calc_body(
         except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
             pass
 
+    # Cooperative cancel between SCF cycles.
+    from .cancellation import attach_scf_cancel_callback, cancel_check_from_stream
+    from .log_utils import emit_status
+
+    attach_scf_cancel_callback(mf, cancel_check_from_stream(stream))
+
+    emit_status(stream, "Running SCF (ground state)…")
     try:
         energy_hartree = float(mf.kernel())
     except Exception as exc:
@@ -249,6 +270,11 @@ def _run_tddft_calc_body(
     oscillator_strengths: List[float] = []
 
     try:
+        emit_status(
+            stream,
+            f"Solving {'TDHF (CIS)' if using_hf else 'TD-DFT'} "
+            f"excited states ({nstates})…",
+        )
         td = mf.TDHF() if using_hf else mf.TDDFT()
         td.nstates = nstates
         td.verbose = 3

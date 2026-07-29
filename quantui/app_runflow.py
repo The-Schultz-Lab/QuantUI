@@ -18,12 +18,100 @@ def _calc_type_badge(calc_type: str) -> str:
         "tddft": "UV-Vis",
         "nmr": "NMR",
         "pes_scan": "PES",
+        "reorganization_energy": "Reorg",
     }.get(calc_type, calc_type or "Unknown")
+
+
+# Calc-type dropdown label → canonical schema key (used for the header banner).
+_CALC_TYPE_CANON = {
+    "Geometry Opt": "geometry_opt",
+    "Frequency": "frequency",
+    "UV-Vis (TD-DFT)": "tddft",
+    "NMR Shielding": "nmr",
+    "PES Scan": "pes_scan",
+    "Reorganization Energy": "reorganization_energy",
+}
+
+
+def _write_run_header(app: Any) -> None:
+    """Write the full run header to the live log — synchronously, atomically.
+
+    Bug fix (2026-07-18): the header used to be written two ways, both
+    unreliable in Voilà — a provisional line via ``clear_output()`` +
+    ``append_stdout()`` (the non-atomic combo ``_set_html_output`` exists to
+    avoid) and the structured banner via ``append_stdout`` from the *background*
+    ``_do_run`` thread (a bg-thread ``.outputs`` mutation, which this app
+    marshals through the io_loop everywhere else). For a large molecule the long
+    gap before the first optimizer/SCF step exposed the race: the pre-step-1
+    stream (both headers) was dropped and the log jumped straight to ``BFGS: 0``.
+
+    Fix: build the whole banner and assign it in a single atomic
+    ``run_output.outputs = (…)`` on the main thread (the click handler). No
+    ``clear_output``, no bg-thread write, no intermediate empty state.
+    ``get_system_info()`` is ``lru_cache``d (warmed at startup) so this stays
+    instant. Later PySCF / optimizer output appends onto this header as before.
+    """
+    mol = getattr(app, "_molecule", None)
+    if mol is None:
+        # Nothing will run; just clear the previous log atomically.
+        _set_run_output(app, ())
+        return
+    try:
+        from quantui.log_utils import format_log_header
+
+        calc_type = _CALC_TYPE_CANON.get(app.calc_type_dd.value, "single_point")
+        try:
+            _n_atoms = len(mol.atoms)
+        except Exception:
+            _n_atoms = None
+        _solvent = app.solvent_dd.value if app.solvent_cb.value else None
+        try:
+            _out_dir = str(app._get_results_dir())
+        except Exception:
+            _out_dir = None
+        banner = format_log_header(
+            formula=mol.get_formula(),
+            method=app.method_dd.value,
+            basis=app.basis_dd.value,
+            calc_type=calc_type,
+            n_atoms=_n_atoms,
+            multiplicity=int(app.mult_si.value),
+            solvent=_solvent,
+            output_dir=_out_dir,
+        )
+    except Exception:
+        # Fallback: a minimal one-liner still beats a blank window.
+        try:
+            banner = (
+                f"▶ Starting {app.calc_type_dd.value} — {mol.get_formula()} · "
+                f"{app.method_dd.value}/{app.basis_dd.value} …\n"
+            )
+        except Exception:
+            banner = "▶ Starting calculation …\n"
+    _set_run_output(
+        app,
+        ({"output_type": "stream", "name": "stdout", "text": banner},),
+    )
+
+
+def _set_run_output(app: Any, outputs: tuple) -> None:
+    """Atomically set ``run_output.outputs`` (fallback to clear_output)."""
+    try:
+        app.run_output.outputs = outputs
+    except Exception:
+        try:
+            app.run_output.clear_output()
+            for o in outputs:
+                app.run_output.append_stdout(o.get("text", ""))
+        except Exception:
+            pass
 
 
 def on_run_clicked(app: Any, btn: Any) -> None:
     """Reset result panes and start the background run thread."""
-    app.run_output.clear_output()
+    # Write the header FIRST (atomic, main thread) — this also clears the
+    # previous run's log via the single ``outputs`` assignment.
+    _write_run_header(app)
     app.result_output.clear_output()
     app.result_viz_output.clear_output()
     app._analysis_mol_output.clear_output()
@@ -48,10 +136,13 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
 
     # The "geometry optimization before this calc" checkbox is meaningful
     # for all workflows except Geometry Opt itself (which IS the geom-opt
-    # workflow). POLISH.9: this was called "pre-optimisation" pre-2026-05-25;
-    # the underlying operation is a full DFT geom-opt — distinct from the
+    # workflow). This was previously called "pre-optimisation"; the
+    # underlying operation is a full DFT geom-opt — distinct from the
     # LJ classical pre-opt in quantui/preopt.py.
-    if ct == "Geometry Opt":
+    # Reorganization Energy runs its own neutral + ion optimizations, so the
+    # standalone "geometry optimization before this calc" checkbox is
+    # meaningless there too (as with Geometry Opt itself).
+    if ct in ("Geometry Opt", "Reorganization Energy"):
         app._freq_preopt_cb.value = False
         app._freq_preopt_cb.layout.display = "none"
     else:
@@ -97,6 +188,11 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
                 "Start from an optimised geometry for best accuracy.</span>"
             ),
         ]
+    elif ct == "Reorganization Energy":
+        app.calc_extra_opts.children = [
+            app._reorg_mode_dd,
+            app._reorg_note,
+        ]
     elif ct == "PES Scan":
         app._update_scan_widgets()
         app.calc_extra_opts.children = [
@@ -141,7 +237,7 @@ def update_scan_widgets(app: Any, _change: Any = None) -> None:
         app._scan_unit_lbl.value = '<span style="font-size:12px;color:#555">°</span>'
 
 
-# Default RMSD tolerance for the seed-geometry "same molecule" check (HIST.6).
+# Default RMSD tolerance for the seed-geometry "same molecule" check.
 # 0.1 Å is generous enough to admit slight conformational differences (e.g.
 # re-importing the same SMILES, which can produce ~0.05 Å float-precision
 # drift in RDKit's embedding) but tight enough to reject distinct isomers,
@@ -206,7 +302,7 @@ def _geometries_match(
     *,
     rmsd_tol: float = _SEED_GEOMETRY_RMSD_TOLERANCE,
 ) -> bool:
-    """Strict atom-order + RMSD-based geometry comparison (HIST.6).
+    """Strict atom-order + RMSD-based geometry comparison.
 
     Returns ``True`` iff the atom symbol lists are equal in order AND the
     structures' RMSD (no rigid alignment) is at or below ``rmsd_tol`` Å.
@@ -244,7 +340,7 @@ def _refresh_seed_options(app: Any, dropdown: Any) -> None:
     """Populate a geo-opt seed dropdown filtered by strict atom+coord match.
 
     Shared helper used by both Frequency and UV-Vis (TD-DFT) seed dropdowns.
-    Filter cascade (HIST.6):
+    Filter cascade:
 
     1. No active molecule → list every geo-opt result (no filter; lets the
        user browse history before loading anything).
@@ -387,10 +483,10 @@ def _preopt_small(text: str, color: str = "#555") -> str:
 def on_preopt_preview(app: Any, btn: Any = None) -> None:
     """Run the classical pre-opt on demand and animate the relaxation in-place.
 
-    M-PREOPT PREOPT.2: instead of the pre-opt being a silent step inside the
-    run, the user previews it here — watches the bonded-FF relaxation animate
-    in the Calculate tab — then Keeps or Reverts it (PREOPT.3). The pre-opt runs
-    on a background thread; UI updates are marshalled back to the main thread.
+    Instead of the pre-opt being a silent step inside the run, the user
+    previews it here — watches the bonded-FF relaxation animate in the
+    Calculate tab — then Keeps or Reverts it. The pre-opt runs on a
+    background thread; UI updates are marshalled back to the main thread.
     """
     mol = getattr(app, "_molecule", None)
     if mol is None:
@@ -471,7 +567,7 @@ def _preopt_preview_failed(app: Any, msg: str) -> None:
 
 
 def on_preopt_accept(app: Any, btn: Any = None) -> None:
-    """Make the previewed relaxed geometry the active molecule (PREOPT.3)."""
+    """Make the previewed relaxed geometry the active molecule."""
     relaxed = getattr(app, "_preopt_relaxed_mol", None)
     if relaxed is None:
         return
@@ -735,6 +831,12 @@ def on_basis_help(app: Any, btn: Any) -> None:
     app._show_help_topic("basis_set")
 
 
+def on_calc_type_help(app: Any, btn: Any) -> None:
+    """Open help overlay focused on calculation-type guidance."""
+    _ = btn
+    app._show_help_topic("calc_type")
+
+
 # Seconds the "Confirm shutdown" state stays armed before auto-reverting to
 # "Exit". Long enough for a deliberate second click, short enough that a stray
 # arming click doesn't leave the button primed indefinitely.
@@ -813,9 +915,9 @@ def _perform_exit(app: Any) -> None:
     app._exit_cancel_btn.layout.display = "none"
     app._exit_btn.description = "Exiting…"
     app._exit_btn.disabled = True
-    # POLISH.1 retry-2 (2026-05-25): the welcome logo now lives in its
-    # own ``widgets.Image`` next to the text. At shutdown hide the logo
-    # so the centered "QuantUI has shut down" message isn't off-center.
+    # The welcome logo now lives in its own ``widgets.Image`` next to the
+    # text. At shutdown hide the logo so the centered "QuantUI has shut
+    # down" message isn't off-center.
     if hasattr(app, "_welcome_logo"):
         try:
             app._welcome_logo.layout.display = "none"
@@ -852,8 +954,8 @@ def on_cal_run(
     """Start async calibration run and initialize calibration UI state."""
     _ = btn
     mode = app._cal_mode_toggle.value
-    # session 55 hotfix: the old ``"short" else "long"`` two-tier dispatch
-    # silently routed tier 3 / tier 4 (and tier 1!) to the tier-2 suite,
+    # The old ``"short" else "long"`` two-tier dispatch silently routed
+    # tier 3 / tier 4 (and tier 1!) to the tier-2 suite,
     # which set ``progress_bar.max = 20`` while tier 1 only ran 8 steps
     # — the bar froze at 40% on completion. Use the 4-tier lookup so
     # ``max`` matches the actual step count.
@@ -861,8 +963,8 @@ def on_cal_run(
 
     suite = _MODE_TO_SUITE.get(mode, benchmark_suite)
     app._cal_stop_event = threading.Event()
-    # session 55 user request: skip-current-step event, separate from
-    # the whole-run stop event. Replaces the hard per-step timeout.
+    # Skip-current-step event, separate from the whole-run stop event.
+    # Replaces the hard per-step timeout.
     app._cal_skip_event = threading.Event()
     app._cal_run_btn.disabled = True
     app._cal_mode_toggle.disabled = True
@@ -875,7 +977,7 @@ def on_cal_run(
     app._cal_step_label.value = (
         '<span style="font-size:12px;color:#475569">Starting…</span>'
         # Reserve a second invisible line so the live-message ticker
-        # doesn't jump the accordion height (session 55 user report).
+        # doesn't jump the accordion height.
         '<br><span style="font-size:11px;color:transparent">.</span>'
     )
     app._cal_results_html.value = ""
@@ -893,9 +995,9 @@ def on_cal_stop(app: Any, btn: Any) -> None:
 def on_cal_skip(app: Any, btn: Any) -> None:
     """Signal the active calibration to skip the CURRENT step + continue.
 
-    Replaces the per-step timeout (session 55 user request after a
-    near-finishing benzene B3LYP/6-31G* freq calc got cut off at the
-    1800 s tier-4 cap). The worker is killed, the step is marked
+    Replaces the per-step timeout (added after a near-finishing benzene
+    B3LYP/6-31G* freq calc got cut off at the 1800 s tier-4 cap). The
+    worker is killed, the step is marked
     ``skipped``, the event is cleared inside ``run_calibration``, and
     the loop moves on to the next step.
     """
@@ -921,7 +1023,7 @@ def _cal_table_html(steps_so_far, total: int, *, in_flight_step=None) -> str:
 
     Called incrementally — after every completed step — so the user sees
     rows accumulate in real time instead of waiting for the whole tier
-    to finish (session 55 user request). ``steps_so_far`` is the list of
+    to finish. ``steps_so_far`` is the list of
     ``BenchmarkStep`` objects completed; ``in_flight_step`` (optional)
     is a dict ``{label, n_electrons, n_basis, status, elapsed_s}`` that
     appends a "running" row at the bottom while a step is mid-execution.
@@ -929,8 +1031,8 @@ def _cal_table_html(steps_so_far, total: int, *, in_flight_step=None) -> str:
     For failed steps (error / timeout / skipped) we render an inline
     italic line below the status cell with a truncated ``error_msg``,
     so the user can see WHY a step failed without having to open
-    ``calibration.json`` (session 55 user request after MP2/CCSD on
-    H₂O/cc-pVDZ silently 'errored' with no on-screen explanation).
+    ``calibration.json`` (added after MP2/CCSD on H₂O/cc-pVDZ silently
+    'errored' with no on-screen explanation).
     """
     import html as _html_mod
 
@@ -998,7 +1100,7 @@ def _cal_table_html(steps_so_far, total: int, *, in_flight_step=None) -> str:
 def do_calibration(app: Any, *, pyscf_available: bool) -> None:
     """Run calibration suite and render calibration summary table.
 
-    Fixes shipped 2026-05-25 (session 55 user reports):
+    Fixes shipped 2026-05-25:
 
     - Wraps the whole run in ``_activity_begin/_end`` so the toolbar
       activity badge stops reading "Idle" while calibration is busy.
@@ -1018,15 +1120,15 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
     # callback; no need to compute it locally. (The earlier draft pulled
     # it from ``_MODE_TO_SUITE`` but never used it — ruff F841.)
 
-    # session 55 user request (after a near-finishing benzene
-    # B3LYP/6-31G* freq got cut off at the old 1800 s tier-4 cap):
-    # no automatic timeout — the user controls long-running steps via
-    # the Skip button. If they walk away from a runaway calc, the
-    # Stop button is still available. Headless callers that genuinely
-    # want a wall-clock cap can pass timeout_per_step explicitly.
+    # No automatic timeout — the user controls long-running steps via
+    # the Skip button (added after a near-finishing benzene B3LYP/6-31G*
+    # freq got cut off at the old 1800 s tier-4 cap). If they walk away
+    # from a runaway calc, the Stop button is still available. Headless
+    # callers that genuinely want a wall-clock cap can pass
+    # timeout_per_step explicitly.
     timeout_per_step: Optional[float] = None
 
-    # M-EST follow-up: keep the toolbar activity badge red for the
+    # Keep the toolbar activity badge red for the
     # duration of the calibration so the user knows the kernel is busy.
     app._activity_begin(f"Calibrating ({mode})…", kind="compute")
 
@@ -1129,36 +1231,51 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
 
 
 def update_notes(app: Any, change: Any = None) -> None:
-    """Refresh educational method notes for the active molecule/method."""
-    app.notes_output.clear_output(wait=True)
-    if app._molecule is None:
-        return
-    try:
-        from quantui import PySCFCalculation
+    """Refresh the method / basis descriptor cards + open-shell hint.
 
-        calc = PySCFCalculation(
-            app._molecule,
-            method=app.method_dd.value,
-            basis=app.basis_dd.value,
-        )
-        notes = calc.get_educational_notes()
-        if notes:
-            safe = (
-                notes.replace("**", "<b>", 1)
-                .replace("**", "</b>", 1)
-                .replace("\n\n", "<br><br>")
-            )
-            with app.notes_output:
-                display(
-                    HTML(
-                        '<div style="background:#fffbf0;padding:8px 12px;'
-                        'border-radius:4px;font-size:13px;margin-top:6px">'
-                        + safe
-                        + "</div>"
-                    )
-                )
+    Replaces the old inline educational-notes text block. The cards
+    describe the *method* and *basis* themselves, so — unlike the old notes —
+    they refresh independently of whether a molecule is loaded. The open-shell
+    hint (restored from the old notes) appears only when multiplicity > 1.
+    """
+    try:
+        from quantui.descriptor_cards import basis_card_html, method_card_html
+
+        app._method_card_html.value = method_card_html(app.method_dd.value)
+        app._basis_card_html.value = basis_card_html(app.basis_dd.value)
     except Exception:
         pass
+    _update_open_shell_hint(app)
+
+
+def _update_open_shell_hint(app: Any) -> None:
+    """Show/hide the open-shell (multiplicity > 1 → UHF) guidance hint."""
+    try:
+        mult = int(app.mult_si.value)
+    except Exception:
+        mult = 1
+    if mult <= 1:
+        app._open_shell_hint.value = ""
+        app._open_shell_hint.layout.display = "none"
+        return
+    n_unpaired = mult - 1
+    plural = "s" if n_unpaired != 1 else ""
+    if app.method_dd.value.upper() == "RHF":
+        # Actionable: RHF is the one method that will misbehave for open-shell.
+        app._open_shell_hint.value = (
+            '<span style="font-size:12px;color:#b45309">'
+            f"⚠ Open-shell: {n_unpaired} unpaired electron{plural} "
+            f"(multiplicity {mult}). RHF assumes all electrons are paired — "
+            "switch to <b>UHF</b> (or a DFT method) for this system.</span>"
+        )
+    else:
+        # Informational: UHF / DFT already handle open-shell correctly.
+        app._open_shell_hint.value = (
+            '<span style="font-size:12px;color:#64748b">'
+            f"Open-shell: {n_unpaired} unpaired electron{plural} "
+            f"(multiplicity {mult}) — running unrestricted.</span>"
+        )
+    app._open_shell_hint.layout.display = ""
 
 
 def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
@@ -1178,7 +1295,7 @@ def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
         n_basis = calc_log_mod.count_basis_functions(
             app._molecule.atoms, app.basis_dd.value
         )
-        # M-EST / EST.1: predict the device the upcoming run will use so
+        # Predict the device the upcoming run will use so
         # the estimator can partition history by GPU vs CPU. The method
         # also matters — gpu4pyscf doesn't support CCSD(T), so even on a
         # GPU machine that calc will run CPU-side.
@@ -1216,7 +1333,7 @@ def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
 def refresh_results_browser(app: Any) -> None:
     """Refresh the History dropdown with saved result directories.
 
-    POLISH.6 (M-POLISH, 2026-05-25): prepends a
+    Prepends a
     ``"(select a calculation to view)"`` placeholder so the dropdown
     opens in an explicit "no calc loaded yet" state. Without the
     placeholder, ipywidgets auto-selected the most-recent entry as the
@@ -1236,40 +1353,74 @@ def refresh_results_browser(app: Any) -> None:
         from quantui import list_results, load_result
     except ImportError:
         return
+    from quantui.app_history import (
+        apply_history_filter,
+        entry_date,
+        refresh_history_facet_options,
+    )
+
     app.results_path_lbl.value = (
         f'<span style="font-size:13px;color:#64748b">'
         f"{app._get_results_dir()}</span>"
     )
     dirs = list_results()
     if not dirs:
+        app._history_entries = []
         app.past_dd.options = [("(no saved results)", "")]
         return
-    placeholder = ("(select a calculation to view)", "")
-    options = [placeholder]
+    # Build the entry cache once. Each entry keeps both the display label and
+    # the parsed facet keys so HIST.7 filtering never re-reads disk.
+    entries: list[dict[str, Any]] = []
     for d in dirs:
         try:
             data = load_result(d)
             ts = data.get("timestamp", d.name)
-            calc_badge = _calc_type_badge(data.get("calc_type", ""))
-            # M-EST follow-up (2026-05-25): calibration-produced results
-            # get a 🔧 marker so the user can tell them apart from
-            # user-initiated calcs. The marker comes from result.json's
-            # ``calibration_run_id`` extras field written by the worker.
+            calc_type = data.get("calc_type", "")
+            calc_badge = _calc_type_badge(calc_type)
+            # Calibration-produced results get a 🔧 marker so the user
+            # can tell them apart from user-initiated calcs. The marker
+            # comes from result.json's ``calibration_run_id`` extras field
+            # written by the worker.
             calib_marker = "🔧 " if data.get("calibration_run_id") else ""
+            formula = data.get("formula", "?")
+            method = data.get("method", "?")
+            basis = data.get("basis", "?")
             label = (
                 f"{ts}  ·  [{calc_badge}]  "
-                f"{calib_marker}{data.get('formula', '?')}  "
-                f"{data.get('method', '?')}/{data.get('basis', '?')}"
+                f"{calib_marker}{formula}  "
+                f"{method}/{basis}"
             )
-            options.append((label, str(d)))
+            entries.append(
+                {
+                    "path": str(d),
+                    "label": label,
+                    "calc_type": calc_type,
+                    "formula": formula,
+                    "name": data.get("name", "") or data.get("molecule_name", ""),
+                    "method": method,
+                    "basis": basis,
+                    "timestamp": ts,
+                    "date": entry_date(ts),
+                    "converged": bool(data.get("converged", False)),
+                }
+            )
         except Exception:
             pass
-    # If the only entry is the placeholder, fall back to the empty-list
-    # message — the loop above silently swallowed every load_result call.
-    if len(options) == 1:
+    # If every load_result call was silently swallowed above, fall back to the
+    # empty-list message.
+    if not entries:
+        app._history_entries = []
         app.past_dd.options = [("(no saved results)", "")]
         return
-    app.past_dd.options = options
+    app._history_entries = entries
+    # Repopulate facet dropdowns + apply the current filter as one atomic step
+    # so the option/value churn doesn't fire a filter pass per widget.
+    app._history_filter_suspend = True
+    try:
+        refresh_history_facet_options(app, entries)
+    finally:
+        app._history_filter_suspend = False
+    apply_history_filter(app)
     if app.calc_type_dd.value == "Frequency":
         app._refresh_freq_seed_options()
 

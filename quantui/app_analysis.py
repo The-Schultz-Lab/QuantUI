@@ -174,6 +174,7 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     # to activate re-sets these in show_orbital_diagram.
     app._last_orb_info = None
     app._last_orb_mo_coeff = None
+    app._last_orb_mo_occ = None
     app._last_orb_mol_atom = None
     app._last_orb_mol_basis = None
     app.traj_accordion.set_title(0, "Trajectory Viewer")
@@ -327,7 +328,7 @@ def pop_preopt_trajectory(app: Any, ctx: Any) -> bool:
     """Populate Trajectory panel for the frequency-time DFT geometry
     optimization trajectory.
 
-    POLISH.9 (2026-05-25): the wrapped operation is a full DFT geom-opt
+    The wrapped operation is a full DFT geom-opt
     at the user's method/basis, not the classical LJ pre-opt that lives
     in ``quantui/preopt.py``. The function name + ``preopt_trajectory.json``
     filename stay (renaming the saved file would break history replay of

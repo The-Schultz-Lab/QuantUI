@@ -1,4 +1,4 @@
-"""POSIX file-descriptor stderr capture (M-STDERR / STDERR.1).
+"""POSIX file-descriptor stderr capture.
 
 PySCF and its C-extension dependencies (libcint, BLAS/LAPACK, dftd3) write
 diagnostic messages directly to file-descriptor 2 (the OS-level stderr),

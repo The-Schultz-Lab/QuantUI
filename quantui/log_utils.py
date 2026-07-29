@@ -10,13 +10,36 @@ from __future__ import annotations
 
 import os
 import platform
+import socket
 import subprocess
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any, Dict, Optional
 
 _WIDTH = 80  # total width of === border lines
 _SEP = "=" * _WIDTH
+_SUB = "-" * _WIDTH  # lighter divider between header sections
+
+# Static list of formats the app can export a result to (EXPORT milestone).
+_EXPORT_FORMATS = "XYZ, MOL/SDF, PDB, Molden, .traj, cube, HTML spectra, .zip"
+
+# SCF/correlation methods that are NOT DFT functionals — shown verbatim in the
+# "Method" field with no separate functional. Everything else is treated as a
+# DFT functional and reported as RKS/UKS + the functional name.
+_NON_DFT_METHODS = frozenset({"RHF", "UHF", "MP2", "CCSD", "CCSD(T)"})
+
+# ASCII-art wordmark shown at the top of every run banner. Rendered in the
+# monospace stdout stream of the live log, so the alignment holds. Raw string:
+# the art contains backslashes. Trailing whitespace is stripped per line so it
+# doesn't trip the linter (the art is the left edge; right padding is cosmetic).
+_ASCII_LOGO_LINES = [
+    r"   ___                    _   _   _ ___",
+    r"  / _ \ _   _  __ _ _ __ | |_| | | |_ _|",
+    r" | | | | | | |/ _` | '_ \| __| | | || |",
+    r" | |_| | |_| | (_| | | | | |_| |_| || |",
+    r"  \__\_\\__,_|\__,_|_| |_|\__|\___/|___|",
+]
 
 
 # ============================================================================
@@ -101,8 +124,22 @@ def _detect_gpu() -> Optional[Dict[str, str]]:
     return None
 
 
+def _pyscf_version() -> str:
+    """Return the installed PySCF version, or a clear 'not installed' marker.
+
+    PySCF is Linux/macOS/WSL only, so this is expected to be absent on the
+    Windows UI-dev path (see constraint #1).
+    """
+    try:
+        import pyscf
+
+        return str(getattr(pyscf, "__version__", "unknown"))
+    except Exception:
+        return "not installed"
+
+
 def collect_system_info() -> Dict[str, Any]:
-    """Gather CPU, RAM, GPU, and thread count.  Safe on all platforms."""
+    """Gather CPU, RAM, GPU, thread count, host, and versions.  Safe anywhere."""
     cpu_model = (
         _read_proc_cpu() or platform.processor() or platform.machine() or "Unknown CPU"
     )
@@ -115,12 +152,20 @@ def collect_system_info() -> Dict[str, Any]:
 
     omp = os.environ.get("OMP_NUM_THREADS", None)
 
+    try:
+        hostname = socket.gethostname() or "unknown"
+    except Exception:
+        hostname = "unknown"
+
     return {
         "cpu_model": cpu_model,
         "cpu_count": cpu_count,
         "ram_str": ram_str,
         "gpu": gpu,
         "omp_threads": omp,
+        "hostname": hostname,
+        "python": platform.python_version(),
+        "pyscf": _pyscf_version(),
     }
 
 
@@ -128,6 +173,59 @@ def collect_system_info() -> Dict[str, Any]:
 def get_system_info() -> Dict[str, Any]:
     """Lazy-cached version of collect_system_info().  Populated on first call."""
     return collect_system_info()
+
+
+# ============================================================================
+# Live run-status helpers
+# ============================================================================
+
+
+def emit_status(stream: Any, message: str) -> None:
+    """Set the live run-status label via a progress stream, if it supports it.
+
+    The run's ``_LogCapture`` exposes a ``set_status`` method; calc modules
+    call this to update the status line during otherwise-silent phases (e.g. an
+    optimizer step's SCF running at ``verbose=0``) WITHOUT appending a line to
+    the log. No-op for plain streams (``sys.stdout``) — duck-typed, so calc
+    modules stay decoupled from the widget layer.
+    """
+    setter = getattr(stream, "set_status", None)
+    if setter is None:
+        return
+    try:
+        setter(message)
+    except Exception:  # noqa: BLE001 — status update is best-effort
+        pass
+
+
+def emit_progress(stream: Any, fraction: float) -> None:
+    """Report a completion fraction (0..1) via a progress stream, if supported.
+
+    Calc modules that know a real completion fraction (PES scan
+    points, optimizer fmax-convergence trend) call this so the live ticker can
+    show a *self-correcting* ``elapsed·(1−f)/f`` remaining-time estimate instead
+    of the static total. Duck-typed on ``stream.set_progress_fraction`` — a
+    no-op for plain streams, keeping calc modules decoupled from the widget layer.
+    """
+    setter = getattr(stream, "set_progress_fraction", None)
+    if setter is None:
+        return
+    try:
+        setter(fraction)
+    except Exception:  # noqa: BLE001 — progress is best-effort
+        pass
+
+
+def format_elapsed(seconds: float) -> str:
+    """Compact elapsed-time label for the live ticker: ``0:42`` / ``1:03:22``."""
+    if seconds < 0:
+        seconds = 0.0
+    s = int(seconds)
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h:
+        return f"{h}:{m:02d}:{sec:02d}"
+    return f"{m}:{sec:02d}"
 
 
 # ============================================================================
@@ -155,7 +253,28 @@ _CALC_TYPE_LABELS: Dict[str, str] = {
     "frequency": "Frequency Analysis",
     "tddft": "TD-DFT (UV-Vis)",
     "nmr": "NMR Shielding",
+    "pes_scan": "PES Scan",
+    "reorganization_energy": "Reorganization Energy (4-point)",
 }
+
+
+def _split_method_functional(
+    method: str, multiplicity: int
+) -> tuple[str, Optional[str]]:
+    """Split the user's method selection into (wf-method, functional).
+
+    HF / post-HF selections are shown verbatim with no functional. A DFT
+    functional is reported as its Kohn-Sham class (RKS closed-shell / UKS
+    open-shell) plus the functional name, matching PySCF's auto-dispatch.
+    """
+    if method.upper() in _NON_DFT_METHODS:
+        return method, None
+    return ("RKS" if multiplicity <= 1 else "UKS"), method
+
+
+def _row(label: str, value: Any) -> str:
+    """One aligned ``  Label           : value`` header row."""
+    return f"  {label:<16}: {value}"
 
 
 def format_log_header(
@@ -165,43 +284,85 @@ def format_log_header(
     basis: str,
     calc_type: str,
     timestamp: Optional[str] = None,
+    n_atoms: Optional[int] = None,
+    multiplicity: int = 1,
+    solvent: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    calc_id: Optional[str] = None,
+    starting_energy: Optional[float] = None,
 ) -> str:
-    """Return a formatted header string to prepend to calculation log output."""
+    """Return a formatted header string to prepend to calculation log output.
+
+    Core args (formula/method/basis/calc_type) are required; the rest add
+    run-provenance rows (host, versions, device, solvation, output dir, …) and
+    default to sensible placeholders so callers can pass only what they know at
+    header-write time.
+    """
     sysinfo = get_system_info()
 
     if timestamp is None:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    if calc_id is None:
+        calc_id = uuid.uuid4().hex[:8]
 
     ct_label = _CALC_TYPE_LABELS.get(calc_type, calc_type.replace("_", " ").title())
+    wf_method, functional = _split_method_functional(method, multiplicity)
 
     gpu = sysinfo["gpu"]
     if gpu:
         mem = f"  |  {gpu['mem_mb']} MB" if gpu.get("mem_mb") else ""
         drv = f"  |  Driver {gpu['driver']}" if gpu.get("driver") else ""
-        gpu_line = f"  GPU:      {gpu['name']}{mem}{drv}"
+        device = f"GPU — {gpu['name']}{mem}{drv}"
     else:
-        gpu_line = "  GPU:      (none detected)"
+        device = "CPU"
 
     omp = sysinfo["omp_threads"]
     omp_str = (
-        f"OMP_NUM_THREADS={omp}"
-        if omp
-        else f"OMP_NUM_THREADS not set  (cores: {sysinfo['cpu_count']})"
+        f"OMP_NUM_THREADS={omp}" if omp else f"not set  (cores: {sysinfo['cpu_count']})"
+    )
+
+    structure = formula if n_atoms is None else f"{formula}  ({n_atoms} atoms)"
+    start_e = (
+        f"{starting_energy:.8f} Ha"
+        if starting_energy is not None
+        else "— (available after the first SCF)"
     )
 
     lines = [
         "",
         _SEP,
-        "  QuantUI — Quantum Chemistry Interface",
-        _SEP,
-        f"  Machine:  {sysinfo['cpu_model']}  |  {sysinfo['cpu_count']} cores  |  RAM: {sysinfo['ram_str']}",
-        gpu_line,
-        f"  Threads:  {omp_str}",
         "",
-        f"  Molecule:     {formula}",
-        f"  Method/Basis: {method} / {basis}",
-        f"  Calc type:    {ct_label}",
-        f"  Started:      {timestamp}",
+        *_ASCII_LOGO_LINES,
+        "",
+        "  Quantum Chemistry Interface",
+        _SEP,
+        _row("Calculation ID", calc_id),
+        _row("Timestamp", timestamp),
+        _row("Host", sysinfo.get("hostname", "unknown")),
+        _row(
+            "Python",
+            f"{sysinfo.get('python', '?')}   |   "
+            f"PySCF: {sysinfo.get('pyscf', '?')}",
+        ),
+        _row("Device", device),
+        _row(
+            "Machine",
+            f"{sysinfo['cpu_model']}  |  {sysinfo['cpu_count']} cores  "
+            f"|  RAM: {sysinfo['ram_str']}",
+        ),
+        _row("Threads", omp_str),
+        _SUB,
+        _row("Method", wf_method),
+        _row("Functional", functional or "—"),
+        _row("Basis Set", basis),
+        _row("Solvation", f"PCM ({solvent})" if solvent else "None"),
+        _row("Job Type", ct_label),
+        _SUB,
+        _row("Input Structure", structure),
+        _row("Starting Energy", start_e),
+        _SUB,
+        _row("Output directory", output_dir or "—"),
+        _row("Export formats", _EXPORT_FORMATS),
         _SEP,
         "",
     ]

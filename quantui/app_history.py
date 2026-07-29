@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import json as _json
 import time
 from contextlib import contextmanager
@@ -11,16 +12,231 @@ from typing import Any, Optional
 import ipywidgets as widgets
 from IPython.display import HTML, display
 
+# ══ HISTORY SEARCH / FACETED FILTER (HIST.7) ══════════════════════════════
+#
+# The History browser caches the parsed ``result.json`` of every saved calc as
+# a list of entry dicts on ``app._history_entries`` (built in
+# ``refresh_results_browser``). Filtering re-narrows that in-memory list — no
+# per-keystroke disk access — and repopulates ``past_dd`` client-side.
+
+# Calc-type facet chips, in display order: (badge label, canonical calc_type key).
+# Mirrors ``_calc_type_badge`` in app_runflow so chips read like the dropdown labels.
+HISTORY_CALC_TYPE_FACETS = [
+    ("SP", "single_point"),
+    ("GeoOpt", "geometry_opt"),
+    ("Freq", "frequency"),
+    ("UV-Vis", "tddft"),
+    ("NMR", "nmr"),
+    ("PES", "pes_scan"),
+    ("Reorg", "reorganization_energy"),
+]
+
+# Status facet chips: (label, key).
+HISTORY_STATUS_FACETS = [
+    ("Converged", "converged"),
+    ("Not converged", "not_converged"),
+]
+
+
+def entry_date(timestamp: Any) -> Optional[_dt.date]:
+    """Parse a result timestamp (``YYYY-MM-DD_...``) into a ``date``, or None."""
+    try:
+        return _dt.date.fromisoformat(str(timestamp)[:10])
+    except (ValueError, TypeError):
+        return None
+
+
+def filter_history_entries(
+    entries: list[dict[str, Any]],
+    *,
+    text: str = "",
+    name_formulas: Optional[Any] = None,
+    calc_types: Optional[Any] = None,
+    method: Optional[str] = None,
+    basis: Optional[str] = None,
+    date_from: Optional[_dt.date] = None,
+    date_to: Optional[_dt.date] = None,
+    statuses: Optional[Any] = None,
+) -> list[dict[str, Any]]:
+    """Return the subset of *entries* matching every active facet.
+
+    Pure function — no widget or disk access, so it is unit-testable in
+    isolation. *entries* is the list of dicts built by
+    ``refresh_results_browser`` (keys: ``formula``, ``name``, ``calc_type``,
+    ``method``, ``basis``, ``timestamp``, ``date``, ``converged`` ...).
+
+    An empty / falsy facet means "no constraint" for that facet:
+
+    - ``text``: case-insensitive substring match against formula + molecule name.
+    - ``name_formulas``: formulas resolved from *text* via the molecule library
+      (so a chemical-name query like "benzene" also matches ``C6H6`` results).
+      An entry passes the text facet if it matches *either* the substring *or*
+      one of these formulas. The DB lookup lives in the caller
+      (``apply_history_filter``) to keep this function pure.
+    - ``calc_types``: iterable of canonical ``calc_type`` keys; entry passes if
+      its ``calc_type`` is in the set.
+    - ``method`` / ``basis``: exact match when truthy.
+    - ``date_from`` / ``date_to``: inclusive ``date`` bounds on the entry's
+      parsed timestamp date (entries with an unparseable date are excluded once
+      any bound is set).
+    - ``statuses``: subset of ``{"converged", "not_converged"}``.
+    """
+    needle = (text or "").strip().lower()
+    formula_set = {str(f).lower() for f in (name_formulas or [])}
+    ct_set = set(calc_types) if calc_types else None
+    status_set = set(statuses) if statuses else None
+    out: list[dict[str, Any]] = []
+    for e in entries:
+        if needle:
+            hay = f"{e.get('formula', '')} {e.get('name', '')}".lower()
+            matched = needle in hay
+            if not matched and formula_set:
+                matched = str(e.get("formula", "")).lower() in formula_set
+            if not matched:
+                continue
+        if ct_set is not None and e.get("calc_type") not in ct_set:
+            continue
+        if method and e.get("method") != method:
+            continue
+        if basis and e.get("basis") != basis:
+            continue
+        if date_from or date_to:
+            d = e.get("date") or entry_date(e.get("timestamp", ""))
+            if d is None:
+                continue
+            if date_from and d < date_from:
+                continue
+            if date_to and d > date_to:
+                continue
+        if status_set is not None:
+            key = "converged" if e.get("converged") else "not_converged"
+            if key not in status_set:
+                continue
+        out.append(e)
+    return out
+
+
+def resolve_query_formulas(query: str) -> set[str]:
+    """Map a free-text chemical-name query to the set of formulas it names, so
+    a search like "benzene" also finds ``C6H6`` results.
+
+    Two precise sources, unioned. Neither matches on synonyms — which would
+    wrongly pull "methylbenzene"=toluene into a "benzene" search:
+
+    1. The curated ``config.COMMON_NAME_TO_FORMULA`` map — covers the simple
+       molecules the bundled library names by formula (benzene, water, …).
+    2. Exact library-*name* matches — covers named organics the library carries
+       properly (toluene, aspirin, caffeine). Exact (not substring) so
+       "benzene" can't drag in "ethylbenzene"/"nitrobenzene" etc.
+
+    Returns an empty set for a blank query, or if nothing resolves. Failures
+    (missing library) are swallowed so search never breaks.
+    """
+    q = (query or "").strip().lower()
+    if not q:
+        return set()
+    formulas: set[str] = set()
+    try:
+        from quantui import config
+
+        # Curated names use substring so type-to-narrow works within the map
+        # (e.g. "hydrogen" surfaces H2 + the hydrogen-X molecules as you type).
+        for name, formula in config.COMMON_NAME_TO_FORMULA.items():
+            if q in name:
+                formulas.add(formula)
+    except Exception:
+        pass
+    try:
+        from quantui import molecule_library as _ml
+
+        # Library: exact entry-*name* match only. Substring/synonym matching
+        # would wrongly pull derivatives ("ethylbenzene", "methylbenzene")
+        # into a "benzene" search.
+        for r in _ml.search(q, limit=200):
+            if r.get("formula") and str(r.get("name", "")).lower() == q:
+                formulas.add(r["formula"])
+    except Exception:
+        pass
+    return formulas
+
+
+def refresh_history_facet_options(app: Any, entries: list[dict[str, Any]]) -> None:
+    """Repopulate the Method / Basis facet dropdowns from the distinct values
+    present in *entries*, preserving the current selection when it survives."""
+    methods = sorted(
+        {e["method"] for e in entries if e.get("method") and e["method"] != "?"}
+    )
+    bases = sorted(
+        {e["basis"] for e in entries if e.get("basis") and e["basis"] != "?"}
+    )
+    method_dd = getattr(app, "history_method_dd", None)
+    if method_dd is not None:
+        cur = method_dd.value
+        method_dd.options = [("Any method", "")] + [(m, m) for m in methods]
+        method_dd.value = cur if cur in methods else ""
+    basis_dd = getattr(app, "history_basis_dd", None)
+    if basis_dd is not None:
+        cur = basis_dd.value
+        basis_dd.options = [("Any basis", "")] + [(b, b) for b in bases]
+        basis_dd.value = cur if cur in bases else ""
+
+
+def apply_history_filter(app: Any) -> None:
+    """Re-narrow the cached history entries by the current facet-widget state
+    and repopulate ``past_dd`` — no disk access.
+
+    Preserves the index-0 placeholder and (via ipywidgets value-preservation)
+    the current selection when it survives the filter. Shows an explicit
+    "no matches" option when every entry is filtered out.
+    """
+    if getattr(app, "_history_filter_suspend", False):
+        return
+    entries = getattr(app, "_history_entries", None)
+    if not entries:
+        # Nothing cached yet (pre-scan) — leave whatever placeholder is set.
+        return
+    calc_types = [
+        key for key, btn in getattr(app, "_history_calc_chips", {}).items() if btn.value
+    ]
+    statuses = [
+        key
+        for key, btn in getattr(app, "_history_status_chips", {}).items()
+        if btn.value
+    ]
+    text = getattr(getattr(app, "history_search", None), "value", "") or ""
+    matches = filter_history_entries(
+        entries,
+        text=text,
+        name_formulas=resolve_query_formulas(text),
+        calc_types=calc_types or None,
+        method=getattr(getattr(app, "history_method_dd", None), "value", "") or None,
+        basis=getattr(getattr(app, "history_basis_dd", None), "value", "") or None,
+        date_from=getattr(getattr(app, "history_date_from", None), "value", None),
+        date_to=getattr(getattr(app, "history_date_to", None), "value", None),
+        statuses=statuses or None,
+    )
+    placeholder = ("(select a calculation to view)", "")
+    if matches:
+        app.past_dd.options = [placeholder] + [(e["label"], e["path"]) for e in matches]
+    else:
+        app.past_dd.options = [placeholder, ("(no matches for current filters)", "")]
+    count_lbl = getattr(app, "history_count_lbl", None)
+    if count_lbl is not None:
+        count_lbl.value = (
+            '<span style="color:#888;font-size:12px">'
+            f"{len(matches)} of {len(entries)} shown</span>"
+        )
+
 
 class _LoadTimer:
-    """Per-stage timing collector for a history-load operation (HIST.2).
+    """Per-stage timing collector for a history-load operation.
 
     Used as: open one ``_LoadTimer`` at the top of each loader, wrap each
     interesting sub-stage in ``with timer.stage("name"):``, then call
     ``timer.emit(status=...)`` exactly once (from the loader's ``finally``
     block). One ``history_load_timing`` event is appended to
     ``event_log.jsonl`` per load with the total elapsed time and a per-stage
-    breakdown. The data drives the HIST.2 latency-optimization pass — until
+    breakdown. The data drives the latency-optimization pass — until
     we know which stage dominates, we don't know which to optimize.
 
     Failures inside ``calc_log.log_event`` are swallowed: telemetry must
@@ -223,7 +439,7 @@ def mol_from_result_dir(result_dir: Path, data: dict[str, Any]) -> Any:
 
 
 def _begin_history_load(app: Any, message: str, source_btns: tuple) -> None:
-    """Show immediate feedback when a history-load action starts (HIST.1).
+    """Show immediate feedback when a history-load action starts.
 
     Lights the toolbar activity indicator and disables the source buttons so
     a second click can't fire a parallel load. Both actions are best-effort —
@@ -242,7 +458,7 @@ def _begin_history_load(app: Any, message: str, source_btns: tuple) -> None:
 
 
 def _end_history_load(app: Any, source_btns: tuple) -> None:
-    """Restore UI state after a history-load action finishes (HIST.1).
+    """Restore UI state after a history-load action finishes.
 
     Mirrors :func:`_begin_history_load`. Called from the loader's ``finally``
     block so the activity indicator + buttons are always restored, even when
@@ -269,11 +485,11 @@ def history_load_results(
     """Display a history result card in the Results tab and navigate there.
 
     ``source_btns`` is an optional tuple of button widgets to disable while
-    the load is in flight (HIST.1 immediate-loading-feedback contract). Tests
+    the load is in flight (immediate-loading-feedback contract). Tests
     and callers that don't have a button reference can omit it.
 
     Stage timings are emitted as a single ``history_load_timing`` event on
-    completion (HIST.2 — drives latency-optimization decisions).
+    completion (drives latency-optimization decisions).
     """
     _begin_history_load(app, "Loading history result…", source_btns)
     timer = _LoadTimer("history_load_results", result_dir)
@@ -330,11 +546,11 @@ def history_load_analysis(
     """Load analysis panels for a history result and navigate to Analysis tab.
 
     ``source_btns`` is an optional tuple of button widgets to disable while
-    the load is in flight (HIST.1 immediate-loading-feedback contract). Tests
+    the load is in flight (immediate-loading-feedback contract). Tests
     and callers that don't have a button reference can omit it.
 
     Stage timings are emitted as a single ``history_load_timing`` event on
-    completion (HIST.2 — drives latency-optimization decisions). Stages cover
+    completion (drives latency-optimization decisions). Stages cover
     the four expected hotspots: pyscf.log read, context build, molecule
     reconstruction, 3D viewer render, and the analysis-context registry walk.
     """

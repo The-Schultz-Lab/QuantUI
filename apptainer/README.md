@@ -105,12 +105,13 @@ the `.def` file copies the entire repo root into the container with
 
 ### Windows — double-click launchers (easiest)
 
-Two `.bat` files in the repo root handle WSL and browser launch automatically:
+Two `.bat` files in the repo's `launchers/` folder handle WSL and browser launch
+automatically:
 
 | File | Purpose |
 | --- | --- |
-| `launch-app.bat` | Student-facing app — uses the baked-in notebook |
-| `launch-dev.bat` | Development mode — uses local `notebooks/` (no rebuild needed for notebook edits) |
+| `launchers/launch-app.bat` | Student-facing app — uses the baked-in notebook |
+| `launchers/launch-dev.bat` | Development mode — uses local `notebooks/` (no rebuild needed for notebook edits) |
 
 Double-click either file. The browser opens automatically at
 [http://localhost:8866](http://localhost:8866).

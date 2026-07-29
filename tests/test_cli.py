@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 import sys
 
 import pytest
@@ -407,3 +408,59 @@ class TestWslAwareOpener:
         assert ok is True
         assert tool == "webbrowser"
         assert opened[0].startswith("file:")
+
+
+class TestCliAvoidsGuiStackImport:
+    """M13 audit fix: ``import quantui.cli`` must not pull in ipywidgets.
+
+    Importing any submodule of ``quantui`` always runs ``quantui/__init__.py``
+    first (Python import semantics), and that module used to eagerly import
+    ``QuantUIApp`` (and, transitively, ``ipywidgets``/``IPython`` widget
+    machinery) even for callers that only want the pure-Python CLI helpers.
+    This must run in a subprocess — checking ``sys.modules`` in-process is
+    unreliable once other test modules in the same pytest session have
+    already imported ipywidgets/quantui.app themselves.
+    """
+
+    def test_import_cli_does_not_load_ipywidgets_or_app(self):
+        script = (
+            "import sys\n"
+            "import quantui.cli\n"
+            "assert 'ipywidgets' not in sys.modules, 'ipywidgets was imported'\n"
+            "assert 'quantui.app' not in sys.modules, 'quantui.app was imported'\n"
+            "assert 'quantui.progress' not in sys.modules, "
+            "'quantui.progress was imported'\n"
+            "print('OK')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "OK" in result.stdout
+
+    def test_lazy_attrs_still_resolve_on_demand(self):
+        script = (
+            "import quantui\n"
+            "assert quantui.StepProgress(['a']).widget is not None\n"
+            "assert len(quantui.HELP_TOPICS) > 0\n"
+            "assert 'charge' in quantui.VALID_TOPICS\n"
+            "quantui.help_panel('charge')\n"
+            "assert quantui.QuantUIApp.__name__ == 'QuantUIApp'\n"
+            "print('OK')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "OK" in result.stdout
+
+    def test_unknown_attribute_still_raises(self):
+        import quantui
+
+        assert hasattr(quantui, "THIS_ATTR_DOES_NOT_EXIST") is False

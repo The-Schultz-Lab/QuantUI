@@ -77,7 +77,7 @@ class SessionResult:
     # method is ``"CCSD(T)"``. ``None`` for plain CCSD. Again, included in
     # ``energy_hartree`` when set.
     ccsd_t_correction_hartree: Optional[float] = None
-    # GPU offload status (M-GPU / GPU.2). ``gpu_used`` is True only when the
+    # GPU offload status. ``gpu_used`` is True only when the
     # SCF object was successfully migrated to gpu4pyscf for this run.
     # ``gpu_name`` carries the CUDA device name when ``gpu_used`` is True so
     # the result card can show *which* GPU ran the calc.
@@ -157,8 +157,8 @@ def resolve_xc(method: str) -> str:
     translation. Every DFT entry point — ``session_calc``, ``freq_calc``,
     ``tddft_calc``, ``optimizer``, ``freq_ir_workers``, ``nmr_calc``,
     and the script-export path in ``config.py`` — should use this
-    helper rather than passing ``method`` to PySCF directly. (Before
-    session 55 they didn't, which is why wB97X-D errored in tier 3
+    helper rather than passing ``method`` to PySCF directly. (Previously
+    they didn't, which is why wB97X-D errored in tier 3
     SP calcs but ALSO would have errored in freq / opt / tddft.)
     """
     method_upper = method.upper()
@@ -230,7 +230,7 @@ def run_in_session(
             ``'6-31G'``, ``'6-31G*'``, ``'cc-pVDZ'``).  Default: ``'6-31G'``.
         verbose: PySCF verbosity level (0 = silent … 9 = very detailed).
             Level 3 prints per-iteration SCF energies; level 4 adds
-            convergence diagnostics.  Default: 3.
+            convergence diagnostics.  Default: 4.
         progress_stream: Optional writable text stream.  All PySCF output
             during the calculation is written here.  Pass a widget-backed
             stream (e.g. ``_WidgetStream``) in the notebook for live display;
@@ -258,7 +258,7 @@ def run_in_session(
 
     stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
 
-    # M-STDERR / STDERR.1: capture C-level (fd-2) stderr from libcint / BLAS
+    # Capture C-level (fd-2) stderr from libcint / BLAS
     # / LAPACK and relay it to ``stream`` on exit. Without this wrapper, the
     # bytes surface as red text above the cell output in Voilà / Jupyter.
     # POSIX-only; no-op on Windows. See quantui/c_stderr.py for design.
@@ -329,16 +329,26 @@ def _run_session_calc_body(
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
     elif method_upper == "MP2":
-        mf = scf.RHF(mol)  # MP2 runs on top of RHF
+        # ``scf.RHF(mol)`` is a factory: for a closed-shell molecule
+        # (mol.spin == 0) it returns a true RHF object; for an open-shell
+        # molecule it auto-dispatches to ROHF instead (verified against
+        # PySCF's own factory behavior — this is not a QuantUI branch).
+        # ``mp.MP2(mf)`` below then further auto-dispatches: RMP2 on an
+        # RHF reference, UMP2 (ROHF-based) on an ROHF reference. Both are
+        # standard, well-defined methods; MP2 is not restricted to
+        # closed-shell input here.
+        mf = scf.RHF(mol)
     elif method_upper in ("CCSD", "CCSD(T)"):
-        # Coupled cluster builds on an RHF reference (M8.1). The correlation
-        # energy (and optional perturbative-triples correction) is added
-        # post-SCF below.
+        # Same auto-dispatch as MP2 above: scf.RHF(mol) yields RHF for
+        # closed-shell input and ROHF for open-shell input, and
+        # cc.CCSD(mf) below correspondingly dispatches to RCCSD or
+        # ROHF-based UCCSD. The correlation energy (and optional
+        # perturbative-triples correction) is added post-SCF below.
         mf = scf.RHF(mol)
     else:
         # DFT: resolve alias then auto-select RKS / UKS. ``resolve_xc``
         # handles the wB97X-D → wb97x + external D3 dispersion mapping
-        # (session 55 fix; see _XC_ALIAS docstring).
+        # (see _XC_ALIAS docstring).
         if mol.spin == 0:
             mf = dft.RKS(mol)
         else:
@@ -368,7 +378,7 @@ def _run_session_calc_body(
                         "\n⚠  PCM solvent unavailable — running in gas phase.\n"
                     )
 
-    # --- Try GPU offload (M-GPU / GPU.1) ---
+    # --- Try GPU offload ---
     # Migrate the SCF object to gpu4pyscf when (a) the package is installed,
     # (b) a CUDA device is available, and (c) the method is supported.
     # Failures fall back to CPU silently — the calc still runs. The
@@ -383,7 +393,18 @@ def _run_session_calc_body(
         except Exception:  # noqa: BLE001 — cleanup (progress stream may be closed)
             pass
 
+    # --- Cooperative cancellation ---
+    # Attach the run's cancel predicate (carried on the progress stream) to
+    # the SCF callback so a Cancel click stops between SCF cycles even when the
+    # calc is running with sparse/no streamed output.
+    from .cancellation import attach_scf_cancel_callback, cancel_check_from_stream
+    from .log_utils import emit_status
+
+    _cancel_check = cancel_check_from_stream(stream)
+    attach_scf_cancel_callback(mf, _cancel_check)
+
     # --- Run SCF ---
+    emit_status(stream, "Running SCF…")
     try:
         energy_hartree = float(mf.kernel())
     except Exception as exc:
@@ -398,6 +419,7 @@ def _run_session_calc_body(
         try:
             from pyscf import mp as _mp
 
+            emit_status(stream, "Running MP2 correlation…")
             _mp2 = _mp.MP2(mf)
             _e_corr, _ = _mp2.kernel()
             mp2_correlation_hartree = float(_e_corr)
@@ -407,7 +429,7 @@ def _run_session_calc_body(
                 f"MP2 correction failed for {molecule.get_formula()}: {exc}"
             ) from exc
 
-    # --- Coupled cluster correlation (M8.1) ---
+    # --- Coupled cluster correlation ---
     # CCSD adds singles + doubles excitations on top of the RHF reference;
     # CCSD(T) adds a perturbative-triples correction on top of CCSD. Both
     # report their corrections as separate result fields so the UI can
@@ -418,6 +440,7 @@ def _run_session_calc_body(
         try:
             from pyscf import cc as _cc
 
+            emit_status(stream, "Running CCSD correlation…")
             _ccsd_obj = _cc.CCSD(mf)
             _e_corr_ccsd, _t1, _t2 = _ccsd_obj.kernel()
             ccsd_correlation_hartree = float(_e_corr_ccsd)
@@ -428,6 +451,7 @@ def _run_session_calc_body(
             ) from exc
         if method_upper == "CCSD(T)":
             try:
+                emit_status(stream, "Computing CCSD(T) triples…")
                 _e_t = _ccsd_obj.ccsd_t()
                 ccsd_t_correction_hartree = float(_e_t)
                 energy_hartree += float(_e_t)
@@ -487,30 +511,36 @@ def _run_session_calc_body(
 
     mulliken_charges: Optional[List[float]] = None
     dipole_moment_debye: Optional[float] = None
-    if method_upper != "UHF":
-        try:
-            # gpu4pyscf doesn't implement population analysis on the GPU object
-            # (``mf.mulliken_pop`` is NotImplemented), so on a GPU-offloaded run
-            # fall back to the host (CPU) object via ``to_cpu()``. ``chg`` is
-            # then host NumPy; _to_numpy_array also covers the CuPy case.
-            mf_pop = mf
-            if not callable(getattr(mf, "mulliken_pop", None)) and callable(
-                getattr(mf, "to_cpu", None)
-            ):
-                mf_pop = mf.to_cpu()
-            _, chg = mf_pop.mulliken_pop(verbose=0)
-            mulliken_charges = [float(c) for c in _to_numpy_array(chg)]
-        except Exception as exc:
-            logger.debug("Mulliken population extraction failed: %s", exc)
-        try:
-            dip = _to_numpy_array(mf.dip_moment(verbose=0))
-            dipole_moment_debye = float(_np.linalg.norm(dip))
-        except Exception as exc:
-            logger.debug("Dipole moment extraction failed: %s", exc)
+    # Audit fix (2026-07-14): both mf.mulliken_pop() and mf.dip_moment()
+    # are well-defined and work correctly for a genuine UHF object (verified
+    # empirically against PySCF) — the previous ``method_upper != "UHF"``
+    # guard around this whole block was an unnecessary restriction that
+    # left the result card blank for both properties on every UHF run,
+    # while UKS (open-shell DFT) went through the identical extraction
+    # successfully.
+    try:
+        # gpu4pyscf doesn't implement population analysis on the GPU object
+        # (``mf.mulliken_pop`` is NotImplemented), so on a GPU-offloaded run
+        # fall back to the host (CPU) object via ``to_cpu()``. ``chg`` is
+        # then host NumPy; _to_numpy_array also covers the CuPy case.
+        mf_pop = mf
+        if not callable(getattr(mf, "mulliken_pop", None)) and callable(
+            getattr(mf, "to_cpu", None)
+        ):
+            mf_pop = mf.to_cpu()
+        _, chg = mf_pop.mulliken_pop(verbose=0)
+        mulliken_charges = [float(c) for c in _to_numpy_array(chg)]
+    except Exception as exc:
+        logger.debug("Mulliken population extraction failed: %s", exc)
+    try:
+        dip = _to_numpy_array(mf.dip_moment(verbose=0))
+        dipole_moment_debye = float(_np.linalg.norm(dip))
+    except Exception as exc:
+        logger.debug("Dipole moment extraction failed: %s", exc)
 
     # MO arrays for orbital visualization (non-fatal if extraction fails).
     # Uses the same ``_to_numpy_array`` CuPy→host helper defined above
-    # (GPU-offload note, BUG fix 2026-05-25):
+    # (GPU-offload note, fix 2026-05-25):
     # when gpu4pyscf migrated ``mf`` to the GPU, ``mf.mo_energy`` / ``mo_coeff``
     # / ``mo_occ`` are CuPy arrays. ``numpy.array(cupy_array)`` raises (numpy
     # refuses implicit device transfers), which silently shipped a
@@ -532,7 +562,7 @@ def _run_session_calc_body(
         ]
         _pyscf_mol_basis = basis
     except Exception as exc:
-        # Bug-A class (session 55): a silent failure here ships a
+        # A silent failure here ships a
         # SessionResult with mo_coeff=None, which makes save_orbitals
         # no-op and breaks Energies + Isosurface panels on history
         # replay. Surface to the event log so a future regression is

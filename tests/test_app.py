@@ -392,6 +392,30 @@ class TestLogCapture:
         cap.write("")
         assert cap.getvalue() == ""
 
+    def test_close_is_noop_and_does_not_raise(self):
+        """Regression (found via the L6 audit fix's Python 3.9 CI matrix):
+        ase.utils.IOContext.openfile() — used by BFGS(..., logfile=...) in
+        optimizer.py / pes_scan.py — checks hasattr(file, "close") to decide
+        whether *file* is an already-open stream it should leave alone vs. a
+        path string it should open() itself. ase==3.26.0 (the newest version
+        pip resolves for Python 3.9) enforces this strictly and raised
+        TypeError for a _LogCapture instance, which had no close() method;
+        ase==3.29.0 (resolved for 3.10/3.11) happened to tolerate it via a
+        later refactor, masking the gap until 3.9 was added to CI.
+        """
+        cap, _ = self._make_capture()
+        cap.close()  # Must not raise
+        assert hasattr(cap, "close")
+
+    def test_satisfies_ase_openfile_already_open_contract(self):
+        """Directly exercises the exact duck-typing check ASE performs."""
+        cap, _ = self._make_capture()
+        assert hasattr(cap, "close"), (
+            "ase.utils.IOContext.openfile() treats any object without a "
+            "'close' attribute as a path to open() itself, which fails for "
+            "a non-path file-like object like _LogCapture"
+        )
+
 
 # ---------------------------------------------------------------------------
 # _do_run dispatch
@@ -641,6 +665,295 @@ class TestExportXYZCallback:
         app = QuantUIApp()
         app._on_export_xyz(None)
         assert "molecule" in app.struct_export_status.value.lower()
+
+    def test_xyz_filename_sanitizes_basis_with_asterisk(self, tmp_path):
+        """M11 audit fix (2026-07-14): a basis like "6-31G*" embedded
+        verbatim in a filename is invalid on Windows ("*" is a reserved
+        character there) and glob-hostile on POSIX. The exported filename
+        must not contain "*".
+        """
+        app = QuantUIApp()
+        app._set_molecule(_water())
+        app._last_result_dir = tmp_path
+        app.basis_dd.value = "6-31G*"
+
+        app._on_export_xyz(None)
+
+        xyz_files = list(tmp_path.glob("*.xyz"))
+        assert len(xyz_files) == 1
+        assert "*" not in xyz_files[0].name
+        assert "Error" not in app.struct_export_status.value
+
+
+class TestExportScriptCallback:
+    """_on_export (standalone PySCF script) sanitizes its filename too."""
+
+    def test_script_filename_sanitizes_basis_with_asterisk(self, tmp_path, monkeypatch):
+        """M11 audit fix (2026-07-14): same filename-sanitization bug as
+        the XYZ export, for the "Export Script" button — the script is
+        written to a bare relative filename in the current directory.
+        """
+        monkeypatch.chdir(tmp_path)
+        app = QuantUIApp()
+        app._set_molecule(_water())
+        app.basis_dd.value = "6-31G*"
+
+        app._on_export(None)
+
+        py_files = list(tmp_path.glob("*.py"))
+        assert len(py_files) == 1
+        assert "*" not in py_files[0].name
+        assert "Error" not in app.export_status.value
+
+
+class TestRunHeader:
+    """The run header is written atomically on the main thread (2026-07-18 fix).
+
+    Regression: the header used clear_output()+append and a background-thread
+    append, so for large molecules the pre-step-1 stream was dropped and the
+    log jumped straight to the first optimizer step. The fix writes the whole
+    banner in one atomic ``run_output.outputs = (...)`` on click.
+    """
+
+    def test_header_written_atomically_with_molecule(self):
+        from quantui.app_runflow import _write_run_header
+
+        app = QuantUIApp()
+        app._set_molecule(_water())
+        app.method_dd.value = "B3LYP"
+        app.basis_dd.value = "6-31G*"
+        _write_run_header(app)
+        outs = app.run_output.outputs
+        # A single atomic stream output — not a clear + multiple appends.
+        assert len(outs) == 1
+        assert outs[0]["output_type"] == "stream"
+        text = outs[0]["text"]
+        assert "B3LYP" in text and "6-31G*" in text
+
+    def test_header_clears_stale_log_when_no_molecule(self):
+        from quantui.app_runflow import _write_run_header
+
+        app = QuantUIApp()
+        app.run_output.outputs = (
+            {"output_type": "stream", "name": "stdout", "text": "old run\n"},
+        )
+        app._molecule = None
+        _write_run_header(app)
+        assert app.run_output.outputs == ()
+
+
+class TestProgressTicker:
+    """M-PROGRESS A1: the live elapsed-time ticker."""
+
+    def test_format_elapsed(self):
+        from quantui.log_utils import format_elapsed
+
+        assert format_elapsed(0) == "0:00"
+        assert format_elapsed(65) == "1:05"
+        assert format_elapsed(3725) == "1:02:05"
+        assert format_elapsed(-3) == "0:00"
+
+    def test_start_sets_stop_event_and_stop_clears(self):
+        app = QuantUIApp()
+        import time as _t
+
+        app._start_elapsed_ticker(_t.perf_counter())
+        assert app._elapsed_stop_event is not None
+        app._stop_elapsed_ticker()
+        assert app._elapsed_stop_event is None
+        assert app._run_elapsed_lbl.value == ""
+
+    def test_ticker_updates_the_chip(self):
+        app = QuantUIApp()
+        import time as _t
+
+        app._start_elapsed_ticker(_t.perf_counter())
+        try:
+            _t.sleep(1.2)
+            assert "⏱" in app._run_elapsed_lbl.value
+        finally:
+            app._stop_elapsed_ticker()
+
+
+class TestRemainingTimeChip:
+    """M-PROGRESS B1: fold the total estimate into a 'time remaining' readout."""
+
+    def test_elapsed_only_when_no_estimate(self):
+        app = QuantUIApp()
+        app._run_estimate_s = None
+        chip = app._format_elapsed_chip(30)
+        assert "⏱" in chip
+        assert "left" not in chip and "estimated" not in chip
+
+    def test_shows_remaining_when_estimate_present(self):
+        app = QuantUIApp()
+        app._run_estimate_s = 120.0
+        app._run_estimate_conf = "high"
+        chip = app._format_elapsed_chip(30)
+        assert "~1:30 left" in chip
+        assert "(rough)" not in chip  # high confidence → no rough marker
+
+    def test_low_confidence_marked_rough(self):
+        app = QuantUIApp()
+        app._run_estimate_s = 120.0
+        app._run_estimate_conf = "low"
+        assert "(rough)" in app._format_elapsed_chip(30)
+
+    def test_overdue_estimate_switches_message(self):
+        app = QuantUIApp()
+        app._run_estimate_s = 60.0
+        chip = app._format_elapsed_chip(200)
+        assert "longer than estimated" in chip
+        assert "left" not in chip
+
+
+class TestFractionProgress:
+    """M-PROGRESS B2: fraction-complete drives a self-correcting remaining time."""
+
+    def test_emit_progress_sets_and_clamps_fraction(self):
+        from quantui.app import _LogCapture
+        from quantui.log_utils import emit_progress
+
+        cap = _LogCapture(widgets.Output())
+        emit_progress(cap, 0.4)
+        assert cap._fraction == 0.4
+        emit_progress(cap, 1.5)  # clamped below 1.0
+        assert cap._fraction == 0.999
+        emit_progress(cap, -0.2)  # clamped at 0
+        assert cap._fraction == 0.0
+
+    def test_emit_progress_noop_on_plain_stream(self):
+        import io
+
+        from quantui.log_utils import emit_progress
+
+        emit_progress(io.StringIO(), 0.5)  # must not raise
+
+    def test_chip_prefers_fraction_over_total(self):
+        from quantui.app import _LogCapture
+
+        app = QuantUIApp()
+        # A total estimate is present, but a real fraction should win.
+        app._run_estimate_s = 9999.0
+        cap = _LogCapture(widgets.Output())
+        cap.set_progress_fraction(0.5)
+        app._active_log = cap
+        # 50% done at 60 s elapsed → ~60 s remaining (elapsed·(1−f)/f).
+        chip = app._format_elapsed_chip(60)
+        assert "~1:00 left" in chip
+        assert "(rough)" not in chip  # fraction path is not "rough"
+
+    def test_chip_ignores_tiny_fraction_and_falls_back(self):
+        from quantui.app import _LogCapture
+
+        app = QuantUIApp()
+        app._run_estimate_s = 120.0
+        cap = _LogCapture(widgets.Output())
+        cap.set_progress_fraction(0.01)  # below the 0.03 floor
+        app._active_log = cap
+        chip = app._format_elapsed_chip(30)
+        # Falls back to B1 total: 120 − 30 = 90 s.
+        assert "~1:30 left" in chip
+
+
+class TestStatusHeartbeat:
+    """M-PROGRESS A2: emit_status drives run_status without touching the log."""
+
+    def test_emit_status_sets_label_via_logcapture(self):
+        from quantui.app import _LogCapture
+        from quantui.log_utils import emit_status
+
+        out = widgets.Output()
+        status = widgets.Label()
+        cap = _LogCapture(out, status)
+        emit_status(cap, "Optimizing geometry — SCF + gradient (step 3)…")
+        assert "step 3" in status.value
+        # set_status must NOT append anything to the output log.
+        assert out.outputs == ()
+
+    def test_emit_status_noop_on_plain_stream(self):
+        import io
+
+        from quantui.log_utils import emit_status
+
+        # A plain stream has no set_status — must be a safe no-op.
+        emit_status(io.StringIO(), "ignored")
+
+
+class TestCalcTypeHelp:
+    """A '?' help button next to Calc. Type opens the calc_type help topic."""
+
+    def test_calc_type_help_topic_exists(self):
+        from quantui.help_content import HELP_TOPICS
+
+        assert "calc_type" in HELP_TOPICS
+        # Covers every calc type the dropdown offers.
+        body = HELP_TOPICS["calc_type"]["body"]
+        for label in ("Single Point", "Geometry Opt", "Reorganization Energy"):
+            assert label in body
+
+    def test_help_button_opens_calc_type_topic(self):
+        app = QuantUIApp()
+        app._on_calc_type_help(None)
+        assert app.help_topic_dd.value == "calc_type"
+
+
+class TestOpenShellHint:
+    """The open-shell hint appears only when multiplicity > 1 (UXP.7 restore)."""
+
+    def test_hidden_for_singlet(self):
+        app = QuantUIApp()
+        app.mult_si.value = 1
+        assert app._open_shell_hint.layout.display == "none"
+
+    def test_shown_and_warns_for_rhf_open_shell(self):
+        app = QuantUIApp()
+        app.method_dd.value = "RHF"
+        app.mult_si.value = 2
+        assert app._open_shell_hint.layout.display == ""
+        val = app._open_shell_hint.value
+        assert "UHF" in val
+        assert "unpaired electron" in val
+
+    def test_informational_for_uhf_open_shell(self):
+        app = QuantUIApp()
+        app.method_dd.value = "UHF"
+        app.mult_si.value = 3
+        assert app._open_shell_hint.layout.display == ""
+        # UHF already handles open-shell → no "switch to UHF" nag.
+        assert "unrestricted" in app._open_shell_hint.value
+
+
+class TestDescriptorCards:
+    """UXP.7: method / basis descriptor cards replace the inline notes block.
+
+    ``_update_notes`` now sets the ``_method_card_html`` / ``_basis_card_html``
+    widget values (icon + one-line) instead of rendering a markdown block into
+    an Output — and does so independently of whether a molecule is loaded.
+    """
+
+    def test_cards_populated_at_construction(self):
+        app = QuantUIApp()
+        assert "<svg" in app._method_card_html.value
+        assert "<svg" in app._basis_card_html.value
+
+    def test_cards_update_without_molecule(self):
+        # No molecule loaded — the cards still describe the method/basis.
+        app = QuantUIApp()
+        app.method_dd.value = "B3LYP"
+        app.basis_dd.value = "cc-pVDZ"
+        app._update_notes()
+        assert "B3LYP" in app._method_card_html.value
+        assert "cc-pVDZ" in app._basis_card_html.value
+        # No literal markdown markers leak into the rendered card.
+        assert "**" not in app._method_card_html.value
+
+    def test_cards_reflect_dropdown_change(self):
+        app = QuantUIApp()
+        app.method_dd.value = "MP2"
+        assert "MP2" in app._method_card_html.value
+        app.basis_dd.value = "def2-SVP"
+        assert "def2-SVP" in app._basis_card_html.value
 
 
 class TestExportMoleculeAndLabel:
@@ -896,9 +1209,10 @@ class TestNMRWidgets:
         app = QuantUIApp()
         assert "NMR Shielding" in app.calc_type_dd.options
 
-    def test_calc_type_dd_has_six_options(self):
+    def test_calc_type_dd_has_expected_options(self):
         app = QuantUIApp()
-        assert len(app.calc_type_dd.options) == 6
+        assert len(app.calc_type_dd.options) == 7
+        assert "Reorganization Energy" in app.calc_type_dd.options
 
     def test_nmr_calc_type_shows_note(self):
         app = QuantUIApp()
@@ -920,6 +1234,41 @@ class TestNMRWidgets:
         app.calc_type_dd.value = "NMR Shielding"
         app.calc_type_dd.value = "Single Point"
         assert len(app.calc_extra_opts.children) == 0
+
+
+class TestReorganizationEnergyUI:
+    """UI wiring for the Reorganization Energy calc-type.
+
+    The reorg run is driven entirely through the calc-type dropdown + the
+    channel-mode selector it reveals + the shared Run Calculation button
+    (``_do_run`` has a ``reorganization_energy`` branch). The old dedicated
+    "Calc. Reorganization Energy" auto-button was removed as a redundant
+    duplicate of that path.
+    """
+
+    def test_reorg_mode_shows_channel_selector(self):
+        app = QuantUIApp()
+        app.calc_type_dd.value = "Reorganization Energy"
+        kids = app.calc_extra_opts.children
+        assert app._reorg_mode_dd in kids
+        assert app._reorg_note in kids
+        assert app._reorg_mode_dd.value == "both"
+
+    def test_reorg_hides_preopt_checkbox(self):
+        app = QuantUIApp()
+        app.calc_type_dd.value = "Reorganization Energy"
+        assert app._freq_preopt_cb.layout.display == "none"
+
+    def test_reorg_calc_type_sets_up_mode(self):
+        app = QuantUIApp()
+        mol = Molecule(["H", "H"], [[0, 0, 0], [0, 0, 0.74]])
+        app._set_molecule(mol)
+        # Selecting the calc type reveals the channel selector; Run Calculation
+        # then dispatches the reorg run via _do_run's reorg branch.
+        app.calc_type_dd.value = "Reorganization Energy"
+        app._reorg_mode_dd.value = "both"
+        assert app.calc_type_dd.value == "Reorganization Energy"
+        assert app._reorg_mode_dd in app.calc_extra_opts.children
 
 
 class TestFormatNMRResult:
@@ -1535,6 +1884,29 @@ class TestVibExportAnimation:
         assert hasattr(app, "_vib_export_status")
         assert isinstance(app._vib_export_status, widgets.HTML)
         assert app._vib_export_status.value == ""
+
+    def test_export_bad_mode_index_chains_original_exception(self):
+        """L audit fix (ruff B904): build_vib_export_html's py3Dmol-fallback
+        path must chain the original IndexError via `raise ... from exc`
+        when displacements[mode_number - 1] is out of range, not swallow it.
+        """
+        from types import SimpleNamespace
+
+        from quantui.app_visualization import build_vib_export_html
+        from quantui.viz_backend_router import BackendAvailability
+
+        if not BackendAvailability.from_environment().py3dmol:
+            pytest.skip("py3Dmol not available for export fallback test")
+
+        freq_stub = SimpleNamespace(displacements=[[[0.1, 0.0, 0.0]]])
+        app_stub = SimpleNamespace(
+            _last_vib_freq_result=freq_stub,
+            _last_vib_molecule=self._water(),
+            _viz_availability=BackendAvailability(py3dmol=True, plotlymol=False),
+        )
+        with pytest.raises(ValueError) as exc_info:
+            build_vib_export_html(app_stub, mode_number=5)  # out of range
+        assert isinstance(exc_info.value.__cause__, IndexError)
 
     def test_export_without_vib_state_shows_error_status(self, tmp_path, monkeypatch):
         monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
@@ -2314,13 +2686,29 @@ class TestOrbitalAccordionWidgets:
         assert isinstance(app._orb_export_fmt_dd, widgets.Dropdown)
         assert app._orb_export_fmt_dd.value == "html"
 
-    def test_orb_toggle_has_four_options(self):
+    def test_orb_toggle_has_preset_options(self):
+        # UXP.4: the four HOMO/LUMO presets plus a free-entry "By index" mode.
         app = QuantUIApp()
-        assert set(app._orb_toggle.options) == {"HOMO-1", "HOMO", "LUMO", "LUMO+1"}
+        assert set(app._orb_toggle.options) == {
+            "HOMO-1",
+            "HOMO",
+            "LUMO",
+            "LUMO+1",
+            "By index",
+        }
 
     def test_orb_toggle_default_homo(self):
         app = QuantUIApp()
         assert app._orb_toggle.value == "HOMO"
+
+    def test_orb_index_input_hidden_until_by_index(self):
+        # UXP.4: the arbitrary MO-index input is revealed only in "By index".
+        app = QuantUIApp()
+        assert app._orb_index_input.layout.display == "none"
+        app._orb_toggle.value = "By index"
+        assert app._orb_index_input.layout.display == ""
+        app._orb_toggle.value = "HOMO"
+        assert app._orb_index_input.layout.display == "none"
 
     def test_orb_iso_controls_hidden_initially(self):
         app = QuantUIApp()
@@ -2430,7 +2818,7 @@ class TestIsosurfacePersistence:
 
         captured: dict[str, object] = {}
 
-        def _fake_generate(_atom, _basis, _coeff, _idx, out_path):
+        def _fake_generate(_atom, _basis, _coeff, _idx, out_path, **_kwargs):
             captured["path"] = out_path
             out_path.write_text("cube", encoding="utf-8")
             return out_path
@@ -2475,7 +2863,7 @@ class TestIsosurfacePersistence:
 
         captured: dict[str, object] = {}
 
-        def _fake_generate(_atom, _basis, _coeff, _idx, out_path):
+        def _fake_generate(_atom, _basis, _coeff, _idx, out_path, **_kwargs):
             captured["path"] = out_path
             out_path.write_text("cube", encoding="utf-8")
             return out_path
@@ -2732,3 +3120,308 @@ class TestCompletionBanner:
     def test_help_panel_initially_hidden(self):
         app = QuantUIApp()
         assert app.help_tab_panel.layout.display == "none"
+
+
+class TestHistoryHardeningHist7:
+    """HIST.7: searchable + faceted History filtering.
+
+    The History browser caches parsed ``result.json`` dicts on
+    ``app._history_entries`` and filters that list client-side. Most coverage
+    targets the pure ``filter_history_entries`` function; a couple of tests
+    exercise ``apply_history_filter`` end-to-end against a lightweight fake app.
+    """
+
+    def _entries(self):
+        from quantui.app_history import entry_date
+
+        raw = [
+            # (path, calc_type, formula, method, basis, ts, converged, name)
+            (
+                "d1",
+                "single_point",
+                "H2O",
+                "RHF",
+                "STO-3G",
+                "2026-05-01_10-00-00-000001",
+                True,
+                "water",
+            ),
+            (
+                "d2",
+                "geometry_opt",
+                "C6H6",
+                "B3LYP",
+                "6-31G*",
+                "2026-06-15_11-00-00-000001",
+                True,
+                "benzene",
+            ),
+            (
+                "d3",
+                "frequency",
+                "H2O",
+                "B3LYP",
+                "6-31G*",
+                "2026-07-01_09-30-00-000001",
+                False,
+                "water",
+            ),
+            (
+                "d4",
+                "tddft",
+                "C6H6",
+                "PBE0",
+                "cc-pVDZ",
+                "2026-07-20_08-00-00-000001",
+                True,
+                "benzene",
+            ),
+        ]
+        return [
+            {
+                "path": p,
+                "label": f"{ts} {ct} {f} {m}/{b}",
+                "calc_type": ct,
+                "formula": f,
+                "name": nm,
+                "method": m,
+                "basis": b,
+                "timestamp": ts,
+                "date": entry_date(ts),
+                "converged": conv,
+            }
+            for (p, ct, f, m, b, ts, conv, nm) in raw
+        ]
+
+    # ── pure filter function ────────────────────────────────────────────
+
+    def test_no_facets_returns_all(self):
+        from quantui.app_history import filter_history_entries
+
+        entries = self._entries()
+        assert filter_history_entries(entries) == entries
+
+    def test_text_matches_formula_case_insensitive(self):
+        from quantui.app_history import filter_history_entries
+
+        got = filter_history_entries(self._entries(), text="c6h6")
+        assert {e["path"] for e in got} == {"d2", "d4"}
+
+    def test_text_matches_molecule_name(self):
+        from quantui.app_history import filter_history_entries
+
+        got = filter_history_entries(self._entries(), text="benzene")
+        assert {e["path"] for e in got} == {"d2", "d4"}
+
+    def test_text_no_match_returns_empty(self):
+        from quantui.app_history import filter_history_entries
+
+        assert filter_history_entries(self._entries(), text="zzz") == []
+
+    def test_calc_type_facet(self):
+        from quantui.app_history import filter_history_entries
+
+        got = filter_history_entries(self._entries(), calc_types=["frequency", "tddft"])
+        assert {e["path"] for e in got} == {"d3", "d4"}
+
+    def test_method_and_basis_facets_combine(self):
+        from quantui.app_history import filter_history_entries
+
+        got = filter_history_entries(self._entries(), method="B3LYP", basis="6-31G*")
+        assert {e["path"] for e in got} == {"d2", "d3"}
+
+    def test_date_range_inclusive(self):
+        import datetime as dt
+
+        from quantui.app_history import filter_history_entries
+
+        got = filter_history_entries(
+            self._entries(),
+            date_from=dt.date(2026, 6, 1),
+            date_to=dt.date(2026, 7, 1),
+        )
+        assert {e["path"] for e in got} == {"d2", "d3"}
+
+    def test_status_facet_converged_only(self):
+        from quantui.app_history import filter_history_entries
+
+        got = filter_history_entries(self._entries(), statuses=["converged"])
+        assert {e["path"] for e in got} == {"d1", "d2", "d4"}
+
+    def test_status_facet_not_converged_only(self):
+        from quantui.app_history import filter_history_entries
+
+        got = filter_history_entries(self._entries(), statuses=["not_converged"])
+        assert {e["path"] for e in got} == {"d3"}
+
+    def test_facets_are_anded_together(self):
+        from quantui.app_history import filter_history_entries
+
+        got = filter_history_entries(
+            self._entries(), text="H2O", calc_types=["frequency"]
+        )
+        assert {e["path"] for e in got} == {"d3"}
+
+    def test_unparseable_date_excluded_when_bound_set(self):
+        import datetime as dt
+
+        from quantui.app_history import filter_history_entries
+
+        entries = self._entries()
+        entries.append(
+            {
+                "path": "bad",
+                "label": "bad",
+                "calc_type": "single_point",
+                "formula": "X",
+                "name": "",
+                "method": "RHF",
+                "basis": "STO-3G",
+                "timestamp": "not-a-date",
+                "date": None,
+                "converged": True,
+            }
+        )
+        got = filter_history_entries(entries, date_from=dt.date(2026, 1, 1))
+        assert "bad" not in {e["path"] for e in got}
+
+    # ── apply_history_filter end-to-end (fake app) ──────────────────────
+
+    def _fake_app(self):
+        import types
+
+        entries = self._entries()
+
+        def _chip(val=False):
+            return types.SimpleNamespace(value=val)
+
+        app = types.SimpleNamespace(
+            _history_entries=entries,
+            _history_filter_suspend=False,
+            history_search=_chip(""),
+            history_method_dd=_chip(""),
+            history_basis_dd=_chip(""),
+            history_date_from=_chip(None),
+            history_date_to=_chip(None),
+            _history_calc_chips={
+                "single_point": _chip(),
+                "geometry_opt": _chip(),
+                "frequency": _chip(),
+                "tddft": _chip(),
+            },
+            _history_status_chips={"converged": _chip(), "not_converged": _chip()},
+            past_dd=types.SimpleNamespace(options=[]),
+            history_count_lbl=_chip(""),
+        )
+        return app
+
+    def test_apply_filter_populates_options_with_placeholder(self):
+        from quantui.app_history import apply_history_filter
+
+        app = self._fake_app()
+        apply_history_filter(app)
+        # index-0 placeholder + all 4 entries
+        assert app.past_dd.options[0] == ("(select a calculation to view)", "")
+        assert len(app.past_dd.options) == 5
+        assert "4 of 4 shown" in app.history_count_lbl.value
+
+    def test_apply_filter_text_narrows_and_counts(self):
+        from quantui.app_history import apply_history_filter
+
+        app = self._fake_app()
+        app.history_search.value = "benzene"
+        apply_history_filter(app)
+        paths = [v for _, v in app.past_dd.options[1:]]
+        assert set(paths) == {"d2", "d4"}
+        assert "2 of 4 shown" in app.history_count_lbl.value
+
+    def test_apply_filter_no_match_shows_message(self):
+        from quantui.app_history import apply_history_filter
+
+        app = self._fake_app()
+        app.history_search.value = "zzz"
+        apply_history_filter(app)
+        assert app.past_dd.options == [
+            ("(select a calculation to view)", ""),
+            ("(no matches for current filters)", ""),
+        ]
+        assert "0 of 4 shown" in app.history_count_lbl.value
+
+    def test_apply_filter_suspended_is_noop(self):
+        from quantui.app_history import apply_history_filter
+
+        app = self._fake_app()
+        app.past_dd.options = ["sentinel"]
+        app._history_filter_suspend = True
+        apply_history_filter(app)
+        assert app.past_dd.options == ["sentinel"]
+
+    # ── chemical-name search (name → formula resolution) ────────────────
+
+    def test_text_name_resolution_matches_formula(self):
+        """A name query resolves to formulas so entries with no stored name
+        still match (e.g. 'benzene' → C6H6)."""
+        from quantui.app_history import filter_history_entries
+
+        entries = self._entries()
+        for e in entries:
+            e["name"] = ""  # simulate results without a stored chemical name
+        got = filter_history_entries(entries, text="benzene", name_formulas={"C6H6"})
+        assert {e["path"] for e in got} == {"d2", "d4"}
+
+    def test_text_substring_still_wins_without_resolution(self):
+        from quantui.app_history import filter_history_entries
+
+        # No name_formulas: falls back to substring over formula + name.
+        got = filter_history_entries(self._entries(), text="c6h6")
+        assert {e["path"] for e in got} == {"d2", "d4"}
+
+    def test_resolve_query_formulas_benzene_precise(self):
+        """'benzene' resolves to C6H6 via the curated map, and does NOT pull in
+        substituted benzenes (toluene C7H8, aniline C6H7N) that only match on
+        synonyms."""
+        from quantui.app_history import resolve_query_formulas
+
+        formulas = resolve_query_formulas("benzene")
+        assert "C6H6" in formulas
+        assert "C7H8" not in formulas  # toluene must not sneak in
+        assert "C6H7N" not in formulas  # aniline must not sneak in
+        assert "C8H10" not in formulas  # ethylbenzene must not sneak in
+
+    def test_resolve_query_formulas_curated_map(self):
+        from quantui.app_history import resolve_query_formulas
+
+        assert "H2O" in resolve_query_formulas("water")
+        assert "H3N" in resolve_query_formulas("ammonia")
+        assert "CH4" in resolve_query_formulas("methane")
+
+    def test_resolve_query_formulas_library_exact_name(self):
+        """Named organics the library carries resolve via exact library name
+        (skips if the bundled library is unavailable)."""
+        from quantui import molecule_library as ml
+        from quantui.app_history import resolve_query_formulas
+
+        if not [
+            r for r in ml.search("toluene", limit=5) if r["name"].lower() == "toluene"
+        ]:
+            pytest.skip("molecule library unavailable")
+        assert "C7H8" in resolve_query_formulas("toluene")
+
+    def test_resolve_query_formulas_blank_is_empty(self):
+        from quantui.app_history import resolve_query_formulas
+
+        assert resolve_query_formulas("") == set()
+        assert resolve_query_formulas("   ") == set()
+
+    def test_apply_filter_name_search_via_resolver(self, monkeypatch):
+        import quantui.app_history as ah
+        from quantui.app_history import apply_history_filter
+
+        app = self._fake_app()
+        for e in app._history_entries:
+            e["name"] = ""  # no stored names → must rely on the resolver
+        monkeypatch.setattr(ah, "resolve_query_formulas", lambda q: {"C6H6"})
+        app.history_search.value = "benzene"
+        apply_history_filter(app)
+        paths = [v for _, v in app.past_dd.options[1:]]
+        assert set(paths) == {"d2", "d4"}

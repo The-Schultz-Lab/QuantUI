@@ -12,7 +12,7 @@ def _result_extra_rows(get: Any) -> str:
     ``get(key, default=None)`` reads a field from either a result object
     (``getattr``) or a saved ``result.json`` dict (``dict.get``). Used by BOTH
     :func:`format_result` (live) and :func:`format_past_result` (history) so the
-    two cards can never drift again — the M-CLEAN regression where the compute
+    two cards can never drift again — a past regression had the compute
     device / dipole / Mulliken rows existed only on the live card. Rows:
     post-HF correlation breakdown (MP2 / CCSD / (T)), solvent, compute device
     (always shown), dipole moment, Mulliken charges.
@@ -45,7 +45,7 @@ def _result_extra_rows(get: Any) -> str:
     if _solvent is not None:
         rows += _num("Solvent (PCM)", str(_solvent))
 
-    # Compute device (M-GPU / GPU.2) — always shown; old saved results lack the
+    # Compute device — always shown; old saved results lack the
     # field and safely read "CPU".
     if bool(get("gpu_used", False)):
         _name = get("gpu_name")
@@ -298,6 +298,22 @@ def format_nmr_result(r: Any) -> str:
             "</td></tr>"
         )
 
+    # M4 audit fix (2026-07-14): the reference shielding constants table only
+    # covers a handful of method/basis combinations; any other combination
+    # silently substitutes the B3LYP/6-31G* constants, which can shift the
+    # reported ppm values by several ppm relative to a properly calibrated
+    # reference. Surface that substitution rather than let it pass silently.
+    _ref_warn = ""
+    if getattr(r, "is_fallback_reference", False):
+        _ref_warn = (
+            '<tr><td colspan="2" style="padding:6px 0 0">'
+            '<span style="color:#b45309;font-size:12px">'
+            f"⚠ No calibrated TMS reference for {r.method}/{r.basis} — using "
+            f"{getattr(r, 'reference_key', 'B3LYP/6-31G*')} constants instead. "
+            "Shifts may be off by a few ppm.</span>"
+            "</td></tr>"
+        )
+
     _empty = ""
     if not r.h_shifts() and not r.c_shifts():
         _empty = (
@@ -310,7 +326,7 @@ def format_nmr_result(r: Any) -> str:
         f'padding:10px 14px;border-radius:4px;margin:6px 0">'
         f"<b>NMR Shielding &mdash; {r.formula} ({r.method}/{r.basis})</b>"
         f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-        f"{header_rows}{h_table}{c_table}{_empty}{_basis_warn}</table></div>"
+        f"{header_rows}{h_table}{c_table}{_empty}{_basis_warn}{_ref_warn}</table></div>"
     )
 
 
@@ -346,6 +362,52 @@ def format_pes_scan_result(r: Any) -> str:
         f'<tr><td style="padding:3px 18px 3px 0;color:#444">All converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
         f"</table></div>"
+    )
+
+
+def format_reorg_result(r: Any) -> str:
+    """Format a reorganization-energy (Marcus 4-point) result card."""
+    _conv = "Yes" if r.converged else "No (some steps did not converge)"
+    _cc = "green" if r.converged else "#c00"
+
+    def _channel_block(ch: Any) -> str:
+        rows = "".join(
+            f'<tr><td style="padding:2px 18px 2px 0;color:#444">{k}</td>'
+            f'<td style="color:#000;font-family:monospace">{v}</td></tr>'
+            for k, v in [
+                ("λ", f"{ch.lambda_ev:.4f} eV ({ch.lambda_kcal:.2f} kcal/mol)"),
+                ("λ₁ ion relaxation", f"{ch.lambda1_hartree * 27.211386245988:.4f} eV"),
+                (
+                    "λ₂ neutral relaxation",
+                    f"{ch.lambda2_hartree * 27.211386245988:.4f} eV",
+                ),
+                (
+                    "Ion state",
+                    f"charge {ch.ion_charge:+d}, mult {ch.ion_multiplicity}",
+                ),
+            ]
+        )
+        return (
+            f'<div style="margin-top:8px">'
+            f'<b style="font-size:13px;color:#166534">{ch.label}</b>'
+            f'<table style="margin-top:2px;font-size:13px;border-collapse:collapse">'
+            f"{rows}</table></div>"
+        )
+
+    _channels_html = "".join(_channel_block(ch) for ch in r.channels)
+    return (
+        f'<div style="background:#f0fff0;border-left:4px solid #4CAF50;'
+        f'padding:10px 14px;border-radius:4px;margin:6px 0">'
+        f"<b>Reorganization Energy (Marcus 4-point) &mdash; "
+        f"{r.formula} ({r.method}/{r.basis})</b>"
+        f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
+        f'<tr><td style="padding:3px 18px 3px 0;color:#444">Neutral energy</td>'
+        f'<td style="color:#000">{r.neutral_energy_hartree:.8f} Ha</td></tr>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:#444">Total opt steps</td>'
+        f'<td style="color:#000">{r.n_total_opt_steps}</td></tr>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:#444">All converged</td>'
+        f'<td style="color:{_cc}">{_conv}</td></tr>'
+        f"</table>{_channels_html}</div>"
     )
 
 
@@ -404,7 +466,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     ts = data.get("timestamp", "")
 
     # Shared 'extra' rows (correlation breakdown / solvent / device / dipole /
-    # Mulliken) — same builder as the live card so the two never drift (M-CLEAN).
+    # Mulliken) — same builder as the live card so the two never drift.
     _extra = _result_extra_rows(lambda k, d=None: data.get(k, d))
 
     # Embed thumbnail if saved

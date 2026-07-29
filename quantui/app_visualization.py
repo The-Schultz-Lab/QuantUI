@@ -79,8 +79,8 @@ def show_result_3d(
     ``visualization_py3dmol.render_molecule_html``); the HTML is routed through
     ``app._set_html_output`` so the viewer is replaced as a single atomic
     ``Output.outputs`` swap. This avoids the nested-Output + ``display(viz)``
-    pattern that caused BUG.6 (trajectory regression) and BUG.7 (Analysis-tab
-    top viewer rendering blank with 🙁 on history replay).
+    pattern that caused a trajectory regression and an Analysis-tab top
+    viewer rendering blank with 🙁 on history replay.
     """
     if render_html_fn is None or molecule is None:
         return
@@ -595,7 +595,7 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     panel populates regardless of plotlymol3d availability. The plotlymol3d
     `VibrationalData` wrapper is built optionally — required only when the
     plotlymol render path is selected; the py3Dmol render path reads
-    displacements directly from ``freq_result`` (VIZBACK.8).
+    displacements directly from ``freq_result``.
     """
     freqs = freq_result.frequencies_cm1
     if not freqs:
@@ -965,6 +965,7 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
 
     app._last_orb_info = info
     app._last_orb_mo_coeff = getattr(result, "mo_coeff", None)
+    app._last_orb_mo_occ = mo_occ
     app._last_orb_mol_atom = getattr(result, "pyscf_mol_atom", None)
     app._last_orb_mol_basis = getattr(result, "pyscf_mol_basis", None)
 
@@ -1039,10 +1040,23 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
 def on_iso_generate(app: Any, btn: Any) -> None:
     """Generate orbital isosurface for currently selected orbital."""
     orbital_label = app._orb_toggle.value
+    # "By index" mode renders an arbitrary 0-based MO index. Encode it
+    # into the label as "MO <n>"; render_orbital_isosurface parses it back.
+    if orbital_label == "By index":
+        orbital_label = f"MO {int(app._orb_index_input.value)}"
     app._iso_render_token = int(getattr(app, "_iso_render_token", 0)) + 1
     render_token = app._iso_render_token
     btn.disabled = True
     btn.description = "Generating…"
+    # Reveal the inline spinner + light the toolbar activity indicator
+    # so the (slow) cube generation reads as busy, not hung.
+    _spinner = getattr(app, "_iso_spinner", None)
+    if _spinner is not None:
+        _spinner.layout.display = ""
+    try:
+        app._activity_begin("Generating orbital isosurface…", kind="compute")
+    except Exception:
+        pass
     try:
         from quantui import calc_log as _clog
 
@@ -1060,8 +1074,27 @@ def on_iso_generate(app: Any, btn: Any) -> None:
         )
 
     done = threading.Event()
+    # Balance the single _activity_begin above exactly once, across
+    # both the normal-completion and timeout paths (idempotent).
+    _finished = threading.Event()
+
+    def _finish_activity() -> None:
+        if _finished.is_set():
+            return
+        _finished.set()
+        try:
+            app._activity_end(kind="compute")
+        except Exception:
+            pass
+        # Only hide the spinner if no newer generation superseded this one
+        # (a newer render still wants the spinner visible).
+        if render_token == int(getattr(app, "_iso_render_token", 0)):
+            _sp = getattr(app, "_iso_spinner", None)
+            if _sp is not None:
+                _sp.layout.display = "none"
 
     def _reset_button() -> None:
+        _finish_activity()
         if render_token != int(getattr(app, "_iso_render_token", 0)):
             return
         btn.disabled = False
@@ -1079,6 +1112,7 @@ def on_iso_generate(app: Any, btn: Any) -> None:
             return
 
         def _show_timeout() -> None:
+            _finish_activity()
             if render_token != int(getattr(app, "_iso_render_token", 0)):
                 return
             try:
@@ -1165,12 +1199,35 @@ def render_orbital_isosurface(
         "LUMO+1": n_occ + 1,
     }
     orb_idx = idx_map.get(orbital_label)
+    # "MO <n>" labels carry an explicit 0-based index from By-index mode.
+    if orb_idx is None:
+        _m = _re.match(r"MO\s+(\d+)$", orbital_label)
+        if _m:
+            orb_idx = int(_m.group(1))
     if orb_idx is None or orb_idx < 0 or orb_idx >= n_total:
+        # Out-of-range (now user-reachable via free index entry) — surface it
+        # instead of silently leaving the "Generating…" placeholder in place.
+        def _show_range_err() -> None:
+            if _is_stale():
+                return
+            app._orb_iso_output.clear_output()
+            with app._orb_iso_output:
+                display(
+                    HTML(
+                        '<p style="color:#b91c1c;padding:8px">'
+                        f"⚠ Orbital index out of range. This calculation has "
+                        f"{n_total} molecular orbitals (valid indices 0–"
+                        f"{n_total - 1}; HOMO = {n_occ - 1}).</p>"
+                    )
+                )
+
+        app._queue_main_thread_callback(_show_range_err)
         return
 
     mo_coeff = getattr(app, "_last_orb_mo_coeff", None)
     mol_atom = getattr(app, "_last_orb_mol_atom", None)
     mol_basis = getattr(app, "_last_orb_mol_basis", None)
+    mo_occ_for_charge = getattr(app, "_last_orb_mo_occ", None)
     if mo_coeff is None or mol_atom is None or mol_basis is None:
         return
 
@@ -1179,6 +1236,7 @@ def render_orbital_isosurface(
 
         from quantui.orbital_visualization import (
             generate_cube_from_arrays,
+            infer_charge_and_spin,
             plot_cube_isosurface,
             render_orbital_isosurface_py3dmol,
         )
@@ -1204,7 +1262,19 @@ def render_orbital_isosurface(
         ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
         cube_path = cube_dir / f"{safe_formula}_{safe_orb}_{ts}.cube"
 
-        generate_cube_from_arrays(mol_atom, mol_basis, mo_coeff, orb_idx, cube_path)
+        # Charge/spin aren't carried on the app's orbital-state attributes —
+        # infer them from the MO occupations so charged/open-shell molecules
+        # (H3O+, OH-, radicals, ...) don't fail to build in PySCF.
+        _charge, _spin = infer_charge_and_spin(mol_atom, mo_occ_for_charge)
+        generate_cube_from_arrays(
+            mol_atom,
+            mol_basis,
+            mo_coeff,
+            orb_idx,
+            cube_path,
+            charge=_charge,
+            spin=_spin,
+        )
         scene_bgcolor = app._plotly_theme_colors()["scene_bgcolor"]
 
         # Route the render: py3Dmol does native, full-resolution in-browser
@@ -1270,7 +1340,7 @@ def render_orbital_isosurface(
         return
     if _is_stale():
         return
-    # M-EXPORT / EXPORT.5: track the last-generated cube + its orbital
+    # Track the last-generated cube + its orbital
     # label so the "Export cube" button can copy it to the top-level
     # result dir with a friendly name without re-deriving the path.
     app._last_cube_path = cube_path
@@ -1295,7 +1365,7 @@ def render_orbital_isosurface(
         html_str,
     )
 
-    # M-EXPORT / EXPORT.5: now that ``_last_cube_path`` is populated, the
+    # Now that ``_last_cube_path`` is populated, the
     # "Export cube" button has something to copy. Enable it on the main
     # thread alongside the iso render swap.
     def _enable_cube_btn() -> None:
@@ -1501,7 +1571,7 @@ def _render_vib_mode_py3dmol(
 ) -> None:
     """Render vibrational animation via py3Dmol multi-frame XYZ.
 
-    Per VIZBACK.8 spec: pure-numpy frame generation (no plotlymol3d
+    Pure-numpy frame generation (no plotlymol3d
     dependency); 24 sinusoidal-phase frames over one full oscillation;
     py3Dmol view with ``addModelsAsFrames`` + ``animate``; serialized to
     HTML and atomically swapped into ``app.vib_output``.
@@ -1539,7 +1609,7 @@ def _render_vib_mode_py3dmol(
             _vib_err(app, "No frequency result cached for vibrational animation.")
         return
 
-    # Cache hit short-circuit (VIZBACK.9). The cache key now includes ``fps``
+    # Cache hit short-circuit. The cache key now includes ``fps``
     # so a user who changes the framerate will rebuild rather than play back
     # a mismatched-interval HTML blob.
     result_dir = getattr(app, "_last_result_dir", None)
@@ -1644,7 +1714,7 @@ def _render_vib_mode_py3dmol(
     _swap_vib_output(app, html_str)
 
     # Persist to disk cache so future visits and history replay can hit
-    # this mode instantly (VIZBACK.9). Non-fatal on failure — render still
+    # this mode instantly. Non-fatal on failure — render still
     # succeeded, cache is purely an optimization.
     if result_dir is not None:
         try:
@@ -2014,7 +2084,7 @@ def build_preopt_preview_html(
     ``viewer.setFrame`` so the user can compare geometries without re-rendering.
     A single-frame trajectory (no relaxation / FF fallback) renders as a static
     structure with no controls. Used by the interactive "Preview
-    pre-optimization" flow (M-PREOPT PREOPT.2).
+    pre-optimization" flow.
     """
     import re
 
@@ -2488,14 +2558,14 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
             import numpy as np
             import py3Dmol  # noqa: F401 — probe; make_view imports it for the export
         except ImportError as exc:
-            raise ValueError(f"py3Dmol unavailable for fallback export: {exc}")
+            raise ValueError(f"py3Dmol unavailable for fallback export: {exc}") from exc
 
         try:
             displ = np.array(freq_result.displacements[mode_number - 1], dtype=float)
         except (AttributeError, IndexError, ValueError, TypeError) as exc:
             raise ValueError(
                 f"Could not read displacements for mode {mode_number}: {exc}"
-            )
+            ) from exc
 
         atoms = list(molecule.atoms)
         base_coords = np.array(molecule.coordinates, dtype=float)
