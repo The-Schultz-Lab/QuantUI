@@ -36,8 +36,31 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   avoids the base image's implicit `defaults` channel. No change to the shipped
   package set or runtime behavior.
 
+### Added
+
+- **GPU offload can now be switched off from the UI** — Status tab → Settings →
+  "Use GPU when available". The preference persists across launches. This exists
+  because GPU offload is not always faster: quantum-chemistry SCF is
+  double-precision throughout, and consumer/workstation GPUs gate FP64 to roughly
+  1/32–1/64 of their FP32 rate, so offload on such a card can be *slower* than a
+  many-core CPU. `QUANTUI_DISABLE_GPU=1` still overrides the setting for scripted
+  runs.
+- **A warning when a detected GPU is unlikely to help.** `quantui gpu check` and
+  the Status tab now flag consumer-class devices with a note that double
+  precision is weak on them and offload may be slower than CPU, instead of
+  presenting any detected CUDA device as free speed.
+
 ### Fixed
 
+- **`quantui gpu check` no longer reports a broken CUDA install as "gpu4pyscf not
+  installed".** `ModuleNotFoundError` is a subclass of `ImportError`, so catching
+  the latter conflated "the package is absent" with "the package is present but
+  its CUDA libraries are missing" — the second case was reported as the first,
+  sending users back to an install step they had already completed. The two are
+  now distinguished, the underlying exception is included in the message (e.g.
+  the missing `libnvJitLink.so`), and both cases are logged. The reason string
+  now comes from the detection probe itself rather than being re-derived by the
+  CLI, so the message can no longer contradict what the run dispatcher decided.
 - **Exit is now a two-stage confirmation, so one click can no longer tear down an
   HPC allocation.** Exit shuts the server down by sending `SIGTERM` to the parent
   process. On a laptop that parent is just Voilà, but on a cluster interactive

@@ -162,43 +162,73 @@ class TestGpuCheck:
         assert "not available" in err
         assert "QUANTUI_DISABLE_GPU" in err
 
-    def test_reports_missing_gpu4pyscf(self, monkeypatch, isolated_log_dir):
-        # Pretend gpu4pyscf isn't installed. Because the GPU detector is
-        # @lru_cached, we patch the underlying functions rather than try
-        # to monkey with builtins __import__.
+    def _patch_gpu4pyscf_import(self, monkeypatch, exc):
+        """Make ``import gpu4pyscf`` raise *exc*, leaving other imports alone."""
+        import builtins as _bi
+
         import quantui.gpu_offload as _gpuo
 
         _gpuo.is_gpu_available.cache_clear()
+        _real_import = _bi.__import__
 
-        # Make is_gpu_available return (False, None) and arrange gpu4pyscf
-        # import to fail inside the CLI's reason-probe path.
         def _fake_import(name, *args, **kwargs):
             if name == "gpu4pyscf":
-                raise ImportError("simulated")
+                raise exc
             return _real_import(name, *args, **kwargs)
 
-        import builtins as _bi
-
-        _real_import = _bi.__import__
         monkeypatch.setattr(_bi, "__import__", _fake_import)
+
+    def test_reports_missing_gpu4pyscf(self, monkeypatch, isolated_log_dir):
+        # Genuinely-absent package → ModuleNotFoundError.
+        self._patch_gpu4pyscf_import(
+            monkeypatch, ModuleNotFoundError("No module named 'gpu4pyscf'")
+        )
         rc, out, err = _capture(["gpu", "check"])
         assert rc == 1
-        assert "gpu4pyscf not installed" in err
+        assert "not installed" in err
+
+    def test_broken_cuda_libs_not_reported_as_missing(
+        self, monkeypatch, isolated_log_dir
+    ):
+        # GPU.7 regression: gpu4pyscf present but its CUDA libraries are not.
+        # This is an ImportError, NOT a ModuleNotFoundError, and it used to be
+        # reported as "gpu4pyscf not installed" — sending the user back to an
+        # install step they had already done.
+        self._patch_gpu4pyscf_import(
+            monkeypatch, ImportError('Failure finding "libnvJitLink.so"')
+        )
+        rc, out, err = _capture(["gpu", "check"])
+        assert rc == 1
+        assert "not installed" not in err
+        assert "failed to import" in err
+        assert "libnvJitLink" in err
 
     def test_happy_path_when_gpu_detected(self, monkeypatch, isolated_log_dir):
         import quantui.gpu_offload as _gpuo
 
-        # Replace the lru_cache-decorated function with a plain callable
-        # that mimics the (.cache_clear()) attribute the CLI calls.
-        def _fake():
-            return (True, "NVIDIA Test GPU")
-
-        _fake.cache_clear = lambda: None  # type: ignore[attr-defined]
-        monkeypatch.setattr(_gpuo, "is_gpu_available", _fake)
+        # The CLI reads probe_gpu() for the (available, name, reason) triple.
+        monkeypatch.setattr(_gpuo, "probe_gpu", lambda: (True, "NVIDIA H200", ""))
         rc, out, err = _capture(["gpu", "check"])
         assert rc == 0
         assert "GPU offload available" in out
-        assert "NVIDIA Test GPU" in out
+        assert "NVIDIA H200" in out
+        # Datacenter card — no FP64 advisory.
+        assert "consumer" not in err
+
+    def test_consumer_gpu_gets_fp64_advisory(self, monkeypatch, isolated_log_dir):
+        # GPU.8: available is not the same as beneficial.
+        import quantui.gpu_offload as _gpuo
+
+        monkeypatch.setattr(
+            _gpuo,
+            "probe_gpu",
+            lambda: (True, "NVIDIA GeForce RTX 5060 Ti", ""),
+        )
+        rc, out, err = _capture(["gpu", "check"])
+        assert rc == 0
+        assert "GPU offload available" in out
+        assert "consumer" in err
+        assert "SLOWER" in err
 
 
 class TestAnalyticsBuild:
