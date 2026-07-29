@@ -838,9 +838,10 @@ def on_calc_type_help(app: Any, btn: Any) -> None:
 
 
 # Seconds the "Confirm shutdown" state stays armed before auto-reverting to
-# "Exit". Long enough for a deliberate second click, short enough that a stray
-# arming click doesn't leave the button primed indefinitely.
-_EXIT_CONFIRM_TIMEOUT_S = 6.0
+# "Exit". Long enough to read the warning and click again without being silently
+# disarmed mid-decision, short enough that a stray arming click doesn't leave the
+# button primed indefinitely.
+_EXIT_CONFIRM_TIMEOUT_S = 15.0
 
 
 def on_exit_clicked(app: Any, _unused: Any = None) -> None:

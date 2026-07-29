@@ -36,6 +36,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   avoids the base image's implicit `defaults` channel. No change to the shipped
   package set or runtime behavior.
 
+### Fixed
+
+- **Exit is now a two-stage confirmation, so one click can no longer tear down an
+  HPC allocation.** Exit shuts the server down by sending `SIGTERM` to the parent
+  process. On a laptop that parent is just Voilà, but on a cluster interactive
+  session (e.g. NCShare) that parent process *is* the job — so a single stray
+  click destroyed the entire allocation. The first click now only arms the
+  shutdown: Exit re-labels to "Confirm shutdown" and an inline warning plus a
+  Cancel button appear. Only a second click runs the shutdown, which is otherwise
+  unchanged. An armed Exit auto-reverts after 15 seconds so a stray click doesn't
+  leave the button primed.
+
 ## [0.4.1] - 2026-07-16
 
 Bug-fix and hardening release from a full repository audit. No new features and
