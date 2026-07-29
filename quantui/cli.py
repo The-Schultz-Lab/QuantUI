@@ -89,52 +89,35 @@ def _cmd_gpu_check(args: argparse.Namespace) -> int:
     Returns exit code 0 when GPU offload is available, 1 when it's not —
     so ``if quantui gpu check; then ...; fi`` works in shell scripts.
     """
-    from quantui.gpu_offload import is_gpu_available
+    from quantui.gpu_offload import is_gpu_available, is_low_fp64_device, probe_gpu
 
     # The detection probe is cached; clear so each CLI invocation is
     # fresh (the user may have just installed gpu4pyscf and wants to
     # confirm without restarting their shell).
     is_gpu_available.cache_clear()
-    available, name = is_gpu_available()
+    available, name, reason = probe_gpu()
     if available:
         print(f"GPU offload available: {name}")
-        return 0
-    print("GPU offload not available", file=sys.stderr)
-    # Surface the most common reasons so a user knows where to look next.
-    import os as _os
-
-    if _os.environ.get("QUANTUI_DISABLE_GPU", "").strip() in ("1", "true", "True"):
-        print(
-            "  reason: QUANTUI_DISABLE_GPU is set in the environment",
-            file=sys.stderr,
-        )
-    else:
-        try:
-            import gpu4pyscf  # noqa: F401
-        except ImportError:
+        if is_low_fp64_device(name):
+            # Available is not the same as worth using: PySCF is FP64
+            # throughout, and consumer cards gate double precision to a small
+            # fraction of single. Say so here rather than let the user discover
+            # it as an unexplained slowdown.
             print(
-                "  reason: gpu4pyscf not installed "
-                "(see README → 'Optional: GPU acceleration')",
+                f"  note: {name} looks like a consumer/workstation GPU, whose "
+                "double-precision throughput is typically 1/32–1/64 of its "
+                "single-precision. Quantum-chemistry SCF is double-precision "
+                "throughout, so offload here may be SLOWER than your CPU. "
+                "Benchmark before relying on it; switch it off in the Status "
+                "tab or with QUANTUI_DISABLE_GPU=1.",
                 file=sys.stderr,
             )
-            return 1
-        try:
-            import cupy as _cupy
-
-            n = int(_cupy.cuda.runtime.getDeviceCount())
-            if n < 1:
-                print("  reason: cupy reports 0 CUDA devices", file=sys.stderr)
-            else:
-                print(
-                    "  reason: cupy/gpu4pyscf import succeeded but probe "
-                    "raised — run "
-                    '`python -c "import cupy; cupy.show_config()"` to inspect',
-                    file=sys.stderr,
-                )
-        except ImportError:
-            print("  reason: cupy not installed", file=sys.stderr)
-        except Exception as exc:
-            print(f"  reason: cupy raised: {exc}", file=sys.stderr)
+        return 0
+    # The reason comes straight from the probe, so this can never contradict
+    # what the dispatcher actually decided.
+    print("GPU offload not available", file=sys.stderr)
+    if reason:
+        print(f"  reason: {reason}", file=sys.stderr)
     return 1
 
 

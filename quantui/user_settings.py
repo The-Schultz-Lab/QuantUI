@@ -63,10 +63,23 @@ class VizSettings:
 
 
 @dataclass
+class ComputeSettings:
+    """Compute-related user preferences."""
+
+    # Whether GPU offload may engage when a CUDA device is detected. Default on
+    # — the historical behavior. Users on consumer cards (weak FP64, see
+    # gpu_offload.is_low_fp64_device) may want this off, since offload can be
+    # slower than a many-core CPU there. ``QUANTUI_DISABLE_GPU=1`` still wins
+    # over this setting.
+    gpu_enabled: bool = True
+
+
+@dataclass
 class UserSettings:
     """Root user settings container — section-based for additive growth."""
 
     viz: VizSettings = field(default_factory=VizSettings)
+    compute: ComputeSettings = field(default_factory=ComputeSettings)
 
     @classmethod
     def load(cls, path: Path | None = None) -> UserSettings:
@@ -147,13 +160,35 @@ class UserSettings:
                 viz.vib_framerate_fps,
             )
 
-        return cls(viz=viz)
+        compute_section = data.get("compute", {})
+        if not isinstance(compute_section, dict):
+            _LOG.warning(
+                "Settings 'compute' section is not an object (got %s); "
+                "using compute defaults",
+                type(compute_section).__name__,
+            )
+            compute_section = {}
+
+        compute = ComputeSettings()
+        if "gpu_enabled" in compute_section:
+            candidate_gpu = compute_section["gpu_enabled"]
+            if isinstance(candidate_gpu, bool):
+                compute.gpu_enabled = candidate_gpu
+            else:
+                _LOG.warning(
+                    "Invalid compute.gpu_enabled %r; using %r",
+                    candidate_gpu,
+                    compute.gpu_enabled,
+                )
+
+        return cls(viz=viz, compute=compute)
 
     def to_dict(self) -> dict:
         """Serialize to a dict for JSON storage with the current schema version."""
         return {
             "_schema_version": _SCHEMA_VERSION,
             "viz": asdict(self.viz),
+            "compute": asdict(self.compute),
         }
 
     def save(self, path: Path | None = None) -> None:

@@ -896,6 +896,7 @@ class QuantUIApp:
         _files_root_dd: Any
         _files_status_html: Any
         _files_up_btn: Any
+        gpu_enabled_cb: Any
         help_content_html: Any
         help_tab_panel: Any
         help_topic_dd: Any
@@ -1207,11 +1208,14 @@ class QuantUIApp:
             except Exception:  # noqa: BLE001 — warm-up is best-effort
                 pass
             try:
-                from quantui.gpu_offload import is_gpu_available
+                from quantui.gpu_offload import probe_gpu
 
-                state = is_gpu_available()
+                # probe_gpu (not is_gpu_available) so the badge can show the
+                # actual reason offload isn't active instead of a generic
+                # "not installed or no CUDA device".
+                state = probe_gpu()
             except Exception:  # noqa: BLE001 — treat any failure as "no GPU"
-                state = (False, None)
+                state = (False, None, "")
             render = getattr(self, "_render_status_html", None)
             html_widget = getattr(self, "_status_html", None)
             if render is None or html_widget is None:
@@ -1404,6 +1408,7 @@ class QuantUIApp:
             visualization_available=VISUALIZATION_AVAILABLE,
             viz_default_backend=self._user_settings.viz.default_backend,
             vib_framerate_fps=self._user_settings.viz.vib_framerate_fps,
+            gpu_enabled=self._user_settings.compute.gpu_enabled,
         )
 
     # ── Welcome header ────────────────────────────────────────────────────
@@ -1698,6 +1703,10 @@ class QuantUIApp:
         # Settings → Vibrational animation framerate (Status tab; persisted).
         self.vib_framerate_si.observe(
             self._safe_cb(self._on_vib_framerate_changed), names="value"
+        )
+        # Settings → GPU offload on/off (Status tab; persisted).
+        self.gpu_enabled_cb.observe(
+            self._safe_cb(self._on_gpu_enabled_changed), names="value"
         )
         # 3D viewer style and lighting controls
         if VISUALIZATION_AVAILABLE:
@@ -2823,6 +2832,38 @@ class QuantUIApp:
         if self._viz_sync_in_progress:
             return
         self._set_viz_preference(change["new"], persist=True)
+
+    def _on_gpu_enabled_changed(self, change) -> None:
+        """Persist the GPU-offload preference and re-probe immediately.
+
+        The detection probe is cached for the process lifetime, so flipping this
+        without clearing the cache would leave the next run using the old
+        decision — the toggle would appear to do nothing until restart.
+        """
+        new_val = bool(change["new"])
+        if new_val == self._user_settings.compute.gpu_enabled:
+            return
+        self._user_settings.compute.gpu_enabled = new_val
+        self._user_settings.save()
+        try:
+            from quantui.gpu_offload import is_gpu_available, probe_gpu
+
+            is_gpu_available.cache_clear()
+            state = probe_gpu()
+        except Exception:  # noqa: BLE001 — a probe failure must not break the UI
+            state = (False, None, "")
+        # Refresh the Status badge so it reflects the new decision right away.
+        render = getattr(self, "_render_status_html", None)
+        html_widget = getattr(self, "_status_html", None)
+        if render is not None and html_widget is not None:
+            try:
+                html_widget.value = render(state)
+            except Exception:  # noqa: BLE001 — best-effort badge refresh
+                pass
+        try:
+            _calc_log.log_event("gpu_enabled_changed", f"gpu_enabled={new_val}")
+        except OSError:
+            pass
 
     def _on_vib_framerate_changed(self, change) -> None:
         """Persist the vibrational-animation framerate and re-render the

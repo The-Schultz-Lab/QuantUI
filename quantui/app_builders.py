@@ -65,6 +65,7 @@ def build_status_panel(
     visualization_available: bool,
     viz_default_backend: str = "auto",
     vib_framerate_fps: int = 10,
+    gpu_enabled: bool = True,
 ) -> None:
     """Build the Status tab panel."""
     cores, mem_gb = get_session_resources_fn()
@@ -106,12 +107,29 @@ def build_status_panel(
     def _gpu_cell(gpu_state: Any) -> str:
         if gpu_state is None:
             return '<span style="color:#94a3b8">&#8987; checking&hellip;</span>'
-        avail, name = gpu_state
+        # Accepts the 2-tuple from is_gpu_available() or the 3-tuple from
+        # probe_gpu() — the app passes the latter so the real reason can be
+        # shown instead of a guess.
+        avail, name = gpu_state[0], gpu_state[1]
+        reason = gpu_state[2] if len(gpu_state) > 2 else ""
         if avail:
-            return _ok(True, f"&mdash; <code>{name}</code>")
-        return _ok(
-            False, "&mdash; <code>gpu4pyscf</code> not installed or no CUDA device"
-        )
+            cell = _ok(True, f"&mdash; <code>{name}</code>")
+            from quantui.gpu_offload import is_low_fp64_device
+
+            if is_low_fp64_device(name):
+                # Detected is not the same as beneficial. Consumer cards gate
+                # FP64 to ~1/32–1/64 of FP32 and PySCF SCF is FP64 throughout,
+                # so offload can be slower than the CPU. Warn in place rather
+                # than let it look like free speed.
+                cell += (
+                    '<div style="color:#b45309;font-size:11px;margin-top:2px">'
+                    "&#9888; consumer-class GPU &mdash; weak double precision; "
+                    "may run <b>slower</b> than CPU. Benchmark before relying "
+                    "on it.</div>"
+                )
+            return cell
+        detail = reason if reason else "not installed or no CUDA device"
+        return _ok(False, f'&mdash; <span style="font-size:12px">{detail}</span>')
 
     def _render_status(gpu_state: Any) -> str:
         items = [
@@ -203,12 +221,31 @@ def build_status_panel(
         "(persists across launches)</span></div>"
     )
 
+    # GPU offload toggle (persists across launches). Off is a legitimate choice
+    # on consumer cards, where FP64 offload can be slower than the CPU — see
+    # gpu_offload.is_low_fp64_device. QUANTUI_DISABLE_GPU=1 overrides this.
+    gpu_toggle_label = widgets.HTML(
+        '<div style="font-size:12px;color:#475569;margin-top:12px;'
+        'margin-bottom:0px">GPU offload '
+        '<span style="color:#94a3b8;font-size:11px">'
+        "(persists across launches; only applies when a CUDA device is "
+        "detected)</span></div>"
+    )
+    app.gpu_enabled_cb = widgets.Checkbox(
+        value=gpu_enabled,
+        description="Use GPU when available",
+        indent=False,
+        layout=layout_fn(width="320px", margin="2px 0 0 0"),
+    )
+
     settings_box = widgets.VBox(
         [
             settings_html,
             app.viz_default_backend_dd,
             vib_fps_label,
             app.vib_framerate_si,
+            gpu_toggle_label,
+            app.gpu_enabled_cb,
         ],
         layout=layout_fn(margin="0 0 8px 0"),
     )
