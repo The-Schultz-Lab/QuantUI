@@ -2335,8 +2335,20 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
     app._exit_btn = widgets.Button(
         description="Exit",
         button_style="danger",
-        tooltip="Shut down the QuantUI server and close this session",
+        tooltip="Shut down the QuantUI server and end this session",
         layout=layout_fn(width="64px", margin="0 0 0 8px"),
+    )
+    # Two-stage exit confirm: the first Exit click reveals this warning + the
+    # Cancel button and re-labels Exit to "Confirm shutdown"; only a second
+    # click shuts down. Prevents a single stray click from tearing down a
+    # cluster/Voilà session — on NCShare the server process IS the interactive
+    # job. Both start hidden; ``app_runflow._arm_exit`` shows them.
+    app._exit_warn_html = widgets.HTML(value="", layout=layout_fn(display="none"))
+    app._exit_cancel_btn = widgets.Button(
+        description="Cancel",
+        button_style="",
+        tooltip="Keep the session running",
+        layout=layout_fn(width="72px", margin="0 0 0 8px", display="none"),
     )
     app._exit_output = widgets.Output(layout=layout_fn(height="0px", overflow="hidden"))
 
