@@ -815,15 +815,20 @@ def build_shared_widgets(
             overflow="hidden",
         )
     )
+    # Keep/Revert live in their own box so the preview handler can hide them
+    # independently of the status line. When the relaxation moves the geometry
+    # negligibly there is nothing to keep or revert, and offering the choice is
+    # just confusing — see app_runflow._preopt_preview_done.
+    app._preopt_actions_box = widgets.HBox(
+        [app.preopt_accept_btn, app.preopt_reset_btn],
+        layout=layout_fn(gap="8px", margin="6px 0 0"),
+    )
     # Whole preview block hidden until the user clicks Preview.
     app.preopt_preview_box = widgets.VBox(
         [
             app.preopt_preview_status,
             app.preopt_preview_output,
-            widgets.HBox(
-                [app.preopt_accept_btn, app.preopt_reset_btn],
-                layout=layout_fn(gap="8px", margin="6px 0 0"),
-            ),
+            app._preopt_actions_box,
         ],
         layout=layout_fn(display="none", margin="6px 0 4px", max_width="480px"),
     )
@@ -887,6 +892,28 @@ def build_shared_widgets(
         style={"description_width": "100px"},
         layout=layout_fn(width="180px"),
     )
+
+    # Geometry Opt seed: start a run from a previously optimised geometry —
+    # the standard "optimise cheaply, then refine at a higher level of theory"
+    # workflow. Same filtered-dropdown pattern as the Frequency / UV-Vis seeds
+    # below; the shared `_refresh_seed_options` helper populates all three.
+    app._geo_seed_dd = widgets.Dropdown(
+        options=[("(use current molecule)", "")],
+        description="Seed geometry:",
+        style={"description_width": "110px"},
+        layout=layout_fn(width="auto", flex="1 1 auto", min_width="260px"),
+        tooltip=(
+            "Optionally start from the final geometry of a previous Geo Opt "
+            "result — e.g. optimise at a low level of theory, then refine here"
+        ),
+    )
+    app._geo_seed_refresh_btn = widgets.Button(
+        description="",
+        icon="refresh",
+        layout=layout_fn(width="32px", height="32px"),
+        tooltip="Refresh the list of saved geometry optimisations",
+    )
+    app._geo_seed_note = widgets.HTML("")
 
     app._freq_seed_dd = widgets.Dropdown(
         options=[("(use current molecule)", "")],

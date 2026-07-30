@@ -149,11 +149,17 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
         app._freq_preopt_cb.layout.display = ""
 
     if ct == "Geometry Opt":
+        app._refresh_geo_seed_options()
         app.calc_extra_opts.children = [
             widgets.HBox(
                 [app.fmax_fi, app.max_steps_si],
                 layout=layout_fn(gap="8px"),
             ),
+            widgets.HBox(
+                [app._geo_seed_dd, app._geo_seed_refresh_btn],
+                layout=layout_fn(align_items="center", gap="6px", width="100%"),
+            ),
+            app._geo_seed_note,
         ]
     elif ct == "Frequency":
         app._refresh_freq_seed_options()
@@ -411,6 +417,30 @@ def _refresh_seed_options(app: Any, dropdown: Any) -> None:
     dropdown.options = options
 
 
+def refresh_geo_seed_options(app: Any) -> None:
+    """Populate the Geometry Opt seed dropdown with saved optimisations."""
+    _refresh_seed_options(app, app._geo_seed_dd)
+
+
+def on_geo_seed_changed(app: Any, change: Any) -> None:
+    """Update the Geometry Opt seed note.
+
+    Unlike the Frequency / UV-Vis handlers this does **not** touch
+    ``_freq_preopt_cb``: that checkbox means "optimise before the real
+    calculation", which is meaningless here — the optimisation *is* the
+    calculation. A seed only changes the starting point.
+    """
+    if change["new"]:
+        app._geo_seed_note.value = (
+            '<span style="font-size:12px;color:#16a34a">'
+            "✓ Optimisation will start from the selected result's final "
+            "geometry instead of the current molecule."
+            "</span>"
+        )
+    else:
+        app._geo_seed_note.value = ""
+
+
 def refresh_freq_seed_options(app: Any) -> None:
     """Populate frequency seed dropdown with saved geometry optimisations."""
     _refresh_seed_options(app, app._freq_seed_dd)
@@ -480,6 +510,22 @@ def _preopt_small(text: str, color: str = "#555") -> str:
     return f'<small style="color:{color}">{text}</small>'
 
 
+# RMS atomic displacement (Å) below which a pre-optimization is treated as
+# having changed nothing, so the animation pane and the Keep/Revert buttons are
+# suppressed entirely.
+#
+# Rationale for the value: typical bond lengths are ~1.0-1.5 Å, so a 0.05 Å RMS
+# displacement is a few percent — invisible at viewer scale, and animating it
+# shows a molecule that appears to sit still. Deliberately conservative: it is
+# far better to show a real-but-small change than to hide one, so this is set
+# well below the ~0.1 Å where motion actually becomes perceptible.
+#
+# Note this is a much coarser test than the 1e-3 Å the status text used to use
+# to pick its wording — that threshold only distinguished "mathematically zero"
+# from "nonzero", which is not the question a user is asking.
+_PREOPT_NEGLIGIBLE_RMSD_A = 0.05
+
+
 def on_preopt_preview(app: Any, btn: Any = None) -> None:
     """Run the classical pre-opt on demand and animate the relaxation in-place.
 
@@ -522,11 +568,45 @@ def _preopt_preview_worker(app: Any, mol: Any) -> None:
 
 
 def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> None:
-    """Main thread: animate the relaxation + reveal Keep/Revert."""
+    """Main thread: animate the relaxation + reveal Keep/Revert.
+
+    When the relaxation barely moved the geometry, the animation and the
+    Keep/Revert pair are **suppressed** — see ``_PREOPT_NEGLIGIBLE_RMSD_A``.
+    """
     from quantui.app_visualization import build_preopt_preview_html
 
-    app._preopt_relaxed_mol = relaxed
     app.preopt_preview_box.layout.display = ""  # ensure visible when results land
+    app.preopt_preview_btn.disabled = False
+
+    if rmsd <= _PREOPT_NEGLIGIBLE_RMSD_A:
+        # Nothing meaningful to show or decide. An animation of a geometry that
+        # does not visibly move, plus a Keep/Revert choice between two
+        # effectively identical structures, reads as "something happened, and
+        # you must now judge it" — when the honest answer is "your geometry was
+        # already fine". Report the number and stop.
+        app._preopt_relaxed_mol = None
+        app.preopt_preview_output.clear_output()
+        app.preopt_preview_output.layout.display = "none"
+        app._preopt_actions_box.layout.display = "none"
+        app.preopt_accept_btn.disabled = True
+        app.preopt_reset_btn.disabled = True
+        app.preopt_preview_status.value = _preopt_small(
+            "Pre-optimization (MMFF94/UFF) found <b>no meaningful change</b> — "
+            f"RMSD {rmsd:.3f} Å. Your geometry is already reasonable, so there "
+            "is nothing to keep or revert; the calculation will use it as-is.",
+            "#444",
+        )
+        try:
+            app._activity_end(kind="ui")
+        except Exception:
+            pass
+        return
+
+    # Meaningful change: restore the panes (a previous preview may have hidden
+    # them) and show the comparison.
+    app._preopt_relaxed_mol = relaxed
+    app.preopt_preview_output.layout.display = ""
+    app._preopt_actions_box.layout.display = ""
     try:
         bg = app._plotly_theme_colors()["scene_bgcolor"]
     except Exception:
@@ -539,16 +619,12 @@ def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> No
         with app.preopt_preview_output:
             display(HTML(_preopt_small(f"Preview render failed: {exc}", "#b91c1c")))
 
-    if rmsd > 1e-3:
-        note = f"moved <b>{rmsd:.3f} Å</b> (RMSD) from your input"
-    else:
-        note = "barely changed — your geometry was already reasonable"
     app.preopt_preview_status.value = _preopt_small(
-        f"Relaxed (MMFF94/UFF): {note}. Use ⇄ or the slider below to compare "
-        "input vs relaxed, then Keep it or revert.",
+        f"Relaxed (MMFF94/UFF): moved <b>{rmsd:.3f} Å</b> (RMSD) from your "
+        "input. Use ⇄ or the slider below to compare input vs relaxed, then "
+        "Keep it or revert.",
         "#444",
     )
-    app.preopt_preview_btn.disabled = False
     app.preopt_accept_btn.disabled = False
     app.preopt_reset_btn.disabled = False
     try:

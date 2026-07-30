@@ -255,6 +255,9 @@ from quantui.app_runflow import (
     on_freq_seed_changed as _run_on_freq_seed_changed,
 )
 from quantui.app_runflow import (
+    on_geo_seed_changed as _run_on_geo_seed_changed,
+)
+from quantui.app_runflow import (
     on_help_toggle as _run_on_help_toggle,
 )
 from quantui.app_runflow import (
@@ -307,6 +310,9 @@ from quantui.app_runflow import (
 )
 from quantui.app_runflow import (
     refresh_freq_seed_options as _run_refresh_freq_seed_options,
+)
+from quantui.app_runflow import (
+    refresh_geo_seed_options as _run_refresh_geo_seed_options,
 )
 from quantui.app_runflow import (
     refresh_results_browser as _run_refresh_results_browser,
@@ -694,6 +700,25 @@ _RE_CYCLE = re.compile(
 _RE_CONV = re.compile(r"converged SCF energy\s*=\s*([\-\d\.]+)")
 _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
 
+# ── Silent-phase heartbeat (M-PROGRESS Phase D) ──────────────────────────────
+#
+# Seconds of stream silence before the log says it is still alive.
+#
+# Sized from a real measurement, not a guess: a user timed an aspirin
+# (21 atoms) B3LYP/6-31G* UV-Vis run and the log printed **nothing for 120 s**
+# after "converged SCF energy" while the TD-DFT solve ran. The status label was
+# advancing the whole time — Phase A covers that — but the log, which is what a
+# user actually watches, looked frozen.
+#
+# 25 s yields ~4 lines across that gap: enough to prove liveness, few enough not
+# to bloat the archived pyscf.log. Gaps grow steeply with system size, and
+# aspirin is a *small* case, so err on the short side.
+_HEARTBEAT_AFTER_S = 25.0
+
+# How often the watchdog wakes to check. Well under _HEARTBEAT_AFTER_S so a beat
+# lands close to its due time, but coarse enough to be free.
+_HEARTBEAT_POLL_S = 2.0
+
 
 # ══ LOG CAPTURE ══════════════════════════════════════════════════════════════
 
@@ -729,6 +754,70 @@ class _LogCapture:
         # Completion fraction (0..1) reported by calc modules via
         # log_utils.emit_progress; read by the elapsed ticker. None = unknown.
         self._fraction: Optional[float] = None
+        # Silent-phase heartbeat (M-PROGRESS Phase D). Long kernels — the TD-DFT
+        # excited-state solve most of all — print nothing for minutes, so the
+        # log looks hung even though the status label is advancing. A watchdog
+        # appends a "still working" line when the stream has gone quiet.
+        self._last_write_t = time.monotonic()
+        self._hb_started_t = self._last_write_t
+        self._hb_stop = threading.Event()
+        self._hb_thread: Optional[threading.Thread] = None
+
+    # ── Silent-phase heartbeat ──────────────────────────────────────────────
+
+    def start_heartbeat(self) -> None:
+        """Begin watching for silent stretches. Idempotent."""
+        if self._hb_thread is not None:
+            return
+        self._last_write_t = time.monotonic()
+        self._hb_started_t = self._last_write_t
+        self._hb_thread = threading.Thread(
+            target=self._heartbeat_loop, daemon=True, name="quantui-log-heartbeat"
+        )
+        self._hb_thread.start()
+
+    def stop_heartbeat(self) -> None:
+        """Stop the watchdog. Safe to call more than once, or if never started."""
+        self._hb_stop.set()
+        self._hb_thread = None
+
+    def _heartbeat_loop(self) -> None:
+        """Append a liveness line whenever the stream has been quiet too long.
+
+        Deliberately writes **directly** to the widget and buffer rather than
+        going through :meth:`write`: that path checks cancellation (which would
+        raise ``_CalcCancelled`` on this thread, where nothing can catch it) and
+        would also reset the very timer being measured.
+        """
+        while not self._hb_stop.wait(_HEARTBEAT_POLL_S):
+            quiet_for = time.monotonic() - self._last_write_t
+            if quiet_for < _HEARTBEAT_AFTER_S:
+                continue
+            stage = ""
+            if self._status is not None:
+                try:
+                    stage = str(self._status.value).strip()
+                except Exception:  # noqa: BLE001 — a label read must not kill it
+                    stage = ""
+            from quantui.log_utils import format_elapsed
+
+            elapsed = time.monotonic() - self._hb_started_t
+            line = "   … still working"
+            if stage:
+                line += f" — {stage}"
+            line += f"  ·  {format_elapsed(elapsed)} elapsed\n"
+            try:
+                # Widget only — deliberately NOT self._buf. The buffer becomes
+                # the result directory's pyscf.log, which should stay a faithful
+                # record of what PySCF emitted. Heartbeats are UI chrome for the
+                # live view; padding the archived log with them would make a
+                # long silent run look chatty after the fact.
+                self._w.append_stdout(line)
+            except Exception:  # noqa: BLE001 — never let the log kill a run
+                pass
+            # Reset so the next beat is measured from this line, giving evenly
+            # spaced heartbeats instead of one per poll once the gap is open.
+            self._last_write_t = time.monotonic()
 
     def write(self, text: str) -> None:
         if not text:
@@ -737,6 +826,9 @@ class _LogCapture:
         # opt step), so raising here stops it at the next line. See _CalcCancelled.
         if self._cancel_check is not None and self._cancel_check():
             raise _CalcCancelled()
+        # Any real output resets the silence timer, so a heartbeat only ever
+        # appears in a genuinely quiet stretch.
+        self._last_write_t = time.monotonic()
         self._w.append_stdout(text)
         self._buf.write(text)
         self._line_buf += text
@@ -971,6 +1063,8 @@ class QuantUIApp:
         xyz_btn: Any
         xyz_msg: Any
         _freq_preopt_cb: Any
+        _geo_seed_dd: Any
+        _geo_seed_note: Any
         _freq_seed_dd: Any
         _freq_seed_note: Any
         _freq_seed_refresh_btn: Any
@@ -1760,11 +1854,17 @@ class QuantUIApp:
         self._freq_seed_dd.observe(
             self._safe_cb(self._on_freq_seed_changed), names="value"
         )
+        self._geo_seed_dd.observe(
+            self._safe_cb(self._on_geo_seed_changed), names="value"
+        )
         self._tddft_seed_dd.observe(
             self._safe_cb(self._on_tddft_seed_changed), names="value"
         )
         self._scan_type_dd.observe(
             self._safe_cb(self._update_scan_widgets), names="value"
+        )
+        self._geo_seed_refresh_btn.on_click(
+            lambda _btn: self._refresh_geo_seed_options()
         )
         self._freq_seed_refresh_btn.on_click(
             lambda _btn: self._refresh_freq_seed_options()
@@ -3142,6 +3242,12 @@ class QuantUIApp:
     def _update_scan_widgets(self, _change=None) -> None:
         _run_update_scan_widgets(self, _change)
 
+    def _refresh_geo_seed_options(self) -> None:
+        _run_refresh_geo_seed_options(self)
+
+    def _on_geo_seed_changed(self, change) -> None:
+        _run_on_geo_seed_changed(self, change)
+
     def _refresh_freq_seed_options(self) -> None:
         _run_refresh_freq_seed_options(self)
 
@@ -4285,6 +4391,10 @@ class QuantUIApp:
         # Expose this run's log to the elapsed ticker so it can read the
         # completion fraction calc modules report via emit_progress.
         self._active_log = log
+        # Watch for silent stretches (M-PROGRESS Phase D). Stopped in the
+        # `finally` alongside the elapsed ticker, so it cannot outlive the run
+        # and keep writing into a finished log.
+        log.start_heartbeat()
 
         # The run header (structured banner) is written synchronously + atomically
         # on the main thread by ``on_run_clicked`` → ``_write_run_header`` BEFORE
@@ -4367,6 +4477,25 @@ class QuantUIApp:
                     )
 
             if ct == "Geometry Opt":
+                # Optional seed: start from a previously optimised geometry
+                # rather than the current molecule — the "optimise cheaply,
+                # then refine at a higher level of theory" workflow. Mirrors
+                # the Frequency / UV-Vis seed handling below.
+                _geo_seed_path = self._geo_seed_dd.value
+                if _geo_seed_path:
+                    from quantui.results_storage import load_trajectory
+
+                    self.run_status.value = "Loading seed geometry from history…"
+                    _geo_seed_traj, _ = load_trajectory(Path(_geo_seed_path))
+                    calc_mol = _geo_seed_traj[-1]
+                    log.write(
+                        f"\nSeed geometry loaded from: "
+                        f"{Path(_geo_seed_path).name}\n"
+                        f"  Formula: {calc_mol.get_formula()}  "
+                        f"Atoms: {len(calc_mol.atoms)}\n"
+                        "  Optimization starts from this geometry.\n\n"
+                    )
+
                 self.run_status.value = "Optimizing geometry..."
                 from quantui import optimize_geometry
 
@@ -5150,6 +5279,10 @@ class QuantUIApp:
             self.cancel_btn.description = "Cancel"
             self.log_clear_btn.disabled = False
             self._stop_elapsed_ticker()
+            try:
+                log.stop_heartbeat()
+            except Exception:  # noqa: BLE001 — teardown must not mask a failure
+                pass
             self._activity_end(kind="compute")
 
     # ── Live elapsed ticker ────────────────────────────────────────────────
