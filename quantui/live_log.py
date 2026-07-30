@@ -107,7 +107,7 @@ def _bridge_js(log_cls: str, mail_cls: str) -> str:
     """
     return """
 (function(){
-  var LOG = %(log)s, MAIL = %(mail)s;
+  var LOG = "__LOG_CLS__", MAIL = "__MAIL_CLS__";
   var lastSeq = 0, observed = null;
 
   function apply(node){
@@ -178,7 +178,7 @@ def _bridge_js(log_cls: str, mail_cls: str) -> str:
     if (!observed || !document.contains(observed)) { attach(); }
   }, 2000);
 })();
-""" % {"log": '"%s"' % log_cls, "mail": '"%s"' % mail_cls}
+""".replace("__LOG_CLS__", log_cls).replace("__MAIL_CLS__", mail_cls)
 
 
 class LiveLog(widgets.VBox):
