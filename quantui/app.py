@@ -592,6 +592,22 @@ h1 {
     border-bottom: none !important;
 }
 
+/* Live calculation log — must stay fixed-width --------------------------- */
+/* The system-font rule above lists ``.jp-OutputArea-output``, which is exactly
+   the element the streaming calc log renders into — so the log inherited a
+   PROPORTIONAL font. Two things in the header depend on fixed-width cells and
+   both broke together: the ASCII wordmark (letters slid into each other) and
+   the padded ``Label           : value`` provenance rows (colons drifted out of
+   line even though the padding is correct). Re-assert monospace for the log
+   only. Two classes out-specifies the single-class rule above, and
+   ``!important`` is required to beat its ``!important``. */
+.quantui-run-output .jp-OutputArea-output,
+.quantui-run-output pre {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+                 "Liberation Mono", "Courier New", monospace !important;
+    font-variant-ligatures: none !important;  /* no ligatures in ASCII art */
+}
+
 /* Section headers ------------------------------------------------------- */
 h3 {
     font-size: 11px !important;
