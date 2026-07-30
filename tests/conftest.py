@@ -31,6 +31,34 @@ def _isolate_results_dir():
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _isolate_user_settings():
+    """Point ``QUANTUI_SETTINGS_PATH`` at a temp file for the whole suite.
+
+    Without this the suite reads the developer's real ``~/.quantui/settings.json``
+    and results depend on how they last left the app. That is not hypothetical:
+    on 2026-07-30 a live GPU.8 verification left ``compute.gpu_enabled = false``
+    on disk, and two `quantui gpu check` tests began failing — the probe
+    short-circuited at the settings gate and never reached the import branch they
+    were asserting on. The tests were correct; their environment was not.
+
+    Every setting is in scope, not just the GPU one: ``viz.default_backend`` and
+    ``vib_framerate_fps`` equally feed app construction. Individual tests that
+    need specific settings still monkeypatch the same variable per-test, which
+    takes precedence over this session default.
+
+    Same rationale as ``_isolate_results_dir`` above, and reflections/10 Rule 6.
+    """
+    prev = os.environ.get("QUANTUI_SETTINGS_PATH")
+    with tempfile.TemporaryDirectory(prefix="quantui_test_settings_") as tmp:
+        os.environ["QUANTUI_SETTINGS_PATH"] = os.path.join(tmp, "settings.json")
+        yield
+        if prev is None:
+            os.environ.pop("QUANTUI_SETTINGS_PATH", None)
+        else:
+            os.environ["QUANTUI_SETTINGS_PATH"] = prev
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _suppress_plotly_browser():
     """Prevent plotly from opening browser tabs during tests.
 

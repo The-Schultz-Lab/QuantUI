@@ -82,8 +82,7 @@ def uhf_mo_data(tmp_path):
 @pytest.fixture()
 def minimal_cube_file(tmp_path):
     """Write a trivially small cube file (1 atom, 2x2x2 grid)."""
-    content = textwrap.dedent(
-        """\
+    content = textwrap.dedent("""\
         Comment line 1
         Comment line 2
          1  0.000000  0.000000  0.000000
@@ -93,8 +92,7 @@ def minimal_cube_file(tmp_path):
          1  0.000000  0.000000  0.000000  0.000000
          0.1  0.2  0.3  0.4
          0.5  0.6  0.7  0.8
-    """
-    )
+    """)
     p = tmp_path / "test.cube"
     p.write_text(content)
     return p

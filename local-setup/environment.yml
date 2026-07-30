@@ -42,9 +42,12 @@ dependencies:
       - voila>=0.5.0
       # Notebook smoke testing
       - nbmake>=1.4.0
-      # Code formatting and linting (not on conda-forge)
-      - black>=24.0.0
-      - ruff>=0.4.0
+      # Code formatting and linting (not on conda-forge). Pinned to a compatible
+      # range so a fresh env matches the revs CI enforces in
+      # .pre-commit-config.yaml — open floors let these drift ahead of CI, which
+      # makes a bare `ruff check` report rules CI never sees (M-CLEAN CLEAN.2).
+      - black~=26.5.1
+      - ruff~=0.16.0
       # Install QuantUI in editable mode
       # On Linux/WSL also run: conda install -c conda-forge pyscf
       # (pyscf-properties is pip-only; installed here automatically)

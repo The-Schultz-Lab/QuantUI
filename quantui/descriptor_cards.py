@@ -174,4 +174,13 @@ def basis_card_html(basis: str) -> str:
     fg, bg, icon = _BASIS_FAMILY_STYLE[fam]
     fam_label, body = _BASIS_COPY[fam]
     title = f"{basis} · {fam_label}"
+    # Starred Pople sets have an equivalent parenthesis spelling that textbooks
+    # use interchangeably (6-31G* == 6-31G(d)). Show it so the dropdown entry is
+    # recognisable to someone who only knows the other form. Deliberately ONE
+    # short line: these cards exist because the previous inline notes were "a lot
+    # of word clutter" (FR-DESCRIPTOR-CARDS), so the full notation table lives in
+    # the basis-set help topic instead.
+    alias = config.pople_notation_alias(basis)
+    if alias:
+        body += f' <span style="color:#64748b">Also written <b>{alias}</b>.</span>'
     return _card_html(fg=fg, bg=bg, icon=icon, title=title, body=body)

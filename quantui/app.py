@@ -592,6 +592,27 @@ h1 {
     border-bottom: none !important;
 }
 
+/* Live calculation log — must stay fixed-width --------------------------- */
+/* The system-font rule above lists ``.jp-OutputArea-output``, which is exactly
+   the element the streaming calc log renders into — so the log inherited a
+   PROPORTIONAL font. Two things in the header depend on fixed-width cells and
+   both broke together: the ASCII wordmark (letters slid into each other) and
+   the padded ``Label           : value`` provenance rows (colons drifted out of
+   line even though the padding is correct). Re-assert monospace for the log
+   only. Two classes out-specifies the single-class rule above, and
+   ``!important`` is required to beat its ``!important``. */
+/* The first two selectors cover the historical widgets.Output rendering; the
+   [class*=] selector covers the LiveLog container (M-LOGSCROLL route C), whose
+   class carries a per-app uid suffix. LiveLog also sets the stack inline — this
+   is belt-and-braces, since a directly-applied rule beats an inherited one. */
+.quantui-run-output .jp-OutputArea-output,
+.quantui-run-output pre,
+[class*="quantui-live-log"] {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+                 "Liberation Mono", "Courier New", monospace !important;
+    font-variant-ligatures: none !important;  /* no ligatures in ASCII art */
+}
+
 /* Section headers ------------------------------------------------------- */
 h3 {
     font-size: 11px !important;
@@ -3495,7 +3516,7 @@ class QuantUIApp:
         # Best-effort clipboard copy via the browser's clipboard API.
         # Wrapped in try/catch on the JS side so a permissions error
         # doesn't show up as a Voilà console exception.
-        from IPython.display import Javascript, display
+        from IPython.display import display
 
         try:
             js_payload = _json.dumps(csv_text)
@@ -3897,57 +3918,20 @@ class QuantUIApp:
         callback(*args, **kwargs)
 
     def _install_run_output_scroll_guard(self) -> None:
-        """Install a JS guard that keeps the live calc log scrolled to the bottom.
+        """No-op: superseded by :class:`quantui.live_log.LiveLog` (M-LOGSCROLL).
 
-        Re-queries the run-output element each animation frame (ipywidgets can
-        replace the node) and pins it to the bottom while output is streaming.
-        Pinning on ``requestAnimationFrame`` runs after ipywidgets' per-line
-        ``scrollTop = 0`` reset but before paint, so the log follows without
-        flicker; pinning stops once the log is idle so a finished log can be
-        scrolled freely.
+        This used to inject a ``requestAnimationFrame`` loop that re-pinned the
+        live log to the bottom every frame, to out-race ipywidgets' per-line
+        ``scrollTop = 0`` reset. That made the log follow output, but at the cost
+        of making it impossible to scroll up during a run — the reported bug.
+
+        Route C removed the reset instead of racing it: the log is now a
+        QuantUI-owned container that is appended to rather than re-rendered, so
+        native ``overflow-anchor`` preserves the user's scroll position and no
+        per-frame pinning is needed. Kept as a no-op because ``display()`` calls
+        it unconditionally; delete once nothing references it.
         """
-        if self._run_output_scroll_guard_installed:
-            return
-
-        js_code = r"""
-(() => {
-    // Keep the live calc log pinned to the bottom while output streams.
-    //
-    // ipywidgets resets scrollTop to 0 on each appended line and may replace the
-    // Output node, so: re-query ".quantui-run-output" every animation frame and,
-    // while it is still growing, pin it to the bottom. Pinning on rAF runs after
-    // the per-line reset but before paint (no flicker); re-querying each frame
-    // avoids binding to a stale node. Idle logs (no growth for ~600ms) are left
-    // alone so they can be scrolled freely.
-    const ROOT_CLASS = "quantui-run-output";
-    let lastScrollHeight = -1;
-    let lastChangeTs = 0;
-
-    function frame(ts) {
-        const el = document.querySelector("." + ROOT_CLASS);
-        if (el) {
-            el.style.overflowAnchor = "none";
-            if (el.scrollHeight !== lastScrollHeight) {
-                lastScrollHeight = el.scrollHeight;
-                lastChangeTs = ts;
-            }
-            if (ts - lastChangeTs < 600) {
-                el.scrollTop = el.scrollHeight;
-            }
-        }
-        requestAnimationFrame(frame);
-    }
-    requestAnimationFrame(frame);
-})();
-"""
-
-        try:
-            with self._exit_output:
-                display(Javascript(js_code))
-            self._run_output_scroll_guard_installed = True
-        except Exception:
-            # Non-notebook contexts may not support JS display; fail silently.
-            self._run_output_scroll_guard_installed = False
+        self._run_output_scroll_guard_installed = True
 
     def _set_molecule_state_only(self, mol) -> None:
         """Apply only thread-safe molecule state updates."""

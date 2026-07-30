@@ -12,6 +12,7 @@ from IPython.display import HTML, display
 import quantui
 from quantui import molecule_library as _ml
 from quantui.help_content import HELP_TOPICS
+from quantui.live_log import LiveLog
 
 # Friendlier labels for the library category filter.
 _CATEGORY_LABELS = {
@@ -646,23 +647,20 @@ def build_shared_widgets(
     # scrollbar that resets to the top on every backend/palette swap.
     app.viz_output = widgets.Output(layout=layout_fn(height="510px", overflow="hidden"))
     app.viz_output.add_class("quantui-viewer-frame")
-    app.run_output = widgets.Output(
-        layout=layout_fn(
-            border="1px solid #c0ccd8",
-            height="300px",
-            padding="8px",
-            overflow_y="auto",
-        )
-    )
+    # Live calc log — a QuantUI-owned scroll container, not a widgets.Output
+    # (M-LOGSCROLL route C). An Output rebuilds its DOM subtree and resets
+    # scrollTop on every appended line, which made it impossible to scroll up
+    # during a run; LiveLog appends text nodes to a node that is never
+    # re-rendered, so native overflow-anchor holds the user's position. It
+    # exposes the same append_stdout / clear_output / .outputs surface the app
+    # already used, so the write paths are unchanged. Border, height, padding
+    # and the monospace stack live in LiveLog's own container style.
+    # No marshaller needed: LiveLog ships text over a traitlet, which is
+    # thread-safe and independent of message parentage. (An earlier revision
+    # pushed display(Javascript(...)) per chunk and silently dropped every
+    # streaming line — see the module docstring.)
+    app.run_output = LiveLog(uid=str(id(app)), layout=layout_fn(margin="0"))
     app.run_output.add_class("quantui-run-output")
-    with app.run_output:
-        display(
-            HTML(
-                '<p style="color:#999;font-style:italic;font-size:13px;margin:2px 0">'
-                "No calculation run yet. PySCF output and any errors will appear here."
-                "</p>"
-            )
-        )
     app.result_output = widgets.Output()
     app.result_viz_output = widgets.Output()
     app.result_viz_output.add_class("quantui-viewer-frame")

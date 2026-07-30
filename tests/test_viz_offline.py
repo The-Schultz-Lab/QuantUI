@@ -81,9 +81,7 @@ def test_orbital_isosurface_renderer_is_cdn_free(tmp_path):
     from quantui import orbital_visualization as ov
 
     cube = tmp_path / "homo.cube"
-    cube.write_text(
-        textwrap.dedent(
-            """\
+    cube.write_text(textwrap.dedent("""\
             Comment line 1
             Comment line 2
              1  0.000000  0.000000  0.000000
@@ -93,9 +91,7 @@ def test_orbital_isosurface_renderer_is_cdn_free(tmp_path):
              1  0.000000  0.000000  0.000000  0.000000
              0.1  0.2  0.3  0.4
              0.5  0.6  0.7  0.8
-            """
-        )
-    )
+            """))
     html = ov.render_orbital_isosurface_py3dmol(cube, isovalue=0.02)
     assert _CDN not in html
     # Two lobes (M-ORBVIZ contract) + loads vendored 3Dmol offline.
