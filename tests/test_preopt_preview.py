@@ -246,6 +246,69 @@ class TestPreviewHandlers:
         assert app.preopt_reset_btn.disabled is False
         assert "0.123" in app.preopt_preview_status.value
 
+    def test_negligible_change_suppresses_animation_and_buttons(self, app):
+        # User report: a preview that shows a molecule sitting still, plus a
+        # Keep/Revert choice between two effectively identical geometries, reads
+        # as "something happened, now judge it" when the honest answer is "your
+        # geometry was already fine".
+        from quantui.app_runflow import _PREOPT_NEGLIGIBLE_RMSD_A, _preopt_preview_done
+
+        relaxed = _water()
+        frames = [[[0, 0, 0], [0.96, 0, 0], [-0.24, 0.93, 0]]]
+        _preopt_preview_done(app, relaxed, _PREOPT_NEGLIGIBLE_RMSD_A / 2, frames)
+
+        assert app.preopt_preview_output.layout.display == "none"
+        assert app._preopt_actions_box.layout.display == "none"
+        assert app.preopt_accept_btn.disabled is True
+        assert app.preopt_reset_btn.disabled is True
+        # Nothing to accept, so Keep must not be armed even if it were clicked.
+        assert app._preopt_relaxed_mol is None
+
+    def test_negligible_change_still_explains_itself(self, app):
+        from quantui.app_runflow import _preopt_preview_done
+
+        _preopt_preview_done(app, _water(), 0.004, [[[0, 0, 0]]])
+
+        status = app.preopt_preview_status.value.lower()
+        assert app.preopt_preview_box.layout.display == ""  # message is visible
+        assert "no meaningful change" in status
+        assert "0.004" in app.preopt_preview_status.value  # the actual number
+        assert "as-is" in status  # says what will happen next
+
+    def test_threshold_boundary_suppresses(self, app):
+        # Exactly at the threshold counts as negligible (<=), so the boundary
+        # cannot produce a preview of an imperceptible motion.
+        from quantui.app_runflow import _PREOPT_NEGLIGIBLE_RMSD_A, _preopt_preview_done
+
+        _preopt_preview_done(app, _water(), _PREOPT_NEGLIGIBLE_RMSD_A, [[[0, 0, 0]]])
+        assert app._preopt_actions_box.layout.display == "none"
+
+    def test_just_above_threshold_shows_the_preview(self, app):
+        pytest.importorskip("py3Dmol")
+        from quantui.app_runflow import _PREOPT_NEGLIGIBLE_RMSD_A, _preopt_preview_done
+
+        relaxed = _water()
+        frames = [[[0, 0, 0], [0.96, 0, 0], [-0.24, 0.93, 0]]]
+        _preopt_preview_done(app, relaxed, _PREOPT_NEGLIGIBLE_RMSD_A + 0.01, frames)
+
+        assert app._preopt_actions_box.layout.display == ""
+        assert app.preopt_accept_btn.disabled is False
+        assert app._preopt_relaxed_mol is relaxed
+
+    def test_meaningful_preview_restores_panes_hidden_by_a_prior_run(self, app):
+        # A negligible preview hides the panes; the next meaningful one must put
+        # them back, or Keep/Revert would be permanently invisible.
+        pytest.importorskip("py3Dmol")
+        from quantui.app_runflow import _preopt_preview_done
+
+        _preopt_preview_done(app, _water(), 0.001, [[[0, 0, 0]]])
+        assert app._preopt_actions_box.layout.display == "none"
+
+        frames = [[[0, 0, 0], [0.96, 0, 0], [-0.24, 0.93, 0]]]
+        _preopt_preview_done(app, _water(), 0.4, frames)
+        assert app._preopt_actions_box.layout.display == ""
+        assert app.preopt_preview_output.layout.display == ""
+
     def test_accept_sets_molecule_and_hides_preview(self, app):
         # Pre-opt is Preview-only: Keep makes the relaxed geometry the active
         # molecule (which the run then uses as-is). There is no checkbox.

@@ -815,15 +815,20 @@ def build_shared_widgets(
             overflow="hidden",
         )
     )
+    # Keep/Revert live in their own box so the preview handler can hide them
+    # independently of the status line. When the relaxation moves the geometry
+    # negligibly there is nothing to keep or revert, and offering the choice is
+    # just confusing — see app_runflow._preopt_preview_done.
+    app._preopt_actions_box = widgets.HBox(
+        [app.preopt_accept_btn, app.preopt_reset_btn],
+        layout=layout_fn(gap="8px", margin="6px 0 0"),
+    )
     # Whole preview block hidden until the user clicks Preview.
     app.preopt_preview_box = widgets.VBox(
         [
             app.preopt_preview_status,
             app.preopt_preview_output,
-            widgets.HBox(
-                [app.preopt_accept_btn, app.preopt_reset_btn],
-                layout=layout_fn(gap="8px", margin="6px 0 0"),
-            ),
+            app._preopt_actions_box,
         ],
         layout=layout_fn(display="none", margin="6px 0 4px", max_width="480px"),
     )
