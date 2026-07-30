@@ -655,15 +655,11 @@ def build_shared_widgets(
     # exposes the same append_stdout / clear_output / .outputs surface the app
     # already used, so the write paths are unchanged. Border, height, padding
     # and the monospace stack live in LiveLog's own container style.
-    # ``schedule`` is load-bearing, not an optimisation: streaming appends come
-    # from the calc's background thread, and the JS channel only reaches the
-    # frontend when emitted on the kernel thread (Output captures by parent
-    # message id, which a worker thread does not have).
-    app.run_output = LiveLog(
-        uid=str(id(app)),
-        schedule=app._queue_main_thread_callback,
-        layout=layout_fn(margin="0"),
-    )
+    # No marshaller needed: LiveLog ships text over a traitlet, which is
+    # thread-safe and independent of message parentage. (An earlier revision
+    # pushed display(Javascript(...)) per chunk and silently dropped every
+    # streaming line — see the module docstring.)
+    app.run_output = LiveLog(uid=str(id(app)), layout=layout_fn(margin="0"))
     app.run_output.add_class("quantui-run-output")
     app.result_output = widgets.Output()
     app.result_viz_output = widgets.Output()

@@ -5,51 +5,67 @@ Why this exists
 The Calculate-tab log used to be a plain ``widgets.Output``. ipywidgets rebuilds
 that widget's DOM subtree on every appended line and resets ``scrollTop`` to 0,
 so scrolling up during a run was impossible — the view snapped away within a
-frame. The app worked around it with a ``requestAnimationFrame`` guard that
-re-pinned the box to the bottom every frame, which fixed "jumps to the top" by
-permanently forcing "stuck at the bottom".
+frame. The old workaround re-pinned the box to the bottom every animation frame,
+which "fixed" jumps-to-top by permanently forcing stuck-at-bottom.
 
-Two cheaper fixes were tried and empirically ruled out in a live Voilà session
-(2026-07-30, LOGSCROLL.0):
+Ruled out in live Voilà sessions (2026-07-30):
 
-- **Native anchoring alone** (``overflow-anchor: auto``, no pinning) — the view
-  still jumped to the top on every line. ``overflow-anchor`` protects against
-  *content insertion*; it cannot undo an explicit ``scrollTop`` assignment.
-- **An outer scroll container** wrapping a non-scrolling Output — also jumped to
-  the top. The Output's subtree teardown collapses the ancestor's
+- **Native anchoring alone** — still jumped to the top. ``overflow-anchor``
+  protects against *content insertion*; it cannot undo an explicit ``scrollTop``
+  assignment.
+- **An outer scroll container** around a non-scrolling Output — also jumped to
+  the top: the Output's subtree teardown collapses the ancestor's
   ``scrollHeight``, so the browser clamps the ancestor's ``scrollTop`` too.
 
-So the fix has to remove the re-render, not out-manoeuvre it. This module owns a
-single ``<div>`` created once, appends **text nodes** to it, and never re-renders
-it. With a stable node, ``overflow-anchor: auto`` does the right thing for free:
-the browser holds the user's position when content is appended below, and a
-one-line "was I at the bottom?" check handles follow-the-tail.
+So the re-render has to go, not be out-raced. This module owns one ``<div>``
+created once and appends **text nodes** to it. With a stable node,
+``overflow-anchor: auto`` holds the user's position for free, and a single
+"was I at the bottom?" check gives follow-the-tail.
+
+How text reaches the browser — and why NOT ``display()``
+--------------------------------------------------------
+First implementation pushed each chunk as ``display(Javascript(...))`` into a
+hidden Output. **That silently dropped every streaming line.** ``display()``
+inside an Output routes by *parent message id*: the frontend captures iopub
+messages whose parent matches the one ``Output.__enter__`` recorded. The run
+header survived only because it is written while the Run click's comm message is
+being processed. Output produced from the calc thread — or from an io_loop
+callback — has no message being processed, so there is no parent to route by and
+the payload never reaches the browser. Marshalling to the main thread did not
+help, because the constraint is the *message context*, not the thread.
+
+The old ``Output.append_stdout`` never had this problem because it mutates the
+``outputs`` **traitlet**, which syncs over the widget comm and is completely
+independent of message parentage.
+
+So this module uses the two mechanisms already proven in this app:
+
+1. **Traitlet sync carries the data** — setting a hidden widget's ``value``
+   works from any thread, no message context required.
+2. **JS installed once at render carries the behaviour** — a ``MutationObserver``
+   set up the same way the vib camera hook is (reflections/01 Rule 7), which
+   copies each chunk into the log container.
+
+No ``display()`` on the streaming path at all. The observer reads chunks out of
+mutation *records* rather than re-reading current DOM state, so nothing is lost
+when several chunks land in the same frame.
 
 Drop-in contract
 ----------------
-:class:`LiveLog` deliberately mimics the small slice of the ``widgets.Output``
-API the app already used — ``append_stdout()``, ``clear_output()`` and assigning
-``.outputs`` — so existing call sites (``_LogCapture.write``, the atomic run
-header write, the Clear button) work unchanged.
-
-Threading
----------
-``append_stdout`` is called from the background calc thread. Writes are buffered
-under a lock and flushed at most every ``_FLUSH_INTERVAL_S``; a daemon timer
-flushes the tail so the last lines of a run are never stranded. This mirrors the
-existing elapsed-ticker pattern (see reflections/02).
+:class:`LiveLog` mimics the slice of ``widgets.Output`` the app already used —
+``append_stdout()``, ``clear_output()`` and assigning ``.outputs`` — so
+``_LogCapture.write``, the atomic run-header write and Clear are unchanged.
 
 Known limitation
 ----------------
-The text lives in the DOM, not in widget state, so a **frontend re-render loses
-it** (kernel reconnect, or a view rebuilt from scratch). The full text is kept in
-``self.text``; call :meth:`resync` to repaint the container from it. M-RECONNECT
-should call ``resync`` when it restores a live view.
+Text lives in the DOM, not widget state, so a frontend re-render (kernel
+reconnect) loses it. Python keeps the authoritative copy in :attr:`text`; call
+:meth:`resync` to repaint. M-RECONNECT should call it when restoring a view.
 """
 
 from __future__ import annotations
 
-import json
+import html as _html
 import logging
 import threading
 from typing import Any, Optional
@@ -59,17 +75,17 @@ from IPython.display import Javascript, display
 
 _LOG = logging.getLogger(__name__)
 
-# Coalescing window for appends. PySCF can emit many lines per second and each
-# flush is a comm round-trip, so batching keeps the channel quiet; short enough
-# that the log still reads as live.
+# Coalescing window for appends. PySCF emits many lines per second; batching
+# keeps the comm quiet while staying short enough to read as live.
 _FLUSH_INTERVAL_S = 0.12
 
-_BODY_CLASS = "quantui-live-log"
+_LOG_CLASS = "quantui-live-log"
+_MAIL_CLASS = "quantui-live-mail"
 
-# The container is the scroll box AND the text node parent — deliberately no
+# The container is the scroll box AND the text-node parent — deliberately no
 # inner <span>. _APP_CSS's system-font rule targets bare `span` with !important,
 # so a wrapper span would be forced back to a proportional font and re-break the
-# ASCII header the same way .jp-OutputArea-output did (see GOTCHAS).
+# ASCII header exactly as .jp-OutputArea-output did (see GOTCHAS).
 _CONTAINER_STYLE = (
     "height:300px;overflow-y:auto;overflow-anchor:auto;"
     "border:1px solid #c0ccd8;border-radius:2px;padding:8px;"
@@ -82,47 +98,131 @@ _CONTAINER_STYLE = (
 _PLACEHOLDER = "No calculation run yet. PySCF output and any errors will appear here."
 
 
+def _bridge_js(log_cls: str, mail_cls: str) -> str:
+    """JS installed once at render: mailbox mutations → log container.
+
+    Retry-until-present mirrors ``_vib_bridge_set_mode``: at install time the
+    widgets may not be in the DOM yet. The watchdog re-attaches if ipywidgets
+    replaces the mailbox node, which it may do on any re-render.
+    """
+    return """
+(function(){
+  var LOG = %(log)s, MAIL = %(mail)s;
+  var lastSeq = 0, observed = null;
+
+  function apply(node){
+    var seq = parseInt(node.getAttribute('data-qseq') || '0', 10);
+    if (!seq || seq <= lastSeq) { return; }          // replay / out-of-order
+    if (seq > lastSeq + 1) {
+      console.warn('[quantui-live-log] gap', lastSeq, '->', seq);
+    }
+    lastSeq = seq;
+    var box = document.querySelector('.' + LOG);
+    if (!box) { return; }
+    var op = node.getAttribute('data-qop') || 'append';
+    var txt = node.textContent || '';
+    if (op === 'set') {
+      box.textContent = txt;
+      box.scrollTop = box.scrollHeight;
+      return;
+    }
+    // Append a text node: the existing DOM is untouched, so there is no
+    // re-render and therefore no scrollTop reset. That is the whole fix.
+    var atBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 8;
+    box.appendChild(document.createTextNode(txt));
+    if (atBottom) { box.scrollTop = box.scrollHeight; }
+  }
+
+  function scan(nodes){
+    for (var i = 0; i < nodes.length; i++){
+      var n = nodes[i];
+      if (n.nodeType !== 1) { continue; }
+      if (n.hasAttribute && n.hasAttribute('data-qseq')) { apply(n); }
+      else if (n.querySelector) {
+        var inner = n.querySelector('[data-qseq]');
+        if (inner) { apply(inner); }
+      }
+    }
+  }
+
+  var obs = new MutationObserver(function(recs){
+    // Read from the RECORDS, not from current DOM state: several chunks can
+    // land in one frame and only the records preserve every one.
+    for (var i = 0; i < recs.length; i++){ scan(recs[i].addedNodes); }
+  });
+
+  function attach(){
+    var host = document.querySelector('.' + MAIL);
+    if (!host) { return false; }
+    if (host === observed) { return true; }
+    try { obs.disconnect(); } catch (e) {}
+    obs.observe(host, {childList: true, subtree: true});
+    observed = host;
+    // Catch anything delivered before the observer was live.
+    var pending = host.querySelector('[data-qseq]');
+    if (pending) { apply(pending); }
+    console.debug('[quantui-live-log] bridge attached');
+    return true;
+  }
+
+  var tries = 0;
+  (function boot(){
+    if (attach()) { return; }
+    if (++tries < 60) { setTimeout(boot, 50); }
+    else { console.warn('[quantui-live-log] mailbox never appeared'); }
+  })();
+
+  // ipywidgets may replace the mailbox node on a re-render, which silently
+  // detaches the observer. Cheap watchdog re-attaches.
+  setInterval(function(){
+    if (!observed || !document.contains(observed)) { attach(); }
+  }, 2000);
+})();
+""" % {"log": '"%s"' % log_cls, "mail": '"%s"' % mail_cls}
+
+
 class LiveLog(widgets.VBox):
     """An append-only, scroll-stable log surface.
 
     Parameters
     ----------
     uid:
-        Suffix making the container class unique per app instance, so two apps
-        in one kernel don't write into each other's log.
+        Suffix making the container/mailbox classes unique per app instance, so
+        two apps in one kernel cannot write into each other's log.
     """
 
-    def __init__(
-        self, uid: str = "main", schedule: Optional[Any] = None, **kwargs: Any
-    ) -> None:
-        # Marshaller that runs a callable on the kernel/main thread. REQUIRED for
-        # streaming to appear: ``widgets.Output.__enter__`` captures output by
-        # recording the *current parent message id*, and a background thread has
-        # no parent-message context — so a JS payload emitted from the calc
-        # thread never reaches the frontend. The run header worked without this
-        # only because it is written from the click handler, i.e. already on the
-        # main thread. Pass ``app._queue_main_thread_callback``.
-        self._schedule = schedule
-        self._cls = f"{_BODY_CLASS}-{uid}"
+    def __init__(self, uid: str = "main", **kwargs: Any) -> None:
+        self._cls = f"{_LOG_CLASS}-{uid}"
+        self._mail_cls = f"{_MAIL_CLASS}-{uid}"
+
         self._container = widgets.HTML(
             f'<div class="{self._cls}" style="{_CONTAINER_STYLE}">{_PLACEHOLDER}</div>'
         )
-        # Hidden channel for the JS append calls. Kept at zero height so it never
-        # affects layout; cleared before each display so it cannot grow without
-        # bound over a long run.
-        self._sink = widgets.Output(
+        # Transport. Setting .value is a traitlet sync over the widget comm —
+        # thread-safe and independent of message parentage, which is exactly
+        # what display() was not. Zero height so it never affects layout.
+        self._mailbox = widgets.HTML(
+            "", layout=widgets.Layout(height="0px", overflow="hidden", margin="0")
+        )
+        self._mailbox.add_class(self._mail_cls)
+        # Carries the one-time observer install. A Javascript output stored in
+        # an Output widget executes when that widget renders, which is how the
+        # old scroll guard and the vib camera hook both work.
+        self._bridge = widgets.Output(
             layout=widgets.Layout(height="0px", overflow="hidden", margin="0")
         )
+
         self._lock = threading.RLock()
         self._pending = ""
         self._text = ""
+        self._seq = 0
         self._timer: Optional[threading.Timer] = None
         self._placeholder_showing = True
-        # Emission counters — cheap, and they turn 'is the channel alive?'
-        # from a guess into an observable fact (see diagnostics()).
-        self._emit_count = 0
-        self._emit_errors = 0
-        super().__init__([self._container, self._sink], **kwargs)
+        self._posts = 0
+        self._post_errors = 0
+
+        super().__init__([self._container, self._mailbox, self._bridge], **kwargs)
+        self._install_bridge()
 
     # ── public state ────────────────────────────────────────────────────────
 
@@ -131,6 +231,24 @@ class LiveLog(widgets.VBox):
         """Everything written so far — the authoritative copy, not the DOM's."""
         with self._lock:
             return self._text + self._pending
+
+    def diagnostics(self) -> dict:
+        """Snapshot of transport health.
+
+        When the log is blank there is otherwise no way to tell whether Python
+        never sent, sent and raised, or sent fine and the browser dropped it.
+        Pair with the ``[quantui-live-log]`` console markers.
+        """
+        with self._lock:
+            return {
+                "posts": self._posts,
+                "errors": self._post_errors,
+                "seq": self._seq,
+                "chars": len(self._text) + len(self._pending),
+                "pending": len(self._pending),
+                "log_class": self._cls,
+                "mail_class": self._mail_cls,
+            }
 
     # ── widgets.Output-compatible surface ───────────────────────────────────
 
@@ -158,9 +276,9 @@ class LiveLog(widgets.VBox):
     def outputs(self, value: tuple) -> None:
         """Atomic replace — used by the on-click run-header write.
 
-        Preserving atomicity matters: the header write was moved to a single
-        assignment specifically to fix the pre-step-1 blank-window bug, so this
-        must not become clear-then-append.
+        Atomicity matters: the header write became a single assignment to fix
+        the pre-step-1 blank-window bug, so this must not become
+        clear-then-append.
         """
         text = "".join(
             item.get("text", "") for item in (value or ()) if isinstance(item, dict)
@@ -176,32 +294,20 @@ class LiveLog(widgets.VBox):
             self._pending = ""
             self._text = text
             self._placeholder_showing = not text
-            body = text if text else _PLACEHOLDER
-            # Scroll to the bottom after a replace so follow-the-tail is active;
-            # the user can then scroll up and — the whole point of route C —
-            # stay there.
-            self._run_js(
-                f"el.textContent = {json.dumps(body)};"
-                "el.scrollTop = el.scrollHeight;"
-            )
+            self._post("set", text if text else _PLACEHOLDER)
 
     def resync(self) -> None:
-        """Repaint the container from :attr:`text`.
-
-        For use after a frontend re-render (kernel reconnect) has emptied the
-        DOM while Python still holds the log.
-        """
+        """Repaint the container from :attr:`text` after a frontend re-render."""
         with self._lock:
-            body = self._text + self._pending or _PLACEHOLDER
-            self._run_js(
-                f"el.textContent = {json.dumps(body)};"
-                "el.scrollTop = el.scrollHeight;"
-            )
+            self._post("set", (self._text + self._pending) or _PLACEHOLDER)
+
+    def flush(self) -> None:
+        """Force any buffered text out immediately."""
+        self._flush()
 
     # ── internals ───────────────────────────────────────────────────────────
 
     def _schedule_locked(self) -> None:
-        """Ensure a flush happens soon. Caller must hold the lock."""
         if self._timer is not None:
             return
         self._timer = threading.Timer(_FLUSH_INTERVAL_S, self._flush)
@@ -216,10 +322,6 @@ class LiveLog(widgets.VBox):
                 pass
             self._timer = None
 
-    def flush(self) -> None:
-        """Force any buffered text out immediately."""
-        self._flush()
-
     def _flush(self) -> None:
         with self._lock:
             self._timer = None
@@ -229,31 +331,43 @@ class LiveLog(widgets.VBox):
             replacing_placeholder = self._placeholder_showing
             self._placeholder_showing = False
             self._text += chunk
+            # First real output replaces the placeholder rather than appending
+            # after it.
             if replacing_placeholder:
-                # First real output: drop the placeholder rather than appending
-                # after it.
-                self._run_js(
-                    f"el.textContent = {json.dumps(self._text)};"
-                    "el.scrollTop = el.scrollHeight;"
-                )
-                return
-            # Append as a text node so the existing DOM is untouched: no
-            # re-render means no scrollTop reset, which is the entire fix.
-            self._run_js(
-                "var atBottom = "
-                "(el.scrollHeight - el.scrollTop - el.clientHeight) < 8;"
-                f"el.appendChild(document.createTextNode({json.dumps(chunk)}));"
-                "if (atBottom) { el.scrollTop = el.scrollHeight; }"
+                self._post("set", self._text)
+            else:
+                self._post("append", chunk)
+
+    def _post(self, op: str, payload: str) -> None:
+        """Hand one chunk to the browser via the mailbox traitlet.
+
+        NOT named ``_send``: that is ``widgets.Widget._send``, the comm
+        transport itself. Overriding it breaks ``add_class`` and every state
+        sync — which is exactly what happened, and what
+        ``test_add_class_still_available`` now catches.
+
+        Sequence numbers let the observer discard replays and warn on gaps —
+        cheap insurance, since a lost chunk would otherwise be invisible.
+        """
+        self._seq += 1
+        try:
+            self._mailbox.value = (
+                f'<span data-qseq="{self._seq}" data-qop="{op}">'
+                f"{_html.escape(payload)}</span>"
             )
+            self._posts += 1
+        except Exception as exc:  # noqa: BLE001 — never break a run over a log
+            # Logged, not silently swallowed: a bare `except: pass` here is what
+            # hid the original transport failure for two live test rounds.
+            self._post_errors += 1
+            _LOG.warning("live-log post failed (op=%s): %s", op, exc)
 
     @staticmethod
     def _in_kernel() -> bool:
         """True only inside a live IPython kernel.
 
-        Without this, ``with self._sink: clear_output()`` writes terminal escape
-        codes to real stdout in headless contexts (pytest, the CLI), because
-        there is no frontend to capture them. The Python-side text state is
-        authoritative either way, so skipping the JS costs nothing off-frontend.
+        Off-frontend (pytest, the CLI) there is nothing to render the installer
+        into, and displaying anyway writes to real stdout.
         """
         try:
             from IPython import get_ipython
@@ -263,69 +377,11 @@ class LiveLog(widgets.VBox):
         except Exception:  # noqa: BLE001 — absence of IPython is a valid answer
             return False
 
-    def _run_js(self, body: str) -> None:
-        """Run *body* with ``el`` bound to the container, if it is present."""
-        # The console marker is deliberate and permanent: it is the only way to
-        # tell "the JS never arrived" from "it arrived but the selector missed",
-        # and distinguishing those took a live debugging round. debug level, so
-        # it is silent unless someone opens the console with verbose enabled.
-        js = (
-            "(function(){var el=document.querySelector('."
-            + self._cls
-            + "');console.debug('[quantui-live-log] payload',"
-            + str(len(body))
-            + ",'target',!!el);if(!el){return;}"
-            + body
-            + "})();"
-        )
-        # Must emit on the main/kernel thread — see the note on ``schedule`` in
-        # __init__. The marshaller runs inline when already on the main thread,
-        # and callbacks queued on the io_loop preserve order, so appends stay
-        # sequenced.
-        if self._schedule is not None:
-            self._schedule(self._emit_js, js)
-        else:
-            self._emit_js(js)
-
-    def _emit_js(self, js: str) -> None:
-        # Kernel check lives here, not in _run_js, so the marshalling path is
-        # still exercised (and therefore testable) off-frontend.
+    def _install_bridge(self) -> None:
         if not self._in_kernel():
             return
         try:
-            # Exactly the shape proven to work for repeated post-render JS
-            # pushes in this app (``app_visualization._vib_bridge_set_mode``):
-            # the Output widget's own ``clear_output`` method, called OUTSIDE
-            # the context, then a bare ``display`` inside it. The free
-            # ``IPython.display.clear_output`` used inside the context instead
-            # publishes a clear message through the display pipeline, which is
-            # not the same thing. Don't "simplify" this back.
-            self._sink.clear_output(wait=True)
-            with self._sink:
-                display(Javascript(js))
-            self._emit_count += 1
-        except Exception as exc:  # noqa: BLE001 — never break a run over a log
-            # Logged, not swallowed silently: a silent except here is what hid
-            # the background-thread failure earlier.
-            self._emit_errors += 1
-            _LOG.warning("live-log JS emit failed: %s", exc)
-
-    def diagnostics(self) -> dict:
-        """Snapshot of the JS channel's health.
-
-        Exists because when the log is blank there is no way to tell, from the
-        outside, whether Python never emitted, emitted and raised, or emitted
-        fine and the browser dropped it. Pair with the ``[quantui-live-log]``
-        console marker: emits climbing + no console marker means the payload is
-        not reaching the frontend.
-        """
-        with self._lock:
-            return {
-                "emits": self._emit_count,
-                "errors": self._emit_errors,
-                "chars_buffered": len(self._text) + len(self._pending),
-                "pending": len(self._pending),
-                "has_scheduler": self._schedule is not None,
-                "in_kernel": self._in_kernel(),
-                "container_class": self._cls,
-            }
+            with self._bridge:
+                display(Javascript(_bridge_js(self._cls, self._mail_cls)))
+        except Exception as exc:  # noqa: BLE001
+            _LOG.warning("live-log bridge install failed: %s", exc)

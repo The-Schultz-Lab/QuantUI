@@ -9,7 +9,9 @@ authoritative Python-side text, and the thread-safe buffering — because
 
 from __future__ import annotations
 
+import re
 import threading
+import xml.etree.ElementTree as ET
 
 import ipywidgets as widgets
 
@@ -125,20 +127,31 @@ class TestBuffering:
         assert len(set(lines)) == n_threads * per_thread  # none lost or doubled
 
 
-class TestBackgroundThreadEmission:
+class TestTraitletTransport:
     """Regression guard for the 2026-07-30 "header prints, then nothing" bug.
 
-    ``widgets.Output.__enter__`` captures output by recording the *current parent
-    message id*. A background thread has no parent-message context, so a JS
-    payload emitted directly from the calc thread never reaches the frontend —
-    which is exactly what happened: the run header appeared (written from the
-    click handler, i.e. the main thread) and every streaming line after it was
-    silently dropped. Emission must therefore be marshalled to the main thread.
+    The first implementation pushed each chunk as ``display(Javascript(...))``
+    into a hidden Output. That routes by *parent message id*, so it only worked
+    while a message was being processed — the run header (written from the click
+    handler) appeared and every streaming line from the calc thread was silently
+    dropped. Marshalling to the main thread did not help: the constraint is the
+    message context, not the thread.
+
+    Text now travels over a traitlet, which syncs via the widget comm from any
+    thread with no message context. These tests pin that down.
     """
 
-    def test_appends_from_a_worker_thread_are_marshalled(self):
-        calls: list[str] = []
-        lg = LiveLog(uid="sched", schedule=lambda fn, *a: calls.append("scheduled"))
+    def test_append_updates_the_mailbox_traitlet(self):
+        lg = _log()
+        lg.append_stdout("streamed\n")
+        lg.flush()
+        assert "streamed" in lg._mailbox.value
+
+    def test_append_from_a_worker_thread_reaches_the_mailbox(self):
+        # The exact path that was broken: no message context on this thread.
+        lg = _log()
+        lg.set_text("HDR\n")
+        before = lg._mailbox.value
 
         def worker() -> None:
             lg.append_stdout("from the calc thread\n")
@@ -148,31 +161,56 @@ class TestBackgroundThreadEmission:
         t.start()
         t.join()
 
-        assert calls, "append from a worker thread did not go through the marshaller"
+        assert lg._mailbox.value != before
+        assert "from the calc thread" in lg._mailbox.value
 
-    def test_header_write_is_also_marshalled(self):
-        # set_text runs on the main thread today, but routing it too means the
-        # contract does not depend on which thread the caller happens to be on.
-        calls: list[str] = []
-        lg = LiveLog(uid="sched2", schedule=lambda fn, *a: calls.append("scheduled"))
-        lg.set_text("HDR\n")
-        assert calls
+    def test_sequence_numbers_increase(self):
+        # The observer discards replays and warns on gaps using these.
+        lg = _log()
+        seqs = []
+        for i in range(3):
+            lg.append_stdout(f"{i}\n")
+            lg.flush()
+            seqs.append(
+                int(re.search(r'data-qseq="(\d+)"', lg._mailbox.value).group(1))
+            )
+        assert seqs == sorted(seqs) and len(set(seqs)) == 3
 
-    def test_scheduler_receives_a_callable_and_payload(self):
-        received: list[tuple] = []
-        lg = LiveLog(uid="sched3", schedule=lambda fn, *a: received.append((fn, a)))
+    def test_ops_are_labelled(self):
+        lg = _log()
         lg.set_text("x")
-        fn, args = received[-1]
-        assert callable(fn)
-        assert len(args) == 1 and isinstance(args[0], str)
-        assert lg._cls in args[0]  # the JS targets this instance's container
+        assert 'data-qop="set"' in lg._mailbox.value
+        lg.append_stdout("y")
+        lg.flush()
+        assert 'data-qop="append"' in lg._mailbox.value
 
-    def test_without_a_scheduler_it_still_does_not_raise(self):
-        # Non-app callers (tests, headless) construct LiveLog with no marshaller.
-        lg = LiveLog(uid="nosched")
+    def test_payload_is_html_escaped(self):
+        # Log lines contain <, > and & (PySCF warnings, file paths, HTML dumps).
+        # Unescaped, they would corrupt the mailbox markup.
+        lg = _log()
+        lg.append_stdout("a <b> & 'c'\n")
+        lg.flush()
+        raw = lg._mailbox.value
+        assert "&lt;b&gt;" in raw
+        decoded = ET.fromstring(raw).text
+        assert decoded == "a <b> & 'c'\n"
+
+    def test_first_output_replaces_the_placeholder(self):
+        # Otherwise the first line would land after "No calculation run yet."
+        lg = _log()
+        lg.append_stdout("first\n")
+        lg.flush()
+        assert 'data-qop="set"' in lg._mailbox.value
+
+    def test_no_display_on_the_streaming_path(self, capsys):
+        # A stdout leak here means display() crept back in.
+        lg = _log()
         lg.append_stdout("x\n")
         lg.flush()
-        assert lg.text == "x\n"
+        lg.set_text("y")
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
 
 
 class TestResync:
