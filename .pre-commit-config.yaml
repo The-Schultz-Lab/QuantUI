@@ -47,7 +47,9 @@ repos:
     # code deliberately rather than letting it appear as noise.
     rev: v0.16.0
     hooks:
-      - id: ruff
+      # `ruff-check`, not `ruff` — the bare `ruff` id still works but is a
+      # legacy alias in current ruff-pre-commit and reports itself as deprecated.
+      - id: ruff-check
         args: ["--fix"]         # auto-fix safe issues (unused imports, etc.)
         files: ^(quantui|tests)/
 
