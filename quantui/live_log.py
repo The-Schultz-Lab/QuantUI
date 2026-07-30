@@ -55,7 +55,7 @@ import threading
 from typing import Any, Optional
 
 import ipywidgets as widgets
-from IPython.display import Javascript, clear_output, display
+from IPython.display import Javascript, display
 
 _LOG = logging.getLogger(__name__)
 
@@ -118,6 +118,10 @@ class LiveLog(widgets.VBox):
         self._text = ""
         self._timer: Optional[threading.Timer] = None
         self._placeholder_showing = True
+        # Emission counters — cheap, and they turn 'is the channel alive?'
+        # from a guess into an observable fact (see diagnostics()).
+        self._emit_count = 0
+        self._emit_errors = 0
         super().__init__([self._container, self._sink], **kwargs)
 
     # ── public state ────────────────────────────────────────────────────────
@@ -261,10 +265,16 @@ class LiveLog(widgets.VBox):
 
     def _run_js(self, body: str) -> None:
         """Run *body* with ``el`` bound to the container, if it is present."""
+        # The console marker is deliberate and permanent: it is the only way to
+        # tell "the JS never arrived" from "it arrived but the selector missed",
+        # and distinguishing those took a live debugging round. debug level, so
+        # it is silent unless someone opens the console with verbose enabled.
         js = (
             "(function(){var el=document.querySelector('."
             + self._cls
-            + "');if(!el){return;}"
+            + "');console.debug('[quantui-live-log] payload',"
+            + str(len(body))
+            + ",'target',!!el);if(!el){return;}"
             + body
             + "})();"
         )
@@ -283,11 +293,39 @@ class LiveLog(widgets.VBox):
         if not self._in_kernel():
             return
         try:
+            # Exactly the shape proven to work for repeated post-render JS
+            # pushes in this app (``app_visualization._vib_bridge_set_mode``):
+            # the Output widget's own ``clear_output`` method, called OUTSIDE
+            # the context, then a bare ``display`` inside it. The free
+            # ``IPython.display.clear_output`` used inside the context instead
+            # publishes a clear message through the display pipeline, which is
+            # not the same thing. Don't "simplify" this back.
+            self._sink.clear_output(wait=True)
             with self._sink:
-                clear_output(wait=True)
                 display(Javascript(js))
+            self._emit_count += 1
         except Exception as exc:  # noqa: BLE001 — never break a run over a log
-            # Logged, not swallowed silently: a silent except here is exactly
-            # what hid the background-thread failure above, so keep this
-            # visible to `quantui log tail`.
+            # Logged, not swallowed silently: a silent except here is what hid
+            # the background-thread failure earlier.
+            self._emit_errors += 1
             _LOG.warning("live-log JS emit failed: %s", exc)
+
+    def diagnostics(self) -> dict:
+        """Snapshot of the JS channel's health.
+
+        Exists because when the log is blank there is no way to tell, from the
+        outside, whether Python never emitted, emitted and raised, or emitted
+        fine and the browser dropped it. Pair with the ``[quantui-live-log]``
+        console marker: emits climbing + no console marker means the payload is
+        not reaching the frontend.
+        """
+        with self._lock:
+            return {
+                "emits": self._emit_count,
+                "errors": self._emit_errors,
+                "chars_buffered": len(self._text) + len(self._pending),
+                "pending": len(self._pending),
+                "has_scheduler": self._schedule is not None,
+                "in_kernel": self._in_kernel(),
+                "container_class": self._cls,
+            }
