@@ -126,7 +126,16 @@ dev = [
     # floor: they must agree with the revs in .pre-commit-config.yaml, which is
     # what CI enforces. With open floors a fresh `pip install` pulls whatever is
     # newest and a bare `ruff check` reports rules CI never sees (M-CLEAN CLEAN.2).
-    "black~=26.5.1",
+    #
+    # black is split by Python version: 26.x requires >=3.10, but requires-python
+    # here is >=3.9 and 3.9 is in the CI matrix, so an unconditional ~=26.5.1
+    # makes the dev extra uninstallable on 3.9. 25.11.0 is the last black that
+    # supports 3.9. Consequence to know: a developer on 3.9 formats with 25.11 and
+    # could differ slightly from CI — CI's authority is the pinned pre-commit rev,
+    # whose lint job runs on 3.11, so run `pre-commit run` before pushing if you
+    # develop on 3.9. (ruff 0.16 needs only >=3.7, so it needs no split.)
+    "black~=26.5.1; python_version >= '3.10'",
+    "black~=25.11.0; python_version < '3.10'",
     "ruff~=0.16.0",
     "pre-commit>=3.7.0",
 ]
