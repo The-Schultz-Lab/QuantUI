@@ -198,6 +198,33 @@ SUPPORTED_BASIS_SETS = [
     "def2-TZVP",
 ]
 
+
+def pople_notation_alias(basis: str) -> str:
+    """Return the parenthesis spelling of a starred Pople basis, else ``""``.
+
+    ``6-31G*`` and ``6-31G(d)`` are the *same basis set* written two ways, and a
+    student who learned one notation has no way to know the other is not a
+    different, missing option. Both spellings are accepted by PySCF (verified
+    2026-07-29: identical AO counts for the ``*``/``(d)`` and ``**``/``(d,p)``
+    pairs), so either is safe to show and to type.
+
+    The mapping is purely notational, so it is derived rather than tabulated —
+    that way it also covers names not currently in ``SUPPORTED_BASIS_SETS``
+    (``6-311G**``, ``6-31+G*``, …) if the dropdown grows:
+
+    - trailing ``**`` → ``(d,p)`` — polarisation on heavy atoms *and* hydrogens
+    - trailing ``*``  → ``(d)``   — polarisation on heavy atoms only
+
+    Returns an empty string for anything without a trailing star (``6-31G``,
+    ``STO-3G``, ``cc-pVDZ``, ``def2-SVP``), which have no alternate spelling.
+    """
+    if basis.endswith("**"):
+        return f"{basis[:-2]}(d,p)"
+    if basis.endswith("*"):
+        return f"{basis[:-1]}(d)"
+    return ""
+
+
 # Implicit solvent options — name → dielectric constant (ε)
 SOLVENT_OPTIONS: Dict[str, float] = {
     "Water": 78.39,

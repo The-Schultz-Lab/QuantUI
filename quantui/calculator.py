@@ -147,11 +147,21 @@ class PySCFCalculation:
                 "Very fast but low accuracy. Good for learning, not research."
             )
         elif "6-31G" in self.basis:
-            notes.append(
+            note = (
                 "**6-31G family**: Split-valence basis sets with a good balance of "
                 "speed and accuracy. The * adds polarization functions for better "
                 "description of molecular bonding and lone pairs."
             )
+            # 6-31G* and 6-31G(d) are the same basis set in two notations; say so
+            # rather than leave a reader thinking their textbook's spelling is a
+            # different, unavailable option.
+            alias = config.pople_notation_alias(self.basis)
+            if alias:
+                note += (
+                    f" Equivalently written **{alias}** — the same basis set, "
+                    "either spelling is accepted."
+                )
+            notes.append(note)
         elif "cc-pV" in self.basis:
             notes.append(
                 "**Correlation-consistent basis sets (cc-pVXZ)**: High-quality basis "
