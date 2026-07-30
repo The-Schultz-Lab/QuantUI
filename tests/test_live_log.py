@@ -125,6 +125,56 @@ class TestBuffering:
         assert len(set(lines)) == n_threads * per_thread  # none lost or doubled
 
 
+class TestBackgroundThreadEmission:
+    """Regression guard for the 2026-07-30 "header prints, then nothing" bug.
+
+    ``widgets.Output.__enter__`` captures output by recording the *current parent
+    message id*. A background thread has no parent-message context, so a JS
+    payload emitted directly from the calc thread never reaches the frontend —
+    which is exactly what happened: the run header appeared (written from the
+    click handler, i.e. the main thread) and every streaming line after it was
+    silently dropped. Emission must therefore be marshalled to the main thread.
+    """
+
+    def test_appends_from_a_worker_thread_are_marshalled(self):
+        calls: list[str] = []
+        lg = LiveLog(uid="sched", schedule=lambda fn, *a: calls.append("scheduled"))
+
+        def worker() -> None:
+            lg.append_stdout("from the calc thread\n")
+            lg.flush()
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+
+        assert calls, "append from a worker thread did not go through the marshaller"
+
+    def test_header_write_is_also_marshalled(self):
+        # set_text runs on the main thread today, but routing it too means the
+        # contract does not depend on which thread the caller happens to be on.
+        calls: list[str] = []
+        lg = LiveLog(uid="sched2", schedule=lambda fn, *a: calls.append("scheduled"))
+        lg.set_text("HDR\n")
+        assert calls
+
+    def test_scheduler_receives_a_callable_and_payload(self):
+        received: list[tuple] = []
+        lg = LiveLog(uid="sched3", schedule=lambda fn, *a: received.append((fn, a)))
+        lg.set_text("x")
+        fn, args = received[-1]
+        assert callable(fn)
+        assert len(args) == 1 and isinstance(args[0], str)
+        assert lg._cls in args[0]  # the JS targets this instance's container
+
+    def test_without_a_scheduler_it_still_does_not_raise(self):
+        # Non-app callers (tests, headless) construct LiveLog with no marshaller.
+        lg = LiveLog(uid="nosched")
+        lg.append_stdout("x\n")
+        lg.flush()
+        assert lg.text == "x\n"
+
+
 class TestResync:
     def test_resync_preserves_text(self):
         # resync repaints the DOM from Python state after a frontend re-render;

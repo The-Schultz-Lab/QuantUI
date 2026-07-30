@@ -50,11 +50,14 @@ should call ``resync`` when it restores a live view.
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from typing import Any, Optional
 
 import ipywidgets as widgets
 from IPython.display import Javascript, clear_output, display
+
+_LOG = logging.getLogger(__name__)
 
 # Coalescing window for appends. PySCF can emit many lines per second and each
 # flush is a comm round-trip, so batching keeps the channel quiet; short enough
@@ -89,7 +92,17 @@ class LiveLog(widgets.VBox):
         in one kernel don't write into each other's log.
     """
 
-    def __init__(self, uid: str = "main", **kwargs: Any) -> None:
+    def __init__(
+        self, uid: str = "main", schedule: Optional[Any] = None, **kwargs: Any
+    ) -> None:
+        # Marshaller that runs a callable on the kernel/main thread. REQUIRED for
+        # streaming to appear: ``widgets.Output.__enter__`` captures output by
+        # recording the *current parent message id*, and a background thread has
+        # no parent-message context — so a JS payload emitted from the calc
+        # thread never reaches the frontend. The run header worked without this
+        # only because it is written from the click handler, i.e. already on the
+        # main thread. Pass ``app._queue_main_thread_callback``.
+        self._schedule = schedule
         self._cls = f"{_BODY_CLASS}-{uid}"
         self._container = widgets.HTML(
             f'<div class="{self._cls}" style="{_CONTAINER_STYLE}">{_PLACEHOLDER}</div>'
@@ -248,8 +261,6 @@ class LiveLog(widgets.VBox):
 
     def _run_js(self, body: str) -> None:
         """Run *body* with ``el`` bound to the container, if it is present."""
-        if not self._in_kernel():
-            return
         js = (
             "(function(){var el=document.querySelector('."
             + self._cls
@@ -257,9 +268,26 @@ class LiveLog(widgets.VBox):
             + body
             + "})();"
         )
+        # Must emit on the main/kernel thread — see the note on ``schedule`` in
+        # __init__. The marshaller runs inline when already on the main thread,
+        # and callbacks queued on the io_loop preserve order, so appends stay
+        # sequenced.
+        if self._schedule is not None:
+            self._schedule(self._emit_js, js)
+        else:
+            self._emit_js(js)
+
+    def _emit_js(self, js: str) -> None:
+        # Kernel check lives here, not in _run_js, so the marshalling path is
+        # still exercised (and therefore testable) off-frontend.
+        if not self._in_kernel():
+            return
         try:
             with self._sink:
                 clear_output(wait=True)
                 display(Javascript(js))
-        except Exception:  # noqa: BLE001 — a log write must never break a run
-            pass
+        except Exception as exc:  # noqa: BLE001 — never break a run over a log
+            # Logged, not swallowed silently: a silent except here is exactly
+            # what hid the background-thread failure above, so keep this
+            # visible to `quantui log tail`.
+            _LOG.warning("live-log JS emit failed: %s", exc)
