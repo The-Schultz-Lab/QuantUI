@@ -700,6 +700,25 @@ _RE_CYCLE = re.compile(
 _RE_CONV = re.compile(r"converged SCF energy\s*=\s*([\-\d\.]+)")
 _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
 
+# ── Silent-phase heartbeat (M-PROGRESS Phase D) ──────────────────────────────
+#
+# Seconds of stream silence before the log says it is still alive.
+#
+# Sized from a real measurement, not a guess: a user timed an aspirin
+# (21 atoms) B3LYP/6-31G* UV-Vis run and the log printed **nothing for 120 s**
+# after "converged SCF energy" while the TD-DFT solve ran. The status label was
+# advancing the whole time — Phase A covers that — but the log, which is what a
+# user actually watches, looked frozen.
+#
+# 25 s yields ~4 lines across that gap: enough to prove liveness, few enough not
+# to bloat the archived pyscf.log. Gaps grow steeply with system size, and
+# aspirin is a *small* case, so err on the short side.
+_HEARTBEAT_AFTER_S = 25.0
+
+# How often the watchdog wakes to check. Well under _HEARTBEAT_AFTER_S so a beat
+# lands close to its due time, but coarse enough to be free.
+_HEARTBEAT_POLL_S = 2.0
+
 
 # ══ LOG CAPTURE ══════════════════════════════════════════════════════════════
 
@@ -735,6 +754,70 @@ class _LogCapture:
         # Completion fraction (0..1) reported by calc modules via
         # log_utils.emit_progress; read by the elapsed ticker. None = unknown.
         self._fraction: Optional[float] = None
+        # Silent-phase heartbeat (M-PROGRESS Phase D). Long kernels — the TD-DFT
+        # excited-state solve most of all — print nothing for minutes, so the
+        # log looks hung even though the status label is advancing. A watchdog
+        # appends a "still working" line when the stream has gone quiet.
+        self._last_write_t = time.monotonic()
+        self._hb_started_t = self._last_write_t
+        self._hb_stop = threading.Event()
+        self._hb_thread: Optional[threading.Thread] = None
+
+    # ── Silent-phase heartbeat ──────────────────────────────────────────────
+
+    def start_heartbeat(self) -> None:
+        """Begin watching for silent stretches. Idempotent."""
+        if self._hb_thread is not None:
+            return
+        self._last_write_t = time.monotonic()
+        self._hb_started_t = self._last_write_t
+        self._hb_thread = threading.Thread(
+            target=self._heartbeat_loop, daemon=True, name="quantui-log-heartbeat"
+        )
+        self._hb_thread.start()
+
+    def stop_heartbeat(self) -> None:
+        """Stop the watchdog. Safe to call more than once, or if never started."""
+        self._hb_stop.set()
+        self._hb_thread = None
+
+    def _heartbeat_loop(self) -> None:
+        """Append a liveness line whenever the stream has been quiet too long.
+
+        Deliberately writes **directly** to the widget and buffer rather than
+        going through :meth:`write`: that path checks cancellation (which would
+        raise ``_CalcCancelled`` on this thread, where nothing can catch it) and
+        would also reset the very timer being measured.
+        """
+        while not self._hb_stop.wait(_HEARTBEAT_POLL_S):
+            quiet_for = time.monotonic() - self._last_write_t
+            if quiet_for < _HEARTBEAT_AFTER_S:
+                continue
+            stage = ""
+            if self._status is not None:
+                try:
+                    stage = str(self._status.value).strip()
+                except Exception:  # noqa: BLE001 — a label read must not kill it
+                    stage = ""
+            from quantui.log_utils import format_elapsed
+
+            elapsed = time.monotonic() - self._hb_started_t
+            line = "   … still working"
+            if stage:
+                line += f" — {stage}"
+            line += f"  ·  {format_elapsed(elapsed)} elapsed\n"
+            try:
+                # Widget only — deliberately NOT self._buf. The buffer becomes
+                # the result directory's pyscf.log, which should stay a faithful
+                # record of what PySCF emitted. Heartbeats are UI chrome for the
+                # live view; padding the archived log with them would make a
+                # long silent run look chatty after the fact.
+                self._w.append_stdout(line)
+            except Exception:  # noqa: BLE001 — never let the log kill a run
+                pass
+            # Reset so the next beat is measured from this line, giving evenly
+            # spaced heartbeats instead of one per poll once the gap is open.
+            self._last_write_t = time.monotonic()
 
     def write(self, text: str) -> None:
         if not text:
@@ -743,6 +826,9 @@ class _LogCapture:
         # opt step), so raising here stops it at the next line. See _CalcCancelled.
         if self._cancel_check is not None and self._cancel_check():
             raise _CalcCancelled()
+        # Any real output resets the silence timer, so a heartbeat only ever
+        # appears in a genuinely quiet stretch.
+        self._last_write_t = time.monotonic()
         self._w.append_stdout(text)
         self._buf.write(text)
         self._line_buf += text
@@ -4305,6 +4391,10 @@ class QuantUIApp:
         # Expose this run's log to the elapsed ticker so it can read the
         # completion fraction calc modules report via emit_progress.
         self._active_log = log
+        # Watch for silent stretches (M-PROGRESS Phase D). Stopped in the
+        # `finally` alongside the elapsed ticker, so it cannot outlive the run
+        # and keep writing into a finished log.
+        log.start_heartbeat()
 
         # The run header (structured banner) is written synchronously + atomically
         # on the main thread by ``on_run_clicked`` → ``_write_run_header`` BEFORE
@@ -5189,6 +5279,10 @@ class QuantUIApp:
             self.cancel_btn.description = "Cancel"
             self.log_clear_btn.disabled = False
             self._stop_elapsed_ticker()
+            try:
+                log.stop_heartbeat()
+            except Exception:  # noqa: BLE001 — teardown must not mask a failure
+                pass
             self._activity_end(kind="compute")
 
     # ── Live elapsed ticker ────────────────────────────────────────────────
