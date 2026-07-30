@@ -29,7 +29,10 @@ repos:
 
   # ── Code formatting (black) ───────────────────────────────────────────────
   - repo: https://github.com/psf/black
-    rev: 24.4.2
+    # Keep this rev, the `black` floor in pyproject.toml's `dev` extra, and
+    # local-setup/environment.yml in lockstep. When they drift, a bare
+    # `black --check` disagrees with CI — see M-CLEAN CLEAN.2.
+    rev: 26.5.1
     hooks:
       - id: black
         language_version: python3
@@ -37,7 +40,12 @@ repos:
 
   # ── Linting (ruff — superset of flake8) ──────────────────────────────────
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.4.7
+    # Keep in lockstep with the `ruff` floor in pyproject.toml's `dev` extra and
+    # local-setup/environment.yml. A ruff minor bump can enable rules that were
+    # previously folded into an ignored code (UP045 split out of UP007) — when
+    # bumping, run `ruff check quantui/ tests/ --statistics` and decide each new
+    # code deliberately rather than letting it appear as noise.
+    rev: v0.16.0
     hooks:
       - id: ruff
         args: ["--fix"]         # auto-fix safe issues (unused imports, etc.)

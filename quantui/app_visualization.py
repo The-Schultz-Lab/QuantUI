@@ -2058,7 +2058,7 @@ def _preopt_controls_html(uid: str, n: int, interval_ms: int) -> str:
         n,
         interval_ms,
         label_js=label_js,
-        initial_label="Frame %d/%d &bull; Relaxed (final)" % (n, n),
+        initial_label=f"Frame {n}/{n} &bull; Relaxed (final)",
         loop=False,  # one-shot: stop on the relaxed frame (no lingering "relaxing…")
         ab_at_start="⇄ Show relaxed",
         ab_other="⇄ Show input",
@@ -2185,7 +2185,7 @@ def build_trajectory_viewer_html(
         n,
         interval_ms,
         label_js=label_js,
-        initial_label="Step %d / %d" % (n - 1, n - 1),
+        initial_label=f"Step {n - 1} / {n - 1}",
         loop=True,  # optimization animation: loop continuously
         ab_at_start="⇄ Final geometry",
         ab_other="⇄ First step (input)",
@@ -2388,8 +2388,10 @@ def _vib_bridge_set_mode(app: Any, mode_number: int) -> None:
         return
     from IPython.display import Javascript, display
 
+    # %-formatting is deliberate here: the payload is JavaScript, which is dense
+    # with braces, so an f-string or .format() would require doubling every one.
     js = (
-        "(function(){var n=0;function go(){n++;"
+        "(function(){var n=0;function go(){n++;"  # noqa: UP031 — see above
         "if(window.__quantuiVibSetMode){window.__quantuiVibSetMode(%d,false);}"
         "else if(n<40){setTimeout(go,50);}}go();})();" % int(mode_number)
     )
@@ -2409,8 +2411,10 @@ def _vib_bridge_set_fps(app: Any, fps: int) -> None:
         return
     from IPython.display import Javascript, display
 
+    # %-formatting is deliberate here — same JavaScript brace-density reason as
+    # ``_vib_bridge_set_mode`` above.
     js = (
-        "(function(){var n=0;function go(){n++;"
+        "(function(){var n=0;function go(){n++;"  # noqa: UP031 — see above
         "if(window.__quantuiVibSetFps){window.__quantuiVibSetFps(%d);}"
         "else if(n<40){setTimeout(go,50);}}go();})();" % int(fps)
     )

@@ -122,8 +122,12 @@ dev = [
     "pytest-xdist>=3.0.0",  # parallel test execution (-n=auto in addopts)
     "mypy>=1.0.0",
     "types-requests>=2.28.0",
-    "black>=24.0.0",
-    "ruff>=0.4.0",
+    # Formatter/linter versions are pinned to a compatible range, NOT an open
+    # floor: they must agree with the revs in .pre-commit-config.yaml, which is
+    # what CI enforces. With open floors a fresh `pip install` pulls whatever is
+    # newest and a bare `ruff check` reports rules CI never sees (M-CLEAN CLEAN.2).
+    "black~=26.5.1",
+    "ruff~=0.16.0",
     "pre-commit>=3.7.0",
 ]
 
@@ -152,6 +156,12 @@ ignore = [
     # They are style-only and do not affect correctness.
     "UP006",  # use built-in dict/list/tuple for annotations (requires 3.9 runtime)
     "UP007",  # use X | Y for unions (requires 3.10 at runtime)
+    # UP045 is the Optional[X] -> X | None half of UP007, which newer ruff split
+    # into its own code. Ignored on exactly the same grounds as UP007 above:
+    # requires-python is >=3.9 and 3.9 is in the CI matrix. Without this entry a
+    # ruff upgrade silently un-ignores a rule the project already decided against
+    # (205 sites), which is what happened when the pins drifted (M-CLEAN CLEAN.2).
+    "UP045",  # use X | None instead of Optional[X] — same as UP007
     "UP035",  # typing.Dict/List/Tuple deprecated — same as UP006
     "B904",   # raise-without-from in except — cosmetic, verbatim copies
     "E722",   # bare except — cosmetic, verbatim copies
