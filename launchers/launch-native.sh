@@ -18,9 +18,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Repo root is one level up from this launchers/ folder.
 cd "$SCRIPT_DIR/.."
 
-echo "QuantUI NATIVE MODE — Local conda env on Linux/WSL, no container"
-echo "Use this when you have edited quantui/*.py and want to test immediately."
-echo
+# Startup banner (shared with the other shell launchers; see _banner.sh).
+# `|| true` so a missing/oddly-permissioned banner file can never abort a
+# launch under `set -eu` — it is decoration, not function.
+if [ -f "$SCRIPT_DIR/_banner.sh" ]; then
+    # shellcheck source=/dev/null
+    . "$SCRIPT_DIR/_banner.sh" || true
+    quantui_banner \
+        "NATIVE MODE — local conda env on Linux/WSL, no container" \
+        "quantui/*.py edits are live; no rebuild needed" || true
+else
+    echo "QuantUI NATIVE MODE — Local conda env on Linux/WSL, no container"
+    echo
+fi
 
 # Locate conda.sh. Detect the install rather than assuming one location:
 # miniforge (recommended for WSL), miniconda, and anaconda are all supported,

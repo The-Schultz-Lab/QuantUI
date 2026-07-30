@@ -18,6 +18,16 @@ mkdir -p "$(dirname "$LOG_FILE")"
 
 exec > >(tee -a "$LOG_FILE") 2>&1
 
+# Startup banner (shared; see _banner.sh). Placed after the tee redirect so it
+# lands in the log too. Non-fatal under `set -euo pipefail`.
+if [ -f "$SCRIPT_DIR/_banner.sh" ]; then
+    # shellcheck source=/dev/null
+    . "$SCRIPT_DIR/_banner.sh" || true
+    quantui_banner \
+        "NATIVE JUPYTER MODE — JupyterLab, not Voilà" \
+        "output is tee'd to logs/native-jupyter.log" || true
+fi
+
 # Locate conda.sh. Detect the install rather than assuming one location:
 # miniforge (recommended for WSL), miniconda, and anaconda are all supported.
 # Falls back to an already-configured conda via $CONDA_EXE.

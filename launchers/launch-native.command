@@ -14,9 +14,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Repo root is one level up from this launchers/ folder.
 cd "$SCRIPT_DIR/.."
 
-echo "QuantUI NATIVE MODE — Local conda env on macOS, no container"
-echo "Use this when you have edited quantui/*.py and want to test immediately."
-echo
+# Startup banner (shared; see _banner.sh). Non-fatal by design under
+# `set -eu` — decoration must never abort a launch.
+if [ -f "$SCRIPT_DIR/_banner.sh" ]; then
+    # shellcheck source=/dev/null
+    . "$SCRIPT_DIR/_banner.sh" || true
+    quantui_banner \
+        "NATIVE MODE — local conda env on macOS, no container" \
+        "quantui/*.py edits are live; no rebuild needed" || true
+else
+    echo "QuantUI NATIVE MODE — Local conda env on macOS, no container"
+    echo
+fi
 
 # Locate conda.sh. Detect the install rather than assuming one location:
 # miniforge, miniconda, and anaconda are all supported, in home, /opt, and
