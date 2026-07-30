@@ -893,6 +893,28 @@ def build_shared_widgets(
         layout=layout_fn(width="180px"),
     )
 
+    # Geometry Opt seed: start a run from a previously optimised geometry —
+    # the standard "optimise cheaply, then refine at a higher level of theory"
+    # workflow. Same filtered-dropdown pattern as the Frequency / UV-Vis seeds
+    # below; the shared `_refresh_seed_options` helper populates all three.
+    app._geo_seed_dd = widgets.Dropdown(
+        options=[("(use current molecule)", "")],
+        description="Seed geometry:",
+        style={"description_width": "110px"},
+        layout=layout_fn(width="auto", flex="1 1 auto", min_width="260px"),
+        tooltip=(
+            "Optionally start from the final geometry of a previous Geo Opt "
+            "result — e.g. optimise at a low level of theory, then refine here"
+        ),
+    )
+    app._geo_seed_refresh_btn = widgets.Button(
+        description="",
+        icon="refresh",
+        layout=layout_fn(width="32px", height="32px"),
+        tooltip="Refresh the list of saved geometry optimisations",
+    )
+    app._geo_seed_note = widgets.HTML("")
+
     app._freq_seed_dd = widgets.Dropdown(
         options=[("(use current molecule)", "")],
         description="Seed geometry:",

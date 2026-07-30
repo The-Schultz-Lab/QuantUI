@@ -149,11 +149,17 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
         app._freq_preopt_cb.layout.display = ""
 
     if ct == "Geometry Opt":
+        app._refresh_geo_seed_options()
         app.calc_extra_opts.children = [
             widgets.HBox(
                 [app.fmax_fi, app.max_steps_si],
                 layout=layout_fn(gap="8px"),
             ),
+            widgets.HBox(
+                [app._geo_seed_dd, app._geo_seed_refresh_btn],
+                layout=layout_fn(align_items="center", gap="6px", width="100%"),
+            ),
+            app._geo_seed_note,
         ]
     elif ct == "Frequency":
         app._refresh_freq_seed_options()
@@ -409,6 +415,30 @@ def _refresh_seed_options(app: Any, dropdown: Any) -> None:
         except Exception:
             continue
     dropdown.options = options
+
+
+def refresh_geo_seed_options(app: Any) -> None:
+    """Populate the Geometry Opt seed dropdown with saved optimisations."""
+    _refresh_seed_options(app, app._geo_seed_dd)
+
+
+def on_geo_seed_changed(app: Any, change: Any) -> None:
+    """Update the Geometry Opt seed note.
+
+    Unlike the Frequency / UV-Vis handlers this does **not** touch
+    ``_freq_preopt_cb``: that checkbox means "optimise before the real
+    calculation", which is meaningless here — the optimisation *is* the
+    calculation. A seed only changes the starting point.
+    """
+    if change["new"]:
+        app._geo_seed_note.value = (
+            '<span style="font-size:12px;color:#16a34a">'
+            "✓ Optimisation will start from the selected result's final "
+            "geometry instead of the current molecule."
+            "</span>"
+        )
+    else:
+        app._geo_seed_note.value = ""
 
 
 def refresh_freq_seed_options(app: Any) -> None:

@@ -255,6 +255,9 @@ from quantui.app_runflow import (
     on_freq_seed_changed as _run_on_freq_seed_changed,
 )
 from quantui.app_runflow import (
+    on_geo_seed_changed as _run_on_geo_seed_changed,
+)
+from quantui.app_runflow import (
     on_help_toggle as _run_on_help_toggle,
 )
 from quantui.app_runflow import (
@@ -307,6 +310,9 @@ from quantui.app_runflow import (
 )
 from quantui.app_runflow import (
     refresh_freq_seed_options as _run_refresh_freq_seed_options,
+)
+from quantui.app_runflow import (
+    refresh_geo_seed_options as _run_refresh_geo_seed_options,
 )
 from quantui.app_runflow import (
     refresh_results_browser as _run_refresh_results_browser,
@@ -971,6 +977,8 @@ class QuantUIApp:
         xyz_btn: Any
         xyz_msg: Any
         _freq_preopt_cb: Any
+        _geo_seed_dd: Any
+        _geo_seed_note: Any
         _freq_seed_dd: Any
         _freq_seed_note: Any
         _freq_seed_refresh_btn: Any
@@ -1760,11 +1768,17 @@ class QuantUIApp:
         self._freq_seed_dd.observe(
             self._safe_cb(self._on_freq_seed_changed), names="value"
         )
+        self._geo_seed_dd.observe(
+            self._safe_cb(self._on_geo_seed_changed), names="value"
+        )
         self._tddft_seed_dd.observe(
             self._safe_cb(self._on_tddft_seed_changed), names="value"
         )
         self._scan_type_dd.observe(
             self._safe_cb(self._update_scan_widgets), names="value"
+        )
+        self._geo_seed_refresh_btn.on_click(
+            lambda _btn: self._refresh_geo_seed_options()
         )
         self._freq_seed_refresh_btn.on_click(
             lambda _btn: self._refresh_freq_seed_options()
@@ -3142,6 +3156,12 @@ class QuantUIApp:
     def _update_scan_widgets(self, _change=None) -> None:
         _run_update_scan_widgets(self, _change)
 
+    def _refresh_geo_seed_options(self) -> None:
+        _run_refresh_geo_seed_options(self)
+
+    def _on_geo_seed_changed(self, change) -> None:
+        _run_on_geo_seed_changed(self, change)
+
     def _refresh_freq_seed_options(self) -> None:
         _run_refresh_freq_seed_options(self)
 
@@ -4367,6 +4387,25 @@ class QuantUIApp:
                     )
 
             if ct == "Geometry Opt":
+                # Optional seed: start from a previously optimised geometry
+                # rather than the current molecule — the "optimise cheaply,
+                # then refine at a higher level of theory" workflow. Mirrors
+                # the Frequency / UV-Vis seed handling below.
+                _geo_seed_path = self._geo_seed_dd.value
+                if _geo_seed_path:
+                    from quantui.results_storage import load_trajectory
+
+                    self.run_status.value = "Loading seed geometry from history…"
+                    _geo_seed_traj, _ = load_trajectory(Path(_geo_seed_path))
+                    calc_mol = _geo_seed_traj[-1]
+                    log.write(
+                        f"\nSeed geometry loaded from: "
+                        f"{Path(_geo_seed_path).name}\n"
+                        f"  Formula: {calc_mol.get_formula()}  "
+                        f"Atoms: {len(calc_mol.atoms)}\n"
+                        "  Optimization starts from this geometry.\n\n"
+                    )
+
                 self.run_status.value = "Optimizing geometry..."
                 from quantui import optimize_geometry
 
