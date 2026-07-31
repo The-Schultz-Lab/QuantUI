@@ -1802,6 +1802,11 @@ class TestTDDFTSeedDropdown:
         seed_dir = self._make_geo_opt_dir(tmp_path, "H2O", offset=1)
         app = QuantUIApp()
         app._molecule = self._water()
+        # The seed dropdown is shared across calc types (UXP2.5), so the
+        # handler needs the active calc type to decide whether picking a seed
+        # should gate the pre-opt checkbox — it must NOT for Geometry Opt.
+        # QuantUIApp defaults to "Single Point"; set this explicitly.
+        app.calc_type_dd.value = "UV-Vis (TD-DFT)"
         app._refresh_tddft_seed_options()
         # Pre-condition: pre-opt checkbox is enabled and toggled on.
         app._freq_preopt_cb.disabled = False
@@ -1820,8 +1825,12 @@ class TestTDDFTSeedDropdown:
         seed_dir = self._make_geo_opt_dir(tmp_path, "H2O", offset=1)
         app = QuantUIApp()
         app._molecule = self._water()
+        # See test_picking_seed_disables_preopt_and_shows_note: the shared
+        # seed dropdown (UXP2.5) needs the active calc type set explicitly.
+        app.calc_type_dd.value = "UV-Vis (TD-DFT)"
         app._refresh_tddft_seed_options()
         app._tddft_seed_dd.value = str(seed_dir)
+        assert app._freq_preopt_cb.disabled is True  # sanity: it did engage
         # Now clear the seed back to the placeholder.
         app._tddft_seed_dd.value = ""
         assert app._freq_preopt_cb.disabled is False

@@ -252,12 +252,6 @@ from quantui.app_runflow import (
     on_expand_mol_input as _run_on_expand_mol_input,
 )
 from quantui.app_runflow import (
-    on_freq_seed_changed as _run_on_freq_seed_changed,
-)
-from quantui.app_runflow import (
-    on_geo_seed_changed as _run_on_geo_seed_changed,
-)
-from quantui.app_runflow import (
     on_help_toggle as _run_on_help_toggle,
 )
 from quantui.app_runflow import (
@@ -297,10 +291,10 @@ from quantui.app_runflow import (
     on_run_clicked as _run_on_run_clicked,
 )
 from quantui.app_runflow import (
-    on_solvent_cb_changed as _run_on_solvent_cb_changed,
+    on_seed_changed as _run_on_seed_changed,
 )
 from quantui.app_runflow import (
-    on_tddft_seed_changed as _run_on_tddft_seed_changed,
+    on_solvent_cb_changed as _run_on_solvent_cb_changed,
 )
 from quantui.app_runflow import (
     populate_compare_list as _run_populate_compare_list,
@@ -309,16 +303,10 @@ from quantui.app_runflow import (
     refresh_comparison as _run_refresh_comparison,
 )
 from quantui.app_runflow import (
-    refresh_freq_seed_options as _run_refresh_freq_seed_options,
-)
-from quantui.app_runflow import (
-    refresh_geo_seed_options as _run_refresh_geo_seed_options,
-)
-from quantui.app_runflow import (
     refresh_results_browser as _run_refresh_results_browser,
 )
 from quantui.app_runflow import (
-    refresh_tddft_seed_options as _run_refresh_tddft_seed_options,
+    refresh_seed_options as _run_refresh_seed_options,
 )
 from quantui.app_runflow import (
     update_estimate as _run_update_estimate,
@@ -1063,6 +1051,9 @@ class QuantUIApp:
         xyz_btn: Any
         xyz_msg: Any
         _freq_preopt_cb: Any
+        _seed_dd: Any
+        _seed_note: Any
+        _seed_refresh_btn: Any
         _geo_seed_dd: Any
         _geo_seed_note: Any
         _freq_seed_dd: Any
@@ -1851,26 +1842,14 @@ class QuantUIApp:
         self.calc_type_dd.observe(
             self._safe_cb(self._on_calc_type_changed), names="value"
         )
-        self._freq_seed_dd.observe(
-            self._safe_cb(self._on_freq_seed_changed), names="value"
-        )
-        self._geo_seed_dd.observe(
-            self._safe_cb(self._on_geo_seed_changed), names="value"
-        )
-        self._tddft_seed_dd.observe(
-            self._safe_cb(self._on_tddft_seed_changed), names="value"
-        )
+        # Geometry Opt / Frequency / UV-Vis (TD-DFT) share one seed-geometry
+        # dropdown + refresh button (UXP2.5, M-UX2) — only one observer/click
+        # binding is needed, not three, since `_geo_seed_dd`, `_freq_seed_dd`
+        # and `_tddft_seed_dd` are the same underlying widget.
+        self._seed_dd.observe(self._safe_cb(self._on_seed_changed), names="value")
+        self._seed_refresh_btn.on_click(lambda _btn: self._refresh_seed_options())
         self._scan_type_dd.observe(
             self._safe_cb(self._update_scan_widgets), names="value"
-        )
-        self._geo_seed_refresh_btn.on_click(
-            lambda _btn: self._refresh_geo_seed_options()
-        )
-        self._freq_seed_refresh_btn.on_click(
-            lambda _btn: self._refresh_freq_seed_options()
-        )
-        self._tddft_seed_refresh_btn.on_click(
-            lambda _btn: self._refresh_tddft_seed_options()
         )
         # Notes + estimate
         self.method_dd.observe(self._safe_cb(self._update_notes), names="value")
@@ -3242,23 +3221,24 @@ class QuantUIApp:
     def _update_scan_widgets(self, _change=None) -> None:
         _run_update_scan_widgets(self, _change)
 
-    def _refresh_geo_seed_options(self) -> None:
-        _run_refresh_geo_seed_options(self)
+    def _refresh_seed_options(self) -> None:
+        _run_refresh_seed_options(self)
 
-    def _on_geo_seed_changed(self, change) -> None:
-        _run_on_geo_seed_changed(self, change)
+    def _on_seed_changed(self, change) -> None:
+        _run_on_seed_changed(self, change)
 
-    def _refresh_freq_seed_options(self) -> None:
-        _run_refresh_freq_seed_options(self)
-
-    def _on_freq_seed_changed(self, change) -> None:
-        _run_on_freq_seed_changed(self, change)
-
-    def _refresh_tddft_seed_options(self) -> None:
-        _run_refresh_tddft_seed_options(self)
-
-    def _on_tddft_seed_changed(self, change) -> None:
-        _run_on_tddft_seed_changed(self, change)
+    # Geometry Opt / Frequency / UV-Vis (TD-DFT) used to each have their own
+    # seed-refresh + seed-changed methods; the widget they operate on is now
+    # one shared dropdown (UXP2.5, M-UX2), so these are aliases of the two
+    # methods above rather than separate implementations. Kept under their
+    # original names because app_runflow.py's per-calc-type branches and the
+    # existing per-calc-type tests still call them by these names.
+    _refresh_geo_seed_options = _refresh_seed_options
+    _refresh_freq_seed_options = _refresh_seed_options
+    _refresh_tddft_seed_options = _refresh_seed_options
+    _on_geo_seed_changed = _on_seed_changed
+    _on_freq_seed_changed = _on_seed_changed
+    _on_tddft_seed_changed = _on_seed_changed
 
     # ── Help buttons ──────────────────────────────────────────────────────
 
@@ -3995,15 +3975,19 @@ class QuantUIApp:
             _collapsed_children.append(self.viz_controls_box)
         self.mol_input_container.children = _collapsed_children
 
-        # Re-filter seed-geometry dropdowns (Freq + UV-Vis) to only include
-        # prior geo-opts of the now-active molecule (formula match). Best-
-        # effort: failures must not block molecule loading.
+        # Re-filter the (shared) seed-geometry dropdown to only include prior
+        # geo-opts of the now-active molecule (formula match). Best-effort:
+        # failures must not block molecule loading.
+        #
+        # This used to refresh only the Frequency/UV-Vis dropdowns, because
+        # Geometry Opt's seed dropdown didn't exist yet when this was written.
+        # Now that all three calc types share one dropdown (UXP2.5), a single
+        # call here also fixes a real gap: switching molecules while already
+        # on the Geometry Opt panel used to leave its seed list showing the
+        # PREVIOUS molecule's matches until the user switched calc types away
+        # and back.
         try:
-            self._refresh_freq_seed_options()
-        except Exception:
-            pass
-        try:
-            self._refresh_tddft_seed_options()
+            self._refresh_seed_options()
         except Exception:
             pass
 

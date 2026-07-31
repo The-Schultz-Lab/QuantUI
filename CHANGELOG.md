@@ -7,6 +7,29 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-31
+
+### Fixed
+
+- **The "Geometry optimization before calculation" checkbox no longer gets
+  stuck disabled.** Selecting a seed geometry on Frequency or UV-Vis disables
+  that checkbox (a seed is already an optimised geometry, so re-optimising
+  first would be redundant) — but switching to a different calculation type
+  afterwards used to leave it disabled with no way to re-enable it short of
+  going back and clearing the seed selection.
+- **The Geometry Opt seed dropdown now updates when you change molecules
+  while already on that panel.** It previously only refreshed when you
+  switched *into* the Geometry Opt calculation type, so loading a new
+  molecule without leaving the panel could leave it listing matches for the
+  wrong molecule.
+
+### Changed
+
+- **Internal cleanup:** the Geometry Opt / Frequency / UV-Vis seed-geometry
+  dropdowns, refresh buttons, and status notes are now one shared widget group
+  instead of three near-identical copies. No user-visible change — the same
+  dropdown, filtering, and messages appear on each calculation type as before.
+
 ## [0.5.0] - 2026-07-31
 
 First release published to **PyPI** — `pip install quantui`.
@@ -461,7 +484,8 @@ Initial public scaffolding of the QuantUI package: `quantui` package with
 `calculator.py`, basic notebook launcher, Apptainer container definition,
 MIT license, and project metadata.
 
-[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.3.0...v0.4.0
