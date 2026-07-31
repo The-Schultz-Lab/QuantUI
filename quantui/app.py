@@ -32,6 +32,7 @@ import quantui
 import quantui.calc_log as _calc_log
 import quantui.issue_tracker as _issue_tracker
 from quantui import molecule_library as _ml
+from quantui import theme as _theme
 from quantui.app_analysis import (
     activate_ana_panel as _ana_activate_ana_panel,
 )
@@ -616,7 +617,7 @@ h3 {
     color: #64748b !important;
     margin: 24px 0 10px !important;
     padding-bottom: 5px !important;
-    border-bottom: 1px solid #e2e8f0 !important;
+    border-bottom: 1px solid __Q_BORDER__ !important;
 }
 
 /* Rounded corners on inputs, dropdowns, and buttons -------------------- */
@@ -632,11 +633,13 @@ h3 {
     background: transparent !important;
 }
 
-/* 3D molecule-viewer frames — a subtle bounding box so the viewer
-   extent reads clearly. The light border inverts to dark automatically under
-   the global dark-mode invert filter. */
+/* 3D molecule-viewer frames — a bounding box so the viewer extent reads
+   clearly. Uses the STRONG token: this frame stands alone rather than sitting
+   in a stack of cards, so it needs to read as a frame on its own. The old
+   #c0ccd8 inverted to a near-invisible 1.65:1 against the dark page — see
+   quantui/theme.py for the measurements and the mid-tone rule. */
 .quantui-viewer-frame {
-    border: 1px solid #c0ccd8 !important;
+    border: 1px solid __Q_BORDER_STRONG__ !important;
     border-radius: 6px !important;
     overflow: hidden !important;
 }
@@ -654,13 +657,20 @@ h3 {
     display: inline-block;
     width: 14px;
     height: 14px;
-    border: 2px solid #c0ccd8;
+    border: 2px solid __Q_BORDER__;
     border-top-color: #2563eb;
     border-radius: 50%;
     animation: quantui-spin 0.7s linear infinite;
     vertical-align: middle;
 }
-</style>"""
+</style>""".replace("__Q_BORDER_STRONG__", _theme.BORDER_STRONG).replace(
+    # Sentinel substitution rather than an f-string: this block is dense with
+    # CSS braces, every one of which would need doubling. Order matters —
+    # __Q_BORDER_STRONG__ must be replaced before __Q_BORDER__, or the shorter
+    # sentinel matches inside the longer one and leaves a dangling "_STRONG__".
+    "__Q_BORDER__",
+    _theme.BORDER,
+)
 
 _LAYOUT_TRAITS: frozenset[str] = frozenset(widgets.Layout.class_trait_names())
 
@@ -2383,7 +2393,7 @@ class QuantUIApp:
                     body = rows[1:]
                     head_html = "".join(
                         f'<th style="padding:4px 10px;text-align:left;'
-                        f"border-bottom:1px solid #cbd5e1;font-size:12px;"
+                        f"border-bottom:1px solid {_theme.BORDER};font-size:12px;"
                         f'color:#1e293b">{_html.escape(str(c))}</th>'
                         for c in header
                     )
@@ -2427,7 +2437,7 @@ class QuantUIApp:
                     # reach the parent app.
                     iframe_html = (
                         '<iframe sandbox="allow-scripts" '
-                        'style="width:100%;height:400px;border:1px solid #cbd5e1;'
+                        f'style="width:100%;height:400px;border:1px solid {_theme.BORDER};'
                         'border-radius:4px" '
                         f'srcdoc="{_html.escape(raw, quote=True)}"></iframe>'
                     )
@@ -5514,7 +5524,7 @@ class QuantUIApp:
             rows.append(f'<div style="{style}">{esc}</div>')
         self._log_output_html.value = (
             '<div style="font-family:monospace;font-size:12px;line-height:1.4;'
-            "padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;"
+            f"padding:8px 10px;background:#f8fafc;border:1px solid {_theme.BORDER};"
             'border-radius:4px;overflow-x:auto;max-height:550px;overflow-y:auto">'
             + "".join(rows)
             + "</div>"
@@ -5530,7 +5540,7 @@ class QuantUIApp:
         if key and key in HELP_TOPICS:
             entry = HELP_TOPICS[key]
             self.help_content_html.value = (
-                f'<div style="border:1px solid #e2e8f0;border-radius:6px;'
+                f'<div style="border:1px solid {_theme.BORDER};border-radius:6px;'
                 f'padding:14px 18px;margin:8px 0;background:#f8fafc;max-width:700px">'
                 f'<h4 style="margin:0 0 10px;color:#1e293b;font-size:15px;font-weight:700">'
                 f'{entry["title"]}</h4>'

@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
+from quantui import theme as _theme
+
 
 def _result_extra_rows(get: Any) -> str:
     """Build the shared 'extra' result-card rows from an accessor.
@@ -478,7 +480,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
             _thumb_html = (
                 f'<img src="data:image/png;base64,{_img_b64}" '
                 f'style="float:right;margin:0 0 6px 14px;border-radius:4px;'
-                f'border:1px solid #e2e8f0" width="173" height="108" />'
+                f'border:1px solid {_theme.BORDER}" width="173" height="108" />'
             )
 
     return (

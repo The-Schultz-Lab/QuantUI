@@ -73,6 +73,8 @@ from typing import Any, Optional
 import ipywidgets as widgets
 from IPython.display import Javascript, display
 
+from quantui import theme as _theme
+
 _LOG = logging.getLogger(__name__)
 
 # Coalescing window for appends. PySCF emits many lines per second; batching
@@ -88,7 +90,7 @@ _MAIL_CLASS = "quantui-live-mail"
 # ASCII header exactly as .jp-OutputArea-output did (see GOTCHAS).
 _CONTAINER_STYLE = (
     "height:300px;overflow-y:auto;overflow-anchor:auto;"
-    "border:1px solid #c0ccd8;border-radius:2px;padding:8px;"
+    f"border:1px solid {_theme.BORDER};border-radius:2px;padding:8px;"
     "font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,"
     "'Liberation Mono','Courier New',monospace;"
     "font-size:12.5px;line-height:1.35;white-space:pre-wrap;"

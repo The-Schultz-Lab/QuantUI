@@ -11,6 +11,7 @@ from IPython.display import HTML, display
 
 import quantui
 from quantui import molecule_library as _ml
+from quantui import theme as _theme
 from quantui.help_content import HELP_TOPICS
 from quantui.live_log import LiveLog
 
@@ -153,7 +154,7 @@ def build_status_panel(
             for k, v in items
         )
         return (
-            '<div style="background:#f8fafc;border:1px solid #e2e8f0;'
+            f'<div style="background:#f8fafc;border:1px solid {_theme.BORDER};'
             "border-left:4px solid #3b82f6;"
             'padding:12px 16px;border-radius:6px;margin:4px 0 8px">'
             '<div style="font-weight:600;font-size:14px;color:#1e293b">'
@@ -188,7 +189,7 @@ def build_status_panel(
         ],
     )
     settings_html = widgets.HTML(
-        '<div style="background:#f8fafc;border:1px solid #e2e8f0;'
+        f'<div style="background:#f8fafc;border:1px solid {_theme.BORDER};'
         "border-left:4px solid #94a3b8;padding:12px 16px;border-radius:6px;"
         'margin:8px 0 4px">'
         '<div style="font-weight:600;font-size:14px;color:#1e293b">Settings</div>'
@@ -811,7 +812,7 @@ def build_shared_widgets(
             height="360px",
             width="100%",
             max_width="480px",
-            border="1px solid #e2e8f0",
+            border=f"1px solid {_theme.BORDER}",
             overflow="hidden",
         )
     )
@@ -1279,7 +1280,7 @@ def build_welcome_header(app: Any, *, layout_fn: Any = None) -> None:
             justify_content="flex-start",
             padding="22px 4px 18px",
             margin="0 0 4px",
-            border_bottom="1px solid #e2e8f0",
+            border_bottom=f"1px solid {_theme.BORDER}",
         ),
     )
 
@@ -2239,7 +2240,7 @@ def build_output_tab(app: Any, *, layout_fn: Any) -> None:
             app._log_output_html,
             app._result_log_accordion,
             widgets.HTML(
-                '<hr style="border:none;border-top:1px solid #e2e8f0;margin:16px 0 10px"/>'
+                f'<hr style="border:none;border-top:1px solid {_theme.BORDER};margin:16px 0 10px"/>'
                 '<p style="color:#94a3b8;font-size:12px;margin:0 0 6px">'
                 "Session event log — records molecule loads, calculations, "
                 "and issue reports across this session.</p>"
@@ -2315,7 +2316,7 @@ def build_files_tab(app: Any, *, layout_fn: Any) -> None:
     )
     app._files_preview_output = widgets.Output(
         layout=layout_fn(
-            border="1px solid #cbd5e1",
+            border=f"1px solid {_theme.BORDER}",
             min_height="220px",
             max_height="420px",
             overflow="auto",
@@ -2403,7 +2404,7 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(
             display="none",
             padding="8px 0",
-            border="1px solid #e2e8f0",
+            border=f"1px solid {_theme.BORDER}",
             border_radius="6px",
             padding_left="12px",
             margin="0 0 8px",

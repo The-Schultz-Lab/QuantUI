@@ -11,6 +11,8 @@ from typing import Any, List
 import ipywidgets as widgets
 from IPython.display import HTML, display
 
+from quantui import theme as _theme
+
 
 @contextmanager
 def _viz_render_event(app: Any, task: Any, backend: Any, **extras: Any):
@@ -1919,7 +1921,7 @@ def on_vib_mode_changed(app: Any, change: dict[str, Any]) -> None:
 
 
 _STEPPER_BTN_STYLE = (
-    "padding:2px 9px;border:1px solid #cbd5e1;border-radius:4px;"
+    f"padding:2px 9px;border:1px solid {_theme.BORDER};border-radius:4px;"
     "background:#f8fafc;color:#334155;cursor:pointer;font-size:13px;line-height:1.4;"
 )
 
