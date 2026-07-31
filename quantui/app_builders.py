@@ -893,11 +893,16 @@ def build_shared_widgets(
         layout=layout_fn(width="180px"),
     )
 
-    # Geometry Opt seed: start a run from a previously optimised geometry —
-    # the standard "optimise cheaply, then refine at a higher level of theory"
-    # workflow. Same filtered-dropdown pattern as the Frequency / UV-Vis seeds
-    # below; the shared `_refresh_seed_options` helper populates all three.
-    app._geo_seed_dd = widgets.Dropdown(
+    # Seed geometry — shared across Geometry Opt / Frequency / UV-Vis (TD-DFT):
+    # start a run from a previously optimised geometry instead of the current
+    # molecule (e.g. optimise cheaply, then refine at a higher level of
+    # theory). Only one of these three calc types is ever visible at a time,
+    # so ONE widget group is built here and referenced under all three
+    # historical per-calc-type attribute names below (UXP2.5, M-UX2,
+    # 2026-07-31) — this used to be three near-identical widget groups.
+    # Real object count is one; the aliases exist so app.py, app_runflow.py,
+    # and the existing per-calc-type tests keep working unchanged.
+    app._seed_dd = widgets.Dropdown(
         options=[("(use current molecule)", "")],
         description="Seed geometry:",
         style={"description_width": "110px"},
@@ -907,54 +912,25 @@ def build_shared_widgets(
             "result — e.g. optimise at a low level of theory, then refine here"
         ),
     )
-    app._geo_seed_refresh_btn = widgets.Button(
+    app._seed_refresh_btn = widgets.Button(
         description="",
         icon="refresh",
         layout=layout_fn(width="32px", height="32px"),
         tooltip="Refresh the list of saved geometry optimisations",
     )
-    app._geo_seed_note = widgets.HTML("")
+    app._seed_note = widgets.HTML("")
+    app._geo_seed_dd = app._freq_seed_dd = app._tddft_seed_dd = app._seed_dd
+    app._geo_seed_refresh_btn = app._freq_seed_refresh_btn = (
+        app._tddft_seed_refresh_btn
+    ) = app._seed_refresh_btn
+    app._geo_seed_note = app._freq_seed_note = app._tddft_seed_note = app._seed_note
 
-    app._freq_seed_dd = widgets.Dropdown(
-        options=[("(use current molecule)", "")],
-        description="Seed geometry:",
-        style={"description_width": "110px"},
-        layout=layout_fn(width="auto", flex="1 1 auto", min_width="260px"),
-        tooltip="Optionally load the final optimised geometry from a previous Geo Opt result",
-    )
-    app._freq_seed_refresh_btn = widgets.Button(
-        description="",
-        icon="refresh",
-        layout=layout_fn(width="32px", height="32px"),
-        tooltip="Refresh the list of saved geometry optimisations",
-    )
     app._freq_preopt_cb = widgets.Checkbox(
         value=False,
         description="Geometry optimization before calculation (QM, slower)",
         style={"description_width": "initial"},
         indent=False,
     )
-    app._freq_seed_note = widgets.HTML("")
-
-    # UV-Vis (TD-DFT) seed-geometry parity with Frequency: lets the user run
-    # the excited-state calculation on a previously optimised geometry rather
-    # than the current input molecule. Same formula-filtered dropdown pattern
-    # as the Frequency seed widgets above; refresh button + status note also
-    # mirrored.
-    app._tddft_seed_dd = widgets.Dropdown(
-        options=[("(use current molecule)", "")],
-        description="Seed geometry:",
-        style={"description_width": "110px"},
-        layout=layout_fn(width="auto", flex="1 1 auto", min_width="260px"),
-        tooltip="Optionally load the final optimised geometry from a previous Geo Opt result",
-    )
-    app._tddft_seed_refresh_btn = widgets.Button(
-        description="",
-        icon="refresh",
-        layout=layout_fn(width="32px", height="32px"),
-        tooltip="Refresh the list of saved geometry optimisations",
-    )
-    app._tddft_seed_note = widgets.HTML("")
 
     app._scan_type_dd = widgets.Dropdown(
         options=["Bond", "Angle", "Dihedral"],

@@ -79,23 +79,117 @@ class TestSeedNote:
 
 
 class TestSeedWiring:
-    def test_refresh_button_targets_the_geo_dropdown(self, app, monkeypatch):
-        # Regression guard: an early revision bound this to _freq_seed_refresh_btn,
-        # so the Geo Opt refresh icon repopulated the Frequency dropdown.
+    def test_refresh_button_click_populates_options(self, app, monkeypatch):
+        # Regression guard, updated for UXP2.5's consolidation: an early
+        # revision bound the Geo Opt refresh button to
+        # _refresh_freq_seed_options, so its click repopulated the Frequency
+        # dropdown instead of its own. Now that all three calc types share one
+        # dropdown/button (there IS only "its own" in the singular), the
+        # meaningful guard is that clicking the button actually triggers the
+        # real refresh implementation, not a specific per-calc-type alias name.
         called = []
         monkeypatch.setattr(
-            app, "_refresh_geo_seed_options", lambda: called.append("geo")
+            app, "_refresh_seed_options", lambda: called.append("refreshed")
         )
         for handler in app._geo_seed_refresh_btn._click_handlers.callbacks:
             handler(app._geo_seed_refresh_btn)
-        assert called == ["geo"]
+        assert called == ["refreshed"]
 
-    def test_each_calc_type_has_its_own_dropdown(self, app):
-        # Sharing one dropdown across calc types would leak a Frequency seed into
-        # a Geometry Opt run.
-        assert app._geo_seed_dd is not app._freq_seed_dd
-        assert app._geo_seed_dd is not app._tddft_seed_dd
+    def test_geo_freq_tddft_share_one_widget_group(self, app):
+        # UXP2.5 (M-UX2, 2026-07-31): Geometry Opt / Frequency / UV-Vis
+        # (TD-DFT) used to each build their own near-identical seed dropdown +
+        # refresh button + note. Only one of the three panels is ever visible
+        # at a time, so there is no benefit to three separate widgets — and a
+        # seed a user picked on one panel legitimately applies if they switch
+        # to another before running, rather than needing to be re-selected.
+        # These attribute names are now aliases onto one shared widget each.
+        assert app._geo_seed_dd is app._freq_seed_dd is app._tddft_seed_dd
+        assert (
+            app._geo_seed_refresh_btn
+            is app._freq_seed_refresh_btn
+            is app._tddft_seed_refresh_btn
+        )
+        assert app._geo_seed_note is app._freq_seed_note is app._tddft_seed_note
 
     def test_refresh_populates_without_error(self, app):
         app._refresh_geo_seed_options()
         assert app._geo_seed_dd.options[0] == ("(use current molecule)", "")
+
+
+class TestPreoptCheckboxDoesNotGetStuckDisabled:
+    """Regression tests for a bug the UXP2.5 consolidation fixed as a side
+    effect, not the thing it set out to fix.
+
+    Before consolidation, on_calc_type_changed only ever set
+    ``_freq_preopt_cb.disabled`` to True (via the per-calc-type seed-changed
+    handlers) and never reset it back to False on a plain calc-type switch —
+    only Geometry Opt/Reorganization Energy explicitly handled the checkbox at
+    all, by hiding it. So: pick a seed on Frequency (disables the checkbox),
+    switch to Single Point (checkbox becomes visible again, but stays
+    disabled), and there was no path back to enabled short of re-selecting and
+    then clearing the seed on the now-hidden Frequency panel.
+    """
+
+    def _seeded_result(self, tmp_path, monkeypatch, app):
+        # Minimal on-disk geometry_opt result so the dropdown has a real,
+        # selectable option (a Dropdown rejects values not in .options).
+        import json
+
+        result_dir = tmp_path / "seed_result"
+        result_dir.mkdir()
+        (result_dir / "result.json").write_text(
+            json.dumps(
+                {
+                    "calc_type": "geometry_opt",
+                    "formula": "H2O",
+                    "method": "RHF",
+                    "basis": "STO-3G",
+                    "timestamp": "2026-01-01T00:00:00",
+                }
+            )
+        )
+        (result_dir / "trajectory.json").write_text(
+            json.dumps([{"atoms": ["O", "H", "H"], "coordinates": [[0, 0, 0]] * 3}])
+        )
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app._molecule = None  # skip the formula/RMSD filter for this test
+        app._refresh_seed_options()
+        return str(result_dir)
+
+    def test_switching_to_single_point_re_enables_the_checkbox(
+        self, app, tmp_path, monkeypatch
+    ):
+        seed = self._seeded_result(tmp_path, monkeypatch, app)
+        app.calc_type_dd.value = "Frequency"
+        app._seed_dd.value = seed
+        assert app._freq_preopt_cb.disabled is True  # sanity: engaged first
+
+        app.calc_type_dd.value = "Single Point"
+
+        assert app._freq_preopt_cb.disabled is False
+
+    def test_a_seed_still_disables_it_after_switching_between_freq_and_uvvis(
+        self, app, tmp_path, monkeypatch
+    ):
+        # The shared dropdown legitimately carries the seed across these two
+        # calc types (UXP2.5) — the checkbox must stay gated, not just avoid
+        # being stuck.
+        seed = self._seeded_result(tmp_path, monkeypatch, app)
+        app.calc_type_dd.value = "Frequency"
+        app._seed_dd.value = seed
+
+        app.calc_type_dd.value = "UV-Vis (TD-DFT)"
+
+        assert app._freq_preopt_cb.disabled is True
+
+    def test_switching_to_geometry_opt_hides_it_regardless_of_a_pending_seed(
+        self, app, tmp_path, monkeypatch
+    ):
+        seed = self._seeded_result(tmp_path, monkeypatch, app)
+        app.calc_type_dd.value = "Frequency"
+        app._seed_dd.value = seed
+
+        app.calc_type_dd.value = "Geometry Opt"
+
+        assert app._freq_preopt_cb.layout.display == "none"
+        assert app._freq_preopt_cb.value is False

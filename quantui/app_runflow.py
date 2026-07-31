@@ -145,8 +145,24 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     if ct in ("Geometry Opt", "Reorganization Energy"):
         app._freq_preopt_cb.value = False
         app._freq_preopt_cb.layout.display = "none"
+    elif ct in ("Frequency", "UV-Vis (TD-DFT)"):
+        app._freq_preopt_cb.layout.display = ""
+        # The seed dropdown is shared across all three seed-consuming calc
+        # types (UXP2.5), so it can carry a value in from whichever of these
+        # two was active before. Re-evaluate .disabled here rather than trust
+        # whatever it was left at — otherwise switching Frequency (seeded) ->
+        # UV-Vis carries a stale disabled=True even if UV-Vis's own seed slot
+        # is empty, and switching either -> Single Point and back left the
+        # checkbox permanently disabled with no way to clear it (pre-existing
+        # bug, fixed here as a side effect of the consolidation).
+        if app._seed_dd.value:
+            app._freq_preopt_cb.value = False
+            app._freq_preopt_cb.disabled = True
+        else:
+            app._freq_preopt_cb.disabled = False
     else:
         app._freq_preopt_cb.layout.display = ""
+        app._freq_preopt_cb.disabled = False
 
     if ct == "Geometry Opt":
         app._refresh_geo_seed_options()
@@ -417,74 +433,54 @@ def _refresh_seed_options(app: Any, dropdown: Any) -> None:
     dropdown.options = options
 
 
-def refresh_geo_seed_options(app: Any) -> None:
-    """Populate the Geometry Opt seed dropdown with saved optimisations."""
-    _refresh_seed_options(app, app._geo_seed_dd)
+def refresh_seed_options(app: Any) -> None:
+    """Populate the (shared) seed-geometry dropdown with saved optimisations.
 
-
-def on_geo_seed_changed(app: Any, change: Any) -> None:
-    """Update the Geometry Opt seed note.
-
-    Unlike the Frequency / UV-Vis handlers this does **not** touch
-    ``_freq_preopt_cb``: that checkbox means "optimise before the real
-    calculation", which is meaningless here — the optimisation *is* the
-    calculation. A seed only changes the starting point.
+    Used by Geometry Opt, Frequency, and UV-Vis (TD-DFT) — only one of which
+    is ever visible at a time, so there is exactly one dropdown to refresh
+    (UXP2.5, M-UX2). Superseded the three near-identical
+    ``refresh_{geo,freq,tddft}_seed_options`` wrappers that used to exist here.
     """
-    if change["new"]:
-        app._geo_seed_note.value = (
-            '<span style="font-size:12px;color:#16a34a">'
-            "✓ Optimisation will start from the selected result's final "
-            "geometry instead of the current molecule."
-            "</span>"
-        )
-    else:
-        app._geo_seed_note.value = ""
+    _refresh_seed_options(app, app._seed_dd)
 
 
-def refresh_freq_seed_options(app: Any) -> None:
-    """Populate frequency seed dropdown with saved geometry optimisations."""
-    _refresh_seed_options(app, app._freq_seed_dd)
+def on_seed_changed(app: Any, change: Any) -> None:
+    """Update the seed note; gate the pre-opt checkbox where a seed makes it
+    redundant.
 
+    Superseded the three near-identical ``on_{geo,freq,tddft}_seed_changed``
+    handlers (UXP2.5, M-UX2) — the dropdown is now one shared widget, so one
+    handler suffices, made calc-type-aware where the three used to differ:
 
-def refresh_tddft_seed_options(app: Any) -> None:
-    """Populate UV-Vis (TD-DFT) seed dropdown with saved geometry optimisations."""
-    _refresh_seed_options(app, app._tddft_seed_dd)
+    - **Frequency / UV-Vis (TD-DFT):** a selected seed is already an optimised
+      geometry, so re-optimising first would be redundant — disable
+      ``_freq_preopt_cb`` while one is selected.
+    - **Geometry Opt (and everything else):** leave that checkbox alone. For
+      Geometry Opt specifically, "optimise before the calculation" is
+      meaningless — the optimisation *is* the calculation — and for other
+      calc types the checkbox isn't seed-related at all.
 
-
-def on_freq_seed_changed(app: Any, change: Any) -> None:
-    """Enable/disable pre-opt checkbox and update seed note message."""
-    path_str = change["new"]
-    if path_str:
-        app._freq_preopt_cb.value = False
-        app._freq_preopt_cb.disabled = True
-        app._freq_seed_note.value = (
-            '<span style="font-size:12px;color:#16a34a">'
-            "✓ Final optimised geometry will be loaded from the selected result."
-            "</span>"
-        )
-    else:
-        app._freq_preopt_cb.disabled = False
-        app._freq_seed_note.value = ""
-
-
-def on_tddft_seed_changed(app: Any, change: Any) -> None:
-    """Enable/disable pre-opt checkbox and update UV-Vis seed note message.
-
-    Mirrors on_freq_seed_changed: a loaded seed geometry is already optimised,
-    so the global pre-opt checkbox is disabled while a seed is selected.
+    See ``on_calc_type_changed`` for the mirror image of this: it re-evaluates
+    ``_freq_preopt_cb.disabled`` on every switch into/out of Frequency/UV-Vis,
+    since the shared dropdown can carry a stale value in from the other one.
     """
+    ct = app.calc_type_dd.value
     path_str = change["new"]
+    if ct in ("Frequency", "UV-Vis (TD-DFT)"):
+        if path_str:
+            app._freq_preopt_cb.value = False
+            app._freq_preopt_cb.disabled = True
+        else:
+            app._freq_preopt_cb.disabled = False
     if path_str:
-        app._freq_preopt_cb.value = False
-        app._freq_preopt_cb.disabled = True
-        app._tddft_seed_note.value = (
+        app._seed_note.value = (
             '<span style="font-size:12px;color:#16a34a">'
-            "✓ Final optimised geometry will be loaded from the selected result."
+            "✓ The run will start from the selected result's final geometry "
+            "instead of the current molecule."
             "</span>"
         )
     else:
-        app._freq_preopt_cb.disabled = False
-        app._tddft_seed_note.value = ""
+        app._seed_note.value = ""
 
 
 def on_solvent_cb_changed(app: Any, change: Any) -> None:
