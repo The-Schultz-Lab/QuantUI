@@ -21,7 +21,7 @@ FROM: condaforge/miniforge3:latest
 %labels
   Maintainer "Jonathan Schultz"
   Purpose "Local teaching interface for quantum chemistry calculations"
-  Version "0.4.1"
+  Version "0.5.0"
 
 %environment
   export PATH="/opt/conda/bin:${PATH}"

@@ -1,10 +1,14 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=9.2.2"]
+# setuptools_scm was listed here historically but never configured — there is
+# no [tool.setuptools_scm] table and `version` below is static, so nothing
+# consumed it. Dropped for the first PyPI release rather than shipping a
+# build dependency that does nothing.
+requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "quantui"
-version = "0.4.1"
+version = "0.5.0"
 description = "An open-source frontend for DFT and post-HF quantum chemistry with PySCF"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -23,19 +27,54 @@ classifiers = [
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    # PyPI shows the licence from this classifier in the sidebar; the
+    # [project] license table alone is not enough for the old-style display.
+    "License :: OSI Approved :: MIT License",
+    # PySCF is Linux/macOS only, so Windows users need the container. Saying so
+    # in metadata means `pip` users see it before they hit an install failure.
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Environment :: Web Environment",
+    "Framework :: Jupyter",
 ]
 
+# Runtime dependencies carry MAJOR-version caps, not open floors (M-PYPI
+# PYPI.2). QuantUI is installed by students as an application, not consumed as
+# a library, so the usual "don't cap in a library" advice does not apply — a
+# resolution conflict is a worse outcome for them than a slightly stale pin,
+# but a silent break from a new major is worse still.
+#
+# The concrete motivation: Voila 0.5.x declares no upper bound on jupyterlab,
+# so a fresh install already resolves a Lab newer than Voila was built against
+# and logs federated-extension errors in the browser console (see GOTCHAS,
+# "Voila 0.5.x does not bound JupyterLab"). Harmless today because the failing
+# extension is Notebook's, which Voila does not use — but shipping an unbounded
+# stack means the next major can break a student with no error we control.
+#
+# Caps are at the MAJOR boundary only: minor/patch updates still flow, and the
+# bounds reflect what has actually been tested rather than pretending to more.
+# Revisit when a new major of any of these is validated.
 dependencies = [
-    "jupyter>=1.0.0",
-    "ipywidgets>=8.0.0",
-    "notebook>=7.0.0",
-    "numpy>=1.24.0",
-    "requests>=2.28.0",
-    "py3Dmol>=2.0.0",
-    "matplotlib>=3.7.0",
-    "plotly>=5.0.0",
-    "plotlymol>=0.2.1",
+    "jupyter>=1.0.0,<2",
+    "ipywidgets>=8.0.0,<9",
+    "notebook>=7.0.0,<8",
+    "numpy>=1.24.0,<3",
+    "requests>=2.28.0,<3",
+    "py3Dmol>=2.0.0,<3",
+    "matplotlib>=3.7.0,<4",
+    "plotly>=5.0.0,<7",
+    "plotlymol>=0.2.1,<1",
 ]
+
+[project.urls]
+# Rendered as the sidebar links on the PyPI project page. "Homepage" and
+# "Source" are the two PyPI actually highlights; the rest appear under
+# "Project links".
+Homepage = "https://github.com/The-Schultz-Lab/QuantUI"
+Source = "https://github.com/The-Schultz-Lab/QuantUI"
+Documentation = "https://the-schultz-lab.github.io/QuantUI/"
+Changelog = "https://github.com/The-Schultz-Lab/QuantUI/blob/main/CHANGELOG.md"
+Issues = "https://github.com/The-Schultz-Lab/QuantUI/issues"
 
 [project.scripts]
 # ``quantui`` CLI — small toolkit for inspecting QuantUI state from
@@ -67,20 +106,25 @@ quantui = [
 # pyscf.nmr (that module doesn't exist in released pyscf); it's
 # pyscf.prop.nmr, provided by pyscf-properties below.
 pyscf = [
-    "pyscf>=2.13.0",
+    # .github/dependabot.yml already ignores pyscf MAJOR bumps ("may break
+    # API — review manually"); this cap makes that policy binding for
+    # installers too, not just for our dependency bot.
+    "pyscf>=2.13.0,<3",
     "pyscf-properties",
 ]
 
 # ASE: structure I/O, extended molecule library, geometry optimisation
 ase = [
-    "ase>=3.22.0",
+    "ase>=3.22.0,<4",
 ]
 
 # Voilà app server — hides notebook code; students see only the widget UI.
 # Run with: voila notebooks/molecule_computations.ipynb
 app = [
-    "voila>=0.5.0",
-    "ipykernel>=6.0.0",
+    # Capped for the same reason as the runtime stack above: Voila is the
+    # component whose own bounds are too loose, so ours have to hold the line.
+    "voila>=0.5.0,<0.6",
+    "ipykernel>=6.0.0,<8",
 ]
 
 # GPU acceleration via gpu4pyscf + cupy (M-GPU). Linux + NVIDIA CUDA only.
@@ -111,7 +155,7 @@ gpu-cuda13x = [
 # Notebook smoke-test dependencies
 notebook = [
     "nbmake>=1.4.0",
-    "ipykernel>=6.0.0",
+    "ipykernel>=6.0.0,<8",
 ]
 
 # Development dependencies

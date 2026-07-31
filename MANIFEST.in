@@ -1,0 +1,39 @@
+# Source-distribution contents (M-PYPI PYPI.3).
+#
+# setuptools already picks up the package itself, README, LICENSE and
+# pyproject.toml. This file fixes the two things it gets wrong for us:
+# CHANGELOG.md was missing, and tests/ was being shipped.
+#
+# Policy — what belongs in the sdist:
+#   INCLUDE  the package, its bundled data, and the documents a user or a
+#            downstream packager needs to understand what they installed.
+#   EXCLUDE  anything only useful from a git clone. A pip user cannot run the
+#            test suite meaningfully (it needs dev extras and PySCF), cannot
+#            build the container, and does not get the notebooks in a usable
+#            location — those all stay in the repo.
+
+include CHANGELOG.md
+include SECURITY.md
+
+# Tests need the dev extras + PySCF to run and are not importable from an
+# installed copy; shipping them roughly doubles the sdist for no benefit.
+prune tests
+
+# Repo-only material: container recipes, launcher scripts, tutorial notebooks,
+# the docs site, and the environment file are all clone-time artifacts.
+prune apptainer
+prune docs
+prune launchers
+prune notebooks
+prune local-setup
+prune scripts
+
+# Build/dev droppings that must never reach an artifact.
+prune .github
+global-exclude *.py[cod]
+global-exclude __pycache__
+global-exclude .DS_Store
+exclude .dev_install_stamp
+exclude .pre-commit-config.yaml
+exclude AUDIT_FINDINGS.md
+exclude quantui.sif
