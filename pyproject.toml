@@ -1,5 +1,9 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=9.2.2"]
+# setuptools_scm was listed here historically but never configured — there is
+# no [tool.setuptools_scm] table and `version` below is static, so nothing
+# consumed it. Dropped for the first PyPI release rather than shipping a
+# build dependency that does nothing.
+requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -23,6 +27,15 @@ classifiers = [
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    # PyPI shows the licence from this classifier in the sidebar; the
+    # [project] license table alone is not enough for the old-style display.
+    "License :: OSI Approved :: MIT License",
+    # PySCF is Linux/macOS only, so Windows users need the container. Saying so
+    # in metadata means `pip` users see it before they hit an install failure.
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Environment :: Web Environment",
+    "Framework :: Jupyter",
 ]
 
 dependencies = [
@@ -36,6 +49,16 @@ dependencies = [
     "plotly>=5.0.0",
     "plotlymol>=0.2.1",
 ]
+
+[project.urls]
+# Rendered as the sidebar links on the PyPI project page. "Homepage" and
+# "Source" are the two PyPI actually highlights; the rest appear under
+# "Project links".
+Homepage = "https://github.com/The-Schultz-Lab/QuantUI"
+Source = "https://github.com/The-Schultz-Lab/QuantUI"
+Documentation = "https://the-schultz-lab.github.io/QuantUI/"
+Changelog = "https://github.com/The-Schultz-Lab/QuantUI/blob/main/CHANGELOG.md"
+Issues = "https://github.com/The-Schultz-Lab/QuantUI/issues"
 
 [project.scripts]
 # ``quantui`` CLI — small toolkit for inspecting QuantUI state from

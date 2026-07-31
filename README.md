@@ -1,8 +1,9 @@
 # QuantUI
 
+[![PyPI](https://img.shields.io/pypi/v/quantui)](https://pypi.org/project/quantui/)
 [![CI](https://github.com/The-Schultz-Lab/QuantUI/actions/workflows/ci.yml/badge.svg)](https://github.com/The-Schultz-Lab/QuantUI/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://the-schultz-lab.github.io/QuantUI/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Schultz-Lab/QuantUI/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%20|%203.10%20|%203.11-blue)](https://www.python.org)
 
 A powerful open-source frontend for DFT and post-HF quantum chemistry.
@@ -78,9 +79,9 @@ research and classroom use.
 ### Windows users: Apptainer container
 
 PySCF does not install on Windows natively. The
-[`apptainer/quantui.def`](apptainer/quantui.def) container bundles
+[`apptainer/quantui.def`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/apptainer/quantui.def) container bundles
 the complete environment and runs anywhere Apptainer/Singularity is available.
-See [`apptainer/README.md`](apptainer/README.md) for build and run instructions.
+See [`apptainer/README.md`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/apptainer/README.md) for build and run instructions.
 
 ---
 
@@ -105,7 +106,7 @@ python -m pip install quantui[pyscf,ase,app]
 
 ### Option C — Apptainer container (Windows / reproducible deployment)
 
-See [apptainer/README.md](apptainer/README.md).
+See [apptainer/README.md](https://github.com/The-Schultz-Lab/QuantUI/blob/main/apptainer/README.md).
 
 ### Optional: GPU acceleration (NVIDIA + Linux / WSL)
 
@@ -194,9 +195,9 @@ no rebuild.
 
 | Platform | File | Action |
 | --- | --- | --- |
-| Windows | [`launchers/launch-native.bat`](launchers/launch-native.bat) | Activates the `quantui` conda env inside WSL Ubuntu, runs Voilà, and opens `http://localhost:8867` |
-| macOS | [`launchers/launch-native.command`](launchers/launch-native.command) | Activates the local `quantui` conda env directly (no WSL needed) and does the same |
-| Linux / WSL | [`launchers/launch-native.sh`](launchers/launch-native.sh) | Run `./launchers/launch-native.sh` from a Linux or WSL terminal; activates `quantui` and does the same |
+| Windows | [`launchers/launch-native.bat`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/launchers/launch-native.bat) | Activates the `quantui` conda env inside WSL Ubuntu, runs Voilà, and opens `http://localhost:8867` |
+| macOS | [`launchers/launch-native.command`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/launchers/launch-native.command) | Activates the local `quantui` conda env directly (no WSL needed) and does the same |
+| Linux / WSL | [`launchers/launch-native.sh`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/launchers/launch-native.sh) | Run `./launchers/launch-native.sh` from a Linux or WSL terminal; activates `quantui` and does the same |
 
 All launchers reuse port `8867`, so you can keep the same browser tab pinned
 across platforms. They **auto-detect your conda installation** — miniforge
@@ -221,7 +222,7 @@ prefix — so no path editing is needed regardless of which you installed.
 
 ### Windows — pin to the Start menu
 
-1. Right-click [`launchers/launch-native.bat`](launchers/launch-native.bat) in
+1. Right-click [`launchers/launch-native.bat`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/launchers/launch-native.bat) in
    File Explorer → **Send to** → **Desktop (create shortcut)**.
 2. Rename the shortcut to something friendly like `QuantUI`.
 3. *(Optional)* Right-click the shortcut → **Properties** → **Change Icon...**
@@ -242,7 +243,7 @@ in your browser.
 ### macOS — pin to the Dock / Launchpad
 
 **Quickest:** double-click
-[`launchers/launch-native.command`](launchers/launch-native.command)
+[`launchers/launch-native.command`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/launchers/launch-native.command)
 from Finder. macOS will open Terminal, run the script, and pop the app open
 in your browser. The first launch is gated by Gatekeeper: right-click the
 file → **Open** → **Open** to clear it (one time only).
@@ -293,7 +294,7 @@ quantui gpu check             # is GPU offload available right now?
 quantui analytics build --open  # build dashboard.html + open in browser
 ```
 
-Full reference with all flags and examples: [docs/CLI.md](docs/CLI.md).
+Full reference with all flags and examples: [docs/CLI.md](https://github.com/The-Schultz-Lab/QuantUI/blob/main/docs/CLI.md).
 
 ---
 
@@ -311,21 +312,21 @@ or any spreadsheet without screen-scraping. The quick reference:
 | Spectrum data in Excel | `*_data_*.csv` | Excel, LibreOffice, pandas |
 | Share whole result | `<result>.zip` (Export bundle) | Any unzip tool |
 
-Full per-tool walkthrough with troubleshooting: [docs/IMPORTING-INTO-AVOGADRO.md](docs/IMPORTING-INTO-AVOGADRO.md).
+Full per-tool walkthrough with troubleshooting: [docs/IMPORTING-INTO-AVOGADRO.md](https://github.com/The-Schultz-Lab/QuantUI/blob/main/docs/IMPORTING-INTO-AVOGADRO.md).
 
 ---
 
 ## Tutorials
 
-Five step-by-step notebooks in [`notebooks/tutorials/`](notebooks/tutorials/):
+Five step-by-step notebooks in [`notebooks/tutorials/`](https://github.com/The-Schultz-Lab/QuantUI/tree/main/notebooks/tutorials/):
 
 | Notebook | Topic |
 | --- | --- |
-| [01_first_calculation.ipynb](notebooks/tutorials/01_first_calculation.ipynb) | Your first RHF calculation |
-| [02_basis_set_study.ipynb](notebooks/tutorials/02_basis_set_study.ipynb) | Comparing STO-3G, 6-31G, cc-pVDZ |
-| [03_multiplicity_radicals.ipynb](notebooks/tutorials/03_multiplicity_radicals.ipynb) | Open-shell molecules and UHF |
-| [04_charged_species.ipynb](notebooks/tutorials/04_charged_species.ipynb) | Ions and charged systems |
-| [05_comparing_results.ipynb](notebooks/tutorials/05_comparing_results.ipynb) | Side-by-side result analysis |
+| [01_first_calculation.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/01_first_calculation.ipynb) | Your first RHF calculation |
+| [02_basis_set_study.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/02_basis_set_study.ipynb) | Comparing STO-3G, 6-31G, cc-pVDZ |
+| [03_multiplicity_radicals.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/03_multiplicity_radicals.ipynb) | Open-shell molecules and UHF |
+| [04_charged_species.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/04_charged_species.ipynb) | Ions and charged systems |
+| [05_comparing_results.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/05_comparing_results.ipynb) | Side-by-side result analysis |
 
 ---
 
@@ -438,4 +439,4 @@ CHANGELOG.md              Release history (Keep a Changelog format)
 
 ## License
 
-[MIT](LICENSE) — Copyright 2026 The Schultz Lab, North Carolina Central University
+[MIT](https://github.com/The-Schultz-Lab/QuantUI/blob/main/LICENSE) — Copyright 2026 The Schultz Lab, North Carolina Central University
