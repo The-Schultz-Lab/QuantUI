@@ -1,6 +1,6 @@
 # QuantUI
 
-[![PyPI](https://img.shields.io/pypi/v/quantui)](https://pypi.org/project/quantui/)
+[![PyPI](https://img.shields.io/pypi/v/quantui?v=2)](https://pypi.org/project/quantui/)
 [![CI](https://github.com/The-Schultz-Lab/QuantUI/actions/workflows/ci.yml/badge.svg)](https://github.com/The-Schultz-Lab/QuantUI/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://the-schultz-lab.github.io/QuantUI/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Schultz-Lab/QuantUI/blob/main/LICENSE)
