@@ -7,8 +7,30 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-31
+
+First release published to **PyPI** — `pip install quantui`.
+
 ### Added
 
+- **Seed geometry for Geometry Optimization runs** — a run can now start from
+  the final geometry of a previous optimization instead of the current molecule,
+  which makes the standard "optimize at a cheap level of theory, then refine at
+  a higher one" workflow a single dropdown choice. Frequency and UV-Vis already
+  supported this; Geometry Opt now matches them.
+- **A "still working" heartbeat in the live log.** Long silent phases — the
+  TD-DFT excited-state solve most of all — could leave the output log unchanged
+  for minutes while the calculation was running normally, which reads as a hang.
+  The log now reports `… still working — <stage> · <elapsed>` whenever it has
+  been quiet for 25 seconds. The saved `pyscf.log` is unaffected; it stays a
+  faithful record of the calculation's own output.
+- **Basis-set names now show their alternate notation.** `6-31G*` and `6-31G(d)`
+  are the same basis set written two ways, and nothing in the UI said so. The
+  basis card now notes the equivalent spelling, and the basis-set help topic
+  explains the star/parenthesis convention, the `+`/`++` diffuse markers and
+  when anions need them, and why Dunning sets (`cc-pVDZ`) have no star at all.
+- **The launcher terminal now prints the QuantUI wordmark** instead of two bare
+  lines of text.
 - **Reorganization energy (Marcus 4-point)** — a new "Reorganization Energy"
   calculation type that computes the internal reorganization energy λ for hole
   (cation) and/or electron (anion) charge transfer. It optimizes the neutral and
@@ -20,9 +42,30 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - **One-click "Calc. Reorganization Energy" button** — sets the calculation type
   to Reorganization Energy, defaults the channel to both hole + electron, and
   launches the run in a single click.
+- **GPU offload can now be switched off from the UI** — Status tab → Settings →
+  "Use GPU when available". The preference persists across launches. This exists
+  because GPU offload is not always faster: quantum-chemistry SCF is
+  double-precision throughout, and consumer/workstation GPUs gate FP64 to roughly
+  1/32–1/64 of their FP32 rate, so offload on such a card can be *slower* than a
+  many-core CPU. `QUANTUI_DISABLE_GPU=1` still overrides the setting for scripted
+  runs.
+- **A warning when a detected GPU is unlikely to help.** `quantui gpu check` and
+  the Status tab now flag consumer-class devices with a note that double
+  precision is weak on them and offload may be slower than CPU, instead of
+  presenting any detected CUDA device as free speed.
 
 ### Changed
 
+- **The live calculation log no longer snaps back to the bottom while a run is
+  in progress**, so you can scroll up and read earlier output mid-calculation.
+  It still follows new output automatically when you are at the bottom. The log
+  is now a container QuantUI owns and appends to, rather than a widget that
+  rebuilt itself on every line.
+- **No pre-optimization preview when the geometry barely moves.** Previously a
+  relaxation that changed essentially nothing still opened an animation pane and
+  a Keep/Revert choice between two effectively identical structures. Below
+  0.05 Å RMS displacement QuantUI now just reports the number and proceeds with
+  your geometry.
 - **All launcher scripts moved into a `launchers/` folder** to declutter the repo
   root. Behaviour is unchanged — each launcher now resolves the repo root as its
   parent directory. `launchers/launch-app.bat` still finds `quantui.sif` next to
@@ -36,22 +79,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   avoids the base image's implicit `defaults` channel. No change to the shipped
   package set or runtime behavior.
 
-### Added
-
-- **GPU offload can now be switched off from the UI** — Status tab → Settings →
-  "Use GPU when available". The preference persists across launches. This exists
-  because GPU offload is not always faster: quantum-chemistry SCF is
-  double-precision throughout, and consumer/workstation GPUs gate FP64 to roughly
-  1/32–1/64 of their FP32 rate, so offload on such a card can be *slower* than a
-  many-core CPU. `QUANTUI_DISABLE_GPU=1` still overrides the setting for scripted
-  runs.
-- **A warning when a detected GPU is unlikely to help.** `quantui gpu check` and
-  the Status tab now flag consumer-class devices with a note that double
-  precision is weak on them and offload may be slower than CPU, instead of
-  presenting any detected CUDA device as free speed.
-
 ### Fixed
 
+- **The live log and run header render in a fixed-width font again.** A
+  system-font rule was applying to the log, which garbled the ASCII wordmark and
+  pushed the run header's `Label : value` columns out of alignment.
 - **`quantui gpu check` no longer reports a broken CUDA install as "gpu4pyscf not
   installed".** `ModuleNotFoundError` is a subclass of `ImportError`, so catching
   the latter conflated "the package is absent" with "the package is present but
@@ -429,7 +461,8 @@ Initial public scaffolding of the QuantUI package: `quantui` package with
 `calculator.py`, basic notebook launcher, Apptainer container definition,
 MIT license, and project metadata.
 
-[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.2.0...v0.3.0
