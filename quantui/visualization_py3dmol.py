@@ -14,6 +14,8 @@ import os
 import tempfile
 from typing import Literal, cast
 
+from quantui import theme as _theme
+
 logger = logging.getLogger(__name__)
 
 Py3DmolStyle = Literal["ball+stick", "stick", "sphere", "line", "cartoon"]
@@ -469,20 +471,25 @@ def render_molecule_html(
             '<div style="color:#b91c1c;padding:8px;">'
             f"❌ Visualization failed: {e}</div>"
         )
-    # Constrain the whole fragment to the viewer's own width.
+    # Frame the fragment at the viewer's own width.
     #
-    # Without this the framing border (`.quantui-viewer-frame`, which uses
-    # `width: fit-content`) still spanned the page: the renderers emit a
-    # FIXED-pixel canvas, but `_info_box_html` above emits a plain block div
-    # that fills its container, so the widest child — and therefore
-    # `fit-content` — was the info box, not the plot. The border then enclosed
-    # a large strip of dead space to the right of the canvas, implying it was
-    # interactive.
+    # The border lives HERE, not on the hosting Output widget's CSS class,
+    # because this is the only place that knows the viewer's pixel width — so
+    # the frame cannot drift out of sync with whatever a caller passes.
     #
-    # Setting the width here rather than in CSS is deliberate: this is the one
-    # place that actually knows the viewer's pixel width, so the frame can't
-    # drift out of sync with whatever a caller passes.
-    return f'<div style="width:{width}px;max-width:100%">' + "\n".join(parts) + "</div>"
+    # It also cannot live on the Output widget at all. Measured in the browser
+    # 2026-08-03: that widget's children are Lumino widgets which JupyterLab
+    # sizes with explicit pixel widths tracking the window, so `fit-content`
+    # there always resolves to the full page width and the border enclosed a
+    # wide strip of dead space beside the plot. That was actively misleading
+    # once the border became visible — it implied the whole strip was
+    # interactive and hid where the page could be scrolled without dragging
+    # the 3-D view.
+    return (
+        f'<div style="width:{width}px;max-width:100%;'
+        f"border:1px solid {_theme.BORDER_STRONG};border-radius:6px;"
+        f'overflow:hidden">' + "\n".join(parts) + "</div>"
+    )
 
 
 def display_molecule(

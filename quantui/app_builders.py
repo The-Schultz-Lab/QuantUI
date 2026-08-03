@@ -647,7 +647,12 @@ def build_shared_widgets(
     # needs no scrollbar — clipping a few px of margin avoids an internal
     # scrollbar that resets to the top on every backend/palette swap.
     app.viz_output = widgets.Output(layout=layout_fn(height="510px", overflow="hidden"))
-    app.viz_output.add_class("quantui-viewer-frame")
+    # No .quantui-viewer-frame here: this output renders via
+    # render_molecule_html, whose fragment now carries its own border sized
+    # to the viewer's exact pixel width. The class's border would sit on the
+    # Output widget, which CANNOT shrink-wrap (JupyterLab's Lumino layout
+    # pins its children to the full window width — measured 2026-08-03), so
+    # it would draw a second, full-width box around the tight one.
     # Live calc log — a QuantUI-owned scroll container, not a widgets.Output
     # (M-LOGSCROLL route C). An Output rebuilds its DOM subtree and resets
     # scrollTop on every appended line, which made it impossible to scroll up
@@ -664,7 +669,9 @@ def build_shared_widgets(
     app.run_output.add_class("quantui-run-output")
     app.result_output = widgets.Output()
     app.result_viz_output = widgets.Output()
-    app.result_viz_output.add_class("quantui-viewer-frame")
+    # Same as viz_output above — bordered by the rendered fragment itself.
+    # overflow is set on the layout since the class no longer supplies it.
+    app.result_viz_output.layout.overflow = "hidden"
     app.comparison_output = widgets.Output()
     app._last_result_dir = None
 

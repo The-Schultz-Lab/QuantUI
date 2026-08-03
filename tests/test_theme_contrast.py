@@ -161,13 +161,13 @@ class TestTokensAreActuallyUsed:
         assert theme.BORDER in _APP_CSS
         assert theme.BORDER_STRONG in _APP_CSS
 
-    def test_viewer_frame_shrink_wraps_the_canvas(self):
-        # The renderers emit a fixed-pixel canvas (600px default) inside a
-        # full-width Output widget. Without fit-content the frame's border
-        # enclosed a wide strip of dead space to the right of the actual plot,
-        # implying that strip was interactive and hiding where the page could
-        # be scrolled without dragging the 3-D view. max-width keeps a wide
-        # viewer from overflowing its column.
+    def test_frame_class_does_not_try_to_shrink_wrap(self):
+        # Measured in the browser 2026-08-03: an Output widget cannot
+        # shrink-wrap. Its children are Lumino widgets that JupyterLab's layout
+        # engine pins to explicit full-window pixel widths, so `fit-content`
+        # (which is min(max-content, …)) can only ever resolve to full width.
+        # Two attempts were made before measuring; this asserts we don't try a
+        # third time.
         import re
 
         from quantui.app import _APP_CSS
@@ -175,18 +175,16 @@ class TestTokensAreActuallyUsed:
         rule = re.search(r"\.quantui-viewer-frame \{[^}]*\}", _APP_CSS, re.S)
         assert rule is not None, ".quantui-viewer-frame rule missing"
         body = rule.group(0)
-        assert "width: fit-content" in body
-        assert "max-width: 100%" in body
+        assert "fit-content" not in body, "Output widgets cannot shrink-wrap"
+        assert "max-content" not in body, "Output widgets cannot shrink-wrap"
 
     @pytest.mark.parametrize("width", [600, 420])
-    def test_rendered_fragment_is_constrained_to_the_viewer_width(self, width):
-        # fit-content on the frame is not sufficient on its own: the fragment
-        # also contains the info box, which is a plain block div and fills its
-        # container. That made the info box the widest child, so fit-content
-        # resolved to the full page width and the border still enclosed dead
-        # space beside the canvas. render_molecule_html wraps the whole
-        # fragment at the viewer's own pixel width to give fit-content
-        # something correct to shrink to.
+    def test_rendered_fragment_carries_its_own_sized_border(self, width):
+        # The border lives on the fragment, not on the hosting Output widget's
+        # CSS class, because render_molecule_html is the only place that knows
+        # the viewer's pixel width — so the frame cannot drift out of sync with
+        # whatever a caller passes, and it hugs the plot instead of spanning
+        # the page.
         pytest.importorskip("py3Dmol")
         from quantui.molecule import Molecule
         from quantui.visualization_py3dmol import render_molecule_html
@@ -194,9 +192,30 @@ class TestTokensAreActuallyUsed:
         mol = Molecule(atoms=["N", "N"], coordinates=[[0, 0, 0], [0, 0, 1.10]])
         html = render_molecule_html(mol, width=width)
 
-        assert html.startswith(f'<div style="width:{width}px;max-width:100%">')
-        # The info box must be INSIDE the constraint — it was the culprit.
+        assert html.startswith(f'<div style="width:{width}px;max-width:100%;')
+        assert f"border:1px solid {theme.BORDER_STRONG}" in html
+        # The info box must be INSIDE the frame — it was what forced the old
+        # full-width sizing, and it should align with the canvas.
         assert "Molecule Information" in html
+
+    def test_wrapper_bordered_outputs_do_not_also_carry_the_frame_class(self):
+        # Both borders would draw: the fragment's tight one AND the class's
+        # full-width one on the Output widget around it.
+        import pathlib
+        import re
+
+        builders = (pathlib.Path(theme.__file__).parent / "app_builders.py").read_text(
+            encoding="utf-8"
+        )
+        framed = set(
+            re.findall(r"app\.(\w+)\.add_class\(\"quantui-viewer-frame\"\)", builders)
+        )
+        assert "viz_output" not in framed
+        assert "result_viz_output" not in framed
+        # The Analysis-tab viewer still renders via the display() path, which
+        # produces no fragment wrapper, so it keeps the class (and its existing
+        # full-width border) rather than silently losing its border entirely.
+        assert "_analysis_mol_output" in framed
 
     def test_retired_border_greys_are_gone_from_in_app_chrome(self):
         # analytics.py is deliberately excluded: it writes a STANDALONE

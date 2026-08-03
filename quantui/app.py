@@ -638,21 +638,25 @@ h3 {
    in a stack of cards, so it needs to read as a frame on its own. The old
    #c0ccd8 inverted to a near-invisible 1.65:1 against the dark page — see
    quantui/theme.py for the measurements and the mid-tone rule. */
+/* ⚠️ An Output widget CANNOT be made to shrink-wrap its contents. Measured in
+   the browser 2026-08-03: the frame's children are Lumino widgets
+   (`.lm-Widget.jp-OutputArea`, `.jp-OutputArea-child`) which JupyterLab's
+   layout engine sizes with EXPLICIT pixel widths tracking the window
+   (789.797px snapped / 2081.8px maximised). `width: fit-content` resolves to
+   `min(max-content, …)`, and a child pinned to the full width makes
+   max-content the full width — so fit-content can only ever resolve to full
+   width. Don't try `fit-content`, `max-content`, or `display: inline-block`
+   here; they were ruled out by that measurement.
+
+   The viewer border therefore lives on a div INSIDE the rendered fragment,
+   where visualization_py3dmol.render_molecule_html knows the exact pixel
+   width. This class now only supplies clipping, and is kept on the
+   Analysis-tab viewer, which still renders via the display() path and so has
+   no fragment wrapper to carry a border. */
 .quantui-viewer-frame {
     border: 1px solid __Q_BORDER_STRONG__ !important;
     border-radius: 6px !important;
     overflow: hidden !important;
-    /* Shrink-wrap the viewer instead of spanning the page. The renderers emit
-       a FIXED-pixel canvas (600px by default — see
-       visualization_py3dmol.render_molecule_html), but the Output widget
-       hosting it is a full-width block, so the frame used to enclose a wide
-       strip of dead space to the right of the actual plot. That made the
-       border misleading: it implied the whole strip was interactive, and gave
-       no visual cue about where the page could be scrolled without dragging
-       the 3-D view. fit-content sizes the box to the canvas it actually
-       contains; max-width keeps a wide viewer from overflowing the column. */
-    width: fit-content !important;
-    max-width: 100% !important;
 }
 /* Collapse the frame to nothing when the viewer output is empty (e.g. before
    a calc runs) so no hollow box shows. Degrades to an always-on border where
