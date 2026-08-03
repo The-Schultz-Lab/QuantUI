@@ -155,28 +155,23 @@ class TestTokensAreActuallyUsed:
         # a dangling "_STRONG__" behind.
         assert "_STRONG__" not in _APP_CSS
 
-    def test_app_css_carries_the_tokens(self):
+    def test_app_css_carries_the_border_token(self):
         from quantui.app import _APP_CSS
 
         assert theme.BORDER in _APP_CSS
-        assert theme.BORDER_STRONG in _APP_CSS
 
-    def test_frame_class_does_not_try_to_shrink_wrap(self):
+    def test_no_viewer_border_is_drawn_from_a_css_class(self):
         # Measured in the browser 2026-08-03: an Output widget cannot
         # shrink-wrap. Its children are Lumino widgets that JupyterLab's layout
         # engine pins to explicit full-window pixel widths, so `fit-content`
-        # (which is min(max-content, …)) can only ever resolve to full width.
-        # Two attempts were made before measuring; this asserts we don't try a
-        # third time.
-        import re
-
+        # (which is min(max-content, …)) can only ever resolve to full width —
+        # a class-borne border spans the page no matter what. Three attempts
+        # were made before that measurement. The border therefore lives on the
+        # rendered fragment, where the pixel width is known; a reintroduced
+        # .quantui-viewer-frame would draw a second, full-width box around it.
         from quantui.app import _APP_CSS
 
-        rule = re.search(r"\.quantui-viewer-frame \{[^}]*\}", _APP_CSS, re.S)
-        assert rule is not None, ".quantui-viewer-frame rule missing"
-        body = rule.group(0)
-        assert "fit-content" not in body, "Output widgets cannot shrink-wrap"
-        assert "max-content" not in body, "Output widgets cannot shrink-wrap"
+        assert "quantui-viewer-frame" not in _APP_CSS
 
     @pytest.mark.parametrize("width", [600, 420])
     def test_rendered_fragment_carries_its_own_sized_border(self, width):
@@ -198,24 +193,49 @@ class TestTokensAreActuallyUsed:
         # full-width sizing, and it should align with the canvas.
         assert "Molecule Information" in html
 
-    def test_wrapper_bordered_outputs_do_not_also_carry_the_frame_class(self):
-        # Both borders would draw: the fragment's tight one AND the class's
-        # full-width one on the Output widget around it.
+    def test_no_viewer_output_carries_a_frame_class(self):
+        # Every 3D viewer now renders through render_molecule_html, so each
+        # already has a fitted border. Adding the class back to any of them
+        # would draw a second, full-width box around the tight one.
+        import pathlib
+
+        builders = (pathlib.Path(theme.__file__).parent / "app_builders.py").read_text(
+            encoding="utf-8"
+        )
+        assert 'add_class("quantui-viewer-frame")' not in builders
+
+    def test_the_calculate_viewer_reserves_room_for_the_whole_fragment(self):
+        # Regression: viz_output was pinned to height="510px" — sized for the
+        # 500px canvas alone — with overflow hidden, which sliced the bottom
+        # border off once the info box moved inside the bordered fragment. A
+        # minimum reserves the same layout space without ever clipping.
         import pathlib
         import re
 
         builders = (pathlib.Path(theme.__file__).parent / "app_builders.py").read_text(
             encoding="utf-8"
         )
-        framed = set(
-            re.findall(r"app\.(\w+)\.add_class\(\"quantui-viewer-frame\"\)", builders)
+        block = re.search(
+            r"app\.viz_output = widgets\.Output\((.*?)\n    \)", builders, re.S
         )
-        assert "viz_output" not in framed
-        assert "result_viz_output" not in framed
-        # The Analysis-tab viewer still renders via the display() path, which
-        # produces no fragment wrapper, so it keeps the class (and its existing
-        # full-width border) rather than silently losing its border entirely.
-        assert "_analysis_mol_output" in framed
+        assert block is not None, "viz_output construction not found"
+        body = block.group(1)
+        assert "min_height=" in body, "a fixed height clips the fragment's border"
+        assert re.search(r"[^_]height=", body) is None
+
+    def test_the_analysis_backend_toggle_keeps_the_border(self):
+        # The re-render path a backend toggle takes must be the same one the
+        # first draw takes, or switching py3Dmol <-> plotlymol3d silently drops
+        # the fragment (and its border) for a bare display() call.
+        import pathlib
+
+        app_src = (pathlib.Path(theme.__file__).parent / "app.py").read_text(
+            encoding="utf-8"
+        )
+        rerender = app_src[app_src.index("def _rerender_3d_views") :]
+        rerender = rerender[: rerender.index("def _update_analysis_backend_label")]
+        assert "_render_molecule_html(" in rerender
+        assert "_display_molecule(" not in rerender
 
     def test_retired_border_greys_are_gone_from_in_app_chrome(self):
         # analytics.py is deliberately excluded: it writes a STANDALONE

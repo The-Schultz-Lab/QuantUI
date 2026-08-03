@@ -646,7 +646,14 @@ def build_shared_widgets(
     # overflow hidden (not auto): the 3D viewer is a fixed-size canvas, so it
     # needs no scrollbar — clipping a few px of margin avoids an internal
     # scrollbar that resets to the top on every backend/palette swap.
-    app.viz_output = widgets.Output(layout=layout_fn(height="510px", overflow="hidden"))
+    # min_height, not height: the fragment is the info box (~110px) PLUS the
+    # 500px canvas plus its border, so the old fixed 510px — sized for the
+    # canvas alone — clipped the bottom border off. A minimum still reserves
+    # space so the page doesn't jump when a molecule first renders, but lets
+    # the box grow if the info box wraps to more lines on a narrow window.
+    app.viz_output = widgets.Output(
+        layout=layout_fn(min_height="620px", overflow="hidden")
+    )
     # No .quantui-viewer-frame here: this output renders via
     # render_molecule_html, whose fragment now carries its own border sized
     # to the viewer's exact pixel width. The class's border would sit on the
@@ -2014,8 +2021,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     app.results_panel = app.results_tab_panel
 
+    # No .quantui-viewer-frame: this renders via render_molecule_html (see
+    # app_visualization._show_result_3d), so the fragment carries its own
+    # border fitted to the viewer. The class would add a second, full-width
+    # box around it — the Output widget cannot shrink-wrap.
     app._analysis_mol_output = widgets.Output()
-    app._analysis_mol_output.add_class("quantui-viewer-frame")
 
     # Analysis-tab backend toggle — mirrors the Calculate-tab `viz_backend_toggle`.
     # Created only when both backends are available (matches Calculate-tab

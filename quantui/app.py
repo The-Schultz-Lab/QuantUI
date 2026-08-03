@@ -452,16 +452,12 @@ try:
         VIZ_STYLE_OPTIONS as _VIZ_STYLE_OPTIONS,
     )
     from quantui.visualization_py3dmol import (
-        display_molecule as _display_molecule,
-    )
-    from quantui.visualization_py3dmol import (
         render_molecule_html as _render_molecule_html,
     )
 
     VISUALIZATION_AVAILABLE = True
 except ImportError:
     VISUALIZATION_AVAILABLE = False
-    _display_molecule = None  # type: ignore[assignment]
     _render_molecule_html = None  # type: ignore[assignment]
     _PLOTLYMOL_VIZ = False
     _PY3DMOL_VIZ = False
@@ -633,38 +629,6 @@ h3 {
     background: transparent !important;
 }
 
-/* 3D molecule-viewer frames — a bounding box so the viewer extent reads
-   clearly. Uses the STRONG token: this frame stands alone rather than sitting
-   in a stack of cards, so it needs to read as a frame on its own. The old
-   #c0ccd8 inverted to a near-invisible 1.65:1 against the dark page — see
-   quantui/theme.py for the measurements and the mid-tone rule. */
-/* ⚠️ An Output widget CANNOT be made to shrink-wrap its contents. Measured in
-   the browser 2026-08-03: the frame's children are Lumino widgets
-   (`.lm-Widget.jp-OutputArea`, `.jp-OutputArea-child`) which JupyterLab's
-   layout engine sizes with EXPLICIT pixel widths tracking the window
-   (789.797px snapped / 2081.8px maximised). `width: fit-content` resolves to
-   `min(max-content, …)`, and a child pinned to the full width makes
-   max-content the full width — so fit-content can only ever resolve to full
-   width. Don't try `fit-content`, `max-content`, or `display: inline-block`
-   here; they were ruled out by that measurement.
-
-   The viewer border therefore lives on a div INSIDE the rendered fragment,
-   where visualization_py3dmol.render_molecule_html knows the exact pixel
-   width. This class now only supplies clipping, and is kept on the
-   Analysis-tab viewer, which still renders via the display() path and so has
-   no fragment wrapper to carry a border. */
-.quantui-viewer-frame {
-    border: 1px solid __Q_BORDER_STRONG__ !important;
-    border-radius: 6px !important;
-    overflow: hidden !important;
-}
-/* Collapse the frame to nothing when the viewer output is empty (e.g. before
-   a calc runs) so no hollow box shows. Degrades to an always-on border where
-   :has() is unsupported. */
-.quantui-viewer-frame:not(:has(.jp-OutputArea-child)) {
-    border-color: transparent !important;
-}
-
 /* Inline "calculating" spinner — shown next to slow on-demand
    controls (e.g. orbital-isosurface generation) while work is in flight. */
 @keyframes quantui-spin { to { transform: rotate(360deg); } }
@@ -678,11 +642,11 @@ h3 {
     animation: quantui-spin 0.7s linear infinite;
     vertical-align: middle;
 }
-</style>""".replace("__Q_BORDER_STRONG__", _theme.BORDER_STRONG).replace(
+</style>""".replace(
     # Sentinel substitution rather than an f-string: this block is dense with
-    # CSS braces, every one of which would need doubling. Order matters —
-    # __Q_BORDER_STRONG__ must be replaced before __Q_BORDER__, or the shorter
-    # sentinel matches inside the longer one and leaves a dangling "_STRONG__".
+    # CSS braces, every one of which would need doubling. If a second sentinel
+    # is ever added, substitute the LONGER name first — "__Q_BORDER__" matches
+    # inside "__Q_BORDER_STRONG__" and would leave a dangling "_STRONG__".
     "__Q_BORDER__",
     _theme.BORDER,
 )
@@ -2896,7 +2860,7 @@ class QuantUIApp:
     def _rerender_3d_views(self) -> None:
         """Re-render visible 3D molecule viewers using the router to pick a
         backend per task. Updates the "Rendering with: X" label widgets."""
-        if _display_molecule is None:
+        if _render_molecule_html is None:
             return
 
         # Calculate-tab molecule preview (MOLECULE_PREVIEW task).
@@ -2909,15 +2873,19 @@ class QuantUIApp:
         if self._analysis_displayed_molecule is not None:
             chosen = self._resolve_backend(VizTask.ANALYSIS_STRUCTURE_VIEW)
             if chosen is not None:
-                self._analysis_mol_output.clear_output()
-                with self._analysis_mol_output:
-                    _display_molecule(
-                        self._analysis_displayed_molecule,
-                        backend=str(chosen),
-                        style=self._viz_style,
-                        lighting=self._viz_lighting,
-                        bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
-                    )
+                # Same render path as the first draw (app_visualization.
+                # _show_result_3d), not display(): the fragment it returns
+                # carries the viewer's own border. Going through display()
+                # here would silently drop that border the moment a user
+                # toggled backends on the Analysis tab.
+                html = _render_molecule_html(
+                    self._analysis_displayed_molecule,
+                    backend=str(chosen),
+                    style=self._viz_style,
+                    lighting=self._viz_lighting,
+                    bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
+                )
+                self._set_html_output(self._analysis_mol_output, html)
                 self._update_analysis_backend_label(chosen)
 
     def _update_analysis_backend_label(self, chosen: VizBackend) -> None:
