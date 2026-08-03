@@ -52,9 +52,21 @@ def _hue_rotate(c: tuple[int, int, int], deg: float) -> tuple[int, int, int]:
     different results than the browser actually produces."""
     a, b = math.cos(math.radians(deg)), math.sin(math.radians(deg))
     m = (
-        (0.213 + a * 0.787 - b * 0.213, 0.715 - a * 0.715 - b * 0.715, 0.072 - a * 0.072 + b * 0.928),
-        (0.213 - a * 0.213 + b * 0.143, 0.715 + a * 0.285 + b * 0.140, 0.072 - a * 0.072 - b * 0.283),
-        (0.213 - a * 0.213 - b * 0.787, 0.715 - a * 0.715 + b * 0.715, 0.072 + a * 0.928 + b * 0.072),
+        (
+            0.213 + a * 0.787 - b * 0.213,
+            0.715 - a * 0.715 - b * 0.715,
+            0.072 - a * 0.072 + b * 0.928,
+        ),
+        (
+            0.213 - a * 0.213 + b * 0.143,
+            0.715 + a * 0.285 + b * 0.140,
+            0.072 - a * 0.072 - b * 0.283,
+        ),
+        (
+            0.213 - a * 0.213 - b * 0.787,
+            0.715 - a * 0.715 + b * 0.715,
+            0.072 + a * 0.928 + b * 0.072,
+        ),
     )
     return tuple(  # type: ignore[return-value]
         max(0, min(255, round(sum(m[i][j] * c[j] for j in range(3))))) for i in range(3)
@@ -111,7 +123,9 @@ class TestBordersSurviveBothModes:
 
     @pytest.mark.parametrize("bg", [PANEL_BG, PAGE_BG], ids=["on-panel", "on-page"])
     def test_strong_border_clears_the_bar_in_both_modes(self, bg):
-        assert _contrast(_hex_rgb(theme.BORDER_STRONG), _hex_rgb(bg)) >= UI_COMPONENT_MIN
+        assert (
+            _contrast(_hex_rgb(theme.BORDER_STRONG), _hex_rgb(bg)) >= UI_COMPONENT_MIN
+        )
         assert _contrast(_dark(theme.BORDER_STRONG), _dark(bg)) >= UI_COMPONENT_MIN
 
     def test_strong_is_actually_stronger_than_the_default(self):
@@ -147,6 +161,23 @@ class TestTokensAreActuallyUsed:
         assert theme.BORDER in _APP_CSS
         assert theme.BORDER_STRONG in _APP_CSS
 
+    def test_viewer_frame_shrink_wraps_the_canvas(self):
+        # The renderers emit a fixed-pixel canvas (600px default) inside a
+        # full-width Output widget. Without fit-content the frame's border
+        # enclosed a wide strip of dead space to the right of the actual plot,
+        # implying that strip was interactive and hiding where the page could
+        # be scrolled without dragging the 3-D view. max-width keeps a wide
+        # viewer from overflowing its column.
+        import re
+
+        from quantui.app import _APP_CSS
+
+        rule = re.search(r"\.quantui-viewer-frame \{[^}]*\}", _APP_CSS, re.S)
+        assert rule is not None, ".quantui-viewer-frame rule missing"
+        body = rule.group(0)
+        assert "width: fit-content" in body
+        assert "max-width: 100%" in body
+
     def test_retired_border_greys_are_gone_from_in_app_chrome(self):
         # analytics.py is deliberately excluded: it writes a STANDALONE
         # dashboard HTML opened directly in a browser, so the app's invert
@@ -162,6 +193,7 @@ class TestTokensAreActuallyUsed:
         offenders = [
             f.name
             for f in pkg.glob("*.py")
-            if f.name != "analytics.py" and retired.search(f.read_text(encoding="utf-8"))
+            if f.name != "analytics.py"
+            and retired.search(f.read_text(encoding="utf-8"))
         ]
         assert offenders == [], f"retired border greys still used in: {offenders}"

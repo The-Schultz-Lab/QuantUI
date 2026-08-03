@@ -642,6 +642,17 @@ h3 {
     border: 1px solid __Q_BORDER_STRONG__ !important;
     border-radius: 6px !important;
     overflow: hidden !important;
+    /* Shrink-wrap the viewer instead of spanning the page. The renderers emit
+       a FIXED-pixel canvas (600px by default — see
+       visualization_py3dmol.render_molecule_html), but the Output widget
+       hosting it is a full-width block, so the frame used to enclose a wide
+       strip of dead space to the right of the actual plot. That made the
+       border misleading: it implied the whole strip was interactive, and gave
+       no visual cue about where the page could be scrolled without dragging
+       the 3-D view. fit-content sizes the box to the canvas it actually
+       contains; max-width keeps a wide viewer from overflowing the column. */
+    width: fit-content !important;
+    max-width: 100% !important;
 }
 /* Collapse the frame to nothing when the viewer output is empty (e.g. before
    a calc runs) so no hollow box shows. Degrades to an always-on border where
