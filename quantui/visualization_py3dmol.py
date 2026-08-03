@@ -469,7 +469,20 @@ def render_molecule_html(
             '<div style="color:#b91c1c;padding:8px;">'
             f"❌ Visualization failed: {e}</div>"
         )
-    return "\n".join(parts)
+    # Constrain the whole fragment to the viewer's own width.
+    #
+    # Without this the framing border (`.quantui-viewer-frame`, which uses
+    # `width: fit-content`) still spanned the page: the renderers emit a
+    # FIXED-pixel canvas, but `_info_box_html` above emits a plain block div
+    # that fills its container, so the widest child — and therefore
+    # `fit-content` — was the info box, not the plot. The border then enclosed
+    # a large strip of dead space to the right of the canvas, implying it was
+    # interactive.
+    #
+    # Setting the width here rather than in CSS is deliberate: this is the one
+    # place that actually knows the viewer's pixel width, so the frame can't
+    # drift out of sync with whatever a caller passes.
+    return f'<div style="width:{width}px;max-width:100%">' + "\n".join(parts) + "</div>"
 
 
 def display_molecule(

@@ -178,6 +178,26 @@ class TestTokensAreActuallyUsed:
         assert "width: fit-content" in body
         assert "max-width: 100%" in body
 
+    @pytest.mark.parametrize("width", [600, 420])
+    def test_rendered_fragment_is_constrained_to_the_viewer_width(self, width):
+        # fit-content on the frame is not sufficient on its own: the fragment
+        # also contains the info box, which is a plain block div and fills its
+        # container. That made the info box the widest child, so fit-content
+        # resolved to the full page width and the border still enclosed dead
+        # space beside the canvas. render_molecule_html wraps the whole
+        # fragment at the viewer's own pixel width to give fit-content
+        # something correct to shrink to.
+        pytest.importorskip("py3Dmol")
+        from quantui.molecule import Molecule
+        from quantui.visualization_py3dmol import render_molecule_html
+
+        mol = Molecule(atoms=["N", "N"], coordinates=[[0, 0, 0], [0, 0, 1.10]])
+        html = render_molecule_html(mol, width=width)
+
+        assert html.startswith(f'<div style="width:{width}px;max-width:100%">')
+        # The info box must be INSIDE the constraint — it was the culprit.
+        assert "Molecule Information" in html
+
     def test_retired_border_greys_are_gone_from_in_app_chrome(self):
         # analytics.py is deliberately excluded: it writes a STANDALONE
         # dashboard HTML opened directly in a browser, so the app's invert
