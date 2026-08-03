@@ -7,6 +7,30 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-03
+
+### Fixed
+
+- **Dark mode now has visible panel edges.** Borders, cards, and dividers were
+  effectively invisible in Dark mode — measured at 1.14:1 against the panel
+  background, well under the 3:1 that WCAG asks of a UI component. Dark mode is
+  a whole-page colour inversion rather than a separate palette, so a light grey
+  border inverts to a near-black one on a near-black page and disappears. The
+  borders are now a mid-tone that stays visible in *both* modes (3.20:1 light,
+  4.30:1 dark). Text contrast was measured too and was never the problem — it
+  is 7.24:1 in light mode and slightly *better* inverted — so text colours are
+  deliberately unchanged.
+
+### Added
+
+- **Every 3-D viewer now has a border around it**, so it is clear where the
+  view ends and where the page can be scrolled without dragging the structure.
+  This covers the molecule preview, the results and analysis structure views,
+  the geometry-optimization trajectory, the vibrational-mode animation, and the
+  classical pre-optimization preview. The frame hugs the plot itself rather
+  than spanning the window width, and looks the same whichever rendering
+  backend (py3Dmol or plotlymol3d) is active.
+
 ## [0.5.1] - 2026-07-31
 
 ### Fixed
@@ -484,7 +508,8 @@ Initial public scaffolding of the QuantUI package: `quantui` package with
 `calculator.py`, basic notebook launcher, Apptainer container definition,
 MIT license, and project metadata.
 
-[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.4.0...v0.4.1
