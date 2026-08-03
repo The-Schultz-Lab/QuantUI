@@ -237,6 +237,121 @@ class TestTokensAreActuallyUsed:
         assert "_render_molecule_html(" in rerender
         assert "_display_molecule(" not in rerender
 
+
+class TestEveryViewerIsFramed:
+    """Every 3-D viewer frames identically, and nothing clips the frame.
+
+    The border lives on the rendered fragment (see theme.frame_viewer_html),
+    which means two things can silently break it: a render path that forgets to
+    call the helper, and a hosting Output pinned to a fixed height, whose
+    overflow:hidden slices the bottom edge off. Both happened during THEME.5,
+    so both are asserted here.
+    """
+
+    @staticmethod
+    def _src(name: str) -> str:
+        import pathlib
+
+        return (pathlib.Path(theme.__file__).parent / name).read_text(encoding="utf-8")
+
+    @classmethod
+    def _body(cls, module: str, func: str) -> str:
+        """Source of one top-level function. Black separates top-level
+        definitions with two blank lines, which is a more reliable end marker
+        than scanning for the next ``def`` — the module-level JS constants
+        between these builders would otherwise be swallowed into the body."""
+        src = cls._src(module)
+        body = src[src.index(f"def {func}(") :]
+        end = body.find("\n\n\n")
+        return body if end == -1 else body[:end]
+
+    def test_the_helper_frames_at_the_viewer_width(self):
+        html = theme.frame_viewer_html("<canvas></canvas>", width=460)
+        assert html.startswith('<div style="width:460px;max-width:100%;')
+        assert f"border:1px solid {theme.BORDER_STRONG}" in html
+        assert html.endswith("</div>")
+
+    def test_controls_are_inset_but_the_viewer_is_flush(self):
+        # The canvas is its own edge, so it should touch the frame; buttons
+        # sitting flush against a visible border read as clipped.
+        html = theme.frame_viewer_html("<canvas></canvas>", width=460, controls="<b/>")
+        assert '<canvas></canvas><div style="padding:0 8px 6px"><b/></div>' in html
+
+    def test_no_controls_means_no_empty_padding_div(self):
+        assert "padding" not in theme.frame_viewer_html("<x/>", width=100)
+
+    @pytest.mark.parametrize(
+        "builder",
+        [
+            "build_preopt_preview_html",
+            "build_trajectory_viewer_html",
+            "build_vib_viewer_html",
+        ],
+    )
+    def test_every_animation_builder_returns_a_framed_fragment(self, builder):
+        # Each of these has early-return paths (single frame, missing viewer
+        # id) that originally returned bare viewer HTML. Every exit must frame,
+        # or an animation loses its border in exactly the cases hardest to
+        # reproduce by hand — which is why this counts returns rather than
+        # checking that the helper is called somewhere in the body.
+        import re
+
+        body = self._body("app_visualization.py", builder)
+        # Anchored to the line start so the `"return s;"` inside these
+        # builders' embedded JS label snippets isn't counted as a Python exit.
+        n_returns = len(re.findall(r"^ +return ", body, re.M))
+        assert n_returns, f"no returns found in {builder}"
+        assert body.count("frame_viewer_html") == n_returns, (
+            f"{builder} has {n_returns} return paths but frames only "
+            f"{body.count('frame_viewer_html')} of them"
+        )
+
+    def test_both_vibration_backends_frame_their_animation(self):
+        # A user who prefers plotlymol (or lacks py3Dmol) hits a different
+        # renderer for the same viewer; it must look the same.
+        for fn in ("_render_vib_mode_py3dmol", "_render_vib_mode_plotlymol"):
+            body = self._body("app_visualization.py", fn)
+            assert "frame_viewer_html" in body, f"{fn} emits an unframed animation"
+
+    def test_the_standalone_export_is_left_unframed(self):
+        # build_vib_export_html writes a file opened OUTSIDE the app, where the
+        # invert filter never applies — same carve-out as analytics.py.
+        body = self._body("app_visualization.py", "build_vib_export_html")
+        assert "frame_viewer_html" not in body
+
+    @pytest.mark.parametrize(
+        "module,widget",
+        [
+            ("app_builders.py", "app.viz_output"),
+            ("app_builders.py", "app.preopt_preview_output"),
+            ("app_builders.py", "app.vib_output"),
+            ("app_visualization.py", "viewer_output"),
+        ],
+    )
+    def test_no_viewer_host_pins_a_fixed_height(self, module, widget):
+        # The failure this catches is subtle: everything renders, the border is
+        # there, and only the BOTTOM edge is missing — which reads as a CSS bug
+        # rather than a sizing one. Calculate-tab regression, 2026-08-03.
+        import re
+
+        src = self._src(module)
+        block = src[src.index(f"{widget} = widgets.Output(") :]
+        block = block[: block.index("\n    )") + 6]
+        assert re.search(r"[^_]height=", block) is None, (
+            f"{widget} pins a fixed height; overflow:hidden will clip the "
+            "frame's bottom border"
+        )
+
+    def test_the_preopt_host_no_longer_draws_its_own_border(self):
+        # It used to carry a widget-level border at max-width 480px. With the
+        # fragment framed, that would draw a second box around the first.
+        src = self._src("app_builders.py")
+        block = src[src.index("app.preopt_preview_output = widgets.Output(") :]
+        block = block[: block.index("\n    )") + 6]
+        assert "border=" not in block
+
+
+class TestRetiredValues:
     def test_retired_border_greys_are_gone_from_in_app_chrome(self):
         # analytics.py is deliberately excluded: it writes a STANDALONE
         # dashboard HTML opened directly in a browser, so the app's invert

@@ -87,4 +87,39 @@ BORDER = "#7d8ea3"
 #: (the 3-D viewer frame, which sits on its own rather than in a card stack).
 BORDER_STRONG = "#64748b"
 
-__all__ = ["BORDER", "BORDER_STRONG"]
+
+def frame_viewer_html(view_html: str, *, width: int, controls: str = "") -> str:
+    """Wrap a 3-D viewer fragment in the standard frame, sized to the viewer.
+
+    Every 3-D viewer in the app — static molecule, optimization trajectory,
+    vibrational mode, classical pre-opt preview — goes through here so they all
+    frame identically and a token change lands everywhere at once.
+
+    ``width`` must be the viewer's own pixel width. The frame is built at that
+    width **here**, in the code that knows it, rather than as a CSS class on the
+    hosting ``widgets.Output``. Measured in the browser 2026-08-03: an Output's
+    children are Lumino widgets that JupyterLab sizes with explicit pixel widths
+    tracking the window, so a class-borne ``fit-content`` always resolves to the
+    full page width. The border then enclosed a wide strip of dead space beside
+    the plot, which is actively misleading — it implies the whole strip is
+    interactive and hides where the page can be scrolled without dragging the
+    3-D view.
+
+    ``controls`` is optional stepper/player markup rendered below the viewer.
+    It is inset so the buttons don't sit flush against the frame; the viewer
+    itself stays flush, since its canvas is its own edge.
+
+    Note for callers: the hosting Output must not pin a fixed ``height``, or the
+    frame's bottom edge is clipped off by ``overflow: hidden``. Use
+    ``min_height`` — see ``app_builders.build_shared_widgets``.
+    """
+    if controls:
+        controls = f'<div style="padding:0 8px 6px">{controls}</div>'
+    return (
+        f'<div style="width:{width}px;max-width:100%;'
+        f"border:1px solid {BORDER_STRONG};border-radius:6px;"
+        f'overflow:hidden">{view_html}{controls}</div>'
+    )
+
+
+__all__ = ["BORDER", "BORDER_STRONG", "frame_viewer_html"]

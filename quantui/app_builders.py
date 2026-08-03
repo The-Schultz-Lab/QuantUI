@@ -823,10 +823,12 @@ def build_shared_widgets(
     app.preopt_preview_output = widgets.Output(
         layout=layout_fn(
             # 290px viewer + stepper controls (slider / play / compare) below.
-            height="360px",
+            # min_height, not height: build_preopt_preview_html now returns a
+            # framed fragment, and a fixed height would clip its bottom border
+            # off under overflow:hidden.
+            min_height="380px",
             width="100%",
             max_width="480px",
-            border=f"1px solid {_theme.BORDER}",
             overflow="hidden",
         )
     )
@@ -1644,7 +1646,9 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     # switch. Matches the trajectory frame_out fix pattern. 460+20=480
     # accommodates the py3Dmol view (460px) plus a small horizontal pad;
     # 420+20=440 likewise for the 420px view height.
-    app.vib_output = widgets.Output(layout=layout_fn(height="440px", width="480px"))
+    # min_height: the vib renderers return a framed fragment, and a fixed
+    # height clips its bottom border off under the tab's overflow rules.
+    app.vib_output = widgets.Output(layout=layout_fn(min_height="450px", width="480px"))
 
     # Vibration animation export: writes the current mode as a self-contained
     # HTML file. Backend selection is independent of the user's default — see

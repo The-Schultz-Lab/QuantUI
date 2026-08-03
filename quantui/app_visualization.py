@@ -308,9 +308,11 @@ def show_opt_trajectory(
         return
 
     # --- Single-viewer trajectory stepper (all frames preloaded) ---
+    # min_height, not height: build_trajectory_viewer_html returns a framed
+    # fragment, and a fixed height would clip its bottom border off.
     viewer_output = widgets.Output(
         layout=layout_fn(
-            height="410px", width="100%", max_width="500px", overflow="hidden"
+            min_height="420px", width="100%", max_width="500px", overflow="hidden"
         )
     )
     try:
@@ -1691,7 +1693,8 @@ def _render_vib_mode_py3dmol(
         from quantui.viz_assets import make_view
 
         interval_ms = max(1, int(round(1000.0 / fps)))
-        view = make_view(width=460, height=420)
+        vib_width = 460
+        view = make_view(width=vib_width, height=420)
         view.addModelsAsFrames(xyz_string, "xyz")
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
         bg = "white" if app.theme_btn.value == "Light" else "#1e1e1e"
@@ -1702,7 +1705,9 @@ def _render_vib_mode_py3dmol(
         # pan/rotate state survives mode switches. The hook is idempotent
         # (guarded by ``_quantuiVibCameraHookInstalled``) and ships inside
         # the cached HTML too — so disk-cache hits also persist the camera.
-        html_str = _VIB_CAMERA_PERSISTENCE_JS + view._make_html()
+        html_str = _theme.frame_viewer_html(
+            _VIB_CAMERA_PERSISTENCE_JS + view._make_html(), width=vib_width
+        )
     except Exception as exc:
         if not _is_vib_stale(app, render_token):
             _vib_err(app, f"Vibrational animation render failed: {exc}")
@@ -1800,7 +1805,11 @@ def _render_vib_mode_plotlymol(
             mode="ball+stick",
             resolution=12,
         )
-        anim_fig.update_layout(height=420)
+        # Explicit width, not just height: the frame is sized in pixels, and a
+        # responsive-width figure would otherwise render this mode at a
+        # different size than the py3Dmol path. 460 matches the viewer in
+        # _render_vib_mode_py3dmol so the two backends look the same.
+        anim_fig.update_layout(width=460, height=420)
     except Exception as exc:
         if not _is_vib_stale(app, render_token):
             _vib_err(app, f"Animation generation failed: {exc}")
@@ -1816,7 +1825,7 @@ def _render_vib_mode_plotlymol(
     )
     if _is_vib_stale(app, render_token):
         return
-    _swap_vib_output(app, anim_html)
+    _swap_vib_output(app, _theme.frame_viewer_html(anim_html, width=460))
 
 
 def render_vib_mode(
@@ -2101,7 +2110,8 @@ def build_preopt_preview_html(
             lines.append(f"{sym} {xyz[0]:.6f} {xyz[1]:.6f} {xyz[2]:.6f}")
     xyz_string = "\n".join(lines) + "\n"
 
-    view = make_view(width=460, height=290)
+    width = 460
+    view = make_view(width=width, height=290)
     view.addModelsAsFrames(xyz_string, "xyz")
     view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
     view.setBackgroundColor(bgcolor)
@@ -2111,7 +2121,7 @@ def build_preopt_preview_html(
     n_frames = len(frames)
     # Single frame (FF no-op / RDKit absent): nothing to step through.
     if n_frames <= 1:
-        return view_html
+        return _theme.frame_viewer_html(view_html, width=width)
 
     m = re.search(r"3dmolviewer_(\w+)", view_html)
     if m is None:
@@ -2119,11 +2129,11 @@ def build_preopt_preview_html(
         # plain auto-loop animation so the relaxation is still visible.
         interval_ms = max(1, int(round(1000.0 / max(1, fps))))
         view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
-        return view._make_html()
+        return _theme.frame_viewer_html(view._make_html(), width=width)
 
     interval_ms = max(1, int(round(1000.0 / max(1, fps))))
     controls = _preopt_controls_html(m.group(1), n_frames, interval_ms)
-    return f'<div style="max-width:480px">{view_html}{controls}</div>'
+    return _theme.frame_viewer_html(view_html, width=width, controls=controls)
 
 
 def build_trajectory_viewer_html(
@@ -2164,11 +2174,12 @@ def build_trajectory_viewer_html(
     view_html = view._make_html()
 
     if n <= 1:
-        return view_html
+        return _theme.frame_viewer_html(view_html, width=width)
 
     m = re.search(r"3dmolviewer_(\w+)", view_html)
     if m is None:
-        return view_html  # can't wire controls without the viewer id
+        # can't wire controls without the viewer id
+        return _theme.frame_viewer_html(view_html, width=width)
 
     interval_ms = max(1, int(round(1000.0 / max(1, fps))))
     eabs = json.dumps([float(e) for e in energies]) if energies else "null"
@@ -2194,7 +2205,7 @@ def build_trajectory_viewer_html(
         scrub_title="Scrub the optimization steps",
         extra_decls=f"var EABS={eabs}; var EREL={erel};",
     )
-    return f'<div style="max-width:{width + 20}px">{view_html}{controls}</div>'
+    return _theme.frame_viewer_html(view_html, width=width, controls=controls)
 
 
 # Single-viewer vibrational animation. ONE py3Dmol viewer holds every mode; the
@@ -2326,9 +2337,7 @@ def build_vib_viewer_html(
         .replace("__BG__", json.dumps(bgcolor))
         .replace("__INIT__", str(int(initial_mode)))
     )
-    return (
-        f'<div style="max-width:{width + 20}px">{view_html}<script>{js}</script></div>'
-    )
+    return _theme.frame_viewer_html(f"{view_html}<script>{js}</script>", width=width)
 
 
 def _vib_single_viewer_supported(app: Any, freq_result: Any) -> bool:

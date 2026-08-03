@@ -471,25 +471,10 @@ def render_molecule_html(
             '<div style="color:#b91c1c;padding:8px;">'
             f"❌ Visualization failed: {e}</div>"
         )
-    # Frame the fragment at the viewer's own width.
-    #
-    # The border lives HERE, not on the hosting Output widget's CSS class,
-    # because this is the only place that knows the viewer's pixel width — so
-    # the frame cannot drift out of sync with whatever a caller passes.
-    #
-    # It also cannot live on the Output widget at all. Measured in the browser
-    # 2026-08-03: that widget's children are Lumino widgets which JupyterLab
-    # sizes with explicit pixel widths tracking the window, so `fit-content`
-    # there always resolves to the full page width and the border enclosed a
-    # wide strip of dead space beside the plot. That was actively misleading
-    # once the border became visible — it implied the whole strip was
-    # interactive and hid where the page could be scrolled without dragging
-    # the 3-D view.
-    return (
-        f'<div style="width:{width}px;max-width:100%;'
-        f"border:1px solid {_theme.BORDER_STRONG};border-radius:6px;"
-        f'overflow:hidden">' + "\n".join(parts) + "</div>"
-    )
+    # Frame the fragment at the viewer's own width — see theme.frame_viewer_html
+    # for why the border cannot live on the hosting Output widget's CSS class.
+    # The info box is INSIDE the frame so it aligns with the canvas.
+    return _theme.frame_viewer_html("\n".join(parts), width=width)
 
 
 def display_molecule(
