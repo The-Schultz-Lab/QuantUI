@@ -32,6 +32,7 @@ import quantui
 import quantui.calc_log as _calc_log
 import quantui.issue_tracker as _issue_tracker
 from quantui import molecule_library as _ml
+from quantui import theme as _theme
 from quantui.app_analysis import (
     activate_ana_panel as _ana_activate_ana_panel,
 )
@@ -451,16 +452,12 @@ try:
         VIZ_STYLE_OPTIONS as _VIZ_STYLE_OPTIONS,
     )
     from quantui.visualization_py3dmol import (
-        display_molecule as _display_molecule,
-    )
-    from quantui.visualization_py3dmol import (
         render_molecule_html as _render_molecule_html,
     )
 
     VISUALIZATION_AVAILABLE = True
 except ImportError:
     VISUALIZATION_AVAILABLE = False
-    _display_molecule = None  # type: ignore[assignment]
     _render_molecule_html = None  # type: ignore[assignment]
     _PLOTLYMOL_VIZ = False
     _PY3DMOL_VIZ = False
@@ -616,7 +613,7 @@ h3 {
     color: #64748b !important;
     margin: 24px 0 10px !important;
     padding-bottom: 5px !important;
-    border-bottom: 1px solid #e2e8f0 !important;
+    border-bottom: 1px solid __Q_BORDER__ !important;
 }
 
 /* Rounded corners on inputs, dropdowns, and buttons -------------------- */
@@ -632,21 +629,6 @@ h3 {
     background: transparent !important;
 }
 
-/* 3D molecule-viewer frames — a subtle bounding box so the viewer
-   extent reads clearly. The light border inverts to dark automatically under
-   the global dark-mode invert filter. */
-.quantui-viewer-frame {
-    border: 1px solid #c0ccd8 !important;
-    border-radius: 6px !important;
-    overflow: hidden !important;
-}
-/* Collapse the frame to nothing when the viewer output is empty (e.g. before
-   a calc runs) so no hollow box shows. Degrades to an always-on border where
-   :has() is unsupported. */
-.quantui-viewer-frame:not(:has(.jp-OutputArea-child)) {
-    border-color: transparent !important;
-}
-
 /* Inline "calculating" spinner — shown next to slow on-demand
    controls (e.g. orbital-isosurface generation) while work is in flight. */
 @keyframes quantui-spin { to { transform: rotate(360deg); } }
@@ -654,13 +636,20 @@ h3 {
     display: inline-block;
     width: 14px;
     height: 14px;
-    border: 2px solid #c0ccd8;
+    border: 2px solid __Q_BORDER__;
     border-top-color: #2563eb;
     border-radius: 50%;
     animation: quantui-spin 0.7s linear infinite;
     vertical-align: middle;
 }
-</style>"""
+</style>""".replace(
+    # Sentinel substitution rather than an f-string: this block is dense with
+    # CSS braces, every one of which would need doubling. If a second sentinel
+    # is ever added, substitute the LONGER name first — "__Q_BORDER__" matches
+    # inside "__Q_BORDER_STRONG__" and would leave a dangling "_STRONG__".
+    "__Q_BORDER__",
+    _theme.BORDER,
+)
 
 _LAYOUT_TRAITS: frozenset[str] = frozenset(widgets.Layout.class_trait_names())
 
@@ -2383,7 +2372,7 @@ class QuantUIApp:
                     body = rows[1:]
                     head_html = "".join(
                         f'<th style="padding:4px 10px;text-align:left;'
-                        f"border-bottom:1px solid #cbd5e1;font-size:12px;"
+                        f"border-bottom:1px solid {_theme.BORDER};font-size:12px;"
                         f'color:#1e293b">{_html.escape(str(c))}</th>'
                         for c in header
                     )
@@ -2427,7 +2416,7 @@ class QuantUIApp:
                     # reach the parent app.
                     iframe_html = (
                         '<iframe sandbox="allow-scripts" '
-                        'style="width:100%;height:400px;border:1px solid #cbd5e1;'
+                        f'style="width:100%;height:400px;border:1px solid {_theme.BORDER};'
                         'border-radius:4px" '
                         f'srcdoc="{_html.escape(raw, quote=True)}"></iframe>'
                     )
@@ -2871,7 +2860,7 @@ class QuantUIApp:
     def _rerender_3d_views(self) -> None:
         """Re-render visible 3D molecule viewers using the router to pick a
         backend per task. Updates the "Rendering with: X" label widgets."""
-        if _display_molecule is None:
+        if _render_molecule_html is None:
             return
 
         # Calculate-tab molecule preview (MOLECULE_PREVIEW task).
@@ -2884,15 +2873,19 @@ class QuantUIApp:
         if self._analysis_displayed_molecule is not None:
             chosen = self._resolve_backend(VizTask.ANALYSIS_STRUCTURE_VIEW)
             if chosen is not None:
-                self._analysis_mol_output.clear_output()
-                with self._analysis_mol_output:
-                    _display_molecule(
-                        self._analysis_displayed_molecule,
-                        backend=str(chosen),
-                        style=self._viz_style,
-                        lighting=self._viz_lighting,
-                        bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
-                    )
+                # Same render path as the first draw (app_visualization.
+                # _show_result_3d), not display(): the fragment it returns
+                # carries the viewer's own border. Going through display()
+                # here would silently drop that border the moment a user
+                # toggled backends on the Analysis tab.
+                html = _render_molecule_html(
+                    self._analysis_displayed_molecule,
+                    backend=str(chosen),
+                    style=self._viz_style,
+                    lighting=self._viz_lighting,
+                    bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
+                )
+                self._set_html_output(self._analysis_mol_output, html)
                 self._update_analysis_backend_label(chosen)
 
     def _update_analysis_backend_label(self, chosen: VizBackend) -> None:
@@ -5514,7 +5507,7 @@ class QuantUIApp:
             rows.append(f'<div style="{style}">{esc}</div>')
         self._log_output_html.value = (
             '<div style="font-family:monospace;font-size:12px;line-height:1.4;'
-            "padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;"
+            f"padding:8px 10px;background:#f8fafc;border:1px solid {_theme.BORDER};"
             'border-radius:4px;overflow-x:auto;max-height:550px;overflow-y:auto">'
             + "".join(rows)
             + "</div>"
@@ -5530,7 +5523,7 @@ class QuantUIApp:
         if key and key in HELP_TOPICS:
             entry = HELP_TOPICS[key]
             self.help_content_html.value = (
-                f'<div style="border:1px solid #e2e8f0;border-radius:6px;'
+                f'<div style="border:1px solid {_theme.BORDER};border-radius:6px;'
                 f'padding:14px 18px;margin:8px 0;background:#f8fafc;max-width:700px">'
                 f'<h4 style="margin:0 0 10px;color:#1e293b;font-size:15px;font-weight:700">'
                 f'{entry["title"]}</h4>'

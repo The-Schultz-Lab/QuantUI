@@ -14,6 +14,8 @@ import os
 import tempfile
 from typing import Literal, cast
 
+from quantui import theme as _theme
+
 logger = logging.getLogger(__name__)
 
 Py3DmolStyle = Literal["ball+stick", "stick", "sphere", "line", "cartoon"]
@@ -469,7 +471,10 @@ def render_molecule_html(
             '<div style="color:#b91c1c;padding:8px;">'
             f"❌ Visualization failed: {e}</div>"
         )
-    return "\n".join(parts)
+    # Frame the fragment at the viewer's own width — see theme.frame_viewer_html
+    # for why the border cannot live on the hosting Output widget's CSS class.
+    # The info box is INSIDE the frame so it aligns with the canvas.
+    return _theme.frame_viewer_html("\n".join(parts), width=width)
 
 
 def display_molecule(
