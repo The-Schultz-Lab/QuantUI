@@ -24,6 +24,8 @@ air-gapped or restricted-network classroom.
 | `build-gpu.sh` | GPU build script (`--version`, `--clean`, `--test`, `--fakeroot`) |
 | `verify-gpu.sh` | Six-step check that a GPU image really reaches the GPU |
 | `slurm/quantui-gpu-test.sbatch` | Batch template for verifying on a cluster |
+| `ncshare-gpu-diagnostic.ipynb` | Interactive diagnostic to run **inside** the image on a GPU node |
+| `make_ncshare_diagnostic.py` | Generates that notebook (edit here, not the `.ipynb`) |
 | `README.md` (this file) | Build, run, and distribution guide |
 
 **Two images, on purpose.** `quantui.def` is CPU-only and conda-based — it is
@@ -521,6 +523,32 @@ the correct energy** — a right answer is not evidence the GPU was used. Only
 - `nvidia-smi` — a device is *visible*
 - `quantui gpu check` — this environment *can* offload
 - `gpu_used: true` — **this calculation actually did**
+
+### Interactive diagnostic notebook
+
+`verify-gpu.sh` runs *outside* the container and answers pass/fail.
+`ncshare-gpu-diagnostic.ipynb` runs *inside* it and answers "what is this
+node, and where is the crossover" — the questions you want on a first
+allocation.
+
+```bash
+apptainer exec --nv --env QUANTUI_SETTINGS_PATH=$TMPDIR/q.json \
+  quantui-gpu.sif jupyter lab --ip=0.0.0.0 --no-browser
+```
+
+Beyond the ladder's checks it records the **driver version and compute
+capability**, the Slurm partition and gres strings, verifies the device's
+FP64 classification is right for its class, and measures a CPU-vs-GPU
+crossover across four systems — each leg in a subprocess so the CPU leg
+genuinely starts with the GPU disabled before any import. It writes a JSON
+record and a paste-able summary.
+
+Edit `make_ncshare_diagnostic.py` and regenerate rather than editing the
+notebook JSON:
+
+```bash
+python apptainer/make_ncshare_diagnostic.py
+```
 
 ### On a cluster
 
