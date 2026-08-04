@@ -21,7 +21,12 @@ FROM: condaforge/miniforge3:latest
 %labels
   Maintainer "Jonathan Schultz"
   Purpose "Local teaching interface for quantum chemistry calculations"
-  Version "0.5.1"
+  # Deliberately not a version number: this image installs the working tree
+  # (%files . /opt/quantui), so a hardcoded label here goes stale on every bump
+  # and says nothing the install does not. `quantui.__version__` inside the
+  # image is the authoritative answer. The GPU image pins a released version
+  # instead, and a test keeps that pin in step with pyproject.
+  Source "working tree at build time — see quantui.__version__ in the image"
 
 %environment
   export PATH="/opt/conda/bin:${PATH}"
