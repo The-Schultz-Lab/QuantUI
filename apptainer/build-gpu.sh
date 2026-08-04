@@ -86,14 +86,16 @@ fi
 # tmpfs that a multi-GB CUDA base image overflows. Both failures land deep into
 # a long build. Default to a work dir next to the output instead, on the same
 # filesystem that already has room for the .sif.
-OWN_TMPDIR=""
-if [[ -z "${APPTAINER_TMPDIR:-}" ]] && findmnt -no OPTIONS /tmp 2>/dev/null | grep -q nodev; then
-  APPTAINER_TMPDIR="${PWD}/.apptainer-build-tmp"
-  mkdir -p "$APPTAINER_TMPDIR"
-  export APPTAINER_TMPDIR
-  OWN_TMPDIR="$APPTAINER_TMPDIR"
-  echo "Note: /tmp is nodev — using $APPTAINER_TMPDIR for the build instead."
-  echo "      Override by setting APPTAINER_TMPDIR yourself."
+# Refuse to clobber a build already in flight from the same checkout. Apptainer
+# writes the .sif only at the end, so two concurrent builds race on the output
+# as well as the scratch.
+_running="$(pgrep -af "apptainer.*build.*${SIF}" 2>/dev/null | grep -v "^$$ " || true)"
+if [[ -n "$_running" ]]; then
+  echo "ERROR: another build of $SIF appears to be running:" >&2
+  echo "  $_running" >&2
+  echo "       Wait for it, or kill it first. Two builds racing on the same" >&2
+  echo "       output and scratch will corrupt each other." >&2
+  exit 1
 fi
 
 # Clean up scratch on ANY exit, not just success. An interrupted build (Ctrl-C,
@@ -141,6 +143,22 @@ for _dir_desc in "${APPTAINER_TMPDIR:-/tmp}|build scratch (APPTAINER_TMPDIR)" \
     echo "         quota'd home:  export APPTAINER_CACHEDIR=/path/with/space" >&2
   fi
 done
+
+OWN_TMPDIR=""
+if [[ -z "${APPTAINER_TMPDIR:-}" ]] && findmnt -no OPTIONS /tmp 2>/dev/null | grep -q nodev; then
+  # mktemp -d, NOT a fixed path. A shared scratch directory means two builds in
+  # the same checkout write the same rootfs and — worse — the first to finish
+  # deletes it while the other is still using it. That failure is baffling from
+  # inside: the build's own /tmp vanishes mid-%post and apt reports
+  # "Unable to mkstemp /tmp/... No such file or directory". Cost one 15-minute
+  # apt fetch to learn, 2026-08-04.
+  mkdir -p "${PWD}/.apptainer-build-tmp"
+  APPTAINER_TMPDIR="$(mktemp -d "${PWD}/.apptainer-build-tmp/run-XXXXXX")"
+  export APPTAINER_TMPDIR
+  OWN_TMPDIR="$APPTAINER_TMPDIR"
+  echo "Note: /tmp is nodev — using $APPTAINER_TMPDIR for the build instead."
+  echo "      Override by setting APPTAINER_TMPDIR yourself."
+fi
 
 BUILD_OPTS=()
 [[ "$FAKEROOT" == true ]] && BUILD_OPTS+=(--fakeroot)

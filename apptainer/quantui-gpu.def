@@ -90,7 +90,9 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
   echo "── System python + venv ─────────────────────────────────────────────"
   apt-get update
   apt-get install -y --no-install-recommends \
-    python3 python3-venv python3-pip ca-certificates git
+    python3 python3-venv python3-pip ca-certificates
+  # No git: nothing is cloned here — QuantUI comes from PyPI — and this apt
+  # step is the slowest part of the build on a poor mirror.
   rm -rf /var/lib/apt/lists/*
 
   # A venv, not the system interpreter: Ubuntu 24.04 marks its python
