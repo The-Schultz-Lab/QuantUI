@@ -20,12 +20,17 @@ quietly wrong are asserted here instead:
   converges to the right energy, on the CPU, silently.
 
 Pure text assertions over the def and scripts — no Apptainer, no GPU, no build.
+Portable too: the only test that shells out is the bash syntax check, which
+skips where bash is absent. An earlier version ran ``grep -oP`` and broke on
+Windows, quietly matching nothing rather than failing loudly.
 """
 
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -130,13 +135,18 @@ class TestTheImageTracksThePackage:
         m = re.search(r"grep -oP '([^']+)' \"\$DEF\"", script)
         assert m is not None, "no version-extraction grep found in build-gpu.sh"
 
-        out = subprocess.run(
-            ["grep", "-oP", m.group(1), str(DEF)],
-            capture_output=True,
-            text=True,
+        # Applied with Python's re, not by shelling out to grep. This module
+        # claims to be pure text assertions, and it should be: `grep -oP` is
+        # absent or PCRE-less on Windows, where it silently matched nothing.
+        # Translating \K (PCRE "drop everything before this") to a capture
+        # group is exact for this shape of pattern.
+        pattern = m.group(1)
+        assert "\\K" in pattern, "expected a \\K pattern; update this translation"
+        pre, post = pattern.split("\\K", 1)
+        resolved = re.findall(
+            pre + "(" + post + ")", DEF.read_text(encoding="utf-8"), re.M
         )
-        resolved = out.stdout.splitlines()
-        assert resolved, f"pattern {m.group(1)!r} matched nothing in the def"
+        assert resolved, f"pattern {pattern!r} matched nothing in the def"
         assert resolved[0] == _pinned_version(def_text), (
             f"build-gpu.sh resolves {resolved[0]!r}, def pins "
             f"{_pinned_version(def_text)!r} — the pattern is matching a comment"
@@ -226,6 +236,14 @@ class TestTheVerificationLadder:
     def verify_text(self) -> str:
         return VERIFY.read_text(encoding="utf-8")
 
+    @pytest.mark.skipif(
+        sys.platform == "win32" or shutil.which("bash") is None,
+        reason="These are Linux/cluster shell scripts and there is no "
+        "pure-Python way to parse them. Skipped on Windows even though a "
+        "`bash` is usually on PATH there: it is typically System32's WSL "
+        "launcher, which exits non-zero when no distro is installed — a "
+        "failure about the runner, not about the script.",
+    )
     @pytest.mark.parametrize("script", [VERIFY, BUILD, SBATCH])
     def test_scripts_are_syntactically_valid(self, script):
         assert subprocess.run(["bash", "-n", str(script)]).returncode == 0
