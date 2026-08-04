@@ -23,6 +23,7 @@ exercised directly.
 from __future__ import annotations
 
 import base64
+import io
 import re
 import tempfile
 from pathlib import Path
@@ -229,15 +230,28 @@ class TestCapturedPngIsWritten:
         app._last_cube_orbital = "HOMO"
         app._orb_png_inbox = Mock(value="pending")
         app._iso_export_status = Mock(value="")
+        app._iso_png_name = Mock(value="")
+        app._iso_png_dpi = Mock(value=300)
         return app
 
     def _uri(self, raw: bytes = _REAL_PNG) -> str:
         return _PNG_URI_PREFIX + base64.b64encode(raw).decode()
 
-    def test_a_capture_lands_on_disk_byte_for_byte(self, tmp_path):
+    def test_a_capture_lands_on_disk_as_the_same_image(self, tmp_path):
+        # Pixels, not bytes. The file is deliberately re-encoded to stamp the
+        # DPI, so byte equality stopped being the right invariant the moment
+        # that landed — what must survive is the image itself.
+        from PIL import Image
+
         app = self._app(tmp_path)
         on_orb_png_captured(app, {"new": self._uri()})
-        assert (tmp_path / "HOMO.png").read_bytes() == _REAL_PNG
+        out = tmp_path / "HOMO.png"
+        assert out.exists()
+        with Image.open(io.BytesIO(_REAL_PNG)) as src, Image.open(out) as dst:
+            assert dst.size == src.size
+            assert list(dst.convert("RGBA").getdata()) == list(
+                src.convert("RGBA").getdata()
+            )
         assert "Saved" in app._iso_export_status.value
 
     def test_the_inbox_is_cleared_so_the_same_view_can_be_saved_twice(self, tmp_path):
@@ -390,6 +404,7 @@ class TestThemeChangeReachesThe3DScenes:
         app._last_cube_path = cube_file
         app._last_vib_molecule = None
         app._last_vib_freq_result = None
+        app._last_traj_result = None
         app._orb_png_inbox = Mock()
         app._set_html_output = lambda out, html: seen.update(html=html)
         app._plotly_theme_colors = lambda: {"scene_bgcolor": "#1e1e1e"}
@@ -406,6 +421,7 @@ class TestThemeChangeReachesThe3DScenes:
         app._last_cube_path = cube_file
         app._last_vib_molecule = None
         app._last_vib_freq_result = None
+        app._last_traj_result = None
         app._orb_png_inbox = Mock()
         app._set_html_output = lambda out, html: seen.update(html=html)
         app._plotly_theme_colors = lambda: {"scene_bgcolor": "#fff"}
@@ -438,6 +454,7 @@ class TestThemeChangeReachesThe3DScenes:
             app._last_cube_path = cube
             app._last_vib_molecule = None
             app._last_vib_freq_result = None
+            app._last_traj_result = None
             app._plotly_theme_colors = lambda: {"scene_bgcolor": "#fff"}
             rerender_3d_scenes_for_theme(app)  # must not raise
 
@@ -482,3 +499,316 @@ class TestIsosurfaceSwapsAreAtomic:
             "isosurface output is cleared then repopulated — use "
             "app._set_html_output for an atomic swap"
         )
+
+
+class TestExportsMatchWhatIsOnScreen:
+    """Trajectory export moved to py3Dmol, 2026-08-04 — same change and same
+    reasoning as VIB_EXPORT the day before: the exported file should be the
+    animation the user was watching, not a second renderer's version of it."""
+
+    def test_the_router_pins_trajectory_export_to_py3dmol(self):
+        from quantui.viz_backend_router import (
+            BackendAvailability,
+            VizBackend,
+            VizPreference,
+            VizTask,
+            select_backend,
+        )
+
+        both = BackendAvailability(py3dmol=True, plotlymol=True)
+        for pref in VizPreference:
+            assert (
+                select_backend(VizTask.TRAJECTORY_EXPORT, pref, both).chosen
+                == VizBackend.PY3DMOL
+            )
+
+    def test_the_export_reuses_the_on_screen_builder(self):
+        # Reusing build_trajectory_viewer_html is what makes "same as on screen"
+        # true by construction rather than by two implementations agreeing.
+        import inspect
+
+        from quantui.app_visualization import show_opt_trajectory
+
+        src = inspect.getsource(show_opt_trajectory)
+        assert "create_trajectory_animation" not in src, "still building via Plotly"
+        assert "standalone_html(" in src
+        assert "build_trajectory_viewer_html(" in src
+
+    def test_the_exported_file_is_a_complete_utf8_document(self):
+        """standalone_html was a no-op pass-through, so exports were bare
+        fragments. Browsers render those in quirks mode, but without a
+        <meta charset> a file opened from disk is not reliably decoded as
+        UTF-8 — and these exports carry non-ASCII (the ⇄ compare button, the →
+        in frame labels). Mojibake in a file destined for a talk is a bad way
+        to discover that."""
+        from quantui.app_visualization import build_trajectory_viewer_html
+        from quantui.viz_assets import standalone_html
+
+        xb = "3\nH2O\nO 0 0 0\nH 0.757 0.587 0\nH -0.757 0.587 0\n"
+        frag = build_trajectory_viewer_html([xb, xb], formula="H2O")
+        assert any(ord(c) > 127 for c in frag), "fixture no longer exercises this"
+
+        html = standalone_html(frag, title="Geo Opt: H2O")
+        assert html.lstrip().lower().startswith("<!doctype html>")
+        assert 'charset="utf-8"' in html
+        assert "<title>Geo Opt: H2O</title>" in html
+        # The viewer itself must survive the wrapping, offline loader included.
+        assert "3dmolviewer" in html
+        assert "data:text/javascript;base64," in html
+        assert "jsdelivr" not in html
+
+
+class TestThemeChangeReachesEveryViewer:
+    """Follow-up to the sticky-background report, 2026-08-04. The first fix
+    covered the isosurface and the vibrational viewer; the user then found the
+    Analysis-tab molecule viewer and the live trajectory viewer still stuck.
+
+    The machinery to redraw those already existed — ``_rerender_3d_views``
+    handles both molecule viewers — it simply was not reached from the theme
+    handler, which called ``_refresh_calc_mol_viewer`` (Calculate tab only).
+    """
+
+    def test_the_theme_handler_redraws_both_molecule_viewers(self):
+        import inspect
+
+        from quantui.app import QuantUIApp
+
+        src = inspect.getsource(QuantUIApp._rerender_plotly_theme)
+        assert "_rerender_3d_views" in src, (
+            "theme change must go through _rerender_3d_views, which covers the "
+            "Analysis tab; _refresh_calc_mol_viewer alone covers only Calculate"
+        )
+
+    def test_the_theme_rerender_covers_the_trajectory(self):
+        import inspect
+
+        from quantui.app_visualization import rerender_3d_scenes_for_theme
+
+        src = inspect.getsource(rerender_3d_scenes_for_theme)
+        assert "_last_traj_result" in src
+        assert "_show_opt_trajectory" in src
+
+    def test_it_skips_a_trajectory_panel_that_was_never_opened(self):
+        # Re-rendering an empty panel would build a viewer on a tab the user
+        # has not looked at, on every theme toggle.
+        from quantui.app_visualization import rerender_3d_scenes_for_theme
+
+        app = Mock()
+        app._last_cube_path = None
+        app._last_vib_molecule = None
+        app._last_vib_freq_result = None
+        app._last_traj_result = object()
+        app.traj_output = Mock(children=())
+        app._plotly_theme_colors = lambda: {"scene_bgcolor": "#fff"}
+
+        rerender_3d_scenes_for_theme(app)
+        app._show_opt_trajectory.assert_not_called()
+
+    def test_it_rerenders_a_trajectory_panel_that_is_populated(self):
+        from quantui.app_visualization import rerender_3d_scenes_for_theme
+
+        traj = object()
+        app = Mock()
+        app._last_cube_path = None
+        app._last_vib_molecule = None
+        app._last_vib_freq_result = None
+        app._last_traj_result = traj
+        app.traj_output = Mock(children=(Mock(),))
+        app._plotly_theme_colors = lambda: {"scene_bgcolor": "#fff"}
+
+        rerender_3d_scenes_for_theme(app)
+        app._show_opt_trajectory.assert_called_once_with(traj)
+
+
+@pytest.fixture
+def gaussian_cube(tmp_path: Path) -> Path:
+    """A cube holding a normalised-ish Gaussian, so enclosed-density fractions
+    are physically sensible rather than noise."""
+    n = 12
+    g = np.linspace(-2, 2, n)
+    X, Y, Z = np.meshgrid(g, g, g, indexing="ij")
+    vals = np.exp(-(X**2 + Y**2 + Z**2)).ravel()
+    lines = [
+        "orb",
+        "cube",
+        "    1    0.000000    0.000000    0.000000",
+        f"    {n}    0.300000    0.000000    0.000000",
+        f"    {n}    0.000000    0.300000    0.000000",
+        f"    {n}    0.000000    0.000000    0.300000",
+        "    1    1.000000    0.000000    0.000000    0.000000",
+    ]
+    for i in range(0, len(vals), 6):
+        lines.append("".join(f"{v:13.5E}" for v in vals[i : i + 6]))
+    p = tmp_path / "gauss.cube"
+    p.write_text("\n".join(lines) + "\n")
+    return p
+
+
+class TestIsovalueIsExplainedAsEnclosedDensity:
+    """An isovalue is an amplitude threshold, which is not the question a
+    chemist has — "how much of the orbital is inside this surface?" is. The
+    readout answers that from the same cube already on disk."""
+
+    def test_a_higher_isovalue_encloses_less_density(self, gaussian_cube):
+        from quantui.orbital_visualization import enclosed_density_fraction
+
+        low = enclosed_density_fraction(gaussian_cube, 0.01)
+        high = enclosed_density_fraction(gaussian_cube, 0.5)
+        assert low is not None and high is not None
+        assert low > high, "tightening the surface must enclose less, not more"
+
+    def test_the_fraction_stays_within_bounds(self, gaussian_cube):
+        from quantui.orbital_visualization import enclosed_density_fraction
+
+        for iso in (1e-6, 0.001, 0.02, 0.2, 0.9, 10.0):
+            frac = enclosed_density_fraction(gaussian_cube, iso)
+            assert frac is not None and 0.0 <= frac <= 1.0, (iso, frac)
+
+    def test_an_unreadable_cube_returns_none_rather_than_raising(self, tmp_path):
+        # This feeds a label beside a slider; it must never be why a drag fails.
+        from quantui.orbital_visualization import enclosed_density_fraction
+
+        junk = tmp_path / "not.cube"
+        junk.write_text("this is not a cube file\n")
+        assert enclosed_density_fraction(junk, 0.02) is None
+        assert enclosed_density_fraction(tmp_path / "missing.cube", 0.02) is None
+
+
+class TestAppearanceControlsNeverRecompute:
+    """Isovalue, opacity and transparency are properties of the RENDER, not of
+    the grid. Redrawing the cube on disk is sub-second; regenerating it is
+    15-30 s, and ~4.6x that at the finest grid. That difference is the only
+    reason these can be sliders rather than an Apply button."""
+
+    def test_the_redraw_path_cannot_reach_cubegen(self):
+        import inspect
+
+        from quantui.app_visualization import rerender_iso_from_cube
+
+        src = inspect.getsource(rerender_iso_from_cube)
+        body = src[src.index('"""', src.index('"""') + 3) :]
+        assert "generate_cube_from_arrays" not in body
+        assert "render_orbital_isosurface(" not in body
+
+    def test_options_come_from_one_place(self):
+        # First render, slider redraw and theme redraw must not be able to
+        # disagree about what the viewer looks like.
+        import inspect
+
+        from quantui import app_visualization as av
+
+        for fn in (av.rerender_iso_from_cube, av.rerender_3d_scenes_for_theme):
+            assert "iso_render_options(app)" in inspect.getsource(fn)
+        assert "iso_render_options(app)" in inspect.getsource(
+            av.render_orbital_isosurface
+        )
+
+    def test_the_options_reflect_the_widgets(self, gaussian_cube):
+        from quantui.app_visualization import iso_render_options
+
+        app = Mock()
+        app._plotly_theme_colors = lambda: {"scene_bgcolor": "white"}
+        app._iso_isovalue_slider = Mock(value=0.07)
+        app._iso_opacity_slider = Mock(value=0.4)
+        app._iso_png_transparent = Mock(value=True)
+        app._orb_png_inbox = Mock()
+
+        opts = iso_render_options(app)
+        assert opts["isovalue"] == pytest.approx(0.07)
+        assert opts["opacity"] == pytest.approx(0.4)
+        assert opts["transparent_bg"] is True
+
+    def test_missing_widgets_fall_back_to_defaults(self):
+        # Partially-built apps (tests, older layouts) must still render.
+        from quantui.app_visualization import iso_render_options
+
+        app = Mock(spec=["_plotly_theme_colors"])
+        app._plotly_theme_colors = lambda: {"scene_bgcolor": "white"}
+        opts = iso_render_options(app)
+        assert opts["isovalue"] == pytest.approx(0.02)
+        assert opts["opacity"] == pytest.approx(0.85)
+        assert opts["transparent_bg"] is False
+
+    def test_transparency_reaches_the_rendered_html(self, gaussian_cube):
+        from quantui.orbital_visualization import render_orbital_isosurface_py3dmol
+
+        opaque = render_orbital_isosurface_py3dmol(gaussian_cube, bgcolor="white")
+        clear = render_orbital_isosurface_py3dmol(
+            gaussian_cube, bgcolor="white", transparent_bg=True
+        )
+        assert "setBackgroundColor" in opaque
+        # The alpha argument is what makes pngURI() capture transparent pixels.
+        assert 'setBackgroundColor("white",0.0)' in clear.replace(" ", "")
+        assert 'setBackgroundColor("white",0.0)' not in opaque.replace(" ", "")
+
+
+class TestPngExportOptions:
+    @staticmethod
+    def _rgba_uri() -> str:
+        # RGBA with a fully transparent pixel, so alpha survival is real.
+        import io
+
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGBA", (4, 4), (255, 0, 0, 0)).save(buf, format="PNG")
+        return _PNG_URI_PREFIX + base64.b64encode(buf.getvalue()).decode()
+
+    @staticmethod
+    def _app(dest: Path, name: str = "", dpi: int = 300) -> Mock:
+        app = Mock()
+        app._last_result_dir = dest
+        app._last_cube_orbital = "HOMO"
+        app._orb_png_inbox = Mock(value="pending")
+        app._iso_export_status = Mock(value="")
+        app._iso_png_name = Mock(value=name)
+        app._iso_png_dpi = Mock(value=dpi)
+        return app
+
+    @pytest.mark.parametrize("dpi", [72, 150, 300, 600])
+    def test_the_requested_dpi_is_stamped(self, tmp_path, dpi):
+        from PIL import Image
+
+        on_orb_png_captured(self._app(tmp_path, dpi=dpi), {"new": self._rgba_uri()})
+        with Image.open(tmp_path / "HOMO.png") as im:
+            # PNG stores pixels-per-metre, so the round-trip is not exact.
+            assert im.info["dpi"][0] == pytest.approx(dpi, rel=1e-3)
+
+    def test_transparency_survives_the_dpi_rewrite(self, tmp_path):
+        # Re-encoding to stamp metadata must not flatten alpha — that would
+        # silently undo the transparent-background option.
+        from PIL import Image
+
+        on_orb_png_captured(self._app(tmp_path), {"new": self._rgba_uri()})
+        with Image.open(tmp_path / "HOMO.png") as im:
+            assert im.mode == "RGBA"
+            assert im.getpixel((0, 0))[3] == 0
+
+    @pytest.mark.parametrize(
+        "typed,expected",
+        [
+            ("", "HOMO.png"),  # falls back to the orbital label
+            ("my figure", "my figure.png"),
+            ("fig1.png", "fig1.png"),  # .png not doubled
+            ("   ", "HOMO.png"),  # whitespace is not a filename
+        ],
+    )
+    def test_the_filename_follows_the_box(self, tmp_path, typed, expected):
+        on_orb_png_captured(self._app(tmp_path, name=typed), {"new": self._rgba_uri()})
+        assert (tmp_path / expected).exists()
+
+    def test_a_typed_path_cannot_escape_the_result_directory(self, tmp_path):
+        # A text box is exactly where a stray "../" arrives.
+        on_orb_png_captured(
+            self._app(tmp_path, name="../../etc/passwd"), {"new": self._rgba_uri()}
+        )
+        written = list(tmp_path.glob("*.png"))
+        assert len(written) == 1
+        assert written[0].parent == tmp_path
+
+    def test_a_broken_dpi_widget_still_saves_the_image(self, tmp_path):
+        # Losing metadata is a mild loss; losing the export is not.
+        app = self._app(tmp_path)
+        app._iso_png_dpi = Mock(value="not-a-number")
+        on_orb_png_captured(app, {"new": self._rgba_uri()})
+        assert (tmp_path / "HOMO.png").exists()

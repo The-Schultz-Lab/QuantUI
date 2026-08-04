@@ -137,6 +137,42 @@ _PNG_URI_PREFIX = "data:image/png;base64,"
 _MAX_PNG_BYTES = 64 * 1024 * 1024
 
 
+def _requested_dpi(app: Any) -> int:
+    try:
+        return int(getattr(app._iso_png_dpi, "value", 300))
+    except Exception:  # noqa: BLE001 — a missing widget must not stop a save
+        return 300
+
+
+def _with_dpi(raw: bytes, dpi: int) -> bytes:
+    """Stamp *dpi* into the PNG's pHYs chunk.
+
+    ⚠️ This sets the PRINT size, not the pixel count. The capture is whatever
+    the canvas holds, and re-encoding cannot invent detail — at 300 dpi a
+    760 px image simply declares itself 2.5 inches wide. That is what makes a
+    figure land at the right physical size in Word or LaTeX instead of being
+    scaled by hand, which is the actual complaint DPI settings answer.
+
+    Pillow is already a dependency (via matplotlib). If anything goes wrong the
+    original bytes are returned: a PNG without the metadata is a mild loss, a
+    failed export is not.
+    """
+    try:
+        import io
+
+        from PIL import Image
+
+        with Image.open(io.BytesIO(raw)) as im:
+            im.load()
+            buf = io.BytesIO()
+            # RGBA is preserved, so a transparent capture stays transparent.
+            im.save(buf, format="PNG", dpi=(dpi, dpi))
+            return buf.getvalue()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("could not stamp %d dpi into the PNG: %s", dpi, exc)
+        return raw
+
+
 def on_orb_png_captured(app: Any, change: dict) -> None:
     """Write a PNG captured from the live isosurface viewer (ORBX.1).
 
@@ -185,9 +221,23 @@ def on_orb_png_captured(app: Any, change: dict) -> None:
         _fail("Capture failed (corrupt image data).")
         return
 
-    label = getattr(app, "_last_cube_orbital", None) or "orbital"
-    safe = "".join(c if c.isalnum() or c in "-_+" else "_" for c in str(label))
+    # Filename: the user's, falling back to the orbital label. Sanitised
+    # either way — this builds a filesystem path, and a name typed into a text
+    # box is exactly where a stray "../" or "/" arrives.
+    # str() rather than trusting the attribute: this runs against real widgets
+    # in the app but also against partially-built ones, and a non-string here
+    # would turn a successful capture into a traceback on the .strip() below.
+    typed = getattr(getattr(app, "_iso_png_name", None), "value", "")
+    typed = typed.strip() if isinstance(typed, str) else ""
+    label = typed or getattr(app, "_last_cube_orbital", None) or "orbital"
+    label = str(label)
+    if label.lower().endswith(".png"):
+        label = label[:-4]
+    safe = "".join(c if c.isalnum() or c in "-_+ " else "_" for c in str(label))
+    safe = safe.strip() or "orbital"
     dest = Path(result_dir) / f"{safe}.png"
+
+    raw = _with_dpi(raw, _requested_dpi(app))
     try:
         dest.write_bytes(raw)
     except OSError as exc:

@@ -1902,6 +1902,74 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="290px", margin="8px 0 4px 0"),
     )
 
+    # ── Isosurface appearance (ORBX.2 cont.) ────────────────────────────
+    # Both re-render from the cube already on disk — no cubegen — so dragging
+    # either is fast. That is the whole reason they can be sliders rather than
+    # an "apply" button.
+    app._iso_isovalue_slider = widgets.FloatLogSlider(
+        value=0.02,
+        base=10,
+        min=-3.0,  # 0.001
+        max=-0.7,  # ~0.2
+        step=0.02,
+        description="Isovalue:",
+        readout_format=".4f",
+        continuous_update=False,  # re-render on release, not per pixel
+        style={"description_width": "70px"},
+        layout=layout_fn(width="330px"),
+    )
+    # An isovalue is an amplitude threshold, which is not the question people
+    # actually have — "how much of the orbital is inside this surface?" is.
+    # That is the integral of |psi|^2 enclosed, computed from the same cube.
+    app._iso_enclosed_label = widgets.HTML(
+        value="", layout=layout_fn(margin="0 0 0 6px")
+    )
+    app._iso_opacity_slider = widgets.FloatSlider(
+        value=0.85,
+        min=0.1,
+        max=1.0,
+        step=0.05,
+        description="Opacity:",
+        readout_format=".2f",
+        continuous_update=False,
+        style={"description_width": "70px"},
+        layout=layout_fn(width="330px"),
+    )
+
+    # ── PNG export options (ORBX.1 cont.) ───────────────────────────────
+    app._iso_png_name = widgets.Text(
+        value="",
+        placeholder="(defaults to the orbital label, e.g. HOMO)",
+        description="PNG name:",
+        style={"description_width": "70px"},
+        layout=layout_fn(width="330px"),
+    )
+    app._iso_png_transparent = widgets.Checkbox(
+        value=False,
+        description="Transparent background",
+        indent=False,
+        tooltip=(
+            "Render with no background so the figure drops onto a slide or a "
+            "coloured page. The viewer previews exactly what will be exported."
+        ),
+        layout=layout_fn(width="330px"),
+    )
+    # DPI is metadata (the PNG pHYs chunk): it sets the PRINT size, not the
+    # pixel count. 300 dpi is the usual journal floor. Labelled with the
+    # resulting print width so the number means something.
+    app._iso_png_dpi = widgets.Dropdown(
+        options=[
+            ("72 dpi — screen", 72),
+            ("150 dpi — draft print", 150),
+            ("300 dpi — journal standard", 300),
+            ("600 dpi — high-res print", 600),
+        ],
+        value=300,
+        description="PNG dpi:",
+        style={"description_width": "70px"},
+        layout=layout_fn(width="330px"),
+    )
+
     # Hidden inbox for client-side PNG capture (ORBX.1). The JS in the rendered
     # isosurface writes a data URI into this Textarea's DOM node and dispatches
     # an 'input' event; ipywidgets' own view then syncs `value` to the kernel.
@@ -1931,6 +1999,19 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             ),
             app._orb_iso_controls,
             app._iso_resolution_dd,
+            widgets.HBox(
+                [app._iso_isovalue_slider, app._iso_enclosed_label],
+                layout=layout_fn(align_items="center"),
+            ),
+            app._iso_opacity_slider,
+            widgets.HTML(
+                '<p style="color:#555;font-size:12px;margin:8px 0 2px">'
+                "<b>PNG export</b> — the Save PNG button under the viewer "
+                "captures the view exactly as you have rotated it.</p>"
+            ),
+            app._iso_png_name,
+            app._iso_png_dpi,
+            app._iso_png_transparent,
             widgets.HBox(
                 [
                     app._iso_generate_btn,

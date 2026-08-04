@@ -298,7 +298,7 @@ def show_opt_trajectory(
         pass
 
     # --- Pre-build XYZ blocks (reused by the viewer and the export) ---
-    charge = traj[0].charge
+    # (charge was only needed by the retired plotlymol export path)
     xyzblocks = [
         f"{len(m.atoms)}\n{m.get_formula()}\n{m.to_xyz_string()}" for m in traj
     ]
@@ -361,15 +361,21 @@ def show_opt_trajectory(
 
         def _do_export() -> None:
             try:
-                from plotlymol3d import create_trajectory_animation
+                # py3Dmol, matching what is on screen (2026-08-04, same change
+                # as VIB_EXPORT). This reuses build_trajectory_viewer_html —
+                # the exact builder that produced the viewer above — so the
+                # exported file has the same stepper, the same per-step energy
+                # labels and the same geometry, rather than a second renderer's
+                # interpretation of them. standalone_html embeds the vendored
+                # 3Dmol.js so the file opens offline, with no CDN.
+                from quantui.viz_assets import standalone_html
 
-                anim_fig = create_trajectory_animation(
-                    xyzblocks=xyzblocks,
-                    energies_hartree=energies if energies else None,
-                    charge=charge,
-                    mode="ball+stick",
-                    resolution=12,
-                    title=f"Geo Opt: {opt_result.formula}",
+                fragment = build_trajectory_viewer_html(
+                    xyzblocks,
+                    formula=opt_result.formula,
+                    energies=list(energies) if energies else None,
+                    rel_e=rel_e or None,
+                    bgcolor="white",  # exported file has no app theme around it
                 )
                 result_dir = getattr(app, "_last_result_dir", None)
                 out_path = (
@@ -377,7 +383,10 @@ def show_opt_trajectory(
                     if result_dir is not None
                     else Path.home() / f"{opt_result.formula}_trajectory.html"
                 )
-                anim_fig.write_html(str(out_path))
+                out_path.write_text(
+                    standalone_html(fragment, title=f"Geo Opt: {opt_result.formula}"),
+                    encoding="utf-8",
+                )
                 app._queue_main_thread_callback(
                     setattr,
                     export_status,
@@ -1306,17 +1315,10 @@ def render_orbital_isosurface(
 
         with _viz_render_event(app, task=_VT.ORBITAL_ISOSURFACE, backend=backend_label):
             if use_py3dmol:
+                # Same options the sliders and the theme path use, so a fresh
+                # render cannot disagree with a redraw of the same orbital.
                 html_str = render_orbital_isosurface_py3dmol(
-                    cube_path,
-                    bgcolor=scene_bgcolor,
-                    # Enables the in-viewer Save-PNG button. Passing the inbox
-                    # class only when the widget exists means the button is
-                    # never rendered without somewhere to deliver to.
-                    capture_class=(
-                        _ORB_PNG_INBOX_CLASS
-                        if getattr(app, "_orb_png_inbox", None) is not None
-                        else ""
-                    ),
+                    cube_path, **iso_render_options(app)
                 )
             else:
                 is_dark = app.theme_btn.value == "Dark"
@@ -1373,6 +1375,9 @@ def render_orbital_isosurface(
     # label so the "Export cube" button can copy it to the top-level
     # result dir with a friendly name without re-deriving the path.
     app._last_cube_path = cube_path
+    # The enclosed-density readout depends on the cube that was just written,
+    # so it can only be filled in now — not when the slider was last moved.
+    update_iso_enclosed_label(app)
     app._last_cube_orbital = orbital_label
     try:
         from quantui import calc_log as _clog
@@ -1908,6 +1913,96 @@ def render_vib_mode(
             )
 
 
+def iso_render_options(app: Any) -> dict:
+    """Current isosurface appearance settings, read straight off the widgets.
+
+    One place, so the first render, the appearance-slider re-render and the
+    theme re-render cannot disagree about what the viewer should look like —
+    which they would the moment any of the three grew a fourth option.
+    """
+
+    def _val(name: str, default):
+        """Widget value coerced to the default's type, or the default.
+
+        The coercion is the point. A widget that exists but holds something
+        uncoercible — a partially-built app, a stub — would otherwise raise out
+        of here and take the whole render with it, which is a poor trade for a
+        slider position.
+        """
+        raw = getattr(getattr(app, name, None), "value", default)
+        try:
+            return type(default)(raw)
+        except (TypeError, ValueError):
+            return default
+
+    return {
+        "isovalue": float(_val("_iso_isovalue_slider", 0.02)),
+        "opacity": float(_val("_iso_opacity_slider", 0.85)),
+        "transparent_bg": bool(_val("_iso_png_transparent", False)),
+        "bgcolor": app._plotly_theme_colors()["scene_bgcolor"],
+        "capture_class": (
+            _ORB_PNG_INBOX_CLASS
+            if getattr(app, "_orb_png_inbox", None) is not None
+            else ""
+        ),
+    }
+
+
+def rerender_iso_from_cube(app: Any) -> bool:
+    """Redraw the isosurface from the cube already on disk. Returns success.
+
+    The point of this function is what it does NOT do: it never re-runs
+    cubegen. Isovalue, opacity, transparency and theme are all properties of
+    the *render*, not of the grid, so changing any of them is a sub-second
+    redraw of a file that already exists — while regenerating would be 15-30 s,
+    and up to ~4.6x that at the finest grid. If that ever stops being true, the
+    appearance sliders have to stop being sliders.
+    """
+    cube = getattr(app, "_last_cube_path", None)
+    if cube is None:
+        return False
+    try:
+        if not Path(cube).exists():
+            return False
+        from quantui.orbital_visualization import render_orbital_isosurface_py3dmol
+
+        html = render_orbital_isosurface_py3dmol(Path(cube), **iso_render_options(app))
+        app._set_html_output(app._orb_iso_output, html)
+        return True
+    except Exception as exc:  # noqa: BLE001 — never break a slider drag
+        logger.warning("isosurface re-render failed: %s", exc)
+        return False
+
+
+def update_iso_enclosed_label(app: Any) -> None:
+    """Show what fraction of the orbital's density the current isovalue holds."""
+    label = getattr(app, "_iso_enclosed_label", None)
+    if label is None:
+        return
+    cube = getattr(app, "_last_cube_path", None)
+    iso = float(getattr(getattr(app, "_iso_isovalue_slider", None), "value", 0.02))
+    if cube is None or not Path(cube).exists():
+        label.value = ""
+        return
+    from quantui.orbital_visualization import enclosed_density_fraction
+
+    frac = enclosed_density_fraction(Path(cube), iso)
+    label.value = (
+        ""
+        if frac is None
+        else (
+            f'<span style="font-size:12px;color:#555">encloses '
+            f"<b>{frac * 100:.1f}%</b> of the density</span>"
+        )
+    )
+
+
+def on_iso_appearance_changed(app: Any, change: dict | None = None) -> None:
+    """Isovalue / opacity / transparency changed — redraw, no recompute."""
+    if rerender_iso_from_cube(app):
+        update_iso_enclosed_label(app)
+
+
 def rerender_3d_scenes_for_theme(app: Any) -> None:
     """Re-render the isosurface and vibrational viewers after a theme change.
 
@@ -1926,13 +2021,21 @@ def rerender_3d_scenes_for_theme(app: Any) -> None:
       finest grid). Re-generating on a theme toggle would be unusable.
     - The vibrational viewer rebuilds from cached displacements, not from a new
       frequency calculation.
+    - The trajectory viewer rebuilds from ``_last_traj_result``, not from a new
+      optimization.
+
+    The two molecule viewers (Calculate and Analysis tabs) are NOT handled here
+    — ``_rerender_plotly_theme`` routes those through ``_rerender_3d_views``,
+    which already knew how to redraw them. It simply was not being called on a
+    theme change, which is why the Analysis-tab viewer stayed dark while the
+    Calculate-tab one updated.
 
     ⚠️ The vib path needs a full rebuild, not ``__quantuiVibSetMode``. That
     bridge switches frames on the existing viewer client-side — which is exactly
     why the camera survives a mode change — but it never touches the scene
     background, so it cannot fix this.
     """
-    scene_bg = app._plotly_theme_colors()["scene_bgcolor"]
+    # (the isosurface reads its colour via iso_render_options below)
 
     # ── Orbital isosurface ──────────────────────────────────────────────
     cube = getattr(app, "_last_cube_path", None)
@@ -1944,17 +2047,26 @@ def rerender_3d_scenes_for_theme(app: Any) -> None:
                 )
 
                 html = render_orbital_isosurface_py3dmol(
-                    Path(cube),
-                    bgcolor=scene_bg,
-                    capture_class=(
-                        _ORB_PNG_INBOX_CLASS
-                        if getattr(app, "_orb_png_inbox", None) is not None
-                        else ""
-                    ),
+                    Path(cube), **iso_render_options(app)
                 )
                 app._set_html_output(app._orb_iso_output, html)
         except Exception as exc:  # noqa: BLE001 — a theme toggle must never raise
             logger.warning("isosurface theme re-render failed: %s", exc)
+
+    # ── Optimization trajectory ─────────────────────────────────────────
+    # Only when the panel is actually populated: re-rendering an empty
+    # trajectory viewer would build one on a tab the user has never opened.
+    # The populated-check is INSIDE the try. It reads app.traj_output.children,
+    # and this function promises never to raise on a theme toggle — a guard that
+    # can itself throw is not a guard. (Caught by a test whose app stub had no
+    # traj_output: len() on the auto-Mock raised straight through.)
+    try:
+        traj = getattr(app, "_last_traj_result", None)
+        children = getattr(getattr(app, "traj_output", None), "children", ())
+        if traj is not None and len(children) > 0:
+            app._show_opt_trajectory(traj)
+    except Exception as exc:  # noqa: BLE001 — a theme toggle must never raise
+        logger.warning("trajectory theme re-render failed: %s", exc)
 
     # ── Vibrational animation ───────────────────────────────────────────
     molecule = getattr(app, "_last_vib_molecule", None)

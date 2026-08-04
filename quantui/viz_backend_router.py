@@ -160,7 +160,11 @@ _TASK_POLICY: dict[VizTask, tuple[VizBackend, VizBackend | None]] = {
     VizTask.ANALYSIS_STRUCTURE_VIEW: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
     VizTask.HISTORY_STRUCTURE_REPLAY: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
     VizTask.TRAJECTORY_FRAME: (VizBackend.PY3DMOL, None),
-    VizTask.TRAJECTORY_EXPORT: (VizBackend.PLOTLYMOL, None),
+    # Same change and same reasoning as VIB_EXPORT (2026-08-04): the exported
+    # file should be the animation the user was watching. The trajectory viewer
+    # is py3Dmol, so the export reuses build_trajectory_viewer_html rather than
+    # rebuilding it in Plotly.
+    VizTask.TRAJECTORY_EXPORT: (VizBackend.PY3DMOL, None),
     VizTask.VIB_INTERACTIVE: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
     # VIB_EXPORT was PLOTLYMOL-only, on the reasoning that a Plotly animation
     # with embedded controls is the canonical "export quality" artifact. That

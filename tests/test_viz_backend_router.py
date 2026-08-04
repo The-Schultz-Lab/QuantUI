@@ -36,9 +36,11 @@ _DUAL_BACKEND_TASKS = [
 ]
 
 # Tasks that require plotlymol3d regardless of preference.
-_PLOTLYMOL_ONLY_TASKS = [
-    VizTask.TRAJECTORY_EXPORT,
-]
+# Empty as of 2026-08-04: TRAJECTORY_EXPORT was the last one, and it moved to
+# py3Dmol with the others. Kept (rather than deleted along with the tests that
+# use it) so restoring a plotlymol-only task is a one-line change and its
+# behaviour is still covered.
+_PLOTLYMOL_ONLY_TASKS: list[VizTask] = []
 
 # Tasks that require py3Dmol regardless of preference.
 #
@@ -57,6 +59,7 @@ _PY3DMOL_ONLY_TASKS = [
     VizTask.TRAJECTORY_FRAME,
     VizTask.ORBITAL_ISOSURFACE,
     VizTask.VIB_EXPORT,
+    VizTask.TRAJECTORY_EXPORT,
 ]
 
 

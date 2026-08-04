@@ -873,6 +873,36 @@ def parse_cube_file(cube_path: Path) -> dict:
     }
 
 
+def enclosed_density_fraction(cube_path: Path, isovalue: float) -> Optional[float]:
+    """Fraction of the orbital's probability density inside |psi| >= *isovalue*.
+
+    An isovalue is an amplitude threshold on the wavefunction, which is not an
+    intuitive quantity — the question people actually have is "how much of the
+    orbital am I looking at?". That is the integral of |psi|^2 over the region
+    the surface encloses, divided by the total, and it is a straight sum over
+    the cube grid that already exists on disk.
+
+    Returned as a fraction in [0, 1], or None if the cube cannot be read. The
+    caller shows it next to the slider; it must never be the reason a render
+    fails, hence the broad catch.
+    """
+    try:
+        cube = parse_cube_file(Path(cube_path))
+        data = np.asarray(cube["data"], dtype=float)
+        # Voxel volume = |a . (b x c)| for the three step vectors. Constant, so
+        # it cancels in the ratio — computed anyway to keep the intent readable
+        # and in case a caller ever wants an absolute integral.
+        density = data * data
+        total = float(density.sum())
+        if total <= 0.0:
+            return None
+        inside = float(density[np.abs(data) >= float(isovalue)].sum())
+        return max(0.0, min(1.0, inside / total))
+    except Exception as exc:  # noqa: BLE001 — a readout must never break a render
+        logger.debug("enclosed_density_fraction failed: %s", exc)
+        return None
+
+
 def _build_molecule_overlay_data(atoms: list[tuple[int, float, float, float]]) -> dict:
     """Build marker and bond segments from cube atom records."""
     atom_x: List[float] = []
@@ -931,6 +961,7 @@ def render_orbital_isosurface_py3dmol(
     bgcolor: str = "white",
     style: str = "stick",
     capture_class: str = "",
+    transparent_bg: bool = False,
 ) -> str:
     """Render an orbital isosurface from a cube file via py3Dmol.
 
@@ -960,6 +991,13 @@ def render_orbital_isosurface_py3dmol(
         Viewer background color.
     style : str
         py3Dmol style for the embedded atoms (e.g. ``"stick"``).
+    transparent_bg : bool
+        Render the scene background fully transparent. 3Dmol's WebGL context is
+        created with ``alpha: true``, so ``setBackgroundColor(colour, 0.0)``
+        produces genuinely transparent pixels that survive ``pngURI()`` — which
+        is what makes a figure drop onto a slide or a coloured page without a
+        white box around it. The *viewer* looks unbacked while this is on; that
+        is the honest preview of what the export will contain.
     capture_class : str
         CSS class of the hidden Textarea that receives captured PNG data URIs.
         Empty (the default) omits the Save-PNG button entirely, so callers that
@@ -987,7 +1025,10 @@ def render_orbital_isosurface_py3dmol(
         "cube",
         {"isoval": -isovalue, "color": neg_color, "opacity": opacity},
     )
-    view.setBackgroundColor(bgcolor)
+    if transparent_bg:
+        view.setBackgroundColor(bgcolor, 0.0)
+    else:
+        view.setBackgroundColor(bgcolor)
     view.zoomTo()
     html = view._make_html()
 

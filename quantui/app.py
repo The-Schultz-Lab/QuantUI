@@ -337,6 +337,9 @@ from quantui.app_visualization import (
     on_ir_mode_changed as _viz_on_ir_mode_changed,
 )
 from quantui.app_visualization import (
+    on_iso_appearance_changed as _viz_on_iso_appearance_changed,
+)
+from quantui.app_visualization import (
     on_iso_generate as _viz_on_iso_generate,
 )
 from quantui.app_visualization import (
@@ -1995,6 +1998,14 @@ class QuantUIApp:
         self._iso_resolution_dd.observe(
             self._safe_cb(self._on_iso_resolution_changed), names="value"
         )
+        # Appearance controls redraw from the cube on disk — no cubegen — so
+        # they can respond directly rather than behind an Apply button.
+        for _w in (
+            self._iso_isovalue_slider,
+            self._iso_opacity_slider,
+            self._iso_png_transparent,
+        ):
+            _w.observe(self._safe_cb(self._on_iso_appearance_changed), names="value")
         self._export_bundle_btn.on_click(self._on_export_bundle)
 
     # ── Files tab ────────────────────────────────────────────────────────
@@ -2762,8 +2773,13 @@ class QuantUIApp:
         _last_pes = getattr(self, "_last_pes_result", None)
         if _last_pes is not None:
             self._show_pes_scan_result(_last_pes)
-        # Re-render 3D molecule viewer so scene_bgcolor updates immediately.
-        self._refresh_calc_mol_viewer()
+        # Re-render BOTH 3D molecule viewers so scene_bgcolor updates
+        # immediately. This used to call _refresh_calc_mol_viewer directly,
+        # which covered the Calculate tab only — the Analysis-tab viewer kept
+        # its old background until something else happened to redraw it.
+        # _rerender_3d_views already handled both; it just was not reached from
+        # here. Reported 2026-08-04.
+        self._rerender_3d_views()
         # ...and the isosurface / vibrational viewers, which bake the same
         # colour into their generated HTML. Without this they keep the old
         # background until the user regenerates — reported 2026-08-04. Both
@@ -3333,6 +3349,9 @@ class QuantUIApp:
 
     def _on_export_pdb(self, btn) -> None:
         _exp_on_export_pdb(self, btn)
+
+    def _on_iso_appearance_changed(self, change) -> None:
+        _viz_on_iso_appearance_changed(self, change)
 
     def _on_orb_png_captured(self, change) -> None:
         _exp_on_orb_png_captured(self, change)
