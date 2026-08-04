@@ -565,11 +565,25 @@ with and without it is the cleanest demonstration that a GPU run differed.
 `quantui gpu check` names the exact reason in both cases, which is why step 0 of
 the verification script looks for them before anything else.
 
-### WSL note
+### WSL note — local verification cannot get past step 2
 
-On WSL2, `nvidia-smi` inside the container generally fails with *"GPU access
-blocked by the operating system"* even when CUDA compute works, because WSL
-routes the GPU through `/dev/dxg` and a Windows-side NVML shim. `verify-gpu.sh`
-detects WSL, adds the extra binds, and downgrades step 2 to a warning — step 3
-(real CuPy compute) is what decides it there. On a real cluster step 2 is
-meaningful and a failure is genuine.
+**You cannot verify a GPU image on WSL2.** Measured 2026-08-04 (RTX 5060 Ti,
+driver 581.95, Apptainer 1.5.3): the container loads the correct `libcuda` —
+either `/usr/lib/wsl/lib/libcuda.so.1` or the one `--nv` injects — and
+`cuDriverGetVersion` still returns **0**, so every CUDA call fails with
+`cudaErrorInsufficientDriver`. WSL reaches the GPU through `/dev/dxg` and a
+Windows-side shim that does not function inside an Apptainer container, and
+binding the whole of `/usr/lib/wsl` does not change it.
+
+`verify-gpu.sh` detects this, reports steps 3-6 as warnings rather than
+failures, and exits **3 (INCONCLUSIVE)** — reporting them as failures would
+train you to ignore exactly the failures that matter on a real node.
+
+This is a platform limit, not a defect in the image. Worth knowing is what the
+same diagnosis *did* confirm: the container resolves `libcuda` from
+`/.singularity.d/libs` — the host driver `--nv` injects — and **not** the
+`compat/libcuda.so.570` that the CUDA base image ships alongside it. That
+ordering is the thing that would genuinely break on a cluster, and it is
+correct.
+
+So: build locally if you like, but verify on a GPU node.

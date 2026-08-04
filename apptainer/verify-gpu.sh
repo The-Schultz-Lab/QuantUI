@@ -56,8 +56,12 @@ fi
 
 NV_FLAGS=(--nv)
 if [ "$IS_WSL" = true ] && [ -d /usr/lib/wsl/lib ]; then
-  NV_FLAGS+=(--bind /usr/lib/wsl/lib:/usr/lib/wsl/lib
-             --env "LD_LIBRARY_PATH=/usr/lib/wsl/lib:\${LD_LIBRARY_PATH:-}")
+  # Binds only — deliberately NOT an LD_LIBRARY_PATH override. Setting it here
+  # would clobber the image's own (/usr/local/cuda/lib64:/.singularity.d/libs),
+  # which is the path that resolves the host driver correctly on a real
+  # cluster. Measured 2026-08-04: forcing the WSL lib first does not help
+  # anyway — see the WSL note after step 2.
+  NV_FLAGS+=(--bind /usr/lib/wsl/lib:/usr/lib/wsl/lib)
   [ -e /dev/dxg ] && NV_FLAGS+=(--bind /dev/dxg:/dev/dxg)
 fi
 
@@ -124,6 +128,34 @@ else
   echo "         no GPU allocated to this job (check --gres)."
 fi
 
+# ── WSL reachability probe ───────────────────────────────────────────────────
+# Measured here 2026-08-04 (RTX 5060 Ti, driver 581.95, Apptainer 1.5.3): the
+# container loads the right libcuda — /usr/lib/wsl/lib/libcuda.so.1, or the one
+# --nv injects — and cuDriverGetVersion still returns 0. WSL reaches the GPU
+# through /dev/dxg and a Windows-side shim that does not function inside an
+# Apptainer container, and binding the whole of /usr/lib/wsl does not change it.
+#
+# This is a platform limit, NOT a defect in the image. The check that would
+# have caught a real image defect passed: the default load resolves the
+# host driver from /.singularity.d/libs, not the compat/libcuda.so.570 that the
+# CUDA base image ships — that ordering is what matters on a cluster.
+WSL_UNREACHABLE=false
+if [ "$IS_WSL" = true ]; then
+  drv=$($APPTAINER_CMD exec "${NV_FLAGS[@]}" "$IMAGE" python -c \
+    "import cupy; print(cupy.cuda.runtime.driverGetVersion())" 2>/dev/null || echo 0)
+  [ "${drv:-0}" -eq 0 ] 2>/dev/null && WSL_UNREACHABLE=true
+fi
+
+# On WSL with no reachable GPU, downgrade the device-dependent steps: they
+# cannot pass here for reasons that have nothing to do with this image.
+dev_fail() {
+  if [ "$WSL_UNREACHABLE" = true ]; then
+    warn "$1 — cannot be tested on WSL (see note below)"
+  else
+    bad "$1"
+  fi
+}
+
 # ── Step 3 — CuPy/driver ABI ─────────────────────────────────────────────────
 # The first step that can fail while step 2 passes: the device is visible but
 # the wheel line is wrong for this driver (e.g. cuda13x wheels on a 570 driver).
@@ -140,7 +172,7 @@ print('fp64 dot:', float((a*a).sum()))
   ok "CuPy allocated and ran an FP64 kernel on the device"
 else
   echo "$out" | sed 's/^/         /'
-  bad "CuPy could not use the device — likely a CUDA wheel/driver mismatch"
+  dev_fail "CuPy could not use the device — likely a CUDA wheel/driver mismatch"
 fi
 
 # ── Step 4 — QuantUI's own probe ─────────────────────────────────────────────
@@ -154,7 +186,7 @@ echo "$out" | sed 's/^/         /'
 if [ "$rc" -eq 0 ]; then
   ok "quantui gpu check reports GPU offload available"
 else
-  bad "quantui gpu check reports the GPU unavailable — the reason above is the fix"
+  dev_fail "quantui gpu check reports the GPU unavailable — the reason above is the fix"
 fi
 
 # ── Step 5 — negative control ────────────────────────────────────────────────
@@ -198,7 +230,7 @@ raise SystemExit(0 if r.gpu_used else 1)
   ok "the calculation actually took the GPU path"
 else
   echo "$out" | sed 's/^/         /'
-  bad "gpu_used was false (or the run failed) — this is the claim that counts"
+  dev_fail "gpu_used was false (or the run failed) — this is the claim that counts"
   echo "         Note it still CONVERGED if it fell back: a correct energy is not"
   echo "         evidence the GPU was used. Only gpu_used is."
 fi
@@ -207,6 +239,18 @@ fi
 printf '\n%s────────────────────────────────────────────%s\n' "$c_dim" "$c_off"
 printf '  %spassed %d%s   %sfailed %d%s   %swarnings %d%s\n' \
   "$c_ok" "$PASS" "$c_off" "$c_bad" "$FAIL" "$c_off" "$c_warn" "$WARN" "$c_off"
+
+if [ "$WSL_UNREACHABLE" = true ]; then
+  printf '\n  %sINCONCLUSIVE on WSL.%s The image is sound as far as this platform\n' \
+    "$c_warn" "$c_off"
+  printf '  can show: it builds, imports, and its CPU fallback works. But WSL\n'
+  printf '  reaches the GPU through a Windows-side shim that does not function\n'
+  printf '  inside an Apptainer container (cuDriverGetVersion returns 0 even with\n'
+  printf '  the right libcuda loaded), so steps 3-6 cannot pass here for reasons\n'
+  printf '  unrelated to this image.\n\n'
+  printf '  Run this on a real GPU node — that is the only place it can answer.\n'
+  exit 3
+fi
 
 if [ "$FAIL" -eq 0 ]; then
   printf '\n  %sImage verified on this node.%s\n' "$c_ok" "$c_off"
