@@ -24,6 +24,8 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
+from quantui import theme as _theme
+
 logger = logging.getLogger(__name__)
 
 # Conversion factor — PySCF stores MO energies in Hartree
@@ -767,7 +769,52 @@ def generate_cube_from_arrays(
 # resolution regardless of molecule size, so the volume is strided down to this
 # cap at render time to keep the figure payload bounded; the saved .cube keeps
 # full resolution.
+# Named grid presets (M-ORBEXPORT ORBX.2). cubegen cost scales as nx*ny*nz,
+# so these are roughly 0.3x / 1x / 2.4x / 4.6x the work of the 60^3 default.
+ISO_RESOLUTION_PRESETS: dict[str, int] = {
+    "coarse": 40,
+    "medium": 60,
+    "fine": 80,
+    "very fine": 100,
+}
+ISO_RESOLUTION_OPTIONS: list[tuple[str, str]] = [
+    ("Coarse (40³) — fastest", "coarse"),
+    ("Medium (60³) — default", "medium"),
+    ("Fine (80³) — ~2.4× slower", "fine"),
+    ("Very fine (100³) — ~4.6× slower", "very fine"),
+]
+DEFAULT_ISO_RESOLUTION: str = "medium"
+
 _MAX_ISOSURFACE_POINTS = 48_000
+
+# ⚠️ The two-knob problem, and which knob matters where.
+#
+# There are two independent resolution controls: the cubegen grid (real
+# fidelity, and what lands in the saved .cube) and the render stride below
+# (display only). Raising the grid without raising the cap would make the user
+# wait longer and then throw the extra detail away.
+#
+# BUT that only applies to the PLOTLY path. py3Dmol — the primary orbital
+# renderer — isosurfaces the cube in the browser at full resolution and never
+# strides, so there a finer grid is visible immediately. The cap exists solely
+# to bound the Plotly figure payload.
+#
+# So the cap scales with the chosen grid, preserving the same fraction of
+# detail the 60^3 default keeps, with a ceiling: past a few hundred thousand
+# points a Plotly Isosurface trace becomes painful to interact with, and a
+# fallback renderer that locks up the tab is worse than one that is smooth and
+# slightly coarse.
+_MAX_ISOSURFACE_POINTS_CEILING = 250_000
+
+
+def max_render_points(grid_points: int) -> int:
+    """Render-stride cap appropriate to a *grid_points*³ cubegen grid.
+
+    Keeps the fraction of retained detail constant relative to the 60³ default
+    rather than the absolute count, so "fine" actually looks finer.
+    """
+    scaled = _MAX_ISOSURFACE_POINTS * (max(1, grid_points) / 60.0) ** 3
+    return int(min(_MAX_ISOSURFACE_POINTS_CEILING, max(_MAX_ISOSURFACE_POINTS, scaled)))
 
 
 def parse_cube_file(cube_path: Path) -> dict:
@@ -883,6 +930,7 @@ def render_orbital_isosurface_py3dmol(
     neg_color: str = "red",
     bgcolor: str = "white",
     style: str = "stick",
+    capture_class: str = "",
 ) -> str:
     """Render an orbital isosurface from a cube file via py3Dmol.
 
@@ -912,6 +960,11 @@ def render_orbital_isosurface_py3dmol(
         Viewer background color.
     style : str
         py3Dmol style for the embedded atoms (e.g. ``"stick"``).
+    capture_class : str
+        CSS class of the hidden Textarea that receives captured PNG data URIs.
+        Empty (the default) omits the Save-PNG button entirely, so callers that
+        have not set up an inbox cannot ship a button that silently does
+        nothing.
 
     Returns
     -------
@@ -936,7 +989,84 @@ def render_orbital_isosurface_py3dmol(
     )
     view.setBackgroundColor(bgcolor)
     view.zoomTo()
-    return view._make_html()
+    html = view._make_html()
+
+    if capture_class:
+        html += _png_capture_controls(html, capture_class)
+    return html
+
+
+# Matches app_visualization._STEPPER_BTN_STYLE so in-viewer controls look like
+# one family. Duplicated rather than imported: app_visualization imports from
+# this module, and importing back would close the cycle.
+_ORB_BTN_STYLE = (
+    f"padding:2px 9px;border:1px solid {_theme.BORDER};border-radius:4px;"
+    "background:#f8fafc;color:#334155;cursor:pointer;font-size:13px;line-height:1.4;"
+)
+
+# JS->kernel bridge for "save what I am looking at" (M-ORBEXPORT ORBX.1).
+#
+# Direction matters: M-LOGSCROLL route C pushes kernel -> JS, and there is no
+# equivalent in this codebase for coming back the other way. The trick used
+# here is the standard one for ipywidgets: write into a hidden Textarea's DOM
+# node and dispatch an 'input' event, which the widget's own view is already
+# listening for, so it syncs `value` back to the kernel like a user typing.
+#
+# Why a DOM button rather than the Python Button next to "Export cube": a
+# Python button would need kernel -> JS -> kernel, and the kernel cannot ask
+# the browser for anything synchronously. A DOM button captures and posts in
+# one direction, which is also why the frame steppers are built this way.
+#
+# ⚠️ The capture MUST come from the live viewer, not a re-render. Per GOTCHAS
+# ("Camera state does NOT persist across atomic HTML swaps"), anything that
+# re-renders first exports the default camera rather than the one the user
+# rotated into — which is the entire value of client-side capture.
+_PNG_CAPTURE_JS = """
+(function(){
+  var UID="__UID__", CLS="__CLS__";
+  var btn=document.getElementById("orb_png_"+UID);
+  if(!btn){ return; }
+  btn.addEventListener("click", function(){
+    var v = window["viewer_"+UID];
+    if(!v || !v.pngURI){ btn.textContent="\u26a0 viewer not ready"; return; }
+    var uri;
+    try { uri = v.pngURI(); }
+    catch(e){ btn.textContent="\u26a0 capture failed"; return; }
+    // The hidden Textarea ipywidgets renders for us. Setting .value alone is
+    // invisible to the widget model; the 'input' event is what syncs it.
+    var box=document.querySelector("."+CLS+" textarea");
+    if(!box){ btn.textContent="\u26a0 no inbox"; return; }
+    box.value = uri;
+    box.dispatchEvent(new Event("input", {bubbles:true}));
+    var old=btn.textContent;
+    btn.textContent="\u2713 saved";
+    setTimeout(function(){ btn.textContent=old; }, 2000);
+  });
+})();
+"""
+
+
+def _png_capture_controls(view_html: str, capture_class: str) -> str:
+    """A 'Save PNG' button wired to the viewer in *view_html*.
+
+    Returns empty string when the viewer id cannot be found, so a parsing
+    change upstream costs the button rather than the whole isosurface.
+    """
+    import re
+
+    m = re.search(r"3dmolviewer_(\w+)", view_html)
+    if m is None:
+        logger.warning("could not find py3Dmol viewer id; PNG capture unavailable")
+        return ""
+    uid = m.group(1)
+    js = _PNG_CAPTURE_JS.replace("__UID__", uid).replace("__CLS__", capture_class)
+    return (
+        f'<div style="margin:4px 0 2px;font-size:13px;">'
+        f'<button id="orb_png_{uid}" type="button" '
+        f'title="Save this view as a PNG, exactly as you have rotated it" '
+        f'style="{_ORB_BTN_STYLE}">\u2b07 Save PNG</button>'
+        f"</div><script>{js}</script>"
+    )
 
 
 def plot_cube_isosurface(
@@ -951,6 +1081,7 @@ def plot_cube_isosurface(
     show_grid: bool = True,
     scene_bgcolor: str = "white",
     axis_color: str = "#111827",
+    max_points: Optional[int] = None,
     title_color: Optional[str] = None,
     bond_color: str = "#6b7280",
 ):
@@ -989,8 +1120,9 @@ def plot_cube_isosurface(
     # Stride each axis so the total point count stays under _MAX_ISOSURFACE_POINTS.
     total = nx * ny * nz
     stride = 1
-    if total > _MAX_ISOSURFACE_POINTS:
-        stride = int(np.ceil((total / _MAX_ISOSURFACE_POINTS) ** (1.0 / 3.0)))
+    cap = _MAX_ISOSURFACE_POINTS if max_points is None else int(max_points)
+    if total > cap:
+        stride = int(np.ceil((total / cap) ** (1.0 / 3.0)))
     data = data[::stride, ::stride, ::stride]
 
     # Build coordinate grids (Bohr), strided to match the downsampled volume.

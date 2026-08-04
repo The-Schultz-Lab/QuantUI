@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -124,6 +125,79 @@ def export_molecule_and_label(app: Any) -> tuple[Any, str, str]:
         else app.basis_dd.value
     )
     return mol, method, basis
+
+
+# Data URIs from 3Dmol's pngURI(). Anchored and length-bounded: this value
+# arrives from the browser, and while it is the user's own page rather than an
+# untrusted party, decoding whatever lands in a widget traitlet without
+# checking its shape is not a habit worth having.
+logger = logging.getLogger(__name__)
+
+_PNG_URI_PREFIX = "data:image/png;base64,"
+_MAX_PNG_BYTES = 64 * 1024 * 1024
+
+
+def on_orb_png_captured(app: Any, change: dict) -> None:
+    """Write a PNG captured from the live isosurface viewer (ORBX.1).
+
+    Fires when the viewer's Save-PNG button writes a data URI into the hidden
+    inbox Textarea. The image is whatever the user is actually looking at,
+    camera included — which is the entire reason capture happens client-side
+    rather than by re-rendering server-side.
+
+    The inbox is cleared afterwards so saving the same view twice re-triggers
+    the traitlet (an unchanged value would not fire ``observe``).
+    """
+    import base64
+    import binascii
+
+    uri = (change or {}).get("new") or ""
+    if not uri:
+        return
+
+    def _fail(msg: str) -> None:
+        app._iso_export_status.value = f'<span style="color:#b22">{msg}</span>'
+        # Clear even on failure, or a retry of the identical capture is silent.
+        _clear_inbox(app)
+
+    def _clear_inbox(a: Any) -> None:
+        box = getattr(a, "_orb_png_inbox", None)
+        if box is not None and box.value:
+            box.value = ""
+
+    if not uri.startswith(_PNG_URI_PREFIX):
+        logger.warning("PNG capture: unexpected data URI prefix")
+        _fail("Capture failed (unexpected image format).")
+        return
+    if len(uri) > _MAX_PNG_BYTES:
+        _fail("Capture failed (image too large).")
+        return
+
+    result_dir = getattr(app, "_last_result_dir", None)
+    if result_dir is None or not isinstance(result_dir, Path):
+        _fail("No result folder available.")
+        return
+
+    try:
+        raw = base64.b64decode(uri[len(_PNG_URI_PREFIX) :], validate=True)
+    except (binascii.Error, ValueError) as exc:
+        logger.warning("PNG capture: could not decode payload: %s", exc)
+        _fail("Capture failed (corrupt image data).")
+        return
+
+    label = getattr(app, "_last_cube_orbital", None) or "orbital"
+    safe = "".join(c if c.isalnum() or c in "-_+" else "_" for c in str(label))
+    dest = Path(result_dir) / f"{safe}.png"
+    try:
+        dest.write_bytes(raw)
+    except OSError as exc:
+        logger.warning("PNG capture: could not write %s: %s", dest, exc)
+        _fail("Could not write the image (see log).")
+        return
+
+    logger.info("Saved orbital PNG: %s (%d bytes)", dest, len(raw))
+    app._iso_export_status.value = f'<span style="color:#2a7">Saved: {dest.name}</span>'
+    _clear_inbox(app)
 
 
 def on_iso_export_cube(app: Any, btn: Any) -> None:

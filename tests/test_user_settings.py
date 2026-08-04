@@ -27,7 +27,14 @@ class TestDefaults:
     def test_to_dict_uses_current_schema_version(self):
         data = UserSettings().to_dict()
         assert data["_schema_version"] == 1
-        assert data["viz"] == {"default_backend": "auto", "vib_framerate_fps": 10}
+        # No schema bump for iso_resolution: the loader reads every viz key with
+        # a default, so a v1 file written before this field existed still loads
+        # cleanly. Bumping would force a needless migration.
+        assert data["viz"] == {
+            "default_backend": "auto",
+            "vib_framerate_fps": 10,
+            "iso_resolution": "medium",
+        }
 
     def test_default_vib_framerate_is_10(self):
         assert UserSettings().viz.vib_framerate_fps == 10

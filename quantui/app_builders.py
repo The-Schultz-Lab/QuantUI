@@ -14,6 +14,14 @@ from quantui import molecule_library as _ml
 from quantui import theme as _theme
 from quantui.help_content import HELP_TOPICS
 from quantui.live_log import LiveLog
+from quantui.orbital_visualization import (
+    ISO_RESOLUTION_OPTIONS as _ISO_RESOLUTION_OPTIONS,
+)
+
+# Class on the hidden Textarea that receives PNG data URIs from the
+# viewer's Save-PNG button. Shared with the JS that writes into it, so
+# it is defined once here and passed down rather than spelled twice.
+_ORB_PNG_INBOX_CLASS = "quantui-orb-png-inbox"
 
 # Friendlier labels for the library category filter.
 _CATEGORY_LABELS = {
@@ -1541,6 +1549,20 @@ def build_run_section(app: Any, *, layout_fn: Any) -> None:
     )
 
 
+def _persisted_iso_resolution(app: Any) -> str:
+    """The saved isosurface grid preset, or the default if anything is off.
+
+    Read off the app rather than threaded in as a parameter: this builder takes
+    no settings arguments, and adding one for a single control would mean
+    touching every caller. A missing or invalid value must never stop the panel
+    from building — a broken preference should cost the preference, not the UI.
+    """
+    try:
+        return str(app._user_settings.viz.iso_resolution)
+    except Exception:  # noqa: BLE001 — settings must never gate widget creation
+        return "medium"
+
+
 def build_results_section(app: Any, *, layout_fn: Any) -> None:
     """Build results and analysis tab panels/widgets."""
 
@@ -1863,6 +1885,33 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         ),
         layout=layout_fn(width="160px", margin="8px 0 4px 8px"),
     )
+    # Cubegen grid (ORBX.2). Persisted, so someone who works at "fine" does not
+    # re-pick it every launch. The labels carry the cost multiplier because the
+    # jump is steep — 100³ is ~4.6× the grid work of the 60³ default — and the
+    # wait is the thing users are choosing between.
+    _iso_res_opts = list(_ISO_RESOLUTION_OPTIONS)
+    app._iso_resolution_dd = widgets.Dropdown(
+        options=_iso_res_opts,
+        value=_persisted_iso_resolution(app),
+        description="Grid:",
+        style={"description_width": "45px"},
+        tooltip=(
+            "Cube grid density. Higher is smoother but slower to compute; "
+            "cost scales with the cube of this number."
+        ),
+        layout=layout_fn(width="290px", margin="8px 0 4px 0"),
+    )
+
+    # Hidden inbox for client-side PNG capture (ORBX.1). The JS in the rendered
+    # isosurface writes a data URI into this Textarea's DOM node and dispatches
+    # an 'input' event; ipywidgets' own view then syncs `value` to the kernel.
+    # It is a real widget (not display:none on the outer box) because the view
+    # must exist in the DOM for that sync to happen at all.
+    app._orb_png_inbox = widgets.Textarea(
+        value="", layout=layout_fn(width="1px", height="1px", visibility="hidden")
+    )
+    app._orb_png_inbox.add_class(_ORB_PNG_INBOX_CLASS)
+
     app._iso_export_status = widgets.HTML(
         value="", layout=layout_fn(margin="0 0 0 8px")
     )
@@ -1881,6 +1930,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 "Optimization first, then click <b>Generate</b>.</p>"
             ),
             app._orb_iso_controls,
+            app._iso_resolution_dd,
             widgets.HBox(
                 [
                     app._iso_generate_btn,
@@ -1890,6 +1940,13 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 ],
                 layout=layout_fn(align_items="center", gap="6px"),
             ),
+            widgets.HTML(
+                '<p style="color:#555;font-size:12px;margin:6px 0 0">'
+                "A <b>Save PNG</b> button appears under the isosurface itself. It "
+                "captures the view exactly as you have rotated it, which is why it "
+                "lives on the viewer rather than up here.</p>"
+            ),
+            app._orb_png_inbox,
         ],
         layout=layout_fn(padding="8px"),
     )

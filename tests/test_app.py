@@ -1960,7 +1960,12 @@ class TestVibExportAnimation:
 
         app._on_vib_export_animation(None)
         assert "color:#b91c1c" in app._vib_export_status.value
-        assert "No visualization backend available" in app._vib_export_status.value
+        # Names the backend that is actually missing rather than pinning exact
+        # prose. The message changed when vib export became py3Dmol-only
+        # (2026-08-04); what matters is that the failure is visible and says
+        # which dependency to fix, not the wording.
+        assert "py3Dmol" in app._vib_export_status.value
+        assert "Export failed" in app._vib_export_status.value
 
 
 class TestHistoryHardeningHist2:

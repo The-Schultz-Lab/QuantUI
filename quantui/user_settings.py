@@ -50,6 +50,11 @@ _VIB_FPS_MIN = 1
 _VIB_FPS_MAX = 120
 _VIB_FPS_DEFAULT = 10
 
+# Valid values for VizSettings.iso_resolution. Kept in sync with
+# orbital_visualization.ISO_RESOLUTION_PRESETS; not imported, for the same
+# zero-dependency reason as _VALID_VIZ_BACKENDS above.
+_VALID_ISO_RESOLUTIONS = ("coarse", "medium", "fine", "very fine")
+
 # Default settings path. The QUANTUI_SETTINGS_PATH env var overrides for tests.
 DEFAULT_SETTINGS_PATH = Path.home() / ".quantui" / "settings.json"
 
@@ -60,6 +65,11 @@ class VizSettings:
 
     default_backend: str = "auto"  # one of _VALID_VIZ_BACKENDS
     vib_framerate_fps: int = _VIB_FPS_DEFAULT  # py3Dmol vib-animation fps
+    # Orbital-isosurface cubegen grid (M-ORBEXPORT ORBX.2). Named rather
+    # than numeric so the meaning survives a change to the underlying grid
+    # sizes, and so a settings file written by a future version with more
+    # presets degrades to the default instead of a nonsense number.
+    iso_resolution: str = "medium"  # one of _VALID_ISO_RESOLUTIONS
 
 
 @dataclass
@@ -158,6 +168,16 @@ class UserSettings:
                 "Invalid viz.vib_framerate_fps %r; using %r",
                 candidate_fps,
                 viz.vib_framerate_fps,
+            )
+
+        candidate_iso = viz_section.get("iso_resolution", viz.iso_resolution)
+        if isinstance(candidate_iso, str) and candidate_iso in _VALID_ISO_RESOLUTIONS:
+            viz.iso_resolution = candidate_iso
+        else:
+            _LOG.warning(
+                "Invalid viz.iso_resolution %r; using %r",
+                candidate_iso,
+                viz.iso_resolution,
             )
 
         compute_section = data.get("compute", {})

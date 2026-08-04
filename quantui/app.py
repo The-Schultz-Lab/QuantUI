@@ -147,6 +147,9 @@ from quantui.app_exports import (
 from quantui.app_exports import (
     on_iso_export_cube as _exp_on_iso_export_cube,
 )
+from quantui.app_exports import (
+    on_orb_png_captured as _exp_on_orb_png_captured,
+)
 from quantui.app_formatters import (
     format_freq_result as _fmt_freq_result,
 )
@@ -1979,6 +1982,16 @@ class QuantUIApp:
         )
         # Cube + bundle exports
         self._iso_export_cube_btn.on_click(self._on_iso_export_cube)
+        # PNG capture arrives from the browser, so there is no button to bind
+        # here — the viewer's own Save-PNG button posts into this Textarea and
+        # ipywidgets syncs it back, firing this observer (ORBX.1).
+        self._orb_png_inbox.observe(
+            self._safe_cb(self._on_orb_png_captured), names="value"
+        )
+        # Persist the grid choice so it survives a relaunch (ORBX.2).
+        self._iso_resolution_dd.observe(
+            self._safe_cb(self._on_iso_resolution_changed), names="value"
+        )
         self._export_bundle_btn.on_click(self._on_export_bundle)
 
     # ── Files tab ────────────────────────────────────────────────────────
@@ -3312,6 +3325,22 @@ class QuantUIApp:
 
     def _on_export_pdb(self, btn) -> None:
         _exp_on_export_pdb(self, btn)
+
+    def _on_orb_png_captured(self, change) -> None:
+        _exp_on_orb_png_captured(self, change)
+
+    def _on_iso_resolution_changed(self, change) -> None:
+        """Persist the isosurface grid choice.
+
+        Saved on change rather than at generate time so the preference sticks
+        even if the user picks a grid and then closes the app without running
+        anything.
+        """
+        new_val = (change or {}).get("new")
+        if not new_val or new_val == self._user_settings.viz.iso_resolution:
+            return
+        self._user_settings.viz.iso_resolution = str(new_val)
+        self._user_settings.save()
 
     def _on_iso_export_cube(self, btn) -> None:
         _exp_on_iso_export_cube(self, btn)

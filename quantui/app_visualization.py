@@ -12,6 +12,7 @@ import ipywidgets as widgets
 from IPython.display import HTML, display
 
 from quantui import theme as _theme
+from quantui.app_builders import _ORB_PNG_INBOX_CLASS
 
 
 @contextmanager
@@ -1270,12 +1271,32 @@ def render_orbital_isosurface(
         # infer them from the MO occupations so charged/open-shell molecules
         # (H3O+, OH-, radicals, ...) don't fail to build in PySCF.
         _charge, _spin = infer_charge_and_spin(mol_atom, mo_occ_for_charge)
+
+        # ORBX.2: the user-chosen cubegen grid. Read at generate time rather
+        # than cached, so changing the dropdown affects the next Generate
+        # without any extra wiring. Falls back to the default if the widget is
+        # absent (older layouts, tests constructing a partial app).
+        from quantui.orbital_visualization import (
+            DEFAULT_ISO_RESOLUTION,
+            ISO_RESOLUTION_PRESETS,
+            max_render_points,
+        )
+
+        _res_key = getattr(
+            getattr(app, "_iso_resolution_dd", None), "value", DEFAULT_ISO_RESOLUTION
+        )
+        _grid = ISO_RESOLUTION_PRESETS.get(
+            _res_key, ISO_RESOLUTION_PRESETS[DEFAULT_ISO_RESOLUTION]
+        )
         generate_cube_from_arrays(
             mol_atom,
             mol_basis,
             mo_coeff,
             orb_idx,
             cube_path,
+            nx=_grid,
+            ny=_grid,
+            nz=_grid,
             charge=_charge,
             spin=_spin,
         )
@@ -1294,6 +1315,14 @@ def render_orbital_isosurface(
                 html_str = render_orbital_isosurface_py3dmol(
                     cube_path,
                     bgcolor=scene_bgcolor,
+                    # Enables the in-viewer Save-PNG button. Passing the inbox
+                    # class only when the widget exists means the button is
+                    # never rendered without somewhere to deliver to.
+                    capture_class=(
+                        _ORB_PNG_INBOX_CLASS
+                        if getattr(app, "_orb_png_inbox", None) is not None
+                        else ""
+                    ),
                 )
             else:
                 is_dark = app.theme_btn.value == "Dark"
@@ -1302,6 +1331,11 @@ def render_orbital_isosurface(
                 title_color = app._plotly_theme_colors()["font_color"]
                 fig = plot_cube_isosurface(
                     cube_path,
+                    # The second knob. Without this the Plotly fallback would
+                    # stride a finer grid straight back down to the 60³ cap and
+                    # the extra wait would buy nothing. py3Dmol above needs no
+                    # equivalent — it isosurfaces at full resolution in-browser.
+                    max_points=max_render_points(_grid),
                     title=f"{orbital_label} Isosurface",
                     show_molecule=True,
                     show_grid=False,
@@ -2498,16 +2532,23 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
 def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
     """Build a self-contained HTML string for the given vibrational mode.
 
-    Backend resolution is preference-independent (decoupled from the user's
-    live-render default backend): plotlymol3d is preferred because it produces
-    a self-contained Plotly animation with embedded playback controls — the
-    canonical "export quality" output. py3Dmol is used as a fallback only when
-    plotlymol3d is unavailable; the resulting HTML embeds the multi-frame
-    py3Dmol viewer with its built-in animate() loop.
+    **py3Dmol only, as of 2026-08-04** (user decision). This used to prefer
+    plotlymol3d on the reasoning that a self-contained Plotly animation with
+    embedded controls is the canonical "export quality" artifact. That reasoning
+    optimised the wrong thing: the file someone exports should be the animation
+    they were just watching. py3Dmol renders the live vibrational viewer, so
+    py3Dmol is what gets exported — same frame construction, same amplitude,
+    same frame count, same fps as the on-screen viewer.
+
+    Backend resolution stays preference-independent, and is now trivially so:
+    ``VizTask.VIB_EXPORT`` is single-backend in the router. The Plotly export
+    branch is removed rather than left unreachable, because unlike the Plotly
+    isosurface path (kept, tested, one line from being restored) it duplicated
+    animation-building logic that would rot silently behind a flag.
 
     Returns ``(backend_name, html_string)``.
 
-    Raises ``ValueError`` when vib state is missing or no backend is available.
+    Raises ``ValueError`` when vib state is missing or py3Dmol is unavailable.
     """
     freq_result = getattr(app, "_last_vib_freq_result", None)
     molecule = getattr(app, "_last_vib_molecule", None)
@@ -2521,53 +2562,9 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
     if availability is None:
         raise ValueError("Visualization availability not initialised.")
 
-    # Plotlymol3d path — preferred for export.
-    if availability.plotlymol:
-        vib_data = getattr(app, "_last_vib_data", None)
-        if vib_data is None:
-            # Plotlymol3d installed but the per-result wrapper wasn't built.
-            # Try once more from the cached freq_result + molecule.
-            try:
-                vib_data = app._build_vib_data_from_freq_result(freq_result, molecule)
-            except Exception:
-                vib_data = None
-        if vib_data is not None:
-            try:
-                import plotly.io as _pio
-                from plotlymol3d import (
-                    create_vibration_animation,
-                    xyzblock_to_rdkitmol,
-                )
-            except ImportError:
-                pass
-            else:
-                xyzblock = (
-                    f"{len(molecule.atoms)}\n{molecule.get_formula()}\n"
-                    f"{molecule.to_xyz_string()}"
-                )
-                rdmol = xyzblock_to_rdkitmol(xyzblock, charge=molecule.charge)
-                anim_fig = create_vibration_animation(
-                    vib_data=vib_data,
-                    mode_number=mode_number,
-                    mol=rdmol,
-                    amplitude=0.4,
-                    n_frames=20,
-                    mode="ball+stick",
-                    resolution=12,
-                )
-                anim_fig.update_layout(height=420)
-                html_str = _pio.to_html(
-                    anim_fig,
-                    full_html=True,
-                    include_plotlyjs=True,
-                    config={"responsive": True},
-                )
-                return ("plotlymol", html_str)
-
-    # py3Dmol fallback — preference-independent fallback when plotlymol is
-    # unavailable or its build path fails. Mirrors _render_vib_mode_py3dmol's
-    # frame construction but emits stand-alone HTML rather than swapping into
-    # vib_output.
+    # The one and only export path. Mirrors _render_vib_mode_py3dmol's frame
+    # construction but emits stand-alone HTML rather than swapping into
+    # vib_output, so the file matches what was on screen.
     if availability.py3dmol:
         try:
             import numpy as np
@@ -2626,6 +2623,7 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
         return ("py3dmol", standalone_html(view._make_html()))
 
     raise ValueError(
-        "No visualization backend available to export the vibrational "
-        "animation. Install plotlymol3d (preferred) or py3dmol."
+        "py3Dmol is unavailable, so the vibrational animation cannot be "
+        "exported. py3Dmol is a required QuantUI dependency — reinstall with "
+        "pip install --force-reinstall 'py3Dmol>=2,<3'."
     )
