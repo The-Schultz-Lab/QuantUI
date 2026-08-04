@@ -364,6 +364,9 @@ from quantui.app_visualization import (
     render_vib_mode as _viz_render_vib_mode,
 )
 from quantui.app_visualization import (
+    rerender_3d_scenes_for_theme as _viz_rerender_3d_scenes_for_theme,
+)
+from quantui.app_visualization import (
     show_ir_spectrum as _viz_show_ir_spectrum,
 )
 from quantui.app_visualization import (
@@ -2761,6 +2764,11 @@ class QuantUIApp:
             self._show_pes_scan_result(_last_pes)
         # Re-render 3D molecule viewer so scene_bgcolor updates immediately.
         self._refresh_calc_mol_viewer()
+        # ...and the isosurface / vibrational viewers, which bake the same
+        # colour into their generated HTML. Without this they keep the old
+        # background until the user regenerates — reported 2026-08-04. Both
+        # re-render from cached inputs; neither re-runs a calculation.
+        _viz_rerender_3d_scenes_for_theme(self)
 
     def _initialize_viz_state_from_preference(self) -> None:
         """Align _viz_backend and the three preference widgets with the

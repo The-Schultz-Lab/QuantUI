@@ -369,3 +369,116 @@ class TestPlotlymolIsOffForOrbitalsAndVibExport:
         from quantui.orbital_visualization import plot_cube_isosurface
 
         assert callable(plot_cube_isosurface)
+
+
+class TestThemeChangeReachesThe3DScenes:
+    """Reported 2026-08-04: *"the background of the animations and isosurface
+    plots is sticky to the theme... but will change if I calculate a new
+    isosurface."*
+
+    py3Dmol paints the background into the WebGL scene at render time rather
+    than reading it from CSS, so nothing re-reads it on a theme toggle. The fix
+    re-renders from cached inputs; these tests pin both that it happens and that
+    it stays cheap.
+    """
+
+    def test_the_rerender_uses_the_new_background(self, cube_file):
+        from quantui.app_visualization import rerender_3d_scenes_for_theme
+
+        seen = {}
+        app = Mock()
+        app._last_cube_path = cube_file
+        app._last_vib_molecule = None
+        app._last_vib_freq_result = None
+        app._orb_png_inbox = Mock()
+        app._set_html_output = lambda out, html: seen.update(html=html)
+        app._plotly_theme_colors = lambda: {"scene_bgcolor": "#1e1e1e"}
+
+        rerender_3d_scenes_for_theme(app)
+        assert "#1e1e1e" in seen["html"]
+
+    def test_the_rerender_keeps_the_save_png_button(self, cube_file):
+        # A theme toggle must not quietly strip a feature off the viewer.
+        from quantui.app_visualization import rerender_3d_scenes_for_theme
+
+        seen = {}
+        app = Mock()
+        app._last_cube_path = cube_file
+        app._last_vib_molecule = None
+        app._last_vib_freq_result = None
+        app._orb_png_inbox = Mock()
+        app._set_html_output = lambda out, html: seen.update(html=html)
+        app._plotly_theme_colors = lambda: {"scene_bgcolor": "#fff"}
+
+        rerender_3d_scenes_for_theme(app)
+        assert "Save PNG" in seen["html"]
+
+    def test_it_never_regenerates_the_cube(self):
+        """The re-render must re-read the cube on disk, never re-run cubegen.
+
+        cubegen is 15-30 s at the default grid and up to ~4.6x that at the
+        finest — running it on a theme toggle would make the toggle unusable.
+        """
+        import inspect
+
+        from quantui.app_visualization import rerender_3d_scenes_for_theme
+
+        src = inspect.getsource(rerender_3d_scenes_for_theme)
+        body = src[src.index('"""', src.index('"""') + 3) :]
+        assert "generate_cube_from_arrays" not in body
+        assert "render_orbital_isosurface(" not in body  # the full generate path
+
+    def test_a_theme_toggle_cannot_raise(self, tmp_path):
+        # Nothing generated yet, and a cube that has since been deleted. Either
+        # would otherwise turn a theme click into a traceback.
+        from quantui.app_visualization import rerender_3d_scenes_for_theme
+
+        for cube in (None, tmp_path / "deleted.cube"):
+            app = Mock()
+            app._last_cube_path = cube
+            app._last_vib_molecule = None
+            app._last_vib_freq_result = None
+            app._plotly_theme_colors = lambda: {"scene_bgcolor": "#fff"}
+            rerender_3d_scenes_for_theme(app)  # must not raise
+
+    def test_the_theme_handler_actually_calls_it(self):
+        # The function existing is worthless if nothing invokes it.
+        import inspect
+
+        from quantui.app import QuantUIApp
+
+        src = inspect.getsource(QuantUIApp._rerender_plotly_theme)
+        assert "rerender_3d_scenes_for_theme" in src
+
+
+class TestIsosurfaceSwapsAreAtomic:
+    """Reported 2026-08-04: *"the screen jumps up when I click to calculate a
+    new isosurface."*
+
+    ``clear_output()`` followed by ``display()`` leaves the output empty for a
+    moment. The panel collapses from ~660px to zero, the document shrinks, the
+    browser clamps scrollTop to the new maximum — and the content returning does
+    not scroll back. ``_set_html_output`` swaps ``outputs`` in one assignment so
+    the empty state is never observed, which is the same fix already applied to
+    the IR toggle, the trajectory stepper and the vib viewer.
+    """
+
+    def test_no_clear_then_display_on_the_isosurface_output(self):
+        import pathlib
+        import re
+
+        import quantui
+
+        src = (
+            pathlib.Path(quantui.__file__).parent / "app_visualization.py"
+        ).read_text(encoding="utf-8")
+        # A bare clear_output() immediately followed by a `with` block is the
+        # pattern that collapses the panel.
+        offenders = re.findall(
+            r"app\._orb_iso_output\.clear_output\(\)\s*\n\s*with app\._orb_iso_output:",
+            src,
+        )
+        assert not offenders, (
+            "isosurface output is cleared then repopulated — use "
+            "app._set_html_output for an atomic swap"
+        )

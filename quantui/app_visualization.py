@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from contextlib import contextmanager
@@ -13,6 +14,8 @@ from IPython.display import HTML, display
 
 from quantui import theme as _theme
 from quantui.app_builders import _ORB_PNG_INBOX_CLASS
+
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -1068,15 +1071,12 @@ def on_iso_generate(app: Any, btn: Any) -> None:
         _clog.log_event("iso_render_start", orbital_label)
     except Exception:
         pass
-    app._orb_iso_output.clear_output()
-    with app._orb_iso_output:
-        display(
-            HTML(
-                f'<p style="color:#555;font-style:italic;padding:4px 0">'
-                f"⏳ Generating {orbital_label} cube file and rendering isosurface"
-                f" — this may take 15–30 s…</p>"
-            )
-        )
+    app._set_html_output(
+        app._orb_iso_output,
+        f'<p style="color:#555;font-style:italic;padding:4px 0">'
+        f"⏳ Generating {orbital_label} cube file and rendering isosurface"
+        f" — this may take 15–30 s…</p>",
+    )
 
     done = threading.Event()
     # Balance the single _activity_begin above exactly once, across
@@ -1128,15 +1128,12 @@ def on_iso_generate(app: Any, btn: Any) -> None:
                 pass
             btn.disabled = False
             btn.description = "Generate Isosurface"
-            app._orb_iso_output.clear_output()
-            with app._orb_iso_output:
-                display(
-                    HTML(
-                        '<p style="color:#b91c1c;padding:8px">'
-                        "⚠ Orbital isosurface timed out after 180 s. "
-                        "Try a smaller basis set or a smaller molecule.</p>"
-                    )
-                )
+            app._set_html_output(
+                app._orb_iso_output,
+                '<p style="color:#b91c1c;padding:8px">'
+                "⚠ Orbital isosurface timed out after 180 s. "
+                "Try a smaller basis set or a smaller molecule.</p>",
+            )
 
         app._queue_main_thread_callback(_show_timeout)
 
@@ -1215,16 +1212,13 @@ def render_orbital_isosurface(
         def _show_range_err() -> None:
             if _is_stale():
                 return
-            app._orb_iso_output.clear_output()
-            with app._orb_iso_output:
-                display(
-                    HTML(
-                        '<p style="color:#b91c1c;padding:8px">'
-                        f"⚠ Orbital index out of range. This calculation has "
-                        f"{n_total} molecular orbitals (valid indices 0–"
-                        f"{n_total - 1}; HOMO = {n_occ - 1}).</p>"
-                    )
-                )
+            app._set_html_output(
+                app._orb_iso_output,
+                '<p style="color:#b91c1c;padding:8px">'
+                f"⚠ Orbital index out of range. This calculation has "
+                f"{n_total} molecular orbitals (valid indices 0–"
+                f"{n_total - 1}; HOMO = {n_occ - 1}).</p>",
+            )
 
         app._queue_main_thread_callback(_show_range_err)
         return
@@ -1365,14 +1359,11 @@ def render_orbital_isosurface(
             pass
 
         def _show_err(msg: str = err_msg) -> None:
-            app._orb_iso_output.clear_output()
-            with app._orb_iso_output:
-                display(
-                    HTML(
-                        f'<p style="color:#b91c1c;padding:8px">'
-                        f"⚠ Orbital isosurface failed: {msg}</p>"
-                    )
-                )
+            app._set_html_output(
+                app._orb_iso_output,
+                f'<p style="color:#b91c1c;padding:8px">'
+                f"⚠ Orbital isosurface failed: {msg}</p>",
+            )
 
         app._queue_main_thread_callback(_show_err)
         return
@@ -1915,6 +1906,70 @@ def render_vib_mode(
                 "No vibrational animation backend available "
                 "(neither py3Dmol nor plotlymol3d installed).",
             )
+
+
+def rerender_3d_scenes_for_theme(app: Any) -> None:
+    """Re-render the isosurface and vibrational viewers after a theme change.
+
+    Both bake their background into the generated HTML at render time — the
+    colour comes from ``_plotly_theme_colors()["scene_bgcolor"]``, and py3Dmol
+    paints it into the WebGL scene rather than reading it from CSS. Nothing
+    re-reads it later, so switching Light/Dark left the old background in place
+    until the user happened to regenerate. Reported 2026-08-04: *"the background
+    ... is sticky to the theme ... but will [change] if I calculate a new
+    isosurface."*
+
+    Both re-renders are CHEAP by construction and must stay that way:
+
+    - The isosurface re-reads the cube already on disk. It does NOT re-run
+      cubegen, which is the slow part (15-30 s, and up to 4.6x that at the
+      finest grid). Re-generating on a theme toggle would be unusable.
+    - The vibrational viewer rebuilds from cached displacements, not from a new
+      frequency calculation.
+
+    ⚠️ The vib path needs a full rebuild, not ``__quantuiVibSetMode``. That
+    bridge switches frames on the existing viewer client-side — which is exactly
+    why the camera survives a mode change — but it never touches the scene
+    background, so it cannot fix this.
+    """
+    scene_bg = app._plotly_theme_colors()["scene_bgcolor"]
+
+    # ── Orbital isosurface ──────────────────────────────────────────────
+    cube = getattr(app, "_last_cube_path", None)
+    if cube is not None:
+        try:
+            if Path(cube).exists():
+                from quantui.orbital_visualization import (
+                    render_orbital_isosurface_py3dmol,
+                )
+
+                html = render_orbital_isosurface_py3dmol(
+                    Path(cube),
+                    bgcolor=scene_bg,
+                    capture_class=(
+                        _ORB_PNG_INBOX_CLASS
+                        if getattr(app, "_orb_png_inbox", None) is not None
+                        else ""
+                    ),
+                )
+                app._set_html_output(app._orb_iso_output, html)
+        except Exception as exc:  # noqa: BLE001 — a theme toggle must never raise
+            logger.warning("isosurface theme re-render failed: %s", exc)
+
+    # ── Vibrational animation ───────────────────────────────────────────
+    molecule = getattr(app, "_last_vib_molecule", None)
+    freq_result = getattr(app, "_last_vib_freq_result", None)
+    mode_dd = getattr(app, "vib_mode_dd", None)
+    if molecule is not None and freq_result is not None and mode_dd is not None:
+        try:
+            render_vib_mode(
+                app,
+                getattr(app, "_last_vib_data", None),
+                molecule,
+                int(mode_dd.value),
+            )
+        except Exception as exc:  # noqa: BLE001 — same
+            logger.warning("vib theme re-render failed: %s", exc)
 
 
 def on_vib_mode_changed(app: Any, change: dict[str, Any]) -> None:
