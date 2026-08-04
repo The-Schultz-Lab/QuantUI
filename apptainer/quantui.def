@@ -40,9 +40,32 @@ FROM: condaforge/miniforge3:latest
   export QUANTUI_RESULTS_DIR="${HOME}/.quantui/results"
 
 %files
-  # Source path is relative to where you run `apptainer build` (repo root).
+  # Source paths are relative to where you run `apptainer build` (repo root).
   # Run the build command from the repo root, not from apptainer/.
-  . /opt/quantui
+  #
+  # An explicit allowlist, NOT `. /opt/quantui`. Copying the whole tree meant
+  # copying build OUTPUT back in: with a 5.8 GB GPU image and a 6.6 GB CPU image
+  # sitting in the repo root, `%files .` was hauling 13 GB into a container
+  # meant to be under 1 GB. That is what actually exhausted the build tmpfs —
+  # the "No space left on device" failure of 2026-08-04 — and any .sif that
+  # survived the %post cleanup would have been embedded in the shipped image.
+  # %files has no exclude syntax, so the list has to be positive.
+  #
+  # Keep in sync with what the image needs at runtime:
+  #   pyproject.toml + README.md + LICENSE  -> `pip install -e .` reads all three
+  #   quantui/                              -> the package (incl. vendored 3Dmol.js)
+  #   notebooks/                            -> %runscript serves the Voila app
+  #   tests/                                -> build.sh --test runs them in-image
+  #   docs/                                 -> user-facing guides referenced by help
+  pyproject.toml /opt/quantui/
+  README.md /opt/quantui/
+  LICENSE /opt/quantui/
+  MANIFEST.in /opt/quantui/
+  CHANGELOG.md /opt/quantui/
+  quantui /opt/quantui/
+  notebooks /opt/quantui/
+  tests /opt/quantui/
+  docs /opt/quantui/
 
 %post
   export PATH="/opt/conda/bin:${PATH}"
@@ -92,26 +115,14 @@ FROM: condaforge/miniforge3:latest
   python -c "from quantui.app import QuantUIApp; print('QuantUIApp OK')"
 
   echo "Cleaning up unnecessary files..."
-  # Version control and caches
-  rm -rf /opt/quantui/.git
-  rm -rf /opt/quantui/.mypy_cache
-  rm -rf /opt/quantui/.pytest_cache
-  rm -rf /opt/quantui/.ruff_cache
-  rm -rf /opt/quantui/.coverage
-  rm -rf /opt/quantui/coverage.xml
-  rm -rf /opt/quantui/htmlcov
+  # Only what the BUILD itself can create. The long list that used to live here
+  # — .git, CLAUDE.md, planning/, .github, dev launchers — existed to undo
+  # `%files .`; with an allowlist those can no longer arrive, and deleting
+  # things that are never copied just hides what is really in the image.
+  # A .sif can no longer be copied in either, which was the expensive one.
   find /opt/quantui -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
   find /opt/quantui -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
-  # Internal dev/AI files not intended for students
-  rm -f  /opt/quantui/CLAUDE.md
-  rm -rf /opt/quantui/planning
-  rm -f  /opt/quantui/feature-requests.md
-  rm -f  /opt/quantui/bug-reports.md
-  rm -f  /opt/quantui/launch-app.bat
-  rm -f  /opt/quantui/launch-dev.bat
-  # Windows-only and CI artefacts
-  rm -rf /opt/quantui/.github
-  rm -f  /opt/quantui/.pre-commit-config.yaml
+  rm -rf /opt/quantui/.pytest_cache
 
   echo "Configuring Jupyter Server..."
   mkdir -p /etc/jupyter

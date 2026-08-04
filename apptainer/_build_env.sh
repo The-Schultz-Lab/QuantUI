@@ -51,8 +51,14 @@ if [[ -z "${APPTAINER_TMPDIR:-}" ]]; then
     _why="${_why:+$_why, }only ${_tmp_avail_g}G free on /tmp"
 
   if [[ -n "$_why" ]]; then
-    mkdir -p "${PWD}/.apptainer-build-tmp"
-    APPTAINER_TMPDIR="$(mktemp -d "${PWD}/.apptainer-build-tmp/run-XXXXXX")"
+    # NEVER inside the source tree. quantui.def does `%files . /opt/quantui`,
+    # so a scratch dir under $PWD becomes part of what Apptainer copies, and
+    # the build dies with "cannot copy a directory, '.', into itself" — plus
+    # permission errors from reading the half-built rootfs it is copying.
+    # (Put it in $PWD first; it broke exactly this way, 2026-08-04.)
+    _scratch_root="${XDG_CACHE_HOME:-$HOME/.cache}/quantui-apptainer-build"
+    mkdir -p "$_scratch_root"
+    APPTAINER_TMPDIR="$(mktemp -d "$_scratch_root/run-XXXXXX")"
     export APPTAINER_TMPDIR
     OWN_TMPDIR="$APPTAINER_TMPDIR"
     echo "Note: $_why — building in $APPTAINER_TMPDIR instead."
