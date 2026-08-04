@@ -51,16 +51,27 @@ if [[ ! -f "$DEF" ]]; then
   exit 1
 fi
 
-# ── Optional clean ────────────────────────────────────────────────────────────
-if [[ "$CLEAN" == true && -f "$SIF" ]]; then
-  echo "Removing existing $SIF ..."
-  rm "$SIF"
-fi
+# NOTE: --clean deliberately does NOT rm the image here. It used to, which
+# meant a build that then failed preflight had already destroyed a working
+# image. Apptainer's --force overwrites on success instead, so the existing
+# .sif survives any failure. (Deleted a good image this way, 2026-08-04.)
+
+# ── Build environment ─────────────────────────────────────────────────────────
+# Shared with build-gpu.sh. Without this, Apptainer unpacks the rootfs AND
+# writes the squashfs into /tmp — a 15.6 GB RAM-backed tmpfs on WSL — so the
+# build dies with "No space left on device / Probably out of space on output
+# filesystem" while the real output filesystem has ~930 GB free. The message
+# points at the wrong disk, which is what makes it hard to read.
+# shellcheck source=apptainer/_build_env.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_build_env.sh"
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 BUILD_OPTS=""
 if [[ "$FAKEROOT" == true ]]; then
   BUILD_OPTS="--fakeroot"
+fi
+if [[ "$CLEAN" == true ]]; then
+  BUILD_OPTS="$BUILD_OPTS --force"
 fi
 
 echo "============================================================"

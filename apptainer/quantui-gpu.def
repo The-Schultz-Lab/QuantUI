@@ -1,0 +1,198 @@
+Bootstrap: docker
+From: nvidia/cuda:12.8.1-devel-ubuntu24.04
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QuantUI — GPU image (M-GPU)
+#
+# Separate from quantui.def on purpose. That image is the CPU-only local
+# teaching interface ("without a cluster", per its own %help) and should stay
+# small and conda-based. This one targets NVIDIA datacenter GPUs under Slurm and
+# makes different, incompatible choices at every layer. Trying to serve both
+# from one file would mean a CUDA base image and a GPU wheel stack shipped to
+# students who will never have a GPU.
+#
+# Target: NCShare (32x H200 SXM 141 GB, sm_90, Ubuntu + Slurm, CUDA 12.8).
+# ─────────────────────────────────────────────────────────────────────────────
+
+%arguments
+    # Which released QuantUI to install. Overridable at build time:
+    #   apptainer build --build-arg QUANTUI_VERSION=0.5.3 quantui-gpu.sif ...
+    # Pinning a PUBLISHED RELEASE rather than cloning a commit is deliberate.
+    # A git clone + `git checkout <sha>` leaves a detached HEAD, which is
+    # exactly where version derivation gets murky; a version on PyPI is an
+    # immutable artifact that anyone can `pip download` and diff. It is also
+    # the provenance story worth demonstrating: the image records a version
+    # someone else can install, not a SHA from one person's working tree.
+    QUANTUI_VERSION=0.5.2
+
+%help
+  QuantUI — GPU image (PySCF + gpu4pyscf on CUDA 12.x)
+
+  Built for NCShare's H200 nodes. Every GPU invocation needs --nv, which is
+  what makes the host driver visible inside the container:
+
+    apptainer exec --nv quantui-gpu.sif quantui gpu check
+    apptainer exec --nv quantui-gpu.sif python your_job.py
+
+  Verify a fresh image (runs the whole ladder, host driver -> real calculation):
+
+    bash apptainer/verify-gpu.sh quantui-gpu.sif
+
+  ── Two things that will silently put you on the CPU ──────────────────────
+
+  1. Apptainer bind-mounts your $HOME by default, and QuantUI keeps a
+     persistent preference at ~/.quantui/settings.json. If compute.gpu_enabled
+     is false there — e.g. you switched it off on a laptop with a consumer
+     card — the container inherits it and quietly runs on CPU. The image does
+     NOT override this, because the same thing happens with any QuantUI
+     container and you should be able to see it. To make a run deterministic,
+     point the setting elsewhere:
+
+       apptainer exec --nv --env QUANTUI_SETTINGS_PATH=/tmp/q.json ...
+
+  2. QUANTUI_DISABLE_GPU=1 forces CPU. Nothing here sets it, and %test asserts
+     that. It is genuinely useful as a negative control — the same command with
+     and without it is the cleanest way to show a GPU run actually differed.
+
+  Neither is a failure: `quantui gpu check` names the exact reason in both
+  cases. That is the point — "a GPU is visible", "this environment can offload"
+  and "this calculation did offload" are three different claims.
+
+%labels
+  Maintainer "Jonathan Schultz"
+  Purpose "GPU-accelerated PySCF via QuantUI, for Slurm clusters (NCShare H200)"
+  QuantUIVersion "{{ QUANTUI_VERSION }}"
+  CudaLine "12.8 / cuda12x wheels"
+  TargetArch "sm_90 (H200) — prebuilt wheels, no nvcc build required"
+
+%environment
+  export PATH="/opt/venv/bin:${PATH}"
+
+  # Never let a stray ~/.local package shadow the image. $HOME is bind-mounted
+  # and on a cluster it is a shared, long-lived NFS directory that likely has
+  # pip installs in it from unrelated work.
+  export PYTHONNOUSERSITE=1
+
+  # Respect a caller-provided value; only default it. quantui.def hardcodes
+  # this, which silently overrides --env. On NCShare $HOME is /hpc/home/$USER
+  # (NFS) — fine for small JSON, but override it to fast local scratch if a job
+  # writes many results.
+  export QUANTUI_RESULTS_DIR="${QUANTUI_RESULTS_DIR:-${HOME}/.quantui/results}"
+
+  # Deliberately NOT set here: QUANTUI_DISABLE_GPU (would defeat the image) and
+  # QUANTUI_SETTINGS_PATH (see %help — the host preference is inherited, and
+  # hiding that would hide a real property of every QuantUI container).
+
+%post
+  set -eux
+  export DEBIAN_FRONTEND=noninteractive
+
+  echo "── System python + venv ─────────────────────────────────────────────"
+  apt-get update
+  apt-get install -y --no-install-recommends \
+    python3 python3-venv python3-pip ca-certificates
+  # No git: nothing is cloned here — QuantUI comes from PyPI — and this apt
+  # step is the slowest part of the build on a poor mirror.
+  rm -rf /var/lib/apt/lists/*
+
+  # A venv, not the system interpreter: Ubuntu 24.04 marks its python
+  # externally-managed (PEP 668), so pip refuses to touch it without
+  # --break-system-packages. Breaking the system python inside a container we
+  # also want to apt-install into is a bad trade for saving one directory.
+  python3 -m venv /opt/venv
+  export PATH="/opt/venv/bin:${PATH}"
+  pip install --no-cache-dir --upgrade pip setuptools wheel
+
+  echo "── QuantUI + PySCF + GPU stack, in ONE pip resolve ──────────────────"
+  # One installer owns every package. The course image mixes conda-forge and
+  # pip for pyscf, where pip can overwrite a conda-managed install in place and
+  # leave conda's metadata claiming files it no longer owns. That image has a
+  # reason to accept the risk — it also carries HYPRE and Open MPI, and
+  # conda-forge's pyscf is prebuilt against conda's BLAS. This image carries
+  # neither, so there is no BLAS/OpenMP linkage to protect and no reason to
+  # involve a second installer at all.
+  #
+  # The CUDA wheels come from QuantUI's own gpu-cuda12x extra rather than being
+  # listed here. Hand-copying that trio is how a container drifts from the
+  # package it installs; naming the extra means this file cannot go stale.
+  #
+  # cuda12x, NOT cuda13x: CUDA's driver API is backward compatible, so cuda12x
+  # runs on both NCShare's 570-series driver and any 580+ update. cuda13x would
+  # hard-fail on 570. H200 is sm_90 and covered by prebuilt wheels either way,
+  # so nothing here needs nvcc — the devel base is for CuPy's runtime JIT
+  # (NVRTC), not for compiling this stack.
+  pip install --no-cache-dir \
+    "quantui[pyscf,ase,app,gpu-cuda12x]=={{ QUANTUI_VERSION }}"
+
+  echo "── Build provenance ─────────────────────────────────────────────────"
+  mkdir -p /opt/build-info
+  pip freeze > /opt/build-info/pip-freeze.txt
+  python -c "import quantui; print(quantui.__version__)" > /opt/build-info/quantui-version.txt
+  date -u +"%Y-%m-%dT%H:%M:%SZ" > /opt/build-info/build-date.txt
+  nvidia-smi --version > /opt/build-info/cuda-toolkit.txt 2>&1 || \
+    echo "no nvidia-smi at build time (expected on a CPU build host)" \
+      > /opt/build-info/cuda-toolkit.txt
+
+  echo "── Import checks (CPU-only; device checks belong at runtime) ────────"
+  python -c "import quantui, pyscf, ase; print('core OK')"
+
+  # NOTE: `import gpu4pyscf` CANNOT run here. Its __config__ module calls
+  # cupy.cuda.runtime.getDeviceCount() at import time, so merely importing it
+  # requires a working driver AND a visible device — which a build host does
+  # not have (and cannot have, if you build on a login node or a laptop).
+  # It fails with cudaErrorInsufficientDriver, which reads like a broken image
+  # but only means "no GPU here", exactly where there was never going to be one.
+  #
+  # find_spec locates the package without executing it, so this proves the
+  # wheel installed without touching the device. Whether it can actually reach
+  # a GPU is verify-gpu.sh's job, on a node that has one.
+  # Checked by DISTRIBUTION name, not by importing: importlib.metadata reads
+  # installed-package metadata and runs none of the package's code. It also
+  # names the exact three wheels the gpu-cuda12x extra requested, so a resolver
+  # substituting something else here is caught at build time rather than on a
+  # GPU node.
+  python -c "import cupy; print('cupy', cupy.__version__)"
+  python -c "import importlib.metadata as m; [print(' ', d, m.version(d)) for d in ('gpu4pyscf-cuda12x', 'cupy-cuda12x', 'cutensor-cu12')]"
+
+  chmod -R a+rX /opt/venv /opt/build-info
+
+%runscript
+  # No default server here — unlike quantui.def, this image's job is batch and
+  # interactive GPU work. Exec what you want explicitly.
+  exec "$@"
+
+%test
+  # ⚠️ This section runs on the BUILD host, which usually has no GPU (a login
+  # node, a laptop, a CI runner). So it may only assert things that are true
+  # without a device: that the stack imports, that versions are right, and that
+  # nothing was baked in that would disable the GPU later. Anything requiring a
+  # real device lives in apptainer/verify-gpu.sh, which runs under --nv.
+  set -eu
+  export PATH="/opt/venv/bin:${PATH}"
+
+  echo "[1/6] core imports"
+  python -c "import quantui, pyscf, ase, numpy, scipy"
+
+  echo "[2/6] pyscf >= 2.13 (QuantUI's floor; freq/NMR paths depend on it)"
+  python -c "import pyscf; v=tuple(int(x) for x in pyscf.__version__.split('.')[:2]); assert v >= (2,13), pyscf.__version__; print(pyscf.__version__)"
+
+  echo "[3/6] exactly one pyscf install (no second installer clobbered it)"
+  test "$(pip list 2>/dev/null | grep -c '^pyscf ')" -eq 1
+
+  echo "[4/6] GPU wheels present (WITHOUT importing gpu4pyscf — see %post)"
+  # Same trap as %post: importing gpu4pyscf calls getDeviceCount() and dies on
+  # a GPU-less build host. find_spec answers "is it installed" without running
+  # any of its module-level code.
+  python -c "import cupy; print('cupy', cupy.__version__)"
+  python -c "import importlib.metadata as m; [m.version(d) for d in ('gpu4pyscf-cuda12x', 'cupy-cuda12x', 'cutensor-cu12')]; print('gpu wheels present')"
+
+  echo "[5/6] nothing in the image disables the GPU"
+  # A baked-in QUANTUI_DISABLE_GPU would make every run silently fall back to
+  # CPU while still converging — the single most expensive failure mode here,
+  # because the job succeeds and the number is right.
+  test -z "${QUANTUI_DISABLE_GPU:-}"
+
+  echo "[6/6] QuantUI reports the pinned version"
+  python -c "import quantui; assert quantui.__version__ == '{{ QUANTUI_VERSION }}', quantui.__version__; print(quantui.__version__)"
+
+  echo "All build-time tests passed. Run verify-gpu.sh on a GPU node next."

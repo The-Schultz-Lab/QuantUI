@@ -18,9 +18,22 @@ air-gapped or restricted-network classroom.
 
 | File | Purpose |
 | --- | --- |
-| `quantui.def` | Container definition file (the "recipe") |
+| `quantui.def` | CPU image definition — the local teaching interface |
 | `build.sh` | Build script with clean/test/fakeroot options |
+| `quantui-gpu.def` | **GPU image** definition (CUDA 12.x + gpu4pyscf) |
+| `build-gpu.sh` | GPU build script (`--version`, `--clean`, `--test`, `--fakeroot`) |
+| `verify-gpu.sh` | Six-step check that a GPU image really reaches the GPU |
+| `slurm/quantui-gpu-test.sbatch` | Batch template for verifying on a cluster |
+| `ncshare-gpu-diagnostic.ipynb` | Interactive diagnostic to run **inside** the image on a GPU node |
+| `make_ncshare_diagnostic.py` | Generates that notebook (edit here, not the `.ipynb`) |
 | `README.md` (this file) | Build, run, and distribution guide |
+
+**Two images, on purpose.** `quantui.def` is CPU-only and conda-based — it is
+the "run QuantUI without a cluster" image students copy to a laptop.
+`quantui-gpu.def` targets NVIDIA datacenter GPUs under Slurm and differs at
+every layer (CUDA base image, all-pip install, a pinned PyPI release rather than
+the working tree). Merging them would ship a multi-GB CUDA stack to students who
+will never have a GPU. See [GPU image](#gpu-image) below.
 
 The compiled `.sif` image is **not** committed to git — it is too large (~4–5 GB).
 Build it locally (see below) or download the latest release asset from the
@@ -419,3 +432,202 @@ Tag the git commit and push so the version is traceable:
 git tag v0.3.0
 git push origin v0.3.0
 ```
+
+---
+
+## GPU image
+
+`quantui-gpu.def` builds an image for running PySCF on NVIDIA datacenter GPUs
+under Slurm. It was written against **NCShare** (32× H200 SXM 141 GB, `sm_90`,
+Ubuntu + Slurm, CUDA 12.8), but nothing in it is site-specific except the two
+flagged values in the sbatch template.
+
+### How it differs from the CPU image
+
+| | `quantui.def` | `quantui-gpu.def` |
+| --- | --- | --- |
+| Base | `condaforge/miniforge3` | `nvidia/cuda:12.8.1-devel-ubuntu24.04` |
+| Installer | mamba + pip | **pip only** |
+| QuantUI source | working tree (`%files`) | **pinned release from PyPI** |
+| GPU | none | `gpu4pyscf` / `cupy` / `cutensor` via the `gpu-cuda12x` extra |
+| Needs `--nv` | no | **yes, on every invocation** |
+| Default action | launches Voilà or JupyterLab | none — `exec` what you want |
+
+Three choices worth the words:
+
+**One installer, not two.** The CPU image uses conda for the scientific stack
+because conda-forge's `pyscf` is prebuilt against conda's BLAS. Mixing conda and
+pip for the same package lets pip overwrite a conda-managed install in place,
+leaving conda's metadata claiming files it no longer owns. The GPU image avoids
+the question entirely: it carries no MPI or HYPRE, so there is no BLAS/OpenMP
+linkage to protect and no reason to involve a second installer.
+
+**A pinned PyPI release, not a git commit.** `pip install quantui==0.5.2` names
+an immutable artifact anyone can download and diff. Cloning and checking out a
+SHA leaves a detached HEAD — reproducible in principle, murkier in practice, and
+it ties the image to one person's working tree.
+
+**`cuda12x`, not `cuda13x`.** CUDA's driver API is backward compatible, so the
+`cuda12x` wheels run on NCShare's 570-series driver *and* on any 580+ update.
+`cuda13x` would hard-fail on 570. H200 is `sm_90` and has prebuilt wheels on
+both lines, so no `nvcc` build is needed either way — the `devel` base image is
+there for CuPy's runtime JIT (NVRTC), not for compiling this stack.
+
+### Build
+
+```bash
+# From the repo root. Installs the version pinned in the def's %arguments.
+bash apptainer/build-gpu.sh --test
+```
+
+```bash
+# Build a different release (must already be published to PyPI)
+bash apptainer/build-gpu.sh --version 0.5.3
+```
+
+The script checks PyPI for the requested version **before** pulling a multi-GB
+base image — a real trap right after cutting a tag, when the GitHub release
+exists but the PyPI publish job is still waiting on its environment approval.
+
+`--fakeroot` builds without root, for HPC login nodes.
+
+### Verify
+
+`%test` runs on the *build host*, which usually has no GPU, so it can only prove
+the stack imports and the versions are right. Proving the GPU works is a
+separate step that has to run where a device exists:
+
+```bash
+bash apptainer/verify-gpu.sh quantui-gpu.sif
+```
+
+It climbs a six-rung ladder, each rung isolating one layer:
+
+| Step | Proves |
+| --- | --- |
+| 0 | No environment trap is silently forcing CPU |
+| 1 | The host driver sees a GPU at all |
+| 2 | `--nv` exposes the device *inside* the container |
+| 3 | CuPy can allocate and run FP64 — the wheel/driver ABI matches |
+| 4 | `quantui gpu check` — this environment *can* offload |
+| 5 | Negative control: `QUANTUI_DISABLE_GPU=1` flips the answer |
+| 6 | A real calculation reports `gpu_used: true` |
+
+Fix the lowest-numbered failure first; later rungs assume the earlier ones.
+
+Step 6 is the only one that matters, and steps 1–5 can all pass while
+calculations still run on the CPU. Note that a fallback run still **converges to
+the correct energy** — a right answer is not evidence the GPU was used. Only
+`gpu_used` is. These are three different claims that are routinely conflated:
+
+- `nvidia-smi` — a device is *visible*
+- `quantui gpu check` — this environment *can* offload
+- `gpu_used: true` — **this calculation actually did**
+
+### Interactive diagnostic notebook
+
+`verify-gpu.sh` runs *outside* the container and answers pass/fail.
+`ncshare-gpu-diagnostic.ipynb` runs *inside* it and answers "what is this
+node, and where is the crossover" — the questions you want on a first
+allocation.
+
+```bash
+apptainer exec --nv --env QUANTUI_SETTINGS_PATH=$TMPDIR/q.json \
+  quantui-gpu.sif jupyter lab --ip=0.0.0.0 --no-browser
+```
+
+Beyond the ladder's checks it records the **driver version and compute
+capability**, the Slurm partition and gres strings, verifies the device's
+FP64 classification is right for its class, and measures a CPU-vs-GPU
+crossover across four systems — each leg in a subprocess so the CPU leg
+genuinely starts with the GPU disabled before any import. It writes a JSON
+record and a paste-able summary.
+
+Edit `make_ncshare_diagnostic.py` and regenerate rather than editing the
+notebook JSON:
+
+```bash
+python apptainer/make_ncshare_diagnostic.py
+```
+
+### On a cluster
+
+```bash
+salloc --partition=<PARTITION> --gres=gpu:h200:1 --cpus-per-task=4 \
+       --mem=16G --time=00:30:00
+bash apptainer/verify-gpu.sh quantui-gpu.sif
+```
+
+Or submit the batch template, which sets thread limits and a job-scoped results
+directory:
+
+```bash
+sbatch --export=ALL,QUANTUI_IMAGE=$HOME/quantui-gpu.sif \
+       apptainer/slurm/quantui-gpu-test.sbatch
+```
+
+The template's `--partition` and `--gres` are deliberately left as `CHANGEME`
+and a `TODO`, because a plausible-looking guess fails later and less clearly
+than an obvious placeholder.
+
+### Two ways to end up on the CPU without noticing
+
+Both let every other check pass while calculations quietly run on the CPU, and
+neither reports an error — the job converges and the energy is correct.
+
+**1. A persisted preference follows you in.** Apptainer bind-mounts `$HOME`, and
+QuantUI stores `compute.gpu_enabled` in `~/.quantui/settings.json`. Switch GPU
+offload off on a laptop with a consumer card, and the *cluster* container
+inherits that setting. The image does not override it — the same thing happens
+with any QuantUI container, and hiding it would hide a real property. To pin a
+run to the image's own default:
+
+```bash
+apptainer exec --nv --env QUANTUI_SETTINGS_PATH=/tmp/q.json quantui-gpu.sif quantui gpu check
+```
+
+**2. `QUANTUI_DISABLE_GPU=1`.** Nothing in the image sets it, and `%test`
+asserts that. It is genuinely useful as a negative control — the same command
+with and without it is the cleanest demonstration that a GPU run differed.
+
+`quantui gpu check` names the exact reason in both cases, which is why step 0 of
+the verification script looks for them before anything else.
+
+### WSL note — local verification cannot get past step 2
+
+**You cannot verify a GPU image on WSL2.** Measured 2026-08-04 (RTX 5060 Ti,
+driver 581.95, Apptainer 1.5.3): the container loads the correct `libcuda` —
+either `/usr/lib/wsl/lib/libcuda.so.1` or the one `--nv` injects — and
+`cuDriverGetVersion` still returns **0**, so every CUDA call fails with
+`cudaErrorInsufficientDriver`. WSL reaches the GPU through `/dev/dxg` and a
+Windows-side shim that does not function inside an Apptainer container, and
+binding the whole of `/usr/lib/wsl` does not change it.
+
+`verify-gpu.sh` detects this, reports steps 3-6 as warnings rather than
+failures, and exits **3 (INCONCLUSIVE)** — reporting them as failures would
+train you to ignore exactly the failures that matter on a real node.
+
+This is a platform limit, not a defect in the image. Worth knowing is what the
+same diagnosis *did* confirm: the container resolves `libcuda` from
+`/.singularity.d/libs` — the host driver `--nv` injects — and **not** the
+`compat/libcuda.so.570` that the CUDA base image ships alongside it. That
+ordering is the thing that would genuinely break on a cluster, and it is
+correct.
+
+**Native WSL is unaffected and worth using.** Outside a container the same GPU
+works normally — verified on this machine: `driverGetVersion` 13000, a real RHF
+run reporting `gpu_used: true`. The distinction is containerisation, not WSL. So
+QuantUI's own GPU logic (offload dispatch, `gpu_used` reporting, method
+coverage, the FP64 advisory) *can* be exercised locally in a native env:
+
+```bash
+pip install "quantui[gpu-cuda13x]"   # match YOUR driver: 13x needs 580+
+quantui gpu check
+```
+
+Note the wheel line differs from the container's on purpose. A local 580+ driver
+takes `cuda13x`; the image targets NCShare's 570-series driver, where `cuda13x`
+would hard-fail and `cuda12x` works on both.
+
+So: build locally if you like, exercise QuantUI's GPU path natively, but verify
+the **image** on a GPU node.
