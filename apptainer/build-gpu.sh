@@ -78,7 +78,8 @@ else
   echo "  (curl unavailable — skipping preflight)"
 fi
 
-[[ "$CLEAN" == true && -f "$SIF" ]] && { echo "Removing $SIF ..."; rm "$SIF"; }
+# --clean maps to apptainer's --force below rather than rm-ing the image here:
+# a failure after this point must not leave you with no image at all.
 
 # Apptainer unpacks the base image into $APPTAINER_TMPDIR (default /tmp). On
 # many systems — WSL included — /tmp is mounted `nodev`, which can make the
@@ -86,82 +87,14 @@ fi
 # tmpfs that a multi-GB CUDA base image overflows. Both failures land deep into
 # a long build. Default to a work dir next to the output instead, on the same
 # filesystem that already has room for the .sif.
-# Refuse to clobber a build already in flight from the same checkout. Apptainer
-# writes the .sif only at the end, so two concurrent builds race on the output
-# as well as the scratch.
-_running="$(pgrep -af "apptainer.*build.*${SIF}" 2>/dev/null | grep -v "^$$ " || true)"
-if [[ -n "$_running" ]]; then
-  echo "ERROR: another build of $SIF appears to be running:" >&2
-  echo "  $_running" >&2
-  echo "       Wait for it, or kill it first. Two builds racing on the same" >&2
-  echo "       output and scratch will corrupt each other." >&2
-  exit 1
-fi
-
-# Clean up scratch on ANY exit, not just success. An interrupted build (Ctrl-C,
-# a timeout, a failed %post) otherwise leaves a partial root filesystem behind.
-#
-# When Apptainer builds with setuid it runs as real root, so parts of that tree
-# are root-owned and a plain rm cannot remove them — the user is left with an
-# undeletable directory in their repo and no obvious explanation. Say what to
-# run instead of failing silently.
-cleanup_tmpdir() {
-  # Disarm first: with EXIT+INT+TERM armed, a signal otherwise runs this once
-  # for the signal and again for the exit it causes, printing the notice twice.
-  trap - EXIT INT TERM
-  [[ -n "$OWN_TMPDIR" && -d "$OWN_TMPDIR" ]] || return 0
-  rm -rf "$OWN_TMPDIR" 2>/dev/null && return 0
-  echo >&2
-  echo "NOTE: build scratch left behind and is root-owned (Apptainer builds as" >&2
-  echo "      root under setuid). Remove it with:" >&2
-  echo "        sudo rm -rf '$OWN_TMPDIR'" >&2
-}
-# INT and TERM as well as EXIT: bash does not reliably run an EXIT trap when
-# it is killed while waiting on a child, which is exactly the Ctrl-C case.
-trap cleanup_tmpdir EXIT INT TERM
-
-# Space preflight. The CUDA devel base unpacks to well over 10 GB before it is
-# squashed into the final image, and the layer cache holds ~5 GB more. Running
-# out shows up as an opaque failure a long way into the build.
-#
-# This matters most on a cluster: $APPTAINER_CACHEDIR defaults to ~/.apptainer,
-# and an HPC home is usually a quota'd NFS volume far smaller than this needs.
-# Point both at scratch there:
-#   export APPTAINER_CACHEDIR=/work/$USER/.apptainer
-#   export APPTAINER_TMPDIR=/work/$USER/apptainer-tmp
-_free_gb() { df -BG --output=avail "$1" 2>/dev/null | tail -1 | tr -dc '0-9'; }
-for _dir_desc in "${APPTAINER_TMPDIR:-/tmp}|build scratch (APPTAINER_TMPDIR)" \
-                 "${APPTAINER_CACHEDIR:-$HOME/.apptainer}|layer cache (APPTAINER_CACHEDIR)" \
-                 "$PWD|output directory"; do
-  _dir="${_dir_desc%%|*}"; _desc="${_dir_desc##*|}"
-  # Walk up to an existing ancestor — the dir may not exist yet.
-  while [[ ! -d "$_dir" && "$_dir" != "/" ]]; do _dir="$(dirname "$_dir")"; done
-  _avail="$(_free_gb "$_dir")"
-  if [[ -n "$_avail" && "$_avail" -lt 20 ]]; then
-    echo "WARNING: only ${_avail}G free on $_dir — $_desc" >&2
-    echo "         A CUDA devel build wants ~20G here. Redirect it if this is a" >&2
-    echo "         quota'd home:  export APPTAINER_CACHEDIR=/path/with/space" >&2
-  fi
-done
-
-OWN_TMPDIR=""
-if [[ -z "${APPTAINER_TMPDIR:-}" ]] && findmnt -no OPTIONS /tmp 2>/dev/null | grep -q nodev; then
-  # mktemp -d, NOT a fixed path. A shared scratch directory means two builds in
-  # the same checkout write the same rootfs and — worse — the first to finish
-  # deletes it while the other is still using it. That failure is baffling from
-  # inside: the build's own /tmp vanishes mid-%post and apt reports
-  # "Unable to mkstemp /tmp/... No such file or directory". Cost one 15-minute
-  # apt fetch to learn, 2026-08-04.
-  mkdir -p "${PWD}/.apptainer-build-tmp"
-  APPTAINER_TMPDIR="$(mktemp -d "${PWD}/.apptainer-build-tmp/run-XXXXXX")"
-  export APPTAINER_TMPDIR
-  OWN_TMPDIR="$APPTAINER_TMPDIR"
-  echo "Note: /tmp is nodev — using $APPTAINER_TMPDIR for the build instead."
-  echo "      Override by setting APPTAINER_TMPDIR yourself."
-fi
+# Scratch dir, concurrency guard, cleanup trap and space preflight.
+# Shared with build.sh — both scripts hit the same failures.
+# shellcheck source=apptainer/_build_env.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_build_env.sh"
 
 BUILD_OPTS=()
 [[ "$FAKEROOT" == true ]] && BUILD_OPTS+=(--fakeroot)
+[[ "$CLEAN" == true ]] && BUILD_OPTS+=(--force)
 BUILD_OPTS+=(--build-arg "QUANTUI_VERSION=${VERSION}")
 
 cat <<EOF
