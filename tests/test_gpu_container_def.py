@@ -173,14 +173,52 @@ class TestNothingSilentlyDisablesTheGpu:
         test_section = _section(def_text, "%test")
         assert "QUANTUI_DISABLE_GPU" in test_section
 
-    def test_build_time_tests_never_require_a_device(self, def_text):
-        # %test runs wherever the build runs — usually a login node or laptop
-        # with no GPU. A device assertion there turns "no GPU on the build host"
-        # into a failed build, which reads as a broken recipe.
-        test_section = _section(def_text, "%test")
-        assert "nvidia-smi" not in test_section
-        assert "getDeviceCount" not in test_section
-        assert "cupy.cuda" not in test_section
+    @pytest.mark.parametrize("section", ["%post", "%test"])
+    def test_build_time_sections_never_require_a_device(self, def_text, section):
+        """Nothing that runs at BUILD time may touch a GPU.
+
+        Both sections run wherever the build runs — a login node, a laptop, a
+        CI runner — which usually has no device. A device call there turns "no
+        GPU on the build host" into a failed build that reads as a broken
+        recipe.
+
+        ``import gpu4pyscf`` is the trap, and it is invisible to a search for
+        device calls: its ``__config__`` module calls
+        ``cupy.cuda.runtime.getDeviceCount()`` at import, so a plain import
+        dies with ``cudaErrorInsufficientDriver``. An earlier version of this
+        test only covered %test and only looked for literal device calls, so it
+        passed while %post carried exactly that import — caught by a real build
+        failing, 2026-08-04. Check the package is installed via find_spec or
+        importlib.metadata, neither of which executes it.
+        """
+        body = _section(def_text, section)
+        code = "\n".join(
+            ln for ln in body.splitlines() if not ln.strip().startswith("#")
+        )
+        # Match the module in ANY import form. Checking for the literal
+        # "import gpu4pyscf" is not enough — the bug that shipped was
+        # `import cupy, gpu4pyscf`, which that substring never matches, so the
+        # first version of this test would have passed over the very line it
+        # was written for. Found by mutating the def and watching it stay green.
+        #
+        # [^;"']* stops the match at a statement separator or a quote, so the
+        # safe forms — find_spec('gpu4pyscf'), m.version('gpu4pyscf-cuda12x') —
+        # are not flagged: those name the package as data, never execute it.
+        offenders = re.findall(r"import\s+[^;\"']*\bgpu4pyscf\b", code)
+        offenders += re.findall(r"from\s+gpu4pyscf\b", code)
+        assert not offenders, (
+            f"{section} imports gpu4pyscf ({offenders[0]!r}) — its __config__ "
+            "calls getDeviceCount() at import time, so this fails on any "
+            "GPU-less build host"
+        )
+        for call in ("nvidia-smi --query", "getDeviceCount", "getDeviceProperties"):
+            assert call not in code, f"{section} makes a device call: {call}"
+
+    def test_the_gpu_wheels_are_verified_without_importing_them(self, def_text):
+        # The safe substitutes. If both vanish, the build stopped checking that
+        # the GPU wheels landed at all — which would only surface on a GPU node.
+        post = _section(def_text, "%post")
+        assert "importlib.metadata" in post or "find_spec" in post
 
 
 class TestTheVerificationLadder:

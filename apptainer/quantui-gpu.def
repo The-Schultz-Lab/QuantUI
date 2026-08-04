@@ -133,7 +133,24 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
 
   echo "── Import checks (CPU-only; device checks belong at runtime) ────────"
   python -c "import quantui, pyscf, ase; print('core OK')"
-  python -c "import cupy, gpu4pyscf; print('gpu stack imports OK')"
+
+  # NOTE: `import gpu4pyscf` CANNOT run here. Its __config__ module calls
+  # cupy.cuda.runtime.getDeviceCount() at import time, so merely importing it
+  # requires a working driver AND a visible device — which a build host does
+  # not have (and cannot have, if you build on a login node or a laptop).
+  # It fails with cudaErrorInsufficientDriver, which reads like a broken image
+  # but only means "no GPU here", exactly where there was never going to be one.
+  #
+  # find_spec locates the package without executing it, so this proves the
+  # wheel installed without touching the device. Whether it can actually reach
+  # a GPU is verify-gpu.sh's job, on a node that has one.
+  # Checked by DISTRIBUTION name, not by importing: importlib.metadata reads
+  # installed-package metadata and runs none of the package's code. It also
+  # names the exact three wheels the gpu-cuda12x extra requested, so a resolver
+  # substituting something else here is caught at build time rather than on a
+  # GPU node.
+  python -c "import cupy; print('cupy', cupy.__version__)"
+  python -c "import importlib.metadata as m; [print(' ', d, m.version(d)) for d in ('gpu4pyscf-cuda12x', 'cupy-cuda12x', 'cutensor-cu12')]"
 
   chmod -R a+rX /opt/venv /opt/build-info
 
@@ -160,8 +177,12 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
   echo "[3/6] exactly one pyscf install (no second installer clobbered it)"
   test "$(pip list 2>/dev/null | grep -c '^pyscf ')" -eq 1
 
-  echo "[4/6] GPU stack importable without a device present"
-  python -c "import cupy, gpu4pyscf; print('cupy', cupy.__version__)"
+  echo "[4/6] GPU wheels present (WITHOUT importing gpu4pyscf — see %post)"
+  # Same trap as %post: importing gpu4pyscf calls getDeviceCount() and dies on
+  # a GPU-less build host. find_spec answers "is it installed" without running
+  # any of its module-level code.
+  python -c "import cupy; print('cupy', cupy.__version__)"
+  python -c "import importlib.metadata as m; [m.version(d) for d in ('gpu4pyscf-cuda12x', 'cupy-cuda12x', 'cutensor-cu12')]; print('gpu wheels present')"
 
   echo "[5/6] nothing in the image disables the GPU"
   # A baked-in QUANTUI_DISABLE_GPU would make every run silently fall back to
