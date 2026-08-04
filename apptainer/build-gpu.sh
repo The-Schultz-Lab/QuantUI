@@ -46,7 +46,16 @@ command -v "$APPTAINER_CMD" >/dev/null 2>&1 || {
 # Resolve the version the def would use, so the preflight below checks the same
 # thing the build will actually request.
 if [[ -z "$VERSION" ]]; then
-  VERSION="$(grep -oP 'QUANTUI_VERSION=\K[0-9][^\s]*' "$DEF" | head -1)"
+  # ^\s* anchors to the %arguments default. Without the anchor this matches the
+  # `--build-arg QUANTUI_VERSION=...` EXAMPLE in the comment above it, which
+  # sits earlier in the file — so the script would preflight and build a
+  # version nobody asked for.
+  VERSION="$(grep -oP '^\s*QUANTUI_VERSION=\K[0-9][^\s]*' "$DEF" | head -1)"
+  if [[ -z "$VERSION" ]]; then
+    echo "ERROR: could not read the QUANTUI_VERSION default from $DEF." >&2
+    echo "       Pass one explicitly:  --version <x.y.z>" >&2
+    exit 1
+  fi
 fi
 
 # Preflight: confirm the release exists on PyPI before spending 20+ minutes
@@ -71,6 +80,20 @@ fi
 
 [[ "$CLEAN" == true && -f "$SIF" ]] && { echo "Removing $SIF ..."; rm "$SIF"; }
 
+# Apptainer unpacks the base image into $APPTAINER_TMPDIR (default /tmp). On
+# many systems — WSL included — /tmp is mounted `nodev`, which can make the
+# build fail partway through creating device nodes, and it is often a small
+# tmpfs that a multi-GB CUDA base image overflows. Both failures land deep into
+# a long build. Default to a work dir next to the output instead, on the same
+# filesystem that already has room for the .sif.
+if [[ -z "${APPTAINER_TMPDIR:-}" ]] && findmnt -no OPTIONS /tmp 2>/dev/null | grep -q nodev; then
+  APPTAINER_TMPDIR="${PWD}/.apptainer-build-tmp"
+  mkdir -p "$APPTAINER_TMPDIR"
+  export APPTAINER_TMPDIR
+  echo "Note: /tmp is nodev — using $APPTAINER_TMPDIR for the build instead."
+  echo "      Override by setting APPTAINER_TMPDIR yourself."
+fi
+
 BUILD_OPTS=()
 [[ "$FAKEROOT" == true ]] && BUILD_OPTS+=(--fakeroot)
 BUILD_OPTS+=(--build-arg "QUANTUI_VERSION=${VERSION}")
@@ -94,6 +117,10 @@ ELAPSED=$(( ($(date +%s) - START) / 60 ))
 echo
 echo "Build complete in ${ELAPSED} minutes."
 ls -lh "$SIF"
+
+if [[ "${APPTAINER_TMPDIR:-}" == "${PWD}/.apptainer-build-tmp" ]]; then
+  rm -rf "$APPTAINER_TMPDIR"
+fi
 
 if [[ "$RUN_TESTS" == true ]]; then
   echo

@@ -114,6 +114,34 @@ class TestTheImageTracksThePackage:
                 f"{extra.strip()} = [" in pyproject
             ), f"def requests extra '{extra.strip()}' that pyproject does not define"
 
+    def test_the_build_script_resolves_the_same_version(self, def_text):
+        """build-gpu.sh must read the same pin the def would use.
+
+        It greps the version out of the def to preflight PyPI before pulling a
+        multi-GB base image. An unanchored pattern matches the ``--build-arg
+        QUANTUI_VERSION=...`` *example* in the comment above the real default,
+        so the script checked for — and would have built — a version nobody
+        asked for. Reported from a live run, 2026-08-04.
+
+        This runs the pattern **read out of the script** rather than a copy, so
+        editing the script's grep is what this test actually exercises.
+        """
+        script = BUILD.read_text(encoding="utf-8")
+        m = re.search(r"grep -oP '([^']+)' \"\$DEF\"", script)
+        assert m is not None, "no version-extraction grep found in build-gpu.sh"
+
+        out = subprocess.run(
+            ["grep", "-oP", m.group(1), str(DEF)],
+            capture_output=True,
+            text=True,
+        )
+        resolved = out.stdout.splitlines()
+        assert resolved, f"pattern {m.group(1)!r} matched nothing in the def"
+        assert resolved[0] == _pinned_version(def_text), (
+            f"build-gpu.sh resolves {resolved[0]!r}, def pins "
+            f"{_pinned_version(def_text)!r} — the pattern is matching a comment"
+        )
+
 
 class TestCudaLineIsCorrectForTheTarget:
     def test_cuda12x_not_cuda13x(self, def_text):

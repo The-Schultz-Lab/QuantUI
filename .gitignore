@@ -62,3 +62,5 @@ nul
 /temp - untracked/
 /logs
 .claudeignore
+.apptainer-build-tmp/
+quantui-gpu.sif
