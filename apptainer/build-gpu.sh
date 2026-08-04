@@ -86,13 +86,61 @@ fi
 # tmpfs that a multi-GB CUDA base image overflows. Both failures land deep into
 # a long build. Default to a work dir next to the output instead, on the same
 # filesystem that already has room for the .sif.
+OWN_TMPDIR=""
 if [[ -z "${APPTAINER_TMPDIR:-}" ]] && findmnt -no OPTIONS /tmp 2>/dev/null | grep -q nodev; then
   APPTAINER_TMPDIR="${PWD}/.apptainer-build-tmp"
   mkdir -p "$APPTAINER_TMPDIR"
   export APPTAINER_TMPDIR
+  OWN_TMPDIR="$APPTAINER_TMPDIR"
   echo "Note: /tmp is nodev — using $APPTAINER_TMPDIR for the build instead."
   echo "      Override by setting APPTAINER_TMPDIR yourself."
 fi
+
+# Clean up scratch on ANY exit, not just success. An interrupted build (Ctrl-C,
+# a timeout, a failed %post) otherwise leaves a partial root filesystem behind.
+#
+# When Apptainer builds with setuid it runs as real root, so parts of that tree
+# are root-owned and a plain rm cannot remove them — the user is left with an
+# undeletable directory in their repo and no obvious explanation. Say what to
+# run instead of failing silently.
+cleanup_tmpdir() {
+  # Disarm first: with EXIT+INT+TERM armed, a signal otherwise runs this once
+  # for the signal and again for the exit it causes, printing the notice twice.
+  trap - EXIT INT TERM
+  [[ -n "$OWN_TMPDIR" && -d "$OWN_TMPDIR" ]] || return 0
+  rm -rf "$OWN_TMPDIR" 2>/dev/null && return 0
+  echo >&2
+  echo "NOTE: build scratch left behind and is root-owned (Apptainer builds as" >&2
+  echo "      root under setuid). Remove it with:" >&2
+  echo "        sudo rm -rf '$OWN_TMPDIR'" >&2
+}
+# INT and TERM as well as EXIT: bash does not reliably run an EXIT trap when
+# it is killed while waiting on a child, which is exactly the Ctrl-C case.
+trap cleanup_tmpdir EXIT INT TERM
+
+# Space preflight. The CUDA devel base unpacks to well over 10 GB before it is
+# squashed into the final image, and the layer cache holds ~5 GB more. Running
+# out shows up as an opaque failure a long way into the build.
+#
+# This matters most on a cluster: $APPTAINER_CACHEDIR defaults to ~/.apptainer,
+# and an HPC home is usually a quota'd NFS volume far smaller than this needs.
+# Point both at scratch there:
+#   export APPTAINER_CACHEDIR=/work/$USER/.apptainer
+#   export APPTAINER_TMPDIR=/work/$USER/apptainer-tmp
+_free_gb() { df -BG --output=avail "$1" 2>/dev/null | tail -1 | tr -dc '0-9'; }
+for _dir_desc in "${APPTAINER_TMPDIR:-/tmp}|build scratch (APPTAINER_TMPDIR)" \
+                 "${APPTAINER_CACHEDIR:-$HOME/.apptainer}|layer cache (APPTAINER_CACHEDIR)" \
+                 "$PWD|output directory"; do
+  _dir="${_dir_desc%%|*}"; _desc="${_dir_desc##*|}"
+  # Walk up to an existing ancestor — the dir may not exist yet.
+  while [[ ! -d "$_dir" && "$_dir" != "/" ]]; do _dir="$(dirname "$_dir")"; done
+  _avail="$(_free_gb "$_dir")"
+  if [[ -n "$_avail" && "$_avail" -lt 20 ]]; then
+    echo "WARNING: only ${_avail}G free on $_dir — $_desc" >&2
+    echo "         A CUDA devel build wants ~20G here. Redirect it if this is a" >&2
+    echo "         quota'd home:  export APPTAINER_CACHEDIR=/path/with/space" >&2
+  fi
+done
 
 BUILD_OPTS=()
 [[ "$FAKEROOT" == true ]] && BUILD_OPTS+=(--fakeroot)
@@ -117,10 +165,6 @@ ELAPSED=$(( ($(date +%s) - START) / 60 ))
 echo
 echo "Build complete in ${ELAPSED} minutes."
 ls -lh "$SIF"
-
-if [[ "${APPTAINER_TMPDIR:-}" == "${PWD}/.apptainer-build-tmp" ]]; then
-  rm -rf "$APPTAINER_TMPDIR"
-fi
 
 if [[ "$RUN_TESTS" == true ]]; then
   echo
