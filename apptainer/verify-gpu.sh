@@ -248,7 +248,16 @@ if [ "$WSL_UNREACHABLE" = true ]; then
   printf '  inside an Apptainer container (cuDriverGetVersion returns 0 even with\n'
   printf '  the right libcuda loaded), so steps 3-6 cannot pass here for reasons\n'
   printf '  unrelated to this image.\n\n'
-  printf '  Run this on a real GPU node — that is the only place it can answer.\n'
+  printf '  Run this on a real GPU node — that is the only place it can answer.\n\n'
+  printf '  %sNative WSL is a different story%s and IS worth using: outside a\n' \
+    "$c_ok" "$c_off"
+  printf '  container the same GPU works normally (verified here — driver 13000,\n'
+  printf '  gpu_used: true). So QuantUI'"'"'s own GPU logic — offload dispatch, the\n'
+  printf '  gpu_used reporting, method coverage — can be exercised locally in a\n'
+  printf '  native env with the gpu extra matching YOUR driver:\n\n'
+  printf '    pip install "quantui[gpu-cuda13x]"   # 13x for a 580+ driver\n'
+  printf '    quantui gpu check\n\n'
+  printf '  Only the container plumbing needs a real GPU node.\n'
   exit 3
 fi
 

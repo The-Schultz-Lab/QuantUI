@@ -586,4 +586,20 @@ same diagnosis *did* confirm: the container resolves `libcuda` from
 ordering is the thing that would genuinely break on a cluster, and it is
 correct.
 
-So: build locally if you like, but verify on a GPU node.
+**Native WSL is unaffected and worth using.** Outside a container the same GPU
+works normally — verified on this machine: `driverGetVersion` 13000, a real RHF
+run reporting `gpu_used: true`. The distinction is containerisation, not WSL. So
+QuantUI's own GPU logic (offload dispatch, `gpu_used` reporting, method
+coverage, the FP64 advisory) *can* be exercised locally in a native env:
+
+```bash
+pip install "quantui[gpu-cuda13x]"   # match YOUR driver: 13x needs 580+
+quantui gpu check
+```
+
+Note the wheel line differs from the container's on purpose. A local 580+ driver
+takes `cuda13x`; the image targets NCShare's 570-series driver, where `cuda13x`
+would hard-fail and `cuda12x` works on both.
+
+So: build locally if you like, exercise QuantUI's GPU path natively, but verify
+the **image** on a GPU node.
