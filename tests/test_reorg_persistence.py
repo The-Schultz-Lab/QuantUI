@@ -204,3 +204,223 @@ class TestOldResultsSayWhatToDo:
         other["calc_type"] = "single_point"
         other.pop("reorg_channels", None)
         assert "Re-run this calculation" not in format_past_result(other, d)
+
+
+class TestTheDistinctGeometries:
+    """REORG.3. The Marcus scheme is four energies on TWO geometries per
+    channel — E_ion(R_neutral) shares its geometry with E_neutral(R_neutral),
+    and likewise for R_ion. A four-step control would show each geometry twice
+    and imply all four differ."""
+
+    @staticmethod
+    def _channels():
+        return [
+            {
+                "kind": "hole",
+                "ion_charge": 1,
+                "ion_geometry": {
+                    "atoms": ["O", "H", "H"],
+                    "coordinates": [[0, 0, 0], [1.03, 0, 0], [-0.27, 1.0, 0]],
+                },
+            },
+            {
+                "kind": "electron",
+                "ion_charge": -1,
+                "ion_geometry": {
+                    "atoms": ["O", "H", "H"],
+                    "coordinates": [[0, 0, 0], [0.92, 0, 0], [-0.22, 0.89, 0]],
+                },
+            },
+        ]
+
+    @staticmethod
+    def _neutral():
+        return {
+            "atoms": ["O", "H", "H"],
+            "coordinates": [[0, 0, 0], [0.96, 0, 0], [-0.24, 0.93, 0]],
+        }
+
+    def test_both_channels_give_three_geometries_not_four(self):
+        from quantui.reorganization_energy import reorg_geometries
+
+        geoms = reorg_geometries(self._channels(), self._neutral())
+        assert len(geoms) == 3, "R_neutral is shared and must appear once"
+
+    def test_one_channel_gives_two(self):
+        from quantui.reorganization_energy import reorg_geometries
+
+        assert len(reorg_geometries(self._channels()[:1], self._neutral())) == 2
+
+    def test_each_geometry_names_the_energies_evaluated_on_it(self):
+        # This is what connects the picture back to λ; without it the viewer is
+        # three structures with no stated relationship to the number.
+        from quantui.reorganization_energy import reorg_geometries
+
+        geoms = reorg_geometries(self._channels(), self._neutral())
+        assert "E_neutral(R_neutral)" in geoms[0]["note"]
+        assert "E_hole(R_neutral)" in geoms[0]["note"]
+        assert "E_hole(R_hole)" in geoms[1]["note"]
+
+    def test_a_missing_ion_geometry_is_skipped_not_faked(self):
+        from quantui.reorganization_energy import reorg_geometries
+
+        chans = self._channels()
+        chans[1].pop("ion_geometry")
+        assert len(reorg_geometries(chans, self._neutral())) == 2
+
+    def test_the_stepper_is_not_animated(self):
+        # λ is a comparison between states, not a trajectory through them;
+        # looping would imply a path that was never computed.
+        from quantui.app_visualization import build_reorg_geometry_viewer_html
+        from quantui.reorganization_energy import reorg_geometries
+
+        html = build_reorg_geometry_viewer_html(
+            reorg_geometries(self._channels(), self._neutral())
+        )
+        assert "LOOP=0" in html.replace(" ", "")
+
+    def test_the_overlay_does_not_superimpose(self):
+        """Both geometries come from optimizations seeded from the same
+        structure with the same atom ordering, so the displacement is physical.
+        Aligning (Kabsch) would rotate away part of what λ measures."""
+        from quantui.app_visualization import build_reorg_overlay_html
+        from quantui.reorganization_energy import reorg_geometries
+
+        geoms = reorg_geometries(self._channels(), self._neutral())
+        html = build_reorg_overlay_html(geoms[0], geoms[1])
+        assert html.count("addModel(") == 2
+        # "align" alone is useless as a signal — CSS text-align appears in the
+        # viewer chrome. Check for an alignment ALGORITHM instead.
+        assert "kabsch" not in html.lower()
+        assert "superimpose(" not in html.lower()
+        # ...and that the viewer tells the user, since a superimposed overlay
+        # would look plausible and be quietly wrong.
+        assert "not superimposed" in html
+
+    def test_the_overlay_leads_with_displacement_arrows(self):
+        """Reported 2026-08-05: two solid ball-and-stick models overlaid were
+        an unreadable blob, because λ relaxations are small and the structures
+        nearly coincide. Arrows have direction and length — which is what a
+        displacement IS — so they carry the signal and the structures became
+        thin wireframes providing context."""
+        from quantui.app_visualization import build_reorg_overlay_html
+        from quantui.reorganization_energy import reorg_geometries
+
+        geoms = reorg_geometries(self._channels(), self._neutral())
+        html = build_reorg_overlay_html(geoms[0], geoms[1])
+        assert "addArrow(" in html
+        assert '"radius": 0.05' in html, "structures must be thin, not bulky"
+
+    def test_atoms_that_did_not_move_get_no_arrow(self):
+        # A zero-length arrow renders as a dot and reads as noise.
+        from quantui.app_visualization import build_reorg_overlay_html
+
+        g = {
+            "label": "R_neutral",
+            "atoms": ["O", "H"],
+            "coordinates": [[0, 0, 0], [0.96, 0, 0]],
+        }
+        html = build_reorg_overlay_html(g, g)
+        assert html.count("addArrow(") == 0
+        assert "no atom moved" in html
+
+    def test_exaggeration_scales_arrows_not_structures(self):
+        """The structures must always show TRUE positions — only the arrows are
+        amplified, and the legend says by how much. Scaling the geometry would
+        put a molecule on screen that was never computed."""
+        from quantui.app_visualization import build_reorg_overlay_html
+        from quantui.reorganization_energy import reorg_geometries
+
+        geoms = reorg_geometries(self._channels(), self._neutral())
+        plain = build_reorg_overlay_html(geoms[0], geoms[1], exaggerate=1.0)
+        scaled = build_reorg_overlay_html(geoms[0], geoms[1], exaggerate=5.0)
+        # Same atom coordinates in both — only the arrow endpoints differ.
+        coord = f"{geoms[1]['coordinates'][1][0]:.6f}"
+        assert coord in plain and coord in scaled
+        assert "&times;5" in scaled and "&times;5" not in plain
+
+    def test_the_overlay_colours_by_structure_not_by_element(self):
+        # In an overlay the question is "which structure is this atom from";
+        # element colouring makes the two indistinguishable where they overlap.
+        from quantui.app_visualization import build_reorg_overlay_html
+        from quantui.reorganization_energy import reorg_geometries
+
+        geoms = reorg_geometries(self._channels(), self._neutral())
+        html = build_reorg_overlay_html(geoms[0], geoms[1])
+        # Grey reference, coloured relaxed structure, red arrows — a hierarchy
+        # rather than two equal-weight solids.
+        assert "#94a3b8" in html  # reference: context
+        assert "#2166ac" in html  # relaxed structure
+        assert "#b2182b" in html  # displacement arrows: the signal
+
+
+class TestTheAnalysisTabIsWiredUp:
+    """REORG.7 — reorganization_energy had NO _PANEL_REGISTRY entry, so the
+    Analysis tab populated nothing at all for these runs."""
+
+    def test_the_calc_type_is_registered(self):
+        from quantui.app import QuantUIApp
+
+        assert "reorganization_energy" in QuantUIApp._PANEL_REGISTRY
+
+    def test_energies_runs_before_isosurface(self):
+        # The same dependency that broke geometry_opt on 2026-08-04:
+        # _pop_energies loads the orbital state _pop_isosurface checks. Now
+        # pinned in a second place, because the trap is per-calc-type.
+        from quantui.app import QuantUIApp
+
+        names = [n for n, _, _ in QuantUIApp._PANEL_REGISTRY["reorganization_energy"]]
+        assert names.index("Energies") < names.index("Isosurface")
+
+    def test_geometries_is_the_default_panel(self):
+        # FIRST auto_select=True wins — not last.
+        from quantui.app import QuantUIApp
+
+        auto = [
+            n
+            for n, _, sel in QuantUIApp._PANEL_REGISTRY["reorganization_energy"]
+            if sel
+        ]
+        assert auto[0] == "Geometries"
+
+    def test_the_panel_has_a_shell_to_render_into(self):
+        from quantui.app import QuantUIApp
+
+        assert any(n == "Geometries" for n, _, _ in QuantUIApp._PANEL_META)
+
+    def test_every_registered_panel_is_actually_in_the_analysis_tab(self):
+        """Registering a panel is not enough — it must also be a CHILD of the
+        Analysis VBox or it can never render.
+
+        Found the hard way (2026-08-05): the Geometries accordion existed, the
+        registry knew about it, every unit test passed, and the tab showed
+        nothing. Checked for every panel rather than just the new one, since
+        the gap is structural and the next panel would hit it too.
+        """
+        from quantui.app import QuantUIApp
+
+        app = QuantUIApp()
+        rendered = {
+            c.get_title(0)
+            for c in app.analysis_tab_panel.children
+            if hasattr(c, "get_title")
+        }
+        for name, attr, _ in QuantUIApp._PANEL_META:
+            acc = getattr(app, attr, None)
+            assert acc is not None, f"{name}: no accordion attribute {attr}"
+            assert acc in app.analysis_tab_panel.children, (
+                f"{name} is registered but is not a child of the Analysis tab, "
+                "so it can never appear"
+            )
+        assert rendered, "no accordions rendered at all"
+
+    def test_live_and_history_read_the_same_payload(self):
+        # The original bug was two paths reading different things. This one
+        # must never grow a second reader.
+        import inspect
+
+        from quantui.app_analysis import _reorg_payload
+
+        src = inspect.getsource(_reorg_payload)
+        assert "_reorg_channels_payload" in src  # live path builds the saved shape
+        assert 'data.get("reorg_channels")' in src  # history path reads it

@@ -111,6 +111,49 @@ class ReorgChannelResult:
         return "Hole (cation)" if self.kind == "hole" else "Electron (anion)"
 
 
+def reorg_geometries(channels: list, neutral_geometry: dict) -> list[dict]:
+    """The DISTINCT geometries behind a run, each labelled with its energies.
+
+    Takes the saved-payload shape (plain dicts), so the live and History paths
+    build the identical list — the same one-renderer discipline that fixed
+    REORG.1.
+
+    Deduplicated by construction: R_neutral is shared by every channel and
+    appears once. A hole+electron run therefore yields three entries
+    (neutral, cation, anion), not six, and not the four the four-point name
+    suggests. Each entry names which of the four energies were evaluated on it,
+    which is what connects the picture back to λ.
+    """
+    out: list[dict] = []
+    if neutral_geometry:
+        # Every channel evaluates E_neutral and E_ion at R_neutral, so list the
+        # neutral energy once and note the ion energies that share this geometry.
+        shared = ", ".join(f"E_{c.get('kind', '?')}(R_neutral)" for c in channels)
+        out.append(
+            {
+                "label": "R_neutral — optimized neutral",
+                "atoms": list(neutral_geometry["atoms"]),
+                "coordinates": [list(c) for c in neutral_geometry["coordinates"]],
+                "note": ("E_neutral(R_neutral)" + (f", {shared}" if shared else "")),
+            }
+        )
+    for ch in channels:
+        geom = ch.get("ion_geometry")
+        if not geom:
+            continue
+        kind = ch.get("kind", "ion")
+        charge = ch.get("ion_charge", 0)
+        out.append(
+            {
+                "label": f"R_{kind} — optimized {kind} ion (charge {charge:+d})",
+                "atoms": list(geom["atoms"]),
+                "coordinates": [list(c) for c in geom["coordinates"]],
+                "note": f"E_{kind}(R_{kind}), E_neutral(R_{kind})",
+            }
+        )
+    return out
+
+
 def geometry_rmsd(a: Molecule, b: Molecule) -> Optional[float]:
     """Mass-independent RMSD in Angstrom between two geometries, atom-for-atom.
 

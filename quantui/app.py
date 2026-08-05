@@ -46,6 +46,9 @@ from quantui.app_analysis import (
     deactivate_all_ana_panels as _ana_deactivate_all_ana_panels,
 )
 from quantui.app_analysis import (
+    on_reorg_view_changed as _ana_on_reorg_view_changed,
+)
+from quantui.app_analysis import (
     pop_energies as _ana_pop_energies,
 )
 from quantui.app_analysis import (
@@ -68,6 +71,9 @@ from quantui.app_analysis import (
 )
 from quantui.app_analysis import (
     pop_preopt_trajectory as _ana_pop_preopt_trajectory,
+)
+from quantui.app_analysis import (
+    pop_reorg_geometries as _ana_pop_reorg_geometries,
 )
 from quantui.app_analysis import (
     pop_uv_vis as _ana_pop_uv_vis,
@@ -1630,6 +1636,7 @@ class QuantUIApp:
         ("IR Spectrum", "_ir_accordion", "Frequency"),
         ("PES Scan", "_pes_scan_accordion", "PES Scan"),
         ("Isosurface", "_iso_accordion", "Single Point (Linux/WSL only)"),
+        ("Geometries", "_reorg_geom_accordion", "Reorganization Energy"),
         ("UV-Vis", "_tddft_accordion", "UV-Vis (TD-DFT)"),
         ("NMR", "_nmr_accordion", "NMR Shielding"),
     ]
@@ -1678,6 +1685,16 @@ class QuantUIApp:
         "nmr": [
             ("NMR", "_pop_nmr_shielding", True),
         ],
+        # reorganization_energy had NO entry at all until 2026-08-05, so the
+        # Analysis tab populated nothing for these runs — not a missing panel,
+        # no panels. Order matters twice over: the FIRST auto_select=True that
+        # returns True wins, AND _pop_energies loads the orbital state
+        # _pop_isosurface checks, so Energies must precede Isosurface.
+        "reorganization_energy": [
+            ("Energies", "_pop_energies", False),
+            ("Geometries", "_pop_reorg_geometries", True),
+            ("Isosurface", "_pop_isosurface", False),
+        ],
         "pes_scan": [
             ("PES Scan", "_pop_pes_plot", True),
             ("Trajectory", "_pop_pes_trajectory", False),
@@ -1692,6 +1709,9 @@ class QuantUIApp:
 
     def _pop_energies(self, ctx: _AnalysisContext) -> bool:
         return _ana_pop_energies(self, ctx)
+
+    def _pop_reorg_geometries(self, ctx: _AnalysisContext) -> bool:
+        return _ana_pop_reorg_geometries(self, ctx)
 
     def _pop_isosurface(self, ctx: _AnalysisContext) -> bool:
         return _ana_pop_isosurface(self, ctx)
@@ -2014,6 +2034,14 @@ class QuantUIApp:
         # Cube + bundle exports
         self._iso_export_cube_btn.on_click(self._on_iso_export_cube)
         self._iso_cancel_btn.on_click(self._safe_cb(self._on_iso_cancel))
+        # Reorg geometry views (REORG.3): both redraw from data already in
+        # memory, so they respond directly rather than behind an Apply button.
+        for _w in (
+            self._reorg_view_toggle,
+            self._reorg_overlay_pair,
+            self._reorg_exaggerate,
+        ):
+            _w.observe(self._safe_cb(self._on_reorg_view_changed), names="value")
         # PNG capture arrives from the browser, so there is no button to bind
         # here — the viewer's own Save-PNG button posts into this Textarea and
         # ipywidgets syncs it back, firing this observer (ORBX.1).
@@ -3377,6 +3405,9 @@ class QuantUIApp:
 
     def _on_export_pdb(self, btn) -> None:
         _exp_on_export_pdb(self, btn)
+
+    def _on_reorg_view_changed(self, change) -> None:
+        _ana_on_reorg_view_changed(self, change)
 
     def _on_iso_cancel(self, btn) -> None:
         _viz_on_iso_cancel(self, btn)

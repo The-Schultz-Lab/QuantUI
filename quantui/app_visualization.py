@@ -2372,6 +2372,188 @@ def _frame_stepper_controls(
     return bar + f"<script>{js}</script>"
 
 
+def build_reorg_geometry_viewer_html(
+    geometries: list[dict],
+    *,
+    bgcolor: str = "white",
+    width: int = 560,
+    height: int = 420,
+) -> str:
+    """Step through the DISTINCT geometries behind a Marcus 4-point run.
+
+    ``geometries`` is ``[{"label", "atoms", "coordinates", "note"}, ...]``.
+
+    Not four steps. The scheme evaluates four energies on **two** geometries per
+    channel (three across both channels) — E_ion(R_neutral) shares its geometry
+    with E_neutral(R_neutral), and likewise for R_ion. A four-step control would
+    show each geometry twice and invite the reading that all four differ, which
+    is why each step is labelled by geometry with the energies computed on it
+    listed underneath.
+
+    Deliberately NOT animated (user request): λ is a comparison between two
+    states, not a trajectory through them, and looping would imply a path that
+    was never computed. Built on ``_frame_stepper_controls`` so the camera
+    behaviour, offline loading and control styling match the trajectory viewer
+    rather than being reinvented.
+    """
+    import json
+    import re
+
+    from quantui.viz_assets import make_view
+
+    if not geometries:
+        return '<p style="color:#555;padding:8px">No geometries available.</p>'
+
+    blocks = []
+    for g in geometries:
+        atoms, coords = g["atoms"], g["coordinates"]
+        lines = [str(len(atoms)), g.get("label", "")]
+        for sym, xyz in zip(atoms, coords):
+            lines.append(f"{sym} {xyz[0]:.6f} {xyz[1]:.6f} {xyz[2]:.6f}")
+        blocks.append("\n".join(lines))
+
+    view = make_view(width=width, height=height)
+    view.addModelsAsFrames("\n".join(blocks) + "\n", "xyz")
+    view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
+    view.setBackgroundColor(bgcolor)
+    view.zoomTo()
+    view_html = view._make_html()
+
+    m = re.search(r"3dmolviewer_(\w+)", view_html)
+    if m is None or len(geometries) < 2:
+        return _theme.frame_viewer_html(view_html, width=width)
+
+    labels = json.dumps(
+        [g.get("label", f"Geometry {i + 1}") for i, g in enumerate(geometries)]
+    )
+    notes = json.dumps([g.get("note", "") for g in geometries])
+    controls = _frame_stepper_controls(
+        m.group(1),
+        len(geometries),
+        1000,  # unused: loop=False and Play is not the point here
+        label_js=(
+            'var s="<b>"+LBL[i]+"</b>";'
+            'if(NOTE[i]) s+="<br><span style=\'color:#555\'>"+NOTE[i]+"</span>";'
+            "return s;"
+        ),
+        initial_label=geometries[0].get("label", "Geometry 1"),
+        loop=False,
+        ab_at_start="⇄ Compare first/last",
+        ab_other="⇄ Back to first",
+        scrub_title="Step between geometries",
+        start_index=0,
+        extra_decls=f"var LBL={labels}; var NOTE={notes};",
+    )
+    return _theme.frame_viewer_html(view_html, width=width, controls=controls)
+
+
+def build_reorg_overlay_html(
+    reference: dict,
+    other: dict,
+    *,
+    bgcolor: str = "white",
+    width: int = 560,
+    height: int = 420,
+    exaggerate: float = 1.0,
+) -> str:
+    """Both geometries superimposed, with displacement arrows.
+
+    First attempt drew two full ball-and-stick models in solid colours. For a
+    molecule whose geometries nearly coincide — which is most of them, since λ
+    is usually a small relaxation — that produces two interpenetrating solids
+    and no legible answer to "what moved". Reported 2026-08-05.
+
+    So the visual hierarchy now matches the question:
+
+    - the **reference** is a thin grey wireframe — context, not content;
+    - the **relaxed** geometry is a thin coloured wireframe;
+    - **arrows** run from each reference atom to its relaxed position, and they
+      are the actual signal. An arrow has direction and length, which is what a
+      displacement is; two overlapping blobs have neither.
+
+    ``exaggerate`` scales the arrows (not the structures) for relaxations too
+    small to see at 1:1 — the same convention as vibrational-mode arrows. The
+    structures always show true positions, so nothing displayed is fictional;
+    only the arrows are amplified, and the legend says by how much.
+
+    No alignment is performed. Both geometries came from optimizations seeded
+    from the same structure with the same atom ordering, so the displacement is
+    physical; superimposing (Kabsch) would rotate away part of what λ measures.
+    """
+    import re
+
+    from quantui.viz_assets import make_view
+
+    def _xyz(g: dict) -> str:
+        lines = [str(len(g["atoms"])), g.get("label", "")]
+        for sym, c in zip(g["atoms"], g["coordinates"]):
+            lines.append(f"{sym} {c[0]:.6f} {c[1]:.6f} {c[2]:.6f}")
+        return "\n".join(lines) + "\n"
+
+    view = make_view(width=width, height=height)
+    # Thin lines, not spheres and thick sticks: the structures are here to give
+    # the arrows something to hang on, and bulk is exactly what obscured them.
+    view.addModel(_xyz(reference), "xyz")
+    view.setStyle({"model": 0}, {"stick": {"radius": 0.05, "color": "#94a3b8"}})
+    view.addModel(_xyz(other), "xyz")
+    view.setStyle({"model": 1}, {"stick": {"radius": 0.05, "color": "#2166ac"}})
+
+    ref_c = reference["coordinates"]
+    oth_c = other["coordinates"]
+    n_drawn = 0
+    max_d = 0.0
+    if len(ref_c) == len(oth_c):
+        for a, b in zip(ref_c, oth_c):
+            d = sum((float(b[i]) - float(a[i])) ** 2 for i in range(3)) ** 0.5
+            max_d = max(max_d, d)
+            # Skip atoms that did not move: a zero-length arrow renders as a
+            # dot and reads as noise.
+            if d < 1e-4:
+                continue
+            tip = [
+                float(a[i]) + (float(b[i]) - float(a[i])) * exaggerate for i in range(3)
+            ]
+            view.addArrow(
+                {
+                    "start": {"x": float(a[0]), "y": float(a[1]), "z": float(a[2])},
+                    "end": {"x": tip[0], "y": tip[1], "z": tip[2]},
+                    "radius": 0.06,
+                    "radiusRatio": 2.5,
+                    "mid": 0.75,
+                    "color": "#b2182b",
+                }
+            )
+            n_drawn += 1
+
+    view.setBackgroundColor(bgcolor)
+    view.zoomTo()
+    view_html = view._make_html()
+    if re.search(r"3dmolviewer_(\w+)", view_html) is None:
+        return view_html
+
+    scale_note = (
+        "" if exaggerate == 1.0 else f" &mdash; arrows scaled &times;{exaggerate:g}"
+    )
+    moved = (
+        "no atom moved measurably"
+        if n_drawn == 0
+        else f"largest shift {max_d:.3f} &Aring;"
+    )
+    legend = (
+        '<div style="margin:4px 0 2px;font-size:12px;padding:0 2px;line-height:1.5">'
+        '<span style="color:#94a3b8;font-weight:700">&#9473;</span> '
+        f'{reference.get("label", "reference").split(" — ")[0]}'
+        '&ensp;<span style="color:#2166ac;font-weight:700">&#9473;</span> '
+        f'{other.get("label", "other").split(" — ")[0]}'
+        '&ensp;<span style="color:#b2182b;font-weight:700">&#10230;</span> '
+        f"displacement ({moved}){scale_note}"
+        '<br><span style="color:#555">Shown as computed, not superimposed &mdash; '
+        "the displacement is the quantity of interest.</span>"
+        "</div>"
+    )
+    return _theme.frame_viewer_html(view_html, width=width, controls=legend)
+
+
 def _preopt_controls_html(uid: str, n: int, interval_ms: int) -> str:
     """Stepper controls for the pre-opt preview (input → relaxed)."""
     label_js = (

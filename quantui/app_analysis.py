@@ -253,6 +253,110 @@ def pop_energies(app: Any, ctx: Any) -> bool:
     return bool(app._show_orbital_diagram(result))
 
 
+def pop_reorg_geometries(app: Any, ctx: Any) -> bool:
+    """Populate the Geometries panel for a reorganization-energy result.
+
+    Works from a live result OR a saved one by reading the same channel payload
+    both now carry — the shape REORG.1 introduced. That is deliberate: the
+    original bug was two paths reading different things, so this one never had
+    the chance to grow a second reader.
+
+    Returns False when the payload is absent, which is exactly the pre-REORG.1
+    case; the panel then stays unavailable rather than showing an empty viewer,
+    and the results card explains why.
+    """
+    channels, neutral = _reorg_payload(app, ctx)
+    if not channels or not neutral:
+        _set_panel_unavailable_message(
+            app,
+            "Geometries",
+            (
+                "Not available for this result: the per-channel geometries were "
+                "not saved. Re-run the calculation to enable the comparison."
+            ),
+        )
+        return False
+
+    from quantui.reorganization_energy import reorg_geometries
+
+    geoms = reorg_geometries(channels, neutral)
+    if len(geoms) < 2:
+        return False
+    app._reorg_geometries = geoms
+    app._reorg_overlay_pair.options = [
+        (f"{geoms[0]['label'].split(' — ')[0]} vs {g['label'].split(' — ')[0]}", i)
+        for i in range(1, len(geoms))
+        for g in [geoms[i]]
+    ]
+    if app._reorg_overlay_pair.options:
+        app._reorg_overlay_pair.value = app._reorg_overlay_pair.options[0][1]
+    render_reorg_geometries(app)
+    return True
+
+
+def _reorg_payload(app: Any, ctx: Any) -> tuple[list, dict]:
+    """Channel list + neutral geometry, from a live result or a saved one."""
+    live = getattr(ctx, "live_result", None)
+    if live is not None and getattr(live, "channels", None):
+        from quantui.results_storage import _reorg_channels_payload
+
+        payload = _reorg_channels_payload(live) or []
+        neutral = payload[0].get("neutral_geometry") if payload else None
+        return payload, neutral or {}
+
+    result_dir = getattr(ctx, "result_dir", None)
+    if result_dir is not None:
+        try:
+            from quantui import load_result
+
+            data = load_result(result_dir)
+            payload = data.get("reorg_channels") or []
+            neutral = payload[0].get("neutral_geometry") if payload else None
+            return payload, neutral or {}
+        except Exception:  # noqa: BLE001 — a missing panel, never a crash
+            return [], {}
+    return [], {}
+
+
+def render_reorg_geometries(app: Any) -> None:
+    """Draw the current view (stepper or overlay) into the Geometries panel."""
+    geoms = getattr(app, "_reorg_geometries", None)
+    if not geoms:
+        return
+    from quantui.app_visualization import (
+        build_reorg_geometry_viewer_html,
+        build_reorg_overlay_html,
+    )
+
+    bg = app._plotly_theme_colors()["scene_bgcolor"]
+    try:
+        if app._reorg_view_toggle.value == "overlay":
+            idx = int(app._reorg_overlay_pair.value or 1)
+            html = build_reorg_overlay_html(
+                geoms[0],
+                geoms[idx],
+                bgcolor=bg,
+                exaggerate=float(getattr(app._reorg_exaggerate, "value", 1.0)),
+            )
+        else:
+            html = build_reorg_geometry_viewer_html(geoms, bgcolor=bg)
+        app._set_html_output(app._reorg_geom_output, html)
+    except Exception as exc:  # noqa: BLE001
+        app._set_html_output(
+            app._reorg_geom_output,
+            f'<p style="color:#b91c1c;padding:8px">Geometry view failed: {exc}</p>',
+        )
+
+
+def on_reorg_view_changed(app: Any, change: Any = None) -> None:
+    """Toggle between stepper and overlay; the pair picker only applies to one."""
+    is_overlay = app._reorg_view_toggle.value == "overlay"
+    app._reorg_overlay_pair.layout.display = "" if is_overlay else "none"
+    # Only meaningful for the overlay — the stepper shows true positions.
+    app._reorg_exaggerate.layout.display = "" if is_overlay else "none"
+    render_reorg_geometries(app)
+
+
 def pop_isosurface(app: Any, ctx: Any) -> bool:
     """Populate Isosurface availability from orbital state.
 
