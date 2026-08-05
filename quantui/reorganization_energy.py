@@ -83,6 +83,12 @@ class ReorgChannelResult:
     lambda2_hartree: float
     lambda_hartree: float
     converged: bool
+    # REORG.2 — the ion-optimized geometry. It was computed and discarded
+    # before, which made the four energies impossible to interpret after the
+    # fact: lambda measures how far the molecule relaxed on becoming an ion,
+    # and without R_ion there is nothing to compare R_neutral against.
+    # Optional so results loaded from a pre-REORG.2 save still construct.
+    ion_molecule: Optional[Molecule] = None
 
     @property
     def lambda_ev(self) -> float:
@@ -103,6 +109,49 @@ class ReorgChannelResult:
     def label(self) -> str:
         """Human-readable channel label."""
         return "Hole (cation)" if self.kind == "hole" else "Electron (anion)"
+
+
+def geometry_rmsd(a: Molecule, b: Molecule) -> Optional[float]:
+    """Mass-independent RMSD in Angstrom between two geometries, atom-for-atom.
+
+    No alignment is performed, and that is deliberate: both geometries come
+    from optimizations seeded from the same structure with the same atom
+    ordering, so the displacement IS the physical quantity of interest.
+    Superimposing first (Kabsch) would rotate away part of what lambda measures.
+
+    None if the two are not comparable — a readout must never be the reason a
+    result fails to display.
+    """
+    try:
+        import numpy as np
+
+        pa = np.asarray(a.coordinates, dtype=float)
+        pb = np.asarray(b.coordinates, dtype=float)
+        if pa.shape != pb.shape or pa.size == 0:
+            return None
+        return float(np.sqrt(((pa - pb) ** 2).sum(axis=1).mean()))
+    except Exception:  # noqa: BLE001 — see docstring
+        return None
+
+
+def max_atom_displacement(a: Molecule, b: Molecule) -> Optional[tuple[int, float]]:
+    """``(atom_index, distance)`` of the atom that moved furthest, in Angstrom.
+
+    RMSD averages the relaxation away; a single atom moving 0.4 A in an
+    otherwise rigid molecule is the interesting case and the mean hides it.
+    """
+    try:
+        import numpy as np
+
+        pa = np.asarray(a.coordinates, dtype=float)
+        pb = np.asarray(b.coordinates, dtype=float)
+        if pa.shape != pb.shape or pa.size == 0:
+            return None
+        d = np.sqrt(((pa - pb) ** 2).sum(axis=1))
+        i = int(np.argmax(d))
+        return (i, float(d[i]))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 @dataclass
@@ -410,6 +459,7 @@ def run_reorganization_energy(
                 lambda2_hartree=lambda2,
                 lambda_hartree=lambda_total,
                 converged=bool(ion_opt.converged),
+                ion_molecule=ion_mol,
             )
         )
         _emit(

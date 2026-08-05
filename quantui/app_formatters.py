@@ -367,36 +367,176 @@ def format_pes_scan_result(r: Any) -> str:
     )
 
 
+_HARTREE_TO_EV = 27.211386245988
+_HARTREE_TO_KCAL = 627.509474
+
+
+def _attach_relaxation_from_saved(payload: list[dict], data: dict) -> None:
+    """RMSD/displacement for a result loaded from disk.
+
+    The neutral geometry comes from the saved molecule rather than a live
+    result object; everything downstream is the same computation the live card
+    does, so the two cards report identical numbers.
+    """
+    from quantui.molecule import Molecule
+
+    # The neutral geometry travels inside the channel payload — see
+    # _reorg_channels_payload for why it is not read from the top level.
+    geom = next(
+        (c.get("neutral_geometry") for c in payload if c.get("neutral_geometry")), None
+    )
+    if not geom:
+        return
+    try:
+        neutral = Molecule(
+            atoms=list(geom["atoms"]),
+            coordinates=[list(c) for c in geom["coordinates"]],
+            charge=geom.get("charge", 0),
+            multiplicity=geom.get("multiplicity", 1),
+        )
+    except Exception:  # noqa: BLE001 — never break a history card
+        return
+
+    class _Holder:
+        molecule = neutral
+
+    _attach_relaxation(payload, _Holder())
+
+
+def _attach_relaxation(payload: list[dict], result: Any = None) -> None:
+    """Add RMSD / largest-atom-shift to each channel, in place (REORG.4).
+
+    Computed at DISPLAY time from geometries that are already stored, rather
+    than persisted as another number that could drift out of step with the
+    coordinates it describes.
+    """
+    from quantui.molecule import Molecule
+    from quantui.reorganization_energy import geometry_rmsd, max_atom_displacement
+
+    neutral = getattr(result, "molecule", None) if result is not None else None
+    for entry in payload:
+        geom = entry.get("ion_geometry")
+        if neutral is None or not geom:
+            continue
+        try:
+            ion = Molecule(
+                atoms=list(geom["atoms"]),
+                coordinates=[list(c) for c in geom["coordinates"]],
+                charge=geom.get("charge", 0),
+                multiplicity=geom.get("multiplicity", 1),
+            )
+        except Exception:  # noqa: BLE001 — a readout must not break a card
+            continue
+        rmsd = geometry_rmsd(neutral, ion)
+        if rmsd is None:
+            continue
+        entry["relaxation"] = {
+            "rmsd": rmsd,
+            "max_atom": max_atom_displacement(neutral, ion),
+        }
+
+
+def reorg_channels_html(channels: list[dict]) -> str:
+    """Render reorganization-energy channels from PLAIN DATA.
+
+    Both the live card and the History card go through here. They used to have
+    separate implementations — the live one reading attributes off a result
+    object, the history one having no channels at all — which is precisely how
+    the reported bug arose. A single renderer over plain dicts is what stops
+    them drifting again: the live path converts its objects to the same shape
+    the saved file holds, so anything that renders live renders after reload.
+    """
+    if not channels:
+        return ""
+
+    def _label(kind: str) -> str:
+        return {
+            "hole": "Hole transfer (cation)",
+            "electron": "Electron transfer (anion)",
+        }.get(kind, str(kind).title())
+
+    blocks = []
+    for ch in channels:
+        lam = ch.get("lambda_hartree")
+        rows = [
+            (
+                "λ",
+                (
+                    "—"
+                    if lam is None
+                    else f"{lam * _HARTREE_TO_EV:.4f} eV "
+                    f"({lam * _HARTREE_TO_KCAL:.2f} kcal/mol)"
+                ),
+            ),
+            ("λ₁ ion relaxation", _ev(ch.get("lambda1_hartree"))),
+            ("λ₂ neutral relaxation", _ev(ch.get("lambda2_hartree"))),
+            (
+                "Ion state",
+                f"charge {ch.get('ion_charge', 0):+d}, "
+                f"mult {ch.get('ion_multiplicity', '?')}",
+            ),
+        ]
+        # Geometry relaxation (REORG.4): what λ physically measures. Only
+        # present once the ion geometry is saved, so older results simply omit
+        # these rows rather than showing blanks.
+        relax = ch.get("relaxation")
+        if relax:
+            rows.append(("Geometry RMSD", f"{relax['rmsd']:.4f} Å"))
+            if relax.get("max_atom") is not None:
+                idx, dist = relax["max_atom"]
+                rows.append(("Largest atom shift", f"{dist:.4f} Å (atom {idx + 1})"))
+        body = "".join(
+            f'<tr><td style="padding:2px 18px 2px 0;color:#444">{k}</td>'
+            f'<td style="color:#000;font-family:monospace">{v}</td></tr>'
+            for k, v in rows
+        )
+        blocks.append(
+            f'<div style="margin-top:8px">'
+            f'<b style="font-size:13px;color:#166534">{_label(ch.get("kind", ""))}</b>'
+            f'<table style="margin-top:2px;font-size:13px;border-collapse:collapse">'
+            f"{body}</table></div>"
+        )
+    return "".join(blocks)
+
+
+def _ev(hartree: Any) -> str:
+    return "—" if hartree is None else f"{hartree * _HARTREE_TO_EV:.4f} eV"
+
+
+def reorg_missing_data_notice() -> str:
+    """Shown on a reorganization-energy result saved before REORG.1.
+
+    Those runs never wrote their channel data, and it cannot be recovered — λ
+    is two geometry optimizations and four SCF energies. So the card says so
+    and names the remedy, rather than rendering an empty section that reads
+    like a rendering failure.
+
+    Detected by ABSENCE of the payload, not by version or timestamp: a result
+    re-saved or imported from elsewhere would defeat a version cutoff.
+    """
+    return (
+        '<div style="margin-top:8px;padding:8px 10px;border-radius:6px;'
+        'background:#fef3c7;border:1px solid #f59e0b;font-size:13px;color:#78350f">'
+        "<b>⚠ Reorganization-energy details were not saved for this result.</b><br>"
+        "Results produced before QuantUI gained λ persistence did not store the "
+        "per-channel energies or geometries, and they cannot be recovered from "
+        "what was saved. <b>Re-run this calculation</b> to see the λ breakdown, "
+        "the four-point energies and the geometry comparison."
+        "</div>"
+    )
+
+
 def format_reorg_result(r: Any) -> str:
     """Format a reorganization-energy (Marcus 4-point) result card."""
     _conv = "Yes" if r.converged else "No (some steps did not converge)"
     _cc = "green" if r.converged else "#c00"
 
-    def _channel_block(ch: Any) -> str:
-        rows = "".join(
-            f'<tr><td style="padding:2px 18px 2px 0;color:#444">{k}</td>'
-            f'<td style="color:#000;font-family:monospace">{v}</td></tr>'
-            for k, v in [
-                ("λ", f"{ch.lambda_ev:.4f} eV ({ch.lambda_kcal:.2f} kcal/mol)"),
-                ("λ₁ ion relaxation", f"{ch.lambda1_hartree * 27.211386245988:.4f} eV"),
-                (
-                    "λ₂ neutral relaxation",
-                    f"{ch.lambda2_hartree * 27.211386245988:.4f} eV",
-                ),
-                (
-                    "Ion state",
-                    f"charge {ch.ion_charge:+d}, mult {ch.ion_multiplicity}",
-                ),
-            ]
-        )
-        return (
-            f'<div style="margin-top:8px">'
-            f'<b style="font-size:13px;color:#166534">{ch.label}</b>'
-            f'<table style="margin-top:2px;font-size:13px;border-collapse:collapse">'
-            f"{rows}</table></div>"
-        )
+    # Same renderer, same shape as the saved payload — see reorg_channels_html.
+    from quantui.results_storage import _reorg_channels_payload
 
-    _channels_html = "".join(_channel_block(ch) for ch in r.channels)
+    _payload = _reorg_channels_payload(r) or []
+    _attach_relaxation(_payload, r)
+    _channels_html = reorg_channels_html(_payload)
     return (
         f'<div style="background:#f0fff0;border-left:4px solid #4CAF50;'
         f'padding:10px 14px;border-radius:4px;margin:6px 0">'
@@ -483,6 +623,19 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
                 f'border:1px solid {_theme.BORDER}" width="173" height="108" />'
             )
 
+    # Reorganization-energy channels (REORG.1). This is the reported bug: the
+    # card came back without the numbers the calculation exists to produce.
+    # Keyed on the calc type AND the payload, so a reorg result saved before λ
+    # persistence gets an explanation instead of a silently incomplete card.
+    _reorg_html = ""
+    if ct == "reorganization_energy":
+        _channels = data.get("reorg_channels")
+        if _channels:
+            _attach_relaxation_from_saved(_channels, data)
+            _reorg_html = reorg_channels_html(_channels)
+        else:
+            _reorg_html = reorg_missing_data_notice()
+
     return (
         f'<div style="background:#f0fff0;border-left:4px solid #4CAF50;'
         f'padding:10px 14px;border-radius:4px;margin:6px 0;overflow:hidden">'
@@ -491,5 +644,5 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         f'<b>{data["formula"]} &mdash; {data["method"]}/{data["basis"]}</b>'
         f'&ensp;<small style="color:#777">{ts}</small>'
         f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-        f"{_rows}{_extra}</table></div>"
+        f"{_rows}{_extra}</table>{_reorg_html}</div>"
     )
