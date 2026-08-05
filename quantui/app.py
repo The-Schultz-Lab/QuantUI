@@ -340,6 +340,9 @@ from quantui.app_visualization import (
     on_iso_appearance_changed as _viz_on_iso_appearance_changed,
 )
 from quantui.app_visualization import (
+    on_iso_cancel as _viz_on_iso_cancel,
+)
+from quantui.app_visualization import (
     on_iso_generate as _viz_on_iso_generate,
 )
 from quantui.app_visualization import (
@@ -1637,9 +1640,31 @@ class QuantUIApp:
             ("Isosurface", "_pop_isosurface", False),
         ],
         "geometry_opt": [
-            ("Trajectory", "_pop_geo_trajectory", True),
+            # ORDER MATTERS: the FIRST entry whose populator returns True and
+            # carries auto_select=True becomes the default panel (see the rules
+            # above). Isosurface therefore leads (requested 2026-08-04); an
+            # earlier attempt put it last, which did nothing because Trajectory
+            # had already claimed the selection.
+            #
+            # Trajectory keeps auto_select=True as the fallback: when a result
+            # has no orbital data, _pop_isosurface returns False, Isosurface
+            # never activates, and Trajectory becomes the default instead.
+            # ORDER IS LOAD-BEARING TWICE OVER.
+            #
+            # 1. Execution: _pop_energies calls show_orbital_diagram, which is
+            #    what populates _last_orb_mo_coeff / _mol_atom / _mol_basis —
+            #    the very state _pop_isosurface checks. Energies MUST run
+            #    first, or Isosurface reports "required data is missing" on a
+            #    result that has it. (Putting Isosurface first did exactly
+            #    that, 2026-08-04.)
+            # 2. Selection: the FIRST entry with auto_select=True that returns
+            #    True becomes the default panel. Energies is False, so
+            #    Isosurface is the first candidate and opens by default —
+            #    which is the request — while Trajectory keeps True as the
+            #    fallback for results with no orbital data.
             ("Energies", "_pop_energies", False),
-            ("Isosurface", "_pop_isosurface", False),
+            ("Isosurface", "_pop_isosurface", True),
+            ("Trajectory", "_pop_geo_trajectory", True),
         ],
         "frequency": [
             ("Vibrational", "_pop_vibrational", True),
@@ -1988,6 +2013,7 @@ class QuantUIApp:
         )
         # Cube + bundle exports
         self._iso_export_cube_btn.on_click(self._on_iso_export_cube)
+        self._iso_cancel_btn.on_click(self._safe_cb(self._on_iso_cancel))
         # PNG capture arrives from the browser, so there is no button to bind
         # here — the viewer's own Save-PNG button posts into this Textarea and
         # ipywidgets syncs it back, firing this observer (ORBX.1).
@@ -2003,7 +2029,9 @@ class QuantUIApp:
         for _w in (
             self._iso_isovalue_slider,
             self._iso_opacity_slider,
-            self._iso_png_transparent,
+            self._iso_colors_dd,
+            # NOT _iso_png_transparent: it is an export-only option, applied at
+            # capture time. Observing it here would change the live viewer.
         ):
             _w.observe(self._safe_cb(self._on_iso_appearance_changed), names="value")
         self._export_bundle_btn.on_click(self._on_export_bundle)
@@ -3349,6 +3377,9 @@ class QuantUIApp:
 
     def _on_export_pdb(self, btn) -> None:
         _exp_on_export_pdb(self, btn)
+
+    def _on_iso_cancel(self, btn) -> None:
+        _viz_on_iso_cancel(self, btn)
 
     def _on_iso_appearance_changed(self, change) -> None:
         _viz_on_iso_appearance_changed(self, change)

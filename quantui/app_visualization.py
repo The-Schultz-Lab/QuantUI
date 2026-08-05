@@ -1043,10 +1043,14 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
         and app._last_orb_mol_atom is not None
         and app._last_orb_mol_basis is not None
     ):
-        app._orb_iso_output.clear_output()
         app._orb_toggle.value = "HOMO"
         app._orb_iso_controls.layout.display = ""
         app._iso_generate_btn.disabled = False
+        # (2) Show the molecule immediately, so the panel is never empty and the
+        # first isosurface fades in over an existing viewer instead of appearing
+        # in a collapsed one. It also lets the user orient the structure BEFORE
+        # generating — the camera carries across, same scene key.
+        _show_iso_placeholder(app)
     else:
         app._orb_iso_controls.layout.display = "none"
         app._iso_generate_btn.disabled = True
@@ -1080,12 +1084,16 @@ def on_iso_generate(app: Any, btn: Any) -> None:
         _clog.log_event("iso_render_start", orbital_label)
     except Exception:
         pass
-    app._set_html_output(
-        app._orb_iso_output,
-        f'<p style="color:#555;font-style:italic;padding:4px 0">'
-        f"⏳ Generating {orbital_label} cube file and rendering isosurface"
-        f" — this may take 15–30 s…</p>",
-    )
+    _show_cancel(app, True)
+    # (7) Do NOT swap the output here. Replacing a rendered viewer with a text
+    # placeholder collapsed the panel from ~620px to nothing, so the accordion
+    # jumped and the page scrolled — then jumped back when the new surface
+    # arrived. Dimming the existing viewer in place keeps the layout identical.
+    # With no viewer yet (first generate) there is nothing to dim, so fall back
+    # to the message; an empty panel cannot collapse further.
+    # A viewer is always present now — the molecule placeholder fills the panel
+    # before the first cube exists — so this can always dim rather than swap.
+    iso_bridge_busy(app, True)
 
     done = threading.Event()
     # Balance the single _activity_begin above exactly once, across
@@ -1113,6 +1121,8 @@ def on_iso_generate(app: Any, btn: Any) -> None:
             return
         btn.disabled = False
         btn.description = "Generate Isosurface"
+        _show_cancel(app, False)
+        iso_bridge_busy(app, False)
 
     def _run() -> None:
         try:
@@ -1914,11 +1924,14 @@ def render_vib_mode(
 
 
 def iso_render_options(app: Any) -> dict:
-    """Current isosurface appearance settings, read straight off the widgets.
+    """Current isosurface settings, read straight off the widgets.
 
-    One place, so the first render, the appearance-slider re-render and the
-    theme re-render cannot disagree about what the viewer should look like —
-    which they would the moment any of the three grew a fourth option.
+    One place, so the first render and every live update agree.
+
+    ``transparent_bg`` is deliberately absent: transparency is an EXPORT
+    property, applied by ``__quantuiIsoCapture`` at the moment of capture and
+    undone immediately after. Putting it here would change the live viewer,
+    which is exactly what the user asked it not to do.
     """
 
     def _val(name: str, default):
@@ -1926,8 +1939,7 @@ def iso_render_options(app: Any) -> dict:
 
         The coercion is the point. A widget that exists but holds something
         uncoercible — a partially-built app, a stub — would otherwise raise out
-        of here and take the whole render with it, which is a poor trade for a
-        slider position.
+        of here and take the whole render with it.
         """
         raw = getattr(getattr(app, name, None), "value", default)
         try:
@@ -1936,9 +1948,9 @@ def iso_render_options(app: Any) -> dict:
             return default
 
     return {
-        "isovalue": float(_val("_iso_isovalue_slider", 0.02)),
-        "opacity": float(_val("_iso_opacity_slider", 0.85)),
-        "transparent_bg": bool(_val("_iso_png_transparent", False)),
+        "isovalue": _val("_iso_isovalue_slider", 0.02),
+        "opacity": _val("_iso_opacity_slider", 0.85),
+        "color_scheme": _val("_iso_colors_dd", "blue-red"),
         "bgcolor": app._plotly_theme_colors()["scene_bgcolor"],
         "capture_class": (
             _ORB_PNG_INBOX_CLASS
@@ -1948,30 +1960,127 @@ def iso_render_options(app: Any) -> dict:
     }
 
 
-def rerender_iso_from_cube(app: Any) -> bool:
-    """Redraw the isosurface from the cube already on disk. Returns success.
-
-    The point of this function is what it does NOT do: it never re-runs
-    cubegen. Isovalue, opacity, transparency and theme are all properties of
-    the *render*, not of the grid, so changing any of them is a sub-second
-    redraw of a file that already exists — while regenerating would be 15-30 s,
-    and up to ~4.6x that at the finest grid. If that ever stops being true, the
-    appearance sliders have to stop being sliders.
-    """
-    cube = getattr(app, "_last_cube_path", None)
-    if cube is None:
-        return False
+def _show_iso_placeholder(app: Any) -> None:
+    """Molecule-only viewer in the isosurface panel, before any cube exists."""
+    # On the Analysis tab app._molecule is usually None — the result came from
+    # history, not the Calculate-tab molecule — so this silently did nothing and
+    # the panel stayed empty. Prefer what the analysis viewer is already showing.
+    mol = (
+        getattr(app, "_analysis_displayed_molecule", None)
+        or getattr(app, "_last_vib_molecule", None)
+        or getattr(app, "_molecule", None)
+    )
+    if mol is None:
+        app._orb_iso_output.clear_output()
+        return
     try:
-        if not Path(cube).exists():
-            return False
-        from quantui.orbital_visualization import render_orbital_isosurface_py3dmol
+        from quantui.orbital_visualization import render_molecule_placeholder_py3dmol
 
-        html = render_orbital_isosurface_py3dmol(Path(cube), **iso_render_options(app))
-        app._set_html_output(app._orb_iso_output, html)
-        return True
-    except Exception as exc:  # noqa: BLE001 — never break a slider drag
-        logger.warning("isosurface re-render failed: %s", exc)
-        return False
+        app._set_html_output(
+            app._orb_iso_output,
+            render_molecule_placeholder_py3dmol(
+                mol, bgcolor=app._plotly_theme_colors()["scene_bgcolor"]
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 — a placeholder must never block
+        logger.debug("iso placeholder failed: %s", exc)
+        app._orb_iso_output.clear_output()
+
+
+def _show_cancel(app: Any, visible: bool) -> None:
+    btn = getattr(app, "_iso_cancel_btn", None)
+    if btn is not None:
+        btn.layout.display = "" if visible else "none"
+
+
+def iso_bridge_busy(app: Any, busy: bool) -> None:
+    """Dim (or restore) the live viewer while a new cube is computed."""
+    bridge = getattr(app, "_iso_js_bridge", None)
+    if bridge is None:
+        return
+    from IPython.display import Javascript, display
+
+    js = (
+        "(function(){"  # noqa: UP031 — JS is brace-dense
+        "var seq=(window.__quantuiIsoBusySeq||0)+1;window.__quantuiIsoBusySeq=seq;"
+        "var n=0;function go(){n++;"
+        # Abandon if a newer busy call has been issued. The retry loop waits up
+        # to 2 s for the hook to exist, so a busy(true) issued while no viewer
+        # was present kept polling and then fired against the NEXT viewer —
+        # after busy(false) had already run. That is the overlay that appeared
+        # right after the surface and never went away (reported 2026-08-04).
+        "if(window.__quantuiIsoBusySeq!==seq){return;}"
+        "if(window.__quantuiIsoBusy){window.__quantuiIsoBusy(%s);}"
+        "else if(n<40){setTimeout(go,50);}}go();})();" % ("true" if busy else "false")
+    )
+    try:
+        bridge.clear_output(wait=True)
+        with bridge:
+            display(Javascript(js))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("iso busy update failed: %s", exc)
+
+
+def on_iso_cancel(app: Any, btn: Any = None) -> None:
+    """Abandon the in-flight isosurface generation.
+
+    cubegen is a blocking PySCF call that cannot be interrupted, so this does
+    not stop the computation — it bumps ``_iso_render_token``, which every
+    completion path already checks, so the worker's result is discarded when it
+    arrives. From the user's side that is what cancel means: the controls come
+    back now and the stale surface never appears.
+    """
+    app._iso_render_token = int(getattr(app, "_iso_render_token", 0)) + 1
+    _show_cancel(app, False)
+    iso_bridge_busy(app, False)
+    gen = getattr(app, "_iso_generate_btn", None)
+    if gen is not None:
+        gen.disabled = False
+        gen.description = "Generate Isosurface"
+    sp = getattr(app, "_iso_spinner", None)
+    if sp is not None:
+        sp.layout.display = "none"
+    try:
+        app._activity_end(kind="compute")
+    except Exception:  # noqa: BLE001 — cancelling must never raise
+        pass
+    status = getattr(app, "_iso_export_status", None)
+    if status is not None:
+        status.value = '<span style="color:#555">Cancelled.</span>'
+
+
+def iso_bridge_update(app: Any, **opts: Any) -> None:
+    """Push appearance changes to the LIVE viewer — no Python re-render.
+
+    This is what keeps the camera. A Python re-render replaces the viewer
+    wholesale, so the orientation the user rotated into is lost (GOTCHAS:
+    "Camera state does NOT persist across atomic HTML swaps"); the JS side
+    instead saves getView()/setView() around a surface rebuild.
+
+    It also stops the panel collapsing and the page jumping on every slider
+    tweak, because no output is swapped at all.
+    """
+    bridge = getattr(app, "_iso_js_bridge", None)
+    if bridge is None:
+        return
+    import json
+
+    from IPython.display import Javascript, display
+
+    payload = json.dumps(opts)
+    # Retry-until-present mirrors _vib_bridge_set_mode: at the moment a slider
+    # fires, the viewer may still be loading its async 3Dmol bundle.
+    js = (
+        "(function(){var n=0;function go(){n++;"  # noqa: UP031 — JS is brace-dense
+        "if(window.__quantuiIsoUpdate){window.__quantuiIsoUpdate(%s);}"
+        "else if(n<40){setTimeout(go,50);}}go();})();" % payload
+    )
+    try:
+        bridge.clear_output(wait=True)
+        with bridge:
+            display(Javascript(js))
+    except Exception as exc:  # noqa: BLE001 — a slider must never raise
+        logger.debug("iso bridge update failed: %s", exc)
 
 
 def update_iso_enclosed_label(app: Any) -> None:
@@ -1998,9 +2107,19 @@ def update_iso_enclosed_label(app: Any) -> None:
 
 
 def on_iso_appearance_changed(app: Any, change: dict | None = None) -> None:
-    """Isovalue / opacity / transparency changed — redraw, no recompute."""
-    if rerender_iso_from_cube(app):
-        update_iso_enclosed_label(app)
+    """Isovalue / opacity / colours changed — update the live viewer in place."""
+    from quantui.orbital_visualization import orbital_colors
+
+    opts = iso_render_options(app)
+    pos, neg = orbital_colors(str(opts["color_scheme"]))
+    iso_bridge_update(
+        app,
+        iso=opts["isovalue"],
+        op=opts["opacity"],
+        pos=pos,
+        neg=neg,
+    )
+    update_iso_enclosed_label(app)
 
 
 def rerender_3d_scenes_for_theme(app: Any) -> None:
@@ -2038,20 +2157,15 @@ def rerender_3d_scenes_for_theme(app: Any) -> None:
     # (the isosurface reads its colour via iso_render_options below)
 
     # ── Orbital isosurface ──────────────────────────────────────────────
-    cube = getattr(app, "_last_cube_path", None)
-    if cube is not None:
-        try:
-            if Path(cube).exists():
-                from quantui.orbital_visualization import (
-                    render_orbital_isosurface_py3dmol,
-                )
-
-                html = render_orbital_isosurface_py3dmol(
-                    Path(cube), **iso_render_options(app)
-                )
-                app._set_html_output(app._orb_iso_output, html)
-        except Exception as exc:  # noqa: BLE001 — a theme toggle must never raise
-            logger.warning("isosurface theme re-render failed: %s", exc)
+    # A background colour is not geometry, so this is one JS call on the live
+    # viewer rather than a re-render. Re-rendering was measurably slow — the
+    # viewer HTML is megabytes at the finer grids — and it also threw away the
+    # camera on every theme toggle.
+    try:
+        if getattr(app, "_last_cube_path", None) is not None:
+            iso_bridge_update(app, bg=app._plotly_theme_colors()["scene_bgcolor"])
+    except Exception as exc:  # noqa: BLE001 — a theme toggle must never raise
+        logger.warning("isosurface theme update failed: %s", exc)
 
     # ── Optimization trajectory ─────────────────────────────────────────
     # Only when the panel is actually populated: re-rendering an empty

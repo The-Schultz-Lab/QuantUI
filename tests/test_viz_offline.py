@@ -95,7 +95,8 @@ def test_orbital_isosurface_renderer_is_cdn_free(tmp_path):
     html = ov.render_orbital_isosurface_py3dmol(cube, isovalue=0.02)
     assert _CDN not in html
     # Two lobes (M-ORBVIZ contract) + loads vendored 3Dmol offline.
-    assert html.count("addVolumetricData") == 2
+    # Count CALLS, not mentions: the surrounding comment names the API too.
+    assert html.count("vw.addVolumetricData(") == 2
     assert "data:text/javascript;base64," in html
 
 

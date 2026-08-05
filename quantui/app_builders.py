@@ -15,7 +15,13 @@ from quantui import theme as _theme
 from quantui.help_content import HELP_TOPICS
 from quantui.live_log import LiveLog
 from quantui.orbital_visualization import (
+    DEFAULT_ORBITAL_COLORS as _DEFAULT_ORBITAL_COLORS,
+)
+from quantui.orbital_visualization import (
     ISO_RESOLUTION_OPTIONS as _ISO_RESOLUTION_OPTIONS,
+)
+from quantui.orbital_visualization import (
+    ORBITAL_COLOR_OPTIONS as _ORBITAL_COLOR_OPTIONS,
 )
 
 # Class on the hidden Textarea that receives PNG data URIs from the
@@ -1844,7 +1850,9 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             ),
             app._orb_toggle,
             app._orb_index_input,
-            app._orb_iso_output,
+            # The viewer is NOT here. It sits below the Generate button in
+            # iso_body, so the button stays next to the orbital selector rather
+            # than being pushed ~620px down the page by the rendered viewer.
         ],
         layout=layout_fn(display="none", margin="8px 0 0 0"),
     )
@@ -1875,6 +1883,17 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     # result dir under a friendly name (HOMO.cube / LUMO.cube / etc.).
     # Disabled until the first isosurface generation populates
     # ``app._last_cube_path``.
+    # Cancel abandons an in-flight generation. cubegen itself cannot be
+    # interrupted mid-call, so this bumps the render token — the worker's
+    # result is discarded on arrival and the UI is freed immediately, which is
+    # what "cancel" means to the person waiting.
+    app._iso_cancel_btn = widgets.Button(
+        description="Cancel",
+        icon="times",
+        button_style="warning",
+        tooltip="Abandon this isosurface generation and restore the controls.",
+        layout=layout_fn(width="110px", display="none", margin="8px 0 4px 0"),
+    )
     app._iso_export_cube_btn = widgets.Button(
         description="Export cube",
         icon="download",
@@ -1924,6 +1943,13 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._iso_enclosed_label = widgets.HTML(
         value="", layout=layout_fn(margin="0 0 0 6px")
     )
+    app._iso_colors_dd = widgets.Dropdown(
+        options=list(_ORBITAL_COLOR_OPTIONS),
+        value=_DEFAULT_ORBITAL_COLORS,
+        description="Colours:",
+        style={"description_width": "70px"},
+        layout=layout_fn(width="330px"),
+    )
     app._iso_opacity_slider = widgets.FloatSlider(
         value=0.85,
         min=0.1,
@@ -1946,14 +1972,19 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._iso_png_transparent = widgets.Checkbox(
         value=False,
-        description="Transparent background",
+        description="Transparent background (export only)",
         indent=False,
         tooltip=(
-            "Render with no background so the figure drops onto a slide or a "
-            "coloured page. The viewer previews exactly what will be exported."
+            "The saved PNG has no background, so the figure drops onto a slide "
+            "or a coloured page. The viewer on screen is unchanged — "
+            "transparency is applied at capture, then undone."
         ),
         layout=layout_fn(width="330px"),
     )
+    # Read by the capture JS (see _PNG_CAPTURE_JS), which looks for
+    # "<inbox-class>-transparent input". That keeps the decision on the browser
+    # side at the moment of capture, with no kernel round-trip.
+    app._iso_png_transparent.add_class(f"{_ORB_PNG_INBOX_CLASS}-transparent")
     # DPI is metadata (the PNG pHYs chunk): it sets the PRINT size, not the
     # pixel count. 300 dpi is the usual journal floor. Labelled with the
     # resulting print width so the number means something.
@@ -1980,6 +2011,12 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._orb_png_inbox.add_class(_ORB_PNG_INBOX_CLASS)
 
+    # Hidden Output that carries one-shot Javascript to the live viewer
+    # (isovalue / opacity / colours / background). Mirrors _vib_js_bridge.
+    app._iso_js_bridge = widgets.Output(
+        layout=layout_fn(width="0px", height="0px", visibility="hidden")
+    )
+
     app._iso_export_status = widgets.HTML(
         value="", layout=layout_fn(margin="0 0 0 8px")
     )
@@ -1998,12 +2035,24 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 "Optimization first, then click <b>Generate</b>.</p>"
             ),
             app._orb_iso_controls,
+            widgets.HBox(
+                [
+                    app._iso_generate_btn,
+                    app._iso_cancel_btn,
+                    app._iso_spinner,
+                    app._iso_export_cube_btn,
+                    app._iso_export_status,
+                ],
+                layout=layout_fn(align_items="center", gap="6px"),
+            ),
+            app._orb_iso_output,
             app._iso_resolution_dd,
             widgets.HBox(
                 [app._iso_isovalue_slider, app._iso_enclosed_label],
                 layout=layout_fn(align_items="center"),
             ),
             app._iso_opacity_slider,
+            app._iso_colors_dd,
             widgets.HTML(
                 '<p style="color:#555;font-size:12px;margin:8px 0 2px">'
                 "<b>PNG export</b> — the Save PNG button under the viewer "
@@ -2012,22 +2061,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             app._iso_png_name,
             app._iso_png_dpi,
             app._iso_png_transparent,
-            widgets.HBox(
-                [
-                    app._iso_generate_btn,
-                    app._iso_spinner,
-                    app._iso_export_cube_btn,
-                    app._iso_export_status,
-                ],
-                layout=layout_fn(align_items="center", gap="6px"),
-            ),
-            widgets.HTML(
-                '<p style="color:#555;font-size:12px;margin:6px 0 0">'
-                "A <b>Save PNG</b> button appears under the isosurface itself. It "
-                "captures the view exactly as you have rotated it, which is why it "
-                "lives on the viewer rather than up here.</p>"
-            ),
             app._orb_png_inbox,
+            app._iso_js_bridge,
         ],
         layout=layout_fn(padding="8px"),
     )

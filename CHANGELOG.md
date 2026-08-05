@@ -7,6 +7,61 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-04
+
+### Added
+
+- **Save orbital isosurfaces as images.** A **Save PNG** button sits under the
+  viewer and captures exactly what you are looking at, camera and all. Options
+  for the filename, the DPI written into the file (72–600; this sets the
+  *print* size, not the pixel count), and a transparent background for dropping
+  a figure onto a slide — the transparency applies only to the saved file, so
+  the viewer on screen is unchanged.
+- **Tunable isosurface resolution** — Coarse/Medium/Fine/Very fine grids,
+  remembered between launches.
+- **Live isosurface controls**: isovalue, opacity and a colour-scheme dropdown
+  (GaussView orange/blue, Avogadro/Jmol red/blue, journal yellow/blue, and
+  more). All three update the existing viewer without recomputing anything, so
+  the orientation you rotated into is preserved.
+- **The isovalue is explained in chemical terms.** Beside the slider, QuantUI
+  reports what fraction of the orbital's density the surface actually encloses
+  — "encloses 98.4% of the density" — because an amplitude threshold is rarely
+  the question anyone has.
+- **A Cancel button** for isosurface generation. The underlying PySCF call
+  cannot be interrupted, so the computation finishes in the background, but its
+  result is discarded and the controls come back immediately.
+- **The molecule is shown before you generate anything**, so the panel is never
+  empty — and you can orient the structure first, since that view carries into
+  the isosurface.
+
+### Changed
+
+- **Orbital isosurfaces are py3Dmol only.** The Plotly renderer is no longer
+  selectable for them: it downsamples the volume by construction, and it cannot
+  carry the new image export. Plotly remains available for the molecule viewers.
+- **Exported animations now match what you saw.** Vibrational modes and
+  optimization trajectories both export from py3Dmol — the renderer that drew
+  them on screen — instead of being rebuilt in Plotly. Exported files are also
+  now complete HTML documents declaring UTF-8, so labels no longer risk
+  mojibake when opened from disk.
+- **For geometry optimizations, the Orbital Isosurface panel opens by default**
+  on the Analysis tab.
+- **Isosurface viewers are framed** like the other 3-D viewers, and generating a
+  new one dims the current one in place rather than collapsing the panel.
+
+### Fixed
+
+- **3-D backgrounds follow the theme.** The isosurface, vibrational and
+  trajectory viewers, and the Analysis-tab molecule viewer, kept their old
+  background when switching Light/Dark until something happened to redraw them.
+- **The page no longer jumps** when generating an isosurface.
+- **Isosurface changes now apply correctly.** Adjusting the isovalue, opacity or
+  colours previously layered a new surface on top of the old one, so raising the
+  isovalue appeared to do nothing, lowering opacity did nothing, and switching
+  palettes made the surface progressively brighter.
+- Very large orbital grids are dramatically lighter in the browser — the cube
+  data was being embedded three times per render.
+
 ## [0.5.2] - 2026-08-03
 
 ### Fixed
@@ -508,7 +563,8 @@ Initial public scaffolding of the QuantUI package: `quantui` package with
 `calculator.py`, basic notebook launcher, Apptainer container definition,
 MIT license, and project metadata.
 
-[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.4.1...v0.5.0

@@ -387,11 +387,16 @@ class TestRenderOrbitalIsosurfacePy3Dmol:
         assert len(html) > 0
 
     def test_adds_two_volumetric_lobes(self, minimal_cube_file):
-        # Both the positive and negative isosurface calls must be embedded.
+        # Both lobes must still be created. The surfaces are now built in JS
+        # from a single embedded cube (see _ISO_VIEWER_JS), so the negative
+        # lobe reads -state.iso rather than a literal -0.02 — the isovalue is
+        # live-updatable and cannot be baked into the call.
         html = render_orbital_isosurface_py3dmol(minimal_cube_file, isovalue=0.02)
-        assert html.count("addVolumetricData") == 2
-        assert "0.02" in html  # +isovalue
-        assert "-0.02" in html  # -isovalue
+        # Count CALLS, not mentions — the surrounding comment names the API
+        # too, and a comment is not a lobe.
+        assert html.count("vw.addVolumetricData(") == 2
+        assert "iso:0.02" in html.replace(" ", "")  # initial +isovalue
+        assert "isoval: -state.iso" in html  # the mirrored lobe
 
     def test_embeds_offline_no_cdn(self, minimal_cube_file):
         # py3Dmol's _make_html must not pull 3Dmol.js from a remote CDN —
