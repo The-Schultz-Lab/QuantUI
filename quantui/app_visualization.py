@@ -2167,6 +2167,18 @@ def rerender_3d_scenes_for_theme(app: Any) -> None:
     except Exception as exc:  # noqa: BLE001 — a theme toggle must never raise
         logger.warning("isosurface theme update failed: %s", exc)
 
+    # ── Reorganization-energy geometries ────────────────────────────────
+    # Same bake-in as every other py3Dmol viewer: bgcolor is painted into the
+    # scene at render time. Redrawing is cheap here — the geometries are a few
+    # dozen coordinates already in memory, no file read and no recomputation.
+    try:
+        if getattr(app, "_reorg_geometries", None):
+            from quantui.app_analysis import render_reorg_geometries
+
+            render_reorg_geometries(app)
+    except Exception as exc:  # noqa: BLE001 — a theme toggle must never raise
+        logger.warning("reorg geometry theme re-render failed: %s", exc)
+
     # ── Optimization trajectory ─────────────────────────────────────────
     # Only when the panel is actually populated: re-rendering an empty
     # trajectory viewer would build one on a tab the user has never opened.

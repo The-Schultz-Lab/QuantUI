@@ -424,3 +424,99 @@ class TestTheAnalysisTabIsWiredUp:
         src = inspect.getsource(_reorg_payload)
         assert "_reorg_channels_payload" in src  # live path builds the saved shape
         assert 'data.get("reorg_channels")' in src  # history path reads it
+
+
+class TestLambdaComparisonAcrossHistory:
+    """Screening candidates by λ is the workflow reorganization energy exists
+    for — a single λ is hard to judge without others beside it."""
+
+    @staticmethod
+    def _entry(name, lam_hole, lam_electron=None, with_geom=True):
+        neutral = {
+            "atoms": ["O", "H", "H"],
+            "coordinates": [[0, 0, 0], [0.96, 0, 0], [-0.24, 0.93, 0]],
+        }
+
+        def _ch(kind, lam, disp):
+            e = {
+                "kind": kind,
+                "lambda_hartree": lam,
+                "ion_charge": 1 if kind == "hole" else -1,
+            }
+            if with_geom:
+                e["neutral_geometry"] = neutral
+                e["ion_geometry"] = {
+                    "atoms": ["O", "H", "H"],
+                    "coordinates": [
+                        [0, 0, 0],
+                        [0.96 + disp, 0, 0],
+                        [-0.24, 0.93, 0],
+                    ],
+                }
+            return e
+
+        chans = [_ch("hole", lam_hole, 0.07)]
+        if lam_electron is not None:
+            chans.append(_ch("electron", lam_electron, 0.03))
+        return (
+            name,
+            {
+                "formula": name,
+                "method": "B3LYP",
+                "basis": "6-31G*",
+                "calc_type": "reorganization_energy",
+                "reorg_channels": chans,
+            },
+        )
+
+    def test_each_channel_gets_its_own_column(self):
+        # λ is per-channel, so it cannot be folded into the general
+        # one-row-per-result comparison without inventing a combined number
+        # that has no physical meaning.
+        from quantui.app_formatters import reorg_comparison_html
+
+        html = reorg_comparison_html(
+            [self._entry("H2O", 0.03, 0.02), self._entry("C6H6", 0.012, 0.009)]
+        )
+        assert "λ hole" in html and "λ electron" in html
+
+    def test_values_are_shown_in_ev(self):
+        from quantui.app_formatters import reorg_comparison_html
+
+        html = reorg_comparison_html([self._entry("H2O", 0.03)])
+        assert "0.8163" in html  # 0.03 Ha in eV
+
+    def test_a_result_without_lambda_is_listed_not_dropped(self):
+        # Silently omitting it would look like it was never selected.
+        from quantui.app_formatters import reorg_comparison_html
+
+        old = ("Old", {"formula": "Old", "calc_type": "reorganization_energy"})
+        html = reorg_comparison_html([self._entry("H2O", 0.03), old])
+        assert "Old" in html
+        assert "re-run" in html.lower()
+
+    def test_nothing_renders_when_no_result_has_channels(self):
+        from quantui.app_formatters import reorg_comparison_html
+
+        assert reorg_comparison_html([]) == ""
+        assert reorg_comparison_html([("x", {"formula": "x"})]) == ""
+
+    def test_the_table_says_which_direction_is_better(self):
+        # A bare number invites the wrong reading; λ is one of the few
+        # quantities where lower is unambiguously the goal.
+        from quantui.app_formatters import reorg_comparison_html
+
+        assert "Lower λ" in reorg_comparison_html([self._entry("H2O", 0.03)])
+
+
+class TestGeometryViewersFollowTheTheme:
+    def test_the_theme_rerender_covers_the_reorg_geometries(self):
+        # Same bake-in as every other py3Dmol viewer: bgcolor is painted into
+        # the scene at render time, so nothing re-reads it on a theme toggle.
+        import inspect
+
+        from quantui.app_visualization import rerender_3d_scenes_for_theme
+
+        assert "render_reorg_geometries" in inspect.getsource(
+            rerender_3d_scenes_for_theme
+        )

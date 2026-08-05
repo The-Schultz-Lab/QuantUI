@@ -436,6 +436,90 @@ def _attach_relaxation(payload: list[dict], result: Any = None) -> None:
         }
 
 
+def reorg_comparison_html(entries: list[tuple[str, dict]]) -> str:
+    """Side-by-side λ table for several saved reorganization-energy results.
+
+    ``entries`` is ``[(label, loaded_result_dict), ...]``.
+
+    This is the workflow reorganization energy exists for: screening candidate
+    molecules by how much they reorganize. One λ in isolation is hard to judge —
+    it is only meaningful against other candidates — so a comparison view is
+    arguably the point of the calculation rather than a nicety.
+
+    Rendered as its own table rather than as extra columns on the general
+    comparison: λ is per-CHANNEL (hole and electron), so it does not fit a
+    one-row-per-result grid without either duplicating rows or inventing a
+    combined number that has no physical meaning.
+
+    Results with no channel payload are listed with a note rather than skipped —
+    silently omitting them would look like they were never selected.
+    """
+    if not entries:
+        return ""
+
+    kinds: list[str] = []
+    for _, data in entries:
+        for ch in data.get("reorg_channels") or []:
+            if ch.get("kind") and ch["kind"] not in kinds:
+                kinds.append(ch["kind"])
+    if not kinds:
+        return ""
+
+    # theme.BORDER, not a hand-picked grey. Dark mode is a whole-page colour
+    # inversion, so a light grey rule inverts to near-black on a near-black page
+    # and vanishes — the defect THEME.5 fixed, and which this table reintroduced
+    # until test_retired_border_greys_are_gone_from_in_app_chrome caught it.
+    th = f"text-align:left;padding:6px 12px;border-bottom:2px solid {_theme.BORDER}"
+    td = f"padding:5px 12px;border-bottom:1px solid {_theme.BORDER}"
+    head = (
+        f'<th style="{th}">Result</th><th style="{th}">Method / basis</th>'
+        + "".join(f'<th style="{th}">λ {k} (eV)</th>' for k in kinds)
+        + f'<th style="{th}">Relaxation (Å)</th>'
+    )
+
+    rows = []
+    for label, data in entries:
+        channels = data.get("reorg_channels") or []
+        if not channels:
+            rows.append(
+                f'<tr><td style="{td}">{label}</td>'
+                f'<td style="{td}" colspan="{len(kinds) + 2}">'
+                '<span style="color:#92400e">λ not saved — re-run to compare'
+                "</span></td></tr>"
+            )
+            continue
+        _attach_relaxation_from_saved(channels, data)
+        by_kind = {c.get("kind"): c for c in channels}
+        cells = []
+        for k in kinds:
+            ch = by_kind.get(k)
+            lam = ch.get("lambda_hartree") if ch else None
+            cells.append(
+                f'<td style="{td};font-family:monospace">'
+                + ("—" if lam is None else f"{lam * _HARTREE_TO_EV:.4f}")
+                + "</td>"
+            )
+        rmsds = [c["relaxation"]["rmsd"] for c in channels if c.get("relaxation")]
+        relax = f"{max(rmsds):.4f}" if rmsds else "—"
+        rows.append(
+            f'<tr><td style="{td}">{label}</td>'
+            f'<td style="{td}">{data.get("method", "?")}/{data.get("basis", "?")}</td>'
+            + "".join(cells)
+            + f'<td style="{td};font-family:monospace">{relax}</td></tr>'
+        )
+
+    return (
+        '<div style="margin-top:14px">'
+        '<h4 style="margin:0 0 4px">Reorganization energy</h4>'
+        '<p style="color:#555;font-size:12px;margin:0 0 6px">'
+        "Lower λ means less geometric reorganization on charging — generally "
+        "favourable for charge transport. Relaxation is the largest per-channel "
+        "RMSD between the neutral and ion geometries.</p>"
+        '<table style="border-collapse:collapse;font-size:13px">'
+        f"<tr>{head}</tr>{''.join(rows)}</table></div>"
+    )
+
+
 def reorg_channels_html(channels: list[dict]) -> str:
     """Render reorganization-energy channels from PLAIN DATA.
 
