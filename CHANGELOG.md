@@ -7,6 +7,46 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-05
+
+### Fixed
+
+- **Reorganization-energy results now survive History.** Reloading one from
+  History showed the calculation's headline numbers as missing — λ, the
+  four-point energies and the per-channel breakdown were never written to disk,
+  so there was nothing to redisplay. Both the live and History result cards now
+  render from the same saved data, so anything visible during a run is visible
+  after reloading it.
+  **Results saved before this cannot be recovered** — λ requires two geometry
+  optimizations and four SCF energies. Those results now say so on the card and
+  tell you to re-run, rather than appearing silently incomplete.
+- **3-D backgrounds follow the theme** in the new geometry viewers, matching the
+  fix applied to the other viewers in 0.6.0.
+
+### Added
+
+- **A Geometries panel** for reorganization energy, on the Analysis tab — which
+  previously showed nothing at all for this calculation type. Step through the
+  distinct geometries behind the four energies, or overlay two of them with
+  arrows marking how each atom moved. The arrows can be scaled ×1–×10 for small
+  relaxations; the structures always show true computed positions.
+- **Geometry relaxation on the result card** — RMSD and the largest single-atom
+  shift between the neutral and ion geometries, which is what λ physically
+  measures.
+- **Compare λ across saved results.** Selecting several reorganization-energy
+  runs in the Compare tab now shows a λ table with a column per channel, for
+  screening candidates by how much they reorganize.
+
+### Changed
+
+- The NCShare GPU diagnostic notebook now reports the **CPU affinity mask**
+  alongside the core count, and states plainly when CPU timings cannot be
+  trusted. A job can be granted 6 cores while still *seeing* 192; whether that
+  matters depends on how the scheduler constrains it, and the core count alone
+  cannot distinguish the two cases.
+- `apptainer/README.md` records the first verified H200 run — driver, compute
+  capability, partition, and the measured CPU/GPU crossover.
+
 ## [0.6.0] - 2026-08-04
 
 ### Added
@@ -563,7 +603,8 @@ Initial public scaffolding of the QuantUI package: `quantui` package with
 `calculator.py`, basic notebook launcher, Apptainer container definition,
 MIT license, and project metadata.
 
-[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.0...v0.5.1

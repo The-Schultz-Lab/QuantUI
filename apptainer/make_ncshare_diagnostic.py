@@ -137,11 +137,34 @@ record("hardware", quantui_version=quantui.__version__,
        nvidia_smi_ok=ok, slurm={k: slurm.get(k) for k in slurm})
 record("allocation", cpus=os.cpu_count(),
        omp_num_threads=os.environ.get("OMP_NUM_THREADS", "(unset)"))
-print("\\ncpus visible:", os.cpu_count(),
-      "| OMP_NUM_THREADS:", os.environ.get("OMP_NUM_THREADS", "(unset)"))
-if not os.environ.get("OMP_NUM_THREADS"):
-    print("  NOTE: unset means OpenMP grabs every core it can see, including")
-    print("        cores belonging to other jobs on a shared node.")
+# ⚠️ The number that matters is the AFFINITY MASK, not cpu_count(). Slurm can
+# constrain a job two ways: a cgroup CPU *quota* (you get N cores' worth of
+# time, but the mask still shows every core on the node) or a cpuset (the mask
+# itself shrinks). Under a quota, OpenMP sees all 192 cores, spawns 192 threads
+# and thrashes them across your 6 cores' worth of quota — so the CPU leg runs
+# SLOWER than a properly configured run, and every GPU speedup measured against
+# it is flattering. Found on NCShare 2026-08-05: 6 cores requested,
+# os.cpu_count() == 192, OMP_NUM_THREADS unset.
+affinity = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else None
+requested = os.environ.get("SLURM_CPUS_PER_TASK")
+print("\\ncpus on node   :", os.cpu_count())
+print("affinity mask  :", affinity)
+print("slurm requested:", requested or "(not under slurm)")
+print("OMP_NUM_THREADS:", os.environ.get("OMP_NUM_THREADS", "(unset)"))
+record("allocation", affinity=affinity, slurm_cpus_per_task=requested)
+
+_omp = os.environ.get("OMP_NUM_THREADS")
+if not _omp and affinity and os.cpu_count() and affinity < os.cpu_count():
+    print("\\n  OK: the affinity mask is smaller than the node, so OpenMP sees")
+    print("      only your allocation even with OMP_NUM_THREADS unset.")
+elif not _omp:
+    print("\\n  \\u26a0 CPU TIMINGS BELOW ARE NOT TRUSTWORTHY.")
+    print("      OpenMP can see every core on this node but Slurm has given you")
+    print(f"      {requested or 'fewer'}. It will spawn one thread per visible core and")
+    print("      thrash them, making the CPU leg slower than it should be — and")
+    print("      every GPU speedup correspondingly flattering.")
+    print("      Fix, then re-run this notebook:")
+    print("        export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK")
 '''
 
 CELL_TRAPS = '''# ── 2. Environment traps ─────────────────────────────────────────────────
@@ -442,6 +465,15 @@ for label, mol_name, method, basis in SYSTEMS:
 record("crossover", systems=rows)
 print("\\nThe crossover is where speedup passes 1.0x. Below it the GPU loses to")
 print("launch and transfer overhead; above it the arithmetic dominates.")
+print("\\n\\u26a0 The speedup is only meaningful WITH the CPU allocation stated.")
+_aff = REPORT["sections"].get("allocation", {}).get("affinity")
+_gpus = os.environ.get("SLURM_GPUS_ON_NODE")
+print(f"   These numbers are 1 GPU vs {_aff} CPU cores.")
+print("   This node has ~12 physical cores per GPU, so a proportional-share")
+print("   comparison uses ~12 — and a default portal session gives fewer.")
+print("   Run this notebook at BOTH allocations: the crossover SHAPE is the")
+print("   same either way, but the numbers move, and 'why only N cores?' is")
+print("   the first thing an audience will ask.")
 
 wins = [r for r in rows if r.get("speedup", 0) > 1.05]
 if not wins:
@@ -499,6 +531,8 @@ print(f"compute cap : {hw.get('compute_capability')}")
 print(f"quantui     : {hw.get('quantui_version')}")
 print(f"cupy/driver : {s.get('cupy', {}).get('version')} / "
       f"driver API {s.get('cupy', {}).get('driver')}")
+alloc = s.get("allocation", {})
+print(f"cpu cores   : {alloc.get('affinity')} (of {alloc.get('cpus')} on the node)")
 print(f"partition   : {hw.get('slurm', {}).get('SLURM_JOB_PARTITION')}")
 print(f"gres        : {hw.get('slurm', {}).get('SLURM_JOB_GRES')}")
 print(f"all passed  : {REPORT['all_passed']}")
