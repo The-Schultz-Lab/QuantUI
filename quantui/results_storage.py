@@ -104,6 +104,63 @@ def _opt_str_list(x: object) -> Optional[list]:
         return None
 
 
+def _reorg_channels_payload(result) -> Optional[list]:
+    """Serialise ReorgChannelResult objects, or None for other calc types.
+
+    Geometries are stored alongside the energies so the four-point breakdown
+    can be *interpreted* later, not merely displayed: lambda is a measure of
+    relaxation, and without R_ion there is nothing to compare R_neutral to.
+    """
+    channels = getattr(result, "channels", None)
+    if not channels:
+        return None
+    # The neutral geometry rides along with the channels rather than being
+    # looked up elsewhere in the saved file. The top-level schema stores
+    # atom_symbols but not coordinates, so a history card had no reliable way
+    # to reach R_neutral — and without it the relaxation cannot be computed.
+    # Self-contained payload also means one thing to read, and one to verify.
+    neutral = getattr(result, "molecule", None)
+    neutral_geom = (
+        None
+        if neutral is None
+        else {
+            "atoms": list(neutral.atoms),
+            "coordinates": [list(c) for c in neutral.coordinates],
+            "charge": getattr(neutral, "charge", 0),
+            "multiplicity": getattr(neutral, "multiplicity", 1),
+        }
+    )
+    out = []
+    for ch in channels:
+        entry = {
+            "kind": getattr(ch, "kind", None),
+            "ion_charge": _opt_int(getattr(ch, "ion_charge", None)),
+            "ion_multiplicity": _opt_int(getattr(ch, "ion_multiplicity", None)),
+            "e_neutral_at_neutral": _opt_float(
+                getattr(ch, "e_neutral_at_neutral", None)
+            ),
+            "e_ion_at_ion": _opt_float(getattr(ch, "e_ion_at_ion", None)),
+            "e_ion_at_neutral": _opt_float(getattr(ch, "e_ion_at_neutral", None)),
+            "e_neutral_at_ion": _opt_float(getattr(ch, "e_neutral_at_ion", None)),
+            "lambda1_hartree": _opt_float(getattr(ch, "lambda1_hartree", None)),
+            "lambda2_hartree": _opt_float(getattr(ch, "lambda2_hartree", None)),
+            "lambda_hartree": _opt_float(getattr(ch, "lambda_hartree", None)),
+            "converged": bool(getattr(ch, "converged", False)),
+        }
+        if neutral_geom is not None:
+            entry["neutral_geometry"] = neutral_geom
+        ion_mol = getattr(ch, "ion_molecule", None)
+        if ion_mol is not None:
+            entry["ion_geometry"] = {
+                "atoms": list(ion_mol.atoms),
+                "coordinates": [list(c) for c in ion_mol.coordinates],
+                "charge": getattr(ion_mol, "charge", 0),
+                "multiplicity": getattr(ion_mol, "multiplicity", 1),
+            }
+        out.append(entry)
+    return out
+
+
 def save_result(
     result: object,
     pyscf_log: str = "",
@@ -185,6 +242,16 @@ def save_result(
 
     data: dict = {
         "_schema_version": _SCHEMA_VERSION,
+        # Reorganization-energy channels (M-REORG REORG.1). A FIRST-CLASS field,
+        # not a generic `extras` bag: lambda is the headline number of this
+        # calculation type, and burying it would leave it undiscoverable and
+        # unqueryable. None for every other calc type.
+        #
+        # This is the bug the student reported: without it, a reorg result
+        # reloaded from History had no channel data to render, so the card came
+        # back missing the very numbers the calculation exists to produce. The
+        # display was never at fault — nothing was ever written.
+        "reorg_channels": _reorg_channels_payload(result),
         "timestamp": ts,
         "calc_type": calc_type,
         "formula": getattr(result, "formula", "?"),

@@ -715,8 +715,24 @@ def on_compare(app: Any, btn: Any, *, layout_fn: Any) -> None:
                 )
     if not summaries:
         return
+    # λ comparison (M-REORG): screening candidates by reorganization energy is
+    # the workflow this calculation type exists for, and a single λ is hard to
+    # judge without others beside it.
+    _reorg_entries = []
+    for d in valid_dirs:
+        try:
+            _rd = load_result(d)
+            if _rd.get("calc_type") == "reorganization_energy":
+                _reorg_entries.append((_rd.get("formula", d.name), _rd))
+        except Exception:  # noqa: BLE001 — already reported above
+            pass
+
     with app.compare_output:
         display(HTML(comparison_table_html(summaries)))
+        if _reorg_entries:
+            from quantui.app_formatters import reorg_comparison_html
+
+            display(HTML(reorg_comparison_html(_reorg_entries)))
         if len(summaries) > 1:
             try:
                 import matplotlib.pyplot as plt

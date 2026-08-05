@@ -83,6 +83,12 @@ class ReorgChannelResult:
     lambda2_hartree: float
     lambda_hartree: float
     converged: bool
+    # REORG.2 — the ion-optimized geometry. It was computed and discarded
+    # before, which made the four energies impossible to interpret after the
+    # fact: lambda measures how far the molecule relaxed on becoming an ion,
+    # and without R_ion there is nothing to compare R_neutral against.
+    # Optional so results loaded from a pre-REORG.2 save still construct.
+    ion_molecule: Optional[Molecule] = None
 
     @property
     def lambda_ev(self) -> float:
@@ -103,6 +109,92 @@ class ReorgChannelResult:
     def label(self) -> str:
         """Human-readable channel label."""
         return "Hole (cation)" if self.kind == "hole" else "Electron (anion)"
+
+
+def reorg_geometries(channels: list, neutral_geometry: dict) -> list[dict]:
+    """The DISTINCT geometries behind a run, each labelled with its energies.
+
+    Takes the saved-payload shape (plain dicts), so the live and History paths
+    build the identical list — the same one-renderer discipline that fixed
+    REORG.1.
+
+    Deduplicated by construction: R_neutral is shared by every channel and
+    appears once. A hole+electron run therefore yields three entries
+    (neutral, cation, anion), not six, and not the four the four-point name
+    suggests. Each entry names which of the four energies were evaluated on it,
+    which is what connects the picture back to λ.
+    """
+    out: list[dict] = []
+    if neutral_geometry:
+        # Every channel evaluates E_neutral and E_ion at R_neutral, so list the
+        # neutral energy once and note the ion energies that share this geometry.
+        shared = ", ".join(f"E_{c.get('kind', '?')}(R_neutral)" for c in channels)
+        out.append(
+            {
+                "label": "R_neutral — optimized neutral",
+                "atoms": list(neutral_geometry["atoms"]),
+                "coordinates": [list(c) for c in neutral_geometry["coordinates"]],
+                "note": ("E_neutral(R_neutral)" + (f", {shared}" if shared else "")),
+            }
+        )
+    for ch in channels:
+        geom = ch.get("ion_geometry")
+        if not geom:
+            continue
+        kind = ch.get("kind", "ion")
+        charge = ch.get("ion_charge", 0)
+        out.append(
+            {
+                "label": f"R_{kind} — optimized {kind} ion (charge {charge:+d})",
+                "atoms": list(geom["atoms"]),
+                "coordinates": [list(c) for c in geom["coordinates"]],
+                "note": f"E_{kind}(R_{kind}), E_neutral(R_{kind})",
+            }
+        )
+    return out
+
+
+def geometry_rmsd(a: Molecule, b: Molecule) -> Optional[float]:
+    """Mass-independent RMSD in Angstrom between two geometries, atom-for-atom.
+
+    No alignment is performed, and that is deliberate: both geometries come
+    from optimizations seeded from the same structure with the same atom
+    ordering, so the displacement IS the physical quantity of interest.
+    Superimposing first (Kabsch) would rotate away part of what lambda measures.
+
+    None if the two are not comparable — a readout must never be the reason a
+    result fails to display.
+    """
+    try:
+        import numpy as np
+
+        pa = np.asarray(a.coordinates, dtype=float)
+        pb = np.asarray(b.coordinates, dtype=float)
+        if pa.shape != pb.shape or pa.size == 0:
+            return None
+        return float(np.sqrt(((pa - pb) ** 2).sum(axis=1).mean()))
+    except Exception:  # noqa: BLE001 — see docstring
+        return None
+
+
+def max_atom_displacement(a: Molecule, b: Molecule) -> Optional[tuple[int, float]]:
+    """``(atom_index, distance)`` of the atom that moved furthest, in Angstrom.
+
+    RMSD averages the relaxation away; a single atom moving 0.4 A in an
+    otherwise rigid molecule is the interesting case and the mean hides it.
+    """
+    try:
+        import numpy as np
+
+        pa = np.asarray(a.coordinates, dtype=float)
+        pb = np.asarray(b.coordinates, dtype=float)
+        if pa.shape != pb.shape or pa.size == 0:
+            return None
+        d = np.sqrt(((pa - pb) ** 2).sum(axis=1))
+        i = int(np.argmax(d))
+        return (i, float(d[i]))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 @dataclass
@@ -410,6 +502,7 @@ def run_reorganization_energy(
                 lambda2_hartree=lambda2,
                 lambda_hartree=lambda_total,
                 converged=bool(ion_opt.converged),
+                ion_molecule=ion_mol,
             )
         )
         _emit(

@@ -3016,6 +3016,10 @@ class TestAnaSwitcher:
             "IR Spectrum",
             "PES Scan",
             "Isosurface",
+            # Added 2026-08-05 with M-REORG REORG.7 — reorganization_energy
+            # previously had no _PANEL_REGISTRY entry at all, so the Analysis
+            # tab populated nothing for those runs.
+            "Geometries",
             "UV-Vis",
             "NMR",
         ]

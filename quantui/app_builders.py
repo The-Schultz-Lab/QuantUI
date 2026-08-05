@@ -2073,6 +2073,58 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._iso_accordion.set_title(0, "Orbital Isosurface")
     app._iso_accordion.selected_index = None
 
+    # ── Reorganization-energy geometries (M-REORG REORG.3) ──────────────
+    # Two views of the same data, because they answer different questions:
+    # stepping shows what each geometry looks like, overlaying shows what
+    # MOVED — and displacement is what λ actually measures.
+    app._reorg_geom_output = widgets.Output(
+        layout=layout_fn(min_height="470px", overflow="hidden")
+    )
+    app._reorg_view_toggle = widgets.ToggleButtons(
+        options=[("Step through", "step"), ("Overlay", "overlay")],
+        value="step",
+        style={"button_width": "120px"},
+        layout=layout_fn(margin="0 0 6px 0"),
+    )
+    app._reorg_overlay_pair = widgets.Dropdown(
+        options=[],
+        description="Compare:",
+        style={"description_width": "70px"},
+        layout=layout_fn(width="380px", display="none"),
+    )
+    # λ relaxations are often a few hundredths of an Ångström — real, and
+    # invisible at 1:1. Scaling the ARROWS (never the structures) is the same
+    # convention vibrational-mode displays use, so nothing shown is fictional.
+    app._reorg_exaggerate = widgets.Dropdown(
+        options=[("True scale (×1)", 1.0), ("×3", 3.0), ("×5", 5.0), ("×10", 10.0)],
+        value=1.0,
+        description="Arrows:",
+        style={"description_width": "70px"},
+        layout=layout_fn(width="380px", display="none"),
+    )
+    app._reorg_geom_body = widgets.VBox(
+        [
+            widgets.HTML(
+                '<p style="color:#555;font-size:12px;margin:0 0 8px">'
+                "The Marcus 4-point scheme evaluates <b>four energies on two "
+                "geometries per channel</b> — the optimized neutral and the "
+                "optimized ion. λ is how far the molecule relaxed between "
+                "them.</p>"
+            ),
+            app._reorg_view_toggle,
+            app._reorg_overlay_pair,
+            app._reorg_exaggerate,
+            app._reorg_geom_output,
+        ],
+        layout=layout_fn(padding="8px"),
+    )
+    app._reorg_geom_accordion = widgets.Accordion(
+        children=[app._reorg_geom_body],
+        layout=layout_fn(display="none", margin="8px 0"),
+    )
+    app._reorg_geom_accordion.set_title(0, "Geometries (λ relaxation)")
+    app._reorg_geom_accordion.selected_index = None
+
     app._uv_mode_toggle = widgets.ToggleButtons(
         options=["Stick", "Broadened"],
         value="Stick",
@@ -2281,6 +2333,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             app.vib_accordion,
             app._ir_accordion,
             app._iso_accordion,
+            # Creating the accordion and registering it in _PANEL_META is not
+            # enough — it also has to be a child of this VBox or it can never
+            # render. Missed on the first pass (2026-08-05): the panel existed,
+            # the registry knew about it, and the Analysis tab showed nothing.
+            app._reorg_geom_accordion,
             app._tddft_accordion,
             app._nmr_accordion,
         ]
