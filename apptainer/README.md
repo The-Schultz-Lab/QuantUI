@@ -550,6 +550,44 @@ notebook JSON:
 python apptainer/make_ncshare_diagnostic.py
 ```
 
+### ✅ Verified on NCShare H200, 2026-08-05
+
+The image and this diagnostic have been run end to end on real hardware — all
+seven checks green, `gpu_used: true`, negative control flipping correctly.
+Recorded so the next build has a known-good pairing to compare against:
+
+| | |
+| --- | --- |
+| GPU | NVIDIA H200, 143771 MiB, compute capability 9.0 |
+| Driver | **580.126.20** (CuPy reports driver API 13000 against runtime 12090) |
+| Partition / node | `gpu` / `compute-gpu-02` |
+| QuantUI | 0.6.0, `cuda12x` wheels |
+
+The driver/runtime pairing is the point: a 580-series driver running `cuda12x`
+wheels is exactly the backward-compatible combination that made `cuda12x` the
+right choice over `cuda13x`, which would have hard-failed on the 570-series
+driver the hardware notes originally listed.
+
+**Measured crossover** (1 GPU vs 6 CPU cores, affinity-confirmed):
+
+| System | GPU | CPU | Speedup |
+| --- | --- | --- | --- |
+| H₂O / STO-3G | 1.80 s | 0.35 s | 0.20× |
+| H₂O / cc-pVDZ | 2.72 s | 0.48 s | 0.18× |
+| C₆H₆ / 6-31G | 2.69 s | 0.77 s | 0.29× |
+| C₆H₆ / cc-pVDZ | 2.86 s | 2.74 s | **0.96× — crossover** |
+| C₆H₆ / cc-pVTZ | 7.07 s | 42.41 s | **6.00×** |
+
+GPU wall time barely moves across the first four — that is fixed launch and
+transfer overhead dominating. Only at cc-pVTZ does the arithmetic grow enough
+for the device to matter.
+
+⚠️ **Quote the CPU allocation with any speedup.** These are 1 GPU vs 6 cores;
+the node has ~12 physical cores per GPU, so a proportional-share comparison
+uses ~12 and would show a smaller factor. Run the diagnostic at both — the
+crossover *shape* is identical, but "why only 6 cores?" is the first question
+an audience asks, and a number without its denominator invites it.
+
 ### On a cluster
 
 ```bash

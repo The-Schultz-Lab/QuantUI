@@ -465,6 +465,15 @@ for label, mol_name, method, basis in SYSTEMS:
 record("crossover", systems=rows)
 print("\\nThe crossover is where speedup passes 1.0x. Below it the GPU loses to")
 print("launch and transfer overhead; above it the arithmetic dominates.")
+print("\\n\\u26a0 The speedup is only meaningful WITH the CPU allocation stated.")
+_aff = REPORT["sections"].get("allocation", {}).get("affinity")
+_gpus = os.environ.get("SLURM_GPUS_ON_NODE")
+print(f"   These numbers are 1 GPU vs {_aff} CPU cores.")
+print("   This node has ~12 physical cores per GPU, so a proportional-share")
+print("   comparison uses ~12 — and a default portal session gives fewer.")
+print("   Run this notebook at BOTH allocations: the crossover SHAPE is the")
+print("   same either way, but the numbers move, and 'why only N cores?' is")
+print("   the first thing an audience will ask.")
 
 wins = [r for r in rows if r.get("speedup", 0) > 1.05]
 if not wins:
@@ -522,6 +531,8 @@ print(f"compute cap : {hw.get('compute_capability')}")
 print(f"quantui     : {hw.get('quantui_version')}")
 print(f"cupy/driver : {s.get('cupy', {}).get('version')} / "
       f"driver API {s.get('cupy', {}).get('driver')}")
+alloc = s.get("allocation", {})
+print(f"cpu cores   : {alloc.get('affinity')} (of {alloc.get('cpus')} on the node)")
 print(f"partition   : {hw.get('slurm', {}).get('SLURM_JOB_PARTITION')}")
 print(f"gres        : {hw.get('slurm', {}).get('SLURM_JOB_GRES')}")
 print(f"all passed  : {REPORT['all_passed']}")
