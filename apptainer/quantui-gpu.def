@@ -23,7 +23,7 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
     # immutable artifact that anyone can `pip download` and diff. It is also
     # the provenance story worth demonstrating: the image records a version
     # someone else can install, not a SHA from one person's working tree.
-    QUANTUI_VERSION=0.5.2
+    QUANTUI_VERSION=0.6.0
 
 %help
   QuantUI — GPU image (PySCF + gpu4pyscf on CUDA 12.x)

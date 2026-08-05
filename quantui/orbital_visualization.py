@@ -18,11 +18,14 @@ Two capabilities, each with progressively heavier dependencies:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
+
+from quantui import theme as _theme
 
 logger = logging.getLogger(__name__)
 
@@ -767,7 +770,56 @@ def generate_cube_from_arrays(
 # resolution regardless of molecule size, so the volume is strided down to this
 # cap at render time to keep the figure payload bounded; the saved .cube keeps
 # full resolution.
+# Named grid presets (M-ORBEXPORT ORBX.2). cubegen cost scales as nx*ny*nz,
+# so these are roughly 0.3x / 1x / 2.4x / 4.6x the work of the 60^3 default.
+ISO_RESOLUTION_PRESETS: dict[str, int] = {
+    "coarse": 40,
+    "medium": 60,
+    "fine": 80,
+    "very fine": 100,
+}
+# Labels carry the grid and a plain adjective. The precise cost multipliers
+# they used to quote were noise at the point of choosing — the ordering is what
+# the user is actually deciding between, and the real wait depends on the
+# molecule and basis anyway.
+ISO_RESOLUTION_OPTIONS: list[tuple[str, str]] = [
+    ("Coarse (40³) — fastest", "coarse"),
+    ("Medium (60³) — default", "medium"),
+    ("Fine (80³) — slower", "fine"),
+    ("Very fine (100³) — slowest", "very fine"),
+]
+DEFAULT_ISO_RESOLUTION: str = "medium"
+
 _MAX_ISOSURFACE_POINTS = 48_000
+
+# ⚠️ The two-knob problem, and which knob matters where.
+#
+# There are two independent resolution controls: the cubegen grid (real
+# fidelity, and what lands in the saved .cube) and the render stride below
+# (display only). Raising the grid without raising the cap would make the user
+# wait longer and then throw the extra detail away.
+#
+# BUT that only applies to the PLOTLY path. py3Dmol — the primary orbital
+# renderer — isosurfaces the cube in the browser at full resolution and never
+# strides, so there a finer grid is visible immediately. The cap exists solely
+# to bound the Plotly figure payload.
+#
+# So the cap scales with the chosen grid, preserving the same fraction of
+# detail the 60^3 default keeps, with a ceiling: past a few hundred thousand
+# points a Plotly Isosurface trace becomes painful to interact with, and a
+# fallback renderer that locks up the tab is worse than one that is smooth and
+# slightly coarse.
+_MAX_ISOSURFACE_POINTS_CEILING = 250_000
+
+
+def max_render_points(grid_points: int) -> int:
+    """Render-stride cap appropriate to a *grid_points*³ cubegen grid.
+
+    Keeps the fraction of retained detail constant relative to the 60³ default
+    rather than the absolute count, so "fine" actually looks finer.
+    """
+    scaled = _MAX_ISOSURFACE_POINTS * (max(1, grid_points) / 60.0) ** 3
+    return int(min(_MAX_ISOSURFACE_POINTS_CEILING, max(_MAX_ISOSURFACE_POINTS, scaled)))
 
 
 def parse_cube_file(cube_path: Path) -> dict:
@@ -826,6 +878,36 @@ def parse_cube_file(cube_path: Path) -> dict:
     }
 
 
+def enclosed_density_fraction(cube_path: Path, isovalue: float) -> Optional[float]:
+    """Fraction of the orbital's probability density inside |psi| >= *isovalue*.
+
+    An isovalue is an amplitude threshold on the wavefunction, which is not an
+    intuitive quantity — the question people actually have is "how much of the
+    orbital am I looking at?". That is the integral of |psi|^2 over the region
+    the surface encloses, divided by the total, and it is a straight sum over
+    the cube grid that already exists on disk.
+
+    Returned as a fraction in [0, 1], or None if the cube cannot be read. The
+    caller shows it next to the slider; it must never be the reason a render
+    fails, hence the broad catch.
+    """
+    try:
+        cube = parse_cube_file(Path(cube_path))
+        data = np.asarray(cube["data"], dtype=float)
+        # Voxel volume = |a . (b x c)| for the three step vectors. Constant, so
+        # it cancels in the ratio — computed anyway to keep the intent readable
+        # and in case a caller ever wants an absolute integral.
+        density = data * data
+        total = float(density.sum())
+        if total <= 0.0:
+            return None
+        inside = float(density[np.abs(data) >= float(isovalue)].sum())
+        return max(0.0, min(1.0, inside / total))
+    except Exception as exc:  # noqa: BLE001 — a readout must never break a render
+        logger.debug("enclosed_density_fraction failed: %s", exc)
+        return None
+
+
 def _build_molecule_overlay_data(atoms: list[tuple[int, float, float, float]]) -> dict:
     """Build marker and bond segments from cube atom records."""
     atom_x: List[float] = []
@@ -872,6 +954,162 @@ def _build_molecule_overlay_data(atoms: list[tuple[int, float, float, float]]) -
     }
 
 
+# Named phase-colour pairs (M-ORBEXPORT ORBX.6). These are conventions people
+# recognise from other software, not arbitrary picks, which is why they are
+# presets rather than only a colour picker.
+ORBITAL_COLOR_SCHEMES: dict[str, tuple[str, str]] = {
+    "blue-red": ("#2166ac", "#b2182b"),
+    "orange-blue": ("#e08214", "#2166ac"),
+    "yellow-blue": ("#e6c619", "#2b4b9b"),
+    "green-purple": ("#1b7837", "#762a83"),
+    "teal-magenta": ("#01807e", "#c51b7d"),
+}
+ORBITAL_COLOR_OPTIONS: list[tuple[str, str]] = [
+    ("Blue / Red — Avogadro, Jmol", "blue-red"),
+    ("Orange / Blue — GaussView", "orange-blue"),
+    ("Yellow / Blue — journal figures", "yellow-blue"),
+    ("Green / Purple", "green-purple"),
+    ("Teal / Magenta", "teal-magenta"),
+]
+DEFAULT_ORBITAL_COLORS: str = "blue-red"
+
+
+def orbital_colors(scheme: str) -> tuple[str, str]:
+    """(positive, negative) hex pair for *scheme*, falling back to the default."""
+    return ORBITAL_COLOR_SCHEMES.get(
+        scheme, ORBITAL_COLOR_SCHEMES[DEFAULT_ORBITAL_COLORS]
+    )
+
+
+# Builds the viewer and registers the live-update bridge.
+#
+# ⚠️ The cube is embedded ONCE, as a JS string, and every 3Dmol call is made
+# from it client-side. The obvious implementation — view.addModel(cube) plus two
+# view.addVolumetricData(cube) from Python — embeds the payload THREE times,
+# which at the 100^3 grid means ~39 MB of HTML per render (measured
+# 2026-08-04). One copy is not a micro-optimisation here.
+#
+# Doing the work in JS is also what makes the controls live. Isovalue, opacity,
+# colours and background can then be changed on the existing viewer, so the
+# camera the user rotated into survives — a Python re-render cannot preserve it,
+# because it replaces the whole viewer (see GOTCHAS: "Camera state does NOT
+# persist across atomic HTML swaps").
+_ISO_VIEWER_JS = """
+(function(){
+  var UID="__UID__", DATA=__DATA__, FMT=__FMT__;
+  var WITH_SURFACES=__WITH_SURFACES__, SCENE=__SCENE__;
+  var state={iso:__ISO__, op:__OP__, pos:__POS__, neg:__NEG__, bg:__BG__};
+  function v(){ return window["viewer_"+UID]; }
+
+  // ⚠️ Isosurfaces are SHAPES, not surfaces. viewer.addVolumetricData() routes
+  // to addIsosurface(), which does this.shapes.push(...) — so
+  // removeAllSurfaces() iterates this.surfaces, finds nothing, and removes
+  // nothing. Using it meant every update stacked another layer on the old one:
+  // a lower isovalue engulfed the previous surface (looked like it worked), a
+  // higher one hid inside it (looked dead), and stacked translucent layers read
+  // as steadily more opaque. Reported 2026-08-04.
+  //
+  // So the shapes are tracked explicitly and removed by reference. removeShape
+  // is exact; removeAllShapes() would also take out anything else ever added.
+  var shapes=[];
+  function surfaces(){
+    var vw=v(); if(!vw){ return; }
+    for(var i=0;i<shapes.length;i++){
+      try{ vw.removeShape(shapes[i]); }catch(e){}
+    }
+    shapes=[];
+    shapes.push(vw.addVolumetricData(DATA,"cube",
+      {isoval: state.iso, color: state.pos, opacity: state.op}));
+    shapes.push(vw.addVolumetricData(DATA,"cube",
+      {isoval: -state.iso, color: state.neg, opacity: state.op}));
+  }
+
+  function build(){
+    var vw=v();
+    if(!vw){ setTimeout(build,50); return; }
+    vw.addModel(DATA,FMT);
+    vw.setStyle({}, {__STYLE__:{}});
+    if(WITH_SURFACES){ surfaces(); }
+    vw.setBackgroundColor(state.bg);
+    vw.zoomTo();
+    // Restore the orientation the previous viewer had, but only for the same
+    // scene: carrying a camera onto a different molecule would frame it
+    // arbitrarily. SCENE is the atom block, so switching ORBITALS keeps the
+    // view (the common case) while switching MOLECULES re-frames.
+    // A freshly built viewer is never busy. Bumping the sequence invalidates
+    // any in-flight busy(true) from the previous viewer, so a stale retry can
+    // never land on this one and leave it dimmed with nothing to clear it.
+    window.__quantuiIsoBusySeq=(window.__quantuiIsoBusySeq||0)+1;
+    var saved=window.__quantuiIsoLastView;
+    if(saved && saved.key===SCENE){
+      try{ vw.setView(saved.view); }catch(e){}
+    }
+    vw.render();
+  }
+
+  // Called when a generate starts, i.e. the last moment this viewer exists.
+  function stash(){
+    var vw=v(); if(!vw){ return; }
+    try{ window.__quantuiIsoLastView={key:SCENE, view:vw.getView()}; }catch(e){}
+  }
+
+  // Live update. Camera is untouched unless the caller asks for a rebuild, and
+  // even then getView/setView carries it across — changing an isovalue must
+  // not throw away an orientation the user chose.
+  window["__quantuiIsoUpdate_"+UID] = function(opts){
+    var vw=v(); if(!vw){ return false; }
+    var geom=false;
+    if(opts.iso!==undefined && opts.iso!==state.iso){ state.iso=opts.iso; geom=true; }
+    if(opts.op!==undefined && opts.op!==state.op){ state.op=opts.op; geom=true; }
+    if(opts.pos!==undefined && opts.pos!==state.pos){ state.pos=opts.pos; geom=true; }
+    if(opts.neg!==undefined && opts.neg!==state.neg){ state.neg=opts.neg; geom=true; }
+    if(opts.bg!==undefined){ state.bg=opts.bg; vw.setBackgroundColor(state.bg); }
+    if(geom){
+      var cam=null;
+      try{ cam=vw.getView(); }catch(e){}
+      surfaces();
+      if(cam){ try{ vw.setView(cam); }catch(e){} }
+    }
+    vw.render();
+    return true;
+  };
+  // Last viewer to load owns the unqualified name; the bridge uses it so the
+  // kernel does not have to track uids.
+  window.__quantuiIsoUpdate = window["__quantuiIsoUpdate_"+UID];
+  // (7) Busy state WITHOUT an output swap. Replacing the viewer with a
+  // "Generating..." message collapsed the panel from ~620px to nothing, so the
+  // accordion jumped and the page scrolled. Dimming the existing surface keeps
+  // the layout identical and still reads as busy.
+  window["__quantuiIsoBusy_"+UID] = function(on){
+    if(on){ stash(); }   // (1) capture the camera before the viewer is replaced
+    var host=document.getElementById("3dmolviewer_"+UID);
+    if(!host){ return false; }
+    host.style.transition="opacity 0.25s ease";
+    host.style.opacity = on ? "0.25" : "1";
+    var tag=document.getElementById("orb_busy_"+UID);
+    if(tag){ tag.style.display = on ? "block" : "none"; }
+    return true;
+  };
+  window.__quantuiIsoBusy = window["__quantuiIsoBusy_"+UID];
+  window.__quantuiIsoCapture = function(transparent){
+    var vw=v(); if(!vw || !vw.pngURI){ return null; }
+    if(!transparent){ return vw.pngURI(); }
+    // Transparent EXPORT without a transparent VIEW: drop the background,
+    // capture, put it back. The user asked for the preview to stay opaque.
+    var uri=null;
+    try{
+      vw.setBackgroundColor(state.bg, 0.0); vw.render();
+      uri=vw.pngURI();
+    } finally {
+      vw.setBackgroundColor(state.bg, 1.0); vw.render();
+    }
+    return uri;
+  };
+  build();
+})();
+"""
+
+
 def render_orbital_isosurface_py3dmol(
     cube_path: Path,
     *,
@@ -879,64 +1117,233 @@ def render_orbital_isosurface_py3dmol(
     opacity: float = 0.85,
     width: int = 760,
     height: int = 620,
-    pos_color: str = "blue",
-    neg_color: str = "red",
+    color_scheme: str = DEFAULT_ORBITAL_COLORS,
     bgcolor: str = "white",
     style: str = "stick",
+    capture_class: str = "",
 ) -> str:
-    """Render an orbital isosurface from a cube file via py3Dmol.
+    """Interactive orbital isosurface, with live client-side controls.
 
-    Unlike :func:`plot_cube_isosurface` (Plotly), py3Dmol isosurfaces the cube
-    *in the browser* at full resolution, so there is no Python-side volume
-    downsample and the payload is just the cube text. Both lobes are drawn:
-    ``+isovalue`` (``pos_color``) and ``-isovalue`` (``neg_color``).
-
-    Returns HTML via py3Dmol's ``_make_html``. The viewer is built through
-    :func:`quantui.viz_assets.make_view`, so it loads 3Dmol.js from the
-    vendored bundle (the page bootstrap) rather than the CDN — see
-    ``viz_assets`` for why this matters offline.
+    Emits an empty py3Dmol viewer plus one JS block that embeds the cube a
+    single time and does all the 3Dmol work in the browser. See ``_ISO_VIEWER_JS``
+    for why that matters (payload size, and camera-preserving live updates).
 
     Parameters
     ----------
-    cube_path : Path
-        Path to a Gaussian ``.cube`` file (read at full resolution).
-    isovalue : float
-        Isosurface threshold; both ``+`` and ``-`` lobes are drawn.
-    opacity : float
-        Surface opacity (0-1).
-    width, height : int
-        Viewer size in pixels.
-    pos_color, neg_color : str
-        Lobe colors for the positive and negative isosurfaces.
-    bgcolor : str
-        Viewer background color.
-    style : str
-        py3Dmol style for the embedded atoms (e.g. ``"stick"``).
-
-    Returns
-    -------
-    str
-        Self-contained HTML for the interactive viewer.
+    isovalue, opacity
+        Initial surface threshold and transparency. Both are changeable live via
+        ``window.__quantuiIsoUpdate`` without rebuilding the viewer.
+    color_scheme
+        Key into :data:`ORBITAL_COLOR_SCHEMES`.
+    bgcolor
+        Scene background. Note the EXPORT background is chosen at capture time,
+        not here — see ``__quantuiIsoCapture``.
+    capture_class
+        CSS class of the hidden Textarea receiving PNG data URIs. Empty omits
+        the Save-PNG button entirely, so it can never render with nowhere to
+        deliver to.
     """
+    cube_text = Path(cube_path).read_text()
+    return _build_iso_viewer(
+        cube_text,
+        data_format="cube",
+        scene_key=_scene_key(cube_text),
+        with_surfaces=True,
+        isovalue=isovalue,
+        opacity=opacity,
+        width=width,
+        height=height,
+        color_scheme=color_scheme,
+        bgcolor=bgcolor,
+        style=style,
+        capture_class=capture_class,
+    )
+
+
+def _scene_key(cube_text: str) -> str:
+    """Identity of the molecule in a cube, used to decide whether a saved
+    camera still applies. The atom block only — a different orbital of the same
+    molecule must keep the user's orientation, a different molecule must not."""
+    import hashlib
+
+    lines = cube_text.splitlines()
+    try:
+        n_atoms = abs(int(lines[2].split()[0]))
+        block = "".join(lines[6 : 6 + n_atoms])
+    except Exception:  # noqa: BLE001 — a bad header only costs camera reuse
+        block = "".join(lines[:8])
+    return hashlib.sha1(block.encode()).hexdigest()[:16]
+
+
+def render_molecule_placeholder_py3dmol(
+    molecule: Any,
+    *,
+    width: int = 760,
+    height: int = 620,
+    bgcolor: str = "white",
+    style: str = "stick",
+) -> str:
+    """The same viewer shell, showing only the molecule — no surfaces.
+
+    Shown before the first Generate so the panel is never empty: the first
+    isosurface then fades in over an existing viewer rather than appearing in a
+    collapsed panel, and the camera the user set while inspecting the structure
+    carries into the isosurface (same scene key).
+    """
+    xyz = (
+        f"{len(molecule.atoms)}\n{molecule.get_formula()}\n"
+        f"{molecule.to_xyz_string()}"
+    )
+    return _build_iso_viewer(
+        xyz,
+        data_format="xyz",
+        # Keyed on the geometry, so a cube of this same molecule reuses the
+        # camera the user set here.
+        scene_key=_scene_key_from_xyz(xyz),
+        with_surfaces=False,
+        width=width,
+        height=height,
+        bgcolor=bgcolor,
+        style=style,
+    )
+
+
+def _scene_key_from_xyz(xyz: str) -> str:
+    import hashlib
+
+    lines = xyz.splitlines()[2:]
+    # Cube atom records carry Z and Bohr coordinates while XYZ carries symbols
+    # and Angstrom, so the two cannot hash to the same value. Element count and
+    # ordering are enough to tell "same molecule" for camera reuse.
+    block = "".join(ln.split()[0] for ln in lines if ln.strip())
+    return hashlib.sha1(block.encode()).hexdigest()[:16]
+
+
+def _build_iso_viewer(
+    data_text: str,
+    *,
+    data_format: str,
+    scene_key: str,
+    with_surfaces: bool,
+    isovalue: float = 0.02,
+    opacity: float = 0.85,
+    width: int = 760,
+    height: int = 620,
+    color_scheme: str = DEFAULT_ORBITAL_COLORS,
+    bgcolor: str = "white",
+    style: str = "stick",
+    capture_class: str = "",
+) -> str:
+    import json
+
     from quantui.viz_assets import make_view
 
-    cube_text = Path(cube_path).read_text()
+    pos_color, neg_color = orbital_colors(color_scheme)
+
     view = make_view(width=width, height=height)
-    view.addModel(cube_text, "cube")
-    view.setStyle({style: {}})
-    view.addVolumetricData(
-        cube_text,
-        "cube",
-        {"isoval": isovalue, "color": pos_color, "opacity": opacity},
+    view_html = view._make_html()
+
+    m = re.search(r"3dmolviewer_(\w+)", view_html)
+    if m is None:
+        logger.error("could not find py3Dmol viewer id; isosurface unavailable")
+        return '<p style="color:#b91c1c;padding:8px">Viewer could not be built.</p>'
+    uid = m.group(1)
+
+    js = (
+        _ISO_VIEWER_JS.replace("__UID__", uid)
+        .replace("__DATA__", json.dumps(data_text))
+        .replace("__FMT__", json.dumps(data_format))
+        .replace("__WITH_SURFACES__", "true" if with_surfaces else "false")
+        .replace("__SCENE__", json.dumps(scene_key))
+        .replace("__ISO__", repr(float(isovalue)))
+        .replace("__OP__", repr(float(opacity)))
+        .replace("__POS__", json.dumps(pos_color))
+        .replace("__NEG__", json.dumps(neg_color))
+        .replace("__BG__", json.dumps(bgcolor))
+        .replace("__STYLE__", style)
     )
-    view.addVolumetricData(
-        cube_text,
-        "cube",
-        {"isoval": -isovalue, "color": neg_color, "opacity": opacity},
+    busy = (
+        f'<div id="orb_busy_{uid}" style="display:none;position:absolute;'
+        "top:50%;left:0;right:0;transform:translateY(-50%);text-align:center;"
+        'font-size:13px;color:#334155;font-style:italic;pointer-events:none">'
+        "⏳ Generating…</div>"
     )
-    view.setBackgroundColor(bgcolor)
-    view.zoomTo()
-    return view._make_html()
+    # position:relative on the wrapper so the overlay is placed against the
+    # viewer rather than the page.
+    body = (
+        f'<div style="position:relative">{view_html}{busy}</div>'
+        f"<script>{js}</script>"
+    )
+    if capture_class:
+        body += _png_capture_controls(uid, capture_class)
+    # Framed like every other 3-D viewer (theme.frame_viewer_html), so the
+    # isosurface panel matches the molecule and trajectory viewers.
+    return _theme.frame_viewer_html(body, width=width)
+
+
+# Matches app_visualization._STEPPER_BTN_STYLE so in-viewer controls look like
+# one family. Duplicated rather than imported: app_visualization imports from
+# this module, and importing back would close the cycle.
+_ORB_BTN_STYLE = (
+    f"padding:2px 9px;border:1px solid {_theme.BORDER};border-radius:4px;"
+    "background:#f8fafc;color:#334155;cursor:pointer;font-size:13px;line-height:1.4;"
+)
+
+# JS->kernel bridge for "save what I am looking at" (M-ORBEXPORT ORBX.1).
+#
+# Direction matters: M-LOGSCROLL route C pushes kernel -> JS, and there is no
+# equivalent in this codebase for coming back the other way. The trick used
+# here is the standard one for ipywidgets: write into a hidden Textarea's DOM
+# node and dispatch an 'input' event, which the widget's own view is already
+# listening for, so it syncs `value` back to the kernel like a user typing.
+#
+# Why a DOM button rather than the Python Button next to "Export cube": a
+# Python button would need kernel -> JS -> kernel, and the kernel cannot ask
+# the browser for anything synchronously. A DOM button captures and posts in
+# one direction, which is also why the frame steppers are built this way.
+#
+# ⚠️ The capture MUST come from the live viewer, not a re-render. Per GOTCHAS
+# ("Camera state does NOT persist across atomic HTML swaps"), anything that
+# re-renders first exports the default camera rather than the one the user
+# rotated into — which is the entire value of client-side capture.
+_PNG_CAPTURE_JS = """
+(function(){
+  var UID="__UID__", CLS="__CLS__";
+  var btn=document.getElementById("orb_png_"+UID);
+  if(!btn){ return; }
+  btn.addEventListener("click", function(){
+    var cap=window["__quantuiIsoCapture"];
+    if(!cap){ btn.textContent="\\u26a0 viewer not ready"; return; }
+    // Transparency is decided HERE, at capture, not by the live viewer — the
+    // preview stays opaque while the exported file has no background.
+    var wantAlpha=false;
+    var cb=document.querySelector("."+CLS+"-transparent input");
+    if(cb){ wantAlpha=!!cb.checked; }
+    var uri=null;
+    try{ uri=cap(wantAlpha); }catch(e){ btn.textContent="\\u26a0 capture failed"; return; }
+    if(!uri){ btn.textContent="\\u26a0 capture failed"; return; }
+    var box=document.querySelector("."+CLS+" textarea");
+    if(!box){ btn.textContent="\\u26a0 no inbox"; return; }
+    box.value=uri;
+    box.dispatchEvent(new Event("input", {bubbles:true}));
+    var old=btn.textContent;
+    btn.textContent="\\u2713 saved";
+    setTimeout(function(){ btn.textContent=old; }, 2000);
+  });
+})();
+"""
+
+
+def _png_capture_controls(uid: str, capture_class: str) -> str:
+    """A 'Save PNG' button wired to the viewer identified by *uid*."""
+    js = _PNG_CAPTURE_JS.replace("__UID__", uid).replace("__CLS__", capture_class)
+    return (
+        f'<div style="margin:4px 0 2px;padding:0 8px 6px;font-size:13px;">'
+        f'<button id="orb_png_{uid}" type="button" '
+        f'title="Save this view as a PNG, exactly as you have rotated it" '
+        f'style="{_ORB_BTN_STYLE}">\u2b07 Save PNG</button>'
+        f"</div><script>{js}</script>"
+    )
 
 
 def plot_cube_isosurface(
@@ -951,6 +1358,7 @@ def plot_cube_isosurface(
     show_grid: bool = True,
     scene_bgcolor: str = "white",
     axis_color: str = "#111827",
+    max_points: Optional[int] = None,
     title_color: Optional[str] = None,
     bond_color: str = "#6b7280",
 ):
@@ -989,8 +1397,9 @@ def plot_cube_isosurface(
     # Stride each axis so the total point count stays under _MAX_ISOSURFACE_POINTS.
     total = nx * ny * nz
     stride = 1
-    if total > _MAX_ISOSURFACE_POINTS:
-        stride = int(np.ceil((total / _MAX_ISOSURFACE_POINTS) ** (1.0 / 3.0)))
+    cap = _MAX_ISOSURFACE_POINTS if max_points is None else int(max_points)
+    if total > cap:
+        stride = int(np.ceil((total / cap) ** (1.0 / 3.0)))
     data = data[::stride, ::stride, ::stride]
 
     # Build coordinate grids (Bohr), strided to match the downsampled volume.

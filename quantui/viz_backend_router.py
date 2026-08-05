@@ -133,21 +133,47 @@ class Decision:
 #     is the only viable real-time trajectory backend in this app.
 #   - TRAJECTORY_EXPORT / VIB_EXPORT: plotlymol produces self-contained HTML
 #     animations with embedded controls, which is the export contract.
-# ORBITAL_ISOSURFACE is dual-backend: py3Dmol does native, full-resolution
-# in-browser cube isosurfacing (primary); the Plotly cube-isosurface path is the
-# fallback (downsampled). "plotlymol" here is the umbrella for that Plotly path,
-# which only needs plotly itself — the dispatch site treats Plotly as the
-# universal fallback when py3Dmol is not chosen.
+# ORBITAL_ISOSURFACE is py3Dmol-ONLY as of 2026-08-04 (user decision). It was
+# dual-backend, with the Plotly cube path selectable by preference. Two reasons
+# it is not:
+#
+#   - Quality. Plotly renders isosurfaces by striding the volume down to a point
+#     cap before building a mesh, so it is downsampled by construction, while
+#     py3Dmol isosurfaces the cube in-browser at full resolution.
+#   - Capability. Only py3Dmol can carry the Save-PNG capture (ORBX.1), and only
+#     it can be told what the user is actually looking at, camera included.
+#
+# User: "plotlymol is really only good for the molecule viewing windows."
+#
+# ⚠️ This is deliberately reversible: restore the fallback by putting
+# VizBackend.PLOTLYMOL back as the second element. The Plotly isosurface code in
+# orbital_visualization.plot_cube_isosurface is kept and still tested — it is
+# unreachable through the router, not deleted — so reverting is a one-line
+# change rather than an archaeology exercise.
+#
+# py3Dmol is a REQUIRED dependency (pyproject: py3Dmol>=2.0.0,<3), so dropping
+# the fallback does not create a realistic "no backend" hole; an install without
+# it is already broken in ways an isosurface fallback would not rescue.
 _TASK_POLICY: dict[VizTask, tuple[VizBackend, VizBackend | None]] = {
     VizTask.MOLECULE_PREVIEW: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
     VizTask.STRUCTURE_VIEW_RESULTS: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
     VizTask.ANALYSIS_STRUCTURE_VIEW: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
     VizTask.HISTORY_STRUCTURE_REPLAY: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
     VizTask.TRAJECTORY_FRAME: (VizBackend.PY3DMOL, None),
-    VizTask.TRAJECTORY_EXPORT: (VizBackend.PLOTLYMOL, None),
+    # Same change and same reasoning as VIB_EXPORT (2026-08-04): the exported
+    # file should be the animation the user was watching. The trajectory viewer
+    # is py3Dmol, so the export reuses build_trajectory_viewer_html rather than
+    # rebuilding it in Plotly.
+    VizTask.TRAJECTORY_EXPORT: (VizBackend.PY3DMOL, None),
     VizTask.VIB_INTERACTIVE: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
-    VizTask.VIB_EXPORT: (VizBackend.PLOTLYMOL, None),
-    VizTask.ORBITAL_ISOSURFACE: (VizBackend.PY3DMOL, VizBackend.PLOTLYMOL),
+    # VIB_EXPORT was PLOTLYMOL-only, on the reasoning that a Plotly animation
+    # with embedded controls is the canonical "export quality" artifact. That
+    # traded away the more important property: the exported file should be the
+    # animation the user was looking at when they clicked Export. py3Dmol is
+    # what renders the live vibrational viewer, so it is what exports now
+    # (user decision 2026-08-04).
+    VizTask.VIB_EXPORT: (VizBackend.PY3DMOL, None),
+    VizTask.ORBITAL_ISOSURFACE: (VizBackend.PY3DMOL, None),
 }
 
 

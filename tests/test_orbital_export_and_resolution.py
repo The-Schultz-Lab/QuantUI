@@ -1,0 +1,1104 @@
+"""Orbital isosurface PNG export and tunable resolution (M-ORBEXPORT ORBX.1/.2).
+
+Two features that fail quietly rather than loudly, which is what these guard:
+
+**Resolution has two knobs.** The cubegen grid controls real fidelity and what
+lands in the saved ``.cube``; a separate stride cap bounds what reaches a Plotly
+figure. Raise the grid alone and the user waits longer for a finer cube, then
+the render throws the extra detail away — the feature *looks broken* to the
+person who asked for it. (Only the Plotly path strides; py3Dmol isosurfaces the
+cube in-browser at full resolution, so there a finer grid shows up immediately.)
+
+**PNG capture crosses the JS/kernel boundary.** The viewer's Save-PNG button
+writes a data URI into a hidden Textarea and dispatches an ``input`` event, and
+ipywidgets syncs it back. Three things can drift apart without any error: the
+CSS class the JS targets vs. the one the widget carries, the button being
+rendered with nowhere to deliver to, and the decode path silently accepting
+malformed input.
+
+No browser, no PySCF, no GPU — the JS is asserted as text and the Python half is
+exercised directly.
+"""
+
+from __future__ import annotations
+
+import base64
+import io
+import re
+import tempfile
+from pathlib import Path
+from unittest.mock import Mock
+
+import numpy as np
+import pytest
+
+from quantui.app_exports import _PNG_URI_PREFIX, on_orb_png_captured
+from quantui.orbital_visualization import (
+    DEFAULT_ISO_RESOLUTION,
+    ISO_RESOLUTION_OPTIONS,
+    ISO_RESOLUTION_PRESETS,
+    max_render_points,
+    render_orbital_isosurface_py3dmol,
+)
+
+# A genuine 1x1 PNG. Using real bytes means the decode path is actually tested
+# rather than a base64 round-trip of arbitrary data.
+_REAL_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+@pytest.fixture
+def cube_file(tmp_path: Path) -> Path:
+    """A minimal but structurally valid Gaussian cube."""
+    n = 4
+    lines = [
+        "orbital",
+        "cube",
+        "    2    0.000000    0.000000    0.000000",
+        f"    {n}    0.500000    0.000000    0.000000",
+        f"    {n}    0.000000    0.500000    0.000000",
+        f"    {n}    0.000000    0.000000    0.500000",
+        "    1    1.000000    0.000000    0.000000    0.000000",
+        "    1    1.000000    1.400000    0.000000    0.000000",
+    ]
+    vals = np.random.RandomState(0).normal(size=n**3) * 0.05
+    for i in range(0, len(vals), 6):
+        lines.append("".join(f"{v:13.5E}" for v in vals[i : i + 6]))
+    p = tmp_path / "orb.cube"
+    p.write_text("\n".join(lines) + "\n")
+    return p
+
+
+class TestResolutionMovesBothKnobs:
+    def test_the_default_preset_is_the_historical_grid(self):
+        # 60³ was the hardcoded value before this was tunable. Changing the
+        # default silently changes every user's cube fidelity and runtime.
+        assert ISO_RESOLUTION_PRESETS[DEFAULT_ISO_RESOLUTION] == 60
+
+    def test_presets_are_ordered_coarse_to_fine(self):
+        values = [ISO_RESOLUTION_PRESETS[key] for _, key in ISO_RESOLUTION_OPTIONS]
+        assert values == sorted(values), "dropdown order must match grid density"
+
+    def test_every_dropdown_option_maps_to_a_preset(self):
+        # A label with no preset would silently fall back to the default at
+        # generate time, so picking "Fine" would do nothing.
+        for _, key in ISO_RESOLUTION_OPTIONS:
+            assert key in ISO_RESOLUTION_PRESETS
+
+    def test_a_finer_grid_raises_the_render_cap(self):
+        """The whole point of ORBX.2. Without this, choosing Fine costs time
+        and buys nothing on the Plotly path."""
+        assert max_render_points(80) > max_render_points(60)
+        assert max_render_points(100) > max_render_points(80)
+
+    def test_the_cap_never_drops_below_the_historical_value(self):
+        # Coarse must not make the fallback renderer *worse* than it was.
+        for grid in ISO_RESOLUTION_PRESETS.values():
+            assert max_render_points(grid) >= 48_000
+
+    def test_the_cap_is_bounded(self):
+        # A cap that scales without limit hands the browser a Plotly trace it
+        # cannot interact with — a fallback that locks the tab is worse than a
+        # slightly coarse one.
+        assert max_render_points(500) <= 250_000
+
+    def test_the_cap_scales_with_volume_not_edge_length(self):
+        # Grid work is nx*ny*nz. A linear scaling would under-provision badly:
+        # 100³ is 4.6x the points of 60³, not 1.7x.
+        ratio = max_render_points(100) / max_render_points(60)
+        assert 4.0 < ratio < 5.0, ratio
+
+    def test_bad_input_does_not_raise(self):
+        # This feeds a renderer; a stray zero must not produce a divide or a
+        # zero cap that strides everything away.
+        assert max_render_points(0) >= 48_000
+        assert max_render_points(-5) >= 48_000
+
+
+class TestResolutionPersists:
+    def test_the_setting_round_trips(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(tmp_path / "s.json"))
+        from quantui.user_settings import UserSettings
+
+        s = UserSettings.load()
+        assert s.viz.iso_resolution == DEFAULT_ISO_RESOLUTION
+        s.viz.iso_resolution = "fine"
+        s.save()
+        assert UserSettings.load().viz.iso_resolution == "fine"
+
+    def test_an_unknown_value_falls_back_rather_than_propagating(
+        self, tmp_path, monkeypatch
+    ):
+        # A settings file written by a future version with more presets must
+        # degrade to the default, not hand a nonsense key to cubegen.
+        import json
+
+        from quantui.user_settings import _SCHEMA_VERSION, UserSettings
+
+        # _schema_version matters: without it the loader discards the file
+        # wholesale and returns defaults, so this would pass without the
+        # validator ever seeing "ultra".
+        p = tmp_path / "s.json"
+        p.write_text(
+            json.dumps(
+                {"_schema_version": _SCHEMA_VERSION, "viz": {"iso_resolution": "ultra"}}
+            )
+        )
+        monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(p))
+
+        assert UserSettings.load().viz.iso_resolution == DEFAULT_ISO_RESOLUTION
+
+    def test_every_preset_is_accepted_by_the_settings_validator(
+        self, tmp_path, monkeypatch
+    ):
+        # user_settings deliberately does not import orbital_visualization, so
+        # its valid-value tuple is a copy. This is the test that keeps the copy
+        # honest.
+        import json
+
+        from quantui.user_settings import _SCHEMA_VERSION, UserSettings
+
+        for key in ISO_RESOLUTION_PRESETS:
+            p = tmp_path / f"{key.replace(' ', '_')}.json"
+            p.write_text(
+                json.dumps(
+                    {"_schema_version": _SCHEMA_VERSION, "viz": {"iso_resolution": key}}
+                )
+            )
+            monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(p))
+            assert UserSettings.load().viz.iso_resolution == key
+
+
+class TestCaptureButtonIsOptIn:
+    def test_no_button_without_an_inbox(self, cube_file):
+        # A Save-PNG button with nowhere to deliver would look functional and
+        # do nothing — the failure mode this feature most needs to avoid.
+        html = render_orbital_isosurface_py3dmol(cube_file)
+        assert "Save PNG" not in html
+
+    def test_the_button_appears_when_an_inbox_is_named(self, cube_file):
+        html = render_orbital_isosurface_py3dmol(cube_file, capture_class="my-inbox")
+        assert "Save PNG" in html
+        assert "__quantuiIsoCapture" in html
+        assert "my-inbox" in html
+
+    def test_the_js_targets_the_class_the_widget_actually_carries(self, cube_file):
+        from quantui.app_builders import _ORB_PNG_INBOX_CLASS
+
+        html = render_orbital_isosurface_py3dmol(
+            cube_file, capture_class=_ORB_PNG_INBOX_CLASS
+        )
+        assert _ORB_PNG_INBOX_CLASS in html
+
+    def test_the_sync_event_is_dispatched(self, cube_file):
+        # Setting textarea.value alone is invisible to the widget model — the
+        # 'input' event is the entire mechanism by which the kernel finds out.
+        html = render_orbital_isosurface_py3dmol(cube_file, capture_class="x")
+        assert 'dispatchEvent(new Event("input"' in html
+        assert "bubbles:true" in html
+
+    def test_the_button_binds_to_this_viewer(self, cube_file):
+        html = render_orbital_isosurface_py3dmol(cube_file, capture_class="x")
+        uid = re.search(r"3dmolviewer_(\w+)", html).group(1)
+        assert f'var UID="{uid}"' in html
+
+    def test_capture_does_not_rebuild_before_grabbing_the_canvas(self, cube_file):
+        # Per GOTCHAS, camera state does not survive a rebuild, so anything
+        # that rebuilds before capture exports the DEFAULT camera — destroying
+        # the only reason to capture client-side.
+        html = render_orbital_isosurface_py3dmol(cube_file, capture_class="x")
+        capture = html[html.index("addEventListener") :]
+        assert "__quantuiIsoCapture" in capture
+        for forbidden in ("addModel", "zoomTo"):
+            assert (
+                forbidden not in capture
+            ), f"capture path calls {forbidden} — that resets the camera"
+
+    def test_transparency_is_applied_at_capture_and_undone(self, cube_file):
+        """Requested 2026-08-04: the checkbox must NOT change the live view.
+
+        The alpha is dropped, the canvas captured, and the background put
+        straight back — inside one synchronous JS call, so the viewer never
+        visibly flickers.
+        """
+        html = render_orbital_isosurface_py3dmol(cube_file, capture_class="x")
+        hook = html[html.index("__quantuiIsoCapture") :]
+        assert "setBackgroundColor(state.bg, 0.0)" in hook
+        assert "setBackgroundColor(state.bg, 1.0)" in hook, "must restore"
+        assert "finally" in hook, "restore must survive a failed capture"
+
+
+class TestCapturedPngIsWritten:
+    @staticmethod
+    def _app(dest: Path) -> Mock:
+        app = Mock()
+        app._last_result_dir = dest
+        app._last_cube_orbital = "HOMO"
+        app._orb_png_inbox = Mock(value="pending")
+        app._iso_export_status = Mock(value="")
+        app._iso_png_name = Mock(value="")
+        app._iso_png_dpi = Mock(value=300)
+        return app
+
+    def _uri(self, raw: bytes = _REAL_PNG) -> str:
+        return _PNG_URI_PREFIX + base64.b64encode(raw).decode()
+
+    def test_a_capture_lands_on_disk_as_the_same_image(self, tmp_path):
+        # Pixels, not bytes. The file is deliberately re-encoded to stamp the
+        # DPI, so byte equality stopped being the right invariant the moment
+        # that landed — what must survive is the image itself.
+        from PIL import Image
+
+        app = self._app(tmp_path)
+        on_orb_png_captured(app, {"new": self._uri()})
+        out = tmp_path / "HOMO.png"
+        assert out.exists()
+        with Image.open(io.BytesIO(_REAL_PNG)) as src, Image.open(out) as dst:
+            assert dst.size == src.size
+            assert list(dst.convert("RGBA").getdata()) == list(
+                src.convert("RGBA").getdata()
+            )
+        assert "Saved" in app._iso_export_status.value
+
+    def test_the_inbox_is_cleared_so_the_same_view_can_be_saved_twice(self, tmp_path):
+        # observe() only fires on *change*; leaving the URI in place would make
+        # a second identical capture silently do nothing.
+        app = self._app(tmp_path)
+        on_orb_png_captured(app, {"new": self._uri()})
+        assert app._orb_png_inbox.value == ""
+
+    def test_the_inbox_is_cleared_on_failure_too(self, tmp_path):
+        app = self._app(tmp_path)
+        on_orb_png_captured(app, {"new": "garbage"})
+        assert app._orb_png_inbox.value == ""
+
+    def test_the_filename_follows_the_orbital_label(self, tmp_path):
+        app = self._app(tmp_path)
+        app._last_cube_orbital = "LUMO+1"
+        on_orb_png_captured(app, {"new": self._uri()})
+        assert (tmp_path / "LUMO+1.png").exists()
+
+    def test_a_hostile_label_cannot_escape_the_result_directory(self, tmp_path):
+        # The label reaches here from app state, but it feeds a filesystem path
+        # and sanitising it costs nothing.
+        app = self._app(tmp_path)
+        app._last_cube_orbital = "../../etc/passwd"
+        on_orb_png_captured(app, {"new": self._uri()})
+        written = list(tmp_path.glob("*.png"))
+        assert len(written) == 1
+        assert written[0].parent == tmp_path
+
+    @pytest.mark.parametrize(
+        "payload,expect",
+        [
+            ("", "no status change"),
+            ("http://example.com/x.png", "unexpected image format"),
+            (_PNG_URI_PREFIX + "!!!not base64!!!", "corrupt image data"),
+        ],
+    )
+    def test_malformed_input_is_reported_not_written(self, tmp_path, payload, expect):
+        app = self._app(tmp_path)
+        on_orb_png_captured(app, {"new": payload})
+        assert not list(tmp_path.glob("*.png"))
+        if payload:
+            assert expect in app._iso_export_status.value
+
+    def test_an_oversized_payload_is_refused_before_decoding(self, tmp_path):
+        # Guards against turning a runaway data URI into a 64 MB+ allocation.
+        app = self._app(tmp_path)
+        on_orb_png_captured(app, {"new": _PNG_URI_PREFIX + "A" * (65 * 1024 * 1024)})
+        assert not list(tmp_path.glob("*.png"))
+        assert "too large" in app._iso_export_status.value
+
+    def test_a_missing_result_directory_is_reported(self):
+        app = self._app(Path(tempfile.mkdtemp()))
+        app._last_result_dir = None
+        on_orb_png_captured(app, {"new": self._uri()})
+        assert "result folder" in app._iso_export_status.value
+
+
+class TestPlotlymolIsOffForOrbitalsAndVibExport:
+    """py3Dmol-only routing, 2026-08-04 (user decision).
+
+    Both were reachable via plotlymol before. The user's reasoning — "plotlymol
+    is really only good for the molecule viewing windows" — has two concrete
+    consequences these tests pin:
+
+      - An orbital isosurface must never be rendered by the strided Plotly path,
+        which is downsampled by construction and cannot carry Save-PNG capture.
+      - An exported vibrational animation must be the one the user was watching.
+
+    Deliberately reversible: each is one line in ``_TASK_POLICY``. These tests
+    are what makes a revert loud rather than silent.
+    """
+
+    @pytest.mark.parametrize("task", ["ORBITAL_ISOSURFACE", "VIB_EXPORT"])
+    def test_preference_cannot_select_plotlymol(self, task):
+        from quantui.viz_backend_router import (
+            BackendAvailability,
+            VizBackend,
+            VizPreference,
+            VizTask,
+            select_backend,
+        )
+
+        both = BackendAvailability(py3dmol=True, plotlymol=True)
+        for pref in VizPreference:
+            decision = select_backend(getattr(VizTask, task), pref, both)
+            assert (
+                decision.chosen == VizBackend.PY3DMOL
+            ), f"{task} resolved to {decision.chosen} under preference {pref}"
+
+    def test_molecule_viewing_still_honours_the_preference(self):
+        # The narrowing must not leak: plotlymol remains selectable for the
+        # molecule viewers, which is the case the user explicitly kept.
+        from quantui.viz_backend_router import (
+            BackendAvailability,
+            VizBackend,
+            VizPreference,
+            VizTask,
+            select_backend,
+        )
+
+        both = BackendAvailability(py3dmol=True, plotlymol=True)
+        decision = select_backend(
+            VizTask.MOLECULE_PREVIEW, VizPreference.PLOTLYMOL, both
+        )
+        assert decision.chosen == VizBackend.PLOTLYMOL
+
+    def test_the_vib_export_builder_has_no_plotly_branch(self):
+        # Unlike the Plotly isosurface path — kept, still tested, one line from
+        # being restored — this branch duplicated animation-building logic that
+        # would rot silently behind a flag, so it was removed outright.
+        import inspect
+
+        from quantui.app_visualization import build_vib_export_html
+
+        code = "\n".join(
+            ln
+            for ln in inspect.getsource(build_vib_export_html).splitlines()
+            if not ln.strip().startswith("#")
+        )
+        body = code[code.index('"""', code.index('"""') + 3) :]
+        assert "create_vibration_animation" not in body
+        assert "availability.plotlymol" not in body
+
+    def test_the_plotly_isosurface_renderer_is_kept_not_deleted(self):
+        # The revert path must stay cheap. Removing this function would turn a
+        # one-line policy change into a rewrite.
+        from quantui.orbital_visualization import plot_cube_isosurface
+
+        assert callable(plot_cube_isosurface)
+
+
+class TestThemeChangeReachesThe3DScenes:
+    """Reported 2026-08-04, then refined: the fix worked but took ~0.5 s.
+
+    The cause was re-rendering the isosurface, whose HTML is megabytes at the
+    finer grids. A background colour is not geometry, so it is now one JS call
+    on the live viewer — fast, and camera-preserving.
+    """
+
+    def test_the_isosurface_background_goes_through_the_bridge(self):
+        import inspect
+
+        from quantui.app_visualization import rerender_3d_scenes_for_theme
+
+        src = inspect.getsource(rerender_3d_scenes_for_theme)
+        iso_part = src[: src.index("Optimization trajectory")]
+        assert "iso_bridge_update(" in iso_part
+        assert "render_orbital_isosurface_py3dmol" not in iso_part
+
+    def test_a_theme_toggle_cannot_raise(self, tmp_path):
+        from quantui.app_visualization import rerender_3d_scenes_for_theme
+
+        for cube in (None, tmp_path / "deleted.cube"):
+            app = Mock()
+            app._last_cube_path = cube
+            app._last_vib_molecule = None
+            app._last_vib_freq_result = None
+            app._last_traj_result = None
+            app._plotly_theme_colors = lambda: {"scene_bgcolor": "#fff"}
+            rerender_3d_scenes_for_theme(app)  # must not raise
+
+    def test_the_theme_handler_actually_calls_it(self):
+        import inspect
+
+        from quantui.app import QuantUIApp
+
+        src = inspect.getsource(QuantUIApp._rerender_plotly_theme)
+        assert "rerender_3d_scenes_for_theme" in src
+
+
+class TestIsosurfaceSwapsAreAtomic:
+    """Reported 2026-08-04: *"the screen jumps up when I click to calculate a
+    new isosurface."*
+
+    ``clear_output()`` followed by ``display()`` leaves the output empty for a
+    moment. The panel collapses from ~660px to zero, the document shrinks, the
+    browser clamps scrollTop to the new maximum — and the content returning does
+    not scroll back. ``_set_html_output`` swaps ``outputs`` in one assignment so
+    the empty state is never observed, which is the same fix already applied to
+    the IR toggle, the trajectory stepper and the vib viewer.
+    """
+
+    def test_no_clear_then_display_on_the_isosurface_output(self):
+        import pathlib
+        import re
+
+        import quantui
+
+        src = (
+            pathlib.Path(quantui.__file__).parent / "app_visualization.py"
+        ).read_text(encoding="utf-8")
+        # A bare clear_output() immediately followed by a `with` block is the
+        # pattern that collapses the panel.
+        offenders = re.findall(
+            r"app\._orb_iso_output\.clear_output\(\)\s*\n\s*with app\._orb_iso_output:",
+            src,
+        )
+        assert not offenders, (
+            "isosurface output is cleared then repopulated — use "
+            "app._set_html_output for an atomic swap"
+        )
+
+
+class TestExportsMatchWhatIsOnScreen:
+    """Trajectory export moved to py3Dmol, 2026-08-04 — same change and same
+    reasoning as VIB_EXPORT the day before: the exported file should be the
+    animation the user was watching, not a second renderer's version of it."""
+
+    def test_the_router_pins_trajectory_export_to_py3dmol(self):
+        from quantui.viz_backend_router import (
+            BackendAvailability,
+            VizBackend,
+            VizPreference,
+            VizTask,
+            select_backend,
+        )
+
+        both = BackendAvailability(py3dmol=True, plotlymol=True)
+        for pref in VizPreference:
+            assert (
+                select_backend(VizTask.TRAJECTORY_EXPORT, pref, both).chosen
+                == VizBackend.PY3DMOL
+            )
+
+    def test_the_export_reuses_the_on_screen_builder(self):
+        # Reusing build_trajectory_viewer_html is what makes "same as on screen"
+        # true by construction rather than by two implementations agreeing.
+        import inspect
+
+        from quantui.app_visualization import show_opt_trajectory
+
+        src = inspect.getsource(show_opt_trajectory)
+        assert "create_trajectory_animation" not in src, "still building via Plotly"
+        assert "standalone_html(" in src
+        assert "build_trajectory_viewer_html(" in src
+
+    def test_the_exported_file_is_a_complete_utf8_document(self):
+        """standalone_html was a no-op pass-through, so exports were bare
+        fragments. Browsers render those in quirks mode, but without a
+        <meta charset> a file opened from disk is not reliably decoded as
+        UTF-8 — and these exports carry non-ASCII (the ⇄ compare button, the →
+        in frame labels). Mojibake in a file destined for a talk is a bad way
+        to discover that."""
+        from quantui.app_visualization import build_trajectory_viewer_html
+        from quantui.viz_assets import standalone_html
+
+        xb = "3\nH2O\nO 0 0 0\nH 0.757 0.587 0\nH -0.757 0.587 0\n"
+        frag = build_trajectory_viewer_html([xb, xb], formula="H2O")
+        assert any(ord(c) > 127 for c in frag), "fixture no longer exercises this"
+
+        html = standalone_html(frag, title="Geo Opt: H2O")
+        assert html.lstrip().lower().startswith("<!doctype html>")
+        assert 'charset="utf-8"' in html
+        assert "<title>Geo Opt: H2O</title>" in html
+        # The viewer itself must survive the wrapping, offline loader included.
+        assert "3dmolviewer" in html
+        assert "data:text/javascript;base64," in html
+        assert "jsdelivr" not in html
+
+
+class TestThemeChangeReachesEveryViewer:
+    """Follow-up to the sticky-background report, 2026-08-04. The first fix
+    covered the isosurface and the vibrational viewer; the user then found the
+    Analysis-tab molecule viewer and the live trajectory viewer still stuck.
+
+    The machinery to redraw those already existed — ``_rerender_3d_views``
+    handles both molecule viewers — it simply was not reached from the theme
+    handler, which called ``_refresh_calc_mol_viewer`` (Calculate tab only).
+    """
+
+    def test_the_theme_handler_redraws_both_molecule_viewers(self):
+        import inspect
+
+        from quantui.app import QuantUIApp
+
+        src = inspect.getsource(QuantUIApp._rerender_plotly_theme)
+        assert "_rerender_3d_views" in src, (
+            "theme change must go through _rerender_3d_views, which covers the "
+            "Analysis tab; _refresh_calc_mol_viewer alone covers only Calculate"
+        )
+
+    def test_the_theme_rerender_covers_the_trajectory(self):
+        import inspect
+
+        from quantui.app_visualization import rerender_3d_scenes_for_theme
+
+        src = inspect.getsource(rerender_3d_scenes_for_theme)
+        assert "_last_traj_result" in src
+        assert "_show_opt_trajectory" in src
+
+    def test_it_skips_a_trajectory_panel_that_was_never_opened(self):
+        # Re-rendering an empty panel would build a viewer on a tab the user
+        # has not looked at, on every theme toggle.
+        from quantui.app_visualization import rerender_3d_scenes_for_theme
+
+        app = Mock()
+        app._last_cube_path = None
+        app._last_vib_molecule = None
+        app._last_vib_freq_result = None
+        app._last_traj_result = object()
+        app.traj_output = Mock(children=())
+        app._plotly_theme_colors = lambda: {"scene_bgcolor": "#fff"}
+
+        rerender_3d_scenes_for_theme(app)
+        app._show_opt_trajectory.assert_not_called()
+
+    def test_it_rerenders_a_trajectory_panel_that_is_populated(self):
+        from quantui.app_visualization import rerender_3d_scenes_for_theme
+
+        traj = object()
+        app = Mock()
+        app._last_cube_path = None
+        app._last_vib_molecule = None
+        app._last_vib_freq_result = None
+        app._last_traj_result = traj
+        app.traj_output = Mock(children=(Mock(),))
+        app._plotly_theme_colors = lambda: {"scene_bgcolor": "#fff"}
+
+        rerender_3d_scenes_for_theme(app)
+        app._show_opt_trajectory.assert_called_once_with(traj)
+
+
+@pytest.fixture
+def gaussian_cube(tmp_path: Path) -> Path:
+    """A cube holding a normalised-ish Gaussian, so enclosed-density fractions
+    are physically sensible rather than noise."""
+    n = 12
+    g = np.linspace(-2, 2, n)
+    X, Y, Z = np.meshgrid(g, g, g, indexing="ij")
+    vals = np.exp(-(X**2 + Y**2 + Z**2)).ravel()
+    lines = [
+        "orb",
+        "cube",
+        "    1    0.000000    0.000000    0.000000",
+        f"    {n}    0.300000    0.000000    0.000000",
+        f"    {n}    0.000000    0.300000    0.000000",
+        f"    {n}    0.000000    0.000000    0.300000",
+        "    1    1.000000    0.000000    0.000000    0.000000",
+    ]
+    for i in range(0, len(vals), 6):
+        lines.append("".join(f"{v:13.5E}" for v in vals[i : i + 6]))
+    p = tmp_path / "gauss.cube"
+    p.write_text("\n".join(lines) + "\n")
+    return p
+
+
+class TestIsovalueIsExplainedAsEnclosedDensity:
+    """An isovalue is an amplitude threshold, which is not the question a
+    chemist has — "how much of the orbital is inside this surface?" is. The
+    readout answers that from the same cube already on disk."""
+
+    def test_a_higher_isovalue_encloses_less_density(self, gaussian_cube):
+        from quantui.orbital_visualization import enclosed_density_fraction
+
+        low = enclosed_density_fraction(gaussian_cube, 0.01)
+        high = enclosed_density_fraction(gaussian_cube, 0.5)
+        assert low is not None and high is not None
+        assert low > high, "tightening the surface must enclose less, not more"
+
+    def test_the_fraction_stays_within_bounds(self, gaussian_cube):
+        from quantui.orbital_visualization import enclosed_density_fraction
+
+        for iso in (1e-6, 0.001, 0.02, 0.2, 0.9, 10.0):
+            frac = enclosed_density_fraction(gaussian_cube, iso)
+            assert frac is not None and 0.0 <= frac <= 1.0, (iso, frac)
+
+    def test_an_unreadable_cube_returns_none_rather_than_raising(self, tmp_path):
+        # This feeds a label beside a slider; it must never be why a drag fails.
+        from quantui.orbital_visualization import enclosed_density_fraction
+
+        junk = tmp_path / "not.cube"
+        junk.write_text("this is not a cube file\n")
+        assert enclosed_density_fraction(junk, 0.02) is None
+        assert enclosed_density_fraction(tmp_path / "missing.cube", 0.02) is None
+
+
+class TestAppearanceControlsUpdateTheLiveViewer:
+    """Requested 2026-08-04: the camera must survive isovalue/opacity changes.
+
+    A Python re-render cannot do that — it replaces the viewer, and GOTCHAS
+    records that camera state does not survive an atomic HTML swap. These
+    controls now drive the existing viewer through a JS bridge: no re-render,
+    no output swap, no collapse, no scroll jump, camera intact.
+    """
+
+    def test_the_slider_handler_never_re_renders(self):
+        import inspect
+
+        from quantui.app_visualization import on_iso_appearance_changed
+
+        src = inspect.getsource(on_iso_appearance_changed)
+        assert "iso_bridge_update(" in src
+        assert "_set_html_output" not in src
+        assert "render_orbital_isosurface_py3dmol" not in src
+
+    def test_the_viewer_preserves_the_camera_across_a_rebuild(self, cube_file):
+        # An isovalue change IS geometry, so surfaces are rebuilt — but
+        # getView/setView carries the orientation across.
+        html = render_orbital_isosurface_py3dmol(cube_file)
+        upd = html[html.index("__quantuiIsoUpdate_") :]
+        assert "getView()" in upd
+        assert "setView(cam)" in upd
+
+    def test_transparency_is_not_a_live_render_option(self):
+        # It is an export property. Including it here is what made the live
+        # view change, which the user explicitly did not want.
+        from quantui.app_visualization import iso_render_options
+
+        app = Mock(spec=["_plotly_theme_colors"])
+        app._plotly_theme_colors = lambda: {"scene_bgcolor": "white"}
+        assert "transparent_bg" not in iso_render_options(app)
+
+    def test_the_options_reflect_the_widgets(self):
+        from quantui.app_visualization import iso_render_options
+
+        app = Mock()
+        app._plotly_theme_colors = lambda: {"scene_bgcolor": "white"}
+        app._iso_isovalue_slider = Mock(value=0.07)
+        app._iso_opacity_slider = Mock(value=0.4)
+        app._iso_colors_dd = Mock(value="orange-blue")
+        app._orb_png_inbox = Mock()
+
+        opts = iso_render_options(app)
+        assert opts["isovalue"] == pytest.approx(0.07)
+        assert opts["opacity"] == pytest.approx(0.4)
+        assert opts["color_scheme"] == "orange-blue"
+
+    def test_missing_widgets_fall_back_to_defaults(self):
+        from quantui.app_visualization import iso_render_options
+
+        app = Mock(spec=["_plotly_theme_colors"])
+        app._plotly_theme_colors = lambda: {"scene_bgcolor": "white"}
+        opts = iso_render_options(app)
+        assert opts["isovalue"] == pytest.approx(0.02)
+        assert opts["opacity"] == pytest.approx(0.85)
+        assert opts["color_scheme"] == "blue-red"
+
+
+class TestColourSchemes:
+    """ORBX.6 — named pairs, because these are conventions people recognise
+    from other software rather than arbitrary picks."""
+
+    def test_every_option_maps_to_a_distinguishable_pair(self):
+        from quantui.orbital_visualization import (
+            ORBITAL_COLOR_OPTIONS,
+            ORBITAL_COLOR_SCHEMES,
+        )
+
+        for _, key in ORBITAL_COLOR_OPTIONS:
+            pos, neg = ORBITAL_COLOR_SCHEMES[key]
+            assert pos.startswith("#") and neg.startswith("#")
+            assert pos != neg, f"{key}: the two phases must be distinguishable"
+
+    def test_an_unknown_scheme_falls_back(self):
+        from quantui.orbital_visualization import (
+            DEFAULT_ORBITAL_COLORS,
+            orbital_colors,
+        )
+
+        assert orbital_colors("nonsense") == orbital_colors(DEFAULT_ORBITAL_COLORS)
+
+    @pytest.mark.parametrize("scheme", ["orange-blue", "yellow-blue", "blue-red"])
+    def test_the_scheme_reaches_the_viewer(self, cube_file, scheme):
+        from quantui.orbital_visualization import ORBITAL_COLOR_SCHEMES
+
+        html = render_orbital_isosurface_py3dmol(cube_file, color_scheme=scheme)
+        pos, neg = ORBITAL_COLOR_SCHEMES[scheme]
+        assert pos in html and neg in html
+
+
+class TestTheCubeIsEmbeddedOnce:
+    """Measured 2026-08-04: building the viewer from Python embedded the cube
+    THREE times — once for addModel, once per addVolumetricData — which at the
+    100^3 grid is ~39 MB of HTML per render. A single embedded copy driven from
+    JS is what makes the finer grids usable."""
+
+    def test_the_payload_appears_exactly_once(self, cube_file):
+        html = render_orbital_isosurface_py3dmol(cube_file)
+        marker = cube_file.read_text().splitlines()[7][:40]
+        assert (
+            html.count(marker) == 1
+        ), f"cube payload embedded {html.count(marker)}x — it must be once"
+
+
+class TestPngExportOptions:
+    @staticmethod
+    def _rgba_uri() -> str:
+        # RGBA with a fully transparent pixel, so alpha survival is real.
+        import io
+
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGBA", (4, 4), (255, 0, 0, 0)).save(buf, format="PNG")
+        return _PNG_URI_PREFIX + base64.b64encode(buf.getvalue()).decode()
+
+    @staticmethod
+    def _app(dest: Path, name: str = "", dpi: int = 300) -> Mock:
+        app = Mock()
+        app._last_result_dir = dest
+        app._last_cube_orbital = "HOMO"
+        app._orb_png_inbox = Mock(value="pending")
+        app._iso_export_status = Mock(value="")
+        app._iso_png_name = Mock(value=name)
+        app._iso_png_dpi = Mock(value=dpi)
+        return app
+
+    @pytest.mark.parametrize("dpi", [72, 150, 300, 600])
+    def test_the_requested_dpi_is_stamped(self, tmp_path, dpi):
+        from PIL import Image
+
+        on_orb_png_captured(self._app(tmp_path, dpi=dpi), {"new": self._rgba_uri()})
+        with Image.open(tmp_path / "HOMO.png") as im:
+            # PNG stores pixels-per-metre, so the round-trip is not exact.
+            assert im.info["dpi"][0] == pytest.approx(dpi, rel=1e-3)
+
+    def test_transparency_survives_the_dpi_rewrite(self, tmp_path):
+        # Re-encoding to stamp metadata must not flatten alpha — that would
+        # silently undo the transparent-background option.
+        from PIL import Image
+
+        on_orb_png_captured(self._app(tmp_path), {"new": self._rgba_uri()})
+        with Image.open(tmp_path / "HOMO.png") as im:
+            assert im.mode == "RGBA"
+            assert im.getpixel((0, 0))[3] == 0
+
+    @pytest.mark.parametrize(
+        "typed,expected",
+        [
+            ("", "HOMO.png"),  # falls back to the orbital label
+            ("my figure", "my figure.png"),
+            ("fig1.png", "fig1.png"),  # .png not doubled
+            ("   ", "HOMO.png"),  # whitespace is not a filename
+        ],
+    )
+    def test_the_filename_follows_the_box(self, tmp_path, typed, expected):
+        on_orb_png_captured(self._app(tmp_path, name=typed), {"new": self._rgba_uri()})
+        assert (tmp_path / expected).exists()
+
+    def test_a_typed_path_cannot_escape_the_result_directory(self, tmp_path):
+        # A text box is exactly where a stray "../" arrives.
+        on_orb_png_captured(
+            self._app(tmp_path, name="../../etc/passwd"), {"new": self._rgba_uri()}
+        )
+        written = list(tmp_path.glob("*.png"))
+        assert len(written) == 1
+        assert written[0].parent == tmp_path
+
+    def test_a_broken_dpi_widget_still_saves_the_image(self, tmp_path):
+        # Losing metadata is a mild loss; losing the export is not.
+        app = self._app(tmp_path)
+        app._iso_png_dpi = Mock(value="not-a-number")
+        on_orb_png_captured(app, {"new": self._rgba_uri()})
+        assert (tmp_path / "HOMO.png").exists()
+
+
+class TestSurfacesAreReplacedNotStacked:
+    """Reported 2026-08-04: isovalue only appeared to work downward, opacity
+    only upward, and toggling the palette made the surface *more* opaque.
+
+    One cause. ``viewer.addVolumetricData`` routes to ``addIsosurface``, which
+    does ``this.shapes.push(...)`` — an isosurface is a SHAPE, not a surface.
+    ``removeAllSurfaces()`` iterates ``this.surfaces``, finds nothing, and
+    removes nothing, so every update stacked another layer:
+
+    - a LOWER isovalue makes a bigger surface that engulfs the old one, which
+      looks like it worked;
+    - a HIGHER one makes a smaller surface hidden inside the old one, which
+      looks like nothing happened;
+    - stacked translucent layers read as steadily more opaque, so flipping the
+      palette back and forth brightened the surface.
+
+    The shapes are now tracked and removed by reference.
+    """
+
+    def test_shapes_are_tracked_and_removed_by_reference(self, cube_file):
+        html = render_orbital_isosurface_py3dmol(cube_file)
+        assert "shapes.push(vw.addVolumetricData" in html, "not tracking shapes"
+        assert "vw.removeShape(shapes[i])" in html, "not removing what it added"
+
+    def test_it_does_not_use_removeallsurfaces(self, cube_file):
+        # The API that silently does nothing here. Only the comment explaining
+        # why may mention it.
+        html = render_orbital_isosurface_py3dmol(cube_file)
+        code = "\n".join(
+            ln for ln in html.splitlines() if not ln.strip().startswith("//")
+        )
+        assert "removeAllSurfaces" not in code
+
+    def test_removal_precedes_creation_in_the_rebuild(self, cube_file):
+        # Adding first and removing after would delete the new shapes.
+        html = render_orbital_isosurface_py3dmol(cube_file)
+        fn = html[html.index("function surfaces()") :]
+        fn = fn[: fn.index("function build()")]
+        assert fn.index("removeShape") < fn.index("shapes.push")
+
+
+class TestGenerationIsCancellableAndDoesNotCollapseThePanel:
+    """Requested 2026-08-04.
+
+    Cancel: cubegen is a blocking PySCF call and cannot be interrupted, so this
+    bumps the render token — every completion path already checks it, so the
+    worker's result is discarded on arrival. From the waiting user's side that
+    is what cancel means: the controls return now and no stale surface appears.
+
+    Panel stability (#7): replacing a rendered viewer with a "Generating…"
+    placeholder collapsed it from ~620px to nothing, so the accordion jumped
+    and the page scrolled, then jumped back. The existing viewer is dimmed in
+    place instead, leaving the layout untouched.
+    """
+
+    def test_cancel_bumps_the_token_so_a_late_result_is_discarded(self):
+        from quantui.app_visualization import on_iso_cancel
+
+        app = Mock()
+        app._iso_render_token = 7
+        app._iso_js_bridge = None
+        on_iso_cancel(app, None)
+        assert app._iso_render_token == 8
+
+    def test_cancel_restores_the_controls_immediately(self):
+        from quantui.app_visualization import on_iso_cancel
+
+        app = Mock()
+        app._iso_render_token = 1
+        app._iso_js_bridge = None
+        app._iso_generate_btn = Mock(disabled=True, description="Generating…")
+        app._iso_spinner = Mock(layout=Mock(display=""))
+        app._iso_cancel_btn = Mock(layout=Mock(display=""))
+        app._iso_export_status = Mock(value="")
+
+        on_iso_cancel(app, None)
+        assert app._iso_generate_btn.disabled is False
+        assert app._iso_generate_btn.description == "Generate Isosurface"
+        assert app._iso_spinner.layout.display == "none"
+        assert app._iso_cancel_btn.layout.display == "none"
+        assert "Cancelled" in app._iso_export_status.value
+
+    def test_cancel_cannot_raise_on_a_partly_built_app(self):
+        # It is a last-resort control; it must work when other things are not.
+        from quantui.app_visualization import on_iso_cancel
+
+        app = Mock(spec=["_iso_render_token"])
+        app._iso_render_token = 0
+        on_iso_cancel(app, None)
+
+    def test_the_viewer_exposes_a_busy_state(self, cube_file):
+        html = render_orbital_isosurface_py3dmol(cube_file)
+        assert "__quantuiIsoBusy" in html
+        # Dimming, not removing: the element keeps its box, so nothing reflows.
+        assert "opacity" in html[html.index("__quantuiIsoBusy") :]
+
+    def test_the_busy_overlay_does_not_affect_layout(self, cube_file):
+        html = render_orbital_isosurface_py3dmol(cube_file)
+        overlay = html[html.index('id="orb_busy_') :][:400]
+        assert "position:absolute" in overlay, "an in-flow overlay would reflow"
+        assert "pointer-events:none" in overlay, "must not eat mouse drags"
+
+    def test_generate_does_not_swap_the_panel_when_it_starts(self):
+        # Superseded twice. It first allowed a placeholder swap on the FIRST
+        # generate; the molecule placeholder removed that case. It then banned
+        # _set_html_output outright, which was wrong — the COMPLETION path
+        # legitimately swaps in the finished viewer. What collapses the panel is
+        # a swap at the START.
+        import inspect
+
+        from quantui.app_visualization import on_iso_generate
+
+        src = inspect.getsource(on_iso_generate)
+        assert "iso_bridge_busy(app, True)" in src
+        start = src[: src.index("iso_bridge_busy(app, True)")]
+        assert "_set_html_output" not in start
+
+    def test_labels_use_adjectives_not_numbers(self):
+        from quantui.orbital_visualization import ISO_RESOLUTION_OPTIONS
+
+        for label, _ in ISO_RESOLUTION_OPTIONS:
+            assert "×" not in label and "x slower" not in label, label
+        # The grid itself stays — it is what the adjective refers to.
+        assert any("40³" in label for label, _ in ISO_RESOLUTION_OPTIONS)
+
+
+class TestCameraSurvivesANewIsosurface:
+    """Requested 2026-08-04. A generate replaces the whole viewer, so the camera
+    cannot live in the viewer object — it is stashed on ``window`` at the moment
+    the busy state is set (exactly when a generate starts) and restored by the
+    next viewer's build().
+    """
+
+    def test_the_camera_is_stashed_when_generation_starts(self, cube_file):
+        html = render_orbital_isosurface_py3dmol(cube_file)
+        busy = html[html.index("__quantuiIsoBusy_") :]
+        assert "stash()" in busy, "camera must be captured before replacement"
+
+    def test_the_camera_is_restored_only_for_the_same_scene(self, cube_file):
+        # Carrying a camera onto a different molecule would frame it
+        # arbitrarily; a different ORBITAL of the same molecule must keep it.
+        html = render_orbital_isosurface_py3dmol(cube_file)
+        assert "saved.key===SCENE" in html
+        assert "setView(saved.view)" in html
+
+    def test_the_scene_key_ignores_the_orbital_but_not_the_molecule(self, tmp_path):
+        from quantui.orbital_visualization import _scene_key
+
+        header = [
+            "orb",
+            "cube",
+            "    1    0.000000    0.000000    0.000000",
+            "    4    0.500000    0.000000    0.000000",
+            "    4    0.000000    0.500000    0.000000",
+            "    4    0.000000    0.000000    0.500000",
+            "    1    1.000000    0.000000    0.000000    0.000000",
+        ]
+        same_mol_other_orbital = "\n".join(header + ["1.0 2.0 3.0"])
+        original = "\n".join(header + ["9.9 8.8 7.7"])
+        moved = "\n".join(
+            header[:6] + ["    6    6.000000    2.000000    0.000000    0.000000"]
+        )
+        assert _scene_key(original) == _scene_key(same_mol_other_orbital)
+        assert _scene_key(original) != _scene_key(moved)
+
+
+class TestThePanelIsNeverEmpty:
+    """Requested 2026-08-04: show the molecule before the first Generate, so the
+    first isosurface fades in over an existing viewer rather than appearing in a
+    collapsed panel."""
+
+    def test_the_placeholder_is_the_same_viewer_shell(self):
+        from quantui.molecule import Molecule
+        from quantui.orbital_visualization import render_molecule_placeholder_py3dmol
+
+        mol = Molecule(
+            atoms=["O", "H", "H"],
+            coordinates=[[0, 0, 0], [0.757, 0.587, 0], [-0.757, 0.587, 0]],
+        )
+        html = render_molecule_placeholder_py3dmol(mol)
+        # Same shell means the busy-dim and camera stash work on it too.
+        assert "__quantuiIsoBusy" in html
+        assert "__quantuiIsoUpdate" in html
+
+    def test_the_placeholder_draws_no_surfaces(self):
+        from quantui.molecule import Molecule
+        from quantui.orbital_visualization import render_molecule_placeholder_py3dmol
+
+        mol = Molecule(atoms=["H", "H"], coordinates=[[0, 0, 0], [0, 0, 0.74]])
+        html = render_molecule_placeholder_py3dmol(mol)
+        assert "WITH_SURFACES=false" in html.replace(" ", "")
+
+    def test_generate_always_dims_now_that_a_viewer_always_exists(self):
+        import inspect
+
+        from quantui.app_visualization import on_iso_generate
+
+        src = inspect.getsource(on_iso_generate)
+        assert "iso_bridge_busy(app, True)" in src
+        # The first-generate placeholder swap is gone — there is always a
+        # viewer to dim, so nothing collapses.
+        assert "may take 15" not in src
+
+
+class TestGeometryOptOpensTheIsosurfacePanel:
+    def test_isosurface_is_the_default_panel_for_geometry_opt(self):
+        from quantui.app import QuantUIApp
+
+        panels = QuantUIApp._PANEL_REGISTRY["geometry_opt"]
+        auto = [name for name, _, select in panels if select]
+        # FIRST-wins, per the rules documented above _PANEL_REGISTRY. An
+        # earlier version of this test asserted last-wins — it passed while the
+        # panel did not actually open, because the assertion matched the
+        # implementation I had imagined rather than the one in the file.
+        assert auto[0] == "Isosurface"
+
+    def test_energies_runs_before_isosurface(self):
+        """The dependency that ordering by selection alone breaks.
+
+        _pop_energies calls show_orbital_diagram, which is what populates
+        _last_orb_mo_coeff / _mol_atom / _mol_basis — exactly the state
+        _pop_isosurface checks. Run Isosurface first and it reports "required
+        data is missing" on a result that has it, because the data has not been
+        loaded yet. That regression shipped on 2026-08-04; this is the test
+        that would have caught it.
+        """
+        from quantui.app import QuantUIApp
+
+        names = [n for n, _, _ in QuantUIApp._PANEL_REGISTRY["geometry_opt"]]
+        assert names.index("Energies") < names.index("Isosurface")
+
+    def test_single_point_keeps_the_same_dependency(self):
+        # Same coupling, same requirement — worth pinning before someone
+        # reorders this one too.
+        from quantui.app import QuantUIApp
+
+        names = [n for n, _, _ in QuantUIApp._PANEL_REGISTRY["single_point"]]
+        assert names.index("Energies") < names.index("Isosurface")
+
+    def test_trajectory_remains_the_fallback(self):
+        # When orbital data is missing its populator returns False and the
+        # panel never activates, so Trajectory must still be able to win.
+        from quantui.app import QuantUIApp
+
+        panels = QuantUIApp._PANEL_REGISTRY["geometry_opt"]
+        assert ("Trajectory", "_pop_geo_trajectory", True) in panels
+
+
+class TestTheBusyOverlayCannotGetStuck:
+    """Reported 2026-08-04: the "Generating…" overlay appeared right after the
+    new surface and never cleared.
+
+    The bridge retries for up to 2 s waiting for its hook to exist. A busy(true)
+    issued while no viewer was present kept polling, then fired against the NEXT
+    viewer — after busy(false) had already run. A sequence guard makes only the
+    newest call able to apply, and a fresh viewer bumps the sequence so nothing
+    in flight can land on it.
+    """
+
+    def test_the_bridge_abandons_superseded_calls(self):
+        import inspect
+
+        from quantui.app_visualization import iso_bridge_busy
+
+        src = inspect.getsource(iso_bridge_busy)
+        assert "__quantuiIsoBusySeq" in src
+        assert "!==seq" in src, "a stale retry must abandon, not apply"
+
+    def test_a_new_viewer_invalidates_pending_busy_calls(self, cube_file):
+        html = render_orbital_isosurface_py3dmol(cube_file)
+        build = html[html.index("function build()") :]
+        assert "__quantuiIsoBusySeq" in build
+
+
+class TestThePlaceholderFindsAMoleculeOnTheAnalysisTab:
+    def test_it_prefers_the_analysis_viewer_molecule(self):
+        # app._molecule is usually None there — the result came from history —
+        # so keying only on it left the panel empty.
+        import inspect
+
+        from quantui.app_visualization import _show_iso_placeholder
+
+        src = inspect.getsource(_show_iso_placeholder)
+        assert "_analysis_displayed_molecule" in src
+        assert src.index("_analysis_displayed_molecule") < src.index('"_molecule"')

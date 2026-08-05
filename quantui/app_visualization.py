@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from contextlib import contextmanager
@@ -12,6 +13,9 @@ import ipywidgets as widgets
 from IPython.display import HTML, display
 
 from quantui import theme as _theme
+from quantui.app_builders import _ORB_PNG_INBOX_CLASS
+
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -294,7 +298,7 @@ def show_opt_trajectory(
         pass
 
     # --- Pre-build XYZ blocks (reused by the viewer and the export) ---
-    charge = traj[0].charge
+    # (charge was only needed by the retired plotlymol export path)
     xyzblocks = [
         f"{len(m.atoms)}\n{m.get_formula()}\n{m.to_xyz_string()}" for m in traj
     ]
@@ -357,15 +361,21 @@ def show_opt_trajectory(
 
         def _do_export() -> None:
             try:
-                from plotlymol3d import create_trajectory_animation
+                # py3Dmol, matching what is on screen (2026-08-04, same change
+                # as VIB_EXPORT). This reuses build_trajectory_viewer_html —
+                # the exact builder that produced the viewer above — so the
+                # exported file has the same stepper, the same per-step energy
+                # labels and the same geometry, rather than a second renderer's
+                # interpretation of them. standalone_html embeds the vendored
+                # 3Dmol.js so the file opens offline, with no CDN.
+                from quantui.viz_assets import standalone_html
 
-                anim_fig = create_trajectory_animation(
-                    xyzblocks=xyzblocks,
-                    energies_hartree=energies if energies else None,
-                    charge=charge,
-                    mode="ball+stick",
-                    resolution=12,
-                    title=f"Geo Opt: {opt_result.formula}",
+                fragment = build_trajectory_viewer_html(
+                    xyzblocks,
+                    formula=opt_result.formula,
+                    energies=list(energies) if energies else None,
+                    rel_e=rel_e or None,
+                    bgcolor="white",  # exported file has no app theme around it
                 )
                 result_dir = getattr(app, "_last_result_dir", None)
                 out_path = (
@@ -373,7 +383,10 @@ def show_opt_trajectory(
                     if result_dir is not None
                     else Path.home() / f"{opt_result.formula}_trajectory.html"
                 )
-                anim_fig.write_html(str(out_path))
+                out_path.write_text(
+                    standalone_html(fragment, title=f"Geo Opt: {opt_result.formula}"),
+                    encoding="utf-8",
+                )
                 app._queue_main_thread_callback(
                     setattr,
                     export_status,
@@ -1030,10 +1043,14 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
         and app._last_orb_mol_atom is not None
         and app._last_orb_mol_basis is not None
     ):
-        app._orb_iso_output.clear_output()
         app._orb_toggle.value = "HOMO"
         app._orb_iso_controls.layout.display = ""
         app._iso_generate_btn.disabled = False
+        # (2) Show the molecule immediately, so the panel is never empty and the
+        # first isosurface fades in over an existing viewer instead of appearing
+        # in a collapsed one. It also lets the user orient the structure BEFORE
+        # generating — the camera carries across, same scene key.
+        _show_iso_placeholder(app)
     else:
         app._orb_iso_controls.layout.display = "none"
         app._iso_generate_btn.disabled = True
@@ -1067,15 +1084,16 @@ def on_iso_generate(app: Any, btn: Any) -> None:
         _clog.log_event("iso_render_start", orbital_label)
     except Exception:
         pass
-    app._orb_iso_output.clear_output()
-    with app._orb_iso_output:
-        display(
-            HTML(
-                f'<p style="color:#555;font-style:italic;padding:4px 0">'
-                f"⏳ Generating {orbital_label} cube file and rendering isosurface"
-                f" — this may take 15–30 s…</p>"
-            )
-        )
+    _show_cancel(app, True)
+    # (7) Do NOT swap the output here. Replacing a rendered viewer with a text
+    # placeholder collapsed the panel from ~620px to nothing, so the accordion
+    # jumped and the page scrolled — then jumped back when the new surface
+    # arrived. Dimming the existing viewer in place keeps the layout identical.
+    # With no viewer yet (first generate) there is nothing to dim, so fall back
+    # to the message; an empty panel cannot collapse further.
+    # A viewer is always present now — the molecule placeholder fills the panel
+    # before the first cube exists — so this can always dim rather than swap.
+    iso_bridge_busy(app, True)
 
     done = threading.Event()
     # Balance the single _activity_begin above exactly once, across
@@ -1103,6 +1121,8 @@ def on_iso_generate(app: Any, btn: Any) -> None:
             return
         btn.disabled = False
         btn.description = "Generate Isosurface"
+        _show_cancel(app, False)
+        iso_bridge_busy(app, False)
 
     def _run() -> None:
         try:
@@ -1127,15 +1147,12 @@ def on_iso_generate(app: Any, btn: Any) -> None:
                 pass
             btn.disabled = False
             btn.description = "Generate Isosurface"
-            app._orb_iso_output.clear_output()
-            with app._orb_iso_output:
-                display(
-                    HTML(
-                        '<p style="color:#b91c1c;padding:8px">'
-                        "⚠ Orbital isosurface timed out after 180 s. "
-                        "Try a smaller basis set or a smaller molecule.</p>"
-                    )
-                )
+            app._set_html_output(
+                app._orb_iso_output,
+                '<p style="color:#b91c1c;padding:8px">'
+                "⚠ Orbital isosurface timed out after 180 s. "
+                "Try a smaller basis set or a smaller molecule.</p>",
+            )
 
         app._queue_main_thread_callback(_show_timeout)
 
@@ -1214,16 +1231,13 @@ def render_orbital_isosurface(
         def _show_range_err() -> None:
             if _is_stale():
                 return
-            app._orb_iso_output.clear_output()
-            with app._orb_iso_output:
-                display(
-                    HTML(
-                        '<p style="color:#b91c1c;padding:8px">'
-                        f"⚠ Orbital index out of range. This calculation has "
-                        f"{n_total} molecular orbitals (valid indices 0–"
-                        f"{n_total - 1}; HOMO = {n_occ - 1}).</p>"
-                    )
-                )
+            app._set_html_output(
+                app._orb_iso_output,
+                '<p style="color:#b91c1c;padding:8px">'
+                f"⚠ Orbital index out of range. This calculation has "
+                f"{n_total} molecular orbitals (valid indices 0–"
+                f"{n_total - 1}; HOMO = {n_occ - 1}).</p>",
+            )
 
         app._queue_main_thread_callback(_show_range_err)
         return
@@ -1270,12 +1284,32 @@ def render_orbital_isosurface(
         # infer them from the MO occupations so charged/open-shell molecules
         # (H3O+, OH-, radicals, ...) don't fail to build in PySCF.
         _charge, _spin = infer_charge_and_spin(mol_atom, mo_occ_for_charge)
+
+        # ORBX.2: the user-chosen cubegen grid. Read at generate time rather
+        # than cached, so changing the dropdown affects the next Generate
+        # without any extra wiring. Falls back to the default if the widget is
+        # absent (older layouts, tests constructing a partial app).
+        from quantui.orbital_visualization import (
+            DEFAULT_ISO_RESOLUTION,
+            ISO_RESOLUTION_PRESETS,
+            max_render_points,
+        )
+
+        _res_key = getattr(
+            getattr(app, "_iso_resolution_dd", None), "value", DEFAULT_ISO_RESOLUTION
+        )
+        _grid = ISO_RESOLUTION_PRESETS.get(
+            _res_key, ISO_RESOLUTION_PRESETS[DEFAULT_ISO_RESOLUTION]
+        )
         generate_cube_from_arrays(
             mol_atom,
             mol_basis,
             mo_coeff,
             orb_idx,
             cube_path,
+            nx=_grid,
+            ny=_grid,
+            nz=_grid,
             charge=_charge,
             spin=_spin,
         )
@@ -1291,9 +1325,10 @@ def render_orbital_isosurface(
 
         with _viz_render_event(app, task=_VT.ORBITAL_ISOSURFACE, backend=backend_label):
             if use_py3dmol:
+                # Same options the sliders and the theme path use, so a fresh
+                # render cannot disagree with a redraw of the same orbital.
                 html_str = render_orbital_isosurface_py3dmol(
-                    cube_path,
-                    bgcolor=scene_bgcolor,
+                    cube_path, **iso_render_options(app)
                 )
             else:
                 is_dark = app.theme_btn.value == "Dark"
@@ -1302,6 +1337,11 @@ def render_orbital_isosurface(
                 title_color = app._plotly_theme_colors()["font_color"]
                 fig = plot_cube_isosurface(
                     cube_path,
+                    # The second knob. Without this the Plotly fallback would
+                    # stride a finer grid straight back down to the 60³ cap and
+                    # the extra wait would buy nothing. py3Dmol above needs no
+                    # equivalent — it isosurfaces at full resolution in-browser.
+                    max_points=max_render_points(_grid),
                     title=f"{orbital_label} Isosurface",
                     show_molecule=True,
                     show_grid=False,
@@ -1331,14 +1371,11 @@ def render_orbital_isosurface(
             pass
 
         def _show_err(msg: str = err_msg) -> None:
-            app._orb_iso_output.clear_output()
-            with app._orb_iso_output:
-                display(
-                    HTML(
-                        f'<p style="color:#b91c1c;padding:8px">'
-                        f"⚠ Orbital isosurface failed: {msg}</p>"
-                    )
-                )
+            app._set_html_output(
+                app._orb_iso_output,
+                f'<p style="color:#b91c1c;padding:8px">'
+                f"⚠ Orbital isosurface failed: {msg}</p>",
+            )
 
         app._queue_main_thread_callback(_show_err)
         return
@@ -1348,6 +1385,9 @@ def render_orbital_isosurface(
     # label so the "Export cube" button can copy it to the top-level
     # result dir with a friendly name without re-deriving the path.
     app._last_cube_path = cube_path
+    # The enclosed-density readout depends on the cube that was just written,
+    # so it can only be filled in now — not when the slider was last moved.
+    update_iso_enclosed_label(app)
     app._last_cube_orbital = orbital_label
     try:
         from quantui import calc_log as _clog
@@ -1881,6 +1921,281 @@ def render_vib_mode(
                 "No vibrational animation backend available "
                 "(neither py3Dmol nor plotlymol3d installed).",
             )
+
+
+def iso_render_options(app: Any) -> dict:
+    """Current isosurface settings, read straight off the widgets.
+
+    One place, so the first render and every live update agree.
+
+    ``transparent_bg`` is deliberately absent: transparency is an EXPORT
+    property, applied by ``__quantuiIsoCapture`` at the moment of capture and
+    undone immediately after. Putting it here would change the live viewer,
+    which is exactly what the user asked it not to do.
+    """
+
+    def _val(name: str, default):
+        """Widget value coerced to the default's type, or the default.
+
+        The coercion is the point. A widget that exists but holds something
+        uncoercible — a partially-built app, a stub — would otherwise raise out
+        of here and take the whole render with it.
+        """
+        raw = getattr(getattr(app, name, None), "value", default)
+        try:
+            return type(default)(raw)
+        except (TypeError, ValueError):
+            return default
+
+    return {
+        "isovalue": _val("_iso_isovalue_slider", 0.02),
+        "opacity": _val("_iso_opacity_slider", 0.85),
+        "color_scheme": _val("_iso_colors_dd", "blue-red"),
+        "bgcolor": app._plotly_theme_colors()["scene_bgcolor"],
+        "capture_class": (
+            _ORB_PNG_INBOX_CLASS
+            if getattr(app, "_orb_png_inbox", None) is not None
+            else ""
+        ),
+    }
+
+
+def _show_iso_placeholder(app: Any) -> None:
+    """Molecule-only viewer in the isosurface panel, before any cube exists."""
+    # On the Analysis tab app._molecule is usually None — the result came from
+    # history, not the Calculate-tab molecule — so this silently did nothing and
+    # the panel stayed empty. Prefer what the analysis viewer is already showing.
+    mol = (
+        getattr(app, "_analysis_displayed_molecule", None)
+        or getattr(app, "_last_vib_molecule", None)
+        or getattr(app, "_molecule", None)
+    )
+    if mol is None:
+        app._orb_iso_output.clear_output()
+        return
+    try:
+        from quantui.orbital_visualization import render_molecule_placeholder_py3dmol
+
+        app._set_html_output(
+            app._orb_iso_output,
+            render_molecule_placeholder_py3dmol(
+                mol, bgcolor=app._plotly_theme_colors()["scene_bgcolor"]
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 — a placeholder must never block
+        logger.debug("iso placeholder failed: %s", exc)
+        app._orb_iso_output.clear_output()
+
+
+def _show_cancel(app: Any, visible: bool) -> None:
+    btn = getattr(app, "_iso_cancel_btn", None)
+    if btn is not None:
+        btn.layout.display = "" if visible else "none"
+
+
+def iso_bridge_busy(app: Any, busy: bool) -> None:
+    """Dim (or restore) the live viewer while a new cube is computed."""
+    bridge = getattr(app, "_iso_js_bridge", None)
+    if bridge is None:
+        return
+    from IPython.display import Javascript, display
+
+    js = (
+        "(function(){"  # noqa: UP031 — JS is brace-dense
+        "var seq=(window.__quantuiIsoBusySeq||0)+1;window.__quantuiIsoBusySeq=seq;"
+        "var n=0;function go(){n++;"
+        # Abandon if a newer busy call has been issued. The retry loop waits up
+        # to 2 s for the hook to exist, so a busy(true) issued while no viewer
+        # was present kept polling and then fired against the NEXT viewer —
+        # after busy(false) had already run. That is the overlay that appeared
+        # right after the surface and never went away (reported 2026-08-04).
+        "if(window.__quantuiIsoBusySeq!==seq){return;}"
+        "if(window.__quantuiIsoBusy){window.__quantuiIsoBusy(%s);}"
+        "else if(n<40){setTimeout(go,50);}}go();})();" % ("true" if busy else "false")
+    )
+    try:
+        bridge.clear_output(wait=True)
+        with bridge:
+            display(Javascript(js))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("iso busy update failed: %s", exc)
+
+
+def on_iso_cancel(app: Any, btn: Any = None) -> None:
+    """Abandon the in-flight isosurface generation.
+
+    cubegen is a blocking PySCF call that cannot be interrupted, so this does
+    not stop the computation — it bumps ``_iso_render_token``, which every
+    completion path already checks, so the worker's result is discarded when it
+    arrives. From the user's side that is what cancel means: the controls come
+    back now and the stale surface never appears.
+    """
+    app._iso_render_token = int(getattr(app, "_iso_render_token", 0)) + 1
+    _show_cancel(app, False)
+    iso_bridge_busy(app, False)
+    gen = getattr(app, "_iso_generate_btn", None)
+    if gen is not None:
+        gen.disabled = False
+        gen.description = "Generate Isosurface"
+    sp = getattr(app, "_iso_spinner", None)
+    if sp is not None:
+        sp.layout.display = "none"
+    try:
+        app._activity_end(kind="compute")
+    except Exception:  # noqa: BLE001 — cancelling must never raise
+        pass
+    status = getattr(app, "_iso_export_status", None)
+    if status is not None:
+        status.value = '<span style="color:#555">Cancelled.</span>'
+
+
+def iso_bridge_update(app: Any, **opts: Any) -> None:
+    """Push appearance changes to the LIVE viewer — no Python re-render.
+
+    This is what keeps the camera. A Python re-render replaces the viewer
+    wholesale, so the orientation the user rotated into is lost (GOTCHAS:
+    "Camera state does NOT persist across atomic HTML swaps"); the JS side
+    instead saves getView()/setView() around a surface rebuild.
+
+    It also stops the panel collapsing and the page jumping on every slider
+    tweak, because no output is swapped at all.
+    """
+    bridge = getattr(app, "_iso_js_bridge", None)
+    if bridge is None:
+        return
+    import json
+
+    from IPython.display import Javascript, display
+
+    payload = json.dumps(opts)
+    # Retry-until-present mirrors _vib_bridge_set_mode: at the moment a slider
+    # fires, the viewer may still be loading its async 3Dmol bundle.
+    js = (
+        "(function(){var n=0;function go(){n++;"  # noqa: UP031 — JS is brace-dense
+        "if(window.__quantuiIsoUpdate){window.__quantuiIsoUpdate(%s);}"
+        "else if(n<40){setTimeout(go,50);}}go();})();" % payload
+    )
+    try:
+        bridge.clear_output(wait=True)
+        with bridge:
+            display(Javascript(js))
+    except Exception as exc:  # noqa: BLE001 — a slider must never raise
+        logger.debug("iso bridge update failed: %s", exc)
+
+
+def update_iso_enclosed_label(app: Any) -> None:
+    """Show what fraction of the orbital's density the current isovalue holds."""
+    label = getattr(app, "_iso_enclosed_label", None)
+    if label is None:
+        return
+    cube = getattr(app, "_last_cube_path", None)
+    iso = float(getattr(getattr(app, "_iso_isovalue_slider", None), "value", 0.02))
+    if cube is None or not Path(cube).exists():
+        label.value = ""
+        return
+    from quantui.orbital_visualization import enclosed_density_fraction
+
+    frac = enclosed_density_fraction(Path(cube), iso)
+    label.value = (
+        ""
+        if frac is None
+        else (
+            f'<span style="font-size:12px;color:#555">encloses '
+            f"<b>{frac * 100:.1f}%</b> of the density</span>"
+        )
+    )
+
+
+def on_iso_appearance_changed(app: Any, change: dict | None = None) -> None:
+    """Isovalue / opacity / colours changed — update the live viewer in place."""
+    from quantui.orbital_visualization import orbital_colors
+
+    opts = iso_render_options(app)
+    pos, neg = orbital_colors(str(opts["color_scheme"]))
+    iso_bridge_update(
+        app,
+        iso=opts["isovalue"],
+        op=opts["opacity"],
+        pos=pos,
+        neg=neg,
+    )
+    update_iso_enclosed_label(app)
+
+
+def rerender_3d_scenes_for_theme(app: Any) -> None:
+    """Re-render the isosurface and vibrational viewers after a theme change.
+
+    Both bake their background into the generated HTML at render time — the
+    colour comes from ``_plotly_theme_colors()["scene_bgcolor"]``, and py3Dmol
+    paints it into the WebGL scene rather than reading it from CSS. Nothing
+    re-reads it later, so switching Light/Dark left the old background in place
+    until the user happened to regenerate. Reported 2026-08-04: *"the background
+    ... is sticky to the theme ... but will [change] if I calculate a new
+    isosurface."*
+
+    Both re-renders are CHEAP by construction and must stay that way:
+
+    - The isosurface re-reads the cube already on disk. It does NOT re-run
+      cubegen, which is the slow part (15-30 s, and up to 4.6x that at the
+      finest grid). Re-generating on a theme toggle would be unusable.
+    - The vibrational viewer rebuilds from cached displacements, not from a new
+      frequency calculation.
+    - The trajectory viewer rebuilds from ``_last_traj_result``, not from a new
+      optimization.
+
+    The two molecule viewers (Calculate and Analysis tabs) are NOT handled here
+    — ``_rerender_plotly_theme`` routes those through ``_rerender_3d_views``,
+    which already knew how to redraw them. It simply was not being called on a
+    theme change, which is why the Analysis-tab viewer stayed dark while the
+    Calculate-tab one updated.
+
+    ⚠️ The vib path needs a full rebuild, not ``__quantuiVibSetMode``. That
+    bridge switches frames on the existing viewer client-side — which is exactly
+    why the camera survives a mode change — but it never touches the scene
+    background, so it cannot fix this.
+    """
+    # (the isosurface reads its colour via iso_render_options below)
+
+    # ── Orbital isosurface ──────────────────────────────────────────────
+    # A background colour is not geometry, so this is one JS call on the live
+    # viewer rather than a re-render. Re-rendering was measurably slow — the
+    # viewer HTML is megabytes at the finer grids — and it also threw away the
+    # camera on every theme toggle.
+    try:
+        if getattr(app, "_last_cube_path", None) is not None:
+            iso_bridge_update(app, bg=app._plotly_theme_colors()["scene_bgcolor"])
+    except Exception as exc:  # noqa: BLE001 — a theme toggle must never raise
+        logger.warning("isosurface theme update failed: %s", exc)
+
+    # ── Optimization trajectory ─────────────────────────────────────────
+    # Only when the panel is actually populated: re-rendering an empty
+    # trajectory viewer would build one on a tab the user has never opened.
+    # The populated-check is INSIDE the try. It reads app.traj_output.children,
+    # and this function promises never to raise on a theme toggle — a guard that
+    # can itself throw is not a guard. (Caught by a test whose app stub had no
+    # traj_output: len() on the auto-Mock raised straight through.)
+    try:
+        traj = getattr(app, "_last_traj_result", None)
+        children = getattr(getattr(app, "traj_output", None), "children", ())
+        if traj is not None and len(children) > 0:
+            app._show_opt_trajectory(traj)
+    except Exception as exc:  # noqa: BLE001 — a theme toggle must never raise
+        logger.warning("trajectory theme re-render failed: %s", exc)
+
+    # ── Vibrational animation ───────────────────────────────────────────
+    molecule = getattr(app, "_last_vib_molecule", None)
+    freq_result = getattr(app, "_last_vib_freq_result", None)
+    mode_dd = getattr(app, "vib_mode_dd", None)
+    if molecule is not None and freq_result is not None and mode_dd is not None:
+        try:
+            render_vib_mode(
+                app,
+                getattr(app, "_last_vib_data", None),
+                molecule,
+                int(mode_dd.value),
+            )
+        except Exception as exc:  # noqa: BLE001 — same
+            logger.warning("vib theme re-render failed: %s", exc)
 
 
 def on_vib_mode_changed(app: Any, change: dict[str, Any]) -> None:
@@ -2498,16 +2813,23 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
 def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
     """Build a self-contained HTML string for the given vibrational mode.
 
-    Backend resolution is preference-independent (decoupled from the user's
-    live-render default backend): plotlymol3d is preferred because it produces
-    a self-contained Plotly animation with embedded playback controls — the
-    canonical "export quality" output. py3Dmol is used as a fallback only when
-    plotlymol3d is unavailable; the resulting HTML embeds the multi-frame
-    py3Dmol viewer with its built-in animate() loop.
+    **py3Dmol only, as of 2026-08-04** (user decision). This used to prefer
+    plotlymol3d on the reasoning that a self-contained Plotly animation with
+    embedded controls is the canonical "export quality" artifact. That reasoning
+    optimised the wrong thing: the file someone exports should be the animation
+    they were just watching. py3Dmol renders the live vibrational viewer, so
+    py3Dmol is what gets exported — same frame construction, same amplitude,
+    same frame count, same fps as the on-screen viewer.
+
+    Backend resolution stays preference-independent, and is now trivially so:
+    ``VizTask.VIB_EXPORT`` is single-backend in the router. The Plotly export
+    branch is removed rather than left unreachable, because unlike the Plotly
+    isosurface path (kept, tested, one line from being restored) it duplicated
+    animation-building logic that would rot silently behind a flag.
 
     Returns ``(backend_name, html_string)``.
 
-    Raises ``ValueError`` when vib state is missing or no backend is available.
+    Raises ``ValueError`` when vib state is missing or py3Dmol is unavailable.
     """
     freq_result = getattr(app, "_last_vib_freq_result", None)
     molecule = getattr(app, "_last_vib_molecule", None)
@@ -2521,53 +2843,9 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
     if availability is None:
         raise ValueError("Visualization availability not initialised.")
 
-    # Plotlymol3d path — preferred for export.
-    if availability.plotlymol:
-        vib_data = getattr(app, "_last_vib_data", None)
-        if vib_data is None:
-            # Plotlymol3d installed but the per-result wrapper wasn't built.
-            # Try once more from the cached freq_result + molecule.
-            try:
-                vib_data = app._build_vib_data_from_freq_result(freq_result, molecule)
-            except Exception:
-                vib_data = None
-        if vib_data is not None:
-            try:
-                import plotly.io as _pio
-                from plotlymol3d import (
-                    create_vibration_animation,
-                    xyzblock_to_rdkitmol,
-                )
-            except ImportError:
-                pass
-            else:
-                xyzblock = (
-                    f"{len(molecule.atoms)}\n{molecule.get_formula()}\n"
-                    f"{molecule.to_xyz_string()}"
-                )
-                rdmol = xyzblock_to_rdkitmol(xyzblock, charge=molecule.charge)
-                anim_fig = create_vibration_animation(
-                    vib_data=vib_data,
-                    mode_number=mode_number,
-                    mol=rdmol,
-                    amplitude=0.4,
-                    n_frames=20,
-                    mode="ball+stick",
-                    resolution=12,
-                )
-                anim_fig.update_layout(height=420)
-                html_str = _pio.to_html(
-                    anim_fig,
-                    full_html=True,
-                    include_plotlyjs=True,
-                    config={"responsive": True},
-                )
-                return ("plotlymol", html_str)
-
-    # py3Dmol fallback — preference-independent fallback when plotlymol is
-    # unavailable or its build path fails. Mirrors _render_vib_mode_py3dmol's
-    # frame construction but emits stand-alone HTML rather than swapping into
-    # vib_output.
+    # The one and only export path. Mirrors _render_vib_mode_py3dmol's frame
+    # construction but emits stand-alone HTML rather than swapping into
+    # vib_output, so the file matches what was on screen.
     if availability.py3dmol:
         try:
             import numpy as np
@@ -2626,6 +2904,7 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
         return ("py3dmol", standalone_html(view._make_html()))
 
     raise ValueError(
-        "No visualization backend available to export the vibrational "
-        "animation. Install plotlymol3d (preferred) or py3dmol."
+        "py3Dmol is unavailable, so the vibrational animation cannot be "
+        "exported. py3Dmol is a required QuantUI dependency — reinstall with "
+        "pip install --force-reinstall 'py3Dmol>=2,<3'."
     )

@@ -147,6 +147,9 @@ from quantui.app_exports import (
 from quantui.app_exports import (
     on_iso_export_cube as _exp_on_iso_export_cube,
 )
+from quantui.app_exports import (
+    on_orb_png_captured as _exp_on_orb_png_captured,
+)
 from quantui.app_formatters import (
     format_freq_result as _fmt_freq_result,
 )
@@ -334,6 +337,12 @@ from quantui.app_visualization import (
     on_ir_mode_changed as _viz_on_ir_mode_changed,
 )
 from quantui.app_visualization import (
+    on_iso_appearance_changed as _viz_on_iso_appearance_changed,
+)
+from quantui.app_visualization import (
+    on_iso_cancel as _viz_on_iso_cancel,
+)
+from quantui.app_visualization import (
     on_iso_generate as _viz_on_iso_generate,
 )
 from quantui.app_visualization import (
@@ -359,6 +368,9 @@ from quantui.app_visualization import (
 )
 from quantui.app_visualization import (
     render_vib_mode as _viz_render_vib_mode,
+)
+from quantui.app_visualization import (
+    rerender_3d_scenes_for_theme as _viz_rerender_3d_scenes_for_theme,
 )
 from quantui.app_visualization import (
     show_ir_spectrum as _viz_show_ir_spectrum,
@@ -1628,9 +1640,31 @@ class QuantUIApp:
             ("Isosurface", "_pop_isosurface", False),
         ],
         "geometry_opt": [
-            ("Trajectory", "_pop_geo_trajectory", True),
+            # ORDER MATTERS: the FIRST entry whose populator returns True and
+            # carries auto_select=True becomes the default panel (see the rules
+            # above). Isosurface therefore leads (requested 2026-08-04); an
+            # earlier attempt put it last, which did nothing because Trajectory
+            # had already claimed the selection.
+            #
+            # Trajectory keeps auto_select=True as the fallback: when a result
+            # has no orbital data, _pop_isosurface returns False, Isosurface
+            # never activates, and Trajectory becomes the default instead.
+            # ORDER IS LOAD-BEARING TWICE OVER.
+            #
+            # 1. Execution: _pop_energies calls show_orbital_diagram, which is
+            #    what populates _last_orb_mo_coeff / _mol_atom / _mol_basis —
+            #    the very state _pop_isosurface checks. Energies MUST run
+            #    first, or Isosurface reports "required data is missing" on a
+            #    result that has it. (Putting Isosurface first did exactly
+            #    that, 2026-08-04.)
+            # 2. Selection: the FIRST entry with auto_select=True that returns
+            #    True becomes the default panel. Energies is False, so
+            #    Isosurface is the first candidate and opens by default —
+            #    which is the request — while Trajectory keeps True as the
+            #    fallback for results with no orbital data.
             ("Energies", "_pop_energies", False),
-            ("Isosurface", "_pop_isosurface", False),
+            ("Isosurface", "_pop_isosurface", True),
+            ("Trajectory", "_pop_geo_trajectory", True),
         ],
         "frequency": [
             ("Vibrational", "_pop_vibrational", True),
@@ -1979,6 +2013,27 @@ class QuantUIApp:
         )
         # Cube + bundle exports
         self._iso_export_cube_btn.on_click(self._on_iso_export_cube)
+        self._iso_cancel_btn.on_click(self._safe_cb(self._on_iso_cancel))
+        # PNG capture arrives from the browser, so there is no button to bind
+        # here — the viewer's own Save-PNG button posts into this Textarea and
+        # ipywidgets syncs it back, firing this observer (ORBX.1).
+        self._orb_png_inbox.observe(
+            self._safe_cb(self._on_orb_png_captured), names="value"
+        )
+        # Persist the grid choice so it survives a relaunch (ORBX.2).
+        self._iso_resolution_dd.observe(
+            self._safe_cb(self._on_iso_resolution_changed), names="value"
+        )
+        # Appearance controls redraw from the cube on disk — no cubegen — so
+        # they can respond directly rather than behind an Apply button.
+        for _w in (
+            self._iso_isovalue_slider,
+            self._iso_opacity_slider,
+            self._iso_colors_dd,
+            # NOT _iso_png_transparent: it is an export-only option, applied at
+            # capture time. Observing it here would change the live viewer.
+        ):
+            _w.observe(self._safe_cb(self._on_iso_appearance_changed), names="value")
         self._export_bundle_btn.on_click(self._on_export_bundle)
 
     # ── Files tab ────────────────────────────────────────────────────────
@@ -2746,8 +2801,18 @@ class QuantUIApp:
         _last_pes = getattr(self, "_last_pes_result", None)
         if _last_pes is not None:
             self._show_pes_scan_result(_last_pes)
-        # Re-render 3D molecule viewer so scene_bgcolor updates immediately.
-        self._refresh_calc_mol_viewer()
+        # Re-render BOTH 3D molecule viewers so scene_bgcolor updates
+        # immediately. This used to call _refresh_calc_mol_viewer directly,
+        # which covered the Calculate tab only — the Analysis-tab viewer kept
+        # its old background until something else happened to redraw it.
+        # _rerender_3d_views already handled both; it just was not reached from
+        # here. Reported 2026-08-04.
+        self._rerender_3d_views()
+        # ...and the isosurface / vibrational viewers, which bake the same
+        # colour into their generated HTML. Without this they keep the old
+        # background until the user regenerates — reported 2026-08-04. Both
+        # re-render from cached inputs; neither re-runs a calculation.
+        _viz_rerender_3d_scenes_for_theme(self)
 
     def _initialize_viz_state_from_preference(self) -> None:
         """Align _viz_backend and the three preference widgets with the
@@ -3312,6 +3377,28 @@ class QuantUIApp:
 
     def _on_export_pdb(self, btn) -> None:
         _exp_on_export_pdb(self, btn)
+
+    def _on_iso_cancel(self, btn) -> None:
+        _viz_on_iso_cancel(self, btn)
+
+    def _on_iso_appearance_changed(self, change) -> None:
+        _viz_on_iso_appearance_changed(self, change)
+
+    def _on_orb_png_captured(self, change) -> None:
+        _exp_on_orb_png_captured(self, change)
+
+    def _on_iso_resolution_changed(self, change) -> None:
+        """Persist the isosurface grid choice.
+
+        Saved on change rather than at generate time so the preference sticks
+        even if the user picks a grid and then closes the app without running
+        anything.
+        """
+        new_val = (change or {}).get("new")
+        if not new_val or new_val == self._user_settings.viz.iso_resolution:
+            return
+        self._user_settings.viz.iso_resolution = str(new_val)
+        self._user_settings.save()
 
     def _on_iso_export_cube(self, btn) -> None:
         _exp_on_iso_export_cube(self, btn)

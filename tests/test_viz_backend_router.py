@@ -33,20 +33,33 @@ _DUAL_BACKEND_TASKS = [
     VizTask.ANALYSIS_STRUCTURE_VIEW,
     VizTask.HISTORY_STRUCTURE_REPLAY,
     VizTask.VIB_INTERACTIVE,
-    # py3Dmol does native in-browser isosurfacing (primary); the Plotly
-    # cube-isosurface path is the fallback.
-    VizTask.ORBITAL_ISOSURFACE,
 ]
 
 # Tasks that require plotlymol3d regardless of preference.
-_PLOTLYMOL_ONLY_TASKS = [
-    VizTask.TRAJECTORY_EXPORT,
-    VizTask.VIB_EXPORT,
-]
+# Empty as of 2026-08-04: TRAJECTORY_EXPORT was the last one, and it moved to
+# py3Dmol with the others. Kept (rather than deleted along with the tests that
+# use it) so restoring a plotlymol-only task is a one-line change and its
+# behaviour is still covered.
+_PLOTLYMOL_ONLY_TASKS: list[VizTask] = []
 
 # Tasks that require py3Dmol regardless of preference.
+#
+# ORBITAL_ISOSURFACE and VIB_EXPORT moved here from the dual/plotlymol lists on
+# 2026-08-04 (user decision — "plotlymol is really only good for the molecule
+# viewing windows"):
+#
+#   - ORBITAL_ISOSURFACE was dual-backend. Plotly renders isosurfaces from a
+#     strided-down volume, so it is downsampled by construction, and it cannot
+#     carry the Save-PNG capture that ORBX.1 adds.
+#   - VIB_EXPORT required plotlymol. The exported file should be the animation
+#     the user was watching, and py3Dmol renders the live vibrational viewer.
+#
+# Both are one-line reversions in _TASK_POLICY if that judgement changes.
 _PY3DMOL_ONLY_TASKS = [
     VizTask.TRAJECTORY_FRAME,
+    VizTask.ORBITAL_ISOSURFACE,
+    VizTask.VIB_EXPORT,
+    VizTask.TRAJECTORY_EXPORT,
 ]
 
 
@@ -151,8 +164,9 @@ class TestDualBackendTasksExplicitPreference:
 
 
 class TestSingleBackendTasksIgnorePreference:
-    """Export and isosurface tasks require plotlymol3d; preference must not
-    change that decision (only availability can)."""
+    """Single-backend tasks pin their renderer; preference must not change
+    that decision (only availability can). Which backend is pinned varies by
+    task — see the two lists above."""
 
     @pytest.mark.parametrize("task", _PLOTLYMOL_ONLY_TASKS)
     @pytest.mark.parametrize(

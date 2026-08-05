@@ -14,6 +14,20 @@ from quantui import molecule_library as _ml
 from quantui import theme as _theme
 from quantui.help_content import HELP_TOPICS
 from quantui.live_log import LiveLog
+from quantui.orbital_visualization import (
+    DEFAULT_ORBITAL_COLORS as _DEFAULT_ORBITAL_COLORS,
+)
+from quantui.orbital_visualization import (
+    ISO_RESOLUTION_OPTIONS as _ISO_RESOLUTION_OPTIONS,
+)
+from quantui.orbital_visualization import (
+    ORBITAL_COLOR_OPTIONS as _ORBITAL_COLOR_OPTIONS,
+)
+
+# Class on the hidden Textarea that receives PNG data URIs from the
+# viewer's Save-PNG button. Shared with the JS that writes into it, so
+# it is defined once here and passed down rather than spelled twice.
+_ORB_PNG_INBOX_CLASS = "quantui-orb-png-inbox"
 
 # Friendlier labels for the library category filter.
 _CATEGORY_LABELS = {
@@ -1541,6 +1555,20 @@ def build_run_section(app: Any, *, layout_fn: Any) -> None:
     )
 
 
+def _persisted_iso_resolution(app: Any) -> str:
+    """The saved isosurface grid preset, or the default if anything is off.
+
+    Read off the app rather than threaded in as a parameter: this builder takes
+    no settings arguments, and adding one for a single control would mean
+    touching every caller. A missing or invalid value must never stop the panel
+    from building — a broken preference should cost the preference, not the UI.
+    """
+    try:
+        return str(app._user_settings.viz.iso_resolution)
+    except Exception:  # noqa: BLE001 — settings must never gate widget creation
+        return "medium"
+
+
 def build_results_section(app: Any, *, layout_fn: Any) -> None:
     """Build results and analysis tab panels/widgets."""
 
@@ -1822,7 +1850,9 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             ),
             app._orb_toggle,
             app._orb_index_input,
-            app._orb_iso_output,
+            # The viewer is NOT here. It sits below the Generate button in
+            # iso_body, so the button stays next to the orbital selector rather
+            # than being pushed ~620px down the page by the rendered viewer.
         ],
         layout=layout_fn(display="none", margin="8px 0 0 0"),
     )
@@ -1853,6 +1883,17 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     # result dir under a friendly name (HOMO.cube / LUMO.cube / etc.).
     # Disabled until the first isosurface generation populates
     # ``app._last_cube_path``.
+    # Cancel abandons an in-flight generation. cubegen itself cannot be
+    # interrupted mid-call, so this bumps the render token — the worker's
+    # result is discarded on arrival and the UI is freed immediately, which is
+    # what "cancel" means to the person waiting.
+    app._iso_cancel_btn = widgets.Button(
+        description="Cancel",
+        icon="times",
+        button_style="warning",
+        tooltip="Abandon this isosurface generation and restore the controls.",
+        layout=layout_fn(width="110px", display="none", margin="8px 0 4px 0"),
+    )
     app._iso_export_cube_btn = widgets.Button(
         description="Export cube",
         icon="download",
@@ -1863,6 +1904,119 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         ),
         layout=layout_fn(width="160px", margin="8px 0 4px 8px"),
     )
+    # Cubegen grid (ORBX.2). Persisted, so someone who works at "fine" does not
+    # re-pick it every launch. The labels carry the cost multiplier because the
+    # jump is steep — 100³ is ~4.6× the grid work of the 60³ default — and the
+    # wait is the thing users are choosing between.
+    _iso_res_opts = list(_ISO_RESOLUTION_OPTIONS)
+    app._iso_resolution_dd = widgets.Dropdown(
+        options=_iso_res_opts,
+        value=_persisted_iso_resolution(app),
+        description="Grid:",
+        style={"description_width": "45px"},
+        tooltip=(
+            "Cube grid density. Higher is smoother but slower to compute; "
+            "cost scales with the cube of this number."
+        ),
+        layout=layout_fn(width="290px", margin="8px 0 4px 0"),
+    )
+
+    # ── Isosurface appearance (ORBX.2 cont.) ────────────────────────────
+    # Both re-render from the cube already on disk — no cubegen — so dragging
+    # either is fast. That is the whole reason they can be sliders rather than
+    # an "apply" button.
+    app._iso_isovalue_slider = widgets.FloatLogSlider(
+        value=0.02,
+        base=10,
+        min=-3.0,  # 0.001
+        max=-0.7,  # ~0.2
+        step=0.02,
+        description="Isovalue:",
+        readout_format=".4f",
+        continuous_update=False,  # re-render on release, not per pixel
+        style={"description_width": "70px"},
+        layout=layout_fn(width="330px"),
+    )
+    # An isovalue is an amplitude threshold, which is not the question people
+    # actually have — "how much of the orbital is inside this surface?" is.
+    # That is the integral of |psi|^2 enclosed, computed from the same cube.
+    app._iso_enclosed_label = widgets.HTML(
+        value="", layout=layout_fn(margin="0 0 0 6px")
+    )
+    app._iso_colors_dd = widgets.Dropdown(
+        options=list(_ORBITAL_COLOR_OPTIONS),
+        value=_DEFAULT_ORBITAL_COLORS,
+        description="Colours:",
+        style={"description_width": "70px"},
+        layout=layout_fn(width="330px"),
+    )
+    app._iso_opacity_slider = widgets.FloatSlider(
+        value=0.85,
+        min=0.1,
+        max=1.0,
+        step=0.05,
+        description="Opacity:",
+        readout_format=".2f",
+        continuous_update=False,
+        style={"description_width": "70px"},
+        layout=layout_fn(width="330px"),
+    )
+
+    # ── PNG export options (ORBX.1 cont.) ───────────────────────────────
+    app._iso_png_name = widgets.Text(
+        value="",
+        placeholder="(defaults to the orbital label, e.g. HOMO)",
+        description="PNG name:",
+        style={"description_width": "70px"},
+        layout=layout_fn(width="330px"),
+    )
+    app._iso_png_transparent = widgets.Checkbox(
+        value=False,
+        description="Transparent background (export only)",
+        indent=False,
+        tooltip=(
+            "The saved PNG has no background, so the figure drops onto a slide "
+            "or a coloured page. The viewer on screen is unchanged — "
+            "transparency is applied at capture, then undone."
+        ),
+        layout=layout_fn(width="330px"),
+    )
+    # Read by the capture JS (see _PNG_CAPTURE_JS), which looks for
+    # "<inbox-class>-transparent input". That keeps the decision on the browser
+    # side at the moment of capture, with no kernel round-trip.
+    app._iso_png_transparent.add_class(f"{_ORB_PNG_INBOX_CLASS}-transparent")
+    # DPI is metadata (the PNG pHYs chunk): it sets the PRINT size, not the
+    # pixel count. 300 dpi is the usual journal floor. Labelled with the
+    # resulting print width so the number means something.
+    app._iso_png_dpi = widgets.Dropdown(
+        options=[
+            ("72 dpi — screen", 72),
+            ("150 dpi — draft print", 150),
+            ("300 dpi — journal standard", 300),
+            ("600 dpi — high-res print", 600),
+        ],
+        value=300,
+        description="PNG dpi:",
+        style={"description_width": "70px"},
+        layout=layout_fn(width="330px"),
+    )
+
+    # Hidden inbox for client-side PNG capture (ORBX.1). The JS in the rendered
+    # isosurface writes a data URI into this Textarea's DOM node and dispatches
+    # an 'input' event; ipywidgets' own view then syncs `value` to the kernel.
+    # It is a real widget (not display:none on the outer box) because the view
+    # must exist in the DOM for that sync to happen at all.
+    app._orb_png_inbox = widgets.Textarea(
+        value="", layout=layout_fn(width="1px", height="1px", visibility="hidden")
+    )
+    app._orb_png_inbox.add_class(_ORB_PNG_INBOX_CLASS)
+
+    # Hidden Output that carries one-shot Javascript to the live viewer
+    # (isovalue / opacity / colours / background). Mirrors _vib_js_bridge.
+    app._iso_js_bridge = widgets.Output(
+        layout=layout_fn(width="0px", height="0px", visibility="hidden")
+    )
+
     app._iso_export_status = widgets.HTML(
         value="", layout=layout_fn(margin="0 0 0 8px")
     )
@@ -1884,12 +2038,31 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             widgets.HBox(
                 [
                     app._iso_generate_btn,
+                    app._iso_cancel_btn,
                     app._iso_spinner,
                     app._iso_export_cube_btn,
                     app._iso_export_status,
                 ],
                 layout=layout_fn(align_items="center", gap="6px"),
             ),
+            app._orb_iso_output,
+            app._iso_resolution_dd,
+            widgets.HBox(
+                [app._iso_isovalue_slider, app._iso_enclosed_label],
+                layout=layout_fn(align_items="center"),
+            ),
+            app._iso_opacity_slider,
+            app._iso_colors_dd,
+            widgets.HTML(
+                '<p style="color:#555;font-size:12px;margin:8px 0 2px">'
+                "<b>PNG export</b> — the Save PNG button under the viewer "
+                "captures the view exactly as you have rotated it.</p>"
+            ),
+            app._iso_png_name,
+            app._iso_png_dpi,
+            app._iso_png_transparent,
+            app._orb_png_inbox,
+            app._iso_js_bridge,
         ],
         layout=layout_fn(padding="8px"),
     )

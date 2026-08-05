@@ -90,12 +90,27 @@ def make_view(**kwargs):
     return py3Dmol.view(**kwargs)
 
 
-def standalone_html(view_html: str) -> str:
-    """Return viewer HTML suitable for a standalone (exported) file.
+def standalone_html(view_html: str, *, title: str = "QuantUI animation") -> str:
+    """Wrap viewer HTML as a complete, standalone document.
 
     Views built via :func:`make_view` already embed the vendored 3Dmol.js
-    loader (``js=<data: URI>``), so an exported file is self-contained and plays
-    offline as-is. Kept as a no-op pass-through for call-site clarity / API
-    stability.
+    loader (``js=<data: URI>``), so the *content* is self-contained and plays
+    offline. This adds the document around it.
+
+    It used to be a no-op pass-through, which wrote a bare fragment to disk.
+    Browsers render that in quirks mode, so it mostly worked — but without a
+    ``<meta charset>`` a file opened from disk is not reliably decoded as
+    UTF-8, and these exports carry non-ASCII: the stepper's ⇄ compare button
+    and the → in frame labels. Mojibake in a file someone puts in a talk is a
+    poor way to find that out.
     """
-    return view_html
+    return (
+        "<!doctype html>\n"
+        '<html lang="en">\n<head>\n'
+        '<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
+        f"<title>{title}</title>\n"
+        "<style>body{margin:0;padding:16px;background:#fff;"
+        "font-family:system-ui,-apple-system,'Segoe UI',sans-serif}</style>\n"
+        "</head>\n<body>\n" + view_html + "\n</body>\n</html>\n"
+    )
