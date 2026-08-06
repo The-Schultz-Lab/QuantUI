@@ -457,6 +457,10 @@ def log_calculation(
     gpu_used: Optional[bool] = None,
     gpu_name: Optional[str] = None,
     n_steps: Optional[int] = None,
+    source: Optional[str] = None,
+    warm: Optional[bool] = None,
+    import_s: Optional[float] = None,
+    stages: Optional[dict] = None,
 ) -> None:
     """Append one performance record to ``perf_log.jsonl``.
 
@@ -464,6 +468,27 @@ def log_calculation(
     offload was active for the run; reading these back lets
     ``quantui.analytics.build_dashboard`` compute GPU-vs-CPU speedups
     across runs of the same (method, basis, formula) tuple.
+
+    ``source`` / ``warm`` / ``import_s`` / ``stages`` (added 2026-08-05,
+    M-PROGRESS Phase C) describe **how the timing was measured**, which
+    turned out to matter more than the cost model itself:
+
+    * ``source`` — ``"app"`` for a run the user launched in the UI,
+      ``"calibration"`` for one the benchmark harness measured in a fresh
+      subprocess. Those two populations have very different wall times for
+      the same chemistry (see :func:`estimate_time`), so mixing them was
+      the dominant error term in the pre-Phase-C estimator.
+    * ``warm`` — whether this process had already completed a calc of the
+      same ``calc_type``. The first frequency of a session pays PySCF's
+      Hessian-module import; later ones don't.
+    * ``import_s`` — measured import cost, when the caller runs in a fresh
+      process and can separate it from compute.
+    * ``stages`` — ``{stage_label: seconds}`` wall-time breakdown, used by
+      the stage-aware frequency model.
+
+    All four are additive and optional: records written before they existed
+    simply lack the keys, and every reader treats "absent" as "unknown"
+    rather than assuming a default.
     """
     record: dict = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -490,6 +515,14 @@ def log_calculation(
     # a history-based "step k / ~N" prior for the live progress fraction.
     if n_steps is not None:
         record["n_steps"] = n_steps
+    if source is not None:
+        record["source"] = str(source)
+    if warm is not None:
+        record["warm"] = bool(warm)
+    if import_s is not None:
+        record["import_s"] = round(float(import_s), 3)
+    if stages:
+        record["stages"] = {str(k): round(float(v), 3) for k, v in stages.items()}
     _append(_perf_path(), record)
 
 
@@ -508,6 +541,8 @@ _POST_HF_METHODS: frozenset = frozenset({"MP2", "CCSD", "CCSD(T)"})
 
 
 def _estimate_frequency_cost(
+    records: Optional[list[dict]] = None,
+    *,
     n_atoms: int,
     n_electrons: int,
     method: str,
@@ -515,6 +550,7 @@ def _estimate_frequency_cost(
     n_basis: Optional[int] = None,
     n_cores: Optional[int] = None,
     gpu_used: Optional[bool] = None,
+    source: Optional[str] = None,
 ) -> Optional[dict]:
     """Structured frequency-time estimate from an SP anchor.
 
@@ -548,7 +584,15 @@ def _estimate_frequency_cost(
     if n_atoms <= 0:
         return None
 
-    sp_est = estimate_time(
+    # ``records=None`` means "use the live history". The replay harness and
+    # ``estimate_time_from_records`` always pass an explicit slice, so the
+    # model itself stays pure; the default exists for direct callers that
+    # just want the same answer the app would give.
+    if records is None:
+        records = _read_all(_perf_path())
+
+    sp_est = estimate_time_from_records(
+        records,
         n_atoms=n_atoms,
         n_electrons=n_electrons,
         method=method,
@@ -557,6 +601,7 @@ def _estimate_frequency_cost(
         n_cores=n_cores,
         calc_type="single_point",
         gpu_used=gpu_used,
+        source=source,
     )
     if sp_est is None:
         return None
@@ -610,6 +655,44 @@ def estimate_time(
     n_cores: Optional[int] = None,
     calc_type: Optional[str] = None,
     gpu_used: Optional[bool] = None,
+    source: Optional[str] = None,
+) -> Optional[dict]:
+    """Estimate wall time for an upcoming calculation from ``perf_log.jsonl``.
+
+    Thin wrapper: reads the performance history, then defers every
+    modelling decision to :func:`estimate_time_from_records`. The split
+    exists so the offline replay harness
+    (:mod:`quantui.estimator_eval`) can score the *same* predictor
+    against an arbitrary historical slice without touching the real log
+    file — which is what makes Phase C's model changes measurable rather
+    than a matter of taste.
+    """
+    return estimate_time_from_records(
+        _read_all(_perf_path()),
+        n_atoms=n_atoms,
+        n_electrons=n_electrons,
+        method=method,
+        basis=basis,
+        n_basis=n_basis,
+        n_cores=n_cores,
+        calc_type=calc_type,
+        gpu_used=gpu_used,
+        source=source,
+    )
+
+
+def estimate_time_from_records(
+    records: list[dict],
+    *,
+    n_atoms: int,
+    n_electrons: int,
+    method: str,
+    basis: str,
+    n_basis: Optional[int] = None,
+    n_cores: Optional[int] = None,
+    calc_type: Optional[str] = None,
+    gpu_used: Optional[bool] = None,
+    source: Optional[str] = None,
 ) -> Optional[dict]:
     """
     Return a time estimate dict, or ``None`` if there is insufficient data.
@@ -661,10 +744,22 @@ def estimate_time(
     label downgraded one notch — better an approximate estimate from
     cross-device data than no estimate at all.
 
+    **Provenance filtering** (2026-08-05, M-PROGRESS Phase C): ``source``
+    partitions the pool the same way ``gpu_used`` does, and for the same
+    reason — the two populations measure different things. A calibration
+    record times a fresh subprocess, so it includes PySCF's import cost;
+    an app record times a calculation inside an already-warm kernel. On
+    small molecules that import dominates, which is why the pre-Phase-C
+    estimator was systematically wrong despite an unbiased median: mixing
+    the populations inflated the spread rather than the centre. Records
+    written before this field existed carry no ``source`` and are treated
+    as "provenance unknown" — admitted only on the fallback path, with
+    confidence downgraded, so the pool self-heals as tagged records
+    accumulate rather than needing the user's history to be discarded.
+
     Returns ``None`` when fewer than 2 converged records are available for
     the scoped candidate pool.
     """
-    records = _read_all(_perf_path())
     converged = [r for r in records if r.get("converged")]
     if not converged:
         return None
@@ -712,11 +807,31 @@ def estimate_time(
             scoped = cpu_scoped
             _gpu_filtered = True
 
+    # Partition by provenance. Same shape as the device partition above:
+    # prefer a pool that was measured the same way the upcoming run will
+    # be, fall back to everything when that pool is too thin.
+    _source_filtered = False
+    if source is not None:
+        same_source = [r for r in scoped if r.get("source") == source]
+        if len(same_source) >= 2:
+            scoped = same_source
+            _source_filtered = True
+
     def _maybe_downgrade(conf: str) -> str:
-        """Downgrade confidence one notch if device-partition fell back."""
-        if gpu_used is None or _gpu_filtered:
-            return conf
-        return {"high": "medium", "medium": "low", "low": "low"}[conf]
+        """Downgrade confidence one notch per partition that fell back.
+
+        A fall-back means the pool contains records measured on a
+        different device, or measured a different way, than the run being
+        predicted. Either alone is worth a notch; both together should
+        not read as merely "medium", so the downgrades compose.
+        """
+        order = ["high", "medium", "low"]
+        idx = order.index(conf)
+        if gpu_used is not None and not _gpu_filtered:
+            idx += 1
+        if source is not None and not _source_filtered:
+            idx += 1
+        return order[min(idx, len(order) - 1)]
 
     beta_new = _METHOD_SCALE_EXP.get(method, 3.5)
     n_cores_current = n_cores if n_cores is not None else 1
@@ -831,6 +946,7 @@ def estimate_time(
     # (tier 1 is SP-only). Confidence is inherited from the SP anchor.
     if calc_type == "frequency":
         cost_est = _estimate_frequency_cost(
+            records,
             n_atoms=n_atoms,
             n_electrons=n_electrons,
             method=method,

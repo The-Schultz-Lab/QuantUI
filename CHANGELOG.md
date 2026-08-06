@@ -7,6 +7,36 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **Running the test suite no longer corrupts your time estimates.** QuantUI's
+  own tests were writing their runs into `~/.quantui/logs/perf_log.jsonl` — the
+  file the runtime estimator learns from. Because those tests use a *simulated*
+  calculation, each one recorded a fabricated timing: 2 773 records were in the
+  log and roughly four fifths of them were test artifacts, including "water
+  frequency" runs whose recorded times ranged from 0.34 s to 143 s for identical
+  chemistry. This is the reason the pre-run estimate had been unreliable. Only
+  developers running the test suite were affected; the fabricated records are
+  now superseded automatically as real runs accumulate, so no manual cleanup is
+  needed.
+- **Calibration now times the calculation, not the process.** Each calibration
+  step runs in a fresh subprocess and its stopwatch started before PySCF was
+  even imported, so every calibration record was inflated by startup cost that
+  a real run in an open session never pays. Import time is still recorded, just
+  separately.
+
+### Added
+
+- **Calculation records say how they were measured.** Runs launched from the app
+  and runs measured by the calibration tool are now labelled as such, and the
+  estimator keeps them apart instead of averaging two populations that measure
+  different things. Records also carry a per-stage time breakdown (SCF, Hessian,
+  excited-state solve, …), which is the groundwork for stage-aware estimates.
+- **`python -m quantui.estimator_eval`** — replays your recorded history through
+  the estimator and reports how accurate it would have been, split by
+  calculation type. Reports coverage alongside accuracy, so a model that stays
+  silent can't look good by refusing to answer.
+
 ## [0.6.1] - 2026-08-05
 
 ### Fixed

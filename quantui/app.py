@@ -694,6 +694,9 @@ _RE_CYCLE = re.compile(
 )
 _RE_CONV = re.compile(r"converged SCF energy\s*=\s*([\-\d\.]+)")
 _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
+# Step/point/state counters inside a status message. Removed before the
+# message is used as a per-stage timing key — see _LogCapture._stage_key.
+_RE_STAGE_NUMBERS = re.compile(r"\d+(?:[./]\d+)*")
 
 # ── Silent-phase heartbeat (M-PROGRESS Phase D) ──────────────────────────────
 #
@@ -757,6 +760,60 @@ class _LogCapture:
         self._hb_started_t = self._last_write_t
         self._hb_stop = threading.Event()
         self._hb_thread: Optional[threading.Thread] = None
+        # Per-stage wall times (M-PROGRESS Phase C, deferred from B3).
+        # Every calc type already announces its phases through
+        # log_utils.emit_status, and every one of those announcements passes
+        # through this object — so stage boundaries can be timed here without
+        # threading a timer through optimizer/freq/tddft/nmr one by one.
+        self._stage_times: dict[str, float] = {}
+        self._stage_name: Optional[str] = None
+        self._stage_started_t = self._last_write_t
+
+    # ── Per-stage timing ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _stage_key(message: str) -> str:
+        """Collapse a live status message to a stable stage name.
+
+        Status messages carry per-step detail — "Opt step 7 — SCF…",
+        "Solving TD-DFT excited states (10)…" — which is exactly right for
+        the user watching the run and exactly wrong as a dictionary key: it
+        would turn one stage into one entry per step. Stripping the numbers
+        leaves the phase itself, which is the unit a cost model reasons in.
+        """
+        text = _RE_STAGE_NUMBERS.sub(" ", message)
+        text = text.replace("…", " ").replace("(", " ").replace(")", " ")
+        text = " ".join(text.split())
+        return text.strip(" -—:·").lower()
+
+    def _enter_stage(self, name: str) -> None:
+        """Close the stage in progress and start *name*.
+
+        Repeated announcements of the same stage (the optimizer re-announces
+        every step) are treated as one continuous stage, so the recorded
+        breakdown stays at the granularity a cost model can use rather than
+        exploding into one entry per step.
+        """
+        now = time.monotonic()
+        if self._stage_name is not None and name != self._stage_name:
+            prev = self._stage_times.get(self._stage_name, 0.0)
+            self._stage_times[self._stage_name] = prev + (now - self._stage_started_t)
+        if name != self._stage_name:
+            self._stage_name = name
+            self._stage_started_t = now
+
+    def stage_timings(self) -> dict[str, float]:
+        """Return ``{stage: seconds}``, including the stage still running.
+
+        Safe to call mid-run: the open stage is measured up to now rather
+        than omitted, so a caller that logs this at the end of a calc gets a
+        breakdown that actually sums to the run.
+        """
+        out = dict(self._stage_times)
+        if self._stage_name is not None:
+            elapsed = time.monotonic() - self._stage_started_t
+            out[self._stage_name] = out.get(self._stage_name, 0.0) + elapsed
+        return out
 
     # ── Silent-phase heartbeat ──────────────────────────────────────────────
 
@@ -830,8 +887,11 @@ class _LogCapture:
         while "\n" in self._line_buf:
             line, self._line_buf = self._line_buf.split("\n", 1)
             m = _RE_Q_STATUS.search(line)
-            if m and self._status is not None:
-                self._status.value = m.group(1).strip()
+            if m:
+                message = m.group(1).strip()
+                self._enter_stage(self._stage_key(message))
+                if self._status is not None:
+                    self._status.value = message
                 continue
             m = _RE_CYCLE.search(line)
             if m and self._status is not None:
@@ -860,6 +920,7 @@ class _LogCapture:
         step k…") during silent (``verbose=0``) phases, without cluttering the
         output log the way a ``[QuantUI_STATUS]`` stream line would.
         """
+        self._enter_stage(self._stage_key(message))
         if self._status is not None:
             try:
                 self._status.value = message
@@ -1236,6 +1297,12 @@ class QuantUIApp:
         # The active run's _LogCapture, so the ticker can read the
         # completion fraction calc modules report onto it. None between runs.
         self._active_log: Optional[_LogCapture] = None
+        # Calc types this session has already completed once. The first run
+        # of a type pays import costs later ones don't (PySCF loads its
+        # Hessian module on the first Frequency, for instance), so the
+        # perf record carries a warm/cold flag rather than silently mixing
+        # the two populations. See calc_log.log_calculation.
+        self._warm_calc_types: set[str] = set()
         # Relaxed molecule from a pending pre-opt preview, awaiting Keep/Revert.
         self._preopt_relaxed_mol: Optional[Molecule] = None
         # Cache kernel io_loop once on the main thread so worker threads can
@@ -4418,6 +4485,7 @@ class QuantUIApp:
                 n_basis=_nb_for_est,
                 calc_type=_ct_for_est,
                 gpu_used=_predicted_gpu_used,
+                source="app",
             )
             if _est is not None:
                 _predicted_run_s = float(_est["seconds"])
@@ -5158,6 +5226,8 @@ class QuantUIApp:
             _mark("perf_begin")
             try:
                 _elapsed_for_est = time.perf_counter() - _run_wall_t
+                _was_warm = save_type in self._warm_calc_types
+                self._warm_calc_types.add(save_type)
                 _calc_log.log_calculation(
                     formula=result.formula,
                     n_atoms=len(calc_mol.atoms),
@@ -5175,6 +5245,9 @@ class QuantUIApp:
                     gpu_used=getattr(result, "gpu_used", None),
                     gpu_name=getattr(result, "gpu_name", None),
                     n_steps=getattr(result, "n_steps", None),
+                    source="app",
+                    warm=_was_warm,
+                    stages=log.stage_timings(),
                 )
                 _calc_log.log_event(
                     "calc_done",

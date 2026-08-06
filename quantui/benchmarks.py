@@ -1031,6 +1031,7 @@ def _calibration_worker(
             if calc_type == "geometry_opt":
                 from quantui.optimizer import optimize_geometry as _opt
 
+                t_compute0 = _t.perf_counter()
                 res = _opt(
                     molecule=mol,
                     method=method,
@@ -1043,6 +1044,7 @@ def _calibration_worker(
             elif calc_type == "frequency":
                 from quantui.freq_calc import run_freq_calc as _freq
 
+                t_compute0 = _t.perf_counter()
                 res = _freq(
                     molecule=mol,
                     method=method,
@@ -1058,6 +1060,7 @@ def _calibration_worker(
                 # verbose=3 gives per-iteration SCF energies in the log —
                 # enough signal to confirm the worker hasn't frozen on a
                 # slow tier-4 entry. (Was verbose=0 previously.)
+                t_compute0 = _t.perf_counter()
                 res = _sp(
                     mol,
                     method=method,
@@ -1069,8 +1072,20 @@ def _calibration_worker(
                 converged = bool(res.converged)
                 n_iterations = int(res.n_iterations)
 
-            elapsed = _t.perf_counter() - t0
-            log_fh.write(f"\n[QuantUI_STATUS] COMPLETED in {elapsed:.2f} s\n")
+            # Time the *calculation*, not the process. ``t0`` is set before
+            # quantui/pyscf are imported, so measuring from it charged every
+            # calibration record with a fresh subprocess's import cost —
+            # which on a small molecule dwarfs the chemistry and made the
+            # calibration population incomparable to in-app runs. Both
+            # numbers are reported: ``elapsed_s`` is what the estimator
+            # trains on, ``import_s`` is kept for diagnosis.
+            _t_done = _t.perf_counter()
+            elapsed = _t_done - t_compute0
+            import_s = t_compute0 - t0
+            log_fh.write(
+                f"\n[QuantUI_STATUS] COMPLETED in {elapsed:.2f} s "
+                f"(+{import_s:.2f} s import)\n"
+            )
 
             # Save as a regular result directory (2026-05-25 — tier 4's
             # MP2 + CCSD + benzene freq are scientifically valuable;
@@ -1090,6 +1105,7 @@ def _calibration_worker(
                     "converged": converged,
                     "n_iterations": n_iterations,
                     "elapsed_s": elapsed,
+                    "import_s": import_s,
                     "result_dir": str(saved_dir) if saved_dir else None,
                 }
             )
@@ -1503,6 +1519,8 @@ def run_calibration(
                     n_basis=step.n_basis,
                     n_cores=1,
                     calc_type=calc_type,
+                    source="calibration",
+                    import_s=msg.get("import_s"),
                 )
             else:
                 step.status = _STATUS_ERROR

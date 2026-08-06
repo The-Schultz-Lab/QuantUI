@@ -1413,6 +1413,7 @@ def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
             n_basis=n_basis,
             calc_type=calc_type,
             gpu_used=_predicted_gpu_used,
+            source="app",
         )
         app.perf_estimate_html.value = calc_log_mod.format_estimate(est)
     except Exception:
