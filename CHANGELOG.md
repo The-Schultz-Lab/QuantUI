@@ -27,6 +27,19 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Checkpoints — an interrupted calculation can pick up where it stopped.**
+  Geometry Optimization saves its trajectory and the optimizer's accumulated
+  curvature after every step; PES Scan banks each point as it finishes. If a
+  run is cancelled, crashes, or the machine goes to sleep, the Calculate tab
+  offers to resume it — and says how much is already done ("8 of 20 scan points
+  already computed") rather than just asking. The offer appears only when the
+  calculation you have configured is *exactly* the interrupted one, geometry
+  included, so a resume can never splice two different runs together.
+- **Warm-started SCF.** A converged density from an earlier run of the same
+  molecule, charge, method and basis is reused as the starting guess, which
+  usually cuts several SCF cycles. The geometry does not have to match — a
+  density from a nearby geometry is a good guess, which is what a geometry
+  optimization relies on internally.
 - **Calculation records say how they were measured.** Runs launched from the app
   and runs measured by the calibration tool are now labelled as such, and the
   estimator keeps them apart instead of averaging two populations that measure

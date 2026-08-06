@@ -760,6 +760,21 @@ def build_shared_widgets(
     )
     app.perf_estimate_html = widgets.HTML()
 
+    # Resume-from-checkpoint offer (M-CHECKPOINT CHK.5). Both widgets stay
+    # hidden until the configured calculation actually has stored progress —
+    # a permanently-visible "Resume" control that is almost never applicable
+    # is worse than none, because it invites the user to wonder what it would
+    # have done.
+    app._resume_notice_html = widgets.HTML(
+        value="", layout=layout_fn(display="none", margin="2px 0 0 0")
+    )
+    app._resume_cb = widgets.Checkbox(
+        value=True,
+        description="Resume from checkpoint",
+        indent=False,
+        layout=layout_fn(display="none", width="auto", margin="0 0 6px 0"),
+    )
+
     app.step_progress = step_progress_cls(
         ["Choose molecule", "Set method", "Run", "Results"]
     )
@@ -1522,6 +1537,8 @@ def build_run_section(app: Any, *, layout_fn: Any) -> None:
                 "sets may take several minutes on a laptop.</p>"
             ),
             app.perf_estimate_html,
+            app._resume_notice_html,
+            app._resume_cb,
             widgets.HBox(
                 [
                     app.run_btn,

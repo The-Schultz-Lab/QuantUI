@@ -1041,6 +1041,8 @@ class QuantUIApp:
         _reset_confirm_html: Any
         _reset_confirm_no: Any
         _reset_confirm_yes: Any
+        _resume_cb: Any
+        _resume_notice_html: Any
         _status_html: Any
         _status_tab_panel: Any
         _theme_style: Any
@@ -4506,6 +4508,14 @@ class QuantUIApp:
             except Exception:  # noqa: BLE001 — telemetry self-guard
                 pass
 
+        # --- Checkpoint for this run (M-CHECKPOINT) ---
+        # Created before any calculation starts, because the runs worth
+        # checkpointing are exactly the ones that never reach the end. Failure
+        # to create one leaves ``_ckpt`` as None and the calc runs unchecked-
+        # pointed, which is the pre-M-CHECKPOINT behaviour.
+        _ckpt = self._begin_run_checkpoint()
+        _resume = bool(_ckpt is not None and self._resume_cb.value)
+
         def _mark(stage: str) -> None:
             _tail_marks[stage] = time.perf_counter()
 
@@ -4677,6 +4687,8 @@ class QuantUIApp:
                     expected_steps=(
                         int(round(_expected_steps)) if _expected_steps else None
                     ),
+                    checkpoint=_ckpt,
+                    resume=_resume,
                 )
                 _sp_result = _run_required_final_single_point(
                     result.molecule,
@@ -4949,6 +4961,8 @@ class QuantUIApp:
                     stop=self._scan_stop.value,
                     steps=self._scan_steps.value,
                     progress_stream=log,  # type: ignore[arg-type]
+                    checkpoint=_ckpt,
+                    resume=_resume,
                 )
                 result_html = self._format_pes_scan_result(result)
                 save_spectra = {
@@ -5004,6 +5018,7 @@ class QuantUIApp:
                     basis=self.basis_dd.value,
                     progress_stream=log,  # type: ignore[arg-type]
                     solvent=_solvent,
+                    checkpoint=_ckpt,
                 )
                 result_html = self._format_result(result)
                 save_spectra, save_type = {}, "single_point"
@@ -5451,6 +5466,7 @@ class QuantUIApp:
                 log.stop_heartbeat()
             except Exception:  # noqa: BLE001 — teardown must not mask a failure
                 pass
+            self._finish_run_checkpoint(_ckpt)
             self._activity_end(kind="compute")
 
     # ── Live elapsed ticker ────────────────────────────────────────────────
@@ -5540,6 +5556,69 @@ class QuantUIApp:
 
     def _update_notes(self, change=None) -> None:
         _run_update_notes(self, change)
+
+    def _begin_run_checkpoint(self) -> Optional[Any]:
+        """Open a checkpoint for the run about to start, or return ``None``.
+
+        Returning ``None`` — no molecule, an unavailable checkpoint module, an
+        unwritable directory — means the calculation runs without one. A
+        checkpoint is an optimisation for the failure case; it must never be
+        the reason a calculation doesn't start.
+        """
+        try:
+            from quantui.app_runflow import checkpoint_identity
+            from quantui.checkpoint import Checkpoint
+
+            identity = checkpoint_identity(self)
+            if identity is None:
+                return None
+            ckpt = Checkpoint(identity)
+            extra: dict = {}
+            if self.calc_type_dd.value == "PES Scan":
+                # Lets the resume offer say "8 of 20" rather than just "8".
+                extra["total_points"] = int(self._scan_steps.value)
+            if not ckpt.begin(**extra):
+                return None
+            return ckpt
+        except Exception as exc:  # noqa: BLE001 — never block a run
+            try:
+                _calc_log.log_event(
+                    "checkpoint_unavailable", f"{type(exc).__name__}: {exc}"[:200]
+                )
+            except Exception:  # noqa: BLE001 — telemetry self-guard
+                pass
+            return None
+
+    def _finish_run_checkpoint(self, ckpt: Optional[Any]) -> None:
+        """Close out *ckpt* after a run ends, however it ended.
+
+        Runs from the ``finally`` of ``_do_run``, so it is reached on success,
+        on failure and on cancel. It deliberately does **not** decide whether
+        the run succeeded — the calc modules mark completion themselves, since
+        only they know whether "finished" means converged, and a run that
+        stopped early must keep its resumable state.
+
+        What happens here is bookkeeping: refresh the resume offer so it
+        reflects reality, and prune old checkpoints so the directory doesn't
+        grow without bound.
+        """
+        try:
+            if ckpt is not None and self._cancel_event.is_set():
+                ckpt.mark_interrupted()
+        except Exception:  # noqa: BLE001 — teardown must not mask a failure
+            pass
+        try:
+            from quantui.checkpoint import prune
+
+            prune()
+        except Exception:  # noqa: BLE001 — retention is best-effort
+            pass
+        try:
+            from quantui.app_runflow import refresh_resume_notice
+
+            refresh_resume_notice(self)
+        except Exception:  # noqa: BLE001 — a stale notice is not fatal
+            pass
 
     def _update_estimate(self, change=None) -> None:
         _run_update_estimate(self, calc_log_mod=_calc_log, change=change)

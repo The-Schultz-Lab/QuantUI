@@ -1367,20 +1367,32 @@ def _update_open_shell_hint(app: Any) -> None:
     app._open_shell_hint.layout.display = ""
 
 
+#: Calculate-tab dropdown label → the key used in perf records, saved
+#: results, and checkpoint identities. One mapping, so the estimator and the
+#: checkpoint layer can never disagree about what calculation is configured.
+_CALC_TYPE_KEYS: dict = {
+    "Single Point": "single_point",
+    "Geometry Opt": "geometry_opt",
+    "Frequency": "frequency",
+    "UV-Vis (TD-DFT)": "tddft",
+    "NMR Shielding": "nmr",
+    "PES Scan": "pes_scan",
+}
+
+
+def calc_type_key(app: Any) -> str:
+    """Return the canonical calc-type key for the current dropdown selection."""
+    return _CALC_TYPE_KEYS.get(app.calc_type_dd.value, "single_point")
+
+
 def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
     """Refresh runtime estimate text from the performance model."""
     if app._molecule is None:
         app.perf_estimate_html.value = ""
+        refresh_resume_notice(app)
         return
     try:
-        calc_type = {
-            "Single Point": "single_point",
-            "Geometry Opt": "geometry_opt",
-            "Frequency": "frequency",
-            "UV-Vis (TD-DFT)": "tddft",
-            "NMR Shielding": "nmr",
-            "PES Scan": "pes_scan",
-        }.get(app.calc_type_dd.value, "single_point")
+        calc_type = calc_type_key(app)
         n_basis = calc_log_mod.count_basis_functions(
             app._molecule.atoms, app.basis_dd.value
         )
@@ -1418,6 +1430,92 @@ def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
         app.perf_estimate_html.value = calc_log_mod.format_estimate(est)
     except Exception:
         app.perf_estimate_html.value = ""
+    # Same triggers as the estimate — molecule, method, basis, calc type —
+    # so the offer can never describe a calculation the user has moved on from.
+    refresh_resume_notice(app)
+
+
+def checkpoint_identity(app: Any) -> Any:
+    """Return the :class:`CalcIdentity` for the calculation as configured.
+
+    ``None`` when there is no molecule yet, or when the checkpoint module is
+    unavailable for any reason — callers treat that as "no checkpointing",
+    which is a working app, just without resume.
+    """
+    try:
+        from quantui.checkpoint import CalcIdentity
+
+        molecule = getattr(app, "_molecule", None)
+        if molecule is None:
+            return None
+        return CalcIdentity.from_molecule(
+            molecule,
+            calc_type=calc_type_key(app),
+            method=app.method_dd.value,
+            basis=app.basis_dd.value,
+        )
+    except Exception:  # noqa: BLE001 — checkpointing is never load-bearing
+        return None
+
+
+def refresh_resume_notice(app: Any) -> None:
+    """Show or hide the resume offer for the currently-configured calculation.
+
+    The offer appears only when there is genuinely banked work to continue,
+    and says how much: "8 of 20 scan points already computed" is actionable in
+    a way that a bare "Resume?" is not.
+    """
+    notice = getattr(app, "_resume_notice_html", None)
+    checkbox = getattr(app, "_resume_cb", None)
+    if notice is None or checkbox is None:
+        return
+
+    def _hide() -> None:
+        notice.value = ""
+        notice.layout.display = "none"
+        checkbox.layout.display = "none"
+
+    try:
+        from quantui.checkpoint import find_resumable
+
+        identity = checkpoint_identity(app)
+        if identity is None:
+            _hide()
+            return
+        ckpt = find_resumable(identity)
+        if ckpt is None:
+            _hide()
+            return
+        state = ckpt.resumable_state() or {}
+        detail = _resume_detail(ckpt, state)
+        notice.value = (
+            '<span style="font-size:12px;color:#64748b">'
+            "♻ An interrupted run of this exact calculation was found"
+            f"{detail}.</span>"
+        )
+        notice.layout.display = "block"
+        checkbox.layout.display = "block"
+    except Exception:  # noqa: BLE001 — never let this break the Calculate tab
+        _hide()
+
+
+def _resume_detail(ckpt: Any, state: dict) -> str:
+    """Return a short " — N points already computed" clause, or ``""``."""
+    try:
+        points = len(ckpt.completed_points())
+        if points:
+            total = state.get("total_points")
+            of_total = f" of {total}" if total else ""
+            return (
+                f" — {points}{of_total} scan point"
+                f"{'s' if points != 1 else ''} already computed"
+            )
+        steps = state.get("steps_done")
+        if isinstance(steps, int) and steps > 0:
+            return f" — {steps} optimizer step{'s' if steps != 1 else ''} already done"
+    except Exception:  # noqa: BLE001 — a missing detail is not worth an error
+        pass
+    return ""
 
 
 def refresh_results_browser(app: Any) -> None:

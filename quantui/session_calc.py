@@ -210,6 +210,8 @@ def run_in_session(
     verbose: int = 4,
     progress_stream: Optional[IO[str]] = None,
     solvent: Optional[str] = None,
+    checkpoint: Optional[Any] = None,
+    warm_start: bool = True,
 ) -> SessionResult:
     """
     Run a quantum chemistry calculation in the current kernel using PySCF.
@@ -235,6 +237,16 @@ def run_in_session(
             during the calculation is written here.  Pass a widget-backed
             stream (e.g. ``_WidgetStream``) in the notebook for live display;
             leave ``None`` to write to ``sys.stdout``.
+        checkpoint: Optional :class:`~quantui.checkpoint.Checkpoint`. When
+            given, PySCF writes its SCF chkfile into the checkpoint directory
+            so a later run of the same system can warm-start from this run's
+            converged density.
+        warm_start: Whether to look for an existing chkfile from a compatible
+            earlier run and use its density as the initial guess. Compatible
+            means same atoms, charge, multiplicity, method and basis —
+            **geometry may differ**, since a density from a nearby geometry is
+            a good guess (that is exactly what a geometry optimization relies
+            on internally). Ignored when no such chkfile exists.
 
     Returns:
         :class:`SessionResult` containing energy, HOMO-LUMO gap, convergence
@@ -272,11 +284,81 @@ def run_in_session(
             verbose=verbose,
             progress_stream=progress_stream,
             solvent=solvent,
+            checkpoint=checkpoint,
+            warm_start=warm_start,
             _dft=dft,
             _gto=gto,
             _scf=scf,
             stream=stream,
         )
+
+
+def _prepare_scf_checkpoint(
+    mf: Any,
+    *,
+    molecule: Molecule,
+    method: str,
+    basis: str,
+    checkpoint: Optional[Any],
+    warm_start: bool,
+    stream: Optional[IO[str]] = None,
+) -> Optional[Any]:
+    """Wire PySCF's chkfile to *checkpoint* and return a warm-start density.
+
+    Returns the initial-guess density matrix to hand to ``mf.kernel``, or
+    ``None`` to let PySCF build its own guess.
+
+    Every step is guarded independently. A warm start is an optimisation, not
+    a requirement: a missing, stale, or unreadable chkfile, a PySCF version
+    without ``from_chk``, or a GPU-migrated object that doesn't accept a
+    chkfile attribute must all end in a normal calculation rather than an
+    error. That is why this returns ``None`` liberally instead of raising.
+    """
+    # Where this run's density gets written, so a later run can reuse it.
+    if checkpoint is not None:
+        try:
+            checkpoint.dir.mkdir(parents=True, exist_ok=True)
+            mf.chkfile = str(checkpoint.scf_chkfile)
+        except Exception as exc:  # noqa: BLE001 — optional persistence
+            logger.debug("could not set SCF chkfile: %s", exc)
+
+    if not warm_start:
+        return None
+
+    try:
+        from .checkpoint import CalcIdentity, find_warm_start_chkfile
+
+        identity = CalcIdentity.from_molecule(
+            molecule, calc_type="single_point", method=method, basis=basis
+        )
+        source = find_warm_start_chkfile(identity)
+    except Exception as exc:  # noqa: BLE001 — discovery is best-effort
+        logger.debug("warm-start lookup failed: %s", exc)
+        return None
+
+    if source is None:
+        return None
+    # Don't warm-start from the file this run is about to overwrite: at best
+    # it is this same calculation's previous attempt, at worst a partial write
+    # from the run that just crashed.
+    if checkpoint is not None and source == checkpoint.scf_chkfile:
+        return None
+
+    from_chk = getattr(mf, "from_chk", None)
+    if from_chk is None:
+        return None
+    try:
+        dm0 = from_chk(str(source))
+    except Exception as exc:  # noqa: BLE001 — a bad guess is not a failure
+        logger.debug("warm start from %s failed: %s", source, exc)
+        return None
+
+    if stream is not None:
+        try:
+            stream.write("\n♻  Warm start — initial guess from a previous run.\n")
+        except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
+            pass
+    return dm0
 
 
 def _run_session_calc_body(
@@ -287,6 +369,8 @@ def _run_session_calc_body(
     verbose: int,
     progress_stream: Optional[IO[str]],
     solvent: Optional[str],
+    checkpoint: Optional[Any] = None,
+    warm_start: bool = True,
     _dft: Any,
     _gto: Any,
     _scf: Any,
@@ -403,10 +487,25 @@ def _run_session_calc_body(
     _cancel_check = cancel_check_from_stream(stream)
     attach_scf_cancel_callback(mf, _cancel_check)
 
+    # --- Checkpoint / warm start (M-CHECKPOINT CHK.1) ---
+    # Persist this run's converged density, and start from an earlier one when
+    # a compatible chkfile exists. Both halves are best-effort: a checkpoint
+    # problem must never stop a calculation that would otherwise run, so every
+    # failure here degrades to "no warm start" rather than raising.
+    _dm0 = _prepare_scf_checkpoint(
+        mf,
+        molecule=molecule,
+        method=method,
+        basis=basis,
+        checkpoint=checkpoint,
+        warm_start=warm_start,
+        stream=stream,
+    )
+
     # --- Run SCF ---
     emit_status(stream, "Running SCF…")
     try:
-        energy_hartree = float(mf.kernel())
+        energy_hartree = float(mf.kernel(dm0=_dm0) if _dm0 is not None else mf.kernel())
     except Exception as exc:
         raise RuntimeError(
             f"PySCF calculation failed for {molecule.get_formula()} "
