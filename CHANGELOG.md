@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-06
+
 ### Fixed
 
 - **Running the test suite no longer corrupts your time estimates.** QuantUI's
