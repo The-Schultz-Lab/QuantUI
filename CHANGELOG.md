@@ -37,6 +37,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   already computed") rather than just asking. The offer appears only when the
   calculation you have configured is *exactly* the interrupted one, geometry
   included, so a resume can never splice two different runs together.
+- **An "Unfinished calculations" list on the History tab.** After restarting
+  QuantUI you no longer have to remember what you were running: every
+  interrupted calculation is listed with its molecule, type, level of theory,
+  how much finished and how long ago. **Load these settings** puts the molecule
+  and all its settings back on the Calculate tab, ready to resume; **Discard**
+  removes one you are done with. Hidden entirely when nothing is unfinished.
 - **Help topic: "Resuming an interrupted calculation."** Covers how to resume,
   why the offer disappears if you change a setting, which calculation types can
   be resumed, and where checkpoints are stored.

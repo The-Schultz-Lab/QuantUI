@@ -67,6 +67,19 @@ STATUS_RUNNING = "running"
 STATUS_INTERRUPTED = "interrupted"
 STATUS_COMPLETE = "complete"
 
+#: Stored calc-type keys → the wording users see. Kept here rather than in the
+#: UI layer because a checkpoint listing has to label runs whose calc type is
+#: read off disk, with no live widget to ask.
+_CALC_TYPE_TITLES: dict = {
+    "single_point": "Single Point",
+    "geometry_opt": "Geometry Opt",
+    "frequency": "Frequency",
+    "tddft": "UV-Vis (TD-DFT)",
+    "nmr": "NMR Shielding",
+    "pes_scan": "PES Scan",
+    "reorganization_energy": "Reorganization Energy",
+}
+
 #: Default retention. A checkpoint's whole value is being recent enough that
 #: resuming beats re-running; past this it is just disk.
 DEFAULT_MAX_AGE_DAYS = 14
@@ -263,6 +276,12 @@ class Checkpoint:
                 "charge": self.identity.charge,
                 "multiplicity": self.identity.multiplicity,
                 "atom_symbols": list(self.identity.atom_symbols),
+                # The starting geometry, so a checkpoint can be *restored*
+                # and not merely reported. Without it a listing could say
+                # "aspirin B3LYP/6-31G* geometry opt, 40 steps" and still
+                # leave the user rebuilding the molecule by hand — which is
+                # the work the listing exists to remove.
+                "coords": [list(map(float, row)) for row in self.identity.coords],
                 "label": self.identity.describe(),
             }
             payload.update(extra)
@@ -429,6 +448,82 @@ def load_all(root: Optional[Path] = None) -> list[dict]:
         out.append(state)
     out.sort(key=lambda s: float(s.get("updated_at") or 0), reverse=True)
     return out
+
+
+def _points_in(path: Path) -> int:
+    """Count complete point records in a checkpoint directory."""
+    try:
+        raw = (path / "points.jsonl").read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return 0
+    total = 0
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        try:
+            json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        total += 1
+    return total
+
+
+def _has_progress_in(path: Path) -> bool:
+    """True when *path* holds finished work, not merely a directory."""
+    if _points_in(path):
+        return True
+    try:
+        traj = path / "opt.traj"
+        return traj.is_file() and traj.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def resumable_checkpoints(root: Optional[Path] = None) -> list[dict]:
+    """Return every checkpoint with resumable work, newest first.
+
+    Unlike :func:`find_resumable`, this asks nothing about what the user
+    currently has configured — it answers "what unfinished work exists at
+    all?". That is the question a user has after restarting the app, when
+    they no longer remember the exact settings that would make the targeted
+    lookup fire.
+
+    Each entry is the stored metadata plus ``dir`` and ``n_points``.
+    """
+    out: list[dict] = []
+    for state in load_all(root):
+        if state.get("status") == STATUS_COMPLETE:
+            continue
+        path = Path(state["dir"])
+        if not _has_progress_in(path):
+            continue
+        state["n_points"] = _points_in(path)
+        out.append(state)
+    return out
+
+
+def restorable_molecule_spec(state: dict) -> Optional[dict]:
+    """Return ``{atoms, coordinates, charge, multiplicity}`` from *state*.
+
+    ``None`` when the checkpoint predates stored coordinates, or its geometry
+    is malformed. Callers must treat that as "listable but not restorable"
+    and say so, rather than offering a button that cannot work.
+    """
+    try:
+        atoms = [str(a) for a in state.get("atom_symbols") or []]
+        coords = [[float(v) for v in row] for row in state.get("coords") or []]
+    except (TypeError, ValueError):
+        return None
+    if not atoms or len(coords) != len(atoms):
+        return None
+    if any(len(row) != 3 for row in coords):
+        return None
+    return {
+        "atoms": atoms,
+        "coordinates": coords,
+        "charge": int(state.get("charge", 0) or 0),
+        "multiplicity": int(state.get("multiplicity", 1) or 1),
+    }
 
 
 def find_warm_start_chkfile(

@@ -2530,8 +2530,54 @@ def build_output_tab(app: Any, *, layout_fn: Any) -> None:
         selected_index=None,
     )
     app._history_log_accordion.set_title(0, "PySCF output log")
+
+    # Unfinished work (M-CHECKPOINT CHK.6). History is where "things I did
+    # earlier" already lives, and an interrupted run is exactly that — it
+    # just never produced a result to save. The whole box hides when nothing
+    # is resumable, so it costs an empty tab nothing.
+    app._resume_list_html = widgets.HTML(value="")
+    app._resume_list_dd = widgets.Dropdown(
+        options=[("(none)", "")],
+        value="",
+        description="Unfinished:",
+        style={"description_width": "80px"},
+        layout=layout_fn(width="460px"),
+    )
+    app._resume_restore_btn = widgets.Button(
+        description="Load these settings",
+        icon="rotate-left",
+        tooltip=(
+            "Put the molecule and settings from this interrupted run back into "
+            "the Calculate tab so it can be resumed"
+        ),
+        layout=layout_fn(width="200px"),
+    )
+    app._resume_discard_btn = widgets.Button(
+        description="Discard",
+        tooltip="Delete this checkpoint. The interrupted run can no longer be resumed.",
+        layout=layout_fn(width="110px"),
+    )
+    app._resume_list_box = widgets.VBox(
+        [
+            widgets.HTML(
+                '<h4 style="margin:12px 0 4px">Unfinished calculations</h4>'
+                '<p style="color:#555;font-size:13px;margin:0 0 6px">Runs that '
+                "stopped before finishing. Load one to put its settings back on "
+                "the Calculate tab, then press Run to continue it.</p>"
+            ),
+            app._resume_list_dd,
+            app._resume_list_html,
+            widgets.HBox(
+                [app._resume_restore_btn, app._resume_discard_btn],
+                layout=layout_fn(gap="6px"),
+            ),
+        ],
+        layout=layout_fn(display="none"),
+    )
+
     app.history_panel.children = (
         *app.history_panel.children,
+        app._resume_list_box,
         app._history_log_accordion,
     )
 

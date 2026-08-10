@@ -16,6 +16,7 @@ Platform-independent: no PySCF, no ASE.
 from __future__ import annotations
 
 import inspect
+import json
 from pathlib import Path
 
 import pytest
@@ -432,7 +433,8 @@ class TestResumeIsOnlyRequestedWhenThereIsProgress:
         import quantui.app as A
 
         src = Path(A.__file__).read_text(encoding="utf-8")
-        body = src[src.index("def _begin_run_checkpoint") :][:2000]
+        body = src[src.index("def _begin_run_checkpoint") :]
+        body = body[: body.index("\n    def ", 1)]
         assert body.index("_checkpoint_resumable = ") < body.index("ckpt.begin(")
 
 
@@ -542,12 +544,343 @@ class TestHelpTopic:
         for calc_type in ("Geometry Opt", "PES Scan", "Frequency"):
             assert calc_type in body
 
+    def test_it_covers_finding_unfinished_work_after_a_restart(self):
+        """The same-session path is easy; the cross-session one is the
+        question users will actually have."""
+        from quantui.help_content import HELP_TOPICS
+
+        body = HELP_TOPICS["resuming_calculations"]["body"]
+        assert "Unfinished calculations" in body
+        assert "Load these settings" in body
+
     def test_it_says_where_checkpoints_live_and_that_deleting_is_safe(self):
         from quantui.help_content import HELP_TOPICS
 
         body = HELP_TOPICS["resuming_calculations"]["body"]
         assert "~/.quantui/checkpoints" in body
         assert "safe" in body
+
+
+class _FakeListApp(_FakeApp):
+    """A fake app carrying the CHK.6 listing widgets as well."""
+
+    def __init__(self, molecule=None):
+        super().__init__(molecule)
+        self._resume_list_box = _FakeWidget()
+        self._resume_list_dd = _FakeWidget("")
+        self._resume_list_html = _FakeWidget("")
+        self._resume_restore_btn = _FakeWidget()
+        self._resume_restore_btn.disabled = False
+        self.charge_si = _FakeWidget(0)
+        self.mult_si = _FakeWidget(1)
+        self.set_molecule_calls = []
+
+    def _set_molecule(self, mol, label=""):
+        self._molecule = mol
+        self.set_molecule_calls.append(label)
+
+
+def _seed_checkpoint(calc_type="geometry_opt", *, points=0, steps=None, molecule=None):
+    identity = C.CalcIdentity.from_molecule(
+        molecule or _FakeMolecule(),
+        calc_type=calc_type,
+        method="RHF",
+        basis="6-31G",
+    )
+    ckpt = C.Checkpoint(identity)
+    ckpt.begin()
+    for i in range(points):
+        ckpt.append_point({"index": i + 1, "value": float(i), "ok": True})
+    if steps is not None:
+        ckpt.trajectory_path.write_bytes(b"frames")
+        ckpt.update(steps_done=steps)
+    return ckpt
+
+
+class TestGeometryIsStored:
+    """Without coordinates a listing can report work it cannot restore."""
+
+    def test_begin_records_the_starting_geometry(self, root):
+        ckpt = _seed_checkpoint()
+        assert ckpt.load_state()["coords"] == [
+            [0.0, 0.0, 0.0],
+            [0.76, 0.59, 0.0],
+            [-0.76, 0.59, 0.0],
+        ]
+
+    def test_spec_round_trips_to_a_matching_resume_key(self, root):
+        """The whole point of restoring: the rebuilt calculation must be
+        recognised as the same one, or the offer never appears."""
+        original = C.CalcIdentity.from_molecule(
+            _FakeMolecule(charge=-1, multiplicity=2),
+            calc_type="geometry_opt",
+            method="RHF",
+            basis="6-31G",
+        )
+        ckpt = C.Checkpoint(original)
+        ckpt.begin()
+        spec = C.restorable_molecule_spec(ckpt.load_state())
+        rebuilt = C.CalcIdentity.from_molecule(
+            _FakeMolecule(
+                atoms=spec["atoms"],
+                coords=spec["coordinates"],
+                charge=spec["charge"],
+                multiplicity=spec["multiplicity"],
+            ),
+            calc_type="geometry_opt",
+            method="RHF",
+            basis="6-31G",
+        )
+        assert rebuilt.resume_key == original.resume_key
+
+    def test_spec_is_none_without_stored_coordinates(self, root):
+        assert C.restorable_molecule_spec({"atom_symbols": ["H", "H"]}) is None
+
+    def test_spec_is_none_when_counts_disagree(self, root):
+        assert (
+            C.restorable_molecule_spec(
+                {"atom_symbols": ["H", "H"], "coords": [[0.0, 0.0, 0.0]]}
+            )
+            is None
+        )
+
+    def test_spec_is_none_for_malformed_rows(self, root):
+        assert (
+            C.restorable_molecule_spec({"atom_symbols": ["H"], "coords": [[0.0, 0.0]]})
+            is None
+        )
+
+
+class TestResumableCheckpointsListing:
+    """The path that works after a restart, when nothing is configured."""
+
+    def test_lists_unfinished_work_regardless_of_configuration(self, root):
+        _seed_checkpoint(steps=5)
+        assert len(C.resumable_checkpoints()) == 1
+
+    def test_omits_checkpoints_with_no_progress(self, root):
+        _seed_checkpoint()
+        assert C.resumable_checkpoints() == []
+
+    def test_omits_completed_runs(self, root):
+        _seed_checkpoint(steps=5).mark_complete()
+        assert C.resumable_checkpoints() == []
+
+    def test_counts_stored_points(self, root):
+        _seed_checkpoint(calc_type="pes_scan", points=6)
+        assert C.resumable_checkpoints()[0]["n_points"] == 6
+
+    def test_lists_several_at_once(self, root):
+        _seed_checkpoint(calc_type="geometry_opt", steps=3)
+        _seed_checkpoint(calc_type="pes_scan", points=2)
+        assert len(C.resumable_checkpoints()) == 2
+
+    def test_a_truncated_points_tail_is_not_counted(self, root):
+        ckpt = _seed_checkpoint(calc_type="pes_scan", points=2)
+        with open(ckpt.points_path, "a", encoding="utf-8") as fh:
+            fh.write('{"index": 3, "val')
+        assert C.resumable_checkpoints()[0]["n_points"] == 2
+
+
+class TestResumeListUi:
+    def test_hidden_when_there_is_no_unfinished_work(self, root):
+        app = _FakeListApp()
+        app_runflow.refresh_resume_list(app)
+        assert app._resume_list_box.layout.display == "none"
+
+    def test_shown_when_unfinished_work_exists(self, root):
+        _seed_checkpoint(steps=4)
+        app = _FakeListApp()
+        app_runflow.refresh_resume_list(app)
+        assert app._resume_list_box.layout.display == "block"
+
+    def test_the_label_names_the_molecule_and_theory(self, root):
+        _seed_checkpoint(steps=4)
+        app = _FakeListApp()
+        app_runflow.refresh_resume_list(app)
+        label = app._resume_list_dd.options[0][0]
+        assert "H2O" in label
+        assert "RHF/6-31G" in label
+        assert "Geometry Opt" in label
+
+    def test_the_description_reports_saved_progress(self, root):
+        _seed_checkpoint(calc_type="pes_scan", points=7)
+        app = _FakeListApp()
+        app_runflow.refresh_resume_list(app)
+        assert "7 scan points computed" in app._resume_list_html.value
+
+    def test_the_description_reports_optimizer_steps(self, root):
+        _seed_checkpoint(steps=9)
+        app = _FakeListApp()
+        app_runflow.refresh_resume_list(app)
+        assert "9 optimizer steps completed" in app._resume_list_html.value
+
+    def test_selection_survives_a_refresh(self, root):
+        """The list refreshes after every run; silently moving the selection
+        would be a fine way to discard the wrong checkpoint."""
+        _seed_checkpoint(calc_type="geometry_opt", steps=3)
+        second = _seed_checkpoint(calc_type="pes_scan", points=2)
+        app = _FakeListApp()
+        app_runflow.refresh_resume_list(app)
+        app._resume_list_dd.value = str(second.dir)
+        app_runflow.refresh_resume_list(app)
+        assert app._resume_list_dd.value == str(second.dir)
+
+    def test_restore_is_disabled_when_geometry_is_missing(self, root):
+        """Offering a button that cannot work is worse than disabling it."""
+        ckpt = _seed_checkpoint(steps=3)
+        state = ckpt.load_state()
+        del state["coords"]
+        ckpt.meta_path.write_text(json.dumps(state), encoding="utf-8")
+        app = _FakeListApp()
+        app_runflow.refresh_resume_list(app)
+        assert app._resume_restore_btn.disabled is True
+        assert "cannot be loaded" in app._resume_list_html.value
+
+    def test_missing_widgets_are_tolerated(self, root):
+        class _Early:
+            pass
+
+        app_runflow.refresh_resume_list(_Early())  # must not raise
+
+
+class TestRestoreResumeEntry:
+    def _prepared(self, root, **kwargs):
+        _seed_checkpoint(**kwargs)
+        app = _FakeListApp()
+        app_runflow.refresh_resume_list(app)
+        return app
+
+    def test_restores_the_molecule(self, root):
+        app = self._prepared(root, steps=3)
+        assert app_runflow.restore_resume_entry(app) is True
+        assert app._molecule is not None
+        assert app._molecule.atoms == ["O", "H", "H"]
+
+    def test_restores_method_basis_and_calc_type(self, root):
+        app = self._prepared(root, steps=3)
+        app_runflow.restore_resume_entry(app)
+        assert app.method_dd.value == "RHF"
+        assert app.basis_dd.value == "6-31G"
+        assert app.calc_type_dd.value == "Geometry Opt"
+
+    def test_restores_charge_and_multiplicity(self, root):
+        """Both are part of the resume key — a restore that skipped them
+        would rebuild a calculation the checkpoint no longer matches."""
+        _seed_checkpoint(steps=3, molecule=_FakeMolecule(charge=-1, multiplicity=2))
+        app = _FakeListApp()
+        app_runflow.refresh_resume_list(app)
+        app_runflow.restore_resume_entry(app)
+        assert app.charge_si.value == -1
+        assert app.mult_si.value == 2
+
+    def test_maps_the_stored_key_back_to_the_dropdown_label(self, root):
+        app = self._prepared(root, calc_type="tddft", points=0, steps=2)
+        app_runflow.restore_resume_entry(app)
+        assert app.calc_type_dd.value == "UV-Vis (TD-DFT)"
+
+    def test_returns_false_with_nothing_selected(self, root):
+        app = _FakeListApp()
+        assert app_runflow.restore_resume_entry(app) is False
+
+    def test_returns_false_when_geometry_is_missing(self, root):
+        ckpt = _seed_checkpoint(steps=3)
+        state = ckpt.load_state()
+        del state["coords"]
+        ckpt.meta_path.write_text(json.dumps(state), encoding="utf-8")
+        app = _FakeListApp()
+        app_runflow.refresh_resume_list(app)
+        assert app_runflow.restore_resume_entry(app) is False
+
+    def test_a_value_the_widget_rejects_does_not_abort_the_restore(self, root):
+        """A basis may vanish from the options across an upgrade. The rest of
+        the restore should still land."""
+
+        class _Picky(_FakeWidget):
+            def __setattr__(self, name, value):
+                if name == "value" and value == "6-31G":
+                    raise ValueError("not an option")
+                super().__setattr__(name, value)
+
+        app = self._prepared(root, steps=3)
+        app.basis_dd = _Picky("STO-3G")
+        assert app_runflow.restore_resume_entry(app) is True
+        assert app.method_dd.value == "RHF"
+
+    def test_restore_does_not_start_the_run(self, root):
+        """The user should see what they are about to continue."""
+        src = Path(app_runflow.__file__).read_text(encoding="utf-8")
+        body = src[src.index("def restore_resume_entry") :]
+        body = body[: body.index("\ndef ", 1)]
+        assert "_do_run" not in body
+        assert "run_btn.click" not in body
+
+
+class TestPesScanSettingsRestore:
+    def test_scan_geometry_is_stored_with_the_checkpoint(self):
+        """Scan range isn't part of the resume key, so a restore that skipped
+        it would reinstate a different scan and miss every stored point."""
+        import quantui.app as A
+
+        src = Path(A.__file__).read_text(encoding="utf-8")
+        assert '"scan_start"' in src
+        assert '"scan_steps"' in src
+
+    def test_stored_settings_are_applied(self, root):
+        identity = C.CalcIdentity.from_molecule(
+            _FakeMolecule(), calc_type="pes_scan", method="RHF", basis="6-31G"
+        )
+        ckpt = C.Checkpoint(identity)
+        ckpt.begin(
+            total_points=12,
+            settings={"scan_start": 0.7, "scan_stop": 2.4, "scan_steps": 12},
+        )
+        ckpt.append_point({"index": 1, "value": 0.7, "ok": True})
+
+        app = _FakeListApp()
+        app._scan_start = _FakeWidget(0.0)
+        app._scan_stop = _FakeWidget(0.0)
+        app._scan_steps = _FakeWidget(0)
+        app_runflow.refresh_resume_list(app)
+        app_runflow.restore_resume_entry(app)
+        assert app._scan_start.value == 0.7
+        assert app._scan_stop.value == 2.4
+        assert app._scan_steps.value == 12
+
+
+class TestResumeListIsRefreshedAtTheRightTimes:
+    def test_refreshed_at_startup_on_both_paths(self):
+        """After a restart the targeted offer cannot fire — nothing is
+        configured yet — so startup is the moment this list matters.
+
+        Startup refreshes through an io_loop when one exists and directly
+        otherwise. Both branches need the call: covering only one leaves the
+        list empty on whichever path that deployment happens to take, which
+        is invisible until someone reports the feature "not working".
+        """
+        import quantui.app as A
+
+        src = Path(A.__file__).read_text(encoding="utf-8")
+        block = src[src.index("loop.add_callback(self._refresh_results_browser)") :]
+        block = block[: block.index("def display")]
+        assert block.count("_refresh_resume_list") == 2, (
+            "both the io_loop and the direct startup branch must refresh "
+            "the unfinished-calculations list"
+        )
+
+    def test_refreshed_after_a_run_finishes(self):
+        import quantui.app as A
+
+        src = Path(A.__file__).read_text(encoding="utf-8")
+        body = src[src.index("def _finish_run_checkpoint") :][:2200]
+        assert "_refresh_resume_list" in body
+
+    def test_the_listing_widgets_are_in_the_history_panel(self):
+        import quantui.app_builders as B
+
+        src = Path(B.__file__).read_text(encoding="utf-8")
+        assert "app._resume_list_box," in src
+        assert "history_panel.children" in src
 
 
 class TestResumeControlsAreInTheLayout:

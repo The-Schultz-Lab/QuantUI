@@ -1042,7 +1042,13 @@ class QuantUIApp:
         _reset_confirm_no: Any
         _reset_confirm_yes: Any
         _resume_cb: Any
+        _resume_discard_btn: Any
+        _resume_entries: Any
+        _resume_list_box: Any
+        _resume_list_dd: Any
+        _resume_list_html: Any
         _resume_notice_html: Any
+        _resume_restore_btn: Any
         _status_html: Any
         _status_tab_panel: Any
         _theme_style: Any
@@ -1423,9 +1429,14 @@ class QuantUIApp:
         if loop is not None:
             loop.add_callback(self._refresh_results_browser)
             loop.add_callback(self._populate_compare_list)
+            # Startup is the moment that matters for CHK.6: after a restart
+            # the targeted resume offer can't fire, because nothing is
+            # configured yet.
+            loop.add_callback(self._refresh_resume_list)
         else:
             self._refresh_results_browser()
             self._populate_compare_list()
+            self._refresh_resume_list()
 
     def display(self) -> None:
         """Inject global CSS and render the application widget."""
@@ -1970,6 +1981,12 @@ class QuantUIApp:
         self.mult_si.observe(self._safe_cb(self._update_notes), names="value")
         self.method_dd.observe(self._safe_cb(self._update_estimate), names="value")
         self.basis_dd.observe(self._safe_cb(self._update_estimate), names="value")
+        # Unfinished-calculations list (CHK.6)
+        self._resume_list_dd.observe(
+            self._safe_cb(self._on_resume_entry_changed), names="value"
+        )
+        self._resume_restore_btn.on_click(self._on_resume_restore)
+        self._resume_discard_btn.on_click(self._on_resume_discard)
         # Help buttons
         self.method_help_btn.on_click(self._on_method_help)
         self.basis_help_btn.on_click(self._on_basis_help)
@@ -5592,6 +5609,20 @@ class QuantUIApp:
             if self.calc_type_dd.value == "PES Scan":
                 # Lets the resume offer say "8 of 20" rather than just "8".
                 extra["total_points"] = int(self._scan_steps.value)
+                # Scan geometry isn't part of the checkpoint identity, so
+                # without these a restore would reinstate the molecule and
+                # method but silently leave a different scan range — and the
+                # stored points, matched by coordinate value, would all miss.
+                extra["settings"] = {
+                    "scan_type": self._scan_type_dd.value,
+                    "scan_atom1": int(self._scan_atom1.value),
+                    "scan_atom2": int(self._scan_atom2.value),
+                    "scan_atom3": int(self._scan_atom3.value),
+                    "scan_atom4": int(self._scan_atom4.value),
+                    "scan_start": float(self._scan_start.value),
+                    "scan_stop": float(self._scan_stop.value),
+                    "scan_steps": int(self._scan_steps.value),
+                }
             if not ckpt.begin(**extra):
                 return None
             return ckpt
@@ -5604,6 +5635,53 @@ class QuantUIApp:
             except Exception:  # noqa: BLE001 — telemetry self-guard
                 pass
             return None
+
+    def _refresh_resume_list(self) -> None:
+        """Rebuild the History tab's unfinished-calculations list."""
+        try:
+            from quantui.app_runflow import refresh_resume_list
+
+            refresh_resume_list(self)
+        except Exception:  # noqa: BLE001 — never break the History tab
+            pass
+
+    def _on_resume_entry_changed(self, _change=None) -> None:
+        from quantui.app_runflow import describe_resume_entry
+
+        describe_resume_entry(self, _change)
+
+    def _on_resume_restore(self, _btn=None) -> None:
+        """Load the selected checkpoint's settings and go to Calculate."""
+        from quantui.app_runflow import restore_resume_entry
+
+        if not restore_resume_entry(self):
+            return
+        # Send the user where the settings just landed. Restoring without
+        # moving them leaves the effect invisible on a tab they aren't
+        # looking at, which reads as the button having done nothing.
+        try:
+            self.root_tab.selected_index = 1
+        except Exception:  # noqa: BLE001 — tab index is cosmetic
+            pass
+
+    def _on_resume_discard(self, _btn=None) -> None:
+        """Delete the selected checkpoint and refresh the list."""
+        try:
+            from quantui.checkpoint import Checkpoint  # noqa: F401
+            import shutil
+
+            selected = self._resume_list_dd.value
+            if selected and selected in (getattr(self, "_resume_entries", None) or {}):
+                shutil.rmtree(selected, ignore_errors=True)
+        except Exception:  # noqa: BLE001 — discarding is best-effort
+            pass
+        self._refresh_resume_list()
+        try:
+            from quantui.app_runflow import refresh_resume_notice
+
+            refresh_resume_notice(self)
+        except Exception:  # noqa: BLE001 — a stale notice is not fatal
+            pass
 
     def _resume_hint_html(self, ckpt: Optional[Any]) -> str:
         """Return a "you can resume this" line for the failure card, or ``""``.
@@ -5660,6 +5738,9 @@ class QuantUIApp:
             refresh_resume_notice(self)
         except Exception:  # noqa: BLE001 — a stale notice is not fatal
             pass
+        # A run that just failed becomes a new listing entry; one that
+        # succeeded removes itself. Either way the list is now stale.
+        self._refresh_resume_list()
 
     def _update_estimate(self, change=None) -> None:
         _run_update_estimate(self, calc_log_mod=_calc_log, change=change)
