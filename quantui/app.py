@@ -4525,23 +4525,6 @@ class QuantUIApp:
             except Exception:  # noqa: BLE001 — telemetry self-guard
                 pass
 
-        # --- Checkpoint for this run (M-CHECKPOINT) ---
-        # Created before any calculation starts, because the runs worth
-        # checkpointing are exactly the ones that never reach the end. Failure
-        # to create one leaves ``_ckpt`` as None and the calc runs unchecked-
-        # pointed, which is the pre-M-CHECKPOINT behaviour.
-        _ckpt = self._begin_run_checkpoint()
-        # Resume only when there is genuinely something to continue. The
-        # checkbox defaults to checked and is *hidden* when nothing is
-        # resumable, so consulting it alone would ask every ordinary run to
-        # resume — and the optimizer would answer with a "no usable
-        # checkpoint" warning on a calculation the user started from scratch.
-        _resume = bool(
-            _ckpt is not None
-            and self._resume_cb.value
-            and getattr(self, "_checkpoint_resumable", False)
-        )
-
         def _mark(stage: str) -> None:
             _tail_marks[stage] = time.perf_counter()
 
@@ -4594,6 +4577,28 @@ class QuantUIApp:
         # `finally` alongside the elapsed ticker, so it cannot outlive the run
         # and keep writing into a finished log.
         log.start_heartbeat()
+
+        # --- Checkpoint for this run (M-CHECKPOINT) ---
+        # Opened before any calculation starts, because the runs worth
+        # checkpointing are exactly the ones that never reach the end. Failure
+        # to open one leaves ``_ckpt`` as None and the calc runs
+        # uncheckpointed, which is the pre-M-CHECKPOINT behaviour.
+        #
+        # Deliberately after ``log`` exists: the checkpoint writes its own
+        # provenance lines into the run log, and those lines are the only
+        # record that a resumed run did not start from the geometry at the
+        # top of the file.
+        _ckpt = self._begin_run_checkpoint(log)
+        # Resume only when there is genuinely something to continue. The
+        # checkbox defaults to checked and is *hidden* when nothing is
+        # resumable, so consulting it alone would ask every ordinary run to
+        # resume — and the optimizer would answer with a "no usable
+        # checkpoint" warning on a calculation the user started from scratch.
+        _resume = bool(
+            _ckpt is not None
+            and self._resume_cb.value
+            and getattr(self, "_checkpoint_resumable", False)
+        )
 
         # The run header (structured banner) is written synchronously + atomically
         # on the main thread by ``on_run_clicked`` → ``_write_run_header`` BEFORE
@@ -5584,7 +5589,7 @@ class QuantUIApp:
     def _update_notes(self, change=None) -> None:
         _run_update_notes(self, change)
 
-    def _begin_run_checkpoint(self) -> Optional[Any]:
+    def _begin_run_checkpoint(self, log_stream: Optional[Any] = None) -> Optional[Any]:
         """Open a checkpoint for the run about to start, or return ``None``.
 
         Returning ``None`` — no molecule, an unavailable checkpoint module, an
@@ -5600,7 +5605,7 @@ class QuantUIApp:
             if identity is None:
                 self._checkpoint_resumable = False
                 return None
-            ckpt = Checkpoint(identity)
+            ckpt = Checkpoint(identity, log_stream=log_stream)
             # Read resumability BEFORE begin() — begin() rewrites the metadata
             # with a fresh "running" status, so asking afterwards would
             # describe the run about to start rather than the one that stopped.

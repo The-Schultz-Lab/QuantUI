@@ -212,6 +212,120 @@ class TestLifecycle:
         C.Checkpoint(_identity()).update(steps_done=3)  # must not raise
 
 
+# ══ Provenance in the run log ════════════════════════════════════════════════
+
+
+class _Stream:
+    """Stand-in for the run's output log."""
+
+    def __init__(self) -> None:
+        self.text = ""
+
+    def write(self, chunk: str) -> None:
+        self.text += chunk
+
+
+class TestCheckpointLogging:
+    """Checkpoint events belong in the archived ``pyscf.log``.
+
+    Unlike the Phase D liveness heartbeat, which is deliberately kept out of
+    the archive, these lines are *provenance*: without them the log of a
+    resumed run reads as a calculation that started from the geometry at the
+    top of the file, which is untrue.
+    """
+
+    def _logged(self, root):
+        stream = _Stream()
+        ckpt = C.Checkpoint(_identity(), log_stream=stream)
+        return ckpt, stream
+
+    def test_opening_is_logged_with_its_location(self, root):
+        ckpt, stream = self._logged(root)
+        ckpt.begin()
+        assert "opened" in stream.text
+        assert str(ckpt.dir) in stream.text
+
+    def test_each_save_is_logged(self, root):
+        ckpt, stream = self._logged(root)
+        ckpt.begin()
+        ckpt.update(steps_done=1)
+        ckpt.update(steps_done=2)
+        assert stream.text.count("saved") == 2
+
+    def test_the_saved_line_names_what_changed(self, root):
+        ckpt, stream = self._logged(root)
+        ckpt.begin()
+        ckpt.update(steps_done=7)
+        assert "steps_done=7" in stream.text
+
+    def test_scan_points_are_logged_by_index(self, root):
+        ckpt, stream = self._logged(root)
+        ckpt.begin()
+        ckpt.append_point({"index": 4, "value": 1.2})
+        assert "scan point 4" in stream.text
+
+    def test_completion_is_logged(self, root):
+        ckpt, stream = self._logged(root)
+        ckpt.begin()
+        ckpt.mark_complete()
+        assert "status=complete" in stream.text
+
+    def test_discarding_is_logged(self, root):
+        ckpt, stream = self._logged(root)
+        ckpt.begin()
+        ckpt.discard()
+        assert "discarded" in stream.text
+
+    def test_a_failed_write_is_not_logged_as_a_save(self, root, monkeypatch):
+        """A log line claiming work was saved when it wasn't is worse than
+        silence — it is exactly the line someone would rely on later."""
+        ckpt, stream = self._logged(root)
+        ckpt.begin()
+        monkeypatch.setattr(
+            C, "_atomic_write_json", lambda *a, **k: (_ for _ in ()).throw(OSError())
+        )
+        ckpt.update(steps_done=3)
+        assert "steps_done=3" not in stream.text
+
+    def test_resume_banner_states_the_log_is_only_the_continuation(self, root):
+        """The single most important line: a resumed run's log does not
+        contain the earlier steps, and must not pretend otherwise."""
+        ckpt, stream = self._logged(root)
+        ckpt.begin()
+        ckpt.log_resumed("continuing from step 12")
+        assert "RESUMED" in stream.text
+        assert "continuing from step 12" in stream.text
+        assert "only the continuation" in stream.text
+
+    def test_no_stream_attached_is_silent_and_safe(self, root):
+        ckpt = C.Checkpoint(_identity())
+        ckpt.begin()
+        ckpt.update(steps_done=1)
+        ckpt.log_resumed("x")  # must not raise
+
+    def test_a_raising_stream_never_breaks_the_checkpoint(self, root):
+        """``_log`` runs from a ``finally`` during teardown and from the
+        optimizer's per-step callback, where the stream may already be
+        raising cancellation."""
+
+        class _Exploding:
+            def write(self, _chunk):
+                raise RuntimeError("cancelled")
+
+        ckpt = C.Checkpoint(_identity(), log_stream=_Exploding())
+        assert ckpt.begin() is True
+        ckpt.update(steps_done=1)
+        assert ckpt.load_state()["steps_done"] == 1
+
+    def test_attach_log_routes_later_events(self, root):
+        ckpt = C.Checkpoint(_identity())
+        ckpt.begin()
+        stream = _Stream()
+        ckpt.attach_log(stream)
+        ckpt.update(steps_done=5)
+        assert "steps_done=5" in stream.text
+
+
 # ══ Robustness — the cases that actually happen after a crash ════════════════
 
 

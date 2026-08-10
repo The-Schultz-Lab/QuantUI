@@ -883,6 +883,79 @@ class TestResumeListIsRefreshedAtTheRightTimes:
         assert "history_panel.children" in src
 
 
+class TestResumedRunsGetTheirOwnResultDirectory:
+    """A resumed run must not overwrite the interrupted run's saved output.
+
+    ``save_result`` builds a microsecond timestamp plus a collision counter
+    and calls ``mkdir(parents=True)`` **without** ``exist_ok`` — so a second
+    run always lands in a new directory and can never write over an earlier
+    ``pyscf.log`` or ``result.json``. Asserted here because it is a property
+    the checkpoint feature now depends on, and a well-meaning change to the
+    naming scheme elsewhere could silently remove it.
+    """
+
+    def test_directory_name_is_timestamped(self):
+        import quantui.results_storage as R
+
+        src = Path(R.__file__).read_text(encoding="utf-8")
+        body = src[src.index("def save_result") :][:4000]
+        assert "%Y-%m-%d_%H-%M-%S-%f" in body
+
+    def test_a_collision_never_reuses_an_existing_directory(self):
+        import quantui.results_storage as R
+
+        src = Path(R.__file__).read_text(encoding="utf-8")
+        body = src[src.index("def save_result") :][:4000]
+        assert "while dest.exists():" in body
+        assert "dest.mkdir(parents=True)" in body
+        assert "exist_ok" not in body.split("dest.mkdir(parents=True)")[0][-200:]
+
+    def test_two_saves_of_the_same_calculation_land_in_different_dirs(
+        self, tmp_path, monkeypatch
+    ):
+        from types import SimpleNamespace
+
+        from quantui.results_storage import save_result
+
+        result = SimpleNamespace(
+            formula="H2O",
+            method="RHF",
+            basis="6-31G",
+            energy_hartree=-76.0,
+            converged=True,
+            n_iterations=8,
+        )
+        first = save_result(result, results_dir=tmp_path, pyscf_log="first run")
+        second = save_result(result, results_dir=tmp_path, pyscf_log="second run")
+        assert first != second
+        assert (first / "pyscf.log").read_text() == "first run"
+        assert (second / "pyscf.log").read_text() == "second run"
+
+
+class TestResumeIsAnnouncedInTheLog:
+    def test_optimizer_announces_a_resume(self):
+        src = Path(optimizer.__file__).read_text(encoding="utf-8")
+        assert "log_resumed(" in src
+
+    def test_pes_scan_announces_a_resume(self):
+        src = Path(pes_scan.__file__).read_text(encoding="utf-8")
+        assert "log_resumed(" in src
+
+    def test_the_checkpoint_is_given_the_run_log(self):
+        """Without a stream attached, every checkpoint line is discarded."""
+        import quantui.app as A
+
+        src = Path(A.__file__).read_text(encoding="utf-8")
+        assert "_begin_run_checkpoint(log)" in src
+        assert "log_stream=log_stream" in src
+
+    def test_warm_start_names_its_source_in_the_log(self):
+        """The SCF iteration count is only interpretable with the starting
+        density identified."""
+        src = Path(session_calc.__file__).read_text(encoding="utf-8")
+        assert "Warm start — initial guess read from" in src
+
+
 class TestResumeControlsAreInTheLayout:
     """Built, registered, and never added to the container has happened here."""
 

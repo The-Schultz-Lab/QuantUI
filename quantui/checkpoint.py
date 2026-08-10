@@ -220,9 +220,45 @@ class Checkpoint:
     speculatively when asking "is there anything to resume?".
     """
 
-    def __init__(self, identity: CalcIdentity, root: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        identity: CalcIdentity,
+        root: Optional[Path] = None,
+        log_stream: Optional[Any] = None,
+    ) -> None:
         self.identity = identity
         self._root = Path(root) if root is not None else checkpoint_root()
+        self._log_stream = log_stream
+
+    # ── Provenance logging ──────────────────────────────────────────────────
+
+    def attach_log(self, stream: Optional[Any]) -> None:
+        """Route checkpoint events to *stream* (the run's output log)."""
+        self._log_stream = stream
+
+    def _log(self, message: str) -> None:
+        """Write one checkpoint line to the run log. Never raises.
+
+        These lines go into the archived ``pyscf.log``, unlike the Phase D
+        liveness heartbeat which is deliberately kept out of it. The
+        distinction is what the line is *for*: a heartbeat says "still
+        alive", which is worthless once the run is over, while a checkpoint
+        line is **provenance** — without it, the log of a resumed run reads
+        as though the calculation started from the geometry at the top of
+        the file, which is simply untrue.
+
+        Swallowing every exception matters more here than usual: this is
+        called from a ``finally`` during teardown, and from the optimizer's
+        per-step callback where the stream may already be raising
+        cancellation.
+        """
+        stream = self._log_stream
+        if stream is None:
+            return
+        try:
+            stream.write(f"[checkpoint] {message}\n")
+        except Exception:  # noqa: BLE001 — provenance is never worth a crash
+            pass
 
     # ── Paths ───────────────────────────────────────────────────────────────
 
@@ -286,6 +322,7 @@ class Checkpoint:
             }
             payload.update(extra)
             _atomic_write_json(self.meta_path, payload)
+            self._log(f"opened — {self.dir}")
             return True
         except Exception as exc:  # noqa: BLE001 — never break the calculation
             logger.debug("checkpoint begin failed for %s: %s", self.dir, exc)
@@ -328,6 +365,10 @@ class Checkpoint:
             _atomic_write_json(self.meta_path, state)
         except Exception as exc:  # noqa: BLE001 — never break the calculation
             logger.debug("checkpoint update failed for %s: %s", self.dir, exc)
+            return
+        if fields:
+            detail = ", ".join(f"{k}={v}" for k, v in sorted(fields.items()))
+            self._log(f"saved — {detail}")
 
     def mark_interrupted(self) -> None:
         """Record that the run stopped before finishing — the resumable state."""
@@ -339,12 +380,30 @@ class Checkpoint:
 
     def discard(self) -> None:
         """Delete the checkpoint directory entirely. Best-effort."""
+        self._log("discarded")
         try:
             shutil.rmtree(self.dir, ignore_errors=True)
         except Exception as exc:  # noqa: BLE001 — cleanup is never fatal
             logger.debug("checkpoint discard failed for %s: %s", self.dir, exc)
 
     # ── Resumability ────────────────────────────────────────────────────────
+
+    def log_resumed(self, detail: str) -> None:
+        """Announce in the run log that this run continues an earlier one.
+
+        The most important line the checkpoint layer writes. A resumed run's
+        ``pyscf.log`` contains only the *new* portion — the earlier steps
+        were written to a different run's log, in a different result
+        directory. Without this banner the file reads as a complete
+        calculation that started from the geometry at the top, which would
+        quietly misrepresent how the result was obtained.
+        """
+        self._log(f"RESUMED from {self.dir}")
+        self._log(f"  {detail}")
+        self._log(
+            "  this log covers only the continuation; earlier output is in "
+            "the result directory of the interrupted run"
+        )
 
     def resumable_state(self) -> Optional[dict]:
         """Return the state only if this checkpoint can actually be resumed.
@@ -390,6 +449,8 @@ class Checkpoint:
                 fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
         except Exception as exc:  # noqa: BLE001 — never break the calculation
             logger.debug("checkpoint point append failed for %s: %s", self.dir, exc)
+            return
+        self._log(f"saved — scan point {payload.get('index', '?')}")
 
     def completed_points(self) -> list[dict]:
         """Return every complete point record, skipping any truncated tail."""

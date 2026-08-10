@@ -377,10 +377,19 @@ def run_pes_scan(
             if isinstance(_idx, int) and _rec.get("ok"):
                 _cached_points[_idx] = _rec
         if _cached_points:
+            _n = len(_cached_points)
             _stream.write(
-                f"\n♻  Resuming scan — {len(_cached_points)} point"
-                f"{'s' if len(_cached_points) != 1 else ''} already computed.\n"
+                f"\n♻  Resuming scan — {_n} point"
+                f"{'s' if _n != 1 else ''} already computed.\n"
             )
+            try:
+                checkpoint.log_resumed(
+                    f"reusing {_n} previously computed scan point"
+                    f"{'s' if _n != 1 else ''}; "
+                    "only the missing points are recomputed"
+                )
+            except Exception:  # noqa: BLE001 — provenance is never worth a crash
+                pass
 
     i1, i2 = atom_indices[0], atom_indices[1]
     i3 = atom_indices[2] if len(atom_indices) >= 3 else 0

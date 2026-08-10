@@ -355,7 +355,14 @@ def _prepare_scf_checkpoint(
 
     if stream is not None:
         try:
-            stream.write("\n♻  Warm start — initial guess from a previous run.\n")
+            # Named source, not just "a previous run": the SCF iteration count
+            # in this log is only interpretable if the reader knows which
+            # density it started from.
+            stream.write(
+                f"\n♻  Warm start — initial guess read from {source}\n"
+                "   (SCF iteration count reflects this starting density, "
+                "not a from-scratch guess)\n"
+            )
         except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
             pass
     return dm0

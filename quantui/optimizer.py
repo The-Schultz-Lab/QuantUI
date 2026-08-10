@@ -519,6 +519,18 @@ def optimize_geometry(
             _stream,
             "\n⚠  No usable checkpoint to resume — starting from the beginning.\n",
         )
+    if _resume_from is not None and checkpoint is not None:
+        try:
+            _done = (checkpoint.load_state() or {}).get("steps_done")
+            _detail = (
+                f"continuing from step {_done}; "
+                "geometry and optimizer curvature restored"
+                if isinstance(_done, int) and _done > 0
+                else "continuing from the last saved geometry"
+            )
+            checkpoint.log_resumed(_detail)
+        except Exception:  # noqa: BLE001 — provenance is never worth a crash
+            pass
     start_molecule = _resume_from if _resume_from is not None else molecule
 
     atoms = molecule_to_atoms(start_molecule)

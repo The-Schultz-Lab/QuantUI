@@ -43,6 +43,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   how much finished and how long ago. **Load these settings** puts the molecule
   and all its settings back on the Calculate tab, ready to resume; **Discard**
   removes one you are done with. Hidden entirely when nothing is unfinished.
+- **Checkpoint activity is recorded in the saved output log.** Opening a
+  checkpoint, every save, completion and discarding all appear as
+  `[checkpoint]` lines in `pyscf.log`. Resuming writes a banner stating plainly
+  that the log covers only the continuation and that the earlier output lives
+  in the interrupted run's result directory — without it the file would read
+  as a calculation that started from the geometry at the top. A warm start now
+  names the file its initial density came from, since the SCF iteration count
+  is only interpretable if you know what it started from.
 - **Help topic: "Resuming an interrupted calculation."** Covers how to resume,
   why the offer disappears if you change a setting, which calculation types can
   be resumed, and where checkpoints are stored.
