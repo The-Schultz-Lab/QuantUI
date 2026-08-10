@@ -4514,7 +4514,16 @@ class QuantUIApp:
         # to create one leaves ``_ckpt`` as None and the calc runs unchecked-
         # pointed, which is the pre-M-CHECKPOINT behaviour.
         _ckpt = self._begin_run_checkpoint()
-        _resume = bool(_ckpt is not None and self._resume_cb.value)
+        # Resume only when there is genuinely something to continue. The
+        # checkbox defaults to checked and is *hidden* when nothing is
+        # resumable, so consulting it alone would ask every ordinary run to
+        # resume — and the optimizer would answer with a "no usable
+        # checkpoint" warning on a calculation the user started from scratch.
+        _resume = bool(
+            _ckpt is not None
+            and self._resume_cb.value
+            and getattr(self, "_checkpoint_resumable", False)
+        )
 
         def _mark(stage: str) -> None:
             _tail_marks[stage] = time.perf_counter()
@@ -5444,6 +5453,7 @@ class QuantUIApp:
                 "Tips: try a smaller basis set (STO-3G), use a geometry-optimized "
                 "structure first, or check for unusually long/short bonds in your "
                 "XYZ input. Full error details are in the <b>Output</b> tab.</small>"
+                f"{self._resume_hint_html(_ckpt)}"
                 "</div>"
             )
             self.result_output.append_display_data(HTML(_err_html))
@@ -5571,8 +5581,13 @@ class QuantUIApp:
 
             identity = checkpoint_identity(self)
             if identity is None:
+                self._checkpoint_resumable = False
                 return None
             ckpt = Checkpoint(identity)
+            # Read resumability BEFORE begin() — begin() rewrites the metadata
+            # with a fresh "running" status, so asking afterwards would
+            # describe the run about to start rather than the one that stopped.
+            self._checkpoint_resumable = ckpt.resumable_state() is not None
             extra: dict = {}
             if self.calc_type_dd.value == "PES Scan":
                 # Lets the resume offer say "8 of 20" rather than just "8".
@@ -5581,6 +5596,7 @@ class QuantUIApp:
                 return None
             return ckpt
         except Exception as exc:  # noqa: BLE001 — never block a run
+            self._checkpoint_resumable = False
             try:
                 _calc_log.log_event(
                     "checkpoint_unavailable", f"{type(exc).__name__}: {exc}"[:200]
@@ -5588,6 +5604,31 @@ class QuantUIApp:
             except Exception:  # noqa: BLE001 — telemetry self-guard
                 pass
             return None
+
+    def _resume_hint_html(self, ckpt: Optional[Any]) -> str:
+        """Return a "you can resume this" line for the failure card, or ``""``.
+
+        The resume offer itself lives up by the Run button, which is not where
+        anyone is looking after a calculation fails. Saying it here, next to
+        the error, is the difference between the feature being discovered and
+        it quietly never being used.
+        """
+        try:
+            if ckpt is None or ckpt.resumable_state() is None:
+                return ""
+            points = len(ckpt.completed_points())
+            done = f"{points} completed scan point{'s' if points != 1 else ''}"
+            if not points:
+                done = "the steps completed so far"
+            return (
+                '<br><br><small style="color:#991b1b">'
+                f"&#9851; <b>This run can be resumed.</b> {done} "
+                "were saved. Leave the settings as they are and press "
+                "<b>Run</b> again — the <b>Resume from checkpoint</b> box "
+                "above the Run button is already ticked.</small>"
+            )
+        except Exception:  # noqa: BLE001 — a hint must never mask the error
+            return ""
 
     def _finish_run_checkpoint(self, ckpt: Optional[Any]) -> None:
         """Close out *ckpt* after a run ends, however it ended.

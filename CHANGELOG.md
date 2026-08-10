@@ -37,6 +37,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   already computed") rather than just asking. The offer appears only when the
   calculation you have configured is *exactly* the interrupted one, geometry
   included, so a resume can never splice two different runs together.
+- **Help topic: "Resuming an interrupted calculation."** Covers how to resume,
+  why the offer disappears if you change a setting, which calculation types can
+  be resumed, and where checkpoints are stored.
 - **Warm-started SCF.** A converged density from an earlier run of the same
   molecule, charge, method and basis is reused as the starting guess, which
   usually cuts several SCF cycles. The geometry does not have to match — a

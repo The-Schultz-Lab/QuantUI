@@ -404,6 +404,152 @@ class TestCheckpointIdentity:
         assert app_runflow.calc_type_key(app) == "single_point"
 
 
+class TestResumeIsOnlyRequestedWhenThereIsProgress:
+    """The checkbox defaults to ticked and hides when nothing is resumable.
+
+    So consulting it alone asks *every* ordinary run to resume, and the
+    optimizer answers with a "no usable checkpoint" warning on a calculation
+    the user started from scratch. The run must gate on real stored progress
+    as well as on the checkbox.
+    """
+
+    def test_run_gates_resume_on_stored_progress(self):
+        import quantui.app as A
+
+        src = Path(A.__file__).read_text(encoding="utf-8")
+        assert "_checkpoint_resumable" in src
+        start = src.index("_resume = bool(")
+        clause = src[start : start + 260]
+        assert "_resume_cb.value" in clause
+        assert "_checkpoint_resumable" in clause
+
+    def test_resumability_is_read_before_begin_rewrites_the_metadata(self):
+        """begin() stamps a fresh "running" status over the interrupted one.
+
+        Asking afterwards would describe the run about to start rather than
+        the one that stopped, and every resume offer would evaluate false.
+        """
+        import quantui.app as A
+
+        src = Path(A.__file__).read_text(encoding="utf-8")
+        body = src[src.index("def _begin_run_checkpoint") :][:2000]
+        assert body.index("_checkpoint_resumable = ") < body.index("ckpt.begin(")
+
+
+class TestCalcTypeChangeRefreshesTheOffer:
+    """A resume offer must never describe a calculation the user left behind.
+
+    ``refresh_resume_notice`` hides the offer when the calc type no longer
+    matches — but only if something calls it. The calc-type observer did not,
+    so the function was correct and unreachable on the one change most likely
+    to invalidate the offer.
+    """
+
+    def test_calc_type_handler_refreshes_the_estimate_and_offer(self):
+        src = Path(app_runflow.__file__).read_text(encoding="utf-8")
+        handler = src[src.index("def on_calc_type_changed") :]
+        handler = handler[: handler.index("\ndef ", 1)]
+        assert "update_estimate(" in handler
+
+    def test_update_estimate_refreshes_the_offer(self):
+        """The single hook the offer hangs off — it must not be removed."""
+        src = Path(app_runflow.__file__).read_text(encoding="utf-8")
+        body = src[src.index("def update_estimate") :]
+        body = body[: body.index("\ndef ", 1)]
+        assert "refresh_resume_notice(app)" in body
+
+
+class TestFailureCardPointsAtTheResume:
+    """The offer sits by the Run button, which is not where anyone looks
+    after a failure. Without a pointer there, the feature is undiscoverable
+    in exactly the situation it was built for."""
+
+    def _ckpt_with_progress(self, points=0, steps=False):
+        identity = C.CalcIdentity.from_molecule(
+            _FakeMolecule(), calc_type="pes_scan", method="RHF", basis="6-31G"
+        )
+        ckpt = C.Checkpoint(identity)
+        ckpt.begin()
+        for i in range(points):
+            ckpt.append_point({"index": i + 1, "value": float(i), "ok": True})
+        if steps:
+            ckpt.trajectory_path.write_bytes(b"frames")
+        return ckpt
+
+    def _hint(self, ckpt):
+        import quantui.app as A
+
+        return A.QuantUIApp._resume_hint_html(object(), ckpt)
+
+    def test_no_hint_without_a_checkpoint(self, root):
+        assert self._hint(None) == ""
+
+    def test_no_hint_when_nothing_was_saved(self, root):
+        """A run that died in its first seconds has nothing to offer."""
+        assert self._hint(self._ckpt_with_progress()) == ""
+
+    def test_hint_names_the_saved_scan_points(self, root):
+        hint = self._hint(self._ckpt_with_progress(points=8))
+        assert "8 completed scan points" in hint
+        assert "Resume from checkpoint" in hint
+
+    def test_hint_is_singular_for_one_point(self, root):
+        assert "1 completed scan point " in self._hint(
+            self._ckpt_with_progress(points=1)
+        )
+
+    def test_hint_covers_optimizer_progress_without_points(self, root):
+        hint = self._hint(self._ckpt_with_progress(steps=True))
+        assert "steps completed so far" in hint
+
+    def test_a_broken_checkpoint_yields_no_hint_rather_than_raising(self, root):
+        """A hint must never mask the error it is printed beside."""
+        ckpt = self._ckpt_with_progress(points=3)
+        ckpt.meta_path.write_text("{ truncated", encoding="utf-8")
+        assert self._hint(ckpt) == ""
+
+    def test_the_failure_card_includes_the_hint(self):
+        import quantui.app as A
+
+        src = Path(A.__file__).read_text(encoding="utf-8")
+        assert "_resume_hint_html(_ckpt)" in src
+
+
+class TestHelpTopic:
+    """Docs users can reach without leaving the app."""
+
+    def test_a_resume_help_topic_exists(self):
+        from quantui.help_content import HELP_TOPICS
+
+        assert "resuming_calculations" in HELP_TOPICS
+
+    def test_it_explains_that_settings_must_match(self):
+        """The most likely confusion: "why has the offer disappeared?"."""
+        from quantui.help_content import HELP_TOPICS
+
+        body = HELP_TOPICS["resuming_calculations"]["body"]
+        assert "identical" in body
+
+    def test_it_names_the_control_the_user_has_to_find(self):
+        from quantui.help_content import HELP_TOPICS
+
+        assert "Resume from checkpoint" in HELP_TOPICS["resuming_calculations"]["body"]
+
+    def test_it_states_which_calc_types_are_resumable(self):
+        from quantui.help_content import HELP_TOPICS
+
+        body = HELP_TOPICS["resuming_calculations"]["body"]
+        for calc_type in ("Geometry Opt", "PES Scan", "Frequency"):
+            assert calc_type in body
+
+    def test_it_says_where_checkpoints_live_and_that_deleting_is_safe(self):
+        from quantui.help_content import HELP_TOPICS
+
+        body = HELP_TOPICS["resuming_calculations"]["body"]
+        assert "~/.quantui/checkpoints" in body
+        assert "safe" in body
+
+
 class TestResumeControlsAreInTheLayout:
     """Built, registered, and never added to the container has happened here."""
 

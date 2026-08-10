@@ -240,6 +240,18 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     else:
         app.calc_extra_opts.children = []
 
+    # Both the runtime estimate and the resume offer are per-calc-type, and
+    # neither was being refreshed here — so switching type left a Frequency
+    # estimate sitting above a Single Point run, and could leave a resume
+    # offer describing a calculation the user had already moved away from.
+    # Both are keyed off the same observers, so one refresh covers them.
+    try:
+        from quantui import calc_log as _calc_log_mod
+
+        update_estimate(app, calc_log_mod=_calc_log_mod)
+    except Exception:  # noqa: BLE001 — a stale hint must not break the tab
+        pass
+
 
 def update_scan_widgets(app: Any, _change: Any = None) -> None:
     """Show/hide atom inputs and unit label based on scan type."""
