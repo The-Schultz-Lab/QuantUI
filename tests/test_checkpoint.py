@@ -23,7 +23,6 @@ import pytest
 
 from quantui import checkpoint as C
 
-
 # ══ Fixtures ═════════════════════════════════════════════════════════════════
 
 
@@ -36,7 +35,11 @@ def root(tmp_path, monkeypatch) -> Path:
 class _FakeMolecule:
     def __init__(self, atoms=("O", "H", "H"), coords=None, charge=0, multiplicity=1):
         self.atoms = list(atoms)
-        self.coordinates = coords or [[0.0, 0.0, 0.0], [0.76, 0.59, 0.0], [-0.76, 0.59, 0.0]]
+        self.coordinates = coords or [
+            [0.0, 0.0, 0.0],
+            [0.76, 0.59, 0.0],
+            [-0.76, 0.59, 0.0],
+        ]
         self.charge = charge
         self.multiplicity = multiplicity
 
@@ -65,7 +68,9 @@ class TestResumeKey:
         assert _identity().resume_key == _identity().resume_key
 
     def test_geometry_change_changes_the_key(self):
-        moved = _identity(coords=((0.0, 0.0, 0.0), (0.80, 0.59, 0.0), (-0.76, 0.59, 0.0)))
+        moved = _identity(
+            coords=((0.0, 0.0, 0.0), (0.80, 0.59, 0.0), (-0.76, 0.59, 0.0))
+        )
         assert moved.resume_key != _identity().resume_key
 
     def test_calc_type_change_changes_the_key(self):
@@ -98,12 +103,16 @@ class TestWarmStartKey:
     """A density from a nearby geometry is a good guess — that's the point."""
 
     def test_geometry_change_does_not_change_the_key(self):
-        moved = _identity(coords=((0.0, 0.0, 0.0), (0.90, 0.59, 0.0), (-0.76, 0.59, 0.0)))
+        moved = _identity(
+            coords=((0.0, 0.0, 0.0), (0.90, 0.59, 0.0), (-0.76, 0.59, 0.0))
+        )
         assert moved.warm_start_key == _identity().warm_start_key
 
     def test_calc_type_change_does_not_change_the_key(self):
         """A single point's converged density is a fine guess for an optimization."""
-        assert _identity(calc_type="pes_scan").warm_start_key == _identity().warm_start_key
+        assert (
+            _identity(calc_type="pes_scan").warm_start_key == _identity().warm_start_key
+        )
 
     def test_method_change_changes_the_key(self):
         assert _identity(method="B3LYP").warm_start_key != _identity().warm_start_key
@@ -306,7 +315,9 @@ class TestResumable:
         ckpt = C.Checkpoint(_identity())
         ckpt.begin()
         ckpt.trajectory_path.write_bytes(b"frames")
-        other = _identity(coords=((9.0, 9.0, 9.0), (0.76, 0.59, 0.0), (-0.76, 0.59, 0.0)))
+        other = _identity(
+            coords=((9.0, 9.0, 9.0), (0.76, 0.59, 0.0), (-0.76, 0.59, 0.0))
+        )
         assert C.find_resumable(other) is None
 
 
@@ -363,12 +374,16 @@ class TestWarmStartDiscovery:
     def test_finds_a_chkfile_from_a_different_geometry(self, root):
         """The whole point: a nearby geometry's density is a good guess."""
         self._seed(_identity())
-        moved = _identity(coords=((0.0, 0.0, 0.0), (0.85, 0.59, 0.0), (-0.76, 0.59, 0.0)))
+        moved = _identity(
+            coords=((0.0, 0.0, 0.0), (0.85, 0.59, 0.0), (-0.76, 0.59, 0.0))
+        )
         assert C.find_warm_start_chkfile(moved) is not None
 
     def test_finds_a_chkfile_from_a_different_calc_type(self, root):
         self._seed(_identity(calc_type="single_point"))
-        assert C.find_warm_start_chkfile(_identity(calc_type="geometry_opt")) is not None
+        assert (
+            C.find_warm_start_chkfile(_identity(calc_type="geometry_opt")) is not None
+        )
 
     def test_does_not_cross_basis_sets(self, root):
         self._seed(_identity(basis="STO-3G"))

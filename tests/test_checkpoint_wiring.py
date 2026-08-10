@@ -20,7 +20,8 @@ from pathlib import Path
 
 import pytest
 
-from quantui import app_runflow, checkpoint as C, optimizer, pes_scan, session_calc
+from quantui import app_runflow, optimizer, pes_scan, session_calc
+from quantui import checkpoint as C
 
 
 @pytest.fixture
@@ -94,9 +95,12 @@ class TestCalcModuleSignatures:
 
     def test_warm_start_is_on_by_default(self):
         """Reusing a converged density is free; opting out is the special case."""
-        assert inspect.signature(session_calc.run_in_session).parameters[
-            "warm_start"
-        ].default is True
+        assert (
+            inspect.signature(session_calc.run_in_session)
+            .parameters["warm_start"]
+            .default
+            is True
+        )
 
     def test_app_passes_the_checkpoint_to_every_long_calc(self):
         """The three calc types that can be interrupted must all receive one."""
