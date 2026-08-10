@@ -5667,7 +5667,6 @@ class QuantUIApp:
     def _on_resume_discard(self, _btn=None) -> None:
         """Delete the selected checkpoint and refresh the list."""
         try:
-            from quantui.checkpoint import Checkpoint  # noqa: F401
             import shutil
 
             selected = self._resume_list_dd.value
