@@ -24,8 +24,6 @@ env/
 # Local config (user-specific overrides — never commit)
 config.local.py
 
-# AI working context (local only — not for public repo)
-CLAUDE.md
 
 # Calculation output files
 *.npz
@@ -58,7 +56,6 @@ Thumbs.db
 
 planning/
 nul
-/.claude/
 /temp - untracked/
 /logs
 .claudeignore
