@@ -69,6 +69,15 @@ def _write_run_header(app: Any) -> None:
             _out_dir = str(app._get_results_dir())
         except Exception:
             _out_dir = None
+        # Density fitting is applied iff the setting is on and the method isn't a
+        # post-HF one (session_calc never fits those references). Mirror that so
+        # the banner states what the run will actually do (M-DF).
+        try:
+            _df_on = bool(
+                app._user_settings.compute.density_fit
+            ) and app.method_dd.value.upper() not in ("MP2", "CCSD", "CCSD(T)")
+        except Exception:
+            _df_on = False
         banner = format_log_header(
             formula=mol.get_formula(),
             method=app.method_dd.value,
@@ -78,6 +87,7 @@ def _write_run_header(app: Any) -> None:
             multiplicity=int(app.mult_si.value),
             solvent=_solvent,
             output_dir=_out_dir,
+            density_fit=_df_on,
         )
     except Exception:
         # Fallback: a minimal one-liner still beats a blank window.

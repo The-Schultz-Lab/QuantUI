@@ -389,3 +389,57 @@ class TestRealSCFPath:
         )
         r = run_in_session(_h2(), method="MP2", basis="STO-3G", verbose=0)
         assert r.density_fit is False
+
+
+# ══ Provenance indicators (DF.7) ═════════════════════════════════════════════
+#
+# Transparency for a teaching tool: the run-header banner records DF on/off like
+# it records device and solvation, and the result card flags it when applied.
+
+
+class TestProvenanceIndicators:
+    def test_header_states_df_on(self):
+        from quantui.log_utils import format_log_header
+
+        header = format_log_header(
+            formula="C6H6",
+            method="B3LYP",
+            basis="def2-SVP",
+            calc_type="tddft",
+            density_fit=True,
+        )
+        assert "Density fitting" in header
+        assert "RI" in header
+
+    def test_header_states_df_off(self):
+        from quantui.log_utils import format_log_header
+
+        header = format_log_header(
+            formula="C6H6", method="B3LYP", basis="def2-SVP", calc_type="single_point"
+        )
+        assert "Density fitting" in header
+        assert "None (exact)" in header
+
+    def _result(self, density_fit):
+        from quantui.session_calc import SessionResult
+
+        return SessionResult(
+            energy_hartree=-1.0,
+            homo_lumo_gap_ev=10.0,
+            converged=True,
+            n_iterations=8,
+            method="B3LYP",
+            basis="def2-SVP",
+            formula="C6H6",
+            density_fit=density_fit,
+        )
+
+    def test_result_card_flags_df_when_used(self):
+        from quantui.app_formatters import format_result
+
+        assert "Density fitting" in format_result(self._result(True))
+
+    def test_result_card_silent_when_unfitted(self):
+        from quantui.app_formatters import format_result
+
+        assert "Density fitting" not in format_result(self._result(False))
