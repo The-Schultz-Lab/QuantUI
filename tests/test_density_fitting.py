@@ -23,6 +23,32 @@ import pytest
 from quantui import calc_log, density_fitting
 from quantui.user_settings import UserSettings
 
+_PYSCF_AVAILABLE = False
+try:
+    import pyscf as _pyscf  # noqa: F401
+
+    _PYSCF_AVAILABLE = True
+except ImportError:
+    pass
+
+pyscf_only = pytest.mark.skipif(
+    not _PYSCF_AVAILABLE,
+    reason="PySCF not installed (Linux/macOS/WSL only)",
+)
+
+
+@pytest.fixture
+def isolated_settings(tmp_path, monkeypatch):
+    """Per-test settings file.
+
+    conftest isolates ``QUANTUI_SETTINGS_PATH`` only once for the whole session,
+    so a test that *saves* a setting would leak it into later tests (and later
+    files). Point the path at a fresh per-test file, per conftest's documented
+    convention, so saves here can't pollute anything else.
+    """
+    monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(tmp_path / "settings.json"))
+
+
 # ══ The helper ═══════════════════════════════════════════════════════════════
 
 
@@ -90,6 +116,7 @@ class TestTryDensityFit:
 # ══ The settings gate ════════════════════════════════════════════════════════
 
 
+@pytest.mark.usefixtures("isolated_settings")
 class TestSettingsGate:
     def test_reflects_saved_setting(self):
         s = UserSettings.load()
@@ -119,6 +146,7 @@ class TestSettingsGate:
 # ══ The user setting ═════════════════════════════════════════════════════════
 
 
+@pytest.mark.usefixtures("isolated_settings")
 class TestComputeSettingDensityFit:
     def test_default_is_off(self):
         assert UserSettings().compute.density_fit is False
@@ -309,3 +337,55 @@ class TestSessionResultDensityFitField:
             density_fit=True,
         )
         assert r.density_fit is True
+
+
+# ══ Real SCF path (PySCF-gated) ══════════════════════════════════════════════
+#
+# The fakes above prove the helper's contract; these prove the *wiring* — that
+# the real session_calc SCF path actually applies DF when the setting is on,
+# records it on the result, and stays numerically faithful. This is the
+# "built but never exercised on a real calc" gap the project has been bitten by.
+
+
+def _h2():
+    from quantui.molecule import Molecule
+
+    return Molecule(["H", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]])
+
+
+@pyscf_only
+@pytest.mark.usefixtures("isolated_settings")
+class TestRealSCFPath:
+    def test_off_by_default(self):
+        from quantui.session_calc import run_in_session
+
+        r = run_in_session(_h2(), method="RHF", basis="STO-3G", verbose=0)
+        assert r.density_fit is False
+        assert r.converged
+
+    def test_setting_on_applies_df_and_stays_faithful(self, monkeypatch):
+        from quantui.session_calc import run_in_session
+
+        plain = run_in_session(_h2(), method="RHF", basis="STO-3G", verbose=0)
+
+        # Force the gate on the way the real SCF path reads it, avoiding any
+        # cross-worker settings-file race under pytest-xdist.
+        monkeypatch.setattr(
+            density_fitting, "_density_fit_enabled_in_settings", lambda: True
+        )
+        fitted = run_in_session(_h2(), method="RHF", basis="STO-3G", verbose=0)
+
+        assert fitted.density_fit is True
+        assert fitted.converged
+        # DF is an approximation, but a small, faithful one.
+        assert abs(fitted.energy_hartree - plain.energy_hartree) < 5e-3
+
+    def test_post_hf_reference_is_not_fitted(self, monkeypatch):
+        """MP2 keeps exact integrals even with the setting on (post-HF skip)."""
+        from quantui.session_calc import run_in_session
+
+        monkeypatch.setattr(
+            density_fitting, "_density_fit_enabled_in_settings", lambda: True
+        )
+        r = run_in_session(_h2(), method="MP2", basis="STO-3G", verbose=0)
+        assert r.density_fit is False
