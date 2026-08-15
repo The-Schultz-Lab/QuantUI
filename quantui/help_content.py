@@ -167,6 +167,18 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "<p><b>Recommendation:</b> Start with <b>STO-3G</b> for learning. "
             "Use <b>6-31G*</b> for serious work. Only use cc-pVTZ if you need "
             "high-accuracy results and have time to wait.</p>"
+            "<p><b>Transition metals and heavy elements:</b> the Pople "
+            "(<code>6-31G</code>…) and Dunning (<code>cc-pV*</code>) sets do "
+            "<b>not</b> cover most metals, so a calculation on, say, a platinum "
+            "or cobalt complex will stop with a message asking you to switch. "
+            "Use <b>def2-SVP</b> or <b>def2-TZVP</b> — these carry effective "
+            "core potentials that cover the whole periodic table. Remember to "
+            "set the <b>charge and multiplicity</b> from the metal's oxidation "
+            "state, and for a reliable starting geometry load one of the "
+            "bundled inorganic examples (cisplatin, hexaamminecobalt(III), "
+            "ferrocene) or paste your own coordinates in the <b>XYZ Input</b> "
+            "tab rather than relying on an online name search, which often "
+            "returns a disconnected salt form for coordination compounds.</p>"
             # UXP2.1: the two Pople notations are a recurring source of
             # confusion — a reader who only knows 6-31G(d) can conclude the
             # 6-31G* in the dropdown is a different set they can't select.
