@@ -206,7 +206,7 @@ quantui analytics build -o ~/projects/lab-share/quantui-report.html --open
 ### Sample output
 
 ```
-Wrote /home/schul/.quantui/dashboard.html
+Wrote /home/youruser/.quantui/dashboard.html
 ```
 
 With `--open`, the CLI picks the right opener for your environment:
@@ -223,8 +223,8 @@ If no opener succeeds — e.g. a headless container with no display —
 you'll see:
 
 ```
-Wrote /home/schul/.quantui/dashboard.html
-(could not auto-open browser — open /home/schul/.quantui/dashboard.html manually)
+Wrote /home/youruser/.quantui/dashboard.html
+(could not auto-open browser — open /home/youruser/.quantui/dashboard.html manually)
 ```
 
 The exit code stays `0` either way — the dashboard was written
