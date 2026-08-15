@@ -86,6 +86,7 @@ That line **is** the cloud/local boundary:
   uncommitted work is invisible to the next machine and is lost when the
   container is reclaimed. (This has bitten the project before — see STATUS on
   stale/uncommitted branches.)
+- **Commit as the project, not yourself.** Set `git config user.email nccu-schultz-lab@users.noreply.github.com` (matches `pyproject.toml`) before committing — never let a personal email into this public repo's history.
 - **Keep planning and code in sync.** If a code change resolves or changes a
   roadmap item, update the planning repo in the same session.
 - Do not create a PR unless asked.
