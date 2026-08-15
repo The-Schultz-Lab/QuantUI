@@ -26,7 +26,7 @@ import logging
 import math
 import sys
 from dataclasses import dataclass
-from typing import IO, List, Optional
+from typing import IO, Any, Dict, List, Optional
 
 from .ase_bridge import ASE_AVAILABLE, atoms_to_molecule, molecule_to_atoms
 from .molecule import Molecule
@@ -170,6 +170,49 @@ class PESScanResult:
 # ============================================================================
 
 
+def _reuse_scan_point(
+    record: Optional[dict],
+    value: float,
+    atoms: Any,
+    molecule: Molecule,
+) -> Optional[tuple]:
+    """Return ``(energy_hartree, molecule)`` for a reusable point, else ``None``.
+
+    Also moves the live ASE ``atoms`` onto the stored geometry. That is not
+    bookkeeping — each scan point relaxes from wherever the previous one
+    finished, so skipping a point without moving the atoms would make the next
+    computed point start from the wrong place and quietly change the profile.
+
+    Returns ``None`` for anything questionable (no record, a coordinate value
+    that no longer matches, malformed geometry). Recomputing a point is cheap
+    next to trusting a mismatched one.
+    """
+    if not record:
+        return None
+    try:
+        if abs(float(record["value"]) - float(value)) > 1e-9:
+            return None
+        energy_ha = float(record["energy_hartree"])
+        symbols = [str(a) for a in record["atoms"]]
+        coords = [[float(c) for c in row] for row in record["coordinates"]]
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not symbols or len(coords) != len(symbols):
+        return None
+
+    point_molecule = Molecule(
+        atoms=symbols,
+        coordinates=coords,
+        charge=molecule.charge,
+        multiplicity=molecule.multiplicity,
+    )
+    try:
+        atoms.set_positions(coords)
+    except Exception:  # noqa: BLE001 — a stale live geometry is not fatal
+        logger.debug("could not restore ASE positions for a reused scan point")
+    return energy_ha, point_molecule
+
+
 def run_pes_scan(
     molecule: Molecule,
     method: str = "RHF",
@@ -182,6 +225,8 @@ def run_pes_scan(
     fmax: float = 0.05,
     max_opt_steps: int = 100,
     progress_stream: Optional[IO[str]] = None,
+    checkpoint: Optional[Any] = None,
+    resume: bool = False,
 ) -> PESScanResult:
     """Run a 1D PES scan along an internal coordinate.
 
@@ -204,6 +249,13 @@ def run_pes_scan(
         fmax: Force convergence threshold (eV/Å) for each constrained optimization.
         max_opt_steps: Maximum BFGS steps per scan point.
         progress_stream: Optional writable stream for per-step progress messages.
+        checkpoint: Optional :class:`~quantui.checkpoint.Checkpoint`. Each
+            completed point is appended to it as soon as it finishes, so an
+            interrupted scan doesn't lose the points it already computed.
+        resume: Reuse the points already stored in *checkpoint* and compute
+            only the ones still missing. Points are matched by index, and a
+            stored point that failed is recomputed rather than accepted — the
+            usual reason to resume a scan is that something went wrong.
 
     Returns:
         :class:`PESScanResult` with the full energy profile and geometries.
@@ -312,6 +364,33 @@ def run_pes_scan(
     # don't know where this point landed, but it wasn't back at the start."
     _last_good_molecule = molecule
 
+    # --- Reusable points from a previous attempt (M-CHECKPOINT CHK.3) ---
+    # Keyed by point index, but each record also stores the coordinate value
+    # it was computed at and is only reused when that value still matches.
+    # That makes the cache self-validating: changing `start`, `stop`, or
+    # `steps` shifts the values, the match fails, and the scan simply
+    # recomputes — no separate grid-compatibility check to keep in sync.
+    _cached_points: Dict[int, dict] = {}
+    if resume and checkpoint is not None:
+        for _rec in checkpoint.completed_points():
+            _idx = _rec.get("index")
+            if isinstance(_idx, int) and _rec.get("ok"):
+                _cached_points[_idx] = _rec
+        if _cached_points:
+            _n = len(_cached_points)
+            _stream.write(
+                f"\n♻  Resuming scan — {_n} point"
+                f"{'s' if _n != 1 else ''} already computed.\n"
+            )
+            try:
+                checkpoint.log_resumed(
+                    f"reusing {_n} previously computed scan point"
+                    f"{'s' if _n != 1 else ''}; "
+                    "only the missing points are recomputed"
+                )
+            except Exception:  # noqa: BLE001 — provenance is never worth a crash
+                pass
+
     i1, i2 = atom_indices[0], atom_indices[1]
     i3 = atom_indices[2] if len(atom_indices) >= 3 else 0
     i4 = atom_indices[3] if len(atom_indices) >= 4 else 0
@@ -321,6 +400,20 @@ def run_pes_scan(
         # Live per-point status + exact completion fraction
         # (points already done / total) for the self-correcting time estimate.
         from .log_utils import emit_progress, emit_status
+
+        _reused = _reuse_scan_point(_cached_points.get(step_num), val, atoms, molecule)
+        if _reused is not None:
+            _energy_ha, _mol_at_point = _reused
+            energies_hartree.append(_energy_ha)
+            coordinates_list.append(_mol_at_point)
+            _last_good_molecule = _mol_at_point
+            emit_progress(_stream, step_num / steps)
+            _stream.write(
+                f"\nScan point {step_num}/{steps}: "
+                f"{scan_type} = {val:.4f} "
+                f"{('Å' if scan_type == 'bond' else '°')}  ·  reused from checkpoint\n"
+            )
+            continue
 
         emit_status(
             _stream,
@@ -397,6 +490,23 @@ def run_pes_scan(
                 f"  E = {e_ha:.8f} Ha  ({'converged' if ok else 'not converged'})\n"
             )
 
+            # Bank the point immediately. Deferring the write until the scan
+            # ends would mean the one scenario a checkpoint exists for — the
+            # scan not reaching its end — saves nothing.
+            if checkpoint is not None:
+                checkpoint.append_point(
+                    {
+                        "index": step_num,
+                        "value": float(val),
+                        "energy_hartree": float(e_ha),
+                        "ok": bool(ok),
+                        "atoms": list(mol_at_point.atoms),
+                        "coordinates": [
+                            [float(c) for c in row] for row in mol_at_point.coordinates
+                        ],
+                    }
+                )
+
         except Exception as exc:
             _stream.write(f"  ⚠ Scan point {step_num} failed: {exc}\n")
             energies_hartree.append(float("nan"))
@@ -406,6 +516,12 @@ def run_pes_scan(
         finally:
             # Always clear the constraint before the next scan point
             atoms.set_constraint()
+
+    if checkpoint is not None:
+        # Every point was attempted, so there is nothing left to resume even
+        # if some of them failed — a failed point is recomputed on a re-run,
+        # not resumed into.
+        checkpoint.mark_complete()
 
     return PESScanResult(
         formula=molecule.get_formula(),

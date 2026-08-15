@@ -59,6 +59,43 @@ def _isolate_user_settings():
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _isolate_log_dir():
+    """Point ``QUANTUI_LOG_DIR`` at a temp dir for the whole suite.
+
+    Without this the suite appends to the developer's real
+    ``~/.quantui/logs/perf_log.jsonl`` — the file the runtime estimator
+    trains on. That is not a cosmetic leak. Measured 2026-08-05 while
+    scoping M-PROGRESS Phase C: 2 773 records were in the log and roughly
+    four fifths of them had been written by tests, not by the user. The
+    end-to-end ``*_analysis_history`` suites drive ``_do_run`` with a
+    *mocked* calculation, so each one recorded an "H2O RHF/6-31G
+    frequency" whose ``elapsed_s`` was really pytest-xdist wall time under
+    contention — values from 0.34 s to 143 s for identical chemistry.
+
+    That single fact explains the symptom Phase C was created to fix. The
+    estimator was not badly modelled; it was trained almost entirely on
+    test-harness noise, which is why its median error was near zero (no
+    bias) while its spread was enormous. See
+    ``quantui.estimator_eval`` for the replay that measures it.
+
+    Isolating the whole suite is the fix at the source. Tests that assert
+    on log behaviour still monkeypatch the same variable per-test, which
+    takes precedence over this session default.
+
+    Same rationale as ``_isolate_results_dir`` above, and reflections/10
+    Rule 6.
+    """
+    prev = os.environ.get("QUANTUI_LOG_DIR")
+    with tempfile.TemporaryDirectory(prefix="quantui_test_logs_") as tmp:
+        os.environ["QUANTUI_LOG_DIR"] = tmp
+        yield
+        if prev is None:
+            os.environ.pop("QUANTUI_LOG_DIR", None)
+        else:
+            os.environ["QUANTUI_LOG_DIR"] = prev
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _suppress_plotly_browser():
     """Prevent plotly from opening browser tabs during tests.
 

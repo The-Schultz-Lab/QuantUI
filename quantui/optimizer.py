@@ -340,6 +340,57 @@ class OptimizationResult:
 # ============================================================================
 
 
+def _write_stream(stream: Optional[IO[str]], text: str) -> None:
+    """Write to *stream*, ignoring a closed or broken one."""
+    if stream is None:
+        return
+    try:
+        stream.write(text)
+    except Exception:  # noqa: BLE001 — a progress note is never worth raising
+        pass
+
+
+def _unlink_quietly(path: Optional[Path]) -> None:
+    if path is None:
+        return
+    try:
+        path.unlink()
+    except OSError:
+        pass
+
+
+def _resume_start_geometry(checkpoint: Optional[Any]) -> Optional[Molecule]:
+    """Return the geometry to restart from, or ``None`` if there isn't one.
+
+    ``None`` covers no checkpoint, no trajectory, an empty or corrupt
+    trajectory, and a checkpoint that already completed. All of them mean
+    "nothing to continue", and the caller handles that by starting normally —
+    so this deliberately reports absence rather than raising.
+    """
+    if checkpoint is None:
+        return None
+    try:
+        state = checkpoint.resumable_state()
+        if state is None:
+            return None
+        traj_path = checkpoint.trajectory_path
+        if not traj_path.is_file() or traj_path.stat().st_size == 0:
+            return None
+        from ase.io.trajectory import Trajectory  # type: ignore[import]
+
+        frames = list(Trajectory(str(traj_path)))
+        if not frames:
+            return None
+        return atoms_to_molecule(
+            frames[-1],
+            charge=int(state.get("charge", 0) or 0),
+            multiplicity=int(state.get("multiplicity", 1) or 1),
+        )
+    except Exception as exc:  # noqa: BLE001 — a bad checkpoint is not an error
+        logger.debug("could not resume from checkpoint: %s", exc)
+        return None
+
+
 def optimize_geometry(
     molecule: Molecule,
     method: str = "RHF",
@@ -350,6 +401,8 @@ def optimize_geometry(
     status_label: str = "Optimizing geometry",
     report_fraction: bool = True,
     expected_steps: Optional[int] = None,
+    checkpoint: Optional[Any] = None,
+    resume: bool = False,
 ) -> OptimizationResult:
     """
     Optimize a molecular geometry at the QM level using ASE-BFGS + PySCF.
@@ -380,6 +433,15 @@ def optimize_geometry(
             progress (step number and maximum force) is written here.
             Pass a widget-backed stream in the notebook for live output;
             leave ``None`` to write to ``sys.stdout``.
+        checkpoint: Optional :class:`~quantui.checkpoint.Checkpoint`. When
+            given, the ASE trajectory and the BFGS Hessian state are written
+            into the checkpoint directory after every step instead of a temp
+            directory, so an interrupted optimization can be continued.
+        resume: Continue from *checkpoint* rather than from *molecule*. The
+            starting geometry becomes the last frame of the stored trajectory
+            and BFGS reloads its accumulated Hessian, so the steps already
+            taken are not repeated. Ignored (with a note to the progress
+            stream) when the checkpoint holds nothing usable.
 
     Returns:
         :class:`OptimizationResult` containing the optimized molecule,
@@ -445,7 +507,33 @@ def optimize_geometry(
     from .cancellation import cancel_check_from_stream, raise_if_cancelled
 
     _cancel_check = cancel_check_from_stream(_stream)
-    atoms = molecule_to_atoms(molecule)
+
+    # --- Resume from a checkpoint (M-CHECKPOINT CHK.2) ---
+    # Restart means two things, and only doing one of them wastes most of the
+    # saving: continue from the last geometry *and* reload the BFGS Hessian.
+    # Without the Hessian, BFGS restarts as steepest descent and spends
+    # several steps rebuilding curvature it had already learned.
+    _resume_from = _resume_start_geometry(checkpoint) if resume else None
+    if resume and _resume_from is None:
+        _write_stream(
+            _stream,
+            "\n⚠  No usable checkpoint to resume — starting from the beginning.\n",
+        )
+    if _resume_from is not None and checkpoint is not None:
+        try:
+            _done = (checkpoint.load_state() or {}).get("steps_done")
+            _detail = (
+                f"continuing from step {_done}; "
+                "geometry and optimizer curvature restored"
+                if isinstance(_done, int) and _done > 0
+                else "continuing from the last saved geometry"
+            )
+            checkpoint.log_resumed(_detail)
+        except Exception:  # noqa: BLE001 — provenance is never worth a crash
+            pass
+    start_molecule = _resume_from if _resume_from is not None else molecule
+
+    atoms = molecule_to_atoms(start_molecule)
     atoms.calc = _QuantUIPySCFCalc(
         method=method,
         basis=basis,
@@ -466,18 +554,51 @@ def optimize_geometry(
     # --- Run optimization with trajectory file ---
     converged = False
     try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            traj_path = Path(tmpdir) / "opt.traj"
+        with contextlib.ExitStack() as _stack:
+            _resuming = _resume_from is not None
+            if checkpoint is not None:
+                # Durable location: the point of a checkpoint is that it
+                # outlives the process that wrote it.
+                checkpoint.dir.mkdir(parents=True, exist_ok=True)
+                traj_path = checkpoint.trajectory_path
+                restart_path: Optional[Path] = checkpoint.optimizer_restart_path
+                if not _resuming:
+                    # Starting over into an existing checkpoint directory:
+                    # clear the stored Hessian first. Leaving it would have
+                    # BFGS begin with curvature from a run this one is not
+                    # continuing — silently, and with no way for the user to
+                    # tell that is what happened.
+                    _unlink_quietly(restart_path)
+            else:
+                tmpdir = _stack.enter_context(tempfile.TemporaryDirectory())
+                traj_path = Path(tmpdir) / "opt.traj"
+                restart_path = None
 
             dyn = BFGS(
                 atoms,
                 trajectory=str(traj_path),
                 logfile=_stream,  # BFGS step table → progress_stream
+                # Appending keeps the frames already computed, so the result's
+                # trajectory covers the whole optimization rather than only
+                # the portion after the interruption.
+                append_trajectory=_resuming,
+                restart=str(restart_path) if restart_path is not None else None,
             )
             # Check cancel after every BFGS step (belt-and-suspenders
             # with the per-step calculator check above).
             if _cancel_check is not None:
                 dyn.attach(lambda: raise_if_cancelled(_cancel_check), interval=1)
+
+            # Keep the checkpoint's step count current so a resume prompt can
+            # say how much work is already banked. Written per step because
+            # the interesting failure is the process dying without warning —
+            # anything deferred to the end would never be written at all.
+            if checkpoint is not None:
+
+                def _record_step() -> None:
+                    checkpoint.update(steps_done=getattr(dyn, "nsteps", None))
+
+                dyn.attach(_record_step, interval=1)
 
             # Estimate completion from the fmax-convergence trend
             # (log-scale between the first step's fmax and the target). Data-free
@@ -513,6 +634,12 @@ def optimize_geometry(
 
             with capture_c_stderr(_stream), contextlib.redirect_stdout(_null):
                 converged = bool(dyn.run(fmax=fmax, steps=steps))
+
+            if checkpoint is not None and converged:
+                # Only a converged optimization is finished. One that hit the
+                # step limit still has work left, so it stays resumable —
+                # raising `steps` and continuing is a real workflow.
+                checkpoint.mark_complete()
 
             # --- Read trajectory frames ---
             from ase.io.trajectory import Trajectory  # type: ignore[import]

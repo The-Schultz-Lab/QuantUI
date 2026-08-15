@@ -7,6 +7,68 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-06
+
+### Fixed
+
+- **Running the test suite no longer corrupts your time estimates.** QuantUI's
+  own tests were writing their runs into `~/.quantui/logs/perf_log.jsonl` — the
+  file the runtime estimator learns from. Because those tests use a *simulated*
+  calculation, each one recorded a fabricated timing: 2 773 records were in the
+  log and roughly four fifths of them were test artifacts, including "water
+  frequency" runs whose recorded times ranged from 0.34 s to 143 s for identical
+  chemistry. This is the reason the pre-run estimate had been unreliable. Only
+  developers running the test suite were affected; the fabricated records are
+  now superseded automatically as real runs accumulate, so no manual cleanup is
+  needed.
+- **Calibration now times the calculation, not the process.** Each calibration
+  step runs in a fresh subprocess and its stopwatch started before PySCF was
+  even imported, so every calibration record was inflated by startup cost that
+  a real run in an open session never pays. Import time is still recorded, just
+  separately.
+
+### Added
+
+- **Checkpoints — an interrupted calculation can pick up where it stopped.**
+  Geometry Optimization saves its trajectory and the optimizer's accumulated
+  curvature after every step; PES Scan banks each point as it finishes. If a
+  run is cancelled, crashes, or the machine goes to sleep, the Calculate tab
+  offers to resume it — and says how much is already done ("8 of 20 scan points
+  already computed") rather than just asking. The offer appears only when the
+  calculation you have configured is *exactly* the interrupted one, geometry
+  included, so a resume can never splice two different runs together.
+- **An "Unfinished calculations" list on the History tab.** After restarting
+  QuantUI you no longer have to remember what you were running: every
+  interrupted calculation is listed with its molecule, type, level of theory,
+  how much finished and how long ago. **Load these settings** puts the molecule
+  and all its settings back on the Calculate tab, ready to resume; **Discard**
+  removes one you are done with. Hidden entirely when nothing is unfinished.
+- **Checkpoint activity is recorded in the saved output log.** Opening a
+  checkpoint, every save, completion and discarding all appear as
+  `[checkpoint]` lines in `pyscf.log`. Resuming writes a banner stating plainly
+  that the log covers only the continuation and that the earlier output lives
+  in the interrupted run's result directory — without it the file would read
+  as a calculation that started from the geometry at the top. A warm start now
+  names the file its initial density came from, since the SCF iteration count
+  is only interpretable if you know what it started from.
+- **Help topic: "Resuming an interrupted calculation."** Covers how to resume,
+  why the offer disappears if you change a setting, which calculation types can
+  be resumed, and where checkpoints are stored.
+- **Warm-started SCF.** A converged density from an earlier run of the same
+  molecule, charge, method and basis is reused as the starting guess, which
+  usually cuts several SCF cycles. The geometry does not have to match — a
+  density from a nearby geometry is a good guess, which is what a geometry
+  optimization relies on internally.
+- **Calculation records say how they were measured.** Runs launched from the app
+  and runs measured by the calibration tool are now labelled as such, and the
+  estimator keeps them apart instead of averaging two populations that measure
+  different things. Records also carry a per-stage time breakdown (SCF, Hessian,
+  excited-state solve, …), which is the groundwork for stage-aware estimates.
+- **`python -m quantui.estimator_eval`** — replays your recorded history through
+  the estimator and reports how accurate it would have been, split by
+  calculation type. Reports coverage alongside accuracy, so a model that stays
+  silent can't look good by refusing to answer.
+
 ## [0.6.1] - 2026-08-05
 
 ### Fixed

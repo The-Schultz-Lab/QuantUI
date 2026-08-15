@@ -694,6 +694,9 @@ _RE_CYCLE = re.compile(
 )
 _RE_CONV = re.compile(r"converged SCF energy\s*=\s*([\-\d\.]+)")
 _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
+# Step/point/state counters inside a status message. Removed before the
+# message is used as a per-stage timing key — see _LogCapture._stage_key.
+_RE_STAGE_NUMBERS = re.compile(r"\d+(?:[./]\d+)*")
 
 # ── Silent-phase heartbeat (M-PROGRESS Phase D) ──────────────────────────────
 #
@@ -757,6 +760,60 @@ class _LogCapture:
         self._hb_started_t = self._last_write_t
         self._hb_stop = threading.Event()
         self._hb_thread: Optional[threading.Thread] = None
+        # Per-stage wall times (M-PROGRESS Phase C, deferred from B3).
+        # Every calc type already announces its phases through
+        # log_utils.emit_status, and every one of those announcements passes
+        # through this object — so stage boundaries can be timed here without
+        # threading a timer through optimizer/freq/tddft/nmr one by one.
+        self._stage_times: dict[str, float] = {}
+        self._stage_name: Optional[str] = None
+        self._stage_started_t = self._last_write_t
+
+    # ── Per-stage timing ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _stage_key(message: str) -> str:
+        """Collapse a live status message to a stable stage name.
+
+        Status messages carry per-step detail — "Opt step 7 — SCF…",
+        "Solving TD-DFT excited states (10)…" — which is exactly right for
+        the user watching the run and exactly wrong as a dictionary key: it
+        would turn one stage into one entry per step. Stripping the numbers
+        leaves the phase itself, which is the unit a cost model reasons in.
+        """
+        text = _RE_STAGE_NUMBERS.sub(" ", message)
+        text = text.replace("…", " ").replace("(", " ").replace(")", " ")
+        text = " ".join(text.split())
+        return text.strip(" -—:·").lower()
+
+    def _enter_stage(self, name: str) -> None:
+        """Close the stage in progress and start *name*.
+
+        Repeated announcements of the same stage (the optimizer re-announces
+        every step) are treated as one continuous stage, so the recorded
+        breakdown stays at the granularity a cost model can use rather than
+        exploding into one entry per step.
+        """
+        now = time.monotonic()
+        if self._stage_name is not None and name != self._stage_name:
+            prev = self._stage_times.get(self._stage_name, 0.0)
+            self._stage_times[self._stage_name] = prev + (now - self._stage_started_t)
+        if name != self._stage_name:
+            self._stage_name = name
+            self._stage_started_t = now
+
+    def stage_timings(self) -> dict[str, float]:
+        """Return ``{stage: seconds}``, including the stage still running.
+
+        Safe to call mid-run: the open stage is measured up to now rather
+        than omitted, so a caller that logs this at the end of a calc gets a
+        breakdown that actually sums to the run.
+        """
+        out = dict(self._stage_times)
+        if self._stage_name is not None:
+            elapsed = time.monotonic() - self._stage_started_t
+            out[self._stage_name] = out.get(self._stage_name, 0.0) + elapsed
+        return out
 
     # ── Silent-phase heartbeat ──────────────────────────────────────────────
 
@@ -830,8 +887,11 @@ class _LogCapture:
         while "\n" in self._line_buf:
             line, self._line_buf = self._line_buf.split("\n", 1)
             m = _RE_Q_STATUS.search(line)
-            if m and self._status is not None:
-                self._status.value = m.group(1).strip()
+            if m:
+                message = m.group(1).strip()
+                self._enter_stage(self._stage_key(message))
+                if self._status is not None:
+                    self._status.value = message
                 continue
             m = _RE_CYCLE.search(line)
             if m and self._status is not None:
@@ -860,6 +920,7 @@ class _LogCapture:
         step k…") during silent (``verbose=0``) phases, without cluttering the
         output log the way a ``[QuantUI_STATUS]`` stream line would.
         """
+        self._enter_stage(self._stage_key(message))
         if self._status is not None:
             try:
                 self._status.value = message
@@ -980,6 +1041,14 @@ class QuantUIApp:
         _reset_confirm_html: Any
         _reset_confirm_no: Any
         _reset_confirm_yes: Any
+        _resume_cb: Any
+        _resume_discard_btn: Any
+        _resume_entries: Any
+        _resume_list_box: Any
+        _resume_list_dd: Any
+        _resume_list_html: Any
+        _resume_notice_html: Any
+        _resume_restore_btn: Any
         _status_html: Any
         _status_tab_panel: Any
         _theme_style: Any
@@ -1236,6 +1305,12 @@ class QuantUIApp:
         # The active run's _LogCapture, so the ticker can read the
         # completion fraction calc modules report onto it. None between runs.
         self._active_log: Optional[_LogCapture] = None
+        # Calc types this session has already completed once. The first run
+        # of a type pays import costs later ones don't (PySCF loads its
+        # Hessian module on the first Frequency, for instance), so the
+        # perf record carries a warm/cold flag rather than silently mixing
+        # the two populations. See calc_log.log_calculation.
+        self._warm_calc_types: set[str] = set()
         # Relaxed molecule from a pending pre-opt preview, awaiting Keep/Revert.
         self._preopt_relaxed_mol: Optional[Molecule] = None
         # Cache kernel io_loop once on the main thread so worker threads can
@@ -1354,9 +1429,14 @@ class QuantUIApp:
         if loop is not None:
             loop.add_callback(self._refresh_results_browser)
             loop.add_callback(self._populate_compare_list)
+            # Startup is the moment that matters for CHK.6: after a restart
+            # the targeted resume offer can't fire, because nothing is
+            # configured yet.
+            loop.add_callback(self._refresh_resume_list)
         else:
             self._refresh_results_browser()
             self._populate_compare_list()
+            self._refresh_resume_list()
 
     def display(self) -> None:
         """Inject global CSS and render the application widget."""
@@ -1901,6 +1981,12 @@ class QuantUIApp:
         self.mult_si.observe(self._safe_cb(self._update_notes), names="value")
         self.method_dd.observe(self._safe_cb(self._update_estimate), names="value")
         self.basis_dd.observe(self._safe_cb(self._update_estimate), names="value")
+        # Unfinished-calculations list (CHK.6)
+        self._resume_list_dd.observe(
+            self._safe_cb(self._on_resume_entry_changed), names="value"
+        )
+        self._resume_restore_btn.on_click(self._on_resume_restore)
+        self._resume_discard_btn.on_click(self._on_resume_discard)
         # Help buttons
         self.method_help_btn.on_click(self._on_method_help)
         self.basis_help_btn.on_click(self._on_basis_help)
@@ -4418,6 +4504,7 @@ class QuantUIApp:
                 n_basis=_nb_for_est,
                 calc_type=_ct_for_est,
                 gpu_used=_predicted_gpu_used,
+                source="app",
             )
             if _est is not None:
                 _predicted_run_s = float(_est["seconds"])
@@ -4490,6 +4577,28 @@ class QuantUIApp:
         # `finally` alongside the elapsed ticker, so it cannot outlive the run
         # and keep writing into a finished log.
         log.start_heartbeat()
+
+        # --- Checkpoint for this run (M-CHECKPOINT) ---
+        # Opened before any calculation starts, because the runs worth
+        # checkpointing are exactly the ones that never reach the end. Failure
+        # to open one leaves ``_ckpt`` as None and the calc runs
+        # uncheckpointed, which is the pre-M-CHECKPOINT behaviour.
+        #
+        # Deliberately after ``log`` exists: the checkpoint writes its own
+        # provenance lines into the run log, and those lines are the only
+        # record that a resumed run did not start from the geometry at the
+        # top of the file.
+        _ckpt = self._begin_run_checkpoint(log)
+        # Resume only when there is genuinely something to continue. The
+        # checkbox defaults to checked and is *hidden* when nothing is
+        # resumable, so consulting it alone would ask every ordinary run to
+        # resume — and the optimizer would answer with a "no usable
+        # checkpoint" warning on a calculation the user started from scratch.
+        _resume = bool(
+            _ckpt is not None
+            and self._resume_cb.value
+            and getattr(self, "_checkpoint_resumable", False)
+        )
 
         # The run header (structured banner) is written synchronously + atomically
         # on the main thread by ``on_run_clicked`` → ``_write_run_header`` BEFORE
@@ -4609,6 +4718,8 @@ class QuantUIApp:
                     expected_steps=(
                         int(round(_expected_steps)) if _expected_steps else None
                     ),
+                    checkpoint=_ckpt,
+                    resume=_resume,
                 )
                 _sp_result = _run_required_final_single_point(
                     result.molecule,
@@ -4881,6 +4992,8 @@ class QuantUIApp:
                     stop=self._scan_stop.value,
                     steps=self._scan_steps.value,
                     progress_stream=log,  # type: ignore[arg-type]
+                    checkpoint=_ckpt,
+                    resume=_resume,
                 )
                 result_html = self._format_pes_scan_result(result)
                 save_spectra = {
@@ -4936,6 +5049,7 @@ class QuantUIApp:
                     basis=self.basis_dd.value,
                     progress_stream=log,  # type: ignore[arg-type]
                     solvent=_solvent,
+                    checkpoint=_ckpt,
                 )
                 result_html = self._format_result(result)
                 save_spectra, save_type = {}, "single_point"
@@ -5158,6 +5272,8 @@ class QuantUIApp:
             _mark("perf_begin")
             try:
                 _elapsed_for_est = time.perf_counter() - _run_wall_t
+                _was_warm = save_type in self._warm_calc_types
+                self._warm_calc_types.add(save_type)
                 _calc_log.log_calculation(
                     formula=result.formula,
                     n_atoms=len(calc_mol.atoms),
@@ -5175,6 +5291,9 @@ class QuantUIApp:
                     gpu_used=getattr(result, "gpu_used", None),
                     gpu_name=getattr(result, "gpu_name", None),
                     n_steps=getattr(result, "n_steps", None),
+                    source="app",
+                    warm=_was_warm,
+                    stages=log.stage_timings(),
                 )
                 _calc_log.log_event(
                     "calc_done",
@@ -5356,6 +5475,7 @@ class QuantUIApp:
                 "Tips: try a smaller basis set (STO-3G), use a geometry-optimized "
                 "structure first, or check for unusually long/short bonds in your "
                 "XYZ input. Full error details are in the <b>Output</b> tab.</small>"
+                f"{self._resume_hint_html(_ckpt)}"
                 "</div>"
             )
             self.result_output.append_display_data(HTML(_err_html))
@@ -5378,6 +5498,7 @@ class QuantUIApp:
                 log.stop_heartbeat()
             except Exception:  # noqa: BLE001 — teardown must not mask a failure
                 pass
+            self._finish_run_checkpoint(_ckpt)
             self._activity_end(kind="compute")
 
     # ── Live elapsed ticker ────────────────────────────────────────────────
@@ -5467,6 +5588,163 @@ class QuantUIApp:
 
     def _update_notes(self, change=None) -> None:
         _run_update_notes(self, change)
+
+    def _begin_run_checkpoint(self, log_stream: Optional[Any] = None) -> Optional[Any]:
+        """Open a checkpoint for the run about to start, or return ``None``.
+
+        Returning ``None`` — no molecule, an unavailable checkpoint module, an
+        unwritable directory — means the calculation runs without one. A
+        checkpoint is an optimisation for the failure case; it must never be
+        the reason a calculation doesn't start.
+        """
+        try:
+            from quantui.app_runflow import checkpoint_identity
+            from quantui.checkpoint import Checkpoint
+
+            identity = checkpoint_identity(self)
+            if identity is None:
+                self._checkpoint_resumable = False
+                return None
+            ckpt = Checkpoint(identity, log_stream=log_stream)
+            # Read resumability BEFORE begin() — begin() rewrites the metadata
+            # with a fresh "running" status, so asking afterwards would
+            # describe the run about to start rather than the one that stopped.
+            self._checkpoint_resumable = ckpt.resumable_state() is not None
+            extra: dict = {}
+            if self.calc_type_dd.value == "PES Scan":
+                # Lets the resume offer say "8 of 20" rather than just "8".
+                extra["total_points"] = int(self._scan_steps.value)
+                # Scan geometry isn't part of the checkpoint identity, so
+                # without these a restore would reinstate the molecule and
+                # method but silently leave a different scan range — and the
+                # stored points, matched by coordinate value, would all miss.
+                extra["settings"] = {
+                    "scan_type": self._scan_type_dd.value,
+                    "scan_atom1": int(self._scan_atom1.value),
+                    "scan_atom2": int(self._scan_atom2.value),
+                    "scan_atom3": int(self._scan_atom3.value),
+                    "scan_atom4": int(self._scan_atom4.value),
+                    "scan_start": float(self._scan_start.value),
+                    "scan_stop": float(self._scan_stop.value),
+                    "scan_steps": int(self._scan_steps.value),
+                }
+            if not ckpt.begin(**extra):
+                return None
+            return ckpt
+        except Exception as exc:  # noqa: BLE001 — never block a run
+            self._checkpoint_resumable = False
+            try:
+                _calc_log.log_event(
+                    "checkpoint_unavailable", f"{type(exc).__name__}: {exc}"[:200]
+                )
+            except Exception:  # noqa: BLE001 — telemetry self-guard
+                pass
+            return None
+
+    def _refresh_resume_list(self) -> None:
+        """Rebuild the History tab's unfinished-calculations list."""
+        try:
+            from quantui.app_runflow import refresh_resume_list
+
+            refresh_resume_list(self)
+        except Exception:  # noqa: BLE001 — never break the History tab
+            pass
+
+    def _on_resume_entry_changed(self, _change=None) -> None:
+        from quantui.app_runflow import describe_resume_entry
+
+        describe_resume_entry(self, _change)
+
+    def _on_resume_restore(self, _btn=None) -> None:
+        """Load the selected checkpoint's settings and go to Calculate."""
+        from quantui.app_runflow import restore_resume_entry
+
+        if not restore_resume_entry(self):
+            return
+        # Send the user where the settings just landed. Restoring without
+        # moving them leaves the effect invisible on a tab they aren't
+        # looking at, which reads as the button having done nothing.
+        try:
+            self.root_tab.selected_index = 1
+        except Exception:  # noqa: BLE001 — tab index is cosmetic
+            pass
+
+    def _on_resume_discard(self, _btn=None) -> None:
+        """Delete the selected checkpoint and refresh the list."""
+        try:
+            import shutil
+
+            selected = self._resume_list_dd.value
+            if selected and selected in (getattr(self, "_resume_entries", None) or {}):
+                shutil.rmtree(selected, ignore_errors=True)
+        except Exception:  # noqa: BLE001 — discarding is best-effort
+            pass
+        self._refresh_resume_list()
+        try:
+            from quantui.app_runflow import refresh_resume_notice
+
+            refresh_resume_notice(self)
+        except Exception:  # noqa: BLE001 — a stale notice is not fatal
+            pass
+
+    def _resume_hint_html(self, ckpt: Optional[Any]) -> str:
+        """Return a "you can resume this" line for the failure card, or ``""``.
+
+        The resume offer itself lives up by the Run button, which is not where
+        anyone is looking after a calculation fails. Saying it here, next to
+        the error, is the difference between the feature being discovered and
+        it quietly never being used.
+        """
+        try:
+            if ckpt is None or ckpt.resumable_state() is None:
+                return ""
+            points = len(ckpt.completed_points())
+            done = f"{points} completed scan point{'s' if points != 1 else ''}"
+            if not points:
+                done = "the steps completed so far"
+            return (
+                '<br><br><small style="color:#991b1b">'
+                f"&#9851; <b>This run can be resumed.</b> {done} "
+                "were saved. Leave the settings as they are and press "
+                "<b>Run</b> again — the <b>Resume from checkpoint</b> box "
+                "above the Run button is already ticked.</small>"
+            )
+        except Exception:  # noqa: BLE001 — a hint must never mask the error
+            return ""
+
+    def _finish_run_checkpoint(self, ckpt: Optional[Any]) -> None:
+        """Close out *ckpt* after a run ends, however it ended.
+
+        Runs from the ``finally`` of ``_do_run``, so it is reached on success,
+        on failure and on cancel. It deliberately does **not** decide whether
+        the run succeeded — the calc modules mark completion themselves, since
+        only they know whether "finished" means converged, and a run that
+        stopped early must keep its resumable state.
+
+        What happens here is bookkeeping: refresh the resume offer so it
+        reflects reality, and prune old checkpoints so the directory doesn't
+        grow without bound.
+        """
+        try:
+            if ckpt is not None and self._cancel_event.is_set():
+                ckpt.mark_interrupted()
+        except Exception:  # noqa: BLE001 — teardown must not mask a failure
+            pass
+        try:
+            from quantui.checkpoint import prune
+
+            prune()
+        except Exception:  # noqa: BLE001 — retention is best-effort
+            pass
+        try:
+            from quantui.app_runflow import refresh_resume_notice
+
+            refresh_resume_notice(self)
+        except Exception:  # noqa: BLE001 — a stale notice is not fatal
+            pass
+        # A run that just failed becomes a new listing entry; one that
+        # succeeded removes itself. Either way the list is now stale.
+        self._refresh_resume_list()
 
     def _update_estimate(self, change=None) -> None:
         _run_update_estimate(self, calc_log_mod=_calc_log, change=change)

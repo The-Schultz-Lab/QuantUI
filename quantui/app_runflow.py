@@ -240,6 +240,18 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     else:
         app.calc_extra_opts.children = []
 
+    # Both the runtime estimate and the resume offer are per-calc-type, and
+    # neither was being refreshed here — so switching type left a Frequency
+    # estimate sitting above a Single Point run, and could leave a resume
+    # offer describing a calculation the user had already moved away from.
+    # Both are keyed off the same observers, so one refresh covers them.
+    try:
+        from quantui import calc_log as _calc_log_mod
+
+        update_estimate(app, calc_log_mod=_calc_log_mod)
+    except Exception:  # noqa: BLE001 — a stale hint must not break the tab
+        pass
+
 
 def update_scan_widgets(app: Any, _change: Any = None) -> None:
     """Show/hide atom inputs and unit label based on scan type."""
@@ -1367,20 +1379,32 @@ def _update_open_shell_hint(app: Any) -> None:
     app._open_shell_hint.layout.display = ""
 
 
+#: Calculate-tab dropdown label → the key used in perf records, saved
+#: results, and checkpoint identities. One mapping, so the estimator and the
+#: checkpoint layer can never disagree about what calculation is configured.
+_CALC_TYPE_KEYS: dict = {
+    "Single Point": "single_point",
+    "Geometry Opt": "geometry_opt",
+    "Frequency": "frequency",
+    "UV-Vis (TD-DFT)": "tddft",
+    "NMR Shielding": "nmr",
+    "PES Scan": "pes_scan",
+}
+
+
+def calc_type_key(app: Any) -> str:
+    """Return the canonical calc-type key for the current dropdown selection."""
+    return _CALC_TYPE_KEYS.get(app.calc_type_dd.value, "single_point")
+
+
 def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
     """Refresh runtime estimate text from the performance model."""
     if app._molecule is None:
         app.perf_estimate_html.value = ""
+        refresh_resume_notice(app)
         return
     try:
-        calc_type = {
-            "Single Point": "single_point",
-            "Geometry Opt": "geometry_opt",
-            "Frequency": "frequency",
-            "UV-Vis (TD-DFT)": "tddft",
-            "NMR Shielding": "nmr",
-            "PES Scan": "pes_scan",
-        }.get(app.calc_type_dd.value, "single_point")
+        calc_type = calc_type_key(app)
         n_basis = calc_log_mod.count_basis_functions(
             app._molecule.atoms, app.basis_dd.value
         )
@@ -1413,10 +1437,313 @@ def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
             n_basis=n_basis,
             calc_type=calc_type,
             gpu_used=_predicted_gpu_used,
+            source="app",
         )
         app.perf_estimate_html.value = calc_log_mod.format_estimate(est)
     except Exception:
         app.perf_estimate_html.value = ""
+    # Same triggers as the estimate — molecule, method, basis, calc type —
+    # so the offer can never describe a calculation the user has moved on from.
+    refresh_resume_notice(app)
+
+
+def checkpoint_identity(app: Any) -> Any:
+    """Return the :class:`CalcIdentity` for the calculation as configured.
+
+    ``None`` when there is no molecule yet, or when the checkpoint module is
+    unavailable for any reason — callers treat that as "no checkpointing",
+    which is a working app, just without resume.
+    """
+    try:
+        from quantui.checkpoint import CalcIdentity
+
+        molecule = getattr(app, "_molecule", None)
+        if molecule is None:
+            return None
+        return CalcIdentity.from_molecule(
+            molecule,
+            calc_type=calc_type_key(app),
+            method=app.method_dd.value,
+            basis=app.basis_dd.value,
+        )
+    except Exception:  # noqa: BLE001 — checkpointing is never load-bearing
+        return None
+
+
+def refresh_resume_notice(app: Any) -> None:
+    """Show or hide the resume offer for the currently-configured calculation.
+
+    The offer appears only when there is genuinely banked work to continue,
+    and says how much: "8 of 20 scan points already computed" is actionable in
+    a way that a bare "Resume?" is not.
+    """
+    notice = getattr(app, "_resume_notice_html", None)
+    checkbox = getattr(app, "_resume_cb", None)
+    if notice is None or checkbox is None:
+        return
+
+    def _hide() -> None:
+        notice.value = ""
+        notice.layout.display = "none"
+        checkbox.layout.display = "none"
+
+    try:
+        from quantui.checkpoint import find_resumable
+
+        identity = checkpoint_identity(app)
+        if identity is None:
+            _hide()
+            return
+        ckpt = find_resumable(identity)
+        if ckpt is None:
+            _hide()
+            return
+        state = ckpt.resumable_state() or {}
+        detail = _resume_detail(ckpt, state)
+        notice.value = (
+            '<span style="font-size:12px;color:#64748b">'
+            "♻ An interrupted run of this exact calculation was found"
+            f"{detail}.</span>"
+        )
+        notice.layout.display = "block"
+        checkbox.layout.display = "block"
+    except Exception:  # noqa: BLE001 — never let this break the Calculate tab
+        _hide()
+
+
+#: Inverse of ``_CALC_TYPE_KEYS`` — a stored calc-type key back to the label
+#: the Calculate-tab dropdown actually uses. Derived rather than written out
+#: twice, so the two can never drift apart.
+_CALC_TYPE_LABELS: dict = {v: k for k, v in _CALC_TYPE_KEYS.items()}
+
+
+def _age_phrase(updated_at: Any) -> str:
+    """Return "2 days ago" / "20 minutes ago" for a stored timestamp."""
+    try:
+        seconds = time.time() - float(updated_at)
+    except (TypeError, ValueError):
+        return ""
+    if seconds < 90:
+        return "just now"
+    if seconds < 5400:
+        return f"{int(seconds // 60)} minutes ago"
+    if seconds < 172800:
+        hours = int(seconds // 3600)
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    return f"{int(seconds // 86400)} days ago"
+
+
+def _resume_entry_label(state: dict) -> str:
+    """One-line dropdown label for an unfinished run."""
+    from quantui.checkpoint import _CALC_TYPE_TITLES
+
+    formula = _formula_from_symbols(state.get("atom_symbols") or [])
+    calc = _CALC_TYPE_TITLES.get(
+        str(state.get("calc_type")), str(state.get("calc_type") or "?")
+    )
+    theory = f"{state.get('method', '?')}/{state.get('basis', '?')}"
+    age = _age_phrase(state.get("updated_at"))
+    return f"{formula} · {calc} · {theory}" + (f" · {age}" if age else "")
+
+
+def _formula_from_symbols(symbols: Any) -> str:
+    """Hill-notation formula from a list of element symbols."""
+    from collections import Counter
+
+    counts = Counter(str(s) for s in symbols)
+    if not counts:
+        return "?"
+    order = [s for s in ("C", "H") if s in counts] + sorted(
+        s for s in counts if s not in ("C", "H")
+    )
+    return "".join(f"{s}{counts[s] if counts[s] > 1 else ''}" for s in order)
+
+
+def refresh_resume_list(app: Any) -> None:
+    """Rebuild the History tab's list of unfinished calculations.
+
+    Deliberately independent of what is configured on the Calculate tab: this
+    is the path that works after a restart, when the user no longer remembers
+    the settings that would make the targeted offer appear.
+    """
+    box = getattr(app, "_resume_list_box", None)
+    dropdown = getattr(app, "_resume_list_dd", None)
+    if box is None or dropdown is None:
+        return
+    try:
+        from quantui.checkpoint import resumable_checkpoints
+
+        entries = resumable_checkpoints()
+    except Exception:  # noqa: BLE001 — never break the History tab
+        entries = []
+
+    app._resume_entries = {str(e["dir"]): e for e in entries}
+    if not entries:
+        box.layout.display = "none"
+        dropdown.options = [("(none)", "")]
+        dropdown.value = ""
+        describe_resume_entry(app)
+        return
+
+    previous = dropdown.value
+    dropdown.options = [(_resume_entry_label(e), str(e["dir"])) for e in entries]
+    # Keep the user's selection across a refresh when it still exists —
+    # a refresh fires after every run, and silently jumping to a different
+    # entry would be a good way to discard the wrong checkpoint.
+    dropdown.value = (
+        previous if previous in app._resume_entries else str(entries[0]["dir"])
+    )
+    box.layout.display = "block"
+    describe_resume_entry(app)
+
+
+def describe_resume_entry(app: Any, _change: Any = None) -> None:
+    """Describe the selected unfinished run beneath the dropdown."""
+    html = getattr(app, "_resume_list_html", None)
+    restore_btn = getattr(app, "_resume_restore_btn", None)
+    if html is None:
+        return
+    state = (getattr(app, "_resume_entries", None) or {}).get(
+        getattr(app, "_resume_list_dd", None) and app._resume_list_dd.value
+    )
+    if not state:
+        html.value = ""
+        return
+
+    from quantui.checkpoint import restorable_molecule_spec
+
+    points = int(state.get("n_points") or 0)
+    total = state.get("total_points")
+    if points:
+        done = f"{points}{f' of {total}' if total else ''} scan point"
+        done += "s" if points != 1 else ""
+        done += " computed"
+    else:
+        steps = state.get("steps_done")
+        done = (
+            f"{steps} optimizer step{'s' if steps != 1 else ''} completed"
+            if isinstance(steps, int) and steps > 0
+            else "partial progress saved"
+        )
+
+    spec = restorable_molecule_spec(state)
+    if spec is None:
+        # Listable but not restorable. Say so rather than offering a button
+        # that cannot work.
+        note = (
+            " — this checkpoint has no stored geometry, so its settings "
+            "cannot be loaded automatically."
+        )
+        if restore_btn is not None:
+            restore_btn.disabled = True
+    else:
+        note = ""
+        if restore_btn is not None:
+            restore_btn.disabled = False
+
+    html.value = (
+        f'<span style="font-size:12px;color:#64748b">{done}'
+        f"; charge {state.get('charge', 0)}, multiplicity "
+        f"{state.get('multiplicity', 1)}.{note}</span>"
+    )
+
+
+def restore_resume_entry(app: Any) -> bool:
+    """Put the selected checkpoint's molecule and settings back on Calculate.
+
+    Returns ``True`` when the settings were applied. Restoring deliberately
+    stops there rather than starting the run: the user should see what they
+    are about to continue, and the existing resume offer above the Run button
+    is what confirms the checkpoint was recognised.
+    """
+    state = (getattr(app, "_resume_entries", None) or {}).get(
+        getattr(app, "_resume_list_dd", None) and app._resume_list_dd.value
+    )
+    if not state:
+        return False
+
+    from quantui.checkpoint import restorable_molecule_spec
+    from quantui.molecule import Molecule
+
+    spec = restorable_molecule_spec(state)
+    if spec is None:
+        return False
+
+    molecule = Molecule(
+        atoms=spec["atoms"],
+        coordinates=spec["coordinates"],
+        charge=spec["charge"],
+        multiplicity=spec["multiplicity"],
+    )
+
+    # Order matters. The molecule goes first because the dropdown observers
+    # refresh the estimate and the resume offer, and both need a molecule to
+    # say anything useful. Charge/multiplicity are set alongside so the
+    # identity that gets rebuilt matches the stored one exactly — they are
+    # part of the resume key.
+    app._set_molecule(molecule, label="checkpoint restore")
+    _assign_widget_value(getattr(app, "charge_si", None), spec["charge"])
+    _assign_widget_value(getattr(app, "mult_si", None), spec["multiplicity"])
+
+    label = _CALC_TYPE_LABELS.get(str(state.get("calc_type")))
+    if label is not None:
+        _assign_widget_value(app.calc_type_dd, label)
+    _assign_widget_value(app.method_dd, state.get("method"))
+    _assign_widget_value(app.basis_dd, state.get("basis"))
+    _restore_calc_settings(app, state.get("settings") or {})
+
+    refresh_resume_notice(app)
+    return True
+
+
+def _restore_calc_settings(app: Any, settings: dict) -> None:
+    """Apply stored calc-type-specific widget values (PES scan geometry)."""
+    for key, attr in (
+        ("scan_type", "_scan_type_dd"),
+        ("scan_atom1", "_scan_atom1"),
+        ("scan_atom2", "_scan_atom2"),
+        ("scan_atom3", "_scan_atom3"),
+        ("scan_atom4", "_scan_atom4"),
+        ("scan_start", "_scan_start"),
+        ("scan_stop", "_scan_stop"),
+        ("scan_steps", "_scan_steps"),
+    ):
+        if key in settings:
+            _assign_widget_value(getattr(app, attr, None), settings[key])
+
+
+def _assign_widget_value(widget: Any, value: Any) -> None:
+    """Set ``widget.value``, ignoring anything the widget won't accept.
+
+    A stored method or basis may no longer be among a dropdown's options —
+    after an upgrade, say. Skipping it leaves the rest of the restore intact
+    and the resume offer simply won't appear, which is the honest outcome.
+    """
+    if widget is None or value is None:
+        return
+    try:
+        widget.value = value
+    except Exception:  # noqa: BLE001 — a rejected value must not abort a restore
+        pass
+
+
+def _resume_detail(ckpt: Any, state: dict) -> str:
+    """Return a short " — N points already computed" clause, or ``""``."""
+    try:
+        points = len(ckpt.completed_points())
+        if points:
+            total = state.get("total_points")
+            of_total = f" of {total}" if total else ""
+            return (
+                f" — {points}{of_total} scan point"
+                f"{'s' if points != 1 else ''} already computed"
+            )
+        steps = state.get("steps_done")
+        if isinstance(steps, int) and steps > 0:
+            return f" — {steps} optimizer step{'s' if steps != 1 else ''} already done"
+    except Exception:  # noqa: BLE001 — a missing detail is not worth an error
+        pass
+    return ""
 
 
 def refresh_results_browser(app: Any) -> None:
