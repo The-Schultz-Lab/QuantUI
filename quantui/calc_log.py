@@ -317,7 +317,12 @@ def _read_all(path: Path) -> list[dict]:
         ):
             return list(cached[2])
         records: list[dict] = []
-        with open(path, encoding="utf-8") as fh:
+        # errors="replace": a concurrent/interrupted append can leave a partial
+        # multibyte UTF-8 sequence at EOF; strict decoding would raise
+        # UnicodeDecodeError and abort the whole read. Replacing the bad bytes
+        # lets that one line fail json.loads and be skipped, matching the
+        # deliberate malformed-entry tolerance below (and under pytest -n=auto).
+        with open(path, encoding="utf-8", errors="replace") as fh:
             for raw in fh:
                 raw = raw.strip()
                 if raw:
@@ -1200,7 +1205,10 @@ def prune_events(days: int = 7) -> None:
         if not path.exists():
             return
         records: list[dict] = []
-        with open(path, encoding="utf-8") as fh:
+        # errors="replace" for the same reason as _read_all: tolerate a partial
+        # multibyte sequence from a concurrent/interrupted append rather than
+        # abort the prune.
+        with open(path, encoding="utf-8", errors="replace") as fh:
             for raw in fh:
                 raw = raw.strip()
                 if raw:
