@@ -290,6 +290,7 @@ def format_log_header(
     output_dir: Optional[str] = None,
     calc_id: Optional[str] = None,
     starting_energy: Optional[float] = None,
+    density_fit: bool = False,
 ) -> str:
     """Return a formatted header string to prepend to calculation log output.
 
@@ -355,6 +356,10 @@ def format_log_header(
         _row("Method", wf_method),
         _row("Functional", functional or "—"),
         _row("Basis Set", basis),
+        _row(
+            "Density fitting",
+            "RI — approximate 2-electron integrals" if density_fit else "None (exact)",
+        ),
         _row("Solvation", f"PCM ({solvent})" if solvent else "None"),
         _row("Job Type", ct_label),
         _SUB,

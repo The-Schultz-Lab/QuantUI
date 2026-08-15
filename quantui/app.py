@@ -1074,6 +1074,7 @@ class QuantUIApp:
         _files_status_html: Any
         _files_up_btn: Any
         gpu_enabled_cb: Any
+        density_fit_enabled_cb: Any
         help_content_html: Any
         help_tab_panel: Any
         help_topic_dd: Any
@@ -1602,6 +1603,7 @@ class QuantUIApp:
             viz_default_backend=self._user_settings.viz.default_backend,
             vib_framerate_fps=self._user_settings.viz.vib_framerate_fps,
             gpu_enabled=self._user_settings.compute.gpu_enabled,
+            density_fit_enabled=self._user_settings.compute.density_fit,
         )
 
     # ── Welcome header ────────────────────────────────────────────────────
@@ -1936,6 +1938,10 @@ class QuantUIApp:
         # Settings → GPU offload on/off (Status tab; persisted).
         self.gpu_enabled_cb.observe(
             self._safe_cb(self._on_gpu_enabled_changed), names="value"
+        )
+        # Settings → density fitting (RI) on/off (Status tab; persisted).
+        self.density_fit_enabled_cb.observe(
+            self._safe_cb(self._on_density_fit_enabled_changed), names="value"
         )
         # 3D viewer style and lighting controls
         if VISUALIZATION_AVAILABLE:
@@ -3134,6 +3140,28 @@ class QuantUIApp:
                 pass
         try:
             _calc_log.log_event("gpu_enabled_changed", f"gpu_enabled={new_val}")
+        except OSError:
+            pass
+
+    def _on_density_fit_enabled_changed(self, change) -> None:
+        """Persist the density-fitting (RI) preference.
+
+        No cache to clear: the SCF path reads ``compute.density_fit`` fresh from
+        settings on each run (:func:`quantui.density_fitting.try_density_fit`).
+        Refresh the time estimate, since DF changes which history pool the
+        estimator draws from.
+        """
+        new_val = bool(change["new"])
+        if new_val == self._user_settings.compute.density_fit:
+            return
+        self._user_settings.compute.density_fit = new_val
+        self._user_settings.save()
+        try:
+            self._update_estimate()
+        except Exception:  # noqa: BLE001 — best-effort estimate refresh
+            pass
+        try:
+            _calc_log.log_event("density_fit_enabled_changed", f"density_fit={new_val}")
         except OSError:
             pass
 
@@ -4496,6 +4524,20 @@ class QuantUIApp:
             except Exception:  # noqa: BLE001 — fall back to device-agnostic
                 _predicted_gpu_used = None
 
+            # Match session_calc's density-fitting decision (M-DF) so the
+            # estimate is drawn from the pool the run will land in. Post-HF
+            # references are never fitted, so predict False for them.
+            _predicted_density_fit: Optional[bool] = None
+            try:
+                if self.method_dd.value.upper() in ("MP2", "CCSD", "CCSD(T)"):
+                    _predicted_density_fit = False
+                else:
+                    _predicted_density_fit = bool(
+                        self._user_settings.compute.density_fit
+                    )
+            except Exception:  # noqa: BLE001 — fall back to fit-agnostic
+                _predicted_density_fit = None
+
             _est = _calc_log.estimate_time(
                 n_atoms=len(mol.atoms),
                 n_electrons=mol.get_electron_count(),
@@ -4505,6 +4547,7 @@ class QuantUIApp:
                 calc_type=_ct_for_est,
                 gpu_used=_predicted_gpu_used,
                 source="app",
+                density_fit=_predicted_density_fit,
             )
             if _est is not None:
                 _predicted_run_s = float(_est["seconds"])
@@ -5294,6 +5337,7 @@ class QuantUIApp:
                     source="app",
                     warm=_was_warm,
                     stages=log.stage_timings(),
+                    density_fit=getattr(result, "density_fit", None),
                 )
                 _calc_log.log_event(
                     "calc_done",

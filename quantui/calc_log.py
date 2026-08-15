@@ -466,6 +466,7 @@ def log_calculation(
     warm: Optional[bool] = None,
     import_s: Optional[float] = None,
     stages: Optional[dict] = None,
+    density_fit: Optional[bool] = None,
 ) -> None:
     """Append one performance record to ``perf_log.jsonl``.
 
@@ -494,6 +495,12 @@ def log_calculation(
     All four are additive and optional: records written before they existed
     simply lack the keys, and every reader treats "absent" as "unknown"
     rather than assuming a default.
+
+    ``density_fit`` (added 2026-08-15, M-DF) records whether density fitting
+    (RI) was applied to the SCF. It follows the same additive convention and is
+    partitioned in :func:`estimate_time` exactly as ``gpu_used`` is — mixing
+    fitted and unfitted runs of the same chemistry under one key would give the
+    estimator a bimodal distribution it cannot see.
     """
     record: dict = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -516,6 +523,8 @@ def log_calculation(
         record["gpu_used"] = bool(gpu_used)
     if gpu_name is not None:
         record["gpu_name"] = gpu_name
+    if density_fit is not None:
+        record["density_fit"] = bool(density_fit)
     # Outer-loop step count (geom-opt BFGS steps / PES scan points). Enables
     # a history-based "step k / ~N" prior for the live progress fraction.
     if n_steps is not None:
@@ -661,6 +670,7 @@ def estimate_time(
     calc_type: Optional[str] = None,
     gpu_used: Optional[bool] = None,
     source: Optional[str] = None,
+    density_fit: Optional[bool] = None,
 ) -> Optional[dict]:
     """Estimate wall time for an upcoming calculation from ``perf_log.jsonl``.
 
@@ -683,6 +693,7 @@ def estimate_time(
         calc_type=calc_type,
         gpu_used=gpu_used,
         source=source,
+        density_fit=density_fit,
     )
 
 
@@ -698,6 +709,7 @@ def estimate_time_from_records(
     calc_type: Optional[str] = None,
     gpu_used: Optional[bool] = None,
     source: Optional[str] = None,
+    density_fit: Optional[bool] = None,
 ) -> Optional[dict]:
     """
     Return a time estimate dict, or ``None`` if there is insufficient data.
@@ -822,6 +834,24 @@ def estimate_time_from_records(
             scoped = same_source
             _source_filtered = True
 
+    # Partition by density fitting (M-DF). Same shape as the device partition:
+    # older records predate DF and were all unfitted, so admit "absent" into
+    # the unfitted pool. Mixing fitted and unfitted runs of the same chemistry
+    # would give the estimator a bimodal distribution it cannot see.
+    _df_filtered = False
+    if density_fit is True:
+        df_scoped = [r for r in scoped if r.get("density_fit") is True]
+        if len(df_scoped) >= 2:
+            scoped = df_scoped
+            _df_filtered = True
+    elif density_fit is False:
+        nodf_scoped = [
+            r for r in scoped if r.get("density_fit") is False or "density_fit" not in r
+        ]
+        if len(nodf_scoped) >= 2:
+            scoped = nodf_scoped
+            _df_filtered = True
+
     def _maybe_downgrade(conf: str) -> str:
         """Downgrade confidence one notch per partition that fell back.
 
@@ -835,6 +865,8 @@ def estimate_time_from_records(
         if gpu_used is not None and not _gpu_filtered:
             idx += 1
         if source is not None and not _source_filtered:
+            idx += 1
+        if density_fit is not None and not _df_filtered:
             idx += 1
         return order[min(idx, len(order) - 1)]
 

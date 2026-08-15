@@ -189,6 +189,12 @@ try:
                 mf.xc = resolve_xc(self.method)
                 mf = maybe_apply_d3(mf, self.method)
 
+            # Density fitting (RI), opt-in (M-DF). Off by default; applies to
+            # every SCF in the optimization when the user enables it.
+            from .density_fitting import try_density_fit as _try_density_fit
+
+            mf, _ = _try_density_fit(mf)
+
             mf.verbose = 0
             mf.stdout = _sink
 

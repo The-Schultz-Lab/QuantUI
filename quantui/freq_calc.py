@@ -253,6 +253,13 @@ def _run_freq_calc_body(
         mf.xc = resolve_xc(method)
         mf = maybe_apply_d3(mf, method, progress_stream=stream)
 
+    # Density fitting (RI), opt-in (M-DF). Off by default. Applied to the main
+    # SCF; the per-displacement inner SCFs below get the same treatment so the
+    # numerical IR-intensity step stays consistent with the reference.
+    from .density_fitting import try_density_fit as _try_density_fit
+
+    mf, _density_fit_used = _try_density_fit(mf)
+
     # Cooperative cancel between SCF cycles (the Hessian block that
     # follows is a single long native call the callback can't interrupt).
     from .cancellation import attach_scf_cancel_callback, cancel_check_from_stream
@@ -436,6 +443,10 @@ def _run_freq_calc_body(
                         _mf_d = scf.UHF(mol) if _dm0_is_unrestricted else scf.RHF(mol)
                     _mf_d.verbose = 0
                     _mf_d.stdout = stream
+                    # Match the main SCF's density-fitting choice (M-DF) before
+                    # any GPU offload, so displaced dipoles stay consistent with
+                    # the reference energy.
+                    _mf_d, _ = _try_density_fit(_mf_d, enabled=_density_fit_used)
                     # ``method_upper="RHF"`` is a label — try_to_gpu only
                     # uses it to skip CCSD(T). For RHF/UHF/DFT the wrapper
                     # attempts ``mf.to_gpu()`` and falls back to CPU on any

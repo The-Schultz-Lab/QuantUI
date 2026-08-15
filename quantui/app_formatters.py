@@ -64,6 +64,17 @@ def _result_extra_rows(get: Any) -> str:
         f"<td>{_device}</td></tr>"
     )
 
+    # Density fitting — shown only when it was applied (the non-default case
+    # worth flagging to the student); exact-integral runs stay uncluttered, and
+    # result types without the field safely omit it.
+    if bool(get("density_fit", False)):
+        rows += (
+            '<tr><td style="padding:3px 18px 3px 0;color:#444">Density fitting</td>'
+            '<td><span style="color:#0369a1">⚡ RI</span> '
+            '<span style="color:#777;font-size:12px">'
+            "(approximate 2-electron integrals)</span></td></tr>"
+        )
+
     _dip = get("dipole_moment_debye")
     if _dip is not None:
         rows += _num("Dipole moment", f"{_dip:.4f} D")

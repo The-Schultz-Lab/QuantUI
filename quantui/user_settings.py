@@ -83,6 +83,14 @@ class ComputeSettings:
     # over this setting.
     gpu_enabled: bool = True
 
+    # Whether to apply density fitting (resolution of the identity) on the SCF
+    # path. Default **off**: DF is a targeted speedup (big for TD-DFT and larger
+    # systems, roughly neutral or slightly slower for small single points), and
+    # a teaching tool should not silently approximate integrals. See
+    # quantui.density_fitting and the M-DF roadmap; per-calc-type defaults are
+    # set only once the size crossover is measured (DF.2).
+    density_fit: bool = False
+
 
 @dataclass
 class UserSettings:
@@ -199,6 +207,16 @@ class UserSettings:
                     "Invalid compute.gpu_enabled %r; using %r",
                     candidate_gpu,
                     compute.gpu_enabled,
+                )
+        if "density_fit" in compute_section:
+            candidate_df = compute_section["density_fit"]
+            if isinstance(candidate_df, bool):
+                compute.density_fit = candidate_df
+            else:
+                _LOG.warning(
+                    "Invalid compute.density_fit %r; using %r",
+                    candidate_df,
+                    compute.density_fit,
                 )
 
         return cls(viz=viz, compute=compute)

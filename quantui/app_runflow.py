@@ -69,6 +69,15 @@ def _write_run_header(app: Any) -> None:
             _out_dir = str(app._get_results_dir())
         except Exception:
             _out_dir = None
+        # Density fitting is applied iff the setting is on and the method isn't a
+        # post-HF one (session_calc never fits those references). Mirror that so
+        # the banner states what the run will actually do (M-DF).
+        try:
+            _df_on = bool(
+                app._user_settings.compute.density_fit
+            ) and app.method_dd.value.upper() not in ("MP2", "CCSD", "CCSD(T)")
+        except Exception:
+            _df_on = False
         banner = format_log_header(
             formula=mol.get_formula(),
             method=app.method_dd.value,
@@ -78,6 +87,7 @@ def _write_run_header(app: Any) -> None:
             multiplicity=int(app.mult_si.value),
             solvent=_solvent,
             output_dir=_out_dir,
+            density_fit=_df_on,
         )
     except Exception:
         # Fallback: a minimal one-liner still beats a blank window.
@@ -1429,6 +1439,18 @@ def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
         except Exception:  # noqa: BLE001 — fall back to device-agnostic prediction
             _predicted_gpu_used = None
 
+        # Predict the density-fitting choice (M-DF) the same way, so the
+        # estimate is drawn from the fitted / unfitted pool the run will land
+        # in. Post-HF references are never fitted (see session_calc).
+        _predicted_density_fit: Optional[bool] = None
+        try:
+            if app.method_dd.value.upper() in ("MP2", "CCSD", "CCSD(T)"):
+                _predicted_density_fit = False
+            else:
+                _predicted_density_fit = bool(app._user_settings.compute.density_fit)
+        except Exception:  # noqa: BLE001 — fall back to fit-agnostic prediction
+            _predicted_density_fit = None
+
         est = calc_log_mod.estimate_time(
             n_atoms=len(app._molecule.atoms),
             n_electrons=app._molecule.get_electron_count(),
@@ -1438,6 +1460,7 @@ def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
             calc_type=calc_type,
             gpu_used=_predicted_gpu_used,
             source="app",
+            density_fit=_predicted_density_fit,
         )
         app.perf_estimate_html.value = calc_log_mod.format_estimate(est)
     except Exception:

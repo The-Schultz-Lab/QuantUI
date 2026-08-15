@@ -217,6 +217,12 @@ def _run_tddft_calc_body(
         mf.xc = resolve_xc(method)
         mf = maybe_apply_d3(mf, method, progress_stream=progress_stream)
 
+    # Density fitting (RI), opt-in (M-DF). Off by default. TD-DFT is where the
+    # measured win is largest (~1.6x on aspirin), so this is the primary target.
+    from .density_fitting import try_density_fit as _try_density_fit
+
+    mf, _ = _try_density_fit(mf)
+
     if using_hf and progress_stream is not None:
         try:
             progress_stream.write(
