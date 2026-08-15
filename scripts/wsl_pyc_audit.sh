@@ -32,7 +32,7 @@ for arg in "$@"; do
 done
 
 set -u -o pipefail
-cd /mnt/c/Users/schul/Documents/local-code-dir/repos-PUBLIC/QuantUI
+cd "$(cd "$(dirname "$0")/.." && pwd)"  # repo root (this script lives in scripts/)
 
 if [ "$WIPE" = "1" ]; then
   find tests -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null

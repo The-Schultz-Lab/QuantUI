@@ -612,7 +612,7 @@ python -c "from quantui.app import QuantUIApp; print('OK')"
 entry in `sys.path` resolves to the current directory; running from the wrong directory
 can shadow the editable install with a different repo's `quantui/` package.
 
-**Python executable:** `C:\Users\schul\miniconda3\envs\quantui\python.exe`
+**Python executable:** `C:\Users\<user>\miniconda3\envs\quantui\python.exe`
 
 Note: PySCF calculations will show "unavailable" on Windows — this is expected.
 All UI, molecule, visualization, and PubChem features work natively on Windows.
