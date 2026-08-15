@@ -32,3 +32,13 @@ python -m pip install --upgrade --ignore-installed setuptools wheel || true
 pip install -e ".[pyscf,ase,dev]"
 
 echo "QuantUI cloud env ready: package + [pyscf,ase,dev] installed." >&2
+
+# Warn if the private planning repo isn't attached to this session. In a cloud
+# session an attached repo is cloned as a sibling of this one; the planning docs
+# (STATUS, roadmaps, DECISIONS) live in NCCU-Schultz-Lab/QuantUI-development-tracking
+# and must be added to session scope to be available.
+_parent="$(dirname "$PWD")"
+if [ ! -d "$_parent/QuantUI-development-tracking" ] \
+   && [ ! -d "$_parent/quantui-development-tracking" ]; then
+  echo "WARNING: No planning repo attached. Please consider starting a new session with the planning repo (NCCU-Schultz-Lab/QuantUI-development-tracking) attached." >&2
+fi
