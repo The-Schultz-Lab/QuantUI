@@ -119,6 +119,45 @@ def _set_run_output(app: Any, outputs: tuple) -> None:
 
 def on_run_clicked(app: Any, btn: Any) -> None:
     """Reset result panes and start the background run thread."""
+    # Pre-run guard (M-METAL MET.5): catch a basis with no parameters for an
+    # element (e.g. 6-31G on Pt) or a charge/multiplicity inconsistent with the
+    # electron count, and explain it here — on the main thread, before anything
+    # is cleared — instead of letting PySCF raise a cryptic error deep in the
+    # background calc thread.
+    mol = getattr(app, "_molecule", None)
+    if mol is not None:
+        try:
+            from quantui.inorganic_guards import preflight_messages
+
+            problems = preflight_messages(
+                mol.atoms,
+                mol.get_electron_count(),
+                app.basis_dd.value,
+                int(app.mult_si.value),
+            )
+        except Exception:  # noqa: BLE001 — a guard failure must not block a run
+            problems = []
+        if problems:
+            body = "\n\n".join(f"  • {p}" for p in problems)
+            _set_run_output(
+                app,
+                (
+                    {
+                        "output_type": "stream",
+                        "name": "stdout",
+                        "text": (
+                            "⚠  This calculation was not started — please fix "
+                            "the following first:\n\n" + body + "\n"
+                        ),
+                    },
+                ),
+            )
+            try:
+                app.run_status.value = "Adjust the settings above, then Run again."
+            except Exception:  # noqa: BLE001 — status label is best-effort
+                pass
+            return
+
     # Write the header FIRST (atomic, main thread) — this also clears the
     # previous run's log via the single ``outputs`` assignment.
     _write_run_header(app)
