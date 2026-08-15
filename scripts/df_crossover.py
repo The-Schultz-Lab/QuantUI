@@ -332,6 +332,68 @@ def _write_csv(cells: list[Cell], path: str) -> None:
             )
 
 
+def _recommend(cells: list[Cell]) -> list[str]:
+    """Derive a per-calc-type DF recommendation from the measured cells.
+
+    Descriptive, not prescriptive: it reports where DF *actually* started
+    winning in this run (the SCF crossover bracket) and the observed TD-DFT and
+    accuracy behaviour, so the numbers set the policy rather than a guess. This
+    is what DF.2 needs on top of the raw table.
+    """
+    cpu = [c for c in cells if c.device == "cpu" and c.scf_speedup is not None]
+    cpu.sort(key=lambda c: c.n_basis)
+    lines: list[str] = ["# Recommendation (from THIS run's data):"]
+    if not cpu:
+        lines.append("#   not enough completed cells to recommend.")
+        return lines
+
+    # SCF crossover: the bracket between the largest system where DF lost and
+    # the smallest where it won.
+    last_loss = max((c.n_basis for c in cpu if c.scf_speedup < 1.0), default=None)
+    first_win = min((c.n_basis for c in cpu if c.scf_speedup >= 1.0), default=None)
+    if first_win is None:
+        lines.append(
+            "#   SCF: DF never beat 4-centre in this run — keep SCF DF OFF, "
+            "or extend the ladder to larger systems."
+        )
+    elif last_loss is None:
+        lines.append(
+            f"#   SCF: DF won at every size measured (down to {first_win} bf) — "
+            "SCF DF ON is defensible; probe smaller if you want the floor."
+        )
+    else:
+        lines.append(
+            f"#   SCF crossover between ~{last_loss} bf (DF slower) and "
+            f"~{first_win} bf (DF faster): default SCF DF ON above ~{first_win} bf."
+        )
+
+    # TD-DFT: usually a win well before SCF.
+    td = [c for c in cpu if c.tddft_speedup is not None]
+    if td:
+        lo = min(c.tddft_speedup for c in td)
+        hi = max(c.tddft_speedup for c in td)
+        verdict = "ON" if lo >= 1.0 else "mixed — inspect per size"
+        lines.append(
+            f"#   TD-DFT: speedup {lo:.2f}x–{hi:.2f}x over {len(td)} cells → "
+            f"default TD-DFT DF {verdict}."
+        )
+
+    # Accuracy ceiling actually observed.
+    des = [c.de_kcal for c in cpu if c.de_kcal is not None]
+    dxs = [c.dexc_mev for c in td if c.dexc_mev is not None]
+    if des:
+        lines.append(
+            f"#   Accuracy cost: max {max(des):.4f} kcal/mol (energy)"
+            + (f", {max(dxs):.2f} meV (first excitation)" if dxs else "")
+            + " — compare against 1 kcal/mol chemical accuracy."
+        )
+    lines.append(
+        "#   Then set quantui/density_fitting per-calc-type defaults from these "
+        "numbers (still a small, data-backed follow-up — not guessed here)."
+    )
+    return lines
+
+
 def _parse_molecules(spec: Optional[str]) -> dict[str, str]:
     if not spec:
         return {
@@ -512,6 +574,14 @@ def main(argv=None) -> int:
     print("#   Watch where 'scf x' crosses 1.0 as n_basis grows — that is the")
     print("#   SCF crossover DF.2 needs. TD-DFT usually wins well before SCF does.")
     print("#   dE kcal / dExc meV are the accuracy cost (expect << 1 kcal/mol).")
+    print()
+    for line in _recommend(cells):
+        print(line)
+    print(
+        "\n# DF.3: to compare the auto-derived auxbasis against a matched one, "
+        "run\n#   this twice — once as-is, once with "
+        "--auxbasis def2-universal-jfit (def2 bases) — and diff dE/timing."
+    )
     return 0
 
 
