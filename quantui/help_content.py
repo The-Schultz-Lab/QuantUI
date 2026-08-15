@@ -202,6 +202,44 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "</ul>"
         ),
     },
+    "density_fitting": {
+        "title": "Density fitting (RI) — a speed vs. accuracy trade-off",
+        "body": (
+            "<p><b>Density fitting</b> (also called the <b>resolution of the "
+            "identity</b>, or RI) is a shortcut for the most expensive part of a "
+            "DFT or Hartree–Fock calculation: the electron–electron repulsion "
+            "integrals. Instead of computing them exactly, it approximates them "
+            "using a smaller auxiliary basis. You are trading a tiny amount of "
+            "accuracy for speed.</p>"
+            "<p><b>It is off by default</b>, and it is a toggle on the Status "
+            "tab. It is not a blanket win, so QuantUI does not turn it on for "
+            "you — here is why.</p>"
+            "<table style='border-collapse:collapse; margin:6px 0;'>"
+            "<tr style='border-bottom:1px solid #ccc;'>"
+            "  <th style='padding:3px 12px; text-align:left;'>Calculation</th>"
+            "  <th style='padding:3px 12px; text-align:left;'>Effect of DF</th></tr>"
+            "<tr><td style='padding:3px 12px;'>TD-DFT (UV-Vis) and larger "
+            "molecules</td>"
+            "  <td style='padding:3px 12px;'>⚡ Noticeably faster — this is the "
+            "case it is built for</td></tr>"
+            "<tr><td style='padding:3px 12px;'>Small single points</td>"
+            "  <td style='padding:3px 12px;'>Roughly neutral, sometimes slightly "
+            "<i>slower</i> (building the auxiliary integrals costs more than it "
+            "saves for a small molecule)</td></tr>"
+            "</table>"
+            "<p><b>How much accuracy do you lose?</b> On a real test case "
+            "(aspirin, B3LYP/6-31G*), the total energy changed by about "
+            "<b>0.008 kcal/mol</b> — hundreds of times smaller than "
+            "&#8216;chemical accuracy&#8217; (1 kcal/mol), and far below the "
+            "error of the functional itself. For most purposes it is "
+            "invisible.</p>"
+            "<p><b>When to switch it on:</b> longer TD-DFT runs or larger "
+            "systems where you feel the wait. <b>When to leave it off:</b> when "
+            "you want the number to match a textbook or a reference exactly, or "
+            "for small quick calculations where it will not help. If you are "
+            "unsure, leaving it off is the safe, exact choice.</p>"
+        ),
+    },
     "homo_lumo": {
         "title": "What is the HOMO-LUMO gap?",
         "body": (

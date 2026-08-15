@@ -83,6 +83,10 @@ class SessionResult:
     # the result card can show *which* GPU ran the calc.
     gpu_used: bool = False
     gpu_name: Optional[str] = None
+    # Whether density fitting (RI) was applied to the SCF for this run (M-DF).
+    # ``False`` for exact four-centre integrals (the default) and for the
+    # post-HF paths, which are never fitted here.
+    density_fit: bool = False
     solvent: Optional[str] = None
     mo_energy_hartree: Optional[Any] = None  # np.ndarray (n_mo,) or (2, n_mo) UHF
     mo_occ: Optional[Any] = None  # np.ndarray (n_mo,) or (2, n_mo) UHF
@@ -447,6 +451,27 @@ def _run_session_calc_body(
         mf.xc = resolve_xc(method)
         mf = maybe_apply_d3(mf, method, progress_stream=progress_stream)
 
+    # --- Density fitting (RI), opt-in (M-DF) ---
+    # Applied to the freshly built SCF object, BEFORE the PCM wrap and the GPU
+    # offload below: gpu4pyscf manages its own fitting, and ``mf.to_gpu()`` can
+    # reject an already-fitted / PCM-wrapped object. Off by default. Skipped for
+    # the post-HF methods (MP2 / CCSD / CCSD(T)) — fitting their HF reference
+    # would change the correlation numerics, which is out of scope for this
+    # opt-in SCF speedup and tracked separately (M-DF).
+    from .density_fitting import try_density_fit as _try_density_fit
+
+    if method_upper in ("MP2", "CCSD", "CCSD(T)"):
+        density_fit_used = False
+    else:
+        mf, density_fit_used = _try_density_fit(mf)
+        if density_fit_used and progress_stream is not None:
+            try:
+                progress_stream.write(
+                    "\n⚡  Density fitting (RI) active — approximate integrals\n"
+                )
+            except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
+                pass
+
     # --- Wrap with implicit solvent (PCM) if requested ---
     if solvent is not None:
         from . import config as _cfg
@@ -719,6 +744,7 @@ def _run_session_calc_body(
         ccsd_t_correction_hartree=ccsd_t_correction_hartree,
         gpu_used=gpu_used,
         gpu_name=gpu_name,
+        density_fit=density_fit_used,
         solvent=solvent,
         mo_energy_hartree=_mo_energy_ha_arr,
         mo_occ=_mo_occ_arr,

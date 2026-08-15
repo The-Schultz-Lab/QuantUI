@@ -360,6 +360,14 @@ def _run_nmr_calc_body(
         mf.xc = resolve_xc(method)
         mf = maybe_apply_d3(mf, method, progress_stream=stream)
 
+    # Density fitting (RI), opt-in (M-DF). Off by default. See DF.5: DF shifts
+    # absolute shieldings, but chemical shifts are differences so the error
+    # largely cancels — this is flagged for explicit validation before DF is
+    # ever defaulted on for NMR.
+    from .density_fitting import try_density_fit as _try_density_fit
+
+    mf, _ = _try_density_fit(mf)
+
     # Cooperative cancel between SCF cycles.
     from .cancellation import attach_scf_cancel_callback, cancel_check_from_stream
     from .log_utils import emit_status

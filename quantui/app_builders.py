@@ -82,6 +82,7 @@ def build_status_panel(
     viz_default_backend: str = "auto",
     vib_framerate_fps: int = 10,
     gpu_enabled: bool = True,
+    density_fit_enabled: bool = False,
 ) -> None:
     """Build the Status tab panel."""
     cores, mem_gb = get_session_resources_fn()
@@ -254,6 +255,25 @@ def build_status_panel(
         layout=layout_fn(width="320px", margin="2px 0 0 0"),
     )
 
+    # Density fitting (RI) toggle (persists across launches). Off by default:
+    # DF is a targeted speedup — a large win for TD-DFT and larger systems,
+    # roughly neutral or slightly slower for small single points — and a
+    # teaching tool should not silently approximate integrals. See the
+    # "density_fitting" help topic for the measured trade-off.
+    df_toggle_label = widgets.HTML(
+        '<div style="font-size:12px;color:#475569;margin-top:12px;'
+        'margin-bottom:0px">Density fitting (RI) '
+        '<span style="color:#94a3b8;font-size:11px">'
+        "(persists across launches; faster TD-DFT / large systems, "
+        "~0.008 kcal/mol accuracy cost)</span></div>"
+    )
+    app.density_fit_enabled_cb = widgets.Checkbox(
+        value=density_fit_enabled,
+        description="Use density fitting (RI)",
+        indent=False,
+        layout=layout_fn(width="320px", margin="2px 0 0 0"),
+    )
+
     settings_box = widgets.VBox(
         [
             settings_html,
@@ -262,6 +282,8 @@ def build_status_panel(
             app.vib_framerate_si,
             gpu_toggle_label,
             app.gpu_enabled_cb,
+            df_toggle_label,
+            app.density_fit_enabled_cb,
         ],
         layout=layout_fn(margin="0 0 8px 0"),
     )
