@@ -146,6 +146,31 @@ def test_log_event_basic_roundtrip(isolated_log_dir):
     assert events[0]["extra_field"] == 42
 
 
+def test_read_all_tolerates_partial_multibyte_tail(isolated_log_dir):
+    """A concurrent/interrupted append can leave a partial multibyte UTF-8
+    sequence at EOF. Reading must skip that line, not raise UnicodeDecodeError.
+
+    Regression: the strict-utf-8 read crashed ``QuantUIApp()`` construction
+    (via ``get_recent_events``) intermittently under ``pytest -n=auto``.
+    """
+    import json
+
+    import quantui.calc_log as clog
+
+    path = clog._event_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "wb") as fh:
+        fh.write(json.dumps({"event": "good", "message": "ok"}).encode() + b"\n")
+        fh.write(b'{"event": "partial"}\xc3')  # truncated multibyte at EOF
+
+    # Must not raise, and must still return the intact record.
+    events = clog.get_recent_events(10)
+    assert [e["event"] for e in events] == ["good"]
+
+    # prune_events reads the same file; it must not raise either.
+    clog.prune_events()
+
+
 def test_prune_events_holds_lock_across_read_and_rewrite(isolated_log_dir):
     """Concurrent log_event() calls must never lose an append to a
     concurrent prune_events() rewrite.
