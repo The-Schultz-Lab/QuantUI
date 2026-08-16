@@ -29,6 +29,11 @@ from quantui.orbital_visualization import (
 # it is defined once here and passed down rather than spelled twice.
 _ORB_PNG_INBOX_CLASS = "quantui-orb-png-inbox"
 
+# Same pattern, own inbox: the reorg-geometry viewer's Save-PNG button
+# (M-EXPORT2 EXP2.2) writes here rather than sharing _ORB_PNG_INBOX_CLASS, so
+# a capture from one viewer can never be mistaken for the other's.
+_REORG_PNG_INBOX_CLASS = "quantui-reorg-png-inbox"
+
 # Friendlier labels for the library category filter.
 _CATEGORY_LABELS = {
     "diatomic": "Diatomics",
@@ -2229,6 +2234,24 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         style={"description_width": "70px"},
         layout=layout_fn(width="380px", display="none"),
     )
+    # Export the retained geometries as XYZ (M-EXPORT2 EXP2.1) — one file per
+    # distinct geometry (R_neutral + each R_ion), not per energy.
+    app._reorg_export_btn = widgets.Button(
+        description="Export XYZ",
+        icon="download",
+        layout=layout_fn(width="130px", margin="4px 0 0 0"),
+        tooltip="Save each geometry (R_neutral, R_ion, ...) as its own XYZ file",
+    )
+    app._reorg_export_status = widgets.HTML(
+        value="", layout=layout_fn(margin="4px 0 0 8px")
+    )
+    # Hidden inbox for the viewer's Save-PNG button (M-EXPORT2 EXP2.2) — same
+    # write-into-DOM-node-then-sync-to-kernel bridge as _orb_png_inbox, own
+    # class so the two capture flows can never cross-fire each other.
+    app._reorg_png_inbox = widgets.Textarea(
+        value="", layout=layout_fn(width="1px", height="1px", visibility="hidden")
+    )
+    app._reorg_png_inbox.add_class(_REORG_PNG_INBOX_CLASS)
     app._reorg_geom_body = widgets.VBox(
         [
             widgets.HTML(
@@ -2242,6 +2265,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             app._reorg_overlay_pair,
             app._reorg_exaggerate,
             app._reorg_geom_output,
+            widgets.HBox(
+                [app._reorg_export_btn, app._reorg_export_status],
+                layout=layout_fn(align_items="center"),
+            ),
+            app._reorg_png_inbox,
         ],
         layout=layout_fn(padding="8px"),
     )

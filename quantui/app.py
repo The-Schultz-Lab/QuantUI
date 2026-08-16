@@ -148,6 +148,9 @@ from quantui.app_exports import (
     on_export_pdb as _exp_on_export_pdb,
 )
 from quantui.app_exports import (
+    on_export_reorg_geometries as _exp_on_export_reorg_geometries,
+)
+from quantui.app_exports import (
     on_export_xyz as _exp_on_export_xyz,
 )
 from quantui.app_exports import (
@@ -155,6 +158,9 @@ from quantui.app_exports import (
 )
 from quantui.app_exports import (
     on_orb_png_captured as _exp_on_orb_png_captured,
+)
+from quantui.app_exports import (
+    on_reorg_png_captured as _exp_on_reorg_png_captured,
 )
 from quantui.app_formatters import (
     format_freq_result as _fmt_freq_result,
@@ -1199,6 +1205,9 @@ class QuantUIApp:
         _reorg_overlay_pair: Any
         _reorg_exaggerate: Any
         _reorg_mode_dd: Any
+        _reorg_export_btn: Any
+        _reorg_export_status: Any
+        _reorg_png_inbox: Any
         _result_dir_label: Any
         _result_log_accordion: Any
         _result_log_output: Any
@@ -2101,6 +2110,7 @@ class QuantUIApp:
         self.export_xyz_btn.on_click(self._on_export_xyz)
         self.export_mol_btn.on_click(self._on_export_mol)
         self.export_pdb_btn.on_click(self._on_export_pdb)
+        self._reorg_export_btn.on_click(self._safe_cb(self._on_export_reorg_geometries))
         # History
         self.past_dd.observe(self._safe_cb(self._on_past_dd_changed), names="value")
         self.past_refresh_btn.on_click(self._on_past_refresh)
@@ -2201,6 +2211,11 @@ class QuantUIApp:
         # ipywidgets syncs it back, firing this observer (ORBX.1).
         self._orb_png_inbox.observe(
             self._safe_cb(self._on_orb_png_captured), names="value"
+        )
+        # Same bridge, own inbox — the reorg-geometry viewer's Save-PNG button
+        # (M-EXPORT2 EXP2.2).
+        self._reorg_png_inbox.observe(
+            self._safe_cb(self._on_reorg_png_captured), names="value"
         )
         # Persist the grid choice so it survives a relaunch (ORBX.2).
         self._iso_resolution_dd.observe(
@@ -3609,6 +3624,9 @@ class QuantUIApp:
     def _on_export_pdb(self, btn) -> None:
         _exp_on_export_pdb(self, btn)
 
+    def _on_export_reorg_geometries(self, btn) -> None:
+        _exp_on_export_reorg_geometries(self, btn)
+
     def _on_reorg_view_changed(self, change) -> None:
         _ana_on_reorg_view_changed(self, change)
 
@@ -3620,6 +3638,9 @@ class QuantUIApp:
 
     def _on_orb_png_captured(self, change) -> None:
         _exp_on_orb_png_captured(self, change)
+
+    def _on_reorg_png_captured(self, change) -> None:
+        _exp_on_reorg_png_captured(self, change)
 
     def _on_iso_resolution_changed(self, change) -> None:
         """Persist the isosurface grid choice.

@@ -135,6 +135,11 @@ def reorg_geometries(channels: list, neutral_geometry: dict) -> list[dict]:
                 "atoms": list(neutral_geometry["atoms"]),
                 "coordinates": [list(c) for c in neutral_geometry["coordinates"]],
                 "note": ("E_neutral(R_neutral)" + (f", {shared}" if shared else "")),
+                # Carried through for exports (M-EXPORT2 EXP2.1/.4) — the
+                # viewer doesn't need these, but an XYZ file with no charge/
+                # multiplicity is a structure nobody downstream can rerun.
+                "charge": neutral_geometry.get("charge", 0),
+                "multiplicity": neutral_geometry.get("multiplicity", 1),
             }
         )
     for ch in channels:
@@ -149,6 +154,8 @@ def reorg_geometries(channels: list, neutral_geometry: dict) -> list[dict]:
                 "atoms": list(geom["atoms"]),
                 "coordinates": [list(c) for c in geom["coordinates"]],
                 "note": f"E_{kind}(R_{kind}), E_neutral(R_{kind})",
+                "charge": geom.get("charge", charge),
+                "multiplicity": geom.get("multiplicity", 1),
             }
         )
     return out

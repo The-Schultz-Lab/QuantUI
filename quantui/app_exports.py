@@ -4,9 +4,65 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .results_storage import _safe_name
+
+
+def export_destination(
+    app: Any,
+    category: str,
+    *name_parts: str,
+    suffix: str,
+) -> Path:
+    """The one place that decides where a new export lands and what it's
+    called (M-EXPORT2 EXP2.3).
+
+    Before this, each exporter picked its own destination and built its own
+    filename inline (``on_export_xyz`` / ``on_export_mol`` / ``on_export_pdb``
+    below all repeat the same three-line pattern), so "where did it save?"
+    had a different answer depending on which button was pressed. New
+    exporters should call this instead of repeating that pattern; the three
+    existing structure exporters are left as-is deliberately — they already
+    work, and retrofitting working export paths carries real regression risk
+    for no user-facing benefit. This is about not repeating the inconsistency
+    as the export surface grows (EXP2.1, and whatever comes after it).
+
+    Every part of ``name_parts`` is sanitised (:func:`_safe_name`) and joined
+    with underscores, so a caller passes meaningful pieces (formula, a
+    geometry label, ...) instead of building a filename by hand.
+
+    Files land next to the calculation's own results (``app._last_result_dir``)
+    so everything about one run stays in one folder. Unlike the existing
+    exporters (which fall back to the current working directory when no
+    result folder exists yet), this raises — silently writing outside the
+    result folder is a worse default for anything added from here on.
+
+    Args:
+        app: the running QuantUIApp (only ``_last_result_dir`` is read).
+        category: a short, human-readable export kind, used only in the
+            error message (e.g. ``"reorg geometry"``).
+        *name_parts: filename-stem pieces, sanitised and joined with ``"_"``.
+        suffix: file extension including the leading dot (e.g. ``".xyz"``).
+
+    Returns:
+        The full destination path (parent directory already exists, since it
+        is always an existing result directory).
+
+    Raises:
+        ValueError: no result directory is available yet.
+    """
+    result_dir = getattr(app, "_last_result_dir", None)
+    if result_dir is None or not isinstance(result_dir, Path):
+        raise ValueError(
+            f"No result folder yet — run a calculation before exporting {category}."
+        )
+    stem = "_".join(_safe_name(str(p)) for p in name_parts if p)
+    # result_dir is narrowed to Path by the isinstance check above, but mypy's
+    # Path.__truediv__ overload resolution still infers Any from an
+    # originally-Any-typed (getattr on `app: Any`) operand — verified in
+    # isolation; the isinstance check is the real, working type guard.
+    return cast(Path, result_dir / f"{stem}{suffix}")
 
 
 def on_export(app: Any, btn: Any) -> None:
@@ -98,6 +154,73 @@ def on_export_pdb(app: Any, btn: Any) -> None:
         app.struct_export_status.value = f"Saved: {dest}"
     except Exception as exc:
         app.struct_export_status.value = f"Error: {exc}"
+
+
+def on_export_reorg_geometries(app: Any, btn: Any) -> None:
+    """Export every retained reorg-energy geometry as its own XYZ file
+    (M-EXPORT2 EXP2.1).
+
+    ``app._reorg_geometries`` (built by ``reorg_geometries()``) is already
+    deduplicated to the DISTINCT geometries behind a run — R_neutral once,
+    plus one R_ion per channel — so this writes exactly that many files, not
+    one per energy. Naming follows EXP2.1's request directly:
+    ``<formula>_R_neutral_<method>_<basis>.xyz`` /
+    ``<formula>_R_hole_<method>_<basis>.xyz`` rather than three files all
+    called ``geometry.xyz``.
+
+    Provenance (EXP2.4): each file's comment line carries the charge,
+    multiplicity, method/basis, and which of the four λ energies were
+    evaluated on that geometry (``note`` — already computed by
+    ``reorg_geometries()`` for the viewer, reused here rather than
+    recomputed) — the whole point of a free-text XYZ comment line, and
+    otherwise unrecoverable from the file six months later.
+    """
+    status = getattr(app, "_reorg_export_status", None)
+
+    def _set_status(msg: str) -> None:
+        if status is not None:
+            status.value = msg
+
+    geoms = getattr(app, "_reorg_geometries", None)
+    if not geoms:
+        _set_status("No geometries to export yet.")
+        return
+
+    from quantui.molecule import Molecule
+
+    method = app.method_dd.value
+    basis = app.basis_dd.value
+    saved: list[str] = []
+    try:
+        for g in geoms:
+            # "R_neutral — optimized neutral" -> "R_neutral"
+            tag = g["label"].split(" — ")[0]
+            mol = Molecule(
+                atoms=list(g["atoms"]),
+                coordinates=[list(c) for c in g["coordinates"]],
+                charge=int(g.get("charge", 0)),
+                multiplicity=int(g.get("multiplicity", 1)),
+            )
+            dest = export_destination(
+                app,
+                "reorg geometry",
+                mol.get_formula(),
+                tag,
+                method,
+                basis,
+                suffix=".xyz",
+            )
+            comment = (
+                f"{tag}  charge={mol.charge} multiplicity={mol.multiplicity}  "
+                f"{method}/{basis}  {g.get('note', '')}"
+            )
+            full_xyz = f"{len(mol.atoms)}\n{comment}\n{mol.to_xyz_string()}\n"
+            dest.write_text(full_xyz, encoding="utf-8")
+            saved.append(dest.name)
+    except Exception as exc:
+        _set_status(f"Error: {exc}")
+        return
+    _set_status(f"Saved {len(saved)} file(s): " + ", ".join(saved))
 
 
 def export_molecule_and_label(app: Any) -> tuple[Any, str, str]:
@@ -247,6 +370,80 @@ def on_orb_png_captured(app: Any, change: dict) -> None:
 
     logger.info("Saved orbital PNG: %s (%d bytes)", dest, len(raw))
     app._iso_export_status.value = f'<span style="color:#2a7">Saved: {dest.name}</span>'
+    _clear_inbox(app)
+
+
+def on_reorg_png_captured(app: Any, change: dict) -> None:
+    """Write a PNG captured from the live reorg-geometry viewer (M-EXPORT2 EXP2.2).
+
+    Same capture/decode/save shape as ``on_orb_png_captured``, fed by its own
+    inbox (``_reorg_png_inbox`` / ``_REORG_PNG_INBOX_CLASS``) so a capture from
+    this viewer is never mistaken for an isosurface capture. Filename/location
+    goes through ``export_destination`` (EXP2.3) since this is a new exporter,
+    not a retrofit of existing behaviour.
+
+    Deliberately skips the isosurface panel's DPI-stamping/custom-name extras
+    (``_iso_png_dpi`` / ``_iso_png_name``) — those are isosurface-panel
+    controls, and wiring them in here would make an unrelated panel's PNG
+    export depend on a setting the user set for a different viewer.
+    """
+    import base64
+    import binascii
+
+    uri = (change or {}).get("new") or ""
+    if not uri:
+        return
+
+    status = getattr(app, "_reorg_export_status", None)
+
+    def _fail(msg: str) -> None:
+        if status is not None:
+            status.value = f'<span style="color:#b22">{msg}</span>'
+        _clear_inbox(app)
+
+    def _clear_inbox(a: Any) -> None:
+        box = getattr(a, "_reorg_png_inbox", None)
+        if box is not None and box.value:
+            box.value = ""
+
+    if not uri.startswith(_PNG_URI_PREFIX):
+        logger.warning("reorg PNG capture: unexpected data URI prefix")
+        _fail("Capture failed (unexpected image format).")
+        return
+    if len(uri) > _MAX_PNG_BYTES:
+        _fail("Capture failed (image too large).")
+        return
+
+    try:
+        raw = base64.b64decode(uri[len(_PNG_URI_PREFIX) :], validate=True)
+    except (binascii.Error, ValueError) as exc:
+        logger.warning("reorg PNG capture: could not decode payload: %s", exc)
+        _fail("Capture failed (corrupt image data).")
+        return
+
+    mol = getattr(app, "_molecule", None)
+    formula = mol.get_formula() if mol is not None else "molecule"
+    method = str(getattr(getattr(app, "method_dd", None), "value", "") or "")
+    basis = str(getattr(getattr(app, "basis_dd", None), "value", "") or "")
+
+    try:
+        dest = export_destination(
+            app, "reorg geometry PNG", formula, "geometry", method, basis, suffix=".png"
+        )
+    except ValueError as exc:
+        _fail(str(exc))
+        return
+
+    try:
+        dest.write_bytes(raw)
+    except OSError as exc:
+        logger.warning("reorg PNG capture: could not write %s: %s", dest, exc)
+        _fail("Could not write the image (see log).")
+        return
+
+    logger.info("Saved reorg geometry PNG: %s (%d bytes)", dest, len(raw))
+    if status is not None:
+        status.value = f'<span style="color:#2a7">Saved: {dest.name}</span>'
     _clear_inbox(app)
 
 
