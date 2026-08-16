@@ -74,6 +74,102 @@ def _ammine_hydrogens(
     return out
 
 
+def _aqua_hydrogens(
+    o_pos: np.ndarray, metal_pos: np.ndarray, oh: float = 0.96, hoh_deg: float = 104.5
+) -> Coords:
+    """Two H of an M–OH2: the O lone pair faces the metal, H splayed outward."""
+    u = o_pos - metal_pos
+    u = u / np.linalg.norm(u)
+    v, _w = _orthonormal_frame(u)
+    half = math.radians(hoh_deg / 2.0)
+    out = []
+    for s in (1.0, -1.0):
+        direction = math.cos(half) * u + s * math.sin(half) * v
+        out.append((o_pos + oh * direction).tolist())
+    return out
+
+
+def _octahedral_dirs() -> List[np.ndarray]:
+    return [
+        np.array(a, float)
+        for a in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
+    ]
+
+
+def _tetrahedral_dirs() -> List[np.ndarray]:
+    raw = ((1, 1, 1), (1, -1, -1), (-1, 1, -1), (-1, -1, 1))
+    return [np.array(a, float) / math.sqrt(3.0) for a in raw]
+
+
+def _square_planar_dirs() -> List[np.ndarray]:
+    return [np.array(a, float) for a in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0))]
+
+
+def _aqua_ligand(d_mo: float):
+    """Place an aqua (H2O) donor along a unit direction from the metal."""
+
+    def place(metal: np.ndarray, u: np.ndarray) -> Tuple[Atoms, Coords]:
+        o = metal + u * d_mo
+        atoms: Atoms = ["O"]
+        coords: Coords = [o.tolist()]
+        for h in _aqua_hydrogens(o, metal):
+            atoms.append("H")
+            coords.append(h)
+        return atoms, coords
+
+    return place
+
+
+def _ammine_ligand(d_mn: float):
+    """Place an ammine (NH3) donor along a unit direction from the metal."""
+
+    def place(metal: np.ndarray, u: np.ndarray) -> Tuple[Atoms, Coords]:
+        n = metal + u * d_mn
+        atoms: Atoms = ["N"]
+        coords: Coords = [n.tolist()]
+        for h in _ammine_hydrogens(n, metal):
+            atoms.append("H")
+            coords.append(h)
+        return atoms, coords
+
+    return place
+
+
+def _linear_ligand(near: str, far: str, d_near: float, d_far: float):
+    """Place a linear diatomic donor (M–near≡far), e.g. cyanide C≡N or CO."""
+
+    def place(metal: np.ndarray, u: np.ndarray) -> Tuple[Atoms, Coords]:
+        p_near = metal + u * d_near
+        p_far = p_near + u * d_far
+        return [near, far], [p_near.tolist(), p_far.tolist()]
+
+    return place
+
+
+def _mono_ligand(elem: str, d: float):
+    """Place a single-atom donor (M–X), e.g. chloro or oxo."""
+
+    def place(metal: np.ndarray, u: np.ndarray) -> Tuple[Atoms, Coords]:
+        return [elem], [(metal + u * d).tolist()]
+
+    return place
+
+
+def _homoleptic(
+    metal_sym: str, dirs: List[np.ndarray], place, charge: int, mult: int
+) -> Tuple[Atoms, Coords, int, int]:
+    """Assemble a homoleptic complex: one ligand type on every coordination site."""
+    atoms: Atoms = [metal_sym]
+    coords: Coords = [[0.0, 0.0, 0.0]]
+    metal = np.zeros(3)
+    for u in dirs:
+        u = u / np.linalg.norm(u)
+        a, c = place(metal, u)
+        atoms.extend(a)
+        coords.extend(c)
+    return atoms, coords, charge, mult
+
+
 def cisplatin() -> Tuple[Atoms, Coords, int, int]:
     """cis-[PtCl2(NH3)2] — square planar Pt(II) d8, singlet, neutral."""
     atoms: Atoms = ["Pt"]
@@ -156,24 +252,92 @@ _BUILDERS = {
         "Fe(C5H5)2 — the archetypal metallocene sandwich compound",
         "ferrocene;bis(cyclopentadienyl)iron;Cp2Fe",
     ),
-}
-
-# A minimal covalent-radius table (Å) for the sanity connectivity check.
-_COV = {
-    "H": 0.31,
-    "C": 0.76,
-    "N": 0.71,
-    "O": 0.66,
-    "Cl": 1.02,
-    "Fe": 1.32,
-    "Co": 1.26,
-    "Pt": 1.36,
-    "Zn": 1.22,
+    # ── Octahedral aqua complexes (weak-field H2O → high-spin) ──────────────
+    "hexaaquairon(II)": (
+        lambda: _homoleptic("Fe", _octahedral_dirs(), _aqua_ligand(2.12), 2, 5),
+        "[Fe(H2O)6]2+ — high-spin octahedral aqua complex (d6, 4 unpaired)",
+        "hexaaquairon;iron(II) hexaaqua;Fe(H2O)6 2+",
+    ),
+    "hexaaquachromium(III)": (
+        lambda: _homoleptic("Cr", _octahedral_dirs(), _aqua_ligand(1.96), 3, 4),
+        "[Cr(H2O)6]3+ — octahedral aqua complex (d3, 3 unpaired)",
+        "hexaaquachromium;chromium(III) hexaaqua;Cr(H2O)6 3+",
+    ),
+    "hexaaquanickel(II)": (
+        lambda: _homoleptic("Ni", _octahedral_dirs(), _aqua_ligand(2.05), 2, 3),
+        "[Ni(H2O)6]2+ — octahedral aqua complex (d8, 2 unpaired)",
+        "hexaaquanickel;nickel(II) hexaaqua;Ni(H2O)6 2+",
+    ),
+    "hexaaquatitanium(III)": (
+        lambda: _homoleptic("Ti", _octahedral_dirs(), _aqua_ligand(2.03), 3, 2),
+        "[Ti(H2O)6]3+ — d1 octahedral aqua complex (the classic single-band "
+        "UV-Vis example)",
+        "hexaaquatitanium;titanium(III) hexaaqua;Ti(H2O)6 3+",
+    ),
+    # ── Octahedral cyanides (strong-field CN- → low-spin) ───────────────────
+    "hexacyanoferrate(III)": (
+        lambda: _homoleptic(
+            "Fe", _octahedral_dirs(), _linear_ligand("C", "N", 1.93, 1.16), -3, 2
+        ),
+        "[Fe(CN)6]3- — ferricyanide, low-spin octahedral (d5, 1 unpaired)",
+        "ferricyanide;hexacyanoferrate(III);Fe(CN)6 3-",
+    ),
+    "hexacyanoferrate(II)": (
+        lambda: _homoleptic(
+            "Fe", _octahedral_dirs(), _linear_ligand("C", "N", 1.92, 1.16), -4, 1
+        ),
+        "[Fe(CN)6]4- — ferrocyanide, low-spin octahedral (d6, diamagnetic)",
+        "ferrocyanide;hexacyanoferrate(II);Fe(CN)6 4-",
+    ),
+    # ── Tetrahedral complexes ───────────────────────────────────────────────
+    "tetracarbonylnickel(0)": (
+        lambda: _homoleptic(
+            "Ni", _tetrahedral_dirs(), _linear_ligand("C", "O", 1.82, 1.14), 0, 1
+        ),
+        "Ni(CO)4 — tetrahedral d10 carbonyl (18-electron, diamagnetic)",
+        "tetracarbonylnickel;nickel tetracarbonyl;Ni(CO)4",
+    ),
+    "tetraamminezinc(II)": (
+        lambda: _homoleptic("Zn", _tetrahedral_dirs(), _ammine_ligand(2.03), 2, 1),
+        "[Zn(NH3)4]2+ — tetrahedral d10 ammine (diamagnetic)",
+        "tetraamminezinc;zinc(II) tetraammine;Zn(NH3)4 2+",
+    ),
+    "tetrachlorocobaltate(II)": (
+        lambda: _homoleptic("Co", _tetrahedral_dirs(), _mono_ligand("Cl", 2.28), -2, 4),
+        "[CoCl4]2- — tetrahedral high-spin cobalt(II) (d7, 3 unpaired), the "
+        "classic blue ion",
+        "tetrachlorocobaltate;CoCl4 2-",
+    ),
+    "permanganate": (
+        lambda: _homoleptic("Mn", _tetrahedral_dirs(), _mono_ligand("O", 1.63), -1, 1),
+        "[MnO4]- — tetrahedral d0 manganese(VII) oxoanion (deep purple)",
+        "permanganate;MnO4;tetraoxomanganate",
+    ),
+    # ── Square-planar (d8) ──────────────────────────────────────────────────
+    "tetrachloroplatinate(II)": (
+        lambda: _homoleptic(
+            "Pt", _square_planar_dirs(), _mono_ligand("Cl", 2.31), -2, 1
+        ),
+        "[PtCl4]2- — square-planar platinum(II) (d8, diamagnetic), the cisplatin "
+        "precursor",
+        "tetrachloroplatinate;PtCl4 2-",
+    ),
 }
 
 
 def _sanity(atoms: Atoms, coords: Coords) -> List[str]:
-    """Return a list of problems (empty = geometry looks sane)."""
+    """Return a list of problems (empty = geometry looks sane).
+
+    Uses the shipped, metal-aware connectivity finder so the checks match how the
+    app itself perceives bonds: no clashes, one connected component (not a
+    scattered salt), and every metal centre actually coordinated.
+    """
+    from quantui.connectivity import (
+        covalent_components,
+        is_metal,
+        metal_coordination_bonds,
+    )
+
     problems: List[str] = []
     pts = np.array(coords)
     n = len(atoms)
@@ -183,20 +347,15 @@ def _sanity(atoms: Atoms, coords: Coords) -> List[str]:
             dij = float(np.linalg.norm(pts[i] - pts[j]))
             if dij < 0.7:
                 problems.append(f"clash: {atoms[i]}{i}-{atoms[j]}{j} = {dij:.2f} Å")
-    # Metal is bonded to the expected number of donors (within 1.3× radii sum).
-    metal_syms = {"Pt", "Co", "Fe", "Zn"}
+    # One connected component — never a scattered / disconnected structure.
+    comps = covalent_components(atoms, coords)
+    if len(comps) != 1:
+        problems.append(f"{len(comps)} disconnected fragments (expected 1)")
+    # Every metal centre is actually coordinated.
+    bonded = {i for bond in metal_coordination_bonds(atoms, coords) for i in bond}
     for i, sym in enumerate(atoms):
-        if sym not in metal_syms:
-            continue
-        neigh = 0
-        for j in range(n):
-            if j == i:
-                continue
-            cutoff = 1.3 * (_COV.get(sym, 1.3) + _COV.get(atoms[j], 0.7))
-            if float(np.linalg.norm(pts[i] - pts[j])) <= cutoff:
-                neigh += 1
-        if neigh == 0:
-            problems.append(f"metal {sym}{i} has no neighbours within bonding range")
+        if is_metal(sym) and i not in bonded:
+            problems.append(f"metal {sym}{i} has no coordination bonds")
     return problems
 
 
@@ -245,6 +404,40 @@ def build_manifest() -> list:
     return entries
 
 
+def _validate_gfnff(entries: list) -> None:
+    """Relax each entry with GFN-FF and report — a real quality gate for the
+    idealized geometries (needs xtb; skipped if unavailable).
+
+    Confirms each starting geometry is physically sane: the GFN-FF relaxation
+    stays a single connected component and doesn't move far (a large RMSD would
+    mean the idealized metrics are off). Spin-independent (GFN-FF is a force
+    field), so multiplicity doesn't enter here.
+    """
+    try:
+        from quantui.connectivity import covalent_components
+        from quantui.molecule import Molecule
+        from quantui.preopt import _XTB_AVAILABLE, preoptimize
+    except Exception as exc:  # noqa: BLE001
+        print(f"\n# GFN-FF validation unavailable ({exc}); skipped")
+        return
+    if not _XTB_AVAILABLE:
+        print("\n# GFN-FF validation skipped (xtb not installed)")
+        return
+
+    print("\n# GFN-FF validation (relax idealized geometry; expect small RMSD)\n")
+    for e in entries:
+        mol = Molecule(
+            atoms=e["atoms"],
+            coordinates=e["coordinates"],
+            charge=e["charge"],
+            multiplicity=e["multiplicity"],
+        )
+        relaxed, rmsd = preoptimize(mol)
+        comps = len(covalent_components(relaxed.atoms, relaxed.coordinates))
+        flag = "OK" if comps == 1 and rmsd < 0.6 else "REVIEW"
+        print(f"  {e['name']:26s} RMSD={rmsd:5.3f} Å  components={comps}  {flag}")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
@@ -252,11 +445,19 @@ def main(argv=None) -> int:
         action="store_true",
         help="Rebuild the library store from all manifests after writing.",
     )
+    ap.add_argument(
+        "--validate-gfnff",
+        action="store_true",
+        help="Relax each geometry with GFN-FF (xtb) and report as a quality gate.",
+    )
     args = ap.parse_args(argv)
 
     entries = build_manifest()
     _MANIFEST.write_text(json.dumps(entries, indent=2) + "\n", encoding="utf-8")
     print(f"\n# wrote {len(entries)} entries -> {_MANIFEST}")
+
+    if args.validate_gfnff:
+        _validate_gfnff(entries)
 
     if args.rebuild:
         from quantui import molecule_library as ml
