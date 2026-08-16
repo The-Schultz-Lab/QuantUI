@@ -1570,6 +1570,7 @@ _CALC_TYPE_KEYS: Dict[str, str] = {
     "UV-Vis (TD-DFT)": "tddft",
     "NMR Shielding": "nmr",
     "PES Scan": "pes_scan",
+    "Reorganization Energy": "reorganization_energy",
 }
 
 

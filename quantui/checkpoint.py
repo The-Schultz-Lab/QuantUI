@@ -429,9 +429,66 @@ class Checkpoint:
             return True
         traj = self.trajectory_path
         try:
-            return traj.is_file() and traj.stat().st_size > 0
+            if traj.is_file() and traj.stat().st_size > 0:
+                return True
+        except OSError:
+            pass
+        return self._has_leg_progress()
+
+    def _has_leg_progress(self) -> bool:
+        """True when any nested leg checkpoint (see :meth:`sub`) has progress.
+
+        A multi-stage run like Reorganization Energy writes nothing directly
+        into its own checkpoint — all the real optimizer state lives in its
+        legs. Without this, the top-level checkpoint would always look empty
+        and the run would never be offered as resumable, no matter how much
+        of a leg had actually completed.
+        """
+        try:
+            entries = list((self.dir / "legs").iterdir())
         except OSError:
             return False
+        return any(entry.is_dir() and _has_progress_in(entry) for entry in entries)
+
+    # ── Multi-stage runs (CHK.7) ────────────────────────────────────────────
+
+    def sub(
+        self,
+        tag: str,
+        *,
+        charge: int,
+        multiplicity: int,
+        coords: Sequence[Sequence[float]],
+    ) -> Checkpoint:
+        """A nested checkpoint for one leg of a multi-stage run.
+
+        Reorganization Energy runs several independent geometry optimizations
+        under a single top-level checkpoint — the neutral reference plus one
+        per ion channel. Sharing one ``resume_key`` across all of them would
+        let one leg's trajectory/Hessian overwrite another's, so each leg
+        needs its own identity. This derives one from *tag* (a short label
+        like ``"neutral_opt"`` or ``"hole_opt"``), *charge*, *multiplicity*
+        and *coords* — the actual starting point of that leg's optimization —
+        while keeping method/basis/atoms from the parent.
+
+        The child's directory is nested under this checkpoint's own
+        (``<dir>/legs/<leg-resume-key>``) rather than living as a sibling in
+        the top-level checkpoint root. That keeps per-leg internals out of
+        the general "unfinished calculations" listing, which has no useful
+        way to present or restore half of a reorg run on its own.
+        """
+        leg_identity = CalcIdentity(
+            calc_type=f"{self.identity.calc_type}:{tag}",
+            method=self.identity.method,
+            basis=self.identity.basis,
+            charge=int(charge),
+            multiplicity=int(multiplicity),
+            atom_symbols=self.identity.atom_symbols,
+            coords=tuple(tuple(float(v) for v in row) for row in coords),
+        )
+        return Checkpoint(
+            leg_identity, root=self.dir / "legs", log_stream=self._log_stream
+        )
 
     # ── Scan points (CHK.3) ─────────────────────────────────────────────────
 

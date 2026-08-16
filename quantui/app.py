@@ -5186,6 +5186,8 @@ class QuantUIApp:
                     steps=self.max_steps_si.value,
                     progress_stream=log,  # type: ignore[arg-type]
                     solvent=_solvent,
+                    checkpoint=_ckpt,
+                    resume=_resume,
                 )
                 result_html = self._format_reorg_result(result)
                 save_spectra = result.to_spectra()

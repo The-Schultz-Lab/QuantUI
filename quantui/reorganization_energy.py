@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from typing import IO, List, Optional
+from typing import IO, Any, List, Optional
 
 from .molecule import Molecule
 from .optimizer import DEFAULT_FMAX, DEFAULT_OPT_STEPS, optimize_geometry
@@ -351,6 +351,8 @@ def run_reorganization_energy(
     steps: int = DEFAULT_OPT_STEPS,
     progress_stream: Optional[IO[str]] = None,
     solvent: Optional[str] = None,
+    checkpoint: Optional[Any] = None,
+    resume: bool = False,
 ) -> ReorganizationEnergyResult:
     """Compute the 4-point Marcus reorganization energy for a molecule.
 
@@ -366,6 +368,27 @@ def run_reorganization_energy(
         progress_stream: Writable stream for live log output (Jupyter widget
             stream in the app, ``sys.stdout`` otherwise).
         solvent: Optional PCM solvent name for the single-point evaluations.
+        checkpoint: Optional :class:`~quantui.checkpoint.Checkpoint` for the
+            whole run (M-CHECKPOINT CHK.7). This run is really 2-3 independent
+            geometry optimizations — the neutral reference plus one per ion
+            channel — and each needs its own resume identity, or one leg's
+            trajectory/Hessian would overwrite another's. So *checkpoint*
+            itself is never handed to ``optimize_geometry`` directly; instead
+            each leg gets its own nested checkpoint via
+            :meth:`~quantui.checkpoint.Checkpoint.sub`. A leg that fails to
+            open its own checkpoint (disk full, permissions) simply runs
+            uncheckpointed — never the reason a leg doesn't run.
+        resume: Continue every leg from its own checkpoint where one exists.
+            A leg with nothing usable to resume just starts fresh — this is
+            not an error, it is the ordinary case for legs added after the
+            interrupted run's progress. Note: a leg that had already
+            *completed* before the interruption has no resumable state
+            either (by design — see ``Checkpoint.resumable_state``), so it is
+            re-optimized rather than instantly reused. In practice this
+            re-optimization converges in a step or two, since it starts
+            already at the minimum, and — because BFGS is deterministic —
+            reproduces the same geometry, so a later leg seeded from it still
+            finds its own checkpoint.
 
     Returns:
         :class:`ReorganizationEnergyResult`.
@@ -399,6 +422,24 @@ def run_reorganization_energy(
             raise RuntimeError(f"Single point did not converge: {tag}")
         return float(res.energy_hartree)
 
+    def _leg_checkpoint(
+        tag: str, *, charge: int, multiplicity: int, coords: Any
+    ) -> Optional[Any]:
+        """Nested checkpoint for one geometry-opt leg (CHK.7), or ``None``.
+
+        ``checkpoint`` (the whole-run checkpoint) is never passed straight to
+        ``optimize_geometry`` — see the docstring above for why each leg needs
+        its own. A leg whose checkpoint fails to open behaves exactly like no
+        checkpoint at all: the optimization still runs, it just isn't
+        resumable.
+        """
+        if checkpoint is None:
+            return None
+        leg = checkpoint.sub(
+            tag, charge=charge, multiplicity=multiplicity, coords=coords
+        )
+        return leg if leg.begin() else None
+
     _emit(
         stream,
         "\n"
@@ -411,6 +452,12 @@ def run_reorganization_energy(
 
     # ── Step 1: optimize the neutral reference geometry ──────────────────────
     _emit(stream, "\n── Optimizing neutral geometry (R_neutral) ──────────\n")
+    neutral_leg = _leg_checkpoint(
+        "neutral_opt",
+        charge=base_charge,
+        multiplicity=base_mult,
+        coords=molecule.coordinates,
+    )
     neutral_opt = optimize_geometry(
         molecule=molecule,
         method=neutral_method,
@@ -420,6 +467,8 @@ def run_reorganization_energy(
         progress_stream=stream,  # type: ignore[arg-type]
         status_label="Reorg: optimizing neutral geometry",
         report_fraction=False,  # Don't let sub-opt 0→1 resets oscillate ETA
+        checkpoint=neutral_leg,
+        resume=resume,
     )
     neutral_mol = neutral_opt.molecule
     n_total_steps = neutral_opt.n_steps
@@ -455,6 +504,12 @@ def run_reorganization_energy(
             charge=ion_charge,
             multiplicity=ion_mult,
         )
+        ion_leg = _leg_checkpoint(
+            f"{kind}_opt",
+            charge=ion_charge,
+            multiplicity=ion_mult,
+            coords=ion_seed.coordinates,
+        )
         ion_opt = optimize_geometry(
             molecule=ion_seed,
             method=ion_method,
@@ -464,6 +519,8 @@ def run_reorganization_energy(
             progress_stream=stream,  # type: ignore[arg-type]
             status_label=f"Reorg: optimizing {kind} ion geometry",
             report_fraction=False,  # See neutral-opt note above
+            checkpoint=ion_leg,
+            resume=resume,
         )
         ion_mol = ion_opt.molecule
         n_total_steps += ion_opt.n_steps
@@ -517,6 +574,17 @@ def run_reorganization_energy(
             f"\n  → λ_{kind} = {lambda_total * HARTREE_TO_EV:.4f} eV "
             f"({lambda_total * HARTREE_TO_KCAL:.2f} kcal/mol)\n",
         )
+
+    if checkpoint is not None:
+        # Reaching here means every required single point converged (a
+        # non-convergent one raises and never gets this far) — the run is
+        # done, whether or not an individual leg itself fully converged.
+        # Mirrors pes_scan.py: "every point was attempted, so there is
+        # nothing left to resume." A leg's own checkpoint (see _leg_checkpoint)
+        # only marks itself complete on convergence, independently of this —
+        # a leg that hit max steps without converging stays resumable at its
+        # own level even after the overall run completes.
+        checkpoint.mark_complete()
 
     result = ReorganizationEnergyResult(
         formula=molecule.get_formula(),
