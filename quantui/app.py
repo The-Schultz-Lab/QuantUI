@@ -3281,6 +3281,17 @@ class QuantUIApp:
                     "⚠ No network detected — resolved offline from the bundled "
                     f"library (not PubChem). {msg}"
                 )
+            # MET.2: a fetched name can resolve to a disconnected ionic salt
+            # (cisplatin → 2 NH₃ + 2 HCl + Pt²⁺) rather than the coordinated
+            # complex. Warn rather than let a wrong geometry silently feed a run.
+            try:
+                from .connectivity import describe_disconnection
+
+                warning = describe_disconnection(mol.atoms, mol.coordinates)
+            except Exception:  # noqa: BLE001 — a detection failure must not block load
+                warning = None
+            if warning:
+                msg = f"⚠ {warning} {msg}"
             self.pubchem_msg.value = msg
         else:
             self.pubchem_msg.value = f"Not found: {error}"
