@@ -134,10 +134,11 @@ class TestPreoptTrajectory:
         # (the regressed capture put ~80% in one frame).
         assert max(steps) <= 0.5 * total
 
-    def test_rdkit_absent_is_non_destructive_single_frame(self, monkeypatch):
+    def test_no_backend_is_non_destructive_single_frame(self, monkeypatch):
         import quantui.preopt as preopt_mod
 
         monkeypatch.setattr(preopt_mod, "_RDKIT_AVAILABLE", False)
+        monkeypatch.setattr(preopt_mod, "_XTB_AVAILABLE", False)
         original = _water()
         mol, rmsd, frames = preopt_mod.preoptimize_with_trajectory(original)
         assert rmsd == 0.0
@@ -362,22 +363,28 @@ class TestMetalPreoptHonesty:
             pytest.skip("rdkit not installed")
         assert preopt_support(_water()) is None
 
-    def test_preopt_support_reason_for_metal(self):
-        from quantui.preopt import _RDKIT_AVAILABLE, preopt_support
+    def test_preopt_support_reason_for_metal_without_xtb(self, monkeypatch):
+        # With the GFN-FF (xtb) backend absent, a metal has no pre-opt backend,
+        # so preopt_support returns a reason that points to xtb / the DFT opt.
+        import quantui.preopt as preopt_mod
 
-        if not _RDKIT_AVAILABLE:
+        if not preopt_mod._RDKIT_AVAILABLE:
             pytest.skip("rdkit not installed")
-        reason = preopt_support(_metal_complex())
-        assert reason is not None and isinstance(reason, str) and reason
+        monkeypatch.setattr(preopt_mod, "_XTB_AVAILABLE", False)
+        reason = preopt_mod.preopt_support(_metal_complex())
+        assert reason is not None and "xtb" in reason.lower()
 
-    def test_metal_negligible_change_reports_honestly(self, app):
-        # The FF no-ops a metal complex at RMSD 0.0. The message must NOT claim
-        # the geometry is "already reasonable"; it must point to DFT geometry opt.
+    def test_metal_negligible_change_reports_honestly_without_xtb(
+        self, app, monkeypatch
+    ):
+        # With no GFN-FF backend, a metal FF no-op at RMSD 0.0 must NOT claim the
+        # geometry is "already reasonable"; it must point to xtb / the DFT opt.
+        import quantui.preopt as preopt_mod
         from quantui.app_runflow import _preopt_preview_done
-        from quantui.preopt import _RDKIT_AVAILABLE
 
-        if not _RDKIT_AVAILABLE:
+        if not preopt_mod._RDKIT_AVAILABLE:
             pytest.skip("rdkit not installed")
+        monkeypatch.setattr(preopt_mod, "_XTB_AVAILABLE", False)
         metal = _metal_complex()
         _preopt_preview_done(app, metal, 0.0, [[list(c) for c in metal.coordinates]])
 
@@ -385,7 +392,6 @@ class TestMetalPreoptHonesty:
         assert "geometry optimization" in status
         assert "isn't available" in status or "not available" in status
         assert "already reasonable" not in status
-        # Nothing to keep/revert either way.
         assert app._preopt_relaxed_mol is None
         assert app._preopt_actions_box.layout.display == "none"
 

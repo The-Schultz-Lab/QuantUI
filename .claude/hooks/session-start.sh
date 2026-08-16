@@ -29,9 +29,9 @@ python -m pip install --upgrade --ignore-installed setuptools wheel || true
 # Editable install with the same extras CI uses. Editable + plain `install`
 # (not `ci`-style clean installs) so the resolved deps are cached in the
 # container image for later sessions.
-pip install -e ".[pyscf,ase,dev]"
+pip install -e ".[pyscf,ase,dev,xtb]"
 
-echo "QuantUI cloud env ready: package + [pyscf,ase,dev] installed." >&2
+echo "QuantUI cloud env ready: package + [pyscf,ase,dev,xtb] installed." >&2
 
 # Warn if the private planning repo isn't attached to this session. In a cloud
 # session an attached repo is cloned as a sibling of this one; the planning docs

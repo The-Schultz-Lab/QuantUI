@@ -698,9 +698,10 @@ def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> No
         # Calling the latter "your geometry is already reasonable" tells a
         # student their scattered metal structure is good. Probe which case this
         # is and word it truthfully.
-        from quantui.preopt import preopt_support
+        from quantui.preopt import preopt_engine_label, preopt_support
 
         unsupported = preopt_support(relaxed)
+        engine = preopt_engine_label(relaxed) or "MMFF94/UFF"
         app._preopt_relaxed_mol = None
         app.preopt_preview_output.clear_output()
         app.preopt_preview_output.layout.display = "none"
@@ -709,18 +710,15 @@ def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> No
         app.preopt_reset_btn.disabled = True
         if unsupported is not None:
             app.preopt_preview_status.value = _preopt_small(
-                "Classical pre-optimization isn't available for this structure "
-                f"({unsupported}). This is expected for metal complexes and other "
-                "systems RDKit can't perceive bonds for — skip the classical "
-                "pre-opt and let the DFT <b>geometry optimization</b> refine the "
-                "structure instead. Make sure the starting geometry is sensible "
-                "first (the bundled inorganic examples or an XYZ paste are good "
-                "starting points).",
+                "Classical pre-optimization isn't available for this structure. "
+                f"{unsupported}. Make sure the starting geometry is sensible first "
+                "(a bundled inorganic example or an XYZ paste are good starting "
+                "points).",
                 "#b45309",
             )
         else:
             app.preopt_preview_status.value = _preopt_small(
-                "Pre-optimization (MMFF94/UFF) found <b>no meaningful change</b> — "
+                f"Pre-optimization ({engine}) found <b>no meaningful change</b> — "
                 f"RMSD {rmsd:.3f} Å. Your geometry is already reasonable, so there "
                 "is nothing to keep or revert; the calculation will use it as-is.",
                 "#444",
@@ -748,8 +746,11 @@ def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> No
         with app.preopt_preview_output:
             display(HTML(_preopt_small(f"Preview render failed: {exc}", "#b91c1c")))
 
+    from quantui.preopt import preopt_engine_label
+
+    engine = preopt_engine_label(relaxed) or "MMFF94/UFF"
     app.preopt_preview_status.value = _preopt_small(
-        f"Relaxed (MMFF94/UFF): moved <b>{rmsd:.3f} Å</b> (RMSD) from your "
+        f"Relaxed ({engine}): moved <b>{rmsd:.3f} Å</b> (RMSD) from your "
         "input. Use ⇄ or the slider below to compare input vs relaxed, then "
         "Keep it or revert.",
         "#444",
