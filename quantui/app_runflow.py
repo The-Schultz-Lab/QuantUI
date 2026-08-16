@@ -218,6 +218,65 @@ def _update_basis_fix_button(app: Any, mol: Any) -> None:
         _hide_basis_fix_button(app)
 
 
+def _spin_small(text: str, color: str = "#444") -> str:
+    return f'<span style="font-size:12.5px;color:{color}">{text}</span>'
+
+
+def on_spin_suggest(app: Any, btn: Any = None) -> None:
+    """Compute a spin-multiplicity suggestion and render it (MET.5).
+
+    Suggests only — the Apply buttons (wired to on_spin_apply) do the setting.
+    A refusal (e.g. non-d8 square-planar) or bad input is shown as a flag, not a
+    crash.
+    """
+    from quantui.spin_presets import suggest_spin_states
+
+    for b in app.spin_apply_btns:
+        b.layout.display = "none"
+    app._spin_suggested_mults = []
+
+    try:
+        s = suggest_spin_states(
+            app.spin_metal_dd.value,
+            int(app.spin_ox_si.value),
+            app.spin_geom_dd.value,
+        )
+    except ValueError as exc:
+        app.spin_helper_output.value = _spin_small(f"⚠ {exc}", "#b45309")
+        return
+
+    lines = [_spin_small(s.explanation)]
+    for c in s.caveats:
+        lines.append(_spin_small(f"⚠ {c}", "#b45309"))
+    app.spin_helper_output.value = "<br>".join(lines)
+
+    # Arm one Apply button per candidate spin state, labelled with the state.
+    app._spin_suggested_mults = [st.multiplicity for st in s.states]
+    for i, st in enumerate(s.states):
+        tag = f" ({st.label})" if st.label else ""
+        app.spin_apply_btns[i].description = (
+            f"Apply multiplicity {st.multiplicity}{tag}"
+        )
+        app.spin_apply_btns[i].layout.display = ""
+
+
+def on_spin_apply(app: Any, index: int) -> None:
+    """Set the multiplicity field from a suggested spin state (MET.5)."""
+    mults = getattr(app, "_spin_suggested_mults", [])
+    if index >= len(mults):
+        return
+    mult = mults[index]
+    try:
+        app.mult_si.value = mult
+    except Exception:  # noqa: BLE001 — out-of-range guard is best-effort
+        return
+    app.spin_helper_output.value = _spin_small(
+        f"Multiplicity set to {mult}. Remember to set the charge from your "
+        "complex — it isn't inferred.",
+        "#166534",
+    )
+
+
 def on_basis_fix(app: Any, btn: Any = None) -> None:
     """One-click MET.5 fix: set the basis to def2-SVP and hide the button."""
     try:

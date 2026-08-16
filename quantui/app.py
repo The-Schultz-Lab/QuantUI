@@ -310,6 +310,12 @@ from quantui.app_runflow import (
     on_solvent_cb_changed as _run_on_solvent_cb_changed,
 )
 from quantui.app_runflow import (
+    on_spin_apply as _run_on_spin_apply,
+)
+from quantui.app_runflow import (
+    on_spin_suggest as _run_on_spin_suggest,
+)
+from quantui.app_runflow import (
     populate_compare_list as _run_populate_compare_list,
 )
 from quantui.app_runflow import (
@@ -2004,6 +2010,13 @@ class QuantUIApp:
         self.run_btn.on_click(self._on_run_clicked)
         self.cancel_btn.on_click(self._safe_cb(self._on_cancel))
         self.basis_fix_btn.on_click(self._safe_cb(self._on_basis_fix))
+        self.spin_suggest_btn.on_click(self._safe_cb(self._on_spin_suggest))
+        self.spin_apply_btns[0].on_click(
+            self._safe_cb(lambda _b: self._on_spin_apply(0))
+        )
+        self.spin_apply_btns[1].on_click(
+            self._safe_cb(lambda _b: self._on_spin_apply(1))
+        )
         self.preopt_preview_btn.on_click(self._safe_cb(self._on_preopt_preview))
         self.preopt_accept_btn.on_click(self._safe_cb(self._on_preopt_accept))
         self.preopt_reset_btn.on_click(self._safe_cb(self._on_preopt_reset))
@@ -3502,6 +3515,12 @@ class QuantUIApp:
 
     def _on_basis_fix(self, btn=None) -> None:
         _run_on_basis_fix(self, btn)
+
+    def _on_spin_suggest(self, btn=None) -> None:
+        _run_on_spin_suggest(self, btn)
+
+    def _on_spin_apply(self, index: int) -> None:
+        _run_on_spin_apply(self, index)
 
     def _on_preopt_preview(self, btn=None) -> None:
         _run_on_preopt_preview(self, btn)
