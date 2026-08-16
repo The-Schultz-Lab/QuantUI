@@ -156,7 +156,12 @@ def on_run_clicked(app: Any, btn: Any) -> None:
                 app.run_status.value = "Adjust the settings above, then Run again."
             except Exception:  # noqa: BLE001 — status label is best-effort
                 pass
+            # MET.5: if the blocker is purely the basis (def2-SVP would clear it),
+            # offer a one-click switch rather than making the student hunt the
+            # dropdown. Only reveal it when def2-SVP actually resolves coverage.
+            _update_basis_fix_button(app, mol)
             return
+        _hide_basis_fix_button(app)
 
     # Write the header FIRST (atomic, main thread) — this also clears the
     # previous run's log via the single ``outputs`` assignment.
@@ -177,6 +182,55 @@ def on_run_clicked(app: Any, btn: Any) -> None:
     app._to_analysis_btn.layout.display = "none"
     app._analysis_empty_html.layout.display = "none"
     threading.Thread(target=app._do_run, daemon=True).start()
+
+
+# The metal-capable basis the one-click MET.5 fix switches to.
+_METAL_FIX_BASIS = "def2-SVP"
+
+
+def _hide_basis_fix_button(app: Any) -> None:
+    try:
+        app.basis_fix_btn.layout.display = "none"
+    except Exception:  # noqa: BLE001 — the button is a UI convenience only
+        pass
+
+
+def _update_basis_fix_button(app: Any, mol: Any) -> None:
+    """Show the one-click fix only when def2-SVP would resolve basis coverage.
+
+    A charge/multiplicity problem (which def2-SVP can't fix) must not trigger it,
+    so this checks the current basis genuinely lacks an element *and* def2-SVP
+    covers them all.
+    """
+    try:
+        from quantui.inorganic_guards import check_basis_coverage
+
+        current_bad = check_basis_coverage(mol.atoms, app.basis_dd.value) is not None
+        def2_ok = check_basis_coverage(mol.atoms, _METAL_FIX_BASIS) is None
+    except Exception:  # noqa: BLE001 — never let the convenience button block a run
+        current_bad = def2_ok = False
+    if current_bad and def2_ok:
+        try:
+            app.basis_fix_btn.layout.display = ""
+        except Exception:  # noqa: BLE001
+            pass
+    else:
+        _hide_basis_fix_button(app)
+
+
+def on_basis_fix(app: Any, btn: Any = None) -> None:
+    """One-click MET.5 fix: set the basis to def2-SVP and hide the button."""
+    try:
+        app.basis_dd.value = _METAL_FIX_BASIS
+    except Exception:  # noqa: BLE001 — a stale option list must not raise
+        return
+    _hide_basis_fix_button(app)
+    try:
+        app.run_status.value = (
+            f"Basis set to {_METAL_FIX_BASIS} (covers metals) — press Run again."
+        )
+    except Exception:  # noqa: BLE001 — status label is best-effort
+        pass
 
 
 def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:

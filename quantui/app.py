@@ -205,6 +205,9 @@ from quantui.app_runflow import (
     on_accumulate as _run_on_accumulate,
 )
 from quantui.app_runflow import (
+    on_basis_fix as _run_on_basis_fix,
+)
+from quantui.app_runflow import (
     on_basis_help as _run_on_basis_help,
 )
 from quantui.app_runflow import (
@@ -2000,6 +2003,7 @@ class QuantUIApp:
         # Run
         self.run_btn.on_click(self._on_run_clicked)
         self.cancel_btn.on_click(self._safe_cb(self._on_cancel))
+        self.basis_fix_btn.on_click(self._safe_cb(self._on_basis_fix))
         self.preopt_preview_btn.on_click(self._safe_cb(self._on_preopt_preview))
         self.preopt_accept_btn.on_click(self._safe_cb(self._on_preopt_accept))
         self.preopt_reset_btn.on_click(self._safe_cb(self._on_preopt_reset))
@@ -3495,6 +3499,9 @@ class QuantUIApp:
             )
         except Exception:
             pass
+
+    def _on_basis_fix(self, btn=None) -> None:
+        _run_on_basis_fix(self, btn)
 
     def _on_preopt_preview(self, btn=None) -> None:
         _run_on_preopt_preview(self, btn)

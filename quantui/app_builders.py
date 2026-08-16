@@ -1142,6 +1142,16 @@ def build_shared_widgets(
         tooltip=("Stop the running calculation at the next SCF cycle / optimizer step"),
     )
 
+    # MET.5: one-click fix shown only when a metal's basis blocks the run.
+    # Hidden until the pre-run guard reveals it; sets the basis to def2-SVP.
+    app.basis_fix_btn = widgets.Button(
+        description="Switch basis to def2-SVP",
+        button_style="warning",
+        icon="wrench",
+        layout=layout_fn(width="220px", height="36px", display="none"),
+        tooltip="Set the basis set to def2-SVP, which covers transition metals",
+    )
+
     app.log_clear_btn = widgets.Button(
         description="Clear",
         button_style="",
@@ -1565,6 +1575,7 @@ def build_run_section(app: Any, *, layout_fn: Any) -> None:
                 [
                     app.run_btn,
                     app.cancel_btn,
+                    app.basis_fix_btn,
                     # Status + elapsed/remaining chip stacked vertically so the
                     # timer never crowds/truncates the (longer) status line.
                     widgets.VBox(
