@@ -2,22 +2,31 @@
 
 **Suggests, never sets.** A transition metal's spin multiplicity is *not* fixed
 by its oxidation state alone: for an octahedral d⁴–d⁷ centre the ligand field
-decides **high-spin vs low-spin** (strong-field ligands like CN⁻/CO/NH₃ pair the
-electrons → low-spin; weak-field ligands like H₂O/halides → high-spin). This
-module turns a metal + oxidation state into the d-electron count and returns
-*both* physically reasonable spin states with a plain-language explanation, so
-the student picks the one matching their complex rather than being handed a
-single (possibly wrong) number.
+decides **high-spin vs low-spin** (strong-field ligands like CN⁻/CO/en pair the
+electrons → low-spin; weak-field ligands like H₂O/halides → high-spin; NH₃ and
+other intermediate-field ligands can go either way). This module turns a metal +
+oxidation state into the d-electron count and returns *both* physically
+reasonable spin states with a plain-language explanation, so the student picks
+the one matching their complex rather than being handed a single (possibly
+wrong) number.
+
+**Transparency over convenience.** Nothing is pre-selected for the student, and
+every assumption or enforcement is surfaced as an explicit ``caveat`` string
+(tetrahedral treated as high-spin; an unusual oxidation state; the square-planar
+restriction) rather than applied silently.
 
 Scope (per the classroom's metals): first-row transition metals (Sc–Zn) and the
 common 4d/5d centres (Ru, Rh, Pd, Pt, …). Geometries: octahedral (default,
-high/low-spin), tetrahedral (effectively always high-spin), and square-planar
-(the diamagnetic d⁸ case, e.g. Pt(II) in cisplatin). Charge is deliberately
-*not* inferred — the overall complex charge depends on the ligand charges, which
-the metal centre alone doesn't determine; the student supplies that.
+high/low-spin), tetrahedral (assumed high-spin), and square-planar — which is
+**restricted to d⁸** (the only case with a standard, unambiguous spin state,
+e.g. Pt(II) in cisplatin); a non-d⁸ square-planar request is refused with a
+clear message rather than given a shaky number. Charge is deliberately *not*
+inferred — the overall complex charge depends on the ligand charges, which the
+metal centre alone doesn't determine; the student supplies that.
 
-Pure logic — no PySCF, no widgets. Raises ``ValueError`` only for a metal /
-oxidation state outside the supported set, so a caller can fall back cleanly.
+Pure logic — no PySCF, no widgets. Raises ``ValueError`` for a metal /
+oxidation state / geometry outside the supported set, so a caller can fall back
+cleanly.
 """
 
 from __future__ import annotations
@@ -65,6 +74,41 @@ _GROUP: Dict[str, int] = {
 
 GEOMETRIES = ("octahedral", "tetrahedral", "square_planar")
 
+# Well-established oxidation states for the in-scope metals (teaching level). A
+# request outside this set isn't refused — it's computed and *flagged* ("unusual
+# … double-check"), per the transparency-over-enforcement principle.
+_COMMON_OXIDATION_STATES: Dict[str, frozenset] = {
+    "Sc": frozenset({3}),
+    "Ti": frozenset({3, 4}),
+    "V": frozenset({2, 3, 4, 5}),
+    "Cr": frozenset({2, 3, 6}),
+    "Mn": frozenset({2, 3, 4, 6, 7}),
+    "Fe": frozenset({2, 3}),
+    "Co": frozenset({2, 3}),
+    "Ni": frozenset({2, 3}),
+    "Cu": frozenset({1, 2}),
+    "Zn": frozenset({2}),
+    "Y": frozenset({3}),
+    "Zr": frozenset({4}),
+    "Nb": frozenset({5}),
+    "Mo": frozenset({4, 6}),
+    "Tc": frozenset({4, 7}),
+    "Ru": frozenset({2, 3, 4}),
+    "Rh": frozenset({3}),
+    "Pd": frozenset({2, 4}),
+    "Ag": frozenset({1}),
+    "Cd": frozenset({2}),
+    "Hf": frozenset({4}),
+    "Ta": frozenset({5}),
+    "W": frozenset({4, 6}),
+    "Re": frozenset({4, 7}),
+    "Os": frozenset({4, 6, 8}),
+    "Ir": frozenset({3, 4}),
+    "Pt": frozenset({2, 4}),
+    "Au": frozenset({1, 3}),
+    "Hg": frozenset({1, 2}),
+}
+
 
 @dataclass(frozen=True)
 class SpinState:
@@ -85,6 +129,7 @@ class SpinSuggestion:
     d_count: int
     states: List[SpinState]
     explanation: str
+    caveats: List[str]  # explicit flags the UI must surface (never applied silently)
 
     @property
     def is_ambiguous(self) -> bool:
@@ -131,14 +176,16 @@ def _states_for_geometry(d: int, geometry: str) -> List[SpinState]:
         u = _TETRAHEDRAL[d]
         return [SpinState("", u, u + 1)]
     if geometry == "square_planar":
-        # Square-planar is the classic strong-field d8 case (Ni(II)/Pd(II)/Pt(II)):
-        # diamagnetic, all electrons paired. Other d-counts in a square-planar
-        # field are uncommon in the teaching set; fall back to the octahedral
-        # unpaired count and flag the assumption in the explanation.
+        # Square-planar is only standard for d8 (Ni(II)/Pd(II)/Pt(II)):
+        # diamagnetic, all electrons paired. Other d-counts have no textbook
+        # square-planar spin state, so refuse rather than invent one.
         if d == 8:
             return [SpinState("", 0, 1)]
-        u = _OCTAHEDRAL_HS[d]
-        return [SpinState("", u, u + 1)]
+        raise ValueError(
+            f"Square-planar spin states are only standard for d8; "
+            f"this centre is d{d}. Choose octahedral or tetrahedral, or set the "
+            f"multiplicity manually."
+        )
     raise ValueError(f"geometry must be one of {GEOMETRIES}, got {geometry!r}")
 
 
@@ -153,10 +200,12 @@ def _explain(
         hs, ls = states[0], states[1]
         body = (
             f" In an {geometry} field this is ambiguous: strong-field ligands "
-            f"(e.g. CN⁻, CO, NH₃) give low-spin — {ls.n_unpaired} unpaired, "
+            f"(e.g. CN⁻, CO, en) give low-spin — {ls.n_unpaired} unpaired, "
             f"multiplicity {ls.multiplicity}; weak-field ligands (e.g. H₂O, "
             f"halides) give high-spin — {hs.n_unpaired} unpaired, multiplicity "
-            f"{hs.multiplicity}. Pick the one matching your ligands."
+            f"{hs.multiplicity}. Intermediate-field ligands like NH₃ can go "
+            f"either way depending on the metal — pick the state matching your "
+            f"complex."
         )
     elif geometry == "square_planar" and d == 8:
         body = (
@@ -176,15 +225,41 @@ def _explain(
     return head + body + tail
 
 
+def _caveats_for(
+    element: str, oxidation_state: int, d: int, geometry: str
+) -> List[str]:
+    """Explicit flags to surface — assumptions/enforcements, never applied silently."""
+    caveats: List[str] = []
+    if geometry == "tetrahedral":
+        caveats.append(
+            "Tetrahedral fields are assumed high-spin (low-spin tetrahedral "
+            "complexes are essentially unknown)."
+        )
+    if geometry == "octahedral" and d == 8:
+        caveats.append(
+            "A d8 centre is often square-planar instead (diamagnetic, "
+            "multiplicity 1) — confirm the geometry."
+        )
+    common = _COMMON_OXIDATION_STATES.get(element)
+    if common is not None and oxidation_state not in common:
+        common_str = ", ".join(f"{o:+d}" for o in sorted(common))
+        caveats.append(
+            f"{oxidation_state:+d} is an unusual oxidation state for {element} "
+            f"(common: {common_str}) — double-check it."
+        )
+    return caveats
+
+
 def suggest_spin_states(
     element: str, oxidation_state: int, geometry: str = "octahedral"
 ) -> SpinSuggestion:
     """Suggest candidate spin multiplicities for a metal centre.
 
-    Returns a :class:`SpinSuggestion` with the d-count and one or two
-    :class:`SpinState` candidates (two when the octahedral field leaves
-    high-/low-spin ambiguous). Raises ``ValueError`` for an unsupported metal,
-    an out-of-range d-count, or an unknown geometry.
+    Returns a :class:`SpinSuggestion` with the d-count, one or two
+    :class:`SpinState` candidates (two when an octahedral field leaves
+    high-/low-spin ambiguous), and a list of ``caveats`` naming every assumption
+    or enforcement in play. Raises ``ValueError`` for an unsupported metal, an
+    out-of-range d-count, an unknown geometry, or a non-d⁸ square-planar request.
     """
     if geometry not in GEOMETRIES:
         raise ValueError(f"geometry must be one of {GEOMETRIES}, got {geometry!r}")
@@ -197,4 +272,5 @@ def suggest_spin_states(
         d_count=d,
         states=states,
         explanation=_explain(element, oxidation_state, d, geometry, states),
+        caveats=_caveats_for(element, oxidation_state, d, geometry),
     )

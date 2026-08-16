@@ -110,6 +110,31 @@ class TestSquarePlanar:
         _, mults = _mults("Pd", 2, "square_planar")
         assert mults == [1]
 
+    def test_non_d8_square_planar_is_refused(self):
+        # Square-planar is only standard for d8; other d-counts must be refused
+        # (with a clear message), not given an invented number.
+        with pytest.raises(ValueError, match="d8"):
+            suggest_spin_states("Fe", 3, "square_planar")  # d5
+
+
+class TestCaveats:
+    def test_tetrahedral_flags_high_spin_assumption(self):
+        s = suggest_spin_states("Fe", 2, "tetrahedral")
+        assert any("high-spin" in c.lower() for c in s.caveats)
+
+    def test_unusual_oxidation_state_is_flagged(self):
+        # Fe(IV) is a d4 centre but an unusual oxidation state for Fe.
+        s = suggest_spin_states("Fe", 4, "octahedral")
+        assert any("unusual" in c.lower() for c in s.caveats)
+
+    def test_common_oxidation_state_not_flagged_as_unusual(self):
+        s = suggest_spin_states("Fe", 3, "octahedral")
+        assert not any("unusual" in c.lower() for c in s.caveats)
+
+    def test_octahedral_d8_notes_square_planar_alternative(self):
+        s = suggest_spin_states("Ni", 2, "octahedral")  # d8
+        assert any("square-planar" in c.lower() for c in s.caveats)
+
 
 class TestTetrahedral:
     @pytest.mark.parametrize(
