@@ -91,5 +91,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install pre-commit
 
-      - name: Run pre-commit (black + ruff + mypy)
+      - name: Run pre-commit (black + ruff)
         run: pre-commit run --all-files
+
+      # mypy is deliberately NOT run through the pre-commit step above.
+      # M-TYPECHECK TYPE.2: the mypy hook is pinned `stages: [pre-push]` (kept
+      # off every commit — it's slow) and `pre-commit run --all-files` only
+      # runs default-stage hooks, so it silently skipped mypy here for months
+      # while this job's name and the branch-protection check both claimed
+      # type checking was happening. A `--hook-stage pre-push` flag would fix
+      # today's instance but not the class of bug: the next hook to acquire an
+      # unusual `stages:` pin would vanish from CI the same way, silently. An
+      # explicit step that runs mypy directly has no stage-filtering machinery
+      # to hide behind.
+      - name: Type check (mypy)
+        run: |
+          pip install "mypy~=1.10.0" numpy types-requests
+          mypy --ignore-missing-imports quantui/

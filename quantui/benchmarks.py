@@ -56,7 +56,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import IO, Any, Callable, List, Optional, cast
 
 # ---------------------------------------------------------------------------
 # Benchmark suite definition
@@ -1022,12 +1022,24 @@ def _calibration_worker(
                 f"\n========= {_dt.utcnow().isoformat()} :: {label} =========\n"
             )
             per_calc_buf = _io.StringIO()
-            stream = _TeeStream(log_fh, per_calc_buf)
+            # _TeeStream implements only .write() — the one method any of
+            # optimize_geometry / run_freq_calc / run_in_session's
+            # progress_stream actually calls in these code paths (no
+            # .flush(), confirmed). The cast documents that narrower-than-
+            # declared usage rather than widening _TeeStream into a full
+            # IO[str] implementation it doesn't need.
+            stream = cast(IO[str], _TeeStream(log_fh, per_calc_buf))
 
             from quantui.molecule import Molecule as _Molecule
 
             mol = _Molecule(atoms, coords, charge=charge, multiplicity=mult)
 
+            # `res` genuinely holds one of three unrelated result types
+            # depending on `calc_type` — each branch below reads only its own
+            # type's attributes, and the shared use after the if/elif
+            # (_save_calibration_step) takes it untyped. Annotate Any so mypy
+            # doesn't pin the variable to whichever branch it sees first.
+            res: Any
             if calc_type == "geometry_opt":
                 from quantui.optimizer import optimize_geometry as _opt
 
@@ -1348,12 +1360,20 @@ def run_calibration(
         # accept. Modern callers (do_calibration) take both; tests pass
         # ``lambda *a: ...``.
         try:
-            progress_cb(*args, live_message=live_message, step=step)
+            # ProgressCallback declares only the 5 positional params — these
+            # richer, newer kwargs are a deliberate, untyped progressive
+            # enhancement: try the richest signature a modern callback might
+            # accept, and let TypeError (a callback that doesn't) fall
+            # through to a plainer call. There's no static type for
+            # "optionally accepts extra kwargs, probe at runtime".
+            progress_cb(  # type: ignore[call-arg]
+                *args, live_message=live_message, step=step
+            )
             return
         except TypeError:
             pass
         try:
-            progress_cb(*args, live_message=live_message)
+            progress_cb(*args, live_message=live_message)  # type: ignore[call-arg]
             return
         except TypeError:
             pass

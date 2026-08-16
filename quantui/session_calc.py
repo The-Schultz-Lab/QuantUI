@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass
-from typing import IO, Any, List, Optional
+from typing import IO, Any, Dict, List, Optional
 
 from .molecule import Molecule
 
@@ -140,7 +140,7 @@ class SessionResult:
 # externally — same pattern as PBE-D3 below. This is D3, not the
 # original Chai 2008 D2; the empirical dispersion energies differ by
 # a few percent for most systems but the functional family is the same.
-_XC_ALIAS: dict = {
+_XC_ALIAS: Dict[str, str] = {
     "M06-L": "m06l",
     "wB97X-D": "wb97x",  # bare functional; D3 applied via _NEEDS_D3
     "CAM-B3LYP": "camb3lyp",

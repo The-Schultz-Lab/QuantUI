@@ -22,7 +22,7 @@ import time
 import uuid as _uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, List, Literal, Optional
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, List, Literal, Optional, cast
 
 import ipywidgets as widgets
 from IPython import get_ipython
@@ -1025,6 +1025,8 @@ class QuantUIApp:
         _clear_log_cache_confirm_btn: Any
         _exit_btn: Any
         _exit_output: Any
+        _exit_cancel_btn: Any
+        _exit_warn_html: Any
         _help_btn: Any
         _issue_btn: Any
         _issue_cancel_btn: Any
@@ -1039,6 +1041,7 @@ class QuantUIApp:
         _cal_run_btn: Any
         _cal_step_label: Any
         _cal_stop_btn: Any
+        _cal_skip_btn: Any
         _log_clear_btn: Any
         _log_output_html: Any
         _log_source_lbl: Any
@@ -1062,6 +1065,7 @@ class QuantUIApp:
         _status_tab_panel: Any
         _theme_style: Any
         _welcome_html: Any
+        _welcome_header: Any
         _activity_btn: Any
         advanced_accordion: Any
         calc_setup_panel: Any
@@ -1102,6 +1106,8 @@ class QuantUIApp:
         history_basis_dd: Any
         history_date_from: Any
         history_date_to: Any
+        _history_calc_chips: Any
+        _history_status_chips: Any
         lib_category_dd: Any
         lib_search_txt: Any
         lib_results_dd: Any
@@ -1115,6 +1121,7 @@ class QuantUIApp:
         results_path_lbl: Any
         run_btn: Any
         cancel_btn: Any
+        basis_fix_btn: Any
         run_output: Any
         run_panel: Any
         run_status: Any
@@ -1145,6 +1152,7 @@ class QuantUIApp:
         _freq_seed_dd: Any
         _freq_seed_note: Any
         _freq_seed_refresh_btn: Any
+        _tddft_seed_dd: Any
         _go_analysis_btn: Any
         _go_results_btn: Any
         _ir_export_btn: Any
@@ -1154,8 +1162,15 @@ class QuantUIApp:
         _ir_fwhm_slider: Any
         _ir_mode_toggle: Any
         _ir_accordion: Any
+        _ir_copy_data_btn: Any
         _iso_accordion: Any
         _iso_generate_btn: Any
+        _iso_cancel_btn: Any
+        _iso_colors_dd: Any
+        _iso_export_cube_btn: Any
+        _iso_isovalue_slider: Any
+        _iso_opacity_slider: Any
+        _iso_resolution_dd: Any
         _last_result_dir: Any
         _nmr_accordion: Any
         _nmr_output: Any
@@ -1165,17 +1180,25 @@ class QuantUIApp:
         _orb_export_btn: Any
         _orb_export_fmt_dd: Any
         _orb_export_status: Any
+        _orb_copy_data_btn: Any
         _orb_iso_controls: Any
         _orb_iso_output: Any
         _orb_n_orb_input: Any
+        _orb_index_input: Any
+        _orb_png_inbox: Any
         _orb_toggle: Any
         _orb_ymax_input: Any
         _orb_ymin_input: Any
         _pes_export_btn: Any
         _pes_export_fmt_dd: Any
         _pes_export_status: Any
+        _pes_copy_data_btn: Any
         _pes_plot_html: Any
         _pes_scan_accordion: Any
+        _reorg_view_toggle: Any
+        _reorg_overlay_pair: Any
+        _reorg_exaggerate: Any
+        _reorg_mode_dd: Any
         _result_dir_label: Any
         _result_log_accordion: Any
         _result_log_output: Any
@@ -1194,6 +1217,7 @@ class QuantUIApp:
         _uv_export_btn: Any
         _uv_export_fmt_dd: Any
         _uv_export_status: Any
+        _uv_copy_data_btn: Any
         _uv_fwhm_slider: Any
         _uv_mode_toggle: Any
         _to_analysis_btn: Any
@@ -1222,6 +1246,7 @@ class QuantUIApp:
         export_pdb_btn: Any
         export_status: Any
         export_xyz_btn: Any
+        _export_bundle_btn: Any
         fmax_fi: Any
         log_clear_btn: Any
         max_steps_si: Any
@@ -1234,6 +1259,13 @@ class QuantUIApp:
         _basis_card_html: Any
         _descriptor_cards_box: Any
         _open_shell_hint: Any
+        spin_metal_dd: Any
+        spin_ox_si: Any
+        spin_geom_dd: Any
+        spin_suggest_btn: Any
+        spin_helper_output: Any
+        spin_apply_btns: Any
+        spin_helper_box: Any
         nstates_si: Any
         perf_estimate_html: Any
         post_calc_panel: Any
@@ -1252,6 +1284,11 @@ class QuantUIApp:
         vib_accordion: Any
         vib_mode_dd: Any
         vib_output: Any
+        vib_prev_btn: Any
+        vib_next_btn: Any
+        _vib_export_btn: Any
+        _vib_export_status: Any
+        _last_vib_molecule: Any
 
     def __init__(self) -> None:
         # ── Instance state ────────────────────────────────────────────────
@@ -2610,15 +2647,15 @@ class QuantUIApp:
 
         if suffix in {".html", ".htm"}:
             try:
-                raw = path.read_text(encoding="utf-8", errors="replace")
-                if len(raw) <= 1_000_000:
+                html_text = path.read_text(encoding="utf-8", errors="replace")
+                if len(html_text) <= 1_000_000:
                     # Sandboxed iframe via srcdoc — embedded JS can't
                     # reach the parent app.
                     iframe_html = (
                         '<iframe sandbox="allow-scripts" '
                         f'style="width:100%;height:400px;border:1px solid {_theme.BORDER};'
                         'border-radius:4px" '
-                        f'srcdoc="{_html.escape(raw, quote=True)}"></iframe>'
+                        f'srcdoc="{_html.escape(html_text, quote=True)}"></iframe>'
                     )
                     with self._files_preview_output:
                         display(HTML(iframe_html))
@@ -3090,7 +3127,11 @@ class QuantUIApp:
                 # toggled backends on the Analysis tab.
                 html = _render_molecule_html(
                     self._analysis_displayed_molecule,
-                    backend=str(chosen),
+                    # VizBackend is a StrEnum whose only members are
+                    # "py3dmol"/"plotlymol", a subset of render_molecule_html's
+                    # accepted Literal — cast documents that, str() alone widens
+                    # to plain str for mypy.
+                    backend=cast(Literal["auto", "py3dmol", "plotlymol"], str(chosen)),
                     style=self._viz_style,
                     lighting=self._viz_lighting,
                     bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
@@ -3151,7 +3192,10 @@ class QuantUIApp:
         try:
             from quantui.gpu_offload import is_gpu_available, probe_gpu
 
-            is_gpu_available.cache_clear()
+            # cache_clear is forwarded from _probe_gpu's lru_cache onto this
+            # function at definition time (gpu_offload.py); mypy can't see a
+            # monkey-patched attribute across the module boundary.
+            is_gpu_available.cache_clear()  # type: ignore[attr-defined]
             state = probe_gpu()
         except Exception:  # noqa: BLE001 — a probe failure must not break the UI
             state = (False, None, "")
