@@ -1994,6 +1994,14 @@ class QuantUIApp:
         self.basis_dd.observe(self._safe_cb(self._update_notes), names="value")
         # Multiplicity drives the open-shell hint (part of _update_notes).
         self.mult_si.observe(self._safe_cb(self._update_notes), names="value")
+        # Keep the active molecule's charge/multiplicity in step with the fields,
+        # so an edit here (or the spin-state helper's Apply) actually reaches the
+        # run — the calc reads mol.charge/mol.multiplicity, and the pre-run guard
+        # reads the widgets, so the two must not drift apart.
+        self.charge_si.observe(
+            self._safe_cb(self._sync_charge_to_molecule), names="value"
+        )
+        self.mult_si.observe(self._safe_cb(self._sync_mult_to_molecule), names="value")
         self.method_dd.observe(self._safe_cb(self._update_estimate), names="value")
         self.basis_dd.observe(self._safe_cb(self._update_estimate), names="value")
         # Unfinished-calculations list (CHK.6)
@@ -4144,6 +4152,18 @@ class QuantUIApp:
         _run_on_help_topic_changed(self, change)
 
     # ══ LOGIC METHODS ════════════════════════════════════════════════════════
+
+    def _sync_charge_to_molecule(self, change=None) -> None:
+        """Push a Charge-field edit onto the active molecule (see the observer
+        wiring): the run reads ``mol.charge``, so the field must not drift."""
+        if self._molecule is not None:
+            self._molecule.charge = int(self.charge_si.value)
+
+    def _sync_mult_to_molecule(self, change=None) -> None:
+        """Push a Multiplicity-field edit (or a spin-helper Apply) onto the
+        active molecule: the run reads ``mol.multiplicity``."""
+        if self._molecule is not None:
+            self._molecule.multiplicity = int(self.mult_si.value)
 
     def _set_molecule(self, mol: Molecule, label: str = "") -> None:
         """Update shared state and refresh dependent widgets."""

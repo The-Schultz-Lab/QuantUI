@@ -426,6 +426,9 @@ def visualize_molecule(
                 exc,
             )
             fallback_style = style if style in _PY3DMOL_STYLES else "ball+stick"
+            # **kwargs is intentionally not forwarded: it carries PlotlyMol-only
+            # options (e.g. resolution) that visualize_molecule_py3dmol doesn't
+            # accept — the same reason the backend=="py3dmol" path above omits it.
             return visualize_molecule_py3dmol(
                 molecule,
                 style=_validate_py3dmol_style(fallback_style),
