@@ -90,6 +90,7 @@ _BASIS_FAMILY_STYLE = {
     "pople": ("#0d9488", "#f0fdfa", _ICON_BASIS_POPLE),
     "cc": ("#15803d", "#f0fdf4", _ICON_BASIS_CC),
     "def2": ("#c2410c", "#fff7ed", _ICON_BASIS_DEF2),
+    "ecp": ("#7c3aed", "#f5f3ff", _ICON_BASIS_DEF2),
 }
 
 # ── Basis family classification + one-line copy ──────────────────────────────
@@ -113,6 +114,11 @@ _BASIS_COPY = {
         "Optimised for DFT; def2-SVP a solid default, def2-TZVP near "
         "complete-basis accuracy.",
     ),
+    "ecp": (
+        "ECP (LANL2DZ)",
+        "Effective core potential for heavy metals; pairs a small light-atom "
+        "basis with an ECP on the metal.",
+    ),
 }
 
 
@@ -124,6 +130,8 @@ def basis_family(basis: str) -> str:
         return "cc"
     if "def2" in basis:
         return "def2"
+    if basis.upper().startswith("LANL"):
+        return "ecp"
     # 3-21G and the whole 6-31G family are Pople split-valence sets.
     if basis.startswith("6-31") or basis == "3-21G" or basis.startswith("6-311"):
         return "pople"

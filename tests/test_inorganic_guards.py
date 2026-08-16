@@ -68,6 +68,13 @@ class TestBasisCoverage:
     def test_def2_covers_metals(self):
         assert check_basis_coverage(["C", "N", "Pt", "Zn"], "def2-SVP") is None
 
+    def test_lanl2dz_covers_metals_and_ligands(self):
+        # MET.5: LANL2DZ is offered for heavy metals and (unlike a mixed-basis
+        # setup) its PySCF definition also covers the ligand atoms, so a whole
+        # complex runs under it as QuantUI's single molecule-wide basis.
+        assert check_basis_coverage(["C", "H", "N", "Cl", "Pt"], "LANL2DZ") is None
+        assert check_basis_coverage(["Fe", "Ru", "Pd"], "LANL2DZ") is None
+
     def test_organic_basis_covers_organics(self):
         assert check_basis_coverage(["C", "H", "O", "N"], "6-31G*") is None
 

@@ -174,6 +174,14 @@ class PySCFCalculation:
                 "def2-SVP is a good default for DFT calculations; def2-TZVP gives "
                 "near-complete-basis accuracy for most properties."
             )
+        elif self.basis.upper().startswith("LANL"):
+            notes.append(
+                "**LANL2DZ**: A double-zeta basis with a Los Alamos effective "
+                "core potential (ECP) on heavy elements — it replaces the core "
+                "electrons of a heavy metal with a potential, making transition "
+                "and heavy-metal calculations tractable. A common alternative to "
+                "the def2 sets for the heaviest centres."
+            )
 
         if self.molecule.multiplicity > 1:
             notes.append(
