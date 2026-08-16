@@ -66,6 +66,46 @@ def _copy_molecule(molecule: Molecule) -> Molecule:
     )
 
 
+def preopt_support(molecule: Molecule) -> Optional[str]:
+    """Why a bonded-FF pre-opt can't run on ``molecule``, or ``None`` if it can.
+
+    Mirrors the perception steps in :func:`_rdkit_ff_relax` (parse →
+    ``DetermineBonds`` → MMFF/UFF parameter check) **without minimizing**, so a
+    caller can tell a genuine *"already optimal, nothing moved"* no-op apart from
+    *"the classical force field has no model for this molecule."* The latter is
+    the metal-complex case (M-METAL MET.4): a transition metal makes
+    ``DetermineBonds`` raise ``"Atom … has no valences defined"``, and
+    :func:`preoptimize` then returns the geometry unchanged at RMSD 0.0 — which
+    must **not** be reported as "your geometry is already reasonable."
+
+    Returns ``None`` when a bonded force field can be built, otherwise a short
+    plain-language reason. Never raises.
+    """
+    if not _RDKIT_AVAILABLE:
+        return "RDKit is not available"
+    from rdkit import Chem
+    from rdkit.Chem import AllChem, rdDetermineBonds
+
+    xyz_block = (
+        f"{len(molecule.atoms)}\n{molecule.get_formula()}\n"
+        f"{molecule.to_xyz_string()}\n"
+    )
+    rdmol = Chem.MolFromXYZBlock(xyz_block)
+    if rdmol is None:
+        return "RDKit could not parse the geometry"
+    try:
+        rdDetermineBonds.DetermineBonds(rdmol, charge=int(molecule.charge))
+    except Exception as exc:  # noqa: BLE001 — perception failure is the signal
+        # Transition metals land here ("Atom N … has no valences defined"), as do
+        # geometries too distorted for distance-based bond perception.
+        return f"RDKit could not perceive bonds ({type(exc).__name__})"
+    if AllChem.MMFFHasAllMoleculeParams(rdmol) or AllChem.UFFHasAllMoleculeParams(
+        rdmol
+    ):
+        return None
+    return "no MMFF or UFF force-field parameters cover these elements"
+
+
 # Interactive-preview animation tuning (preoptimize_with_trajectory). The
 # trajectory is captured as fresh minimizations from the input at increasing
 # iteration budgets (see _rdkit_ff_relax). _PREVIEW_FRAMES is how many are shown

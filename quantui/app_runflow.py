@@ -636,23 +636,41 @@ def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> No
     app.preopt_preview_btn.disabled = False
 
     if rmsd <= _PREOPT_NEGLIGIBLE_RMSD_A:
-        # Nothing meaningful to show or decide. An animation of a geometry that
-        # does not visibly move, plus a Keep/Revert choice between two
-        # effectively identical structures, reads as "something happened, and
-        # you must now judge it" — when the honest answer is "your geometry was
-        # already fine". Report the number and stop.
+        # Nothing to show or decide — but a 0 Å result has two very different
+        # causes, and conflating them misleads (M-METAL MET.4). Either the
+        # bonded FF ran and the geometry was already fine (an honest no-op), or
+        # the FF could not build a model at all — a metal complex, where
+        # DetermineBonds raises and preoptimize() returns the input unchanged.
+        # Calling the latter "your geometry is already reasonable" tells a
+        # student their scattered metal structure is good. Probe which case this
+        # is and word it truthfully.
+        from quantui.preopt import preopt_support
+
+        unsupported = preopt_support(relaxed)
         app._preopt_relaxed_mol = None
         app.preopt_preview_output.clear_output()
         app.preopt_preview_output.layout.display = "none"
         app._preopt_actions_box.layout.display = "none"
         app.preopt_accept_btn.disabled = True
         app.preopt_reset_btn.disabled = True
-        app.preopt_preview_status.value = _preopt_small(
-            "Pre-optimization (MMFF94/UFF) found <b>no meaningful change</b> — "
-            f"RMSD {rmsd:.3f} Å. Your geometry is already reasonable, so there "
-            "is nothing to keep or revert; the calculation will use it as-is.",
-            "#444",
-        )
+        if unsupported is not None:
+            app.preopt_preview_status.value = _preopt_small(
+                "Classical pre-optimization isn't available for this structure "
+                f"({unsupported}). This is expected for metal complexes and other "
+                "systems RDKit can't perceive bonds for — skip the classical "
+                "pre-opt and let the DFT <b>geometry optimization</b> refine the "
+                "structure instead. Make sure the starting geometry is sensible "
+                "first (the bundled inorganic examples or an XYZ paste are good "
+                "starting points).",
+                "#b45309",
+            )
+        else:
+            app.preopt_preview_status.value = _preopt_small(
+                "Pre-optimization (MMFF94/UFF) found <b>no meaningful change</b> — "
+                f"RMSD {rmsd:.3f} Å. Your geometry is already reasonable, so there "
+                "is nothing to keep or revert; the calculation will use it as-is.",
+                "#444",
+            )
         try:
             app._activity_end(kind="ui")
         except Exception:
