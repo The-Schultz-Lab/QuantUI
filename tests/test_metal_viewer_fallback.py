@@ -75,3 +75,25 @@ class TestMetalViewerFallback:
         # py3Dmol to fall back to, that must propagate rather than be swallowed.
         with pytest.raises(ValueError):
             viz.visualize_molecule(_mol("inorganic-cisplatin"), backend="plotlymol")
+
+
+class TestCoordinationBonds:
+    """M-METAL MET.6: the py3Dmol viewer draws dashed metal↔donor bonds so a
+    coordination metal is never a lone dot."""
+
+    def test_metal_html_has_dashed_cylinders(self):
+        pytest.importorskip("py3Dmol")
+        from quantui.visualization_py3dmol import render_molecule_html
+
+        html = render_molecule_html(
+            _mol("inorganic-cisplatin"), backend="py3dmol", width=300, height=250
+        )
+        assert "addCylinder" in html  # coordination bonds drawn
+        assert "dashed" in html
+
+    def test_organic_html_has_no_cylinders(self):
+        pytest.importorskip("py3Dmol")
+        from quantui.visualization_py3dmol import render_molecule_html
+
+        html = render_molecule_html(_water(), backend="py3dmol", width=300, height=250)
+        assert "addCylinder" not in html

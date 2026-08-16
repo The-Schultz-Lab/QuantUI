@@ -181,13 +181,54 @@ def visualize_molecule_py3dmol(
     else:
         view.setStyle({style: {}})
 
+    # MET.6: 3Dmol.js's own bond perception leaves a coordination metal as a lone
+    # dot — it draws no bonds to the centre. Draw the metal↔donor bonds ourselves,
+    # dashed (GaussView convention), from the same distance-based connectivity the
+    # salt-warning uses. No-op for purely organic molecules.
+    _add_coordination_bonds(view, molecule)
+
     # Set background
     view.setBackgroundColor(bgcolor)
 
-    # Zoom to fit
+    # Zoom to fit — includes the (now bonded) metal, so it is never off-screen.
     view.zoomTo()
 
     return view
+
+
+# Dashed coordination-bond styling (py3Dmol addCylinder): a thin gray dashed
+# cylinder from the metal centre to each donor atom.
+_COORD_BOND_RADIUS = 0.06
+_COORD_BOND_COLOR = "#777777"
+
+
+def _add_coordination_bonds(view, molecule) -> None:
+    """Draw dashed metal↔donor cylinders so a metal centre isn't a lone dot.
+
+    Uses the distance-based, metal-aware connectivity finder. Best-effort: any
+    failure (or a molecule with no metal) simply leaves the view unchanged.
+    """
+    try:
+        from quantui.connectivity import metal_coordination_bonds
+
+        coords = molecule.coordinates
+        bonds = metal_coordination_bonds(molecule.atoms, coords)
+        for i, j in bonds:
+            xi, yi, zi = coords[i]
+            xj, yj, zj = coords[j]
+            view.addCylinder(
+                {
+                    "start": {"x": float(xi), "y": float(yi), "z": float(zi)},
+                    "end": {"x": float(xj), "y": float(yj), "z": float(zj)},
+                    "radius": _COORD_BOND_RADIUS,
+                    "color": _COORD_BOND_COLOR,
+                    "dashed": True,
+                    "fromCap": 1,
+                    "toCap": 1,
+                }
+            )
+    except Exception:  # noqa: BLE001 — bond decoration must never break the viewer
+        logger.debug("coordination-bond overlay skipped", exc_info=True)
 
 
 _PY3DMOL_STYLES: tuple[Py3DmolStyle, ...] = (

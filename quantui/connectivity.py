@@ -21,7 +21,7 @@ Pure logic — no RDKit, no PySCF, no widgets. Never raises on ordinary input.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 # Covalent radii in Å (Cordero et al., Dalton Trans. 2008, 2832). A broad subset
 # covering the organic elements, common heteroatoms/ions, and the transition /
@@ -86,8 +86,103 @@ _FALLBACK_RADIUS = 0.75
 DEFAULT_TOLERANCE = 1.3
 
 
+# Coordination-complex metal centres: the transition metals plus the common
+# heavy main-group metals seen as centres. RDKit's organic bond perception can't
+# bond these, and 3Dmol.js's own perception leaves them as lone dots — so the
+# viewer draws their bonds explicitly (MET.6).
+COORDINATION_METALS = frozenset(
+    {
+        # 3d / 4d / 5d transition metals
+        "Sc",
+        "Ti",
+        "V",
+        "Cr",
+        "Mn",
+        "Fe",
+        "Co",
+        "Ni",
+        "Cu",
+        "Zn",
+        "Y",
+        "Zr",
+        "Nb",
+        "Mo",
+        "Tc",
+        "Ru",
+        "Rh",
+        "Pd",
+        "Ag",
+        "Cd",
+        "Hf",
+        "Ta",
+        "W",
+        "Re",
+        "Os",
+        "Ir",
+        "Pt",
+        "Au",
+        "Hg",
+        # common heavy main-group metal centres
+        "Al",
+        "Ga",
+        "In",
+        "Sn",
+        "Pb",
+        "Bi",
+    }
+)
+
+
 def _radius(symbol: str) -> float:
     return COVALENT_RADII.get(symbol, _FALLBACK_RADIUS)
+
+
+def is_metal(symbol: str) -> bool:
+    """True for a coordination-complex metal centre (see COORDINATION_METALS)."""
+    return symbol in COORDINATION_METALS
+
+
+def covalent_bonds(
+    atoms: Sequence[str],
+    coords: Sequence[Sequence[float]],
+    tolerance: float = DEFAULT_TOLERANCE,
+) -> List[Tuple[int, int]]:
+    """All bonded atom-index pairs (i < j) by covalent-radii distance.
+
+    Two atoms *i*, *j* are bonded when ``dist(i, j) <= tolerance * (r_i + r_j)`` —
+    the same, metal-aware criterion :func:`covalent_components` groups on.
+    """
+    n = len(atoms)
+    bonds: List[Tuple[int, int]] = []
+    for i in range(n):
+        ri = _radius(atoms[i])
+        xi, yi, zi = coords[i][0], coords[i][1], coords[i][2]
+        for j in range(i + 1, n):
+            threshold = tolerance * (ri + _radius(atoms[j]))
+            dx = xi - coords[j][0]
+            dy = yi - coords[j][1]
+            dz = zi - coords[j][2]
+            if dx * dx + dy * dy + dz * dz <= threshold * threshold:
+                bonds.append((i, j))
+    return bonds
+
+
+def metal_coordination_bonds(
+    atoms: Sequence[str],
+    coords: Sequence[Sequence[float]],
+    tolerance: float = DEFAULT_TOLERANCE,
+) -> List[Tuple[int, int]]:
+    """Bonds with a metal centre at one end — the coordination bonds to draw.
+
+    These are exactly the bonds RDKit / 3Dmol.js miss on a coordination complex,
+    so the viewer draws them itself (MET.6). Purely organic bonds are excluded
+    (3Dmol.js already renders those).
+    """
+    return [
+        (i, j)
+        for (i, j) in covalent_bonds(atoms, coords, tolerance)
+        if is_metal(atoms[i]) or is_metal(atoms[j])
+    ]
 
 
 def covalent_components(
@@ -105,17 +200,9 @@ def covalent_components(
     if n == 0:
         return []
     adj: List[List[int]] = [[] for _ in range(n)]
-    for i in range(n):
-        ri = _radius(atoms[i])
-        xi, yi, zi = coords[i][0], coords[i][1], coords[i][2]
-        for j in range(i + 1, n):
-            threshold = tolerance * (ri + _radius(atoms[j]))
-            dx = xi - coords[j][0]
-            dy = yi - coords[j][1]
-            dz = zi - coords[j][2]
-            if dx * dx + dy * dy + dz * dz <= threshold * threshold:
-                adj[i].append(j)
-                adj[j].append(i)
+    for i, j in covalent_bonds(atoms, coords, tolerance):
+        adj[i].append(j)
+        adj[j].append(i)
 
     seen = [False] * n
     components: List[List[int]] = []

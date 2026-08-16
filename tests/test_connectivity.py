@@ -10,9 +10,12 @@ from __future__ import annotations
 import pytest
 
 from quantui.connectivity import (
+    covalent_bonds,
     covalent_components,
     describe_disconnection,
     is_disconnected,
+    is_metal,
+    metal_coordination_bonds,
 )
 from quantui.molecule import Molecule
 
@@ -87,6 +90,40 @@ class TestDescribeDisconnection:
         msg = describe_disconnection(atoms, coords)
         assert msg is not None
         assert "Pt" in msg
+
+
+class TestBonds:
+    def test_covalent_bonds_water(self):
+        atoms, coords = _water_coords()
+        bonds = covalent_bonds(atoms, coords)
+        # Two O–H bonds, no H–H.
+        assert sorted(bonds) == [(0, 1), (0, 2)]
+
+    def test_is_metal(self):
+        assert is_metal("Pt") and is_metal("Fe") and is_metal("Co")
+        assert not is_metal("C") and not is_metal("N") and not is_metal("H")
+
+    def test_metal_coordination_bonds_cisplatin(self):
+        atoms, coords = _cisplatin()
+        bonds = metal_coordination_bonds(atoms, coords)
+        # Square-planar Pt(II): 4 coordination bonds, all involving Pt.
+        assert len(bonds) == 4
+        for i, j in bonds:
+            assert is_metal(atoms[i]) or is_metal(atoms[j])
+        partners = sorted(atoms[j if is_metal(atoms[i]) else i] for i, j in bonds)
+        assert partners == ["Cl", "Cl", "N", "N"]
+
+    def test_metal_coordination_bonds_counts(self):
+        from quantui import molecule_library as ml
+
+        expected = {"inorganic-hexaamminecobaltiii": 6, "inorganic-ferrocene": 10}
+        for eid, n in expected.items():
+            e = next(x for x in ml.iter_entries() if x["id"] == eid)
+            assert len(metal_coordination_bonds(e["atoms"], e["coordinates"])) == n
+
+    def test_organic_has_no_coordination_bonds(self):
+        atoms, coords = _water_coords()
+        assert metal_coordination_bonds(atoms, coords) == []
 
 
 @pytest.fixture
