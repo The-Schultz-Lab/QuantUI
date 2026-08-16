@@ -59,13 +59,13 @@ class TestBulkManifest:
 
 class TestBulkInStore:
     def test_total_count_includes_bulk(self):
-        assert ml.count() >= 176 + len(_bulk_entries())
+        assert ml.count() >= 179 + len(_bulk_entries())
 
     def test_bulk_excluded_from_preset_dict(self):
         # The browse dropdown must NOT balloon with thousands of bulk entries.
         d = config.MOLECULE_LIBRARY
         assert all(not k.startswith("qm9-") for k in d)
-        assert len(d) == 176  # presets + curated only
+        assert len(d) == 179  # presets + curated only (+3 MET.9 inorganics)
 
     def test_bulk_category_present(self):
         assert "bulk-qm9" in ml.categories()
