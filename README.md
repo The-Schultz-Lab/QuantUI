@@ -20,11 +20,12 @@ research and classroom use.
 
 ## What it does
 
-- **Molecule input** — paste XYZ coordinates, browse an indexed three-tier
-  bundled library (20 presets + 156 curated molecules + ~1,900 QM9 structures,
-  searchable by name/formula), or run a structure search by name, SMILES,
-  InChI, PubChem CID, InChIKey, or CAS number (PubChem → NCI CACTUS → offline
-  bundled-library fallback; SMILES/InChI resolve locally with no network)
+- **Molecule input** — paste XYZ coordinates, browse an indexed bundled library
+  (organic presets + curated molecules + ~1,900 QM9 structures + **14
+  ready-to-run coordination complexes**, searchable by name/formula), or run a
+  structure search by name, SMILES, InChI, PubChem CID, InChIKey, or CAS number
+  (PubChem → NCI CACTUS → offline bundled-library fallback; SMILES/InChI resolve
+  locally with no network)
 - **Offline-first** — runs with no internet: the bundled molecule library and
   the 3D viewer's JavaScript (3Dmol.js) are vendored, so structure lookup and
   every 3D view work in an air-gapped classroom. (Network is used only for the
@@ -48,6 +49,18 @@ research and classroom use.
   animation; vibrational frequency analysis with animated normal modes,
   user-tunable playback FPS, and a per-result-directory disk cache so mode
   switches on repeat visits and history replay are instant
+- **Inorganic / coordination complexes** — first-class support for
+  transition-metal chemistry the organic pipeline can't handle: 14 bundled
+  metal complexes (octahedral / tetrahedral / square-planar; aqua, ammine,
+  cyanide, carbonyl, halide, oxo) with correct charge and spin; a pre-run guard
+  that catches a metal on an incompatible basis (nudges to def2-SVP / LANL2DZ)
+  and an impossible charge/multiplicity before the calculation starts; a
+  **spin-state helper** that suggests a multiplicity from a metal centre's
+  oxidation state and geometry (both high- and low-spin where the ligand field
+  decides — you pick); optional **GFN-FF (xtb) pre-optimization** that relaxes a
+  metal complex the classical organic force field can't; a warning when a name
+  search returns a disconnected salt instead of the coordinated complex; and a
+  viewer that draws the coordination bonds so the metal is never a lone dot
 - **Results persistence** — every calculation is saved automatically to a
   timestamped directory; a built-in browser lets you reload past results
   after a kernel restart; the full `pyscf.log` is shown inline
@@ -163,6 +176,26 @@ and result cards will display the compute device.
 
 Whenever gpu4pyscf can't offload a particular call, QuantUI falls back
 to CPU automatically and the result card reflects which device ran.
+
+### Optional: GFN-FF metal pre-optimization (xtb)
+
+The classical (MMFF/UFF) pre-optimizer relies on RDKit's organic valence
+model, which can't handle a transition metal. Install
+[xtb](https://github.com/grimme-lab/xtb) to enable **GFN-FF**, a general
+force field that relaxes coordination complexes across the whole periodic
+table. Fully optional — without it, metal pre-opt simply reports that it
+isn't available and points you to the DFT geometry optimization.
+
+```bash
+# Linux (PyPI wheels bundle the compiled library):
+pip install quantui[xtb]
+
+# Windows / macOS (no PyPI wheel — use conda-forge):
+conda install -c conda-forge xtb-python
+```
+
+QuantUI detects xtb automatically and routes metal pre-optimizations through
+GFN-FF; organic molecules still use the faster RDKit force field.
 
 ---
 
@@ -365,7 +398,13 @@ Five step-by-step notebooks in [`notebooks/tutorials/`](https://github.com/The-S
 ### Basis sets
 
 STO-3G (fast, good for learning) → 3-21G → 6-31G / 6-31G\* / 6-31G\*\* →
-cc-pVDZ / cc-pVTZ → def2-SVP / def2-TZVP
+cc-pVDZ / cc-pVTZ → def2-SVP / def2-TZVP → LANL2DZ
+
+For **transition metals and heavy elements**, use **def2-SVP** / **def2-TZVP**
+or **LANL2DZ** — these carry the effective core potentials that cover metals,
+whereas the Pople (`6-31G…`) and Dunning (`cc-pV…`) sets do not. QuantUI's
+pre-run guard flags a metal on an incompatible basis and offers a one-click
+switch to def2-SVP before the calculation starts.
 
 ---
 
