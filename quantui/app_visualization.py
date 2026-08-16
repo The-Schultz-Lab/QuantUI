@@ -483,7 +483,9 @@ def render_traj_frame(app: Any, molecule: Any, output_widget: Any) -> None:
         with output_widget:
             display(fig)
         return
-    except ImportError:
+    except Exception:  # noqa: BLE001 — MET.3: any PlotlyMol failure (missing
+        # backend, or the RDKit valence error a transition metal raises) must
+        # fall through to the py3Dmol renderer below, never crash the frame.
         pass
 
     # Fallback: py3Dmol
