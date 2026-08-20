@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 import ipywidgets as widgets
 from IPython.display import HTML, Javascript, display
@@ -1563,7 +1563,7 @@ def _update_open_shell_hint(app: Any) -> None:
 #: Calculate-tab dropdown label → the key used in perf records, saved
 #: results, and checkpoint identities. One mapping, so the estimator and the
 #: checkpoint layer can never disagree about what calculation is configured.
-_CALC_TYPE_KEYS: dict = {
+_CALC_TYPE_KEYS: Dict[str, str] = {
     "Single Point": "single_point",
     "Geometry Opt": "geometry_opt",
     "Frequency": "frequency",
@@ -1708,7 +1708,7 @@ def refresh_resume_notice(app: Any) -> None:
 #: Inverse of ``_CALC_TYPE_KEYS`` — a stored calc-type key back to the label
 #: the Calculate-tab dropdown actually uses. Derived rather than written out
 #: twice, so the two can never drift apart.
-_CALC_TYPE_LABELS: dict = {v: k for k, v in _CALC_TYPE_KEYS.items()}
+_CALC_TYPE_LABELS: Dict[str, str] = {v: k for k, v in _CALC_TYPE_KEYS.items()}
 
 
 def _age_phrase(updated_at: Any) -> str:

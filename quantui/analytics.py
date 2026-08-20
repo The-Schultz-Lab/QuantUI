@@ -34,7 +34,7 @@ import statistics
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 from quantui.calc_log import _log_dir, get_perf_history, get_prediction_history
 
@@ -280,11 +280,17 @@ def _bar_chart_html(
         margin=dict(l=40, r=20, t=10, b=40),
         plot_bgcolor="#ffffff",
     )
-    return pio.to_html(
-        fig,
-        include_plotlyjs="inline" if include_plotlyjs else False,
-        full_html=False,
-        config={"displayModeBar": False},
+    # plotly has no bundled type stubs; --ignore-missing-imports leaves
+    # pio.to_html untyped. It genuinely returns str (verified: this
+    # function's other returns are explicit None for the no-data case).
+    return cast(
+        str,
+        pio.to_html(
+            fig,
+            include_plotlyjs="inline" if include_plotlyjs else False,
+            full_html=False,
+            config={"displayModeBar": False},
+        ),
     )
 
 
@@ -344,11 +350,14 @@ def _timeline_html(records: list[dict], *, include_plotlyjs: bool) -> Optional[s
         plot_bgcolor="#ffffff",
         legend=dict(orientation="h", x=0, y=1.05),
     )
-    return pio.to_html(
-        fig,
-        include_plotlyjs="inline" if include_plotlyjs else False,
-        full_html=False,
-        config={"displayModeBar": False},
+    return cast(
+        str,
+        pio.to_html(
+            fig,
+            include_plotlyjs="inline" if include_plotlyjs else False,
+            full_html=False,
+            config={"displayModeBar": False},
+        ),
     )
 
 
@@ -452,11 +461,14 @@ def _prediction_scatter_html(
         plot_bgcolor="#ffffff",
         legend=dict(orientation="h", x=0, y=1.05),
     )
-    return pio.to_html(
-        fig,
-        include_plotlyjs="inline" if include_plotlyjs else False,
-        full_html=False,
-        config={"displayModeBar": False},
+    return cast(
+        str,
+        pio.to_html(
+            fig,
+            include_plotlyjs="inline" if include_plotlyjs else False,
+            full_html=False,
+            config={"displayModeBar": False},
+        ),
     )
 
 

@@ -99,8 +99,9 @@ class StepProgress:
                 f'font-weight:{weight}; color:{color};">'
                 f"{icon} <b>Step {i + 1}:</b> {html.escape(label)}"
             )
-            if self._messages[i]:
-                line += f" — <i>{html.escape(self._messages[i])}</i>"
+            message = self._messages[i]
+            if message:
+                line += f" — <i>{html.escape(message)}</i>"
             line += "</div>"
             lines.append(line)
 

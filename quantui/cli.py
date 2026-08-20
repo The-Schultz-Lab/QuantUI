@@ -35,7 +35,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Optional, Sequence, cast
 
 from quantui.calc_log import _event_path, get_recent_events
 
@@ -94,7 +94,10 @@ def _cmd_gpu_check(args: argparse.Namespace) -> int:
     # The detection probe is cached; clear so each CLI invocation is
     # fresh (the user may have just installed gpu4pyscf and wants to
     # confirm without restarting their shell).
-    is_gpu_available.cache_clear()
+    # cache_clear is forwarded from _probe_gpu's lru_cache onto this function
+    # at definition time (gpu_offload.py); mypy can't see a monkey-patched
+    # attribute across the module boundary.
+    is_gpu_available.cache_clear()  # type: ignore[attr-defined]
     available, name, reason = probe_gpu()
     if available:
         print(f"GPU offload available: {name}")
@@ -281,7 +284,10 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    # args.func is set per-subcommand via set_defaults(func=_cmd_xxx)
+    # (argparse.Namespace is untyped, so mypy sees Any here); every _cmd_*
+    # handler returns an int exit code by convention.
+    return cast(int, args.func(args))
 
 
 if __name__ == "__main__":

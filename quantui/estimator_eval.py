@@ -120,7 +120,9 @@ def _is_scoreable(record: dict) -> bool:
     if not record.get("converged"):
         return False
     try:
-        elapsed = float(record.get("elapsed_s"))
+        # record is untyped JSON; float() may reject a missing/non-numeric
+        # value at runtime, which the except below already handles.
+        elapsed = float(record.get("elapsed_s"))  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return False
     # A zero/negative elapsed can't produce a meaningful error percentage.

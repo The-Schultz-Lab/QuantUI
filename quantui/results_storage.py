@@ -79,7 +79,7 @@ def _opt_int(x: object) -> Optional[int]:
     if x is None:
         return None
     try:
-        return int(x)  # type: ignore[arg-type]
+        return int(x)  # type: ignore[arg-type, no-any-return, call-overload]
     except (TypeError, ValueError):
         return None
 
@@ -89,7 +89,7 @@ def _opt_float_list(x: object) -> Optional[list]:
     if x is None:
         return None
     try:
-        return [float(v) for v in x]  # type: ignore[union-attr]
+        return [float(v) for v in x]  # type: ignore[union-attr, attr-defined]
     except (TypeError, ValueError):
         return None
 
@@ -99,7 +99,7 @@ def _opt_str_list(x: object) -> Optional[list]:
     if x is None:
         return None
     try:
-        return [str(v) for v in x]  # type: ignore[union-attr]
+        return [str(v) for v in x]  # type: ignore[union-attr, attr-defined]
     except TypeError:
         return None
 
@@ -454,6 +454,10 @@ def save_molden(
 
     if has_vib:
         try:
+            # has_vib = bool(frequencies_cm1) and bool(normal_modes) (above),
+            # so both are truthy here — the assert gives mypy that narrowing
+            # (it can't see it through the intermediate has_vib flag).
+            assert frequencies_cm1 is not None
             _append_molden_vibrations(
                 dest,
                 frequencies_cm1=frequencies_cm1,

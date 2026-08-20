@@ -534,7 +534,9 @@ def orbital_summary_html(info: OrbitalInfo) -> str:
 # ============================================================================
 
 
-def infer_charge_and_spin(mol_atom: list, mo_occ: np.ndarray | list) -> Tuple[int, int]:
+def infer_charge_and_spin(
+    mol_atom: Optional[list], mo_occ: Optional[np.ndarray | list]
+) -> Tuple[int, int]:
     """Infer ``(charge, spin)`` for a ``gto.Mole`` from atoms + MO occupations.
 
     Cube/isosurface generation from saved MO data does not have direct access
@@ -925,9 +927,12 @@ def _build_molecule_overlay_data(atoms: list[tuple[int, float, float, float]]) -
         atom_sizes.append(max(6.0, 15.0 * _COVALENT_RADII_ANGSTROM.get(z_num, 0.75)))
         atom_labels.append(_ATOMIC_SYMBOLS.get(z_num, str(z_num)))
 
-    bond_x: List[float] = []
-    bond_y: List[float] = []
-    bond_z: List[float] = []
+    # None entries deliberately break a Plotly line trace between bond
+    # segments (x=[x1,x2,None,x3,x4,None,...]) so consecutive bonds don't
+    # visually connect.
+    bond_x: List[Optional[float]] = []
+    bond_y: List[Optional[float]] = []
+    bond_z: List[Optional[float]] = []
     for i, (zi, xi, yi, zi_pos) in enumerate(atoms):
         for zj, xj, yj, zj_pos in atoms[i + 1 :]:
             ri = _COVALENT_RADII_ANGSTROM.get(zi, 0.75)

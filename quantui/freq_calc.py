@@ -30,7 +30,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import IO, Any, List, Optional
+from typing import IO, Any, List, Optional, cast
 
 from .molecule import Molecule
 from .session_calc import HARTREE_TO_EV
@@ -457,7 +457,14 @@ def _run_freq_calc_body(
                     # failure, so this is safe to call unconditionally.
                     _mf_d, _used_gpu, _gpu_name = _try_to_gpu_inner(_mf_d, "RHF")
                     _mf_d.kernel(dm0=_dm0)
-                    return _np_ir.array(_mf_d.dip_moment(verbose=0))
+                    # pyscf has no type stubs (ignore_missing_imports), so
+                    # dip_moment()'s Any return defeats asarray's overload
+                    # resolution too; dip_moment() genuinely returns an
+                    # array-like of floats.
+                    return cast(
+                        _np_ir.ndarray,
+                        _np_ir.asarray(_mf_d.dip_moment(verbose=0), dtype=float),
+                    )
 
                 # Opt-in parallel path (Pass B). When (a) the user has
                 # set ``QUANTUI_FREQ_PARALLEL=1``, (b) no GPU is available,

@@ -52,6 +52,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from typing import cast
 
 _SCHEMA_VERSION = 1
 _LOG = logging.getLogger(__name__)
@@ -137,7 +138,10 @@ def get_cached_html(
     entry = idx["modes"][str(mode_number)]
     html_path = cache_dir(result_dir) / entry["file"]
     try:
-        return html_path.read_text(encoding="utf-8")
+        # html_path is Any: load_index()'s bare `dict` return (untyped JSON)
+        # propagates through entry["file"] and the / operator. read_text()
+        # genuinely returns str; the cast documents that, not a runtime check.
+        return cast(str, html_path.read_text(encoding="utf-8"))
     except OSError as exc:
         _LOG.warning(
             "Failed to read cached html at %s (%s)",
@@ -242,6 +246,9 @@ def _amplitude_matches(saved: object, requested: float) -> bool:
     if saved is None:
         return False
     try:
-        return abs(float(saved) - requested) < _AMPLITUDE_TOL
+        # saved is deliberately object (untyped JSON) — float() may reject
+        # it at runtime for any non-numeric value, which the except below
+        # already handles; that's the real type check, not this cast.
+        return abs(float(saved) - requested) < _AMPLITUDE_TOL  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return False

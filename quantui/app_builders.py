@@ -881,7 +881,7 @@ def build_shared_widgets(
         )
         for _ in range(2)
     )
-    app._spin_suggested_mults: list = []
+    app._spin_suggested_mults = []
     app.spin_helper_box = widgets.Accordion(
         children=[
             widgets.VBox(

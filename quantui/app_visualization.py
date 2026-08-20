@@ -7,7 +7,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, cast
 
 import ipywidgets as widgets
 from IPython.display import HTML, display
@@ -2541,7 +2541,9 @@ def build_reorg_overlay_html(
 
     view.setBackgroundColor(bgcolor)
     view.zoomTo()
-    view_html = view._make_html()
+    # py3Dmol has no type stubs (ignore_missing_imports); _make_html()
+    # genuinely returns str.
+    view_html = cast(str, view._make_html())
     if re.search(r"3dmolviewer_(\w+)", view_html) is None:
         return view_html
 

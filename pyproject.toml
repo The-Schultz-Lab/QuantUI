@@ -175,7 +175,11 @@ dev = [
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.10.0",
     "pytest-xdist>=3.0.0",  # parallel test execution (-n=auto in addopts)
-    "mypy>=1.0.0",
+    "mypy~=1.10.0",  # pinned, not an open floor — same reasoning as
+    # black/ruff below: it must agree with .pre-commit-config.yaml's rev,
+    # which is what CI enforces (M-TYPECHECK TYPE.2). A newer mypy silently
+    # disagrees: 2.x drops support for python_version = "3.9" (this repo's
+    # floor) and reports a different error set than the pinned check.
     "types-requests>=2.28.0",
     # Formatter/linter versions are pinned to a compatible range, NOT an open
     # floor: they must agree with the revs in .pre-commit-config.yaml, which is
