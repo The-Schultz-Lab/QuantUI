@@ -3,6 +3,20 @@
 The pre-run guard blocks a metal on an incompatible basis; this offers a single
 click to fix it — but only when def2-SVP actually resolves the coverage, never
 for a charge/multiplicity problem it can't fix.
+
+Only ``test_metal_on_pople_reveals_fix`` needs the PySCF-availability guard
+(see ``test_inorganic_guards.py``, which gates for the same reason): it is the
+one test asserting the button becomes *visible*, which requires
+``inorganic_guards.check_basis_coverage`` to actually detect a real basis gap
+via PySCF's loader. Windows CI installs no ``pyscf`` extra ("PySCF requires
+Linux/WSL"), so without the guard, ``on_run_clicked``'s broad
+except-and-continue around the preflight check silently no-ops there and the
+button never appears — not a bug in the app (that's the same "never break a
+run" fallback every guard in this codebase uses), just a test asserting
+PySCF-backed behavior on a platform where PySCF isn't installed. The other
+tests here don't need the guard: a click's own effects
+(``test_click_sets_def2_and_hides``) and every "stays hidden" assertion hold
+regardless of whether PySCF is present.
 """
 
 from __future__ import annotations
@@ -10,6 +24,19 @@ from __future__ import annotations
 import pytest
 
 from quantui.molecule import Molecule
+
+_PYSCF_AVAILABLE = False
+try:
+    import pyscf as _pyscf  # noqa: F401
+
+    _PYSCF_AVAILABLE = True
+except ImportError:
+    pass
+
+pyscf_only = pytest.mark.skipif(
+    not _PYSCF_AVAILABLE,
+    reason="PySCF not installed (Linux/macOS/WSL only)",
+)
 
 
 @pytest.fixture
@@ -43,6 +70,7 @@ class TestBasisFixButton:
     def test_hidden_initially(self, app):
         assert app.basis_fix_btn.layout.display == "none"
 
+    @pyscf_only
     def test_metal_on_pople_reveals_fix(self, app):
         app._molecule = _cisplatin()
         app.basis_dd.value = "6-31G"  # no Pt coverage

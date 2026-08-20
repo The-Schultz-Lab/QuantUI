@@ -335,11 +335,14 @@ def _run_nmr_calc_body(
     import numpy as _np
 
     from . import config as _config
+    from .inorganic_guards import ecp_for_basis
     from .session_calc import maybe_apply_d3, resolve_xc
 
     mol = gto.Mole()
     mol.atom = molecule.to_pyscf_format()
     mol.basis = basis
+    # Heavy-element ECP (LANL2DZ / def2); empty dict for all-electron bases.
+    mol.ecp = ecp_for_basis(basis, molecule.atoms)
     mol.charge = molecule.charge
     mol.spin = molecule.multiplicity - 1
     mol.verbose = 4
