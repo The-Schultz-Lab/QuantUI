@@ -1321,7 +1321,7 @@ _PNG_CAPTURE_JS = """
   var btn=document.getElementById("orb_png_"+UID);
   if(!btn){ return; }
   btn.addEventListener("click", function(){
-    var cap=window["__quantuiIsoCapture"];
+    var cap=window["__CAPFN__"];
     if(!cap){ btn.textContent="\\u26a0 viewer not ready"; return; }
     // Transparency is decided HERE, at capture, not by the live viewer — the
     // preview stays opaque while the exported file has no background.
@@ -1343,9 +1343,24 @@ _PNG_CAPTURE_JS = """
 """
 
 
-def _png_capture_controls(uid: str, capture_class: str) -> str:
-    """A 'Save PNG' button wired to the viewer identified by *uid*."""
-    js = _PNG_CAPTURE_JS.replace("__UID__", uid).replace("__CLS__", capture_class)
+def _png_capture_controls(
+    uid: str, capture_class: str, capture_fn: str = "__quantuiIsoCapture"
+) -> str:
+    """A 'Save PNG' button wired to the viewer identified by *uid*.
+
+    *capture_fn* is the name of the global JS function (already defined
+    elsewhere, e.g. ``window[capture_fn] = function(transparent){...}``) that
+    does the actual ``pngURI()`` capture. Defaults to the isosurface viewer's
+    bare, unscoped global for backward compatibility (ORBX.1). Callers with
+    multiple live viewers of the same kind on a page (e.g. a fresh uid per
+    render) must pass a uid-scoped name to avoid one viewer's button
+    capturing another viewer's frame.
+    """
+    js = (
+        _PNG_CAPTURE_JS.replace("__UID__", uid)
+        .replace("__CLS__", capture_class)
+        .replace("__CAPFN__", capture_fn)
+    )
     return (
         f'<div style="margin:4px 0 2px;padding:0 8px 6px;font-size:13px;">'
         f'<button id="orb_png_{uid}" type="button" '

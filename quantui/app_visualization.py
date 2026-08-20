@@ -14,6 +14,7 @@ from IPython.display import HTML, display
 
 from quantui import theme as _theme
 from quantui.app_builders import _ORB_PNG_INBOX_CLASS
+from quantui.orbital_visualization import _png_capture_controls
 
 logger = logging.getLogger(__name__)
 
@@ -2386,12 +2387,39 @@ def _frame_stepper_controls(
     return bar + f"<script>{js}</script>"
 
 
+# UID-scoped capture function for the reorg-geometry viewer (M-EXPORT2 EXP2.2).
+# Every render of build_reorg_geometry_viewer_html gets a fresh uid (full
+# atomic HTML swap — see app_analysis.render_reorg_geometries), so, unlike the
+# isosurface viewer's single bare window.__quantuiIsoCapture global, this
+# defines a per-render global named after the uid to avoid one render's button
+# capturing a different render's (possibly already-detached) viewer.
+_REORG_CAPTURE_JS = """
+(function(){
+  var UID="__UID__";
+  window["__CAPFN__"] = function(transparent){
+    var vw = window["viewer_"+UID];
+    if(!vw || !vw.pngURI){ return null; }
+    if(!transparent){ return vw.pngURI(); }
+    var uri=null;
+    try{
+      vw.setBackgroundColor(__BG__, 0.0); vw.render();
+      uri=vw.pngURI();
+    } finally {
+      vw.setBackgroundColor(__BG__, 1.0); vw.render();
+    }
+    return uri;
+  };
+})();
+"""
+
+
 def build_reorg_geometry_viewer_html(
     geometries: list[dict],
     *,
     bgcolor: str = "white",
     width: int = 560,
     height: int = 420,
+    capture_class: str = "",
 ) -> str:
     """Step through the DISTINCT geometries behind a Marcus 4-point run.
 
@@ -2409,6 +2437,10 @@ def build_reorg_geometry_viewer_html(
     was never computed. Built on ``_frame_stepper_controls`` so the camera
     behaviour, offline loading and control styling match the trajectory viewer
     rather than being reinvented.
+
+    ``capture_class`` wires a "Save PNG" button (M-EXPORT2 EXP2.2), mirroring
+    the isosurface viewer's capture bridge (ORBX.1) but with a uid-scoped
+    capture function — see ``_REORG_CAPTURE_JS``. Empty omits the button.
     """
     import json
     import re
@@ -2434,7 +2466,24 @@ def build_reorg_geometry_viewer_html(
     view_html = view._make_html()
 
     m = re.search(r"3dmolviewer_(\w+)", view_html)
-    if m is None or len(geometries) < 2:
+    if m is None:
+        return _theme.frame_viewer_html(view_html, width=width)
+    uid = m.group(1)
+
+    if capture_class:
+        capture_fn = f"__quantuiReorgCapture_{uid}"
+        capture_js = (
+            _REORG_CAPTURE_JS.replace("__UID__", uid)
+            .replace("__CAPFN__", capture_fn)
+            .replace("__BG__", json.dumps(bgcolor))
+        )
+        view_html = (
+            view_html
+            + f"<script>{capture_js}</script>"
+            + _png_capture_controls(uid, capture_class, capture_fn=capture_fn)
+        )
+
+    if len(geometries) < 2:
         return _theme.frame_viewer_html(view_html, width=width)
 
     labels = json.dumps(
@@ -2442,7 +2491,7 @@ def build_reorg_geometry_viewer_html(
     )
     notes = json.dumps([g.get("note", "") for g in geometries])
     controls = _frame_stepper_controls(
-        m.group(1),
+        uid,
         len(geometries),
         1000,  # unused: loop=False and Play is not the point here
         label_js=(

@@ -339,7 +339,16 @@ def render_reorg_geometries(app: Any) -> None:
                 exaggerate=float(getattr(app._reorg_exaggerate, "value", 1.0)),
             )
         else:
-            html = build_reorg_geometry_viewer_html(geoms, bgcolor=bg)
+            from quantui.app_builders import _REORG_PNG_INBOX_CLASS
+
+            capture_class = (
+                _REORG_PNG_INBOX_CLASS
+                if getattr(app, "_reorg_png_inbox", None) is not None
+                else ""
+            )
+            html = build_reorg_geometry_viewer_html(
+                geoms, bgcolor=bg, capture_class=capture_class
+            )
         app._set_html_output(app._reorg_geom_output, html)
     except Exception as exc:  # noqa: BLE001
         app._set_html_output(
