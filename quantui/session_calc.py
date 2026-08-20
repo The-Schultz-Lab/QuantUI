@@ -407,9 +407,15 @@ def _run_session_calc_body(
         )
 
     # --- Build PySCF Mole object ---
+    from .inorganic_guards import ecp_for_basis
+
     mol = gto.Mole()
     mol.atom = molecule.to_pyscf_format()
     mol.basis = basis
+    # LANL2DZ / def2 bundle an ECP for heavy elements that PySCF applies only
+    # when mol.ecp is set too; without it the metal runs all-electron on a
+    # valence basis (garbage energies/gradients). Empty for all-electron sets.
+    mol.ecp = ecp_for_basis(basis, molecule.atoms)
     mol.charge = molecule.charge
     mol.spin = molecule.multiplicity - 1
     mol.verbose = verbose

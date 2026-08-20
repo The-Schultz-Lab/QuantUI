@@ -228,9 +228,13 @@ def _run_freq_calc_body(
             pass
 
     # ── Build Mole object ────────────────────────────────────────────────────
+    from .inorganic_guards import ecp_for_basis
+
     mol = gto.Mole()
     mol.atom = molecule.to_pyscf_format()
     mol.basis = basis
+    # Heavy-element ECP (LANL2DZ / def2); empty dict for all-electron bases.
+    mol.ecp = ecp_for_basis(basis, molecule.atoms)
     mol.charge = molecule.charge
     mol.spin = molecule.multiplicity - 1
     mol.verbose = 4

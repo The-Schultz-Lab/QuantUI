@@ -164,9 +164,14 @@ try:
                     self.atoms.get_positions().tolist(),
                 )
             ]
+            from .inorganic_guards import ecp_for_basis
+
             mol = gto.Mole()
             mol.atom = _atom_list_for_cube
             mol.basis = self.basis
+            # Attach the ECP so heavy-element gradients are physical — without it
+            # the optimisation walks off an all-electron/valence-basis surface.
+            mol.ecp = ecp_for_basis(self.basis, self.atoms.get_chemical_symbols())
             mol.charge = self.charge
             mol.spin = self.spin
             mol.unit = "Angstrom"
