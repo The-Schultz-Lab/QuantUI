@@ -181,25 +181,68 @@ def visualize_molecule_py3dmol(
     else:
         view.setStyle({style: {}})
 
+    # MET.6: 3Dmol.js's own bond perception leaves a coordination metal as a lone
+    # dot — it draws no bonds to the centre. Draw the metal↔donor bonds ourselves,
+    # dashed (GaussView convention), from the same distance-based connectivity the
+    # salt-warning uses. No-op for purely organic molecules.
+    _add_coordination_bonds(view, molecule)
+
     # Set background
     view.setBackgroundColor(bgcolor)
 
-    # Zoom to fit
+    # Zoom to fit — includes the (now bonded) metal, so it is never off-screen.
     view.zoomTo()
 
     return view
 
 
+# Dashed coordination-bond styling (py3Dmol addCylinder): a thin gray dashed
+# cylinder from the metal centre to each donor atom.
+_COORD_BOND_RADIUS = 0.06
+_COORD_BOND_COLOR = "#777777"
+
+
+def _add_coordination_bonds(view, molecule) -> None:
+    """Draw dashed metal↔donor cylinders so a metal centre isn't a lone dot.
+
+    Uses the distance-based, metal-aware connectivity finder. Best-effort: any
+    failure (or a molecule with no metal) simply leaves the view unchanged.
+    """
+    try:
+        from quantui.connectivity import metal_coordination_bonds
+
+        coords = molecule.coordinates
+        bonds = metal_coordination_bonds(molecule.atoms, coords)
+        for i, j in bonds:
+            xi, yi, zi = coords[i]
+            xj, yj, zj = coords[j]
+            view.addCylinder(
+                {
+                    "start": {"x": float(xi), "y": float(yi), "z": float(zi)},
+                    "end": {"x": float(xj), "y": float(yj), "z": float(zj)},
+                    "radius": _COORD_BOND_RADIUS,
+                    "color": _COORD_BOND_COLOR,
+                    "dashed": True,
+                    "fromCap": 1,
+                    "toCap": 1,
+                }
+            )
+    except Exception:  # noqa: BLE001 — bond decoration must never break the viewer
+        logger.debug("coordination-bond overlay skipped", exc_info=True)
+
+
+_PY3DMOL_STYLES: tuple[Py3DmolStyle, ...] = (
+    "ball+stick",
+    "stick",
+    "sphere",
+    "line",
+    "cartoon",
+)
+
+
 def _validate_py3dmol_style(style: str) -> Py3DmolStyle:
-    valid_styles: tuple[Py3DmolStyle, ...] = (
-        "ball+stick",
-        "stick",
-        "sphere",
-        "line",
-        "cartoon",
-    )
-    if style not in valid_styles:
-        raise ValueError(f"style must be one of {list(valid_styles)}, got '{style}'")
+    if style not in _PY3DMOL_STYLES:
+        raise ValueError(f"style must be one of {list(_PY3DMOL_STYLES)}, got '{style}'")
     return cast(Py3DmolStyle, style)
 
 
@@ -262,12 +305,26 @@ def visualize_molecule_plotlymol(
     try:
         tmp.write(full_xyz)
         tmp.close()
-        fig = draw_3D_rep(
-            xyzfile=tmp.name,
-            charge=charge,
-            mode=mode,
-            resolution=resolution,
-        )
+        try:
+            fig = draw_3D_rep(
+                xyzfile=tmp.name,
+                charge=charge,
+                mode=mode,
+                resolution=resolution,
+            )
+        except Exception as exc:
+            # RDKit's bond-order perception (rdDetermineBonds), called inside
+            # plotlymol3d's draw_3D_rep, raises inconsistently across builds
+            # for the same "can't perceive this molecule's bonds" condition —
+            # a clean ValueError on most, a raw C++-level IndexError
+            # ("unordered_map::at") on at least one Python-3.9 RDKit wheel
+            # (a metal with no covalent-radius table entry). Normalized to one
+            # type here so callers — including the MET.3 fallback below, which
+            # must still catch it — don't depend on a third-party
+            # implementation detail that varies by platform/Python version.
+            raise ValueError(
+                f"Could not determine bonds for {molecule.get_formula()}: {exc}"
+            ) from exc
         if _plotlymol_format_lighting is not None:
             preset = LIGHTING_PRESETS.get(lighting, LIGHTING_PRESETS["soft"])
             fig = _plotlymol_format_lighting(fig, **preset)
@@ -360,15 +417,40 @@ def visualize_molecule(
             "line": "stick",  # plotlyMol has no line mode; use stick
         }
         mode = mode_map.get(style, "ball+stick")
-        return visualize_molecule_plotlymol(
-            molecule,
-            mode=mode,
-            width=width,
-            height=height,
-            bgcolor=bgcolor,
-            lighting=lighting,
-            **kwargs,
-        )
+        try:
+            return visualize_molecule_plotlymol(
+                molecule,
+                mode=mode,
+                width=width,
+                height=height,
+                bgcolor=bgcolor,
+                lighting=lighting,
+                **kwargs,
+            )
+        except Exception as exc:  # noqa: BLE001 — a viewer must never hard-error
+            # MET.3: PlotlyMol runs RDKit valence perception, which raises on
+            # transition metals ("Atom N has no valences defined"). py3Dmol
+            # renders straight from coordinates with no valence model, so fall
+            # back to it rather than crash on a valid molecule.
+            if not PY3DMOL_AVAILABLE:
+                raise
+            logger.warning(
+                "PlotlyMol could not render %s (%s); falling back to py3Dmol.",
+                molecule.get_formula(),
+                exc,
+            )
+            fallback_style = style if style in _PY3DMOL_STYLES else "ball+stick"
+            # **kwargs is intentionally not forwarded: it carries PlotlyMol-only
+            # options (e.g. resolution) that visualize_molecule_py3dmol doesn't
+            # accept — the same reason the backend=="py3dmol" path above omits it.
+            return visualize_molecule_py3dmol(
+                molecule,
+                style=_validate_py3dmol_style(fallback_style),
+                width=width,
+                height=height,
+                bgcolor=bgcolor,
+                lighting=lighting,
+            )
     else:
         raise ValueError(f"Unknown backend: {backend}")
 

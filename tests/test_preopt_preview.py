@@ -50,6 +50,20 @@ def _embed_smiles(smiles: str):
     )
 
 
+def _metal_complex() -> Molecule:
+    """A bundled coordination complex (cisplatin) — RDKit can't perceive its
+    metal bonds, so the classical FF has no model for it (M-METAL MET.4)."""
+    from quantui import molecule_library as ml
+
+    e = next(x for x in ml.iter_entries() if x["id"] == "inorganic-cisplatin")
+    return Molecule(
+        atoms=e["atoms"],
+        coordinates=e["coordinates"],
+        charge=e["charge"],
+        multiplicity=e["multiplicity"],
+    )
+
+
 # ── Backend: preoptimize_with_trajectory ────────────────────────────────────
 
 
@@ -120,10 +134,11 @@ class TestPreoptTrajectory:
         # (the regressed capture put ~80% in one frame).
         assert max(steps) <= 0.5 * total
 
-    def test_rdkit_absent_is_non_destructive_single_frame(self, monkeypatch):
+    def test_no_backend_is_non_destructive_single_frame(self, monkeypatch):
         import quantui.preopt as preopt_mod
 
         monkeypatch.setattr(preopt_mod, "_RDKIT_AVAILABLE", False)
+        monkeypatch.setattr(preopt_mod, "_XTB_AVAILABLE", False)
         original = _water()
         mol, rmsd, frames = preopt_mod.preoptimize_with_trajectory(original)
         assert rmsd == 0.0
@@ -335,6 +350,62 @@ class TestPreviewHandlers:
         assert app._molecule is original  # unchanged
         assert app._preopt_relaxed_mol is None
         assert app.preopt_preview_box.layout.display == "none"
+
+
+class TestMetalPreoptHonesty:
+    """M-METAL MET.4: a 0 Å pre-opt on a metal complex is a *failure* to build a
+    force-field model, not a benign "your geometry is already reasonable"."""
+
+    def test_preopt_support_none_for_organic(self):
+        from quantui.preopt import _RDKIT_AVAILABLE, preopt_support
+
+        if not _RDKIT_AVAILABLE:
+            pytest.skip("rdkit not installed")
+        assert preopt_support(_water()) is None
+
+    def test_preopt_support_reason_for_metal_without_xtb(self, monkeypatch):
+        # With the GFN-FF (xtb) backend absent, a metal has no pre-opt backend,
+        # so preopt_support returns a reason that points to xtb / the DFT opt.
+        import quantui.preopt as preopt_mod
+
+        if not preopt_mod._RDKIT_AVAILABLE:
+            pytest.skip("rdkit not installed")
+        monkeypatch.setattr(preopt_mod, "_XTB_AVAILABLE", False)
+        reason = preopt_mod.preopt_support(_metal_complex())
+        assert reason is not None and "xtb" in reason.lower()
+
+    def test_metal_negligible_change_reports_honestly_without_xtb(
+        self, app, monkeypatch
+    ):
+        # With no GFN-FF backend, a metal FF no-op at RMSD 0.0 must NOT claim the
+        # geometry is "already reasonable"; it must point to xtb / the DFT opt.
+        import quantui.preopt as preopt_mod
+        from quantui.app_runflow import _preopt_preview_done
+
+        if not preopt_mod._RDKIT_AVAILABLE:
+            pytest.skip("rdkit not installed")
+        monkeypatch.setattr(preopt_mod, "_XTB_AVAILABLE", False)
+        metal = _metal_complex()
+        _preopt_preview_done(app, metal, 0.0, [[list(c) for c in metal.coordinates]])
+
+        status = app.preopt_preview_status.value.lower()
+        assert "geometry optimization" in status
+        assert "isn't available" in status or "not available" in status
+        assert "already reasonable" not in status
+        assert app._preopt_relaxed_mol is None
+        assert app._preopt_actions_box.layout.display == "none"
+
+    def test_organic_negligible_change_still_says_already_reasonable(self, app):
+        # The honest-metal path must not regress the organic no-op wording.
+        from quantui.app_runflow import _preopt_preview_done
+        from quantui.preopt import _RDKIT_AVAILABLE
+
+        if not _RDKIT_AVAILABLE:
+            pytest.skip("rdkit not installed")
+        _preopt_preview_done(app, _water(), 0.01, [[[0, 0, 0]]])
+        status = app.preopt_preview_status.value.lower()
+        assert "already reasonable" in status
+        assert "no meaningful change" in status
 
 
 class TestStaleRunStatus:

@@ -119,6 +119,50 @@ def _set_run_output(app: Any, outputs: tuple) -> None:
 
 def on_run_clicked(app: Any, btn: Any) -> None:
     """Reset result panes and start the background run thread."""
+    # Pre-run guard (M-METAL MET.5): catch a basis with no parameters for an
+    # element (e.g. 6-31G on Pt) or a charge/multiplicity inconsistent with the
+    # electron count, and explain it here — on the main thread, before anything
+    # is cleared — instead of letting PySCF raise a cryptic error deep in the
+    # background calc thread.
+    mol = getattr(app, "_molecule", None)
+    if mol is not None:
+        try:
+            from quantui.inorganic_guards import preflight_messages
+
+            problems = preflight_messages(
+                mol.atoms,
+                mol.get_electron_count(),
+                app.basis_dd.value,
+                int(app.mult_si.value),
+            )
+        except Exception:  # noqa: BLE001 — a guard failure must not block a run
+            problems = []
+        if problems:
+            body = "\n\n".join(f"  • {p}" for p in problems)
+            _set_run_output(
+                app,
+                (
+                    {
+                        "output_type": "stream",
+                        "name": "stdout",
+                        "text": (
+                            "⚠  This calculation was not started — please fix "
+                            "the following first:\n\n" + body + "\n"
+                        ),
+                    },
+                ),
+            )
+            try:
+                app.run_status.value = "Adjust the settings above, then Run again."
+            except Exception:  # noqa: BLE001 — status label is best-effort
+                pass
+            # MET.5: if the blocker is purely the basis (def2-SVP would clear it),
+            # offer a one-click switch rather than making the student hunt the
+            # dropdown. Only reveal it when def2-SVP actually resolves coverage.
+            _update_basis_fix_button(app, mol)
+            return
+        _hide_basis_fix_button(app)
+
     # Write the header FIRST (atomic, main thread) — this also clears the
     # previous run's log via the single ``outputs`` assignment.
     _write_run_header(app)
@@ -138,6 +182,114 @@ def on_run_clicked(app: Any, btn: Any) -> None:
     app._to_analysis_btn.layout.display = "none"
     app._analysis_empty_html.layout.display = "none"
     threading.Thread(target=app._do_run, daemon=True).start()
+
+
+# The metal-capable basis the one-click MET.5 fix switches to.
+_METAL_FIX_BASIS = "def2-SVP"
+
+
+def _hide_basis_fix_button(app: Any) -> None:
+    try:
+        app.basis_fix_btn.layout.display = "none"
+    except Exception:  # noqa: BLE001 — the button is a UI convenience only
+        pass
+
+
+def _update_basis_fix_button(app: Any, mol: Any) -> None:
+    """Show the one-click fix only when def2-SVP would resolve basis coverage.
+
+    A charge/multiplicity problem (which def2-SVP can't fix) must not trigger it,
+    so this checks the current basis genuinely lacks an element *and* def2-SVP
+    covers them all.
+    """
+    try:
+        from quantui.inorganic_guards import check_basis_coverage
+
+        current_bad = check_basis_coverage(mol.atoms, app.basis_dd.value) is not None
+        def2_ok = check_basis_coverage(mol.atoms, _METAL_FIX_BASIS) is None
+    except Exception:  # noqa: BLE001 — never let the convenience button block a run
+        current_bad = def2_ok = False
+    if current_bad and def2_ok:
+        try:
+            app.basis_fix_btn.layout.display = ""
+        except Exception:  # noqa: BLE001
+            pass
+    else:
+        _hide_basis_fix_button(app)
+
+
+def _spin_small(text: str, color: str = "#444") -> str:
+    return f'<span style="font-size:12.5px;color:{color}">{text}</span>'
+
+
+def on_spin_suggest(app: Any, btn: Any = None) -> None:
+    """Compute a spin-multiplicity suggestion and render it (MET.5).
+
+    Suggests only — the Apply buttons (wired to on_spin_apply) do the setting.
+    A refusal (e.g. non-d8 square-planar) or bad input is shown as a flag, not a
+    crash.
+    """
+    from quantui.spin_presets import suggest_spin_states
+
+    for b in app.spin_apply_btns:
+        b.layout.display = "none"
+    app._spin_suggested_mults = []
+
+    try:
+        s = suggest_spin_states(
+            app.spin_metal_dd.value,
+            int(app.spin_ox_si.value),
+            app.spin_geom_dd.value,
+        )
+    except ValueError as exc:
+        app.spin_helper_output.value = _spin_small(f"⚠ {exc}", "#b45309")
+        return
+
+    lines = [_spin_small(s.explanation)]
+    for c in s.caveats:
+        lines.append(_spin_small(f"⚠ {c}", "#b45309"))
+    app.spin_helper_output.value = "<br>".join(lines)
+
+    # Arm one Apply button per candidate spin state, labelled with the state.
+    app._spin_suggested_mults = [st.multiplicity for st in s.states]
+    for i, st in enumerate(s.states):
+        tag = f" ({st.label})" if st.label else ""
+        app.spin_apply_btns[i].description = (
+            f"Apply multiplicity {st.multiplicity}{tag}"
+        )
+        app.spin_apply_btns[i].layout.display = ""
+
+
+def on_spin_apply(app: Any, index: int) -> None:
+    """Set the multiplicity field from a suggested spin state (MET.5)."""
+    mults = getattr(app, "_spin_suggested_mults", [])
+    if index >= len(mults):
+        return
+    mult = mults[index]
+    try:
+        app.mult_si.value = mult
+    except Exception:  # noqa: BLE001 — out-of-range guard is best-effort
+        return
+    app.spin_helper_output.value = _spin_small(
+        f"Multiplicity set to {mult}. Remember to set the charge from your "
+        "complex — it isn't inferred.",
+        "#166534",
+    )
+
+
+def on_basis_fix(app: Any, btn: Any = None) -> None:
+    """One-click MET.5 fix: set the basis to def2-SVP and hide the button."""
+    try:
+        app.basis_dd.value = _METAL_FIX_BASIS
+    except Exception:  # noqa: BLE001 — a stale option list must not raise
+        return
+    _hide_basis_fix_button(app)
+    try:
+        app.run_status.value = (
+            f"Basis set to {_METAL_FIX_BASIS} (covers metals) — press Run again."
+        )
+    except Exception:  # noqa: BLE001 — status label is best-effort
+        pass
 
 
 def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
@@ -597,23 +749,39 @@ def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> No
     app.preopt_preview_btn.disabled = False
 
     if rmsd <= _PREOPT_NEGLIGIBLE_RMSD_A:
-        # Nothing meaningful to show or decide. An animation of a geometry that
-        # does not visibly move, plus a Keep/Revert choice between two
-        # effectively identical structures, reads as "something happened, and
-        # you must now judge it" — when the honest answer is "your geometry was
-        # already fine". Report the number and stop.
+        # Nothing to show or decide — but a 0 Å result has two very different
+        # causes, and conflating them misleads (M-METAL MET.4). Either the
+        # bonded FF ran and the geometry was already fine (an honest no-op), or
+        # the FF could not build a model at all — a metal complex, where
+        # DetermineBonds raises and preoptimize() returns the input unchanged.
+        # Calling the latter "your geometry is already reasonable" tells a
+        # student their scattered metal structure is good. Probe which case this
+        # is and word it truthfully.
+        from quantui.preopt import preopt_engine_label, preopt_support
+
+        unsupported = preopt_support(relaxed)
+        engine = preopt_engine_label(relaxed) or "MMFF94/UFF"
         app._preopt_relaxed_mol = None
         app.preopt_preview_output.clear_output()
         app.preopt_preview_output.layout.display = "none"
         app._preopt_actions_box.layout.display = "none"
         app.preopt_accept_btn.disabled = True
         app.preopt_reset_btn.disabled = True
-        app.preopt_preview_status.value = _preopt_small(
-            "Pre-optimization (MMFF94/UFF) found <b>no meaningful change</b> — "
-            f"RMSD {rmsd:.3f} Å. Your geometry is already reasonable, so there "
-            "is nothing to keep or revert; the calculation will use it as-is.",
-            "#444",
-        )
+        if unsupported is not None:
+            app.preopt_preview_status.value = _preopt_small(
+                "Classical pre-optimization isn't available for this structure. "
+                f"{unsupported}. Make sure the starting geometry is sensible first "
+                "(a bundled inorganic example or an XYZ paste are good starting "
+                "points).",
+                "#b45309",
+            )
+        else:
+            app.preopt_preview_status.value = _preopt_small(
+                f"Pre-optimization ({engine}) found <b>no meaningful change</b> — "
+                f"RMSD {rmsd:.3f} Å. Your geometry is already reasonable, so there "
+                "is nothing to keep or revert; the calculation will use it as-is.",
+                "#444",
+            )
         try:
             app._activity_end(kind="ui")
         except Exception:
@@ -637,8 +805,11 @@ def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> No
         with app.preopt_preview_output:
             display(HTML(_preopt_small(f"Preview render failed: {exc}", "#b91c1c")))
 
+    from quantui.preopt import preopt_engine_label
+
+    engine = preopt_engine_label(relaxed) or "MMFF94/UFF"
     app.preopt_preview_status.value = _preopt_small(
-        f"Relaxed (MMFF94/UFF): moved <b>{rmsd:.3f} Å</b> (RMSD) from your "
+        f"Relaxed ({engine}): moved <b>{rmsd:.3f} Å</b> (RMSD) from your "
         "input. Use ⇄ or the slider below to compare input vs relaxed, then "
         "Keep it or revert.",
         "#444",

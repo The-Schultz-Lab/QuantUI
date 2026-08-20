@@ -205,6 +205,9 @@ from quantui.app_runflow import (
     on_accumulate as _run_on_accumulate,
 )
 from quantui.app_runflow import (
+    on_basis_fix as _run_on_basis_fix,
+)
+from quantui.app_runflow import (
     on_basis_help as _run_on_basis_help,
 )
 from quantui.app_runflow import (
@@ -305,6 +308,12 @@ from quantui.app_runflow import (
 )
 from quantui.app_runflow import (
     on_solvent_cb_changed as _run_on_solvent_cb_changed,
+)
+from quantui.app_runflow import (
+    on_spin_apply as _run_on_spin_apply,
+)
+from quantui.app_runflow import (
+    on_spin_suggest as _run_on_spin_suggest,
 )
 from quantui.app_runflow import (
     populate_compare_list as _run_populate_compare_list,
@@ -1985,6 +1994,14 @@ class QuantUIApp:
         self.basis_dd.observe(self._safe_cb(self._update_notes), names="value")
         # Multiplicity drives the open-shell hint (part of _update_notes).
         self.mult_si.observe(self._safe_cb(self._update_notes), names="value")
+        # Keep the active molecule's charge/multiplicity in step with the fields,
+        # so an edit here (or the spin-state helper's Apply) actually reaches the
+        # run — the calc reads mol.charge/mol.multiplicity, and the pre-run guard
+        # reads the widgets, so the two must not drift apart.
+        self.charge_si.observe(
+            self._safe_cb(self._sync_charge_to_molecule), names="value"
+        )
+        self.mult_si.observe(self._safe_cb(self._sync_mult_to_molecule), names="value")
         self.method_dd.observe(self._safe_cb(self._update_estimate), names="value")
         self.basis_dd.observe(self._safe_cb(self._update_estimate), names="value")
         # Unfinished-calculations list (CHK.6)
@@ -2000,6 +2017,14 @@ class QuantUIApp:
         # Run
         self.run_btn.on_click(self._on_run_clicked)
         self.cancel_btn.on_click(self._safe_cb(self._on_cancel))
+        self.basis_fix_btn.on_click(self._safe_cb(self._on_basis_fix))
+        self.spin_suggest_btn.on_click(self._safe_cb(self._on_spin_suggest))
+        self.spin_apply_btns[0].on_click(
+            self._safe_cb(lambda _b: self._on_spin_apply(0))
+        )
+        self.spin_apply_btns[1].on_click(
+            self._safe_cb(lambda _b: self._on_spin_apply(1))
+        )
         self.preopt_preview_btn.on_click(self._safe_cb(self._on_preopt_preview))
         self.preopt_accept_btn.on_click(self._safe_cb(self._on_preopt_accept))
         self.preopt_reset_btn.on_click(self._safe_cb(self._on_preopt_reset))
@@ -3281,6 +3306,17 @@ class QuantUIApp:
                     "⚠ No network detected — resolved offline from the bundled "
                     f"library (not PubChem). {msg}"
                 )
+            # MET.2: a fetched name can resolve to a disconnected ionic salt
+            # (cisplatin → 2 NH₃ + 2 HCl + Pt²⁺) rather than the coordinated
+            # complex. Warn rather than let a wrong geometry silently feed a run.
+            try:
+                from .connectivity import describe_disconnection
+
+                warning = describe_disconnection(mol.atoms, mol.coordinates)
+            except Exception:  # noqa: BLE001 — a detection failure must not block load
+                warning = None
+            if warning:
+                msg = f"⚠ {warning} {msg}"
             self.pubchem_msg.value = msg
         else:
             self.pubchem_msg.value = f"Not found: {error}"
@@ -3484,6 +3520,15 @@ class QuantUIApp:
             )
         except Exception:
             pass
+
+    def _on_basis_fix(self, btn=None) -> None:
+        _run_on_basis_fix(self, btn)
+
+    def _on_spin_suggest(self, btn=None) -> None:
+        _run_on_spin_suggest(self, btn)
+
+    def _on_spin_apply(self, index: int) -> None:
+        _run_on_spin_apply(self, index)
 
     def _on_preopt_preview(self, btn=None) -> None:
         _run_on_preopt_preview(self, btn)
@@ -4107,6 +4152,18 @@ class QuantUIApp:
         _run_on_help_topic_changed(self, change)
 
     # ══ LOGIC METHODS ════════════════════════════════════════════════════════
+
+    def _sync_charge_to_molecule(self, change=None) -> None:
+        """Push a Charge-field edit onto the active molecule (see the observer
+        wiring): the run reads ``mol.charge``, so the field must not drift."""
+        if self._molecule is not None:
+            self._molecule.charge = int(self.charge_si.value)
+
+    def _sync_mult_to_molecule(self, change=None) -> None:
+        """Push a Multiplicity-field edit (or a spin-helper Apply) onto the
+        active molecule: the run reads ``mol.multiplicity``."""
+        if self._molecule is not None:
+            self._molecule.multiplicity = int(self.mult_si.value)
 
     def _set_molecule(self, mol: Molecule, label: str = "") -> None:
         """Update shared state and refresh dependent widgets."""

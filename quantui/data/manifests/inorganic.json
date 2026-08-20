@@ -1,0 +1,1412 @@
+[
+  {
+    "id": "inorganic-cisplatin",
+    "name": "cisplatin",
+    "formula": "H6Cl2N2Pt",
+    "category": "inorganic-complex",
+    "charge": 0,
+    "multiplicity": 1,
+    "source": "quantui-idealized",
+    "synonyms": "cisplatin;cis-platin;CDDP;PtCl2(NH3)2",
+    "description": "cis-diamminedichloroplatinum(II) \u2014 square-planar Pt(II) chemotherapy drug",
+    "atoms": [
+      "Pt",
+      "Cl",
+      "Cl",
+      "N",
+      "H",
+      "H",
+      "H",
+      "N",
+      "H",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        1.647559,
+        1.647559,
+        0.0
+      ],
+      [
+        -1.647559,
+        1.647559,
+        0.0
+      ],
+      [
+        -1.449569,
+        -1.449569,
+        0.0
+      ],
+      [
+        -1.010448,
+        -2.370206,
+        0.0
+      ],
+      [
+        -2.030266,
+        -1.350387,
+        0.832679
+      ],
+      [
+        -2.030266,
+        -1.350387,
+        -0.832679
+      ],
+      [
+        1.449569,
+        -1.449569,
+        0.0
+      ],
+      [
+        2.370206,
+        -1.010448,
+        0.0
+      ],
+      [
+        1.350387,
+        -2.030266,
+        0.832679
+      ],
+      [
+        1.350387,
+        -2.030266,
+        -0.832679
+      ]
+    ]
+  },
+  {
+    "id": "inorganic-hexaamminecobaltiii",
+    "name": "hexaamminecobalt(III)",
+    "formula": "H18CoN6",
+    "category": "inorganic-complex",
+    "charge": 3,
+    "multiplicity": 1,
+    "source": "quantui-idealized",
+    "synonyms": "hexaamminecobalt;cobalt hexammine;Co(NH3)6",
+    "description": "[Co(NH3)6]3+ \u2014 classic octahedral Werner complex (low-spin d6)",
+    "atoms": [
+      "Co",
+      "N",
+      "H",
+      "H",
+      "H",
+      "N",
+      "H",
+      "H",
+      "H",
+      "N",
+      "H",
+      "H",
+      "H",
+      "N",
+      "H",
+      "H",
+      "H",
+      "N",
+      "H",
+      "H",
+      "H",
+      "N",
+      "H",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        1.97,
+        0.0,
+        0.0
+      ],
+      [
+        2.310483,
+        0.961494,
+        0.0
+      ],
+      [
+        2.310483,
+        -0.480747,
+        0.832679
+      ],
+      [
+        2.310483,
+        -0.480747,
+        -0.832679
+      ],
+      [
+        -1.97,
+        0.0,
+        0.0
+      ],
+      [
+        -2.310483,
+        0.961494,
+        0.0
+      ],
+      [
+        -2.310483,
+        -0.480747,
+        -0.832679
+      ],
+      [
+        -2.310483,
+        -0.480747,
+        0.832679
+      ],
+      [
+        0.0,
+        1.97,
+        0.0
+      ],
+      [
+        0.961494,
+        2.310483,
+        0.0
+      ],
+      [
+        -0.480747,
+        2.310483,
+        -0.832679
+      ],
+      [
+        -0.480747,
+        2.310483,
+        0.832679
+      ],
+      [
+        0.0,
+        -1.97,
+        0.0
+      ],
+      [
+        0.961494,
+        -2.310483,
+        0.0
+      ],
+      [
+        -0.480747,
+        -2.310483,
+        0.832679
+      ],
+      [
+        -0.480747,
+        -2.310483,
+        -0.832679
+      ],
+      [
+        0.0,
+        0.0,
+        1.97
+      ],
+      [
+        0.961494,
+        0.0,
+        2.310483
+      ],
+      [
+        -0.480747,
+        0.832679,
+        2.310483
+      ],
+      [
+        -0.480747,
+        -0.832679,
+        2.310483
+      ],
+      [
+        0.0,
+        0.0,
+        -1.97
+      ],
+      [
+        0.961494,
+        0.0,
+        -2.310483
+      ],
+      [
+        -0.480747,
+        -0.832679,
+        -2.310483
+      ],
+      [
+        -0.480747,
+        0.832679,
+        -2.310483
+      ]
+    ]
+  },
+  {
+    "id": "inorganic-ferrocene",
+    "name": "ferrocene",
+    "formula": "C10H10Fe",
+    "category": "inorganic-complex",
+    "charge": 0,
+    "multiplicity": 1,
+    "source": "quantui-idealized",
+    "synonyms": "ferrocene;bis(cyclopentadienyl)iron;Cp2Fe",
+    "description": "Fe(C5H5)2 \u2014 the archetypal metallocene sandwich compound",
+    "atoms": [
+      "Fe",
+      "C",
+      "H",
+      "C",
+      "H",
+      "C",
+      "H",
+      "C",
+      "H",
+      "C",
+      "H",
+      "C",
+      "H",
+      "C",
+      "H",
+      "C",
+      "H",
+      "C",
+      "H",
+      "C",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        1.21,
+        0.0,
+        1.66
+      ],
+      [
+        2.29,
+        0.0,
+        1.66
+      ],
+      [
+        0.373911,
+        1.150778,
+        1.66
+      ],
+      [
+        0.707649,
+        2.177919,
+        1.66
+      ],
+      [
+        -0.978911,
+        0.71122,
+        1.66
+      ],
+      [
+        -1.852649,
+        1.346028,
+        1.66
+      ],
+      [
+        -0.978911,
+        -0.71122,
+        1.66
+      ],
+      [
+        -1.852649,
+        -1.346028,
+        1.66
+      ],
+      [
+        0.373911,
+        -1.150778,
+        1.66
+      ],
+      [
+        0.707649,
+        -2.177919,
+        1.66
+      ],
+      [
+        1.21,
+        0.0,
+        -1.66
+      ],
+      [
+        2.29,
+        0.0,
+        -1.66
+      ],
+      [
+        0.373911,
+        1.150778,
+        -1.66
+      ],
+      [
+        0.707649,
+        2.177919,
+        -1.66
+      ],
+      [
+        -0.978911,
+        0.71122,
+        -1.66
+      ],
+      [
+        -1.852649,
+        1.346028,
+        -1.66
+      ],
+      [
+        -0.978911,
+        -0.71122,
+        -1.66
+      ],
+      [
+        -1.852649,
+        -1.346028,
+        -1.66
+      ],
+      [
+        0.373911,
+        -1.150778,
+        -1.66
+      ],
+      [
+        0.707649,
+        -2.177919,
+        -1.66
+      ]
+    ]
+  },
+  {
+    "id": "inorganic-hexaaquaironii",
+    "name": "hexaaquairon(II)",
+    "formula": "H12FeO6",
+    "category": "inorganic-complex",
+    "charge": 2,
+    "multiplicity": 5,
+    "source": "quantui-idealized",
+    "synonyms": "hexaaquairon;iron(II) hexaaqua;Fe(H2O)6 2+",
+    "description": "[Fe(H2O)6]2+ \u2014 high-spin octahedral aqua complex (d6, 4 unpaired)",
+    "atoms": [
+      "Fe",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        2.12,
+        0.0,
+        0.0
+      ],
+      [
+        2.707729,
+        0.759062,
+        0.0
+      ],
+      [
+        2.707729,
+        -0.759062,
+        0.0
+      ],
+      [
+        -2.12,
+        0.0,
+        0.0
+      ],
+      [
+        -2.707729,
+        0.759062,
+        0.0
+      ],
+      [
+        -2.707729,
+        -0.759062,
+        0.0
+      ],
+      [
+        0.0,
+        2.12,
+        0.0
+      ],
+      [
+        0.759062,
+        2.707729,
+        0.0
+      ],
+      [
+        -0.759062,
+        2.707729,
+        0.0
+      ],
+      [
+        0.0,
+        -2.12,
+        0.0
+      ],
+      [
+        0.759062,
+        -2.707729,
+        0.0
+      ],
+      [
+        -0.759062,
+        -2.707729,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        2.12
+      ],
+      [
+        0.759062,
+        0.0,
+        2.707729
+      ],
+      [
+        -0.759062,
+        0.0,
+        2.707729
+      ],
+      [
+        0.0,
+        0.0,
+        -2.12
+      ],
+      [
+        0.759062,
+        0.0,
+        -2.707729
+      ],
+      [
+        -0.759062,
+        0.0,
+        -2.707729
+      ]
+    ]
+  },
+  {
+    "id": "inorganic-hexaaquachromiumiii",
+    "name": "hexaaquachromium(III)",
+    "formula": "H12CrO6",
+    "category": "inorganic-complex",
+    "charge": 3,
+    "multiplicity": 4,
+    "source": "quantui-idealized",
+    "synonyms": "hexaaquachromium;chromium(III) hexaaqua;Cr(H2O)6 3+",
+    "description": "[Cr(H2O)6]3+ \u2014 octahedral aqua complex (d3, 3 unpaired)",
+    "atoms": [
+      "Cr",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        1.96,
+        0.0,
+        0.0
+      ],
+      [
+        2.547729,
+        0.759062,
+        0.0
+      ],
+      [
+        2.547729,
+        -0.759062,
+        0.0
+      ],
+      [
+        -1.96,
+        0.0,
+        0.0
+      ],
+      [
+        -2.547729,
+        0.759062,
+        0.0
+      ],
+      [
+        -2.547729,
+        -0.759062,
+        0.0
+      ],
+      [
+        0.0,
+        1.96,
+        0.0
+      ],
+      [
+        0.759062,
+        2.547729,
+        0.0
+      ],
+      [
+        -0.759062,
+        2.547729,
+        0.0
+      ],
+      [
+        0.0,
+        -1.96,
+        0.0
+      ],
+      [
+        0.759062,
+        -2.547729,
+        0.0
+      ],
+      [
+        -0.759062,
+        -2.547729,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.96
+      ],
+      [
+        0.759062,
+        0.0,
+        2.547729
+      ],
+      [
+        -0.759062,
+        0.0,
+        2.547729
+      ],
+      [
+        0.0,
+        0.0,
+        -1.96
+      ],
+      [
+        0.759062,
+        0.0,
+        -2.547729
+      ],
+      [
+        -0.759062,
+        0.0,
+        -2.547729
+      ]
+    ]
+  },
+  {
+    "id": "inorganic-hexaaquanickelii",
+    "name": "hexaaquanickel(II)",
+    "formula": "H12NiO6",
+    "category": "inorganic-complex",
+    "charge": 2,
+    "multiplicity": 3,
+    "source": "quantui-idealized",
+    "synonyms": "hexaaquanickel;nickel(II) hexaaqua;Ni(H2O)6 2+",
+    "description": "[Ni(H2O)6]2+ \u2014 octahedral aqua complex (d8, 2 unpaired)",
+    "atoms": [
+      "Ni",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        2.05,
+        0.0,
+        0.0
+      ],
+      [
+        2.637729,
+        0.759062,
+        0.0
+      ],
+      [
+        2.637729,
+        -0.759062,
+        0.0
+      ],
+      [
+        -2.05,
+        0.0,
+        0.0
+      ],
+      [
+        -2.637729,
+        0.759062,
+        0.0
+      ],
+      [
+        -2.637729,
+        -0.759062,
+        0.0
+      ],
+      [
+        0.0,
+        2.05,
+        0.0
+      ],
+      [
+        0.759062,
+        2.637729,
+        0.0
+      ],
+      [
+        -0.759062,
+        2.637729,
+        0.0
+      ],
+      [
+        0.0,
+        -2.05,
+        0.0
+      ],
+      [
+        0.759062,
+        -2.637729,
+        0.0
+      ],
+      [
+        -0.759062,
+        -2.637729,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        2.05
+      ],
+      [
+        0.759062,
+        0.0,
+        2.637729
+      ],
+      [
+        -0.759062,
+        0.0,
+        2.637729
+      ],
+      [
+        0.0,
+        0.0,
+        -2.05
+      ],
+      [
+        0.759062,
+        0.0,
+        -2.637729
+      ],
+      [
+        -0.759062,
+        0.0,
+        -2.637729
+      ]
+    ]
+  },
+  {
+    "id": "inorganic-hexaaquatitaniumiii",
+    "name": "hexaaquatitanium(III)",
+    "formula": "H12O6Ti",
+    "category": "inorganic-complex",
+    "charge": 3,
+    "multiplicity": 2,
+    "source": "quantui-idealized",
+    "synonyms": "hexaaquatitanium;titanium(III) hexaaqua;Ti(H2O)6 3+",
+    "description": "[Ti(H2O)6]3+ \u2014 d1 octahedral aqua complex (the classic single-band UV-Vis example)",
+    "atoms": [
+      "Ti",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H",
+      "O",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        2.03,
+        0.0,
+        0.0
+      ],
+      [
+        2.617729,
+        0.759062,
+        0.0
+      ],
+      [
+        2.617729,
+        -0.759062,
+        0.0
+      ],
+      [
+        -2.03,
+        0.0,
+        0.0
+      ],
+      [
+        -2.617729,
+        0.759062,
+        0.0
+      ],
+      [
+        -2.617729,
+        -0.759062,
+        0.0
+      ],
+      [
+        0.0,
+        2.03,
+        0.0
+      ],
+      [
+        0.759062,
+        2.617729,
+        0.0
+      ],
+      [
+        -0.759062,
+        2.617729,
+        0.0
+      ],
+      [
+        0.0,
+        -2.03,
+        0.0
+      ],
+      [
+        0.759062,
+        -2.617729,
+        0.0
+      ],
+      [
+        -0.759062,
+        -2.617729,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        2.03
+      ],
+      [
+        0.759062,
+        0.0,
+        2.617729
+      ],
+      [
+        -0.759062,
+        0.0,
+        2.617729
+      ],
+      [
+        0.0,
+        0.0,
+        -2.03
+      ],
+      [
+        0.759062,
+        0.0,
+        -2.617729
+      ],
+      [
+        -0.759062,
+        0.0,
+        -2.617729
+      ]
+    ]
+  },
+  {
+    "id": "inorganic-hexacyanoferrateiii",
+    "name": "hexacyanoferrate(III)",
+    "formula": "C6FeN6",
+    "category": "inorganic-complex",
+    "charge": -3,
+    "multiplicity": 2,
+    "source": "quantui-idealized",
+    "synonyms": "ferricyanide;hexacyanoferrate(III);Fe(CN)6 3-",
+    "description": "[Fe(CN)6]3- \u2014 ferricyanide, low-spin octahedral (d5, 1 unpaired)",
+    "atoms": [
+      "Fe",
+      "C",
+      "N",
+      "C",
+      "N",
+      "C",
+      "N",
+      "C",
+      "N",
+      "C",
+      "N",
+      "C",
+      "N"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        1.93,
+        0.0,
+        0.0
+      ],
+      [
+        3.09,
+        0.0,
+        0.0
+      ],
+      [
+        -1.93,
+        0.0,
+        0.0
+      ],
+      [
+        -3.09,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.93,
+        0.0
+      ],
+      [
+        0.0,
+        3.09,
+        0.0
+      ],
+      [
+        0.0,
+        -1.93,
+        0.0
+      ],
+      [
+        0.0,
+        -3.09,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.93
+      ],
+      [
+        0.0,
+        0.0,
+        3.09
+      ],
+      [
+        0.0,
+        0.0,
+        -1.93
+      ],
+      [
+        0.0,
+        0.0,
+        -3.09
+      ]
+    ]
+  },
+  {
+    "id": "inorganic-hexacyanoferrateii",
+    "name": "hexacyanoferrate(II)",
+    "formula": "C6FeN6",
+    "category": "inorganic-complex",
+    "charge": -4,
+    "multiplicity": 1,
+    "source": "quantui-idealized",
+    "synonyms": "ferrocyanide;hexacyanoferrate(II);Fe(CN)6 4-",
+    "description": "[Fe(CN)6]4- \u2014 ferrocyanide, low-spin octahedral (d6, diamagnetic)",
+    "atoms": [
+      "Fe",
+      "C",
+      "N",
+      "C",
+      "N",
+      "C",
+      "N",
+      "C",
+      "N",
+      "C",
+      "N",
+      "C",
+      "N"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        1.92,
+        0.0,
+        0.0
+      ],
+      [
+        3.08,
+        0.0,
+        0.0
+      ],
+      [
+        -1.92,
+        0.0,
+        0.0
+      ],
+      [
+        -3.08,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.92,
+        0.0
+      ],
+      [
+        0.0,
+        3.08,
+        0.0
+      ],
+      [
+        0.0,
+        -1.92,
+        0.0
+      ],
+      [
+        0.0,
+        -3.08,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.92
+      ],
+      [
+        0.0,
+        0.0,
+        3.08
+      ],
+      [
+        0.0,
+        0.0,
+        -1.92
+      ],
+      [
+        0.0,
+        0.0,
+        -3.08
+      ]
+    ]
+  },
+  {
+    "id": "inorganic-tetracarbonylnickel0",
+    "name": "tetracarbonylnickel(0)",
+    "formula": "C4NiO4",
+    "category": "inorganic-complex",
+    "charge": 0,
+    "multiplicity": 1,
+    "source": "quantui-idealized",
+    "synonyms": "tetracarbonylnickel;nickel tetracarbonyl;Ni(CO)4",
+    "description": "Ni(CO)4 \u2014 tetrahedral d10 carbonyl (18-electron, diamagnetic)",
+    "atoms": [
+      "Ni",
+      "C",
+      "O",
+      "C",
+      "O",
+      "C",
+      "O",
+      "C",
+      "O"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        1.050777,
+        1.050777,
+        1.050777
+      ],
+      [
+        1.708957,
+        1.708957,
+        1.708957
+      ],
+      [
+        1.050777,
+        -1.050777,
+        -1.050777
+      ],
+      [
+        1.708957,
+        -1.708957,
+        -1.708957
+      ],
+      [
+        -1.050777,
+        1.050777,
+        -1.050777
+      ],
+      [
+        -1.708957,
+        1.708957,
+        -1.708957
+      ],
+      [
+        -1.050777,
+        -1.050777,
+        1.050777
+      ],
+      [
+        -1.708957,
+        -1.708957,
+        1.708957
+      ]
+    ]
+  },
+  {
+    "id": "inorganic-tetraamminezincii",
+    "name": "tetraamminezinc(II)",
+    "formula": "H12N4Zn",
+    "category": "inorganic-complex",
+    "charge": 2,
+    "multiplicity": 1,
+    "source": "quantui-idealized",
+    "synonyms": "tetraamminezinc;zinc(II) tetraammine;Zn(NH3)4 2+",
+    "description": "[Zn(NH3)4]2+ \u2014 tetrahedral d10 ammine (diamagnetic)",
+    "atoms": [
+      "Zn",
+      "N",
+      "H",
+      "H",
+      "H",
+      "N",
+      "H",
+      "H",
+      "H",
+      "N",
+      "H",
+      "H",
+      "H",
+      "N",
+      "H",
+      "H",
+      "H"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        1.172021,
+        1.172021,
+        1.172021
+      ],
+      [
+        2.153656,
+        0.976071,
+        0.976071
+      ],
+      [
+        0.976071,
+        2.153656,
+        0.976071
+      ],
+      [
+        0.976071,
+        0.976071,
+        2.153656
+      ],
+      [
+        1.172021,
+        -1.172021,
+        -1.172021
+      ],
+      [
+        2.153656,
+        -0.976071,
+        -0.976071
+      ],
+      [
+        0.976071,
+        -2.153656,
+        -0.976071
+      ],
+      [
+        0.976071,
+        -0.976071,
+        -2.153656
+      ],
+      [
+        -1.172021,
+        1.172021,
+        -1.172021
+      ],
+      [
+        -0.583542,
+        1.761127,
+        -1.761127
+      ],
+      [
+        -1.761127,
+        0.583542,
+        -1.761127
+      ],
+      [
+        -1.761127,
+        1.761127,
+        -0.583542
+      ],
+      [
+        -1.172021,
+        -1.172021,
+        1.172021
+      ],
+      [
+        -0.583542,
+        -1.761127,
+        1.761127
+      ],
+      [
+        -1.761127,
+        -0.583542,
+        1.761127
+      ],
+      [
+        -1.761127,
+        -1.761127,
+        0.583542
+      ]
+    ]
+  },
+  {
+    "id": "inorganic-tetrachlorocobaltateii",
+    "name": "tetrachlorocobaltate(II)",
+    "formula": "Cl4Co",
+    "category": "inorganic-complex",
+    "charge": -2,
+    "multiplicity": 4,
+    "source": "quantui-idealized",
+    "synonyms": "tetrachlorocobaltate;CoCl4 2-",
+    "description": "[CoCl4]2- \u2014 tetrahedral high-spin cobalt(II) (d7, 3 unpaired), the classic blue ion",
+    "atoms": [
+      "Co",
+      "Cl",
+      "Cl",
+      "Cl",
+      "Cl"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        1.316359,
+        1.316359,
+        1.316359
+      ],
+      [
+        1.316359,
+        -1.316359,
+        -1.316359
+      ],
+      [
+        -1.316359,
+        1.316359,
+        -1.316359
+      ],
+      [
+        -1.316359,
+        -1.316359,
+        1.316359
+      ]
+    ]
+  },
+  {
+    "id": "inorganic-permanganate",
+    "name": "permanganate",
+    "formula": "MnO4",
+    "category": "inorganic-complex",
+    "charge": -1,
+    "multiplicity": 1,
+    "source": "quantui-idealized",
+    "synonyms": "permanganate;MnO4;tetraoxomanganate",
+    "description": "[MnO4]- \u2014 tetrahedral d0 manganese(VII) oxoanion (deep purple)",
+    "atoms": [
+      "Mn",
+      "O",
+      "O",
+      "O",
+      "O"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.941081,
+        0.941081,
+        0.941081
+      ],
+      [
+        0.941081,
+        -0.941081,
+        -0.941081
+      ],
+      [
+        -0.941081,
+        0.941081,
+        -0.941081
+      ],
+      [
+        -0.941081,
+        -0.941081,
+        0.941081
+      ]
+    ]
+  },
+  {
+    "id": "inorganic-tetrachloroplatinateii",
+    "name": "tetrachloroplatinate(II)",
+    "formula": "Cl4Pt",
+    "category": "inorganic-complex",
+    "charge": -2,
+    "multiplicity": 1,
+    "source": "quantui-idealized",
+    "synonyms": "tetrachloroplatinate;PtCl4 2-",
+    "description": "[PtCl4]2- \u2014 square-planar platinum(II) (d8, diamagnetic), the cisplatin precursor",
+    "atoms": [
+      "Pt",
+      "Cl",
+      "Cl",
+      "Cl",
+      "Cl"
+    ],
+    "coordinates": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        2.31,
+        0.0,
+        0.0
+      ],
+      [
+        -2.31,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        2.31,
+        0.0
+      ],
+      [
+        0.0,
+        -2.31,
+        0.0
+      ]
+    ]
+  }
+]

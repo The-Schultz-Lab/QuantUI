@@ -73,11 +73,13 @@ def _oh_distances(mol: Molecule):
 
 
 class TestNonDestructive:
-    def test_rdkit_absent_returns_original_unchanged(self, monkeypatch):
-        """RDKit missing → return the original geometry, never raise."""
+    def test_no_backend_returns_original_unchanged(self, monkeypatch):
+        """No pre-opt backend (RDKit and xtb both absent) → return the original
+        geometry, never raise."""
         import quantui.preopt as preopt_mod
 
         monkeypatch.setattr(preopt_mod, "_RDKIT_AVAILABLE", False)
+        monkeypatch.setattr(preopt_mod, "_XTB_AVAILABLE", False)
         original = _water()
         mol, rmsd = preopt_mod.preoptimize(original)
         assert isinstance(mol, Molecule)

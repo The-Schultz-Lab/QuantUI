@@ -17,6 +17,9 @@ dependencies:
   - numpy>=1.24.0
   - ase>=3.22.0          # Structure I/O, molecule library, geometry optimisation
   - rdkit>=2022.03.1     # PubChem SDF→XYZ conversion, SMILES input
+  - xtb-python>=20.2     # GFN-FF metal-capable pre-optimization (the Python API +
+                         # ASE calculator; conda-forge has Windows/macOS builds,
+                         # whereas the PyPI `xtb` wheel is Linux-only)
 
   # Visualization
   - py3dmol>=2.0.0       # Primary 3D molecular viewer

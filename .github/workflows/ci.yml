@@ -28,7 +28,9 @@ jobs:
       - name: Install package and dev dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[pyscf,ase,dev]"
+          # xtb (GFN-FF metal pre-opt) is Linux-only on PyPI, so it's included
+          # here (ubuntu) but not in the Windows job below — its tests skip there.
+          pip install -e ".[pyscf,ase,dev,xtb]"
 
       - name: Run tests (skip network tests)
         run: |

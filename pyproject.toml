@@ -118,6 +118,17 @@ ase = [
     "ase>=3.22.0,<4",
 ]
 
+# GFN-FF metal-capable classical pre-optimization via xtb (Grimme's general
+# force field). RDKit's organic valence model can't touch a transition metal;
+# GFN-FF covers the whole periodic table. quantui.preopt uses it when present
+# and falls back gracefully otherwise. xtb publishes **Linux pip wheels only** —
+# on Windows/macOS install it from conda-forge (see local-setup/environment.yml).
+# Depends on ase (the optimizer driving the relaxation).
+xtb = [
+    "xtb>=22.1",
+    "ase>=3.22.0,<4",
+]
+
 # Voilà app server — hides notebook code; students see only the widget UI.
 # Run with: voila notebooks/molecule_computations.ipynb
 app = [

@@ -832,6 +832,82 @@ def build_shared_widgets(
         style={"description_width": "100px"},
         layout=layout_fn(width="190px"),
     )
+
+    # MET.5 spin-state helper: suggest a multiplicity for a metal centre from its
+    # oxidation state (d-count) + geometry. Suggests, never sets — the student
+    # clicks an Apply button. Charge is not touched (depends on the ligands).
+    from quantui.spin_presets import supported_metals
+
+    app.spin_metal_dd = widgets.Dropdown(
+        options=supported_metals(),
+        value="Fe",
+        description="Metal:",
+        style={"description_width": "90px"},
+        layout=layout_fn(width="160px"),
+    )
+    app.spin_ox_si = widgets.BoundedIntText(
+        value=3,
+        min=-4,
+        max=8,
+        description="Oxidation:",
+        style={"description_width": "90px"},
+        layout=layout_fn(width="160px"),
+    )
+    app.spin_geom_dd = widgets.Dropdown(
+        options=[
+            ("Octahedral", "octahedral"),
+            ("Tetrahedral", "tetrahedral"),
+            ("Square-planar", "square_planar"),
+        ],
+        value="octahedral",
+        description="Geometry:",
+        style={"description_width": "90px"},
+        layout=layout_fn(width="200px"),
+    )
+    app.spin_suggest_btn = widgets.Button(
+        description="Suggest multiplicity",
+        icon="magic",
+        button_style="info",
+        layout=layout_fn(width="200px"),
+    )
+    app.spin_helper_output = widgets.HTML(value="")
+    # Up to two candidate spin states (high/low-spin); hidden until suggested.
+    app.spin_apply_btns = tuple(
+        widgets.Button(
+            description="Apply",
+            icon="check",
+            button_style="success",
+            layout=layout_fn(width="260px", display="none"),
+        )
+        for _ in range(2)
+    )
+    app._spin_suggested_mults: list = []
+    app.spin_helper_box = widgets.Accordion(
+        children=[
+            widgets.VBox(
+                [
+                    widgets.HTML(
+                        '<span style="font-size:12px;color:#475569">Suggests a '
+                        "spin multiplicity for a transition-metal centre from its "
+                        "oxidation state and geometry. It never sets anything on "
+                        "its own — review the note, then click Apply. Charge is "
+                        "not changed (it depends on your ligands).</span>"
+                    ),
+                    widgets.HBox(
+                        [app.spin_metal_dd, app.spin_ox_si, app.spin_geom_dd],
+                        layout=layout_fn(flex_wrap="wrap", gap="6px"),
+                    ),
+                    app.spin_suggest_btn,
+                    app.spin_helper_output,
+                    app.spin_apply_btns[0],
+                    app.spin_apply_btns[1],
+                ],
+                layout=layout_fn(gap="6px"),
+            )
+        ]
+    )
+    app.spin_helper_box.set_title(0, "🧲 Spin-state helper (metal complexes)")
+    app.spin_helper_box.selected_index = None  # collapsed by default
     # Classical (MMFF/UFF) pre-optimization is an explicit, transparent tool —
     # Preview → Keep/Revert — NOT a silent checkbox baked into the run. This
     # avoids the confusing dual path (accepting a previewed geometry while a
@@ -1140,6 +1216,16 @@ def build_shared_widgets(
         disabled=True,
         layout=layout_fn(width="110px", height="36px"),
         tooltip=("Stop the running calculation at the next SCF cycle / optimizer step"),
+    )
+
+    # MET.5: one-click fix shown only when a metal's basis blocks the run.
+    # Hidden until the pre-run guard reveals it; sets the basis to def2-SVP.
+    app.basis_fix_btn = widgets.Button(
+        description="Switch basis to def2-SVP",
+        button_style="warning",
+        icon="wrench",
+        layout=layout_fn(width="220px", height="36px", display="none"),
+        tooltip="Set the basis set to def2-SVP, which covers transition metals",
     )
 
     app.log_clear_btn = widgets.Button(
@@ -1529,6 +1615,7 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
                 layout=layout_fn(flex_wrap="wrap", align_items="flex-start"),
             ),
             app._open_shell_hint,
+            app.spin_helper_box,
             widgets.HBox(
                 [app.calc_type_dd, app.calc_type_help_btn],
                 layout=layout_fn(align_items="center", gap="4px"),
@@ -1565,6 +1652,7 @@ def build_run_section(app: Any, *, layout_fn: Any) -> None:
                 [
                     app.run_btn,
                     app.cancel_btn,
+                    app.basis_fix_btn,
                     # Status + elapsed/remaining chip stacked vertically so the
                     # timer never crowds/truncates the (longer) status line.
                     widgets.VBox(

@@ -196,6 +196,7 @@ SUPPORTED_BASIS_SETS = [
     "cc-pVTZ",
     "def2-SVP",
     "def2-TZVP",
+    "LANL2DZ",
 ]
 
 

@@ -13,7 +13,8 @@ from quantui import config
 from quantui import molecule_library as ml
 
 # Reasonable element-symbol whitelist for the bundled tiers (CHONF + curated
-# heteroatoms + common ions). Guards against codec corruption.
+# heteroatoms + common ions + the coordination-complex metals from the bundled
+# inorganic examples, MET.9). Guards against codec corruption.
 _KNOWN = {
     "H",
     "He",
@@ -35,8 +36,16 @@ _KNOWN = {
     "Ar",
     "K",
     "Ca",
+    "Ti",
+    "Cr",
+    "Mn",
+    "Fe",
+    "Co",
+    "Ni",
+    "Zn",
     "Br",
     "I",
+    "Pt",
 }
 
 

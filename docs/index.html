@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QuantUI — Free, open, and interactive quantum chemistry</title>
-  <meta name="description" content="QuantUI is a free, open-source frontend for PySCF — DFT, MP2, CCSD, CCSD(T), TD-DFT, NMR, geometry optimization, frequency analysis, PES scans, optional NVIDIA GPU offload, and interactive 3D visualization, running locally in Jupyter or Voilà.">
+  <meta name="description" content="QuantUI is a free, open-source frontend for PySCF — DFT, MP2, CCSD, CCSD(T), TD-DFT, NMR, geometry optimization, frequency analysis, PES scans, transition-metal / coordination-complex support (GFN-FF pre-optimization, spin-state helper), optional NVIDIA GPU offload, and interactive 3D visualization, running locally in Jupyter or Voilà.">
   <meta property="og:title" content="QuantUI — Free, open, and interactive quantum chemistry">
   <meta property="og:description" content="PySCF in an interactive Jupyter/Voilà UI. DFT, MP2, CCSD, CCSD(T), NMR, UV-Vis, frequencies, PES scans, GPU offload, and 3D structures — all local, no cluster required.">
   <meta property="og:type" content="website">
@@ -544,6 +544,21 @@
           <code class="inline-code">voila</code>. Light/Dark themes,
           inline log viewer, and an in-app bug-report form. Equally at
           home in a research group or a classroom.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="feature-card__icon">🧲</div>
+        <div class="feature-card__title">Inorganic &amp; Coordination Complexes</div>
+        <p class="feature-card__body">
+          First-class transition-metal support: 14 bundled metal complexes
+          (octahedral / tetrahedral / square-planar) with correct charge and
+          spin, a pre-run guard that catches a metal on an incompatible basis
+          (nudges to def2-SVP / LANL2DZ) and an impossible multiplicity, a
+          <strong>spin-state helper</strong> that suggests high/low-spin
+          multiplicities from oxidation state + geometry, optional
+          <strong>GFN-FF (xtb)</strong> pre-optimization for metals, and a
+          viewer that draws the coordination bonds.
         </p>
       </div>
 
