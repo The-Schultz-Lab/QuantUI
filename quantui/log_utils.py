@@ -379,8 +379,38 @@ def format_log_header(
 # ============================================================================
 
 
-def _extract_warnings(log_text: str) -> list[str]:
-    """Return list of unique warning/error lines found in log_text."""
+# A converged HOMO-LUMO gap wider than this (eV) means any earlier
+# "HOMO == LUMO" degeneracy warning described a pre-convergence density, not the
+# result — see _extract_warnings. Small enough that a genuinely (near-)degenerate
+# converged state stays below it and keeps its warning.
+_DEGENERACY_GAP_THRESHOLD_EV: float = 0.1
+
+
+def _is_homo_lumo_degeneracy_warning(lower: str) -> bool:
+    """True for PySCF's ``get_occ`` 'HOMO x == LUMO y' degeneracy warning."""
+    return "homo" in lower and "== lumo" in lower
+
+
+def _extract_warnings(
+    log_text: str, *, converged_gap_ev: float | None = None
+) -> list[str]:
+    """Return list of unique warning/error lines found in log_text.
+
+    PySCF's ``get_occ`` emits ``HOMO <x> == LUMO <y>`` on *every* density it
+    sees — including the ``minao`` initial guess, before SCF iteration 1. For a
+    transition-metal complex the bare initial guess has a near-degenerate d
+    manifold with no ligand field yet, so this warning fires even when the SCF
+    then converges to a perfectly healthy gap (observed on ferrocene: the digest
+    showed ``HOMO == LUMO`` right beneath a converged 2.98 eV gap — a false
+    alarm). When *converged_gap_ev* is provided and comfortably non-degenerate
+    (> ``_DEGENERACY_GAP_THRESHOLD_EV``), such lines are dropped as transient:
+    they describe a pre-convergence density, not the result. A genuinely
+    (near-)degenerate converged state has a small gap and keeps its warning.
+    (M-UX2 UXP2.6.)
+    """
+    drop_degeneracy = (
+        converged_gap_ev is not None and converged_gap_ev > _DEGENERACY_GAP_THRESHOLD_EV
+    )
     seen: set[str] = set()
     found = []
     for line in log_text.splitlines():
@@ -392,6 +422,8 @@ def _extract_warnings(log_text: str) -> list[str]:
             kw in lower
             for kw in ("warn", "error", "failed", "not converge", "imaginary")
         ):
+            if drop_degeneracy and _is_homo_lumo_degeneracy_warning(lower):
+                continue
             if stripped not in seen:
                 seen.add(stripped)
                 found.append(stripped)
@@ -419,6 +451,10 @@ def format_log_footer(
     from .session_calc import HARTREE_TO_EV  # local import — avoids circular deps
 
     lines: list[str] = ["", _SEP, "  ── Result " + "─" * (_WIDTH - 12)]
+
+    # Hoisted: used by the warnings digest below, which runs whether or not
+    # ``result`` is present.
+    gap_ev: float | None = None
 
     if result is not None:
         converged = getattr(result, "converged", None)
@@ -474,7 +510,7 @@ def format_log_footer(
 
     # Warnings digest
     lines.append("  ── Warnings Digest " + "─" * (_WIDTH - 22))
-    warnings = _extract_warnings(log_text)
+    warnings = _extract_warnings(log_text, converged_gap_ev=gap_ev)
     if warnings:
         for w in warnings[:10]:  # cap at 10
             # Truncate very long lines

@@ -195,6 +195,23 @@
     @media (max-width: 900px) { .features-grid { grid-template-columns: repeat(2, 1fr); } }
     @media (max-width: 560px) { .features-grid { grid-template-columns: 1fr; } }
 
+    /* ── Example gallery ─────────────────────────────────────────────────── */
+    .gallery-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; margin-top: 1rem; }
+    @media (max-width: 720px) { .gallery-grid { grid-template-columns: 1fr; } }
+    .gallery-figure {
+      margin: 0; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px;
+      overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.07);
+      display: flex; flex-direction: column;
+    }
+    .gallery-figure img, .gallery-figure iframe { width: 100%; display: block; background: #ffffff; border: 0; }
+    .gallery-figure iframe { height: 340px; }
+    .gallery-figure figcaption { padding: 1rem 1.25rem; border-top: 1px solid #eef2f7; }
+    .gallery-figure figcaption strong { display: block; color: #0f172a; font-weight: 650; }
+    .gallery-figure figcaption span { display: block; color: #64748b; font-size: 0.9rem; margin-top: 0.25rem; }
+    .gallery-figure figcaption a { color: #2563eb; font-weight: 600; text-decoration: none; }
+    .gallery-figure figcaption a:hover { text-decoration: underline; }
+    .gallery-badge { color: #2563eb; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+
     .card {
       background: #ffffff;
       border-radius: 14px;
@@ -341,6 +358,7 @@
     <a class="nav__logo" href="#">QuantUI</a>
     <span class="nav__badge">v0.3 &middot; MIT</span>
     <a class="nav__link" href="#features">Features</a>
+    <a class="nav__link" href="#examples">Examples</a>
     <a class="nav__link" href="#install">Install</a>
     <a class="nav__link" href="#tutorials">Tutorials</a>
     <a class="btn btn--ghost" href="https://github.com/The-Schultz-Lab/QuantUI">GitHub &rarr;</a>
@@ -561,6 +579,73 @@
           viewer that draws the coordination bonds.
         </p>
       </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── Example gallery ───────────────────────────────────────────────────── -->
+<section class="section section--tinted" id="examples">
+  <div class="container">
+    <h2 class="section__title">See it in action</h2>
+    <p class="section__subtitle">
+      Real QuantUI output &mdash; a molecular orbital, an orbital energy-level
+      diagram, an IR spectrum, and a geometry optimization. The two panels marked
+      <em>Interactive</em> are live: drag to rotate, press play.
+    </p>
+    <div class="gallery-grid">
+
+      <figure class="gallery-figure">
+        <img src="images/cisplatin_lumo.png" alt="Cisplatin LUMO isosurface" loading="lazy">
+        <figcaption>
+          <strong>Cisplatin LUMO</strong>
+          <span>Molecular-orbital isosurface, B3LYP / LANL2DZ (ECP on Pt and Cl).</span>
+        </figcaption>
+      </figure>
+
+      <figure class="gallery-figure">
+        <img src="images/aspartame_orbital_diagram.png" alt="Aspartame orbital energy-level diagram" loading="lazy">
+        <figcaption>
+          <strong>Aspartame orbital energies</strong>
+          <span>Occupied/virtual energy levels, HOMO&ndash;LUMO gap 6.09 eV (B3LYP / 6-31G*).</span>
+        </figcaption>
+      </figure>
+
+      <figure class="gallery-figure">
+        <img src="images/benzene_ir_spectrum.png" alt="Benzene IR spectrum" loading="lazy">
+        <figcaption>
+          <strong>Benzene IR spectrum</strong>
+          <span>Analytical Hessian, &omega;B97X-D / 6-31G &mdash; the four IR-active bands.</span>
+        </figcaption>
+      </figure>
+
+      <figure class="gallery-figure">
+        <img src="images/cisplatin_optimization.png" alt="Cisplatin geometry-optimization energy convergence" loading="lazy">
+        <figcaption>
+          <strong>Geometry optimization</strong>
+          <span>Cisplatin relaxing over 21 BFGS steps, B3LYP / LANL2DZ.</span>
+        </figcaption>
+      </figure>
+
+      <figure class="gallery-figure">
+        <iframe src="examples/cisplatin_trajectory.html" title="Cisplatin optimization trajectory (interactive)" loading="lazy"></iframe>
+        <figcaption>
+          <span class="gallery-badge">Interactive</span>
+          <strong>Optimization trajectory</strong>
+          <span>Watch cisplatin relax step by step &mdash; drag to rotate.
+            <a href="examples/cisplatin_trajectory.html" target="_blank" rel="noopener">Open full &nearr;</a></span>
+        </figcaption>
+      </figure>
+
+      <figure class="gallery-figure">
+        <iframe src="examples/benzene_vib_mode.html" title="Benzene vibrational mode (interactive)" loading="lazy"></iframe>
+        <figcaption>
+          <span class="gallery-badge">Interactive</span>
+          <strong>Vibrational mode</strong>
+          <span>A benzene normal mode animated in 3D.
+            <a href="examples/benzene_vib_mode.html" target="_blank" rel="noopener">Open full &nearr;</a></span>
+        </figcaption>
+      </figure>
 
     </div>
   </div>
