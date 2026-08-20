@@ -1018,10 +1018,14 @@ _ISO_VIEWER_JS = """
       try{ vw.removeShape(shapes[i]); }catch(e){}
     }
     shapes=[];
+    // smoothness = Laplacian smoothing passes 3Dmol.js runs on the raw
+    // marching-cubes mesh. Default (1) leaves visible triangle facets on the
+    // lobes; the roughness is the mesh, not the grid, so more cubegen points
+    // don't fix it but a few smoothing passes do (GaussView-like surfaces).
     shapes.push(vw.addVolumetricData(DATA,"cube",
-      {isoval: state.iso, color: state.pos, opacity: state.op}));
+      {isoval: state.iso, color: state.pos, opacity: state.op, smoothness: 5}));
     shapes.push(vw.addVolumetricData(DATA,"cube",
-      {isoval: -state.iso, color: state.neg, opacity: state.op}));
+      {isoval: -state.iso, color: state.neg, opacity: state.op, smoothness: 5}));
   }
 
   function build(){
