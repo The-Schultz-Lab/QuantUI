@@ -305,12 +305,26 @@ def visualize_molecule_plotlymol(
     try:
         tmp.write(full_xyz)
         tmp.close()
-        fig = draw_3D_rep(
-            xyzfile=tmp.name,
-            charge=charge,
-            mode=mode,
-            resolution=resolution,
-        )
+        try:
+            fig = draw_3D_rep(
+                xyzfile=tmp.name,
+                charge=charge,
+                mode=mode,
+                resolution=resolution,
+            )
+        except Exception as exc:
+            # RDKit's bond-order perception (rdDetermineBonds), called inside
+            # plotlymol3d's draw_3D_rep, raises inconsistently across builds
+            # for the same "can't perceive this molecule's bonds" condition —
+            # a clean ValueError on most, a raw C++-level IndexError
+            # ("unordered_map::at") on at least one Python-3.9 RDKit wheel
+            # (a metal with no covalent-radius table entry). Normalized to one
+            # type here so callers — including the MET.3 fallback below, which
+            # must still catch it — don't depend on a third-party
+            # implementation detail that varies by platform/Python version.
+            raise ValueError(
+                f"Could not determine bonds for {molecule.get_formula()}: {exc}"
+            ) from exc
         if _plotlymol_format_lighting is not None:
             preset = LIGHTING_PRESETS.get(lighting, LIGHTING_PRESETS["soft"])
             fig = _plotlymol_format_lighting(fig, **preset)

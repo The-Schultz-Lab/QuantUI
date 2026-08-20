@@ -48,6 +48,43 @@ def basis_unsupported_elements(basis: str, elements: Iterable[str]) -> List[str]
     return bad
 
 
+def ecp_for_basis(basis: str, elements: Iterable[str]) -> dict:
+    """Return the ``mol.ecp`` mapping ``basis`` needs over ``elements``.
+
+    Basis sets like **LANL2DZ** and the **def2** family bundle an effective core
+    potential (ECP) for heavy elements, but PySCF only applies it when
+    ``mol.ecp`` is set *as well as* ``mol.basis``. Set only the basis and the
+    heavy atom is run all-electron against a valence-only basis: PySCF keeps the
+    full electron count, warns ``ECP not specified``, and produces garbage
+    energies and gradients — a geometry optimisation then walks off into
+    nonsense (fmax in the thousands, energy sliding without converging).
+
+    This returns ``{element: basis}`` for exactly the elements that carry an ECP
+    under ``basis`` (via the same ``pyscf.gto.basis.load_ecp`` lookup a run
+    performs), so a caller can write::
+
+        mol.ecp = ecp_for_basis(basis, molecule.atoms)  # {} for all-electron sets
+
+    Pople / cc / STO sets have no ECP table, so this returns ``{}`` and the
+    caller leaves ``mol.ecp`` at its (empty) default. Never raises: a missing
+    ECP table is treated as "no ECP for that element".
+    """
+    from pyscf import gto
+
+    ecp: dict = {}
+    seen = set()
+    for el in elements:
+        if el in seen:
+            continue
+        seen.add(el)
+        try:
+            if gto.basis.load_ecp(basis, el):
+                ecp[el] = basis
+        except Exception:  # noqa: BLE001 — no ECP table for this basis/element
+            pass
+    return ecp
+
+
 def check_basis_coverage(elements: Iterable[str], basis: str) -> Optional[str]:
     """Message if ``basis`` lacks any element, else ``None``."""
     bad = basis_unsupported_elements(basis, elements)
