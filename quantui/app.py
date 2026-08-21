@@ -205,6 +205,9 @@ from quantui.app_history import (
     on_view_log as _hist_on_view_log,
 )
 from quantui.app_runflow import (
+    calc_type_key as _run_calc_type_key,
+)
+from quantui.app_runflow import (
     do_calibration as _run_do_calibration,
 )
 from quantui.app_runflow import (
@@ -4614,15 +4617,7 @@ class QuantUIApp:
         _predicted_run_s: Optional[float] = None
         _predicted_run_confidence: str = "unknown"
         try:
-            _ct_for_est = {
-                "Single Point": "single_point",
-                "Geometry Opt": "geometry_opt",
-                "Frequency": "frequency",
-                "UV-Vis (TD-DFT)": "tddft",
-                "NMR Shielding": "nmr",
-                "PES Scan": "pes_scan",
-                "Reorganization Energy": "reorganization_energy",
-            }.get(self.calc_type_dd.value, "single_point")
+            _ct_for_est = _run_calc_type_key(self)
             _nb_for_est = _calc_log.count_basis_functions(
                 mol.atoms, self.basis_dd.value
             )

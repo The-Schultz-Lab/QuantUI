@@ -22,17 +22,6 @@ def _calc_type_badge(calc_type: str) -> str:
     }.get(calc_type, calc_type or "Unknown")
 
 
-# Calc-type dropdown label → canonical schema key (used for the header banner).
-_CALC_TYPE_CANON = {
-    "Geometry Opt": "geometry_opt",
-    "Frequency": "frequency",
-    "UV-Vis (TD-DFT)": "tddft",
-    "NMR Shielding": "nmr",
-    "PES Scan": "pes_scan",
-    "Reorganization Energy": "reorganization_energy",
-}
-
-
 def _write_run_header(app: Any) -> None:
     """Write the full run header to the live log — synchronously, atomically.
 
@@ -59,7 +48,7 @@ def _write_run_header(app: Any) -> None:
     try:
         from quantui.log_utils import format_log_header
 
-        calc_type = _CALC_TYPE_CANON.get(app.calc_type_dd.value, "single_point")
+        calc_type = _CALC_TYPE_KEYS.get(app.calc_type_dd.value, "single_point")
         try:
             _n_atoms = len(mol.atoms)
         except Exception:
