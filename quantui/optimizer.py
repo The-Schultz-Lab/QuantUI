@@ -198,7 +198,7 @@ try:
             # every SCF in the optimization when the user enables it.
             from .density_fitting import try_density_fit as _try_density_fit
 
-            mf, _ = _try_density_fit(mf)
+            mf, self._density_fit_used = _try_density_fit(mf)
 
             mf.verbose = 0
             mf.stdout = _sink
@@ -280,6 +280,7 @@ class OptimizationResult:
     mo_coeff: Optional[Any] = None
     pyscf_mol_atom: Optional[Any] = None  # atom list at final geometry (Angstrom)
     pyscf_mol_basis: Optional[str] = None
+    density_fit: bool = False
 
     @property
     def energy_hartree(self) -> float:
@@ -698,6 +699,7 @@ def optimize_geometry(
     _opt_mo_coeff: Optional[Any] = None
     _opt_mol_atom: Optional[Any] = None
     _opt_mol_basis: Optional[str] = None
+    _opt_density_fit = bool(getattr(atoms.calc, "_density_fit_used", False))
     try:
         import numpy as _np_mo
 
@@ -792,6 +794,7 @@ def optimize_geometry(
         mo_coeff=_opt_mo_coeff,
         pyscf_mol_atom=_opt_mol_atom,
         pyscf_mol_basis=_opt_mol_basis,
+        density_fit=_opt_density_fit,
     )
 
 

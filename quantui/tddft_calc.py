@@ -77,6 +77,7 @@ class TDDFTResult:
     excitation_energies_ev: List[float] = field(default_factory=list)
     oscillator_strengths: List[float] = field(default_factory=list)
     nstates: int = 10
+    density_fit: bool = False
 
     @property
     def energy_ev(self) -> float:
@@ -225,7 +226,7 @@ def _run_tddft_calc_body(
     # measured win is largest (~1.6x on aspirin), so this is the primary target.
     from .density_fitting import try_density_fit as _try_density_fit
 
-    mf, _ = _try_density_fit(mf)
+    mf, density_fit_used = _try_density_fit(mf)
 
     if using_hf and progress_stream is not None:
         try:
@@ -314,4 +315,5 @@ def _run_tddft_calc_body(
         excitation_energies_ev=excitation_energies_ev,
         oscillator_strengths=oscillator_strengths,
         nstates=nstates,
+        density_fit=density_fit_used,
     )

@@ -280,6 +280,7 @@ def save_result(
         "solvent": getattr(result, "solvent", None),
         "gpu_used": bool(getattr(result, "gpu_used", False)),
         "gpu_name": getattr(result, "gpu_name", None),
+        "density_fit": bool(getattr(result, "density_fit", False)),
         "dipole_moment_debye": _opt_float(getattr(result, "dipole_moment_debye", None)),
         "mulliken_charges": _opt_float_list(getattr(result, "mulliken_charges", None)),
         "atom_symbols": _opt_str_list(getattr(result, "atom_symbols", None)),

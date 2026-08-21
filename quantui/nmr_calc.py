@@ -47,6 +47,7 @@ class NMRResult:
     # method/basis.
     reference_key: str = ""
     is_fallback_reference: bool = False
+    density_fit: bool = False
 
     def h_shifts(self) -> List[Tuple[int, float]]:
         """(atom_index, δ ppm) pairs for all H atoms in molecule order."""
@@ -369,7 +370,7 @@ def _run_nmr_calc_body(
     # ever defaulted on for NMR.
     from .density_fitting import try_density_fit as _try_density_fit
 
-    mf, _ = _try_density_fit(mf)
+    mf, density_fit_used = _try_density_fit(mf)
 
     # Cooperative cancel between SCF cycles.
     from .cancellation import attach_scf_cancel_callback, cancel_check_from_stream
@@ -445,4 +446,5 @@ def _run_nmr_calc_body(
         converged=converged,
         reference_key=matched_ref_key,
         is_fallback_reference=is_fallback_ref,
+        density_fit=density_fit_used,
     )

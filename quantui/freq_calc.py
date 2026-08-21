@@ -106,6 +106,7 @@ class FreqResult:
     mo_occ: Optional[List] = None
     pyscf_mol_atom: Optional[List] = None
     pyscf_mol_basis: Optional[str] = None
+    density_fit: bool = False
 
     @property
     def energy_ev(self) -> float:
@@ -731,4 +732,5 @@ def _run_freq_calc_body(
         mo_occ=mo_occ_list,
         pyscf_mol_atom=pyscf_mol_atom,
         pyscf_mol_basis=basis,
+        density_fit=_density_fit_used,
     )
