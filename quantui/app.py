@@ -2057,8 +2057,8 @@ class QuantUIApp:
         self._resume_list_dd.observe(
             self._safe_cb(self._on_resume_entry_changed), names="value"
         )
-        self._resume_restore_btn.on_click(self._on_resume_restore)
-        self._resume_discard_btn.on_click(self._on_resume_discard)
+        self._resume_restore_btn.on_click(self._safe_cb(self._on_resume_restore))
+        self._resume_discard_btn.on_click(self._safe_cb(self._on_resume_discard))
         # Help buttons
         self.method_help_btn.on_click(self._on_method_help)
         self.basis_help_btn.on_click(self._on_basis_help)
