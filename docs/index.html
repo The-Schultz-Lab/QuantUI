@@ -204,7 +204,7 @@
       display: flex; flex-direction: column;
     }
     .gallery-figure img, .gallery-figure iframe { width: 100%; display: block; background: #ffffff; border: 0; }
-    .gallery-figure iframe { height: 380px; }
+    .gallery-figure iframe { height: 400px; }
     .gallery-figure figcaption { padding: 1rem 1.25rem; border-top: 1px solid #eef2f7; }
     .gallery-figure figcaption strong { display: block; color: #0f172a; font-weight: 650; }
     .gallery-figure figcaption span { display: block; color: #64748b; font-size: 0.9rem; margin-top: 0.25rem; }
@@ -630,12 +630,12 @@
       </figure>
 
       <figure class="gallery-figure">
-        <img src="images/cisplatin_trajectory.gif" alt="Cisplatin geometry-optimization trajectory (animated)" loading="lazy">
+        <iframe src="examples/cisplatin_trajectory.html" title="Cisplatin optimization trajectory (interactive)" loading="lazy"></iframe>
         <figcaption>
-          <span class="gallery-badge">Animated</span>
+          <span class="gallery-badge">Interactive</span>
           <strong>Optimization trajectory</strong>
-          <span>Cisplatin relaxing step by step, B3LYP/LANL2DZ.
-            <a href="examples/cisplatin_trajectory.html" target="_blank" rel="noopener">Open interactive &nearr;</a></span>
+          <span>Cisplatin relaxing step by step &mdash; press play, drag to rotate.
+            <a href="examples/cisplatin_trajectory.html" target="_blank" rel="noopener">Open full &nearr;</a></span>
         </figcaption>
       </figure>
 
