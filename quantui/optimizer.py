@@ -531,13 +531,16 @@ def optimize_geometry(
             _stream,
             "\n⚠  No usable checkpoint to resume — starting from the beginning.\n",
         )
+    _resume_steps_done: Optional[int] = None
     if _resume_from is not None and checkpoint is not None:
         try:
             _done = (checkpoint.load_state() or {}).get("steps_done")
+            if isinstance(_done, int) and _done > 0:
+                _resume_steps_done = _done
             _detail = (
                 f"continuing from step {_done}; "
                 "geometry and optimizer curvature restored"
-                if isinstance(_done, int) and _done > 0
+                if _resume_steps_done is not None
                 else "continuing from the last saved geometry"
             )
             checkpoint.log_resumed(_detail)
@@ -596,6 +599,21 @@ def optimize_geometry(
                 append_trajectory=_resuming,
                 restart=str(restart_path) if restart_path is not None else None,
             )
+            if _resuming and _resume_steps_done is not None:
+                # A freshly constructed BFGS always starts nsteps at 0, even
+                # on a resumed run — left unseeded, the per-step
+                # checkpoint.update(steps_done=dyn.nsteps) callback below
+                # regresses the reported step count on every resume (a
+                # resumed-then-interrupted-again run under-reports how much
+                # work is banked). ISSUE.5. Seeding it from the checkpoint
+                # makes step counting continue where the previous run left
+                # off. (ASE's own irun() also uses nsteps==0 to guard the
+                # pre-loop trajectory write it does for a *fresh* run; the
+                # installed ASE version already skips that write whenever
+                # append_trajectory left the file non-empty, so this seeding
+                # is not needed to avoid a duplicated boundary frame here —
+                # only to keep the reported step count correct.)
+                dyn.nsteps = _resume_steps_done
             # Check cancel after every BFGS step (belt-and-suspenders
             # with the per-step calculator check above).
             if _cancel_check is not None:

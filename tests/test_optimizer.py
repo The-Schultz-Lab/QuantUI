@@ -469,6 +469,77 @@ class TestOptimizeGeometryOutputStream:
         assert "converge" not in output.lower() or "BFGS" in output
 
 
+class TestOptimizeGeometryResume:
+    """M-ISSUES ISSUE.5 regression: resuming from a checkpoint must not
+    regress the reported step count.
+
+    A fresh ``BFGS`` instance always has ``nsteps == 0``. Left unseeded on a
+    resumed run, the per-step ``checkpoint.update(steps_done=dyn.nsteps)``
+    call reports a count that restarted at 0 instead of continuing from what
+    the interrupted run had already banked — a resumed-then-interrupted-again
+    optimization under-reports how much work is saved. Seeding ``nsteps``
+    from the checkpoint on resume (``optimizer.py``) fixes it.
+
+    The installed ASE version (>= 3.26, via ``Dynamics.irun``'s
+    ``_traj_is_empty()`` guard) already skips the pre-loop observer call that
+    an older ASE would fire unconditionally at ``nsteps == 0`` — the
+    duplicate-trajectory-frame half of ISSUE.5 as originally filed. The
+    trajectory-length assertion below is kept as a live invariant check, not
+    because this test demonstrates a fix for it.
+    """
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_resume_continues_the_step_count_and_does_not_duplicate_frames(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("QUANTUI_CHECKPOINT_DIR", str(tmp_path / "ckpt"))
+        from quantui.checkpoint import CalcIdentity, Checkpoint
+        from quantui.optimizer import optimize_geometry
+
+        # Compressed bond length so the first step never converges within
+        # steps=1 — every call below is guaranteed to take exactly one step.
+        mol = _h2(0.60)
+        identity = CalcIdentity.from_molecule(
+            mol, calc_type="geometry_opt", method="RHF", basis="STO-3G"
+        )
+        checkpoint = Checkpoint(identity)
+        checkpoint.begin()
+
+        result1 = optimize_geometry(
+            mol,
+            method="RHF",
+            basis="STO-3G",
+            fmax=1e-6,
+            steps=1,
+            checkpoint=checkpoint,
+            resume=False,
+        )
+        assert result1.converged is False
+        len_after_first_run = len(result1.trajectory)
+        steps_done_after_first_run = checkpoint.load_state()["steps_done"]
+        assert steps_done_after_first_run == 1
+
+        result2 = optimize_geometry(
+            mol,
+            method="RHF",
+            basis="STO-3G",
+            fmax=1e-6,
+            steps=1,
+            checkpoint=checkpoint,
+            resume=True,
+        )
+
+        # Exactly one new frame — not a duplicated boundary frame plus one.
+        assert len(result2.trajectory) == len_after_first_run + 1
+
+        # Step count continues from what the first run already banked,
+        # rather than resetting because the resumed BFGS instance's own
+        # nsteps starts at 0.
+        steps_done_after_resume = checkpoint.load_state()["steps_done"]
+        assert steps_done_after_resume == steps_done_after_first_run + 1
+
+
 # ============================================================================
 # Public API surface
 # ============================================================================
