@@ -204,7 +204,7 @@
       display: flex; flex-direction: column;
     }
     .gallery-figure img, .gallery-figure iframe { width: 100%; display: block; background: #ffffff; border: 0; }
-    .gallery-figure iframe { height: 340px; }
+    .gallery-figure iframe { height: 400px; }
     .gallery-figure figcaption { padding: 1rem 1.25rem; border-top: 1px solid #eef2f7; }
     .gallery-figure figcaption strong { display: block; color: #0f172a; font-weight: 650; }
     .gallery-figure figcaption span { display: block; color: #64748b; font-size: 0.9rem; margin-top: 0.25rem; }
@@ -356,11 +356,12 @@
 <nav class="nav" role="navigation">
   <div class="nav__inner">
     <a class="nav__logo" href="#">QuantUI</a>
-    <span class="nav__badge">v0.3 &middot; MIT</span>
+    <a class="nav__badge" href="https://pypi.org/project/quantui/" target="_blank" rel="noopener">v0.7.0 &middot; MIT</a>
     <a class="nav__link" href="#features">Features</a>
     <a class="nav__link" href="#examples">Examples</a>
     <a class="nav__link" href="#install">Install</a>
     <a class="nav__link" href="#tutorials">Tutorials</a>
+    <a class="nav__link" href="https://pypi.org/project/quantui/" target="_blank" rel="noopener">PyPI</a>
     <a class="btn btn--ghost" href="https://github.com/The-Schultz-Lab/QuantUI">GitHub &rarr;</a>
   </div>
 </nav>
@@ -372,6 +373,7 @@
 
       <div class="hero__text">
         <div class="hero__eyebrow">
+          <a class="pill" href="https://pypi.org/project/quantui/" target="_blank" rel="noopener">pip install quantui</a>
           <span class="pill">Open-source PySCF frontend</span>
           <span class="pill pill--teal">No cluster required</span>
           <span class="pill pill--teal">Runs offline</span>
@@ -632,7 +634,7 @@
         <figcaption>
           <span class="gallery-badge">Interactive</span>
           <strong>Optimization trajectory</strong>
-          <span>Watch cisplatin relax step by step &mdash; drag to rotate.
+          <span>Cisplatin relaxing step by step &mdash; press play, drag to rotate.
             <a href="examples/cisplatin_trajectory.html" target="_blank" rel="noopener">Open full &nearr;</a></span>
         </figcaption>
       </figure>
