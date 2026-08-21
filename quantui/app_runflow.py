@@ -1731,16 +1731,11 @@ def _resume_entry_label(state: dict) -> str:
 
 
 def _formula_from_symbols(symbols: Any) -> str:
-    """Hill-notation formula from a list of element symbols."""
-    from collections import Counter
+    """Hill-notation formula from a list of element symbols, ``"?"`` if empty."""
+    from .connectivity import hill_formula
 
-    counts = Counter(str(s) for s in symbols)
-    if not counts:
-        return "?"
-    order = [s for s in ("C", "H") if s in counts] + sorted(
-        s for s in counts if s not in ("C", "H")
-    )
-    return "".join(f"{s}{counts[s] if counts[s] > 1 else ''}" for s in order)
+    symbols = [str(s) for s in symbols]
+    return hill_formula(symbols) if symbols else "?"
 
 
 def refresh_resume_list(app: Any) -> None:

@@ -223,8 +223,13 @@ def covalent_components(
     return components
 
 
-def _hill_formula(symbols: Sequence[str]) -> str:
-    """Formula in Hill order (C, H, then alphabetical); '2' subscripts inline."""
+def hill_formula(symbols: Sequence[str]) -> str:
+    """Formula in Hill order (C, H, then alphabetical); '2' subscripts inline.
+
+    The one shared implementation — :meth:`quantui.molecule.Molecule.get_formula`
+    and :func:`quantui.app_runflow._formula_from_symbols` both delegate here
+    (M-ISSUES ISSUE.8) so the convention only has to change in one place.
+    """
     counts: Dict[str, int] = {}
     for s in symbols:
         counts[s] = counts.get(s, 0) + 1
@@ -270,7 +275,7 @@ def describe_disconnection(
     formula_counts: Dict[str, int] = {}
     order: List[str] = []
     for comp in components:
-        f = _hill_formula([atoms[i] for i in comp])
+        f = hill_formula([atoms[i] for i in comp])
         if f not in formula_counts:
             order.append(f)
         formula_counts[f] = formula_counts.get(f, 0) + 1
