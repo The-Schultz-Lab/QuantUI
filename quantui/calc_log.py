@@ -991,6 +991,7 @@ def estimate_time_from_records(
             n_basis=n_basis,
             n_cores=n_cores,
             gpu_used=gpu_used,
+            source=source,
         )
         if cost_est is not None:
             return cost_est
