@@ -1961,6 +1961,7 @@ def iso_render_options(app: Any) -> dict:
     return {
         "isovalue": _val("_iso_isovalue_slider", 0.02),
         "opacity": _val("_iso_opacity_slider", 0.85),
+        "wireframe": _val("_iso_wireframe_cb", False),
         "color_scheme": _val("_iso_colors_dd", "blue-red"),
         "bgcolor": app._plotly_theme_colors()["scene_bgcolor"],
         "capture_class": (
@@ -2127,6 +2128,7 @@ def on_iso_appearance_changed(app: Any, change: dict | None = None) -> None:
         app,
         iso=opts["isovalue"],
         op=opts["opacity"],
+        wf=opts["wireframe"],
         pos=pos,
         neg=neg,
     )

@@ -1090,7 +1090,7 @@ _ISO_VIEWER_JS = """
 (function(){
   var UID="__UID__", DATA=__DATA__, FMT=__FMT__;
   var WITH_SURFACES=__WITH_SURFACES__, SCENE=__SCENE__;
-  var state={iso:__ISO__, op:__OP__, pos:__POS__, neg:__NEG__, bg:__BG__};
+  var state={iso:__ISO__, op:__OP__, pos:__POS__, neg:__NEG__, bg:__BG__, wf:__WF__};
   function v(){ return window["viewer_"+UID]; }
 
   // ⚠️ Isosurfaces are SHAPES, not surfaces. viewer.addVolumetricData() routes
@@ -1115,9 +1115,11 @@ _ISO_VIEWER_JS = """
     // lobes; the roughness is the mesh, not the grid, so more cubegen points
     // don't fix it but a few smoothing passes do (GaussView-like surfaces).
     shapes.push(vw.addVolumetricData(DATA,"cube",
-      {isoval: state.iso, color: state.pos, opacity: state.op, smoothness: 5}));
+      {isoval: state.iso, color: state.pos, opacity: state.op, smoothness: 5,
+       wireframe: state.wf}));
     shapes.push(vw.addVolumetricData(DATA,"cube",
-      {isoval: -state.iso, color: state.neg, opacity: state.op, smoothness: 5}));
+      {isoval: -state.iso, color: state.neg, opacity: state.op, smoothness: 5,
+       wireframe: state.wf}));
   }
 
   function build(){
@@ -1159,6 +1161,11 @@ _ISO_VIEWER_JS = """
     if(opts.op!==undefined && opts.op!==state.op){ state.op=opts.op; geom=true; }
     if(opts.pos!==undefined && opts.pos!==state.pos){ state.pos=opts.pos; geom=true; }
     if(opts.neg!==undefined && opts.neg!==state.neg){ state.neg=opts.neg; geom=true; }
+    // Wireframe is baked into the shape at creation (addVolumetricData), same
+    // as colour/opacity above — there is no "restyle" call for an existing
+    // isosurface shape, so a toggle rebuilds it like every other appearance
+    // change here.
+    if(opts.wf!==undefined && opts.wf!==state.wf){ state.wf=opts.wf; geom=true; }
     if(opts.bg!==undefined){ state.bg=opts.bg; vw.setBackgroundColor(state.bg); }
     if(geom){
       var cam=null;
@@ -1211,6 +1218,7 @@ def render_orbital_isosurface_py3dmol(
     *,
     isovalue: float = 0.02,
     opacity: float = 0.85,
+    wireframe: bool = False,
     width: int = 760,
     height: int = 620,
     color_scheme: str = DEFAULT_ORBITAL_COLORS,
@@ -1229,6 +1237,13 @@ def render_orbital_isosurface_py3dmol(
     isovalue, opacity
         Initial surface threshold and transparency. Both are changeable live via
         ``window.__quantuiIsoUpdate`` without rebuilding the viewer.
+    wireframe
+        Surface finish (M-ORBEXPORT ORBX.7). Re-scoped from the original
+        "metallic" request after reading the vendored 3Dmol.js: Lambert
+        shading has no specular term, so glossy/metallic isn't reachable on
+        this backend — wireframe is what the renderer can actually do.
+        Changeable live, same as isovalue/opacity, though 3Dmol.js rebuilds
+        the shape to apply it (no in-place restyle for volumetric data).
     color_scheme
         Key into :data:`ORBITAL_COLOR_SCHEMES`.
     bgcolor
@@ -1247,6 +1262,7 @@ def render_orbital_isosurface_py3dmol(
         with_surfaces=True,
         isovalue=isovalue,
         opacity=opacity,
+        wireframe=wireframe,
         width=width,
         height=height,
         color_scheme=color_scheme,
@@ -1323,6 +1339,7 @@ def _build_iso_viewer(
     with_surfaces: bool,
     isovalue: float = 0.02,
     opacity: float = 0.85,
+    wireframe: bool = False,
     width: int = 760,
     height: int = 620,
     color_scheme: str = DEFAULT_ORBITAL_COLORS,
@@ -1353,6 +1370,7 @@ def _build_iso_viewer(
         .replace("__SCENE__", json.dumps(scene_key))
         .replace("__ISO__", repr(float(isovalue)))
         .replace("__OP__", repr(float(opacity)))
+        .replace("__WF__", "true" if wireframe else "false")
         .replace("__POS__", json.dumps(pos_color))
         .replace("__NEG__", json.dumps(neg_color))
         .replace("__BG__", json.dumps(bgcolor))

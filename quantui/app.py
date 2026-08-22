@@ -1194,6 +1194,7 @@ class QuantUIApp:
         _iso_export_cube_btn: Any
         _iso_isovalue_slider: Any
         _iso_opacity_slider: Any
+        _iso_wireframe_cb: Any
         _iso_resolution_dd: Any
         _last_result_dir: Any
         _nmr_accordion: Any
@@ -2244,6 +2245,7 @@ class QuantUIApp:
         for _w in (
             self._iso_isovalue_slider,
             self._iso_opacity_slider,
+            self._iso_wireframe_cb,
             self._iso_colors_dd,
             # NOT _iso_png_transparent: it is an export-only option, applied at
             # capture time. Observing it here would change the live viewer.
