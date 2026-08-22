@@ -154,11 +154,21 @@ class TestTokensAreActuallyUsed:
         # Order-of-replacement bug: replacing the short sentinel first leaves
         # a dangling "_STRONG__" behind.
         assert "_STRONG__" not in _APP_CSS
+        # M-THEME text-tier tokens added 2026-08-21 (h1/h3 colour, spinner
+        # border-top-color) — same class of bug, same guard.
+        assert "__Q_" not in _APP_CSS
 
     def test_app_css_carries_the_border_token(self):
         from quantui.app import _APP_CSS
 
         assert theme.BORDER in _APP_CSS
+
+    def test_app_css_carries_the_text_and_accent_tokens(self):
+        from quantui.app import _APP_CSS
+
+        assert theme.TEXT_STRONG in _APP_CSS
+        assert theme.TEXT_SLATE in _APP_CSS
+        assert theme.ACCENT_INFO in _APP_CSS
 
     def test_no_viewer_border_is_drawn_from_a_css_class(self):
         # Measured in the browser 2026-08-03: an Output widget cannot
@@ -371,3 +381,89 @@ class TestRetiredValues:
             and retired.search(f.read_text(encoding="utf-8"))
         ]
         assert offenders == [], f"retired border greys still used in: {offenders}"
+
+
+class TestNoRawHexReintroducedInMigratedChrome:
+    """M-THEME Execution Sequence step 1 (2026-08-21): the text/border/accent
+    tokens in ``theme.py`` were extracted from raw hex literals scattered
+    across these widget-building modules. This guards the migration from
+    quietly eroding — a future edit pasting ``color:#555`` back in instead of
+    ``{_theme.TEXT_SECONDARY}`` should fail here, not resurface as a silent
+    duplicate literal for the next audit to rediscover.
+
+    Excludes ``theme.py`` itself (the source of truth) and the plotting/3-D
+    modules (``analytics.py``, ``orbital_visualization.py``,
+    ``app_visualization.py``, ``visualization_py3dmol.py``, ``ir_plot.py``) —
+    those were deliberately left out of this pass (M-THEME roadmap 14) since a
+    wrong substitution there risks a real rendering regression this suite
+    can't see; migrating them is future work, not yet a regression to catch.
+    ``results_storage.py`` is also excluded — its calc-type badge colours are
+    already one small, well-factored dict, not the scattered-literal problem
+    this migration targets.
+    """
+
+    MIGRATED_FILES = (
+        "app_formatters.py",
+        "app_builders.py",
+        "app.py",
+        "app_runflow.py",
+        "descriptor_cards.py",
+        "help_content.py",
+        "app_analysis.py",
+        "app_history.py",
+        "calc_log.py",
+    )
+
+    #: theme.py attributes whose values were extracted from these files.
+    #: Kept as an explicit list (not "every theme.py string attribute") so a
+    #: token added later for a *new* use doesn't retroactively demand every
+    #: historical file be clean of a value it never used to begin with.
+    MIGRATED_TOKENS = (
+        "TEXT_HEADING",
+        "TEXT_LABEL",
+        "TEXT_SECONDARY",
+        "TEXT_MUTED",
+        "TEXT_MUTED_LIGHT",
+        "TEXT_FAINT",
+        "TEXT_SUBTLE",
+        "TEXT_BODY",
+        "TEXT_STRONG",
+        "TEXT_SLATE",
+        "TEXT_SLATE_DARK",
+        "BG_PANEL",
+        "BORDER_LEGACY",
+        "ACCENT_ERROR",
+        "ACCENT_ERROR_ALT",
+        "ACCENT_SUCCESS",
+        "ACCENT_SUCCESS_BG",
+        "ACCENT_SUCCESS_ALT",
+        "ACCENT_WARNING",
+        "ACCENT_WARNING_LIGHT",
+        "ACCENT_INFO",
+        "ACCENT_PURPLE",
+        "ACCENT_TEAL",
+    )
+
+    def test_no_migrated_value_appears_as_a_raw_literal(self):
+        import pathlib
+        import re
+
+        pkg = pathlib.Path(theme.__file__).parent
+        values = [getattr(theme, name) for name in self.MIGRATED_TOKENS]
+        # Longest first so e.g. "#94a3b8" isn't shadowed by a shorter value
+        # that happens to prefix-match earlier in an unordered scan.
+        values.sort(key=len, reverse=True)
+        alternation = "|".join(re.escape(v) for v in values)
+        pattern = re.compile(f"(?:{alternation})\\b", re.IGNORECASE)
+        entity_pattern = re.compile(r"&#[0-9a-fA-F]{3,8};")
+
+        offenders = {}
+        for fname in self.MIGRATED_FILES:
+            text = (pkg / fname).read_text(encoding="utf-8")
+            text = entity_pattern.sub("", text)  # HTML entities, not colours
+            found = sorted(set(pattern.findall(text)))
+            if found:
+                offenders[fname] = found
+        assert (
+            offenders == {}
+        ), f"raw hex reintroduced where a theme.py token exists: {offenders}"

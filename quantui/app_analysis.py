@@ -8,6 +8,8 @@ from typing import Any
 
 import ipywidgets as widgets
 
+from . import theme as _theme
+
 _PANEL_UNAVAILABLE_STYLE = (
     "padding:12px 16px;color:#6b7280;font-size:13px;font-style:italic"
 )
@@ -230,7 +232,7 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     source_suffix = " (from History)" if ctx.source == "history" else ""
     heading = _analysis_heading_label(ctx)
     app._analysis_context_lbl.value = (
-        f'<p style="color:#555;font-size:13px;margin:4px 0 12px">'
+        f'<p style="color:{_theme.TEXT_SECONDARY};font-size:13px;margin:4px 0 12px">'
         f"Analysing: {_html_mod.escape(heading)}{source_suffix}</p>"
     )
     has_any = bool(app._ana_available)
@@ -353,7 +355,7 @@ def render_reorg_geometries(app: Any) -> None:
     except Exception as exc:  # noqa: BLE001
         app._set_html_output(
             app._reorg_geom_output,
-            f'<p style="color:#b91c1c;padding:8px">Geometry view failed: {exc}</p>',
+            f'<p style="color:{_theme.ACCENT_ERROR};padding:8px">Geometry view failed: {exc}</p>',
         )
 
 
@@ -647,28 +649,28 @@ def pop_nmr_shielding(app: Any, ctx: Any) -> bool:
         if not shifts:
             return ""
         rows = "".join(
-            f'<tr><td style="padding:2px 14px 2px 0;color:#555">{sym}-{n}</td>'
-            f'<td style="color:#000">{d:.2f} ppm</td></tr>'
+            f'<tr><td style="padding:2px 14px 2px 0;color:{_theme.TEXT_SECONDARY}">{sym}-{n}</td>'
+            f'<td style="color:{_theme.TEXT_HEADING}">{d:.2f} ppm</td></tr>'
             for n, (_i, d) in enumerate(sorted(shifts, key=lambda x: x[0]), 1)
         )
         return (
             f'<tr><td colspan="2" style="padding:8px 0 2px;font-weight:600">'
             f"{label} shifts (vs. {ref}):</td></tr>"
-            f'<tr><th style="text-align:left;color:#555;font-size:12px;padding:2px 14px 2px 0">Atom</th>'
-            f'<th style="text-align:left;color:#555;font-size:12px">δ (ppm)</th></tr>'
+            f'<tr><th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px;padding:2px 14px 2px 0">Atom</th>'
+            f'<th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px">δ (ppm)</th></tr>'
             + rows
         )
 
     shielding_rows = "".join(
-        f'<tr><td style="padding:2px 10px 2px 0;color:#555">{sym}{i + 1}</td>'
-        f'<td style="color:#000">{s:.2f}</td></tr>'
+        f'<tr><td style="padding:2px 10px 2px 0;color:{_theme.TEXT_SECONDARY}">{sym}{i + 1}</td>'
+        f'<td style="color:{_theme.TEXT_HEADING}">{s:.2f}</td></tr>'
         for i, (sym, s) in enumerate(zip(atom_symbols, shielding))
     )
     html = (
         f'<div style="font-size:13px">'
         f'<table style="border-collapse:collapse;margin-bottom:8px">'
-        f'<tr><th style="text-align:left;color:#555;font-size:12px;padding:2px 10px 2px 0">Atom</th>'
-        f'<th style="text-align:left;color:#555;font-size:12px">σ (ppm)</th></tr>'
+        f'<tr><th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px;padding:2px 10px 2px 0">Atom</th>'
+        f'<th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px">σ (ppm)</th></tr>'
         f"{shielding_rows}</table>"
         f'<table style="border-collapse:collapse">'
         f"{_shift_table('¹H', h_shifts, 'H')}"

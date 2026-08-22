@@ -59,19 +59,30 @@ left alone here.
 
 Scope of this module today
 --------------------------
-Only the tokens needed for the THEME.5 fix. It is intentionally not a
-full-palette migration: the codebase has ~390 hardcoded hex literals across 17
-files, most of them *semantic* accents (error red, success green, link blue)
-whose hue survives ``hue-rotate(180)`` and which look correct in both modes
-already. Migrating those wholesale would be a large, visually-unverifiable
-change for no user-visible gain.
+Originally just the THEME.5 border fix. As of 2026-08-21, also a text-tier
+greyscale set and a status-accent set (see below) extracted from the 9
+widget-building "chrome" modules (``app.py``, ``app_builders.py``,
+``app_formatters.py``, ``app_runflow.py``, and others) — 379 of that file
+set's ~436 hardcoded-hex occurrences, covering the 22 highest-frequency
+distinct values. Still not a full-palette migration: the plotting/3-D-viewer
+modules (``analytics.py``, ``orbital_visualization.py``,
+``app_visualization.py``, ``visualization_py3dmol.py``, ``ir_plot.py``) are
+untouched — a wrong substitution there risks an actual rendering regression
+a cloud session with no browser can't catch — and a long tail of ~70
+low-frequency chrome values remains too. Most of what's *left* is still
+*semantic* accents (error red, success green, link blue) whose hue survives
+``hue-rotate(180)`` and looks correct in both modes already; the text/accent
+tokens added here are a maintainability move (one name instead of ~380
+copy-pasted literals), not a correctness fix — unlike ``BORDER``/
+``BORDER_STRONG`` above, which changed values and needed real contrast
+measurement.
 
 When THEME.6 (customisable palettes) lands, the invert filter has to go — a
 palette system cannot work when dark mode is a derived inversion rather than an
 independent set of values. At that point these tokens become the seam: they
 grow light/dark variants and the ``_theme_css`` filter is replaced. Keeping them
-named here means that change edits this file plus the CSS, not 19 call sites
-again.
+named here means that change edits this file plus the CSS, not hundreds of call
+sites again.
 """
 
 from __future__ import annotations
@@ -86,6 +97,75 @@ BORDER = "#7d8ea3"
 #: Emphasised border for elements that should read as framed even at a glance
 #: (the 3-D viewer frame, which sits on its own rather than in a card stack).
 BORDER_STRONG = "#64748b"
+
+#: Light legacy border/rule colour (tables, dividers). Kept distinct from
+#: ``BORDER`` rather than merged into it — this module's own docstring warns
+#: that a light border like this one is exactly the shape of value that
+#: disappears under the dark-mode invert filter; flagged here, not yet
+#: re-measured or replaced, so a later contrast pass has one name to fix
+#: instead of the original scattered literal.
+BORDER_LEGACY = "#ccc"
+
+#: Background used for panel/card chrome (result cards, descriptor cards).
+#: Also the reference panel background this module's own WCAG measurements
+#: (see the docstring table) were computed against.
+BG_PANEL = "#f8fafc"
+
+# ── Text (greyscale tiers) ────────────────────────────────────────────────────
+# Extracted 2026-08-21 (M-THEME Execution Sequence step 1) from ~300 scattered
+# literal occurrences across app_formatters.py, app_builders.py, app.py,
+# app_runflow.py, descriptor_cards.py, and other widget-building modules —
+# named so they're one greppable set instead of loose hex strings, and so a
+# future *harmonization* pass (there are more of these than there should be;
+# see below) only has to touch this file plus whatever it introduces, not 300
+# call sites again.
+#
+# Deliberately NOT harmonized to fewer distinct shades in this pass: each
+# token keeps its call sites' exact original value, so migrating call sites to
+# reference these is a pure extract-to-constant refactor with zero rendered-
+# pixel change — safe to do without a browser, unlike the border fix (THEME.5)
+# above, which needed real contrast measurement because it *changed* values.
+# This module's own docstring already argues these greys were not the
+# reported defect ("text contrast was never broken") — the value here is
+# maintainability (one name per shade, no more copy-pasted hex) and getting
+# migrated code ready for THEME.6, not a correctness fix. A later, visually
+# verified pass can still collapse TEXT_MUTED/_MUTED_LIGHT/_FAINT into fewer
+# WCAG-measured values the way BORDER/BORDER_STRONG already were.
+TEXT_HEADING = "#000"
+TEXT_LABEL = "#444"
+TEXT_SECONDARY = "#555"
+TEXT_MUTED = "#666"
+TEXT_MUTED_LIGHT = "#777"
+TEXT_FAINT = "#888"
+TEXT_SUBTLE = "#94a3b8"
+TEXT_BODY = "#334155"
+TEXT_STRONG = "#1e293b"
+#: Same numeric value as ``BORDER_STRONG`` today, coincidentally — kept as a
+#: separate name because the ~25 call sites using it are text colour, not
+#: borders. Decoupled on purpose: a later border-only or text-only retune
+#: must not silently move the other.
+TEXT_SLATE = "#64748b"
+TEXT_SLATE_DARK = "#475569"
+
+# ── Status accents ────────────────────────────────────────────────────────────
+# This module's docstring notes semantic accents (error/success/warning hues)
+# were not the reported defect — they survive ``hue-rotate(180)`` and read
+# correctly in both modes already. Named here anyway for the same
+# maintainability reason as the text tier: one call site can't drift from
+# another when they share a name instead of a copy-pasted literal. The "_ALT"
+# / "_LIGHT" siblings are distinct pre-existing values (a second red, a
+# lighter amber, …), not renamed — see the text-tier note above on why this
+# pass doesn't consolidate them.
+ACCENT_ERROR = "#b91c1c"
+ACCENT_ERROR_ALT = "#c00"
+ACCENT_SUCCESS = "#16a34a"
+ACCENT_SUCCESS_BG = "#f0fff0"
+ACCENT_SUCCESS_ALT = "#4caf50"
+ACCENT_WARNING = "#b45309"
+ACCENT_WARNING_LIGHT = "#f59e0b"
+ACCENT_INFO = "#2563eb"
+ACCENT_PURPLE = "#7c3aed"
+ACCENT_TEAL = "#0d9488"
 
 
 def frame_viewer_html(view_html: str, *, width: int, controls: str = "") -> str:
@@ -122,4 +202,31 @@ def frame_viewer_html(view_html: str, *, width: int, controls: str = "") -> str:
     )
 
 
-__all__ = ["BORDER", "BORDER_STRONG", "frame_viewer_html"]
+__all__ = [
+    "BORDER",
+    "BORDER_STRONG",
+    "BORDER_LEGACY",
+    "BG_PANEL",
+    "TEXT_HEADING",
+    "TEXT_LABEL",
+    "TEXT_SECONDARY",
+    "TEXT_MUTED",
+    "TEXT_MUTED_LIGHT",
+    "TEXT_FAINT",
+    "TEXT_SUBTLE",
+    "TEXT_BODY",
+    "TEXT_STRONG",
+    "TEXT_SLATE",
+    "TEXT_SLATE_DARK",
+    "ACCENT_ERROR",
+    "ACCENT_ERROR_ALT",
+    "ACCENT_SUCCESS",
+    "ACCENT_SUCCESS_BG",
+    "ACCENT_SUCCESS_ALT",
+    "ACCENT_WARNING",
+    "ACCENT_WARNING_LIGHT",
+    "ACCENT_INFO",
+    "ACCENT_PURPLE",
+    "ACCENT_TEAL",
+    "frame_viewer_html",
+]

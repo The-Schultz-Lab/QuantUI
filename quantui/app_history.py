@@ -12,6 +12,8 @@ from typing import Any, Optional
 import ipywidgets as widgets
 from IPython.display import HTML, display
 
+from . import theme as _theme
+
 # ══ HISTORY SEARCH / FACETED FILTER (HIST.7) ══════════════════════════════
 #
 # The History browser caches the parsed ``result.json`` of every saved calc as
@@ -223,7 +225,7 @@ def apply_history_filter(app: Any) -> None:
     count_lbl = getattr(app, "history_count_lbl", None)
     if count_lbl is not None:
         count_lbl.value = (
-            '<span style="color:#888;font-size:12px">'
+            f'<span style="color:{_theme.TEXT_FAINT};font-size:12px">'
             f"{len(matches)} of {len(entries)} shown</span>"
         )
 

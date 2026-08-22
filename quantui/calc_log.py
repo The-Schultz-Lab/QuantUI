@@ -23,6 +23,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+from . import theme as _theme
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -1061,11 +1063,15 @@ def format_estimate(est: Optional[dict]) -> str:
     else:
         time_str = f"~{s / 3600:.1f} hr"
 
-    colour = {"high": "#22c55e", "medium": "#f59e0b", "low": "#94a3b8"}[conf]
+    colour = {
+        "high": "#22c55e",
+        "medium": _theme.ACCENT_WARNING_LIGHT,
+        "low": _theme.TEXT_SUBTLE,
+    }[conf]
     return (
-        f'<span style="font-size:12px;color:#64748b">'
+        f'<span style="font-size:12px;color:{_theme.TEXT_SLATE}">'
         f'Estimated time: <b style="color:{colour}">{time_str}</b>'
-        f'&ensp;<span style="color:#94a3b8">({conf} confidence, {n} similar '
+        f'&ensp;<span style="color:{_theme.TEXT_SUBTLE}">({conf} confidence, {n} similar '
         f'run{"s" if n != 1 else ""})</span></span>'
     )
 
