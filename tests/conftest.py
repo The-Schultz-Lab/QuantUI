@@ -150,6 +150,39 @@ $$$$
 
 
 @pytest.fixture
+def sample_sdf_metal_complex_2d():
+    """Synthetic flat-2D SDF for a Pt(NH3)2Cl2-like coordination complex.
+
+    Mirrors what PubChem/CACTUS actually hand back for a real complex (see
+    M-METAL MET.2): no bond entries link the metal to its donor atoms, so
+    RDKit's ``GetMolFrags`` sees Pt, each NH3, and each Cl as separate
+    fragments even though this is one real coordinated molecule. All-zero Z
+    coordinates keep RDKit's 2D/3D autodetection landing on 2D, which is what
+    triggers a re-embed for a non-metal input (MET.1's failure mode).
+    """
+    return """
+  Test  2D
+
+  9  4  0  0  0  0            999 V2000
+    0.0000    0.0000    0.0000 Pt  0  0  0  0  0  0  0  0  0  0  0  0
+    2.0000    0.0000    0.0000 N   0  0  0  0  0  0  0  0  0  0  0  0
+    2.3000    0.5000    0.0000 H   0  0  0  0  0  0  0  0  0  0  0  0
+    2.3000   -0.5000    0.0000 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.0000    0.0000    0.0000 N   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.3000    0.5000    0.0000 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.3000   -0.5000    0.0000 H   0  0  0  0  0  0  0  0  0  0  0  0
+    0.0000    2.0000    0.0000 Cl  0  0  0  0  0  0  0  0  0  0  0  0
+    0.0000   -2.0000    0.0000 Cl  0  0  0  0  0  0  0  0  0  0  0  0
+  2  3  1  0  0  0  0
+  2  4  1  0  0  0  0
+  5  6  1  0  0  0  0
+  5  7  1  0  0  0  0
+M  END
+$$$$
+"""
+
+
+@pytest.fixture
 def temp_test_dir(tmp_path):
     """Create a temporary directory for test files."""
     test_dir = tmp_path / "quantui_test"

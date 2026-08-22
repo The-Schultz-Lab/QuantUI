@@ -169,6 +169,82 @@ class TestSDFToXYZ:
         for field in required_fields:
             assert field in metadata, f"Missing metadata field: {field}"
 
+    @rdkit_only
+    def test_sdf_to_xyz_flags_metal_detected(self, sample_sdf_water):
+        """A non-metal molecule reports metal_detected=False."""
+        _, metadata = sdf_to_xyz(sample_sdf_water)
+        assert metadata["metal_detected"] is False
+
+    @rdkit_only
+    def test_metal_complex_keeps_source_coordinates_instead_of_reembedding(
+        self, sample_sdf_metal_complex_2d
+    ):
+        """M-METAL MET.1 regression.
+
+        RDKit sees no bond between Pt and its donor atoms, so re-embedding
+        (as a non-metal disconnected input would trigger) scatters the
+        "fragments" via ``_separate_fragments``. For a metal complex with a
+        source conformer, the original — even if flat 2D — coordinates must
+        be kept so the real Pt-N/Pt-Cl proximity survives for a downstream
+        GFN-FF pre-optimization to relax into 3D.
+        """
+        xyz_string, metadata = sdf_to_xyz(sample_sdf_metal_complex_2d)
+
+        assert metadata["metal_detected"] is True
+        assert metadata["coords_embedded"] is False
+
+        lines = xyz_string.strip().split("\n")[2:]
+        coords = {}
+        for line in lines:
+            parts = line.split()
+            symbol = parts[0]
+            xyz = tuple(float(v) for v in parts[1:4])
+            coords.setdefault(symbol, []).append(xyz)
+
+        pt = coords["Pt"][0]
+        # Source geometry placed the two N donors at exactly 2.0 Å from Pt;
+        # _separate_fragments would have pushed them apart by 3+ Å instead.
+        for n in coords["N"]:
+            dist = sum((a - b) ** 2 for a, b in zip(pt, n)) ** 0.5
+            assert dist == pytest.approx(2.0, abs=1e-4)
+
+    @rdkit_only
+    def test_non_metal_disconnected_input_still_gets_fragments_separated(self):
+        """Regression: the metal carve-out must not touch the salt-separation
+        path a non-metal disconnected molecule still needs (MET.2's "salt"
+        case this milestone already handles)."""
+        overlapping_waters = """
+  Test  2D
+
+  6  4  0  0  0  0            999 V2000
+    0.0000    0.0000    0.0000 O   0  0  0  0  0  0  0  0  0  0  0  0
+    0.7570    0.5870    0.0000 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.7570    0.5870    0.0000 H   0  0  0  0  0  0  0  0  0  0  0  0
+    0.1000    0.1000    0.0000 O   0  0  0  0  0  0  0  0  0  0  0  0
+    0.8570    0.6870    0.0000 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.6570    0.6870    0.0000 H   0  0  0  0  0  0  0  0  0  0  0  0
+  1  2  1  0  0  0  0
+  1  3  1  0  0  0  0
+  4  5  1  0  0  0  0
+  4  6  1  0  0  0  0
+M  END
+$$$$
+"""
+        xyz_string, metadata = sdf_to_xyz(overlapping_waters)
+
+        assert metadata["metal_detected"] is False
+        assert metadata["coords_embedded"] is True
+
+        lines = xyz_string.strip().split("\n")[2:]
+        oxygens = [
+            tuple(float(v) for v in line.split()[1:4])
+            for line in lines
+            if line.split()[0] == "O"
+        ]
+        assert len(oxygens) == 2
+        dist = sum((a - b) ** 2 for a, b in zip(oxygens[0], oxygens[1])) ** 0.5
+        assert dist >= 3.0 - 1e-6
+
 
 class TestFetchMolecule:
     """Test high-level molecule fetching."""
