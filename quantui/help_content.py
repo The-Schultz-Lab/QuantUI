@@ -320,6 +320,41 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "run multiple calculations and view energy differences in one table.</p>"
         ),
     },
+    "measure": {
+        "title": "Click-to-measure (bond / angle / dihedral)",
+        "body": (
+            "<p>Click atoms directly in the Analysis tab's molecule viewer to "
+            "read off geometry, the same way GaussView's picker works:</p>"
+            "<table style='border-collapse:collapse; margin:6px 0;'>"
+            f"<tr style='border-bottom:1px solid {_theme.BORDER_LEGACY};'>"
+            "  <th style='padding:3px 12px; text-align:left;'>Clicks</th>"
+            "  <th style='padding:3px 12px; text-align:left;'>Shows</th></tr>"
+            "<tr><td style='padding:3px 12px;'>1 atom</td>"
+            "  <td style='padding:3px 12px;'>which atom is selected</td></tr>"
+            "<tr><td style='padding:3px 12px;'>2 atoms</td>"
+            "  <td style='padding:3px 12px;'>bond length, in Å</td></tr>"
+            "<tr><td style='padding:3px 12px;'>3 atoms</td>"
+            "  <td style='padding:3px 12px;'>+ the angle at the 2nd atom, in "
+            "degrees</td></tr>"
+            "<tr><td style='padding:3px 12px;'>4 atoms</td>"
+            "  <td style='padding:3px 12px;'>+ the dihedral (torsion) angle, "
+            "in degrees</td></tr>"
+            "</table>"
+            "<p>A 5th click starts a new chain from that atom. Clicking an "
+            "atom already in the chain is ignored — repeating an atom makes "
+            "the geometry undefined. Picked atoms are highlighted in the "
+            "viewer; <b>Clear</b> resets the selection.</p>"
+            "<p><b>Note:</b> this needs the <b>py3Dmol</b> viewer — if the "
+            "panel shows a message instead of the picker, switch backends "
+            "with the toggle above the viewer (or in Settings). Switching "
+            "molecules or leaving the Analysis tab clears the current "
+            "selection, so a measurement is never shown against the wrong "
+            "structure.</p>"
+            "<p>If four picked atoms include three that fall in a straight "
+            "line, the dihedral has no defined plane — the panel reports "
+            "this rather than showing a number.</p>"
+        ),
+    },
     "resuming_calculations": {
         "title": "Resuming an interrupted calculation",
         "body": (
