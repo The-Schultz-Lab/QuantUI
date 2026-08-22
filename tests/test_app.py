@@ -666,6 +666,25 @@ class TestExportXYZCallback:
         app._on_export_xyz(None)
         assert "molecule" in app.struct_export_status.value.lower()
 
+    def test_xyz_comment_line_carries_charge_and_multiplicity(self, tmp_path):
+        # M-EXPORT2 EXP2.4: was method/basis only; charge/multiplicity is
+        # exactly the kind of thing unrecoverable from a bare geometry once
+        # handed off, and the reorg-geometry exporter already included it —
+        # this closes that inconsistency.
+        app = QuantUIApp()
+        mol = _water()
+        mol.charge = 1
+        mol.multiplicity = 2
+        app._set_molecule(mol)
+        app._last_result_dir = tmp_path
+
+        app._on_export_xyz(None)
+
+        content = list(tmp_path.glob("*.xyz"))[0].read_text()
+        comment_line = content.splitlines()[1]
+        assert "charge=1" in comment_line
+        assert "multiplicity=2" in comment_line
+
     def test_xyz_filename_sanitizes_basis_with_asterisk(self, tmp_path):
         """M11 audit fix (2026-07-14): a basis like "6-31G*" embedded
         verbatim in a filename is invalid on Windows ("*" is a reserved

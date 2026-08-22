@@ -27,7 +27,7 @@ import io
 import re
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
@@ -278,6 +278,24 @@ class TestCapturedPngIsWritten:
         app._last_cube_orbital = "LUMO+1"
         on_orb_png_captured(app, {"new": self._uri()})
         assert (tmp_path / "LUMO+1.png").exists()
+
+    def test_the_saved_png_carries_provenance_metadata(self, tmp_path):
+        # M-EXPORT2 EXP2.4 / M-ORBEXPORT ORBX.4: a PNG has no comment line
+        # like an XYZ or cube file, so tEXt chunks are its only chance to
+        # carry method/basis/resolution — otherwise unrecoverable from the
+        # file itself once it's been handed off.
+        from PIL import Image
+
+        app = self._app(tmp_path)
+        app.method_dd = Mock(value="B3LYP")
+        app.basis_dd = Mock(value="6-31G*")
+        app._iso_resolution_dd = Mock(value="fine")
+        on_orb_png_captured(app, {"new": self._uri()})
+        with Image.open(tmp_path / "HOMO.png") as im:
+            assert im.text["Method"] == "B3LYP"
+            assert im.text["Basis"] == "6-31G*"
+            assert im.text["Isosurface resolution"] == "fine"
+            assert im.text["Orbital"] == "HOMO"
 
     def test_a_hostile_label_cannot_escape_the_result_directory(self, tmp_path):
         # The label reaches here from app state, but it feeds a filesystem path
@@ -680,12 +698,14 @@ class TestAppearanceControlsUpdateTheLiveViewer:
         app._plotly_theme_colors = lambda: {"scene_bgcolor": "white"}
         app._iso_isovalue_slider = Mock(value=0.07)
         app._iso_opacity_slider = Mock(value=0.4)
+        app._iso_wireframe_cb = Mock(value=True)
         app._iso_colors_dd = Mock(value="orange-blue")
         app._orb_png_inbox = Mock()
 
         opts = iso_render_options(app)
         assert opts["isovalue"] == pytest.approx(0.07)
         assert opts["opacity"] == pytest.approx(0.4)
+        assert opts["wireframe"] is True
         assert opts["color_scheme"] == "orange-blue"
 
     def test_missing_widgets_fall_back_to_defaults(self):
@@ -696,7 +716,55 @@ class TestAppearanceControlsUpdateTheLiveViewer:
         opts = iso_render_options(app)
         assert opts["isovalue"] == pytest.approx(0.02)
         assert opts["opacity"] == pytest.approx(0.85)
+        assert opts["wireframe"] is False
         assert opts["color_scheme"] == "blue-red"
+
+
+class TestSurfaceFinish:
+    """M-ORBEXPORT ORBX.7 — re-scoped from "metallic" (unreachable on
+    py3Dmol's Lambert-only shading, per the roadmap's read of the vendored
+    3Dmol.js) to wireframe, the surface-finish option this renderer can
+    actually do.
+    """
+
+    def test_wireframe_off_by_default(self, cube_file):
+        html = render_orbital_isosurface_py3dmol(cube_file)
+        assert "wf:false" in html
+
+    def test_wireframe_on_when_requested(self, cube_file):
+        html = render_orbital_isosurface_py3dmol(cube_file, wireframe=True)
+        assert "wf:true" in html
+
+    def test_both_lobes_get_the_wireframe_flag(self, cube_file):
+        # Positive and negative phases are two separate addVolumetricData
+        # calls (see _ISO_VIEWER_JS) — a fix that only touched one would
+        # render half the orbital solid and half wireframe.
+        html = render_orbital_isosurface_py3dmol(cube_file, wireframe=True)
+        assert html.count("wireframe: state.wf") == 2
+
+    def test_wireframe_is_a_live_update_option_not_a_rebuild_only_one(self):
+        # Same shape as isovalue/opacity: changeable via
+        # window.__quantuiIsoUpdate without a Python re-render.
+        from quantui.orbital_visualization import _ISO_VIEWER_JS
+
+        assert "opts.wf" in _ISO_VIEWER_JS
+
+    def test_toggling_wireframe_reaches_the_bridge(self):
+        from quantui.app_visualization import on_iso_appearance_changed
+
+        app = Mock()
+        app._plotly_theme_colors = lambda: {"scene_bgcolor": "white"}
+        app._iso_isovalue_slider = Mock(value=0.02)
+        app._iso_opacity_slider = Mock(value=0.85)
+        app._iso_wireframe_cb = Mock(value=True)
+        app._iso_colors_dd = Mock(value="blue-red")
+        app._orb_png_inbox = Mock()
+        app._iso_js_bridge = Mock()
+        app._last_cube_path = None  # skip update_iso_enclosed_label's cube read
+
+        with patch("quantui.app_visualization.iso_bridge_update") as mock_update:
+            on_iso_appearance_changed(app)
+        assert mock_update.call_args.kwargs["wf"] is True
 
 
 class TestColourSchemes:

@@ -577,6 +577,61 @@ def infer_charge_and_spin(
     return charge, spin
 
 
+def _resolution_label(nx: int, ny: int, nz: int) -> str:
+    """Named preset (M-ORBEXPORT ORBX.2) matching *nx/ny/nz*, or ``"custom"``.
+
+    Only a cubic grid matching one of :data:`ISO_RESOLUTION_PRESETS` gets its
+    friendly name back; anything else (a non-cubic grid, or a value nobody
+    picked from the dropdown) is reported honestly as custom rather than
+    guessed at.
+    """
+    if nx == ny == nz:
+        for label, grid in ISO_RESOLUTION_PRESETS.items():
+            if grid == nx:
+                return label
+    return "custom"
+
+
+def _write_cube_provenance(
+    output_path: Path,
+    *,
+    basis: str,
+    nx: int,
+    ny: int,
+    nz: int,
+    charge: int,
+    spin: int,
+    method: str = "",
+) -> None:
+    """Overwrite a freshly written cube file's two free-text comment lines
+    with QuantUI provenance (M-EXPORT2 EXP2.4 / M-ORBEXPORT ORBX.4).
+
+    The Gaussian cube format reserves exactly its first two lines for
+    human-readable comments — everything from line 3 on (atom count, grid
+    header, atoms, volumetric data) is untouched, so this is safe to do
+    *after* :func:`pyscf.tools.cubegen.orbital` writes the file rather than
+    reimplementing its grid-computation logic just to pass a custom comment
+    through. Without this, every cube QuantUI writes carries cubegen's own
+    fixed comment ("Orbital value in real space (1/Bohr^3)") and nothing
+    about which basis, grid, or charge/spin state produced it — unrecoverable
+    once the file has been handed to Avogadro / VMD / Multiwfn or emailed on.
+    """
+    line1 = (
+        f"QuantUI orbital cube — {method}/{basis}"
+        if method
+        else f"QuantUI orbital cube — basis {basis}"
+    )
+    label = _resolution_label(nx, ny, nz)
+    line2 = f"grid {nx}x{ny}x{nz} ({label}); charge={charge} spin={spin}"
+    text = output_path.read_text(encoding="utf-8")
+    lines = text.split("\n")
+    if len(lines) < 2:
+        return  # not a well-formed cube file; leave it alone rather than corrupt it
+    lines[0] = line1
+    lines[1] = line2
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def generate_cube_file(
     results_path: Path,
     orbital_index: int,
@@ -586,6 +641,7 @@ def generate_cube_file(
     ny: int = 60,
     nz: int = 60,
     margin: float = 5.0,
+    method: str = "",
 ) -> Path:
     """
     Generate a Gaussian cube file for a molecular orbital.
@@ -606,6 +662,10 @@ def generate_cube_file(
         Grid resolution along each axis.
     margin : float
         Extra space (Bohr) beyond atomic extents.
+    method : str
+        Method/functional label for the provenance comment (M-EXPORT2
+        EXP2.4). ``results.npz`` doesn't carry it, so this has to come from
+        the caller; omitted from the comment when blank.
 
     Returns
     -------
@@ -670,6 +730,16 @@ def generate_cube_file(
         nz=nz,
         margin=margin,
     )
+    _write_cube_provenance(
+        output_path,
+        basis=basis_str,
+        nx=nx,
+        ny=ny,
+        nz=nz,
+        charge=charge,
+        spin=spin,
+        method=method,
+    )
     logger.info("Wrote cube file: %s", output_path)
     return output_path
 
@@ -687,6 +757,7 @@ def generate_cube_from_arrays(
     margin: float = 5.0,
     charge: int = 0,
     spin: int = 0,
+    method: str = "",
 ) -> Path:
     """
     Generate a cube file from in-session MO data (no ``.npz`` file required).
@@ -720,6 +791,12 @@ def generate_cube_from_arrays(
     spin : int
         PySCF's ``2S = n_alpha - n_beta``. Required for open-shell
         (odd-electron) molecules — default 0 assumes closed-shell.
+    method : str
+        Method/functional label for the provenance comment (M-EXPORT2
+        EXP2.4) — e.g. ``'B3LYP'``. Best-effort: the caller's current method
+        selection, not necessarily re-verified against what actually produced
+        *mo_coeff* (this function has no way to check that). Omitted from the
+        comment entirely when blank, rather than guessed at.
 
     Returns
     -------
@@ -759,6 +836,16 @@ def generate_cube_from_arrays(
         ny=ny,
         nz=nz,
         margin=margin,
+    )
+    _write_cube_provenance(
+        output_path,
+        basis=mol_basis,
+        nx=nx,
+        ny=ny,
+        nz=nz,
+        charge=charge,
+        spin=spin,
+        method=method,
     )
     logger.info("Wrote cube file: %s", output_path)
     return output_path
@@ -1003,7 +1090,7 @@ _ISO_VIEWER_JS = """
 (function(){
   var UID="__UID__", DATA=__DATA__, FMT=__FMT__;
   var WITH_SURFACES=__WITH_SURFACES__, SCENE=__SCENE__;
-  var state={iso:__ISO__, op:__OP__, pos:__POS__, neg:__NEG__, bg:__BG__};
+  var state={iso:__ISO__, op:__OP__, pos:__POS__, neg:__NEG__, bg:__BG__, wf:__WF__};
   function v(){ return window["viewer_"+UID]; }
 
   // ⚠️ Isosurfaces are SHAPES, not surfaces. viewer.addVolumetricData() routes
@@ -1028,9 +1115,11 @@ _ISO_VIEWER_JS = """
     // lobes; the roughness is the mesh, not the grid, so more cubegen points
     // don't fix it but a few smoothing passes do (GaussView-like surfaces).
     shapes.push(vw.addVolumetricData(DATA,"cube",
-      {isoval: state.iso, color: state.pos, opacity: state.op, smoothness: 5}));
+      {isoval: state.iso, color: state.pos, opacity: state.op, smoothness: 5,
+       wireframe: state.wf}));
     shapes.push(vw.addVolumetricData(DATA,"cube",
-      {isoval: -state.iso, color: state.neg, opacity: state.op, smoothness: 5}));
+      {isoval: -state.iso, color: state.neg, opacity: state.op, smoothness: 5,
+       wireframe: state.wf}));
   }
 
   function build(){
@@ -1072,6 +1161,11 @@ _ISO_VIEWER_JS = """
     if(opts.op!==undefined && opts.op!==state.op){ state.op=opts.op; geom=true; }
     if(opts.pos!==undefined && opts.pos!==state.pos){ state.pos=opts.pos; geom=true; }
     if(opts.neg!==undefined && opts.neg!==state.neg){ state.neg=opts.neg; geom=true; }
+    // Wireframe is baked into the shape at creation (addVolumetricData), same
+    // as colour/opacity above — there is no "restyle" call for an existing
+    // isosurface shape, so a toggle rebuilds it like every other appearance
+    // change here.
+    if(opts.wf!==undefined && opts.wf!==state.wf){ state.wf=opts.wf; geom=true; }
     if(opts.bg!==undefined){ state.bg=opts.bg; vw.setBackgroundColor(state.bg); }
     if(geom){
       var cam=null;
@@ -1124,6 +1218,7 @@ def render_orbital_isosurface_py3dmol(
     *,
     isovalue: float = 0.02,
     opacity: float = 0.85,
+    wireframe: bool = False,
     width: int = 760,
     height: int = 620,
     color_scheme: str = DEFAULT_ORBITAL_COLORS,
@@ -1142,6 +1237,13 @@ def render_orbital_isosurface_py3dmol(
     isovalue, opacity
         Initial surface threshold and transparency. Both are changeable live via
         ``window.__quantuiIsoUpdate`` without rebuilding the viewer.
+    wireframe
+        Surface finish (M-ORBEXPORT ORBX.7). Re-scoped from the original
+        "metallic" request after reading the vendored 3Dmol.js: Lambert
+        shading has no specular term, so glossy/metallic isn't reachable on
+        this backend — wireframe is what the renderer can actually do.
+        Changeable live, same as isovalue/opacity, though 3Dmol.js rebuilds
+        the shape to apply it (no in-place restyle for volumetric data).
     color_scheme
         Key into :data:`ORBITAL_COLOR_SCHEMES`.
     bgcolor
@@ -1160,6 +1262,7 @@ def render_orbital_isosurface_py3dmol(
         with_surfaces=True,
         isovalue=isovalue,
         opacity=opacity,
+        wireframe=wireframe,
         width=width,
         height=height,
         color_scheme=color_scheme,
@@ -1236,6 +1339,7 @@ def _build_iso_viewer(
     with_surfaces: bool,
     isovalue: float = 0.02,
     opacity: float = 0.85,
+    wireframe: bool = False,
     width: int = 760,
     height: int = 620,
     color_scheme: str = DEFAULT_ORBITAL_COLORS,
@@ -1266,6 +1370,7 @@ def _build_iso_viewer(
         .replace("__SCENE__", json.dumps(scene_key))
         .replace("__ISO__", repr(float(isovalue)))
         .replace("__OP__", repr(float(opacity)))
+        .replace("__WF__", "true" if wireframe else "false")
         .replace("__POS__", json.dumps(pos_color))
         .replace("__NEG__", json.dumps(neg_color))
         .replace("__BG__", json.dumps(bgcolor))

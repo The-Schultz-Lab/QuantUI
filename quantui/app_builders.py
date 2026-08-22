@@ -2093,6 +2093,20 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         style={"description_width": "70px"},
         layout=layout_fn(width="330px"),
     )
+    # M-ORBEXPORT ORBX.7 — surface finish. Re-scoped from the original
+    # "metallic" request: the vendored 3Dmol.js is Lambert-only (no specular
+    # term), so glossy/metallic isn't reachable on this backend; wireframe is
+    # what the renderer can actually do.
+    app._iso_wireframe_cb = widgets.Checkbox(
+        value=False,
+        description="Wireframe",
+        indent=False,
+        tooltip=(
+            "Show the isosurface mesh instead of a solid surface — useful for "
+            "seeing the atoms through a lobe, or for a slide."
+        ),
+        layout=layout_fn(width="330px"),
+    )
 
     # ── PNG export options (ORBX.1 cont.) ───────────────────────────────
     app._iso_png_name = widgets.Text(
@@ -2184,6 +2198,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 layout=layout_fn(align_items="center"),
             ),
             app._iso_opacity_slider,
+            app._iso_wireframe_cb,
             app._iso_colors_dd,
             widgets.HTML(
                 f'<p style="color:{_theme.TEXT_SECONDARY};font-size:12px;margin:8px 0 2px">'

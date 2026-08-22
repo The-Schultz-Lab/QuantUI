@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Optional, cast
 
 from .results_storage import _safe_name
 
@@ -94,7 +94,15 @@ def on_export(app: Any, btn: Any) -> None:
 
 
 def on_export_xyz(app: Any, btn: Any) -> None:
-    """Export molecule geometry to an XYZ file."""
+    """Export molecule geometry to an XYZ file.
+
+    Provenance (M-EXPORT2 EXP2.4): the comment line carries charge and
+    multiplicity alongside method/basis, matching
+    :func:`on_export_reorg_geometries`'s format — before this fix the two
+    XYZ exporters disagreed (reorg had charge/multiplicity, this one didn't),
+    and charge/multiplicity is exactly the kind of thing unrecoverable from a
+    bare geometry once it's been handed off.
+    """
     if app._molecule is None:
         app.struct_export_status.value = "Load a molecule first."
         return
@@ -102,9 +110,11 @@ def on_export_xyz(app: Any, btn: Any) -> None:
         mol, method, basis = export_molecule_and_label(app)
         fname = f"{_safe_name(mol.get_formula())}_{_safe_name(method)}_{_safe_name(basis)}.xyz"
         xyz_body = mol.to_xyz_string()
-        full_xyz = (
-            f"{len(mol.atoms)}\n{mol.get_formula()} {method}/{basis}\n{xyz_body}\n"
+        comment = (
+            f"{mol.get_formula()}  charge={mol.charge} multiplicity={mol.multiplicity}  "
+            f"{method}/{basis}"
         )
+        full_xyz = f"{len(mol.atoms)}\n{comment}\n{xyz_body}\n"
         dest = (app._last_result_dir / fname) if app._last_result_dir else Path(fname)
         dest.write_text(full_xyz, encoding="utf-8")
         app.struct_export_status.value = f"Saved: {dest}"
@@ -267,14 +277,28 @@ def _requested_dpi(app: Any) -> int:
         return 300
 
 
-def _with_dpi(raw: bytes, dpi: int) -> bytes:
-    """Stamp *dpi* into the PNG's pHYs chunk.
+def _with_dpi(
+    raw: bytes, dpi: Optional[int], *, metadata: Optional[dict[str, str]] = None
+) -> bytes:
+    """Stamp *dpi* into the PNG's pHYs chunk, and optionally provenance
+    (M-EXPORT2 EXP2.4) into ``tEXt`` chunks — one re-encode for both, since
+    Pillow does both in the same ``save()`` call. *dpi* of ``None`` skips the
+    pHYs stamp and writes metadata only — for exporters that intentionally
+    don't offer a DPI setting (e.g. the reorg-geometry PNG, which deliberately
+    doesn't inherit the isosurface panel's DPI control).
 
     ⚠️ This sets the PRINT size, not the pixel count. The capture is whatever
     the canvas holds, and re-encoding cannot invent detail — at 300 dpi a
     760 px image simply declares itself 2.5 inches wide. That is what makes a
     figure land at the right physical size in Word or LaTeX instead of being
     scaled by hand, which is the actual complaint DPI settings answer.
+
+    *metadata*, if given, becomes one ``tEXt`` chunk per key — method, basis,
+    grid resolution, whatever the caller has. A PNG has no comment-line
+    equivalent to an XYZ or cube file, so this is the export's only chance to
+    carry that context; without it a figure someone emailed you a year later
+    is orphaned from what produced it, same argument as ORBX.4 for cubes.
+    Read back with ``PIL.Image.open(path).text``.
 
     Pillow is already a dependency (via matplotlib). If anything goes wrong the
     original bytes are returned: a PNG without the metadata is a mild loss, a
@@ -284,15 +308,25 @@ def _with_dpi(raw: bytes, dpi: int) -> bytes:
         import io
 
         from PIL import Image
+        from PIL.PngImagePlugin import PngInfo
 
         with Image.open(io.BytesIO(raw)) as im:
             im.load()
             buf = io.BytesIO()
+            pnginfo = None
+            if metadata:
+                pnginfo = PngInfo()
+                for key, value in metadata.items():
+                    if value:
+                        pnginfo.add_text(key, str(value))
+            save_kwargs: dict[str, Any] = {"format": "PNG", "pnginfo": pnginfo}
+            if dpi is not None:
+                save_kwargs["dpi"] = (dpi, dpi)
             # RGBA is preserved, so a transparent capture stays transparent.
-            im.save(buf, format="PNG", dpi=(dpi, dpi))
+            im.save(buf, **save_kwargs)
             return buf.getvalue()
     except Exception as exc:  # noqa: BLE001
-        logger.warning("could not stamp %d dpi into the PNG: %s", dpi, exc)
+        logger.warning("could not finalize PNG (dpi=%s): %s", dpi, exc)
         return raw
 
 
@@ -360,7 +394,22 @@ def on_orb_png_captured(app: Any, change: dict) -> None:
     safe = safe.strip() or "orbital"
     dest = Path(result_dir) / f"{safe}.png"
 
-    raw = _with_dpi(raw, _requested_dpi(app))
+    # Provenance (M-EXPORT2 EXP2.4 / M-ORBEXPORT ORBX.4): best-effort from
+    # the live UI state, same caveat as the cube path — not re-verified
+    # against what actually produced the captured image (e.g. after a
+    # History replay). The resolution key is read directly from the dropdown
+    # here rather than reverse-mapped from a grid size, since this call site
+    # has the preset name itself.
+    metadata = {
+        "Software": "QuantUI",
+        "Orbital": label,
+        "Method": str(getattr(getattr(app, "method_dd", None), "value", "") or ""),
+        "Basis": str(getattr(getattr(app, "basis_dd", None), "value", "") or ""),
+        "Isosurface resolution": str(
+            getattr(getattr(app, "_iso_resolution_dd", None), "value", "") or ""
+        ),
+    }
+    raw = _with_dpi(raw, _requested_dpi(app), metadata=metadata)
     try:
         dest.write_bytes(raw)
     except OSError as exc:
@@ -434,6 +483,13 @@ def on_reorg_png_captured(app: Any, change: dict) -> None:
         _fail(str(exc))
         return
 
+    # Provenance (M-EXPORT2 EXP2.4) — metadata only, no DPI stamp (see
+    # _with_dpi's docstring for why this exporter skips DPI intentionally).
+    raw = _with_dpi(
+        raw,
+        None,
+        metadata={"Software": "QuantUI", "Method": method, "Basis": basis},
+    )
     try:
         dest.write_bytes(raw)
     except OSError as exc:
