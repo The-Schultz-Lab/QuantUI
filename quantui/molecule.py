@@ -152,32 +152,9 @@ class Molecule:
         Returns:
             str: Molecular formula
         """
-        # Count atoms
-        atom_counts: dict[str, int] = {}
-        for atom in self.atoms:
-            atom_counts[atom] = atom_counts.get(atom, 0) + 1
+        from .connectivity import hill_formula
 
-        # Build formula (C, H, then alphabetical)
-        formula_parts = []
-
-        # Carbon first (if present)
-        if "C" in atom_counts:
-            count = atom_counts["C"]
-            formula_parts.append(f"C{count if count > 1 else ''}")
-            del atom_counts["C"]
-
-        # Hydrogen second (if present)
-        if "H" in atom_counts:
-            count = atom_counts["H"]
-            formula_parts.append(f"H{count if count > 1 else ''}")
-            del atom_counts["H"]
-
-        # Rest alphabetically
-        for atom in sorted(atom_counts.keys()):
-            count = atom_counts[atom]
-            formula_parts.append(f"{atom}{count if count > 1 else ''}")
-
-        return "".join(formula_parts)
+        return hill_formula(self.atoms)
 
     def to_pyscf_format(self) -> str:
         """

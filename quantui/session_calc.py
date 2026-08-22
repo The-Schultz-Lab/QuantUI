@@ -542,13 +542,30 @@ def _run_session_calc_body(
 
     # --- Run SCF ---
     emit_status(stream, "Running SCF…")
-    try:
-        energy_hartree = float(mf.kernel(dm0=_dm0) if _dm0 is not None else mf.kernel())
-    except Exception as exc:
-        raise RuntimeError(
-            f"PySCF calculation failed for {molecule.get_formula()} "
-            f"({method}/{basis}): {exc}"
-        ) from exc
+    if _dm0 is not None:
+        try:
+            energy_hartree = float(mf.kernel(dm0=_dm0))
+        except Exception as warm_exc:
+            # A warm start is an optimisation, not a requirement (M-CHECKPOINT
+            # CHK.1) — a warm-start-specific failure (a GPU-migrated mean-field
+            # rejecting a host/numpy density, or a loadable-but-incompatible
+            # chkfile density) must degrade to a scratch guess, not hard-fail
+            # an otherwise-fine calculation.
+            logger.warning(
+                "Warm-start dm0 rejected by SCF kernel, retrying from a scratch "
+                "guess: %s",
+                warm_exc,
+            )
+            emit_status(stream, "Warm start failed — retrying from scratch guess…")
+            _dm0 = None
+    if _dm0 is None:
+        try:
+            energy_hartree = float(mf.kernel())
+        except Exception as exc:
+            raise RuntimeError(
+                f"PySCF calculation failed for {molecule.get_formula()} "
+                f"({method}/{basis}): {exc}"
+            ) from exc
 
     # --- MP2 correlation energy (post-HF) ---
     mp2_correlation_hartree: Optional[float] = None

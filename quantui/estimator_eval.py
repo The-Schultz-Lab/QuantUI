@@ -164,17 +164,19 @@ def replay(
     for record in ordered:
         # Every record becomes history for the ones after it, whether or
         # not it is itself scoreable — the app's estimator sees them all.
-        past = history
-        history = history + [record]
-
+        # Appended in place, after being used as "past" below, rather than
+        # concatenated into a fresh list each iteration — the same effect
+        # (a prediction never sees its own ground-truth record) in O(n)
+        # instead of O(n^2) for a large perf_log.jsonl.
         if not _is_scoreable(record):
+            history.append(record)
             continue
 
         key = str(record.get(slice_by) or "(unset)")
         bucket = slices.setdefault(key, ReplayStats(label=key))
 
         predicted = calc_log.estimate_time_from_records(
-            past,
+            history,
             n_atoms=int(record.get("n_atoms") or 0),
             n_electrons=int(record.get("n_electrons") or 0),
             method=str(record.get("method") or ""),
@@ -185,6 +187,7 @@ def replay(
             gpu_used=record.get("gpu_used"),
             source=record.get("source") if use_source else None,
         )
+        history.append(record)
         if predicted is None or float(predicted["seconds"]) <= 0:
             bucket.n_no_estimate += 1
             overall.n_no_estimate += 1

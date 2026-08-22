@@ -18,6 +18,8 @@ from typing import Dict
 
 import ipywidgets as widgets
 
+from . import theme as _theme
+
 # ---------------------------------------------------------------------------
 # Help text bank — keys used by help_panel()
 # ---------------------------------------------------------------------------
@@ -54,7 +56,7 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "<p>The <b>Calc. Type</b> dropdown chooses what QuantUI computes for "
             "your molecule at the selected method / basis.</p>"
             "<table style='border-collapse:collapse; margin:6px 0;'>"
-            "<tr style='border-bottom:1px solid #ccc;'>"
+            f"<tr style='border-bottom:1px solid {_theme.BORDER_LEGACY};'>"
             "  <th style='padding:3px 12px; text-align:left;'>Type</th>"
             "  <th style='padding:3px 12px; text-align:left;'>Computes</th>"
             "  <th style='padding:3px 12px; text-align:left;'>Cost</th></tr>"
@@ -99,7 +101,7 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "<p>Both methods approximate the electronic wavefunction using "
             "Hartree–Fock theory, but they treat electron spin differently.</p>"
             "<table style='border-collapse:collapse; margin:6px 0;'>"
-            "<tr style='border-bottom:1px solid #ccc;'>"
+            f"<tr style='border-bottom:1px solid {_theme.BORDER_LEGACY};'>"
             "  <th style='padding:3px 12px; text-align:left;'>Method</th>"
             "  <th style='padding:3px 12px; text-align:left;'>Full name</th>"
             "  <th style='padding:3px 12px; text-align:left;'>When to use</th></tr>"
@@ -134,7 +136,7 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "<p>A <b>basis set</b> is the mathematical toolkit used to describe "
             "electron orbitals. Larger basis sets are more accurate but slower.</p>"
             "<table style='border-collapse:collapse; margin:6px 0;'>"
-            "<tr style='border-bottom:1px solid #ccc;'>"
+            f"<tr style='border-bottom:1px solid {_theme.BORDER_LEGACY};'>"
             "  <th style='padding:3px 12px; text-align:left;'>Basis set</th>"
             "  <th style='padding:3px 12px; text-align:left;'>Speed</th>"
             "  <th style='padding:3px 12px; text-align:left;'>Accuracy</th>"
@@ -228,7 +230,7 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "tab. It is not a blanket win, so QuantUI does not turn it on for "
             "you — here is why.</p>"
             "<table style='border-collapse:collapse; margin:6px 0;'>"
-            "<tr style='border-bottom:1px solid #ccc;'>"
+            f"<tr style='border-bottom:1px solid {_theme.BORDER_LEGACY};'>"
             "  <th style='padding:3px 12px; text-align:left;'>Calculation</th>"
             "  <th style='padding:3px 12px; text-align:left;'>Effect of DF</th></tr>"
             "<tr><td style='padding:3px 12px;'>TD-DFT (UV-Vis) and larger "
@@ -267,7 +269,7 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "</ul>"
             "<p><b>Typical values:</b></p>"
             "<table style='border-collapse:collapse; margin:6px 0;'>"
-            "<tr style='border-bottom:1px solid #ccc;'>"
+            f"<tr style='border-bottom:1px solid {_theme.BORDER_LEGACY};'>"
             "  <th style='padding:3px 12px; text-align:left;'>Molecule</th>"
             "  <th style='padding:3px 12px; text-align:left;'>Gap (eV)</th>"
             "  <th style='padding:3px 12px; text-align:left;'>Character</th></tr>"
@@ -291,7 +293,7 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
         "body": (
             "<p>After a calculation completes, QuantUI reports several key quantities:</p>"
             "<table style='border-collapse:collapse; margin:6px 0;'>"
-            "<tr style='border-bottom:1px solid #ccc;'>"
+            f"<tr style='border-bottom:1px solid {_theme.BORDER_LEGACY};'>"
             "  <th style='padding:3px 12px; text-align:left;'>Quantity</th>"
             "  <th style='padding:3px 12px; text-align:left;'>What it means</th></tr>"
             "<tr><td style='padding:3px 12px;'><b>Total energy</b></td>"
@@ -328,8 +330,8 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "message itself tells you the run can be resumed. Leave every "
             "setting exactly as it was and return to the <i>Calculate</i> tab. "
             "A line appears just above the <b>Run</b> button:</p>"
-            "<blockquote style='border-left:3px solid #ccc;padding:6px 12px;"
-            "margin:8px 0;font-size:13px;color:#444'>"
+            f"<blockquote style='border-left:3px solid {_theme.BORDER_LEGACY};padding:6px 12px;"
+            f"margin:8px 0;font-size:13px;color:{_theme.TEXT_LABEL}'>"
             "&#9851; An interrupted run of this exact calculation was found — "
             "8 of 20 scan points already computed."
             "</blockquote>"
@@ -354,7 +356,7 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "put the setting you changed back as it was.</p>"
             "<p><b>What gets saved, by calculation type:</b></p>"
             "<table style='border-collapse:collapse; margin:6px 0;'>"
-            "<tr style='border-bottom:1px solid #ccc;'>"
+            f"<tr style='border-bottom:1px solid {_theme.BORDER_LEGACY};'>"
             "  <th style='padding:3px 12px; text-align:left;'>Type</th>"
             "  <th style='padding:3px 12px; text-align:left;'>Resuming picks up…</th></tr>"
             "<tr><td style='padding:3px 12px;'><b>Geometry Opt</b></td>"
@@ -392,8 +394,8 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
         "title": "How to cite PySCF",
         "body": (
             "<p>If you use QuantUI results in a report or publication, cite PySCF:</p>"
-            "<blockquote style='border-left:3px solid #ccc;padding:6px 12px;"
-            "margin:8px 0;font-size:13px;color:#444'>"
+            f"<blockquote style='border-left:3px solid {_theme.BORDER_LEGACY};padding:6px 12px;"
+            f"margin:8px 0;font-size:13px;color:{_theme.TEXT_LABEL}'>"
             "Q. Sun, X. Zhang, S. Banerjee, P. Bao, M. Barbry, N. S. Blunt, "
             "N. A. Bogdanov, G. H. Booth, J. Chen, Z.-H. Cui, J. J. Eriksen, "
             "Y. Gao, S. Guo, J. Hermann, M. R. Hermes, K. Koh, P. Koval, "
@@ -431,7 +433,7 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "<p><b>Multiplicity</b> = 2S + 1, where S is the total electron spin. "
             "It tells the computer how many unpaired electrons the molecule has.</p>"
             "<table style='border-collapse:collapse; margin:6px 0;'>"
-            "<tr style='border-bottom:1px solid #ccc;'>"
+            f"<tr style='border-bottom:1px solid {_theme.BORDER_LEGACY};'>"
             "  <th style='padding:3px 12px; text-align:left;'>Unpaired e⁻</th>"
             "  <th style='padding:3px 12px; text-align:left;'>Multiplicity</th>"
             "  <th style='padding:3px 12px; text-align:left;'>Name</th>"
@@ -462,7 +464,7 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "compliant files. No screen-scraping — open the right file in "
             "the right tool.</p>"
             "<table style='border-collapse:collapse; margin:6px 0;'>"
-            "<tr style='border-bottom:1px solid #ccc;'>"
+            f"<tr style='border-bottom:1px solid {_theme.BORDER_LEGACY};'>"
             "  <th style='padding:3px 12px; text-align:left;'>What you want to do</th>"
             "  <th style='padding:3px 12px; text-align:left;'>QuantUI file</th>"
             "  <th style='padding:3px 12px; text-align:left;'>External tool</th></tr>"
