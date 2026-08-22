@@ -10,6 +10,7 @@ import ipywidgets as widgets
 from IPython.display import HTML, display
 
 import quantui
+from quantui import app_measurement as _measure
 from quantui import molecule_library as _ml
 from quantui import theme as _theme
 from quantui.help_content import HELP_TOPICS
@@ -2426,6 +2427,68 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     # box around it — the Output widget cannot shrink-wrap.
     app._analysis_mol_output = widgets.Output()
 
+    # ── Click-to-measure (M-MEASURE MEAS.2-.6) ──────────────────────────
+    # Hidden inbox for the click JS injected into the py3Dmol-rendered
+    # Analysis viewer (app_measurement.inject_click_js) — same JS->kernel
+    # "write into a hidden Textarea's DOM node, dispatch 'input'" trick
+    # ORBX.1's PNG capture uses, new inbox.
+    app._measure_inbox = widgets.Textarea(
+        value="", layout=layout_fn(width="1px", height="1px", visibility="hidden")
+    )
+    app._measure_inbox.add_class(_measure.MEASURE_INBOX_CLASS)
+    # Hidden Output that carries one-shot Javascript pushing highlight
+    # updates to the live viewer. Mirrors _iso_js_bridge.
+    app._measure_js_bridge = widgets.Output(
+        layout=layout_fn(width="0px", height="0px", visibility="hidden")
+    )
+    app._measure_readout = widgets.HTML(
+        value=_measure._readout_html(_measure._PLACEHOLDER_TEXT)
+    )
+    app._measure_clear_btn = widgets.Button(
+        description="Clear",
+        button_style="",
+        tooltip="Clear the picked atoms and their highlights",
+        layout=layout_fn(width="70px"),
+    )
+    app._measure_help_btn = widgets.Button(
+        description="?",
+        button_style="",
+        layout=layout_fn(width="28px", height="28px"),
+        tooltip="Click-to-measure bond length / angle / dihedral — opens Help tab",
+    )
+    app._measure_controls = widgets.VBox(
+        [
+            widgets.HBox(
+                [app._measure_readout],
+                layout=layout_fn(align_items="center"),
+            ),
+            widgets.HBox(
+                [app._measure_clear_btn, app._measure_help_btn],
+                layout=layout_fn(align_items="center", gap="6px", margin="2px 0 0"),
+            ),
+        ]
+    )
+    # DEC-009: the panel stays visible regardless of backend — only its
+    # content swaps (MEAS.6). Shown when the resolved backend can't support
+    # native clicking (plotlymol, or py3Dmol simply unavailable).
+    app._measure_fallback_msg = widgets.HTML(
+        value=(
+            f'<p style="color:{_theme.TEXT_SECONDARY};font-size:12px;margin:4px 0">'
+            "Click-to-measure needs the py3Dmol viewer — switch backends above "
+            "(or in Settings) to use it.</p>"
+        ),
+        layout=layout_fn(display="none"),
+    )
+    app._measure_panel = widgets.VBox(
+        [
+            app._measure_controls,
+            app._measure_fallback_msg,
+            app._measure_inbox,
+            app._measure_js_bridge,
+        ],
+        layout=layout_fn(margin="4px 0 8px"),
+    )
+
     # Analysis-tab backend toggle — mirrors the Calculate-tab `viz_backend_toggle`.
     # Created only when both backends are available (matches Calculate-tab
     # convention). Synchronized with the Calculate-tab toggle via
@@ -2490,6 +2553,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     ana_children = [
         app._analysis_context_lbl,
         app._analysis_mol_output,
+        app._measure_panel,
     ]
     if ana_backend_row is not None:
         ana_children.append(ana_backend_row)

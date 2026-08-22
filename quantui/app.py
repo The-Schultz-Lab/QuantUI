@@ -204,6 +204,12 @@ from quantui.app_history import (
 from quantui.app_history import (
     on_view_log as _hist_on_view_log,
 )
+from quantui.app_measurement import (
+    on_measure_clear as _measure_on_clear,
+)
+from quantui.app_measurement import (
+    on_measure_inbox_changed as _measure_on_inbox_changed,
+)
 from quantui.app_runflow import (
     calc_type_key as _run_calc_type_key,
 )
@@ -1219,6 +1225,15 @@ class QuantUIApp:
         _iso_wireframe_cb: Any
         _iso_resolution_dd: Any
         _last_result_dir: Any
+        _measure_inbox: Any
+        _measure_js_bridge: Any
+        _measure_readout: Any
+        _measure_clear_btn: Any
+        _measure_help_btn: Any
+        _measure_controls: Any
+        _measure_fallback_msg: Any
+        _measure_panel: Any
+        _measure_picks: Any
         _nmr_accordion: Any
         _nmr_output: Any
         _orb_accordion: Any
@@ -2258,6 +2273,14 @@ class QuantUIApp:
         self._reorg_png_inbox.observe(
             self._safe_cb(self._on_reorg_png_captured), names="value"
         )
+        # Click-to-measure (M-MEASURE MEAS.2/3): a click in the Analysis-tab
+        # viewer posts an atom index into this inbox the same way the PNG
+        # buttons post a data URI.
+        self._measure_inbox.observe(
+            self._safe_cb(self._on_measure_inbox_changed), names="value"
+        )
+        self._measure_clear_btn.on_click(self._on_measure_clear)
+        self._measure_help_btn.on_click(self._on_measure_help)
         # Persist the grid choice so it survives a relaunch (ORBX.2).
         self._iso_resolution_dd.observe(
             self._safe_cb(self._on_iso_resolution_changed), names="value"
@@ -3199,6 +3222,12 @@ class QuantUIApp:
                     lighting=self._viz_lighting,
                     bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
                 )
+                # M-MEASURE: same wiring as the post-calc render path — a
+                # backend-toggle switch is still a fresh viewer, so stale
+                # picks from the previous backend must not survive it.
+                from quantui.app_measurement import finalize_analysis_html
+
+                html = finalize_analysis_html(self, html, chosen)
                 self._set_html_output(self._analysis_mol_output, html)
                 self._update_analysis_backend_label(chosen)
 
@@ -3689,6 +3718,16 @@ class QuantUIApp:
 
     def _on_reorg_png_captured(self, change) -> None:
         _exp_on_reorg_png_captured(self, change)
+
+    def _on_measure_inbox_changed(self, change) -> None:
+        _measure_on_inbox_changed(self, change)
+
+    def _on_measure_clear(self, btn=None) -> None:
+        _measure_on_clear(self, btn)
+
+    def _on_measure_help(self, btn) -> None:
+        _ = btn
+        self._show_help_topic("measure")
 
     def _on_iso_resolution_changed(self, change) -> None:
         """Persist the isosurface grid choice.

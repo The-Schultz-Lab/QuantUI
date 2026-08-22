@@ -137,6 +137,13 @@ def show_result_3d(
                     lighting=app._viz_lighting,
                     bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
                 )
+                if is_analysis_output:
+                    # M-MEASURE: wires click-to-measure into the freshly
+                    # rendered HTML (py3Dmol only) and resets any stale picks
+                    # from whatever was shown before.
+                    from quantui.app_measurement import finalize_analysis_html
+
+                    html = finalize_analysis_html(app, html, chosen)
                 app._set_html_output(extra_output, html)
             if is_analysis_output:
                 app._update_analysis_backend_label(chosen)
