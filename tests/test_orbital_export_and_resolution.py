@@ -279,6 +279,24 @@ class TestCapturedPngIsWritten:
         on_orb_png_captured(app, {"new": self._uri()})
         assert (tmp_path / "LUMO+1.png").exists()
 
+    def test_the_saved_png_carries_provenance_metadata(self, tmp_path):
+        # M-EXPORT2 EXP2.4 / M-ORBEXPORT ORBX.4: a PNG has no comment line
+        # like an XYZ or cube file, so tEXt chunks are its only chance to
+        # carry method/basis/resolution — otherwise unrecoverable from the
+        # file itself once it's been handed off.
+        from PIL import Image
+
+        app = self._app(tmp_path)
+        app.method_dd = Mock(value="B3LYP")
+        app.basis_dd = Mock(value="6-31G*")
+        app._iso_resolution_dd = Mock(value="fine")
+        on_orb_png_captured(app, {"new": self._uri()})
+        with Image.open(tmp_path / "HOMO.png") as im:
+            assert im.text["Method"] == "B3LYP"
+            assert im.text["Basis"] == "6-31G*"
+            assert im.text["Isosurface resolution"] == "fine"
+            assert im.text["Orbital"] == "HOMO"
+
     def test_a_hostile_label_cannot_escape_the_result_directory(self, tmp_path):
         # The label reaches here from app state, but it feeds a filesystem path
         # and sanitising it costs nothing.

@@ -577,6 +577,61 @@ def infer_charge_and_spin(
     return charge, spin
 
 
+def _resolution_label(nx: int, ny: int, nz: int) -> str:
+    """Named preset (M-ORBEXPORT ORBX.2) matching *nx/ny/nz*, or ``"custom"``.
+
+    Only a cubic grid matching one of :data:`ISO_RESOLUTION_PRESETS` gets its
+    friendly name back; anything else (a non-cubic grid, or a value nobody
+    picked from the dropdown) is reported honestly as custom rather than
+    guessed at.
+    """
+    if nx == ny == nz:
+        for label, grid in ISO_RESOLUTION_PRESETS.items():
+            if grid == nx:
+                return label
+    return "custom"
+
+
+def _write_cube_provenance(
+    output_path: Path,
+    *,
+    basis: str,
+    nx: int,
+    ny: int,
+    nz: int,
+    charge: int,
+    spin: int,
+    method: str = "",
+) -> None:
+    """Overwrite a freshly written cube file's two free-text comment lines
+    with QuantUI provenance (M-EXPORT2 EXP2.4 / M-ORBEXPORT ORBX.4).
+
+    The Gaussian cube format reserves exactly its first two lines for
+    human-readable comments — everything from line 3 on (atom count, grid
+    header, atoms, volumetric data) is untouched, so this is safe to do
+    *after* :func:`pyscf.tools.cubegen.orbital` writes the file rather than
+    reimplementing its grid-computation logic just to pass a custom comment
+    through. Without this, every cube QuantUI writes carries cubegen's own
+    fixed comment ("Orbital value in real space (1/Bohr^3)") and nothing
+    about which basis, grid, or charge/spin state produced it — unrecoverable
+    once the file has been handed to Avogadro / VMD / Multiwfn or emailed on.
+    """
+    line1 = (
+        f"QuantUI orbital cube — {method}/{basis}"
+        if method
+        else f"QuantUI orbital cube — basis {basis}"
+    )
+    label = _resolution_label(nx, ny, nz)
+    line2 = f"grid {nx}x{ny}x{nz} ({label}); charge={charge} spin={spin}"
+    text = output_path.read_text(encoding="utf-8")
+    lines = text.split("\n")
+    if len(lines) < 2:
+        return  # not a well-formed cube file; leave it alone rather than corrupt it
+    lines[0] = line1
+    lines[1] = line2
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def generate_cube_file(
     results_path: Path,
     orbital_index: int,
@@ -586,6 +641,7 @@ def generate_cube_file(
     ny: int = 60,
     nz: int = 60,
     margin: float = 5.0,
+    method: str = "",
 ) -> Path:
     """
     Generate a Gaussian cube file for a molecular orbital.
@@ -606,6 +662,10 @@ def generate_cube_file(
         Grid resolution along each axis.
     margin : float
         Extra space (Bohr) beyond atomic extents.
+    method : str
+        Method/functional label for the provenance comment (M-EXPORT2
+        EXP2.4). ``results.npz`` doesn't carry it, so this has to come from
+        the caller; omitted from the comment when blank.
 
     Returns
     -------
@@ -670,6 +730,16 @@ def generate_cube_file(
         nz=nz,
         margin=margin,
     )
+    _write_cube_provenance(
+        output_path,
+        basis=basis_str,
+        nx=nx,
+        ny=ny,
+        nz=nz,
+        charge=charge,
+        spin=spin,
+        method=method,
+    )
     logger.info("Wrote cube file: %s", output_path)
     return output_path
 
@@ -687,6 +757,7 @@ def generate_cube_from_arrays(
     margin: float = 5.0,
     charge: int = 0,
     spin: int = 0,
+    method: str = "",
 ) -> Path:
     """
     Generate a cube file from in-session MO data (no ``.npz`` file required).
@@ -720,6 +791,12 @@ def generate_cube_from_arrays(
     spin : int
         PySCF's ``2S = n_alpha - n_beta``. Required for open-shell
         (odd-electron) molecules — default 0 assumes closed-shell.
+    method : str
+        Method/functional label for the provenance comment (M-EXPORT2
+        EXP2.4) — e.g. ``'B3LYP'``. Best-effort: the caller's current method
+        selection, not necessarily re-verified against what actually produced
+        *mo_coeff* (this function has no way to check that). Omitted from the
+        comment entirely when blank, rather than guessed at.
 
     Returns
     -------
@@ -759,6 +836,16 @@ def generate_cube_from_arrays(
         ny=ny,
         nz=nz,
         margin=margin,
+    )
+    _write_cube_provenance(
+        output_path,
+        basis=mol_basis,
+        nx=nx,
+        ny=ny,
+        nz=nz,
+        charge=charge,
+        spin=spin,
+        method=method,
     )
     logger.info("Wrote cube file: %s", output_path)
     return output_path

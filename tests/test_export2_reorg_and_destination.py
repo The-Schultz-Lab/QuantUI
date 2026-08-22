@@ -161,6 +161,18 @@ class TestReorgPngCaptureBridge:
         assert len(written) == 1
         assert "Saved" in app._reorg_export_status.value
 
+    def test_the_saved_png_carries_method_and_basis_metadata(self, tmp_path):
+        # M-EXPORT2 EXP2.4: metadata only, no DPI stamp — this exporter
+        # deliberately has no DPI control of its own (see _with_dpi).
+        from PIL import Image
+
+        app = self._app(tmp_path)
+        on_reorg_png_captured(app, {"new": _png_uri()})
+        written = list(tmp_path.glob("*.png"))[0]
+        with Image.open(written) as im:
+            assert im.text["Method"] == "B3LYP"
+            assert im.text["Basis"] == "6-31G*"
+
     def test_inbox_is_cleared_after_a_capture(self, tmp_path):
         app = self._app(tmp_path)
         on_reorg_png_captured(app, {"new": _png_uri()})

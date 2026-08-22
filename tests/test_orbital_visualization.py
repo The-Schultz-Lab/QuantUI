@@ -503,5 +503,123 @@ class TestGenerateCubeFromArrays:
         assert result.exists()
 
 
+# ---------------------------------------------------------------------------
+# Cube provenance — M-EXPORT2 EXP2.4 / M-ORBEXPORT ORBX.4
+# ---------------------------------------------------------------------------
+
+
+class TestResolutionLabel:
+    def test_matches_a_known_preset(self):
+        from quantui.orbital_visualization import _resolution_label
+
+        assert _resolution_label(40, 40, 40) == "coarse"
+        assert _resolution_label(60, 60, 60) == "medium"
+        assert _resolution_label(80, 80, 80) == "fine"
+        assert _resolution_label(100, 100, 100) == "very fine"
+
+    def test_non_cubic_grid_is_custom(self):
+        from quantui.orbital_visualization import _resolution_label
+
+        assert _resolution_label(60, 60, 80) == "custom"
+
+    def test_cubic_but_off_preset_grid_is_custom(self):
+        # Never guesses a nearby preset name for a value nobody picked from
+        # the dropdown — honesty over a plausible-looking guess.
+        from quantui.orbital_visualization import _resolution_label
+
+        assert _resolution_label(55, 55, 55) == "custom"
+
+
+class TestWriteCubeProvenance:
+    def test_overwrites_only_the_first_two_lines(self, tmp_path):
+        from quantui.orbital_visualization import _write_cube_provenance
+
+        cube = tmp_path / "x.cube"
+        cube.write_text(
+            "Orbital value in real space (1/Bohr^3)\n"
+            "MO coefficients\n"
+            "2 0.0 0.0 0.0\n"
+            "line4\nline5\n",
+            encoding="utf-8",
+        )
+        _write_cube_provenance(
+            cube, basis="STO-3G", nx=60, ny=60, nz=60, charge=0, spin=0, method="RHF"
+        )
+        lines = cube.read_text(encoding="utf-8").split("\n")
+        assert lines[0] == "QuantUI orbital cube — RHF/STO-3G"
+        assert lines[2] == "2 0.0 0.0 0.0"
+        assert lines[3] == "line4"
+        assert lines[4] == "line5"
+
+    def test_method_omitted_when_blank(self, tmp_path):
+        from quantui.orbital_visualization import _write_cube_provenance
+
+        cube = tmp_path / "x.cube"
+        cube.write_text("a\nb\nc\n", encoding="utf-8")
+        _write_cube_provenance(
+            cube, basis="6-31G*", nx=60, ny=60, nz=60, charge=0, spin=0
+        )
+        line1 = cube.read_text(encoding="utf-8").split("\n")[0]
+        assert line1 == "QuantUI orbital cube — basis 6-31G*"
+        assert "/" not in line1.split("basis ")[1]  # no dangling "method/" prefix
+
+    def test_records_grid_preset_and_charge_spin(self, tmp_path):
+        from quantui.orbital_visualization import _write_cube_provenance
+
+        cube = tmp_path / "x.cube"
+        cube.write_text("a\nb\nc\n", encoding="utf-8")
+        _write_cube_provenance(
+            cube, basis="def2-SVP", nx=80, ny=80, nz=80, charge=1, spin=1
+        )
+        line2 = cube.read_text(encoding="utf-8").split("\n")[1]
+        assert line2 == "grid 80x80x80 (fine); charge=1 spin=1"
+
+    def test_leaves_a_malformed_file_alone(self, tmp_path):
+        # A cube file always has at least 2 header lines; a file that
+        # somehow doesn't must not be corrupted further by this helper.
+        from quantui.orbital_visualization import _write_cube_provenance
+
+        cube = tmp_path / "x.cube"
+        cube.write_text("only one line", encoding="utf-8")
+        _write_cube_provenance(
+            cube, basis="STO-3G", nx=60, ny=60, nz=60, charge=0, spin=0
+        )
+        assert cube.read_text(encoding="utf-8") == "only one line"
+
+
+class TestGenerateCubeFromArraysProvenance:
+    @_pyscf_only
+    def test_generated_cube_carries_provenance_and_still_parses(self, tmp_path):
+        from pyscf import gto, scf
+
+        from quantui.orbital_visualization import (
+            generate_cube_from_arrays,
+            parse_cube_file,
+        )
+
+        mol = gto.M(atom="H 0 0 0; H 0 0 1.4", basis="sto-3g", verbose=0)
+        mf = scf.RHF(mol)
+        mf.verbose = 0
+        mf.kernel()
+        out_path = tmp_path / "homo.cube"
+        generate_cube_from_arrays(
+            mol_atom=[["H", [0.0, 0.0, 0.0]], ["H", [0.0, 0.0, 0.74]]],
+            mol_basis="sto-3g",
+            mo_coeff=mf.mo_coeff,
+            orbital_index=int(np.where(mf.mo_occ > 0)[0][-1]),
+            output_path=out_path,
+            nx=10,
+            ny=10,
+            nz=10,
+            method="RHF",
+        )
+        lines = out_path.read_text(encoding="utf-8").split("\n")
+        assert lines[0] == "QuantUI orbital cube — RHF/sto-3g"
+        assert "grid 10x10x10" in lines[1]
+        # Rewriting the header must not disturb the parseable body.
+        cube = parse_cube_file(out_path)
+        assert cube["data"].shape == (10, 10, 10)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

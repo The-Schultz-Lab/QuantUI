@@ -1304,6 +1304,13 @@ def render_orbital_isosurface(
         _grid = ISO_RESOLUTION_PRESETS.get(
             _res_key, ISO_RESOLUTION_PRESETS[DEFAULT_ISO_RESOLUTION]
         )
+        # M-EXPORT2 EXP2.4 / M-ORBEXPORT ORBX.4: best-effort provenance, not a
+        # re-verified guarantee — the live method dropdown, not necessarily
+        # what actually produced the stored mo_coeff (e.g. after a History
+        # replay of a differently-computed result).
+        _method_for_provenance = str(
+            getattr(getattr(app, "method_dd", None), "value", "") or ""
+        )
         generate_cube_from_arrays(
             mol_atom,
             mol_basis,
@@ -1315,6 +1322,7 @@ def render_orbital_isosurface(
             nz=_grid,
             charge=_charge,
             spin=_spin,
+            method=_method_for_provenance,
         )
         scene_bgcolor = app._plotly_theme_colors()["scene_bgcolor"]
 
