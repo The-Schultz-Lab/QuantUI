@@ -727,6 +727,16 @@ _RE_CYCLE = re.compile(
 )
 _RE_CONV = re.compile(r"converged SCF energy\s*=\s*([\-\d\.]+)")
 _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
+# TD-DFT root convergence (M-PROGRESS D2). PySCF's Davidson solver prints
+# "root %d converged  |r|= ...  e= <excitation energy, Ha>  max|de|= ..." at
+# verbose=5 (DEBUG) — see tddft_calc.py's td.verbose. This is the only
+# per-root progress signal the solve emits; without it the heartbeat's
+# generic "still working" line is all a user sees during a multi-minute
+# excited-state solve.
+_RE_TD_ROOT = re.compile(
+    r"root\s+(\d+)\s+converged\s+\|r\|=\s*[\d.eE+\-]+\s+e=\s*([\d.eE+\-]+)"
+)
+_HARTREE_TO_EV = 27.211386245988
 # Step/point/state counters inside a status message. Removed before the
 # message is used as a per-stage timing key — see _LogCapture._stage_key.
 _RE_STAGE_NUMBERS = re.compile(r"\d+(?:[./]\d+)*")
@@ -933,6 +943,18 @@ class _LogCapture:
                     self._status.value = f"SCF cycle {n}  ·  ΔE = {float(delta):.4g} Ha"
                 except Exception:
                     self._status.value = f"SCF cycle {n}"
+                continue
+            m = _RE_TD_ROOT.search(line)
+            if m and self._status is not None:
+                root, e_ha = m.group(1), m.group(2)
+                try:
+                    root_n = int(root) + 1  # PySCF's root index is 0-based
+                    ev = float(e_ha) * _HARTREE_TO_EV
+                    self._status.value = (
+                        f"TD-DFT root {root_n} converged  ·  {ev:.3f} eV"
+                    )
+                except Exception:
+                    self._status.value = f"TD-DFT root {root} converged"
                 continue
             m = _RE_CONV.search(line)
             if m:

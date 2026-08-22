@@ -339,7 +339,13 @@ def sdf_to_xyz(sdf_content: str) -> Tuple[str, Dict[str, Any]]:
     Returns:
         Tuple of (xyz_string, metadata_dict)
         xyz_string format: "n_atoms\\ncomment\\natom x y z\\n..."
-        metadata includes: formula, molecular_weight, charge
+        metadata includes: formula, molecular_weight, charge, coords_embedded
+        (whether the coordinates were re-embedded rather than taken from the
+        source SDF), metal_detected (a coordination-complex metal centre is
+        present, per ``connectivity.is_metal`` — when true and the source SDF
+        had any conformer, the source coordinates are kept rather than
+        re-embedded, since RDKit's valence perception can't see a metal-donor
+        bond and would otherwise scatter the ligands)
 
     Raises:
         ValueError: If SDF parsing fails
@@ -366,6 +372,24 @@ def sdf_to_xyz(sdf_content: str) -> Tuple[str, Dict[str, Any]]:
         # "3D" structure.
         conf = mol.GetConformer() if mol.GetNumConformers() else None
         coords_embedded = conf is None or not conf.Is3D()
+
+        # M-METAL MET.1: RDKit's valence-based bond perception draws no bond
+        # between a metal centre and its donor atoms, so a coordination complex
+        # looks like several disconnected fragments to GetMolFrags/EmbedMolecule
+        # — exactly the "salt" shape _separate_fragments exists to fix. Applying
+        # it here would push a real complex's ligands away from the metal instead
+        # of a counterion away from an ion. Prefer whatever coordinates the
+        # source SDF already has (even a flat 2D layout keeps the metal-donor
+        # proximity that the GFN-FF pre-optimization can relax into 3D); only
+        # fall back to a from-scratch embed when the source truly has none, and
+        # skip the fragment-separation step in that case so the embed is treated
+        # as one system.
+        from .connectivity import is_metal
+
+        has_metal = any(is_metal(atom.GetSymbol()) for atom in mol.GetAtoms())
+        if has_metal and conf is not None:
+            coords_embedded = False
+
         if coords_embedded:
             if AllChem.EmbedMolecule(mol, randomSeed=42) != 0:
                 AllChem.EmbedMolecule(mol, randomSeed=42, useRandomCoords=True)
@@ -376,9 +400,10 @@ def sdf_to_xyz(sdf_content: str) -> Tuple[str, Dict[str, Any]]:
                     AllChem.UFFOptimizeMolecule(mol)
                 except Exception:
                     pass
-            # Salts/counterions embed jammed together — separate them so bond
-            # perception doesn't see a bonded counterion.
-            _separate_fragments(mol)
+            if not has_metal:
+                # Salts/counterions embed jammed together — separate them so
+                # bond perception doesn't see a bonded counterion.
+                _separate_fragments(mol)
 
         # Extract coordinates and build XYZ string
         conf = mol.GetConformer()
@@ -403,6 +428,7 @@ def sdf_to_xyz(sdf_content: str) -> Tuple[str, Dict[str, Any]]:
             "num_atoms": mol.GetNumAtoms(),
             "num_heavy_atoms": mol.GetNumHeavyAtoms(),
             "coords_embedded": coords_embedded,
+            "metal_detected": has_metal,
         }
 
         logger.debug(f"Converted SDF to XYZ: {metadata['formula']}")

@@ -17,7 +17,14 @@ from unittest.mock import MagicMock, patch
 import ipywidgets as widgets
 import pytest
 
-from quantui.app import _RE_CONV, _RE_CYCLE, QuantUIApp, _AnalysisContext, _LogCapture
+from quantui.app import (
+    _RE_CONV,
+    _RE_CYCLE,
+    _RE_TD_ROOT,
+    QuantUIApp,
+    _AnalysisContext,
+    _LogCapture,
+)
 from quantui.molecule import Molecule
 
 # ---------------------------------------------------------------------------
@@ -391,6 +398,32 @@ class TestLogCapture:
         cap, _ = self._make_capture()
         cap.write("")
         assert cap.getvalue() == ""
+
+    def test_td_root_regex_parses_line(self):
+        # Real line PySCF's Davidson solver prints at td.verbose=5 (DEBUG).
+        line = "root 0 converged  |r|= 3.36e-16  e= 0.48304531721958305  max|de|= 0.483"
+        m = _RE_TD_ROOT.search(line)
+        assert m is not None
+        assert m.group(1) == "0"
+        assert m.group(2) == "0.48304531721958305"
+
+    def test_status_label_updated_on_td_root_converged(self):
+        # M-PROGRESS D2: the only per-root progress signal during a
+        # multi-minute TD-DFT excited-state solve.
+        cap, status = self._make_capture()
+        cap.write("root 1 converged  |r|= 1.2e-9  e= 0.2  max|de|= -0.0003\n")
+        assert "TD-DFT root 2" in status.value  # PySCF's root index is 0-based
+        assert "eV" in status.value
+
+    def test_td_root_status_survives_a_malformed_energy(self, monkeypatch):
+        # float(e) is user-facing formatting, not the regex match itself —
+        # a malformed capture must still surface something, not crash the run.
+        cap, status = self._make_capture()
+        monkeypatch.setattr("quantui.app.float", lambda *_a, **_k: 1 / 0, raising=False)
+        cap.write("root 3 converged  |r|= 1e-9  e= 0.4  max|de|= 0.0001\n")
+        # Fallback uses the raw captured (0-based) index, same as the
+        # existing SCF-cycle fallback a few lines above.
+        assert "TD-DFT root 3 converged" in status.value
 
     def test_close_is_noop_and_does_not_raise(self):
         """Regression (found via the L6 audit fix's Python 3.9 CI matrix):
