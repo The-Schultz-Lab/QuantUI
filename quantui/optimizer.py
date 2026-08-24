@@ -281,6 +281,11 @@ class OptimizationResult:
     pyscf_mol_atom: Optional[Any] = None  # atom list at final geometry (Angstrom)
     pyscf_mol_basis: Optional[str] = None
     density_fit: bool = False
+    # Final-geometry Mulliken / dipole — same fields SessionResult carries so
+    # the Populations Analysis panel activates after a Geometry Opt too.
+    atom_symbols: Optional[List[str]] = None
+    mulliken_charges: Optional[List[float]] = None
+    dipole_moment_debye: Optional[float] = None
 
     @property
     def energy_hartree(self) -> float:
@@ -717,6 +722,11 @@ def optimize_geometry(
     _opt_mo_coeff: Optional[Any] = None
     _opt_mol_atom: Optional[Any] = None
     _opt_mol_basis: Optional[str] = None
+    _opt_atom_symbols: Optional[List[str]] = (
+        list(trajectory[-1].atoms) if trajectory else None
+    )
+    _opt_mulliken: Optional[List[float]] = None
+    _opt_dipole: Optional[float] = None
     _opt_density_fit = bool(getattr(atoms.calc, "_density_fit_used", False))
     try:
         import numpy as _np_mo
@@ -729,6 +739,29 @@ def optimize_geometry(
             _opt_mo_coeff = _np_mo.array(_last_mf.mo_coeff)
             _opt_mol_atom = _last_atom_list
             _opt_mol_basis = basis
+            # Mulliken / dipole — mirror session_calc's host fallback for
+            # gpu4pyscf (mulliken_pop is NotImplemented on the GPU object).
+            try:
+                _mf_pop = _last_mf
+                if not callable(getattr(_last_mf, "mulliken_pop", None)) and callable(
+                    getattr(_last_mf, "to_cpu", None)
+                ):
+                    _mf_pop = _last_mf.to_cpu()
+                _, _chg = _mf_pop.mulliken_pop(verbose=0)
+                _opt_mulliken = [float(c) for c in _np_mo.asarray(_chg)]
+            except Exception as _pop_exc:
+                logger.debug(
+                    "Final-step Mulliken extraction failed in optimizer: %s",
+                    _pop_exc,
+                )
+            try:
+                _dip = _np_mo.asarray(_last_mf.dip_moment(verbose=0))
+                _opt_dipole = float(_np_mo.linalg.norm(_dip))
+            except Exception as _dip_exc:
+                logger.debug(
+                    "Final-step dipole extraction failed in optimizer: %s",
+                    _dip_exc,
+                )
     except Exception as exc:
         # Silent failure here ships an OptimizationResult with no MO data,
         # breaking Energies + Isosurface panels on history replay.
@@ -813,6 +846,9 @@ def optimize_geometry(
         pyscf_mol_atom=_opt_mol_atom,
         pyscf_mol_basis=_opt_mol_basis,
         density_fit=_opt_density_fit,
+        atom_symbols=_opt_atom_symbols,
+        mulliken_charges=_opt_mulliken,
+        dipole_moment_debye=_opt_dipole,
     )
 
 

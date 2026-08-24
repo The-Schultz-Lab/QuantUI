@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import html as _html_mod
 import types as _types_mod
-from typing import Any
+from typing import Any, Optional
 
 import ipywidgets as widgets
 
@@ -124,6 +124,9 @@ def build_ana_switcher(app: Any, *, layout_fn: Any) -> None:
     app._orb_accordion.observe(
         app._safe_cb(app._on_orb_accordion_show), names=["selected_index"]
     )
+    app._mulliken_accordion.observe(
+        app._safe_cb(app._on_mulliken_accordion_show), names=["selected_index"]
+    )
 
 
 def select_ana_panel(app: Any, name: str) -> None:
@@ -177,6 +180,12 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     app._last_orb_info = None
     app._last_orb_mo_coeff = None
     app._last_orb_mo_occ = None
+    # Mulliken state consumed by the Populations panel — reset so a context
+    # without charges cannot leak the prior calc's chart into this one.
+    app._last_mulliken_symbols = None
+    app._last_mulliken_charges = None
+    app._last_mulliken_dipole = None
+    app._last_mulliken_fig = None
     app._last_orb_mol_atom = None
     app._last_orb_mol_basis = None
     app.traj_accordion.set_title(0, "Trajectory Viewer")
@@ -679,6 +688,154 @@ def pop_nmr_shielding(app: Any, ctx: Any) -> bool:
     )
     app._nmr_output.value = html
     return True
+
+
+def _mulliken_payload(ctx: Any) -> tuple[list[str], list[float], Optional[float]]:
+    """Atom symbols, Mulliken charges, and optional dipole from live or history.
+
+    History loads top-level ``result.json`` fields (already persisted by
+    ``save_result``) rather than ``spectra`` — charges are not spectra data.
+    """
+    if ctx.live_result is not None:
+        result = ctx.live_result
+        symbols = list(getattr(result, "atom_symbols", None) or [])
+        charges = list(getattr(result, "mulliken_charges", None) or [])
+        dip = getattr(result, "dipole_moment_debye", None)
+        dip_f = float(dip) if dip is not None else None
+        return symbols, charges, dip_f
+
+    result_dir = getattr(ctx, "result_dir", None)
+    if result_dir is None:
+        return [], [], None
+    try:
+        from quantui import load_result
+
+        data = load_result(result_dir)
+    except Exception:  # noqa: BLE001 — missing panel, never a crash
+        return [], [], None
+    symbols = list(data.get("atom_symbols") or [])
+    charges_raw = data.get("mulliken_charges")
+    if charges_raw is None:
+        return symbols, [], None
+    charges = [float(c) for c in charges_raw]
+    dip = data.get("dipole_moment_debye")
+    dip_f = float(dip) if dip is not None else None
+    return symbols, charges, dip_f
+
+
+def pop_mulliken(app: Any, ctx: Any) -> bool:
+    """Populate the Mulliken Populations panel (table + bar chart).
+
+    Returns False when charges are missing so the accordion stays on its
+    placeholder (reflections/07 Rules 2–4). Both live and history paths share
+    this code via :func:`_mulliken_payload`.
+    """
+    try:
+        symbols, charges, dipole = _mulliken_payload(ctx)
+        if not symbols or not charges or len(symbols) != len(charges):
+            return False
+        return bool(show_mulliken_populations(app, symbols, charges, dipole))
+    except Exception as exc:
+        try:
+            from quantui import calc_log as _clog
+
+            _clog.log_event(
+                "mulliken_populate_error",
+                f"{type(exc).__name__}: {exc}"[:300],
+                calc_type=getattr(ctx, "calc_type", ""),
+            )
+        except Exception:  # noqa: BLE001 — telemetry self-guard
+            pass
+        return False
+
+
+def show_mulliken_populations(
+    app: Any,
+    atom_symbols: list,
+    charges: list,
+    dipole_debye: Optional[float] = None,
+) -> bool:
+    """Write Mulliken table + Plotly chart into the Populations accordion."""
+    if not atom_symbols or not charges or len(atom_symbols) != len(charges):
+        return False
+
+    app._last_mulliken_symbols = list(atom_symbols)
+    app._last_mulliken_charges = [float(c) for c in charges]
+    app._last_mulliken_dipole = (
+        float(dipole_debye) if dipole_debye is not None else None
+    )
+
+    q_sum = sum(app._last_mulliken_charges)
+    summary_bits = [
+        f"Sum of Mulliken charges: <b>{q_sum:+.4f} e</b>"
+        f' <span style="color:{_theme.TEXT_MUTED_LIGHT};font-size:12px">'
+        "(should match the molecular charge)</span>"
+    ]
+    if app._last_mulliken_dipole is not None:
+        summary_bits.append(
+            f"Dipole moment: <b>{app._last_mulliken_dipole:.4f} D</b>"
+            f' <span style="color:{_theme.TEXT_MUTED_LIGHT};font-size:12px">'
+            "(from the SCF density, not from these charges)</span>"
+        )
+    app._mulliken_summary.value = (
+        f'<p style="font-size:13px;color:{_theme.TEXT_HEADING};margin:0 0 8px">'
+        + "<br>".join(summary_bits)
+        + "</p>"
+    )
+
+    rows = "".join(
+        f'<tr><td style="padding:2px 14px 2px 0;color:{_theme.TEXT_SECONDARY}">'
+        f"{_html_mod.escape(sym)}{i + 1}</td>"
+        f'<td style="color:{_theme.TEXT_HEADING};font-family:monospace">'
+        f"{chg:+.4f}</td></tr>"
+        for i, (sym, chg) in enumerate(
+            zip(app._last_mulliken_symbols, app._last_mulliken_charges)
+        )
+    )
+    app._mulliken_table.value = (
+        f'<table style="border-collapse:collapse;margin:0 0 10px;font-size:13px">'
+        f'<tr><th style="text-align:left;color:{_theme.TEXT_SECONDARY};'
+        f'font-size:12px;padding:2px 14px 2px 0">Atom</th>'
+        f'<th style="text-align:left;color:{_theme.TEXT_SECONDARY};'
+        f'font-size:12px">Charge (e)</th></tr>'
+        f"{rows}</table>"
+    )
+
+    update_mulliken_figure(app)
+    return True
+
+
+def update_mulliken_figure(app: Any) -> None:
+    """Re-render the Mulliken bar chart into ``app._mulliken_fig``."""
+    symbols = getattr(app, "_last_mulliken_symbols", None)
+    charges = getattr(app, "_last_mulliken_charges", None)
+    if not symbols or not charges:
+        return
+    try:
+        import plotly.io as _pio
+
+        from quantui.mulliken_plot import plot_mulliken_charges
+
+        fig = plot_mulliken_charges(symbols, charges)
+        app._apply_plotly_theme(fig)
+        app._last_mulliken_fig = fig
+        app._set_html_output(
+            app._mulliken_fig,
+            _pio.to_html(
+                fig,
+                include_plotlyjs="require",
+                full_html=False,
+                config={"responsive": True},
+            ),
+        )
+    except Exception as exc:
+        app._last_mulliken_fig = None
+        try:
+            from quantui import calc_log as _clog
+
+            _clog.log_event("mulliken_fig_error", f"{type(exc).__name__}: {exc}"[:300])
+        except Exception:  # noqa: BLE001 — telemetry self-guard
+            pass
 
 
 def pop_pes_plot(app: Any, ctx: Any) -> bool:

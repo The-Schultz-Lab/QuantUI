@@ -3074,6 +3074,7 @@ class TestAnaSwitcher:
             "Geometries",
             "UV-Vis",
             "NMR",
+            "Populations",
         ]
 
     def test_no_panels_available_initially(self):

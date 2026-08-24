@@ -65,6 +65,9 @@ def _make_sp_result(with_coeff: bool = True):
         homo_lumo_gap_ev=10.5,
         converged=True,
         n_iterations=8,
+        atom_symbols=["O", "H", "H"],
+        mulliken_charges=[-0.66, 0.33, 0.33],
+        dipole_moment_debye=1.85,
         mo_energy_hartree=np.array([-20.5, -1.3, -0.7, -0.5, -0.3, 0.5, 0.7]),
         mo_occ=np.array([2.0, 2.0, 2.0, 2.0, 2.0, 0.0, 0.0]),
         mo_coeff=mo_coeff,
@@ -170,6 +173,16 @@ class TestSPPanelActivation:
         ctx = app._build_history_context(saved)
         app._apply_analysis_context(ctx)
         assert "Energies" in app._ana_available
+
+    def test_populations_panel_activates_with_mulliken_charges(
+        self, tmp_path, app, sp_result
+    ):
+        saved = save_result(
+            sp_result, results_dir=tmp_path, calc_type="single_point", spectra={}
+        )
+        ctx = app._build_history_context(saved)
+        app._apply_analysis_context(ctx)
+        assert "Populations" in app._ana_available
 
     def test_energies_absent_when_orbitals_missing(self, tmp_path, app, sp_result):
         # save_result only — no save_orbitals call, so orbitals.npz is absent

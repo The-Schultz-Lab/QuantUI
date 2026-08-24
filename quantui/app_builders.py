@@ -2352,6 +2352,48 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._nmr_accordion.set_title(0, "NMR Chemical Shifts")
     app._nmr_accordion.selected_index = None
 
+    # Mulliken Populations — table + Plotly bar chart (always-mounted;
+    # content swapped when activated, DEC-009 / reflections 07 Rule 6).
+    app._mulliken_summary = widgets.HTML(value="", layout=layout_fn(width="100%"))
+    app._mulliken_table = widgets.HTML(value="", layout=layout_fn(width="100%"))
+    # min_height matches plot_mulliken_charges height so the Output does not
+    # collapse to 0px during the atomic outputs swap (same fix as IR/UV-Vis).
+    app._mulliken_fig = widgets.Output(
+        layout=layout_fn(width="100%", min_height="320px"),
+    )
+    app._mulliken_help_btn = widgets.Button(
+        description="?",
+        button_style="",
+        layout=layout_fn(width="28px", height="28px"),
+        tooltip="What are Mulliken charges? — opens Help",
+    )
+    mulliken_header = widgets.HBox(
+        [
+            widgets.HTML(
+                f'<span style="font-size:12px;color:{_theme.TEXT_SECONDARY};'
+                'font-weight:600">Partial charges from the SCF density</span>'
+            ),
+            app._mulliken_help_btn,
+        ],
+        layout=layout_fn(align_items="center", gap="8px", margin="0 0 6px 0"),
+    )
+    app._mulliken_accordion = widgets.Accordion(
+        children=[
+            widgets.VBox(
+                [
+                    mulliken_header,
+                    app._mulliken_summary,
+                    app._mulliken_table,
+                    app._mulliken_fig,
+                ],
+                layout=layout_fn(padding="8px"),
+            )
+        ],
+        layout=layout_fn(display="none", margin="8px 0"),
+    )
+    app._mulliken_accordion.set_title(0, "Mulliken Populations")
+    app._mulliken_accordion.selected_index = None
+
     app._result_dir_label = widgets.HTML(
         value="",
         layout=layout_fn(display="none", margin="4px 0 0 0"),
@@ -2574,6 +2616,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             app._reorg_geom_accordion,
             app._tddft_accordion,
             app._nmr_accordion,
+            app._mulliken_accordion,
         ]
     )
     app.analysis_tab_panel = widgets.VBox(
