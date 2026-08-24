@@ -355,6 +355,30 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "this rather than showing a number.</p>"
         ),
     },
+    "mulliken": {
+        "title": "Mulliken populations (partial charges)",
+        "body": (
+            "<p><b>Mulliken population analysis</b> partitions the SCF electron "
+            "density onto atoms, giving a partial charge on each atom (in units "
+            "of the elementary charge <i>e</i>).</p>"
+            "<ul>"
+            "<li><b>Negative</b> charge → that atom has more electron density "
+            "than its nuclear charge (electron-rich).</li>"
+            "<li><b>Positive</b> charge → electron-deficient.</li>"
+            "</ul>"
+            "<p>The Analysis tab's <b>Mulliken Populations</b> accordion shows "
+            "a per-atom table and a bar chart after a Single Point or Geometry "
+            "Optimization. The sum of the charges should match the molecular "
+            "charge you set.</p>"
+            "<p><b>Dipole moment</b> (Debye), when shown, comes from the full "
+            "SCF density — not from summing these point charges. The two "
+            "numbers are related but not identical.</p>"
+            "<p><b>Caveat for students:</b> Mulliken charges are "
+            "<i>basis-set dependent</i>. Comparing charges across very "
+            "different basis sets (e.g. STO-3G vs. def2-TZVP) is unreliable; "
+            "use them for qualitative polarity within one calculation.</p>"
+        ),
+    },
     "resuming_calculations": {
         "title": "Resuming an interrupted calculation",
         "body": (

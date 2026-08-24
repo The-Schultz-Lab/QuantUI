@@ -61,6 +61,9 @@ from quantui.app_analysis import (
     pop_isosurface as _ana_pop_isosurface,
 )
 from quantui.app_analysis import (
+    pop_mulliken as _ana_pop_mulliken,
+)
+from quantui.app_analysis import (
     pop_nmr_shielding as _ana_pop_nmr_shielding,
 )
 from quantui.app_analysis import (
@@ -83,6 +86,9 @@ from quantui.app_analysis import (
 )
 from quantui.app_analysis import (
     select_ana_panel as _ana_select_ana_panel,
+)
+from quantui.app_analysis import (
+    update_mulliken_figure as _ana_update_mulliken_figure,
 )
 from quantui.app_builders import (
     build_calc_setup as _bld_build_calc_setup,
@@ -1234,6 +1240,11 @@ class QuantUIApp:
         _measure_fallback_msg: Any
         _measure_panel: Any
         _measure_picks: Any
+        _mulliken_accordion: Any
+        _mulliken_summary: Any
+        _mulliken_table: Any
+        _mulliken_fig: Any
+        _mulliken_help_btn: Any
         _nmr_accordion: Any
         _nmr_output: Any
         _orb_accordion: Any
@@ -1389,6 +1400,11 @@ class QuantUIApp:
         self._last_orb_mo_occ: Any = None
         self._last_orb_mol_atom: Any = None
         self._last_orb_mol_basis: Any = None
+        # Mulliken Populations panel state (table + Plotly bar chart).
+        self._last_mulliken_symbols: Any = None
+        self._last_mulliken_charges: Any = None
+        self._last_mulliken_dipole: Any = None
+        self._last_mulliken_fig: Any = None
         # Last-generated cube file path + orbital label.
         # Set by the isosurface render path; consumed by the Export cube
         # button. Initialized here so the button handler reads ``None``
@@ -1796,6 +1812,10 @@ class QuantUIApp:
         if change["new"] == 0 and getattr(self, "_last_orb_info", None) is not None:
             self._on_orb_range_changed()
 
+    def _on_mulliken_accordion_show(self, change) -> None:
+        if change["new"] == 0 and getattr(self, "_last_mulliken_charges", None):
+            _ana_update_mulliken_figure(self)
+
     def _select_ana_panel(self, name: str) -> None:
         _ana_select_ana_panel(self, name)
 
@@ -1832,12 +1852,14 @@ class QuantUIApp:
         ("Geometries", "_reorg_geom_accordion", "Reorganization Energy"),
         ("UV-Vis", "_tddft_accordion", "UV-Vis (TD-DFT)"),
         ("NMR", "_nmr_accordion", "NMR Shielding"),
+        ("Populations", "_mulliken_accordion", "Single Point / Geometry Opt"),
     ]
 
     _PANEL_REGISTRY: ClassVar[dict] = {
         "single_point": [
             ("Energies", "_pop_energies", True),
             ("Isosurface", "_pop_isosurface", False),
+            ("Populations", "_pop_mulliken", False),
         ],
         "geometry_opt": [
             # ORDER MATTERS: the FIRST entry whose populator returns True and
@@ -1865,6 +1887,7 @@ class QuantUIApp:
             ("Energies", "_pop_energies", False),
             ("Isosurface", "_pop_isosurface", True),
             ("Trajectory", "_pop_geo_trajectory", True),
+            ("Populations", "_pop_mulliken", False),
         ],
         "frequency": [
             ("Vibrational", "_pop_vibrational", True),
@@ -1926,6 +1949,9 @@ class QuantUIApp:
 
     def _pop_nmr_shielding(self, ctx: _AnalysisContext) -> bool:
         return _ana_pop_nmr_shielding(self, ctx)
+
+    def _pop_mulliken(self, ctx: _AnalysisContext) -> bool:
+        return _ana_pop_mulliken(self, ctx)
 
     def _pop_pes_plot(self, ctx: _AnalysisContext) -> bool:
         return _ana_pop_pes_plot(self, ctx)
@@ -2281,6 +2307,7 @@ class QuantUIApp:
         )
         self._measure_clear_btn.on_click(self._on_measure_clear)
         self._measure_help_btn.on_click(self._on_measure_help)
+        self._mulliken_help_btn.on_click(self._on_mulliken_help)
         # Persist the grid choice so it survives a relaunch (ORBX.2).
         self._iso_resolution_dd.observe(
             self._safe_cb(self._on_iso_resolution_changed), names="value"
@@ -3066,6 +3093,8 @@ class QuantUIApp:
                 self._uv_mode_toggle.value,
                 self._uv_fwhm_slider.value,
             )
+        if getattr(self, "_last_mulliken_charges", None):
+            _ana_update_mulliken_figure(self)
         _last_pes = getattr(self, "_last_pes_result", None)
         if _last_pes is not None:
             self._show_pes_scan_result(_last_pes)
@@ -3728,6 +3757,10 @@ class QuantUIApp:
     def _on_measure_help(self, btn) -> None:
         _ = btn
         self._show_help_topic("measure")
+
+    def _on_mulliken_help(self, btn) -> None:
+        _ = btn
+        self._show_help_topic("mulliken")
 
     def _on_iso_resolution_changed(self, change) -> None:
         """Persist the isosurface grid choice.
