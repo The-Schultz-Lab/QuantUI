@@ -71,6 +71,22 @@ class TestInjectClickJS:
         assert "__quantuiMeasureHighlight" in html
         assert "addSphere" in html
 
+    def test_highlight_radius_scales_with_atom_vdw(self):
+        # Fixed radius:0.4 sat inside C/O/Cl ball+stick spheres (VDW×0.3).
+        # The overlay must look up 3Dmol's VDW table and clear the atom.
+        html = inject_click_js(_py3dmol_html(), inbox_class=MEASURE_INBOX_CLASS)
+        assert "highlightRadius" in html
+        assert "vdwRadii" in html
+        assert "radius:0.4" not in html
+        assert "radius:highlightRadius(a)" in html
+
+    def test_highlight_color_is_saturated(self):
+        html = inject_click_js(_py3dmol_html(), inbox_class=MEASURE_INBOX_CLASS)
+        assert "#FFEA00" in html
+        assert "opacity:0.80" in html
+        # Named CSS "yellow" was the old washed-out value.
+        assert 'color:"yellow"' not in html
+
     def test_missing_viewer_id_returns_html_unchanged(self):
         html = "<p>not a py3dmol viewer</p>"
         out = inject_click_js(html, inbox_class=MEASURE_INBOX_CLASS)
