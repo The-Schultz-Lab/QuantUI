@@ -13,6 +13,10 @@ import quantui
 from quantui import app_measurement as _measure
 from quantui import molecule_library as _ml
 from quantui import theme as _theme
+from quantui.app_xyz_input import (
+    build_xyz_interactive_widgets,
+    sync_textarea_from_table,
+)
 from quantui.help_content import HELP_TOPICS
 from quantui.live_log import LiveLog
 from quantui.orbital_visualization import (
@@ -838,6 +842,22 @@ def build_shared_widgets(
         style={"description_width": "100px"},
         layout=layout_fn(width="190px"),
     )
+    app.charge_mult_suggest_btn = widgets.Button(
+        description="Suggest from geometry",
+        icon="magic",
+        button_style="",
+        layout=layout_fn(width="180px", height="28px"),
+        tooltip="Suggest neutral charge and parity-compatible multiplicity from "
+        "the loaded structure (you must apply the suggestion)",
+    )
+    app.charge_mult_suggest_output = widgets.HTML(value="")
+    app.charge_mult_apply_btn = widgets.Button(
+        description="Apply suggestion",
+        icon="check",
+        button_style="success",
+        layout=layout_fn(width="170px", height="28px", display="none"),
+    )
+    app._charge_mult_suggestion = None
 
     # MET.5 spin-state helper: suggest a multiplicity for a metal centre from its
     # oxidation state (d-count) + geometry. Suggests, never sets — the student
@@ -1494,6 +1514,12 @@ def build_molecule_section(
     )
     app.xyz_msg = widgets.Label()
 
+    build_xyz_interactive_widgets(app, layout_fn=layout_fn)
+    try:
+        sync_textarea_from_table(app)
+    except Exception:
+        pass
+
     app.pubchem_txt = widgets.Text(
         placeholder="name, SMILES, CID, or InChI  (e.g. aspirin, CC(=O)O, 2244)",
         layout=layout_fn(width="380px"),
@@ -1538,10 +1564,26 @@ def build_molecule_section(
     tab_xyz = widgets.VBox(
         [
             widgets.HTML(
-                hint + "Paste XYZ coordinates (element x y z, one atom per line).</p>"
+                hint + "Paste XYZ coordinates or use the atom table below. "
+                "Charge and multiplicity are set in Calculation Setup — "
+                "geometry loading does not change them.</p>"
             ),
             app.xyz_area,
-            widgets.HBox([app.xyz_btn, app.xyz_msg]),
+            widgets.HBox(
+                [app.xyz_btn, app.xyz_cleanup_btn, app.xyz_msg],
+                layout=layout_fn(gap="8px", align_items="center", flex_wrap="wrap"),
+            ),
+            app.xyz_table_header,
+            app.xyz_table_box,
+            widgets.HBox(
+                [
+                    app.xyz_add_atom_btn,
+                    app.xyz_fill_table_btn,
+                    app.xyz_apply_table_btn,
+                ],
+                layout=layout_fn(gap="8px", flex_wrap="wrap"),
+            ),
+            app.xyz_cleanup_preview_box,
         ]
     )
     tab_pubchem = widgets.VBox(
@@ -1612,7 +1654,19 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
                         ]
                     ),
                     widgets.HTML("&ensp;&ensp;"),
-                    widgets.VBox([app.charge_si, app.mult_si]),
+                    widgets.VBox(
+                        [
+                            widgets.VBox([app.charge_si, app.mult_si]),
+                            widgets.HBox(
+                                [
+                                    app.charge_mult_suggest_btn,
+                                    app.charge_mult_apply_btn,
+                                ],
+                                layout=layout_fn(gap="6px", margin="4px 0 0"),
+                            ),
+                            app.charge_mult_suggest_output,
+                        ]
+                    ),
                     widgets.HTML("&ensp;"),
                     # Descriptor cards — to the right of the inputs so
                     # they don't displace charge/multiplicity.

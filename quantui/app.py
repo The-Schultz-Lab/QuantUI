@@ -250,6 +250,12 @@ from quantui.app_runflow import (
     on_calc_type_help as _run_on_calc_type_help,
 )
 from quantui.app_runflow import (
+    on_charge_mult_apply as _run_on_charge_mult_apply,
+)
+from quantui.app_runflow import (
+    on_charge_mult_suggest as _run_on_charge_mult_suggest,
+)
+from quantui.app_runflow import (
     on_clear as _run_on_clear,
 )
 from quantui.app_runflow import (
@@ -461,6 +467,27 @@ from quantui.app_visualization import (
 )
 from quantui.app_visualization import (
     wire_uv_controls as _viz_wire_uv_controls,
+)
+from quantui.app_xyz_input import (
+    on_load_xyz as _xyz_on_load_xyz,
+)
+from quantui.app_xyz_input import (
+    on_xyz_add_atom as _xyz_on_add_atom,
+)
+from quantui.app_xyz_input import (
+    on_xyz_apply_table as _xyz_on_apply_table,
+)
+from quantui.app_xyz_input import (
+    on_xyz_cleanup as _xyz_on_cleanup,
+)
+from quantui.app_xyz_input import (
+    on_xyz_cleanup_accept as _xyz_on_cleanup_accept,
+)
+from quantui.app_xyz_input import (
+    on_xyz_cleanup_reject as _xyz_on_cleanup_reject,
+)
+from quantui.app_xyz_input import (
+    on_xyz_fill_table as _xyz_on_fill_table,
 )
 from quantui.cancellation import CalcCancelled as _CalcCancelled
 
@@ -1219,6 +1246,15 @@ class QuantUIApp:
         xyz_area: Any
         xyz_btn: Any
         xyz_msg: Any
+        xyz_add_atom_btn: Any
+        xyz_apply_table_btn: Any
+        xyz_cleanup_accept_btn: Any
+        xyz_cleanup_btn: Any
+        xyz_cleanup_preview: Any
+        xyz_cleanup_preview_box: Any
+        xyz_cleanup_reject_btn: Any
+        xyz_fill_table_btn: Any
+        xyz_table_box: Any
         _freq_preopt_cb: Any
         _seed_dd: Any
         _seed_note: Any
@@ -1347,6 +1383,9 @@ class QuantUIApp:
         calc_type_dd: Any
         calc_type_help_btn: Any
         charge_si: Any
+        charge_mult_apply_btn: Any
+        charge_mult_suggest_btn: Any
+        charge_mult_suggest_output: Any
         clear_btn: Any
         _completion_banner: Any
         _completion_mol_lbl: Any
@@ -2143,6 +2182,12 @@ class QuantUIApp:
         )
         self.lib_results_dd.observe(self._safe_cb(self._on_lib_select), names="value")
         self.xyz_btn.on_click(self._on_load_xyz)
+        self.xyz_add_atom_btn.on_click(self._on_xyz_add_atom)
+        self.xyz_fill_table_btn.on_click(self._on_xyz_fill_table)
+        self.xyz_apply_table_btn.on_click(self._on_xyz_apply_table)
+        self.xyz_cleanup_btn.on_click(self._on_xyz_cleanup)
+        self.xyz_cleanup_accept_btn.on_click(self._on_xyz_cleanup_accept)
+        self.xyz_cleanup_reject_btn.on_click(self._on_xyz_cleanup_reject)
         self.pubchem_btn.on_click(self._on_search_pubchem)
         self.pubchem_candidates_dd.observe(
             self._safe_cb(self._on_pubchem_candidate_selected), names="value"
@@ -2190,6 +2235,10 @@ class QuantUIApp:
         self.run_btn.on_click(self._on_run_clicked)
         self.cancel_btn.on_click(self._safe_cb(self._on_cancel))
         self.basis_fix_btn.on_click(self._safe_cb(self._on_basis_fix))
+        self.charge_mult_suggest_btn.on_click(
+            self._safe_cb(self._on_charge_mult_suggest)
+        )
+        self.charge_mult_apply_btn.on_click(self._safe_cb(self._on_charge_mult_apply))
         self.spin_suggest_btn.on_click(self._safe_cb(self._on_spin_suggest))
         self.spin_apply_btns[0].on_click(
             self._safe_cb(lambda _b: self._on_spin_apply(0))
@@ -3510,13 +3559,25 @@ class QuantUIApp:
         )
 
     def _on_load_xyz(self, btn) -> None:
-        try:
-            atoms, coords = parse_xyz_input(self.xyz_area.value.strip())
-            mol = Molecule(atoms=atoms, coordinates=coords)
-            self._set_molecule(mol, "Loaded from XYZ input")
-            self.xyz_msg.value = ""
-        except Exception as exc:
-            self.xyz_msg.value = f"Parse error: {exc}"
+        _xyz_on_load_xyz(self, btn)
+
+    def _on_xyz_add_atom(self, btn) -> None:
+        _xyz_on_add_atom(self, btn)
+
+    def _on_xyz_fill_table(self, btn) -> None:
+        _xyz_on_fill_table(self, btn)
+
+    def _on_xyz_apply_table(self, btn) -> None:
+        _xyz_on_apply_table(self, btn)
+
+    def _on_xyz_cleanup(self, btn) -> None:
+        _xyz_on_cleanup(self, btn)
+
+    def _on_xyz_cleanup_accept(self, btn) -> None:
+        _xyz_on_cleanup_accept(self, btn)
+
+    def _on_xyz_cleanup_reject(self, btn) -> None:
+        _xyz_on_cleanup_reject(self, btn)
 
     def _apply_pubchem_search_result(
         self,
@@ -3761,6 +3822,12 @@ class QuantUIApp:
 
     def _on_basis_fix(self, btn=None) -> None:
         _run_on_basis_fix(self, btn)
+
+    def _on_charge_mult_suggest(self, btn=None) -> None:
+        _run_on_charge_mult_suggest(self, btn)
+
+    def _on_charge_mult_apply(self, btn=None) -> None:
+        _run_on_charge_mult_apply(self, btn)
 
     def _on_spin_suggest(self, btn=None) -> None:
         _run_on_spin_suggest(self, btn)
@@ -4446,7 +4513,9 @@ class QuantUIApp:
         if self._molecule is not None:
             self._molecule.multiplicity = int(self.mult_si.value)
 
-    def _set_molecule(self, mol: Molecule, label: str = "") -> None:
+    def _set_molecule(
+        self, mol: Molecule, label: str = "", *, sync_charge_mult: bool = True
+    ) -> None:
         """Update shared state and refresh dependent widgets."""
         self._molecule = mol
         self.run_btn.disabled = False
@@ -4495,10 +4564,15 @@ class QuantUIApp:
             f"{_summary}</div>"
         )
 
-        self.charge_si.value = mol.charge
-        self.mult_si.value = mol.multiplicity
-        if mol.multiplicity > 1 and self.method_dd.value == "RHF":
-            self.method_dd.value = "UHF"
+        if sync_charge_mult:
+            self.charge_si.value = mol.charge
+            self.mult_si.value = mol.multiplicity
+            if mol.multiplicity > 1 and self.method_dd.value == "RHF":
+                self.method_dd.value = "UHF"
+        else:
+            # Geometry-only load: calc-setup fields own charge/mult.
+            self._molecule.charge = int(self.charge_si.value)
+            self._molecule.multiplicity = int(self.mult_si.value)
 
         # Route through ``_refresh_calc_mol_viewer`` (2026-05-25)
         # so the viewer renders via an atomic outputs swap rather than the
