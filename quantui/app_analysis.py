@@ -135,21 +135,63 @@ def build_ana_switcher(app: Any, *, layout_fn: Any) -> None:
 
 
 def select_ana_panel(app: Any, name: str) -> None:
-    """Expand the named panel and collapse all others."""
+    """Mark the primary analysis panel for this result (scroll target).
+
+    Does not collapse other panels — every panel with data stays expanded
+    so students can see trajectory, energies, etc. at once.
+    """
     app._ana_active = name
     app._ana_unavail_html.layout.display = "none"
-    for panel_name, acc in zip(app._ana_panel_names, app._ana_accordions):
-        acc.selected_index = 0 if panel_name == name else None
 
 
 def activate_ana_panel(app: Any, name: str, auto_select: bool = True) -> None:
-    """Mark a panel as available and reveal its content."""
+    """Mark a panel as available, reveal its content, and expand it."""
     app._ana_available.add(name)
     if name in app._ana_unavail_msgs:
         app._ana_unavail_msgs[name].layout.display = "none"
         app._ana_content_boxes[name].layout.display = ""
+    for panel_name, acc in zip(app._ana_panel_names, app._ana_accordions):
+        if panel_name == name:
+            acc.selected_index = 0
+            break
     if auto_select:
         app._select_ana_panel(name)
+
+
+def scroll_analysis_tab_to_top(app: Any) -> None:
+    """Scroll the page to the top of the Analysis tab (3D viewer + context).
+
+    Voilà often lands users mid-page (e.g. on the orbital isosurface panel)
+    when switching tabs; nudge the viewport back to the molecule viewer.
+    """
+    bridge = getattr(app, "_analysis_scroll_bridge", None)
+    if bridge is None:
+        return
+    from IPython.display import Javascript, display
+
+    js = """
+(function(){
+  function go(){
+    var panel=document.querySelector(".quantui-analysis-tab-panel");
+    if(panel){
+      panel.scrollIntoView({block:"start",inline:"nearest"});
+      var y=panel.getBoundingClientRect().top+window.pageYOffset-12;
+      window.scrollTo({top:Math.max(0,y),left:0,behavior:"instant"});
+      return;
+    }
+    window.scrollTo(0,0);
+  }
+  go();
+  setTimeout(go,60);
+  setTimeout(go,250);
+})();
+"""
+    try:
+        bridge.clear_output(wait=True)
+        with bridge:
+            display(Javascript(js))
+    except Exception:
+        pass
 
 
 def deactivate_all_ana_panels(app: Any) -> None:

@@ -70,6 +70,18 @@ class TestInjectClickJS:
         html = inject_click_js(_py3dmol_html(), inbox_class=MEASURE_INBOX_CLASS)
         assert "__quantuiMeasureHighlight" in html
         assert "addSphere" in html
+        assert "addLine" in html
+        assert "drawAngleArc" in html
+        assert "drawDihedralArc" in html
+
+    def test_measure_heading_exists(self):
+        app = Mock()
+        # build via QuantUIApp is heavy; heading is wired in app_builders.
+        from quantui.app import QuantUIApp
+
+        real = QuantUIApp()
+        assert hasattr(real, "_measure_heading")
+        assert "Measurement" in real._measure_heading.value
 
     def test_highlight_radius_scales_with_atom_vdw(self):
         # Fixed radius:0.4 sat inside C/O/Cl ball+stick spheres (VDW×0.3).

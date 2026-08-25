@@ -85,6 +85,9 @@ from quantui.app_analysis import (
     pop_vibrational as _ana_pop_vibrational,
 )
 from quantui.app_analysis import (
+    scroll_analysis_tab_to_top as _ana_scroll_analysis_tab_to_top,
+)
+from quantui.app_analysis import (
     select_ana_panel as _ana_select_ana_panel,
 )
 from quantui.app_analysis import (
@@ -1706,9 +1709,11 @@ class QuantUIApp:
         timer.daemon = True
         timer.start()
 
-    def _on_root_tab_changed(self, _change) -> None:
+    def _on_root_tab_changed(self, change) -> None:
         """Pulse the activity light on tab navigation actions."""
         self._activity_pulse("Switching tabs...", hold_s=0.16, kind="ui")
+        if change.get("new") == 2:
+            _ana_scroll_analysis_tab_to_top(self)
 
     def _go_to_results_tab(self, _btn) -> None:
         """Navigate to Results tab with a visible activity pulse."""
@@ -1719,6 +1724,7 @@ class QuantUIApp:
         """Navigate to Analysis tab with a visible activity pulse."""
         self._activity_pulse("Navigating to Analysis tab...", hold_s=0.16, kind="ui")
         self.root_tab.selected_index = 2
+        _ana_scroll_analysis_tab_to_top(self)
 
     # ── Status panel ──────────────────────────────────────────────────────
 
@@ -1841,9 +1847,8 @@ class QuantUIApp:
     #
     # Rules:
     #   • populate_method_name is a string — looked up via getattr at runtime.
-    #   • auto_select=True on the FIRST entry that returns True activates that
-    #     panel as the default view; subsequent entries with auto_select=True are
-    #     treated as False (only one panel is auto-selected per result).
+    #   • auto_select=True on the FIRST entry that returns True marks that
+    #     panel as the primary scroll target; every panel with data expands.
     #   • If a populate method returns False / None the panel stays disabled.
     #   • Populate methods must NOT call _activate_ana_panel themselves.
 
@@ -5255,6 +5260,19 @@ class QuantUIApp:
                 }
                 save_type = "tddft"
             elif ct == "NMR Shielding":
+                _nmr_seed_path = self._freq_seed_dd.value
+                if _nmr_seed_path:
+                    from quantui.results_storage import load_trajectory
+
+                    self.run_status.value = "Loading seed geometry from history…"
+                    _nmr_seed_traj, _ = load_trajectory(Path(_nmr_seed_path))
+                    calc_mol = _nmr_seed_traj[-1]
+                    log.write(
+                        f"\nSeed geometry loaded from: {Path(_nmr_seed_path).name}\n"
+                        f"  Formula: {calc_mol.get_formula()}  "
+                        f"Atoms: {len(calc_mol.atoms)}\n\n"
+                    )
+
                 self.run_status.value = "Running NMR shielding (SCF + GIAO)..."
                 from quantui.nmr_calc import run_nmr_calc
 

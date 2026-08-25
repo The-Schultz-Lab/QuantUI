@@ -1266,19 +1266,22 @@ class TestNMRWidgets:
         assert len(app.calc_type_dd.options) == 7
         assert "Reorganization Energy" in app.calc_type_dd.options
 
-    def test_nmr_calc_type_shows_note(self):
+    def test_nmr_calc_type_shows_seed_and_note(self):
         app = QuantUIApp()
         app.calc_type_dd.value = "NMR Shielding"
-        # calc_extra_opts should contain an HTML note about basis recommendations
-        assert len(app.calc_extra_opts.children) == 1
-        note = app.calc_extra_opts.children[0]
+        assert len(app.calc_extra_opts.children) == 3
+        rendered = []
+        for child in app.calc_extra_opts.children:
+            rendered.extend(getattr(child, "children", [child]))
+        assert app._freq_seed_dd in rendered
+        note = app.calc_extra_opts.children[2]
         assert isinstance(note, widgets.HTML)
         assert "6-31G*" in note.value
 
     def test_nmr_note_mentions_sto3g_warning(self):
         app = QuantUIApp()
         app.calc_type_dd.value = "NMR Shielding"
-        note = app.calc_extra_opts.children[0]
+        note = app.calc_extra_opts.children[2]
         assert "STO-3G" in note.value
 
     def test_switching_away_from_nmr_clears_opts(self):
@@ -3018,6 +3021,21 @@ class TestAnalysisTab:
         app = QuantUIApp()
         assert app._analysis_empty_html.layout.display == "none"
 
+    def test_analysis_tab_has_scroll_bridge_and_panel_class(self):
+        app = QuantUIApp()
+        import ipywidgets as widgets
+
+        assert isinstance(app._analysis_scroll_bridge, widgets.Output)
+        assert "quantui-analysis-tab-panel" in app.analysis_tab_panel._dom_classes
+
+    def test_welcome_logo_svg_is_valid(self):
+        from quantui import theme
+
+        app = QuantUIApp()
+        svg = bytes(app._welcome_logo.value).decode("utf-8")
+        assert theme.ACCENT_INFO in svg
+        assert "_theme.ACCENT_INFO" not in svg
+
     def test_orb_accordion_in_analysis_tab(self):
         app = QuantUIApp()
         assert app._orb_accordion in app.analysis_tab_panel.children
@@ -3097,22 +3115,19 @@ class TestAnaSwitcher:
         app._activate_ana_panel("Energies")
         assert app._orb_accordion.selected_index == 0
 
-    def test_activate_panel_no_auto_select(self):
+    def test_activate_panel_no_auto_select_still_expands(self):
         app = QuantUIApp()
         app._activate_ana_panel("Energies", auto_select=False)
-        # Panel is available but not expanded; still visible in DOM.
         assert "Energies" in app._ana_available
-        assert app._orb_accordion.selected_index is None
+        assert app._orb_accordion.selected_index == 0
         assert app._orb_accordion.layout.display == ""
 
-    def test_activate_collapses_other_accordions(self):
+    def test_activate_does_not_collapse_other_accordions(self):
         app = QuantUIApp()
         app._activate_ana_panel("Energies")
-        # Other accordions remain visible but collapsed (not hidden).
-        for name, acc in zip(app._ana_panel_names, app._ana_accordions):
-            if name != "Energies":
-                assert acc.layout.display == ""
-                assert acc.selected_index is None
+        app._activate_ana_panel("IR Spectrum", auto_select=False)
+        assert app._orb_accordion.selected_index == 0
+        assert app._ir_accordion.selected_index == 0
 
     def test_deactivate_all_clears_available(self):
         app = QuantUIApp()

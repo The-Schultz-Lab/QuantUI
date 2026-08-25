@@ -1392,8 +1392,8 @@ def build_welcome_header(app: Any, *, layout_fn: Any = None) -> None:
         "</g>"
         '<circle cx="140" cy="140" r="20"'
         ' fill="rgba(37,99,235,0.25)" filter="url(#q-glow)"/>'
-        '<circle cx="140" cy="140" r="14"'
-        ' fill=_theme.ACCENT_INFO filter="url(#q-glow)"/>'
+        f'<circle cx="140" cy="140" r="14"'
+        f' fill="{_theme.ACCENT_INFO}" filter="url(#q-glow)"/>'
         '<circle cx="140" cy="140" r="8" fill="#60a5fa"/>'
         '<circle cx="137" cy="137" r="3" fill="rgba(255,255,255,0.45)"/>'
         "</svg>"
@@ -2517,6 +2517,14 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._measure_readout = widgets.HTML(
         value=_measure._readout_html(_measure._PLACEHOLDER_TEXT)
     )
+    app._measure_heading = widgets.HTML(
+        value=(
+            f'<div style="font-size:13px;font-weight:600;color:{_theme.TEXT_BODY};'
+            f'margin:8px 0 2px">Measurement</div>'
+            f'<div style="font-size:11px;color:{_theme.TEXT_SECONDARY};margin:0 0 2px">'
+            "Click atoms in the viewer — bond, angle, then dihedral</div>"
+        )
+    )
     app._measure_clear_btn = widgets.Button(
         description="Clear",
         button_style="",
@@ -2531,6 +2539,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._measure_controls = widgets.VBox(
         [
+            app._measure_heading,
             widgets.HBox(
                 [app._measure_readout],
                 layout=layout_fn(align_items="center"),
@@ -2621,9 +2630,13 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(display="none"),
     )
     app._ana_unavail_html = widgets.HTML(value="", layout=layout_fn(display="none"))
+    app._analysis_scroll_bridge = widgets.Output(
+        layout=layout_fn(width="0px", height="0px", visibility="hidden")
+    )
     app._build_ana_switcher()
 
     ana_children = [
+        app._analysis_scroll_bridge,
         app._analysis_context_lbl,
         app._analysis_mol_output,
         app._measure_panel,
@@ -2654,6 +2667,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         ana_children,
         layout=layout_fn(padding="8px 0"),
     )
+    app.analysis_tab_panel.add_class("quantui-analysis-tab-panel")
     app.post_calc_panel = app.analysis_tab_panel
 
 

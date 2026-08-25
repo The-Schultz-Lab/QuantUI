@@ -194,6 +194,7 @@ class TestGeoOptPanelActivation:
         ctx = app._build_history_context(saved)
         app._apply_analysis_context(ctx)
         assert "Trajectory" in app._ana_available
+        assert app.traj_accordion.selected_index == 0
 
     def test_energies_panel_activates(self, tmp_path, app, geo_opt_result):
         saved = self._save_all(tmp_path, geo_opt_result)
