@@ -13,6 +13,10 @@ import quantui
 from quantui import app_measurement as _measure
 from quantui import molecule_library as _ml
 from quantui import theme as _theme
+from quantui.app_xyz_input import (
+    build_xyz_interactive_widgets,
+    sync_textarea_from_table,
+)
 from quantui.help_content import HELP_TOPICS
 from quantui.live_log import LiveLog
 from quantui.orbital_visualization import (
@@ -1494,6 +1498,12 @@ def build_molecule_section(
     )
     app.xyz_msg = widgets.Label()
 
+    build_xyz_interactive_widgets(app, layout_fn=layout_fn)
+    try:
+        sync_textarea_from_table(app)
+    except Exception:
+        pass
+
     app.pubchem_txt = widgets.Text(
         placeholder="name, SMILES, CID, or InChI  (e.g. aspirin, CC(=O)O, 2244)",
         layout=layout_fn(width="380px"),
@@ -1538,10 +1548,26 @@ def build_molecule_section(
     tab_xyz = widgets.VBox(
         [
             widgets.HTML(
-                hint + "Paste XYZ coordinates (element x y z, one atom per line).</p>"
+                hint + "Paste XYZ coordinates or use the atom table below. "
+                "Charge and multiplicity are set in Calculation Setup — "
+                "geometry loading does not change them.</p>"
             ),
             app.xyz_area,
-            widgets.HBox([app.xyz_btn, app.xyz_msg]),
+            widgets.HBox(
+                [app.xyz_btn, app.xyz_cleanup_btn, app.xyz_msg],
+                layout=layout_fn(gap="8px", align_items="center", flex_wrap="wrap"),
+            ),
+            app.xyz_table_header,
+            app.xyz_table_box,
+            widgets.HBox(
+                [
+                    app.xyz_add_atom_btn,
+                    app.xyz_fill_table_btn,
+                    app.xyz_apply_table_btn,
+                ],
+                layout=layout_fn(gap="8px", flex_wrap="wrap"),
+            ),
+            app.xyz_cleanup_preview_box,
         ]
     )
     tab_pubchem = widgets.VBox(

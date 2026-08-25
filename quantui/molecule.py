@@ -33,6 +33,8 @@ class Molecule:
         coordinates: List[List[float]],
         charge: int = 0,
         multiplicity: int = 1,
+        *,
+        validate_spin: bool = True,
     ):
         """
         Initialize a molecule.
@@ -42,6 +44,9 @@ class Molecule:
             coordinates: List of [x, y, z] coordinates in Angstroms
             charge: Total molecular charge
             multiplicity: Spin multiplicity (2S+1)
+            validate_spin: When False, skip the charge/multiplicity electron-parity
+                check. Used when loading geometry from XYZ so charge and multiplicity
+                can be set independently in the calculation setup panel.
 
         Raises:
             ValueError: If molecule data is invalid
@@ -50,6 +55,7 @@ class Molecule:
         self.coordinates = coordinates
         self.charge = charge
         self.multiplicity = multiplicity
+        self._validate_spin = validate_spin
 
         # Validate molecule
         self._validate()
@@ -106,7 +112,11 @@ class Molecule:
                 f"Must be a positive integer."
             )
 
-        # Check multiplicity compatibility with electron count
+        # Check multiplicity compatibility with electron count (optional — geometry
+        # loads from XYZ skip this so charge/mult can be edited separately).
+        if not self._validate_spin:
+            return
+
         num_electrons = self.get_electron_count()
         if (num_electrons + self.multiplicity) % 2 != 1:
             # Generate list of valid multiplicities (up to 5 options)
