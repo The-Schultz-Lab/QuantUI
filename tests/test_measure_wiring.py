@@ -75,8 +75,6 @@ class TestInjectClickJS:
         assert "drawDihedralArc" in html
 
     def test_measure_heading_exists(self):
-        app = Mock()
-        # build via QuantUIApp is heavy; heading is wired in app_builders.
         from quantui.app import QuantUIApp
 
         real = QuantUIApp()
