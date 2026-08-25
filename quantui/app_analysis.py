@@ -858,9 +858,10 @@ def show_mulliken_populations(
         f' <span style="color:{_theme.TEXT_MUTED_LIGHT};font-size:12px">'
         "(should match the molecular charge)</span>"
     ]
+    dip_vec = app._last_mulliken_dipole_vector
     if app._last_mulliken_dipole is not None:
-        if has_vec:
-            vx, vy, vz = app._last_mulliken_dipole_vector
+        if dip_vec is not None:
+            vx, vy, vz = dip_vec
             summary_bits.append(
                 f"Dipole moment: <b>{app._last_mulliken_dipole:.4f} D</b>"
                 f' <span style="color:{_theme.TEXT_MUTED_LIGHT};font-size:12px">'
