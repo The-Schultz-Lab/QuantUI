@@ -268,6 +268,91 @@ def on_spin_apply(app: Any, index: int) -> None:
     )
 
 
+def _atoms_from_active_geometry(app: Any) -> list[str]:
+    """Return atom symbols from the loaded molecule or the XYZ textarea."""
+    from quantui.molecule import parse_xyz_input
+
+    mol = getattr(app, "_molecule", None)
+    if mol is not None and getattr(mol, "atoms", None):
+        return list(mol.atoms)
+    text = getattr(app, "xyz_area", None)
+    raw = text.value.strip() if text is not None else ""
+    if raw:
+        atoms, _coords = parse_xyz_input(raw)
+        return atoms
+    raise ValueError("Load a molecule or enter coordinates in the XYZ tab first.")
+
+
+def on_charge_mult_suggest(app: Any, btn: Any = None) -> None:
+    """Suggest neutral charge + parity-compatible multiplicity (never auto-sets)."""
+    from quantui.xyz_input import suggest_charge_multiplicity_from_atoms
+
+    app._charge_mult_suggestion = None
+    app.charge_mult_apply_btn.layout.display = "none"
+
+    try:
+        atoms = _atoms_from_active_geometry(app)
+        suggestion = suggest_charge_multiplicity_from_atoms(atoms, assume_charge=0)
+    except Exception as exc:
+        app.charge_mult_suggest_output.value = _spin_small(
+            f"⚠ {exc}", _theme.ACCENT_WARNING
+        )
+        return
+
+    app._charge_mult_suggestion = suggestion
+    lines = [
+        _spin_small(
+            f"Suggested: charge {suggestion.charge}, "
+            f"multiplicity {suggestion.multiplicity}."
+        ),
+        _spin_small(suggestion.explanation),
+    ]
+    current_charge = int(app.charge_si.value)
+    if current_charge != suggestion.charge:
+        from quantui.molecule import suggest_multiplicity
+
+        alt_mult = suggest_multiplicity(atoms, current_charge)
+        lines.append(
+            _spin_small(
+                f"Your charge field is {current_charge}; at that charge, "
+                f"multiplicity {alt_mult} would be parity-compatible "
+                "(Apply still sets neutral charge 0)."
+            )
+        )
+    for caveat in suggestion.caveats:
+        lines.append(_spin_small(f"⚠ {caveat}", _theme.ACCENT_WARNING))
+    app.charge_mult_suggest_output.value = "<br>".join(lines)
+    app.charge_mult_apply_btn.description = (
+        f"Apply charge {suggestion.charge}, mult {suggestion.multiplicity}"
+    )
+    app.charge_mult_apply_btn.layout.display = ""
+
+
+def on_charge_mult_apply(app: Any, btn: Any = None) -> None:
+    """Apply the last charge/multiplicity suggestion to the widgets and molecule."""
+    suggestion = getattr(app, "_charge_mult_suggestion", None)
+    if suggestion is None:
+        return
+    app.charge_si.value = suggestion.charge
+    app.mult_si.value = suggestion.multiplicity
+    if suggestion.multiplicity > 1 and app.method_dd.value == "RHF":
+        app.method_dd.value = "UHF"
+    if getattr(app, "_molecule", None) is not None:
+        app._molecule.charge = suggestion.charge
+        app._molecule.multiplicity = suggestion.multiplicity
+    app.charge_mult_suggest_output.value = _spin_small(
+        f"Applied charge {suggestion.charge} and multiplicity "
+        f"{suggestion.multiplicity}. Re-check before running.",
+        "#166534",
+    )
+    app.charge_mult_apply_btn.layout.display = "none"
+    app._charge_mult_suggestion = None
+    try:
+        app._update_notes()
+    except Exception:
+        pass
+
+
 def on_basis_fix(app: Any, btn: Any = None) -> None:
     """One-click MET.5 fix: set the basis to def2-SVP and hide the button."""
     try:

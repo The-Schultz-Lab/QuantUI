@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import List, Sequence, Tuple
 
 from .inorganic_guards import check_charge_multiplicity
-from .molecule import ATOMIC_NUMBERS, Molecule, parse_xyz_input
+from .molecule import ATOMIC_NUMBERS, Molecule, parse_xyz_input, suggest_multiplicity
 
 
 def normalize_element_symbol(symbol: str) -> str:
@@ -46,6 +47,75 @@ def spin_compatibility_note(
 ) -> str | None:
     """Plain-language note when charge/mult disagree with electron count."""
     return check_charge_multiplicity(electron_count(atoms, charge), multiplicity)
+
+
+@dataclass(frozen=True)
+class ChargeMultSuggestion:
+    """Conservative charge/multiplicity guess from atomic composition only."""
+
+    charge: int
+    multiplicity: int
+    n_electrons: int
+    formula: str
+    explanation: str
+    caveats: Tuple[str, ...]
+
+
+def suggest_charge_multiplicity_from_atoms(
+    atoms: Sequence[str],
+    *,
+    assume_charge: int = 0,
+) -> ChargeMultSuggestion:
+    """Suggest charge and multiplicity from element symbols (not coordinates).
+
+    Coordinates do not encode charge or spin. This assumes ``assume_charge``
+    (default neutral) and picks the lowest multiplicity compatible with the
+    resulting electron count (singlet or doublet by parity).
+    """
+    from .connectivity import hill_formula
+
+    atom_list = list(atoms)
+    if not atom_list:
+        raise ValueError("No atoms to suggest charge and multiplicity for.")
+
+    n_electrons = electron_count(atom_list, assume_charge)
+    multiplicity = suggest_multiplicity(atom_list, assume_charge)
+    formula = hill_formula(atom_list)
+
+    parity_word = "even" if n_electrons % 2 == 0 else "odd"
+    spin_word = {1: "singlet", 2: "doublet"}.get(
+        multiplicity, f"multiplicity {multiplicity}"
+    )
+    explanation = (
+        f"{formula}: {n_electrons} electrons at charge {assume_charge} "
+        f"({parity_word} count) → {spin_word} (multiplicity {multiplicity})."
+    )
+
+    caveats: List[str] = [
+        "Charge cannot be inferred from coordinates — only atomic symbols are used.",
+        "Neutral charge (0) is assumed.",
+        "Multiplicity is the lowest parity-compatible value, not necessarily the "
+        "ground-state spin (e.g. O₂ is a triplet; many radicals need higher multiplicities).",
+    ]
+    try:
+        from .spin_presets import supported_metals
+
+        if any(sym in set(supported_metals()) for sym in atom_list):
+            caveats.append(
+                "Transition-metal complexes: use the Spin-state helper below for "
+                "oxidation-state-based multiplicity suggestions."
+            )
+    except Exception:
+        pass
+
+    return ChargeMultSuggestion(
+        charge=assume_charge,
+        multiplicity=multiplicity,
+        n_electrons=n_electrons,
+        formula=formula,
+        explanation=explanation,
+        caveats=tuple(caveats),
+    )
 
 
 def load_molecule_from_xyz_text(

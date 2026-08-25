@@ -842,6 +842,22 @@ def build_shared_widgets(
         style={"description_width": "100px"},
         layout=layout_fn(width="190px"),
     )
+    app.charge_mult_suggest_btn = widgets.Button(
+        description="Suggest from geometry",
+        icon="magic",
+        button_style="",
+        layout=layout_fn(width="180px", height="28px"),
+        tooltip="Suggest neutral charge and parity-compatible multiplicity from "
+        "the loaded structure (you must apply the suggestion)",
+    )
+    app.charge_mult_suggest_output = widgets.HTML(value="")
+    app.charge_mult_apply_btn = widgets.Button(
+        description="Apply suggestion",
+        icon="check",
+        button_style="success",
+        layout=layout_fn(width="170px", height="28px", display="none"),
+    )
+    app._charge_mult_suggestion = None
 
     # MET.5 spin-state helper: suggest a multiplicity for a metal centre from its
     # oxidation state (d-count) + geometry. Suggests, never sets — the student
@@ -1638,7 +1654,19 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
                         ]
                     ),
                     widgets.HTML("&ensp;&ensp;"),
-                    widgets.VBox([app.charge_si, app.mult_si]),
+                    widgets.VBox(
+                        [
+                            widgets.VBox([app.charge_si, app.mult_si]),
+                            widgets.HBox(
+                                [
+                                    app.charge_mult_suggest_btn,
+                                    app.charge_mult_apply_btn,
+                                ],
+                                layout=layout_fn(gap="6px", margin="4px 0 0"),
+                            ),
+                            app.charge_mult_suggest_output,
+                        ]
+                    ),
                     widgets.HTML("&ensp;"),
                     # Descriptor cards — to the right of the inputs so
                     # they don't displace charge/multiplicity.

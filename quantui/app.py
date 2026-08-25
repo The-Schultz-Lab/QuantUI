@@ -247,6 +247,12 @@ from quantui.app_runflow import (
     on_calc_type_help as _run_on_calc_type_help,
 )
 from quantui.app_runflow import (
+    on_charge_mult_apply as _run_on_charge_mult_apply,
+)
+from quantui.app_runflow import (
+    on_charge_mult_suggest as _run_on_charge_mult_suggest,
+)
+from quantui.app_runflow import (
     on_clear as _run_on_clear,
 )
 from quantui.app_runflow import (
@@ -1347,6 +1353,9 @@ class QuantUIApp:
         calc_type_dd: Any
         calc_type_help_btn: Any
         charge_si: Any
+        charge_mult_apply_btn: Any
+        charge_mult_suggest_btn: Any
+        charge_mult_suggest_output: Any
         clear_btn: Any
         _completion_banner: Any
         _completion_mol_lbl: Any
@@ -2187,6 +2196,10 @@ class QuantUIApp:
         self.run_btn.on_click(self._on_run_clicked)
         self.cancel_btn.on_click(self._safe_cb(self._on_cancel))
         self.basis_fix_btn.on_click(self._safe_cb(self._on_basis_fix))
+        self.charge_mult_suggest_btn.on_click(
+            self._safe_cb(self._on_charge_mult_suggest)
+        )
+        self.charge_mult_apply_btn.on_click(self._safe_cb(self._on_charge_mult_apply))
         self.spin_suggest_btn.on_click(self._safe_cb(self._on_spin_suggest))
         self.spin_apply_btns[0].on_click(
             self._safe_cb(lambda _b: self._on_spin_apply(0))
@@ -3756,6 +3769,12 @@ class QuantUIApp:
 
     def _on_basis_fix(self, btn=None) -> None:
         _run_on_basis_fix(self, btn)
+
+    def _on_charge_mult_suggest(self, btn=None) -> None:
+        _run_on_charge_mult_suggest(self, btn)
+
+    def _on_charge_mult_apply(self, btn=None) -> None:
+        _run_on_charge_mult_apply(self, btn)
 
     def _on_spin_suggest(self, btn=None) -> None:
         _run_on_spin_suggest(self, btn)

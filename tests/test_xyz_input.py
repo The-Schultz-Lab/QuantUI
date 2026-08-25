@@ -4,10 +4,12 @@ import pytest
 
 from quantui.molecule import Molecule, parse_xyz_input
 from quantui.xyz_input import (
+    ChargeMultSuggestion,
     format_xyz_body,
     load_molecule_from_xyz_text,
     propose_xyz_cleanup,
     spin_compatibility_note,
+    suggest_charge_multiplicity_from_atoms,
 )
 
 
@@ -74,3 +76,25 @@ class TestSpinCompatibilityNote:
     def test_nitrogen_doublet_needed(self):
         note = spin_compatibility_note(["N"], 0, 1)
         assert note is not None
+
+
+class TestSuggestChargeMultiplicityFromAtoms:
+    def test_nitrogen_neutral_doublet(self):
+        s = suggest_charge_multiplicity_from_atoms(["N"])
+        assert s.charge == 0
+        assert s.multiplicity == 2
+        assert s.formula == "N"
+        assert "cannot be inferred" in s.caveats[0].lower()
+
+    def test_water_neutral_singlet(self):
+        s = suggest_charge_multiplicity_from_atoms(["O", "H", "H"])
+        assert s.charge == 0
+        assert s.multiplicity == 1
+
+    def test_empty_raises(self):
+        with pytest.raises(ValueError, match="No atoms"):
+            suggest_charge_multiplicity_from_atoms([])
+
+    def test_returns_frozen_dataclass(self):
+        s = suggest_charge_multiplicity_from_atoms(["H", "H"])
+        assert isinstance(s, ChargeMultSuggestion)
