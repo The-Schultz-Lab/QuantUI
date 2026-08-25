@@ -14,9 +14,7 @@ _PANEL_UNAVAILABLE_STYLE = (
     "padding:12px 16px;color:#6b7280;font-size:13px;font-style:italic"
 )
 
-_MULLIKEN_DIPOLE_TOOLTIP = (
-    "Green arrow along μ through the molecular centre of mass"
-)
+_MULLIKEN_DIPOLE_TOOLTIP = "Green arrow along μ through the molecular centre of mass"
 _MULLIKEN_DIPOLE_TOOLTIP_DISABLED = (
     "Unavailable: this result has no saved μx, μy, μz — re-run to enable the 3D arrow"
 )
