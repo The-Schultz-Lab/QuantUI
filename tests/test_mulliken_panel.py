@@ -33,6 +33,7 @@ def _sp_result_with_charges(**overrides):
         atom_symbols=["O", "H", "H"],
         mulliken_charges=[-0.66, 0.33, 0.33],
         dipole_moment_debye=1.85,
+        dipole_vector_debye=[0.0, 0.0, 1.85],
         mo_energy_hartree=None,
         mo_occ=None,
         mo_coeff=None,
@@ -104,6 +105,7 @@ class TestPopMullikenLive:
         )
         assert "1.8500 D" in app._mulliken_summary.value
         assert app._last_mulliken_charges == pytest.approx([-0.66, 0.33, 0.33])
+        assert app._last_mulliken_dipole_vector == pytest.approx([0.0, 0.0, 1.85])
 
     def test_returns_false_without_charges(self, app):
         ctx = SimpleNamespace(

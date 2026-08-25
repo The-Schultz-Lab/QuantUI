@@ -2352,8 +2352,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._nmr_accordion.set_title(0, "NMR Chemical Shifts")
     app._nmr_accordion.selected_index = None
 
-    # Mulliken Populations — table + Plotly bar chart (always-mounted;
-    # content swapped when activated, DEC-009 / reflections 07 Rule 6).
+    # Mulliken Populations — table + Plotly bar chart + 3D overlay toggles
+    # (always-mounted; content swapped when activated, DEC-009).
     app._mulliken_summary = widgets.HTML(value="", layout=layout_fn(width="100%"))
     app._mulliken_table = widgets.HTML(value="", layout=layout_fn(width="100%"))
     # min_height matches plot_mulliken_charges height so the Output does not
@@ -2367,6 +2367,25 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="28px", height="28px"),
         tooltip="What are Mulliken charges? — opens Help",
     )
+    app._mulliken_color_cb = widgets.Checkbox(
+        value=True,
+        description="Color atoms by charge",
+        indent=False,
+        tooltip="Red = electron-rich (−); blue = electron-deficient (+)",
+        layout=layout_fn(width="auto", margin="0 12px 0 0"),
+    )
+    app._mulliken_dipole_cb = widgets.Checkbox(
+        value=True,
+        description="Show dipole arrow",
+        indent=False,
+        tooltip="Green arrow along μ through the molecular centre of mass",
+        layout=layout_fn(width="auto"),
+    )
+    # Hidden Output that carries one-shot Javascript for Mulliken/dipole
+    # overlays on the live Analysis viewer (same bridge pattern as measure).
+    app._populations_js_bridge = widgets.Output(
+        layout=layout_fn(width="0px", height="0px", visibility="hidden")
+    )
     mulliken_header = widgets.HBox(
         [
             widgets.HTML(
@@ -2377,14 +2396,20 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         ],
         layout=layout_fn(align_items="center", gap="8px", margin="0 0 6px 0"),
     )
+    mulliken_overlay_row = widgets.HBox(
+        [app._mulliken_color_cb, app._mulliken_dipole_cb],
+        layout=layout_fn(align_items="center", flex_wrap="wrap", margin="0 0 8px 0"),
+    )
     app._mulliken_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
                 [
                     mulliken_header,
+                    mulliken_overlay_row,
                     app._mulliken_summary,
                     app._mulliken_table,
                     app._mulliken_fig,
+                    app._populations_js_bridge,
                 ],
                 layout=layout_fn(padding="8px"),
             )

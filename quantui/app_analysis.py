@@ -185,7 +185,15 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     app._last_mulliken_symbols = None
     app._last_mulliken_charges = None
     app._last_mulliken_dipole = None
+    app._last_mulliken_dipole_vector = None
     app._last_mulliken_fig = None
+    dip_cb = getattr(app, "_mulliken_dipole_cb", None)
+    if dip_cb is not None:
+        dip_cb.disabled = False
+        dip_cb.value = True
+    color_cb = getattr(app, "_mulliken_color_cb", None)
+    if color_cb is not None:
+        color_cb.value = True
     app._last_orb_mol_atom = None
     app._last_orb_mol_basis = None
     app.traj_accordion.set_title(0, "Trajectory Viewer")
@@ -690,11 +698,14 @@ def pop_nmr_shielding(app: Any, ctx: Any) -> bool:
     return True
 
 
-def _mulliken_payload(ctx: Any) -> tuple[list[str], list[float], Optional[float]]:
-    """Atom symbols, Mulliken charges, and optional dipole from live or history.
+def _mulliken_payload(
+    ctx: Any,
+) -> tuple[list[str], list[float], Optional[float], Optional[list[float]]]:
+    """Atom symbols, Mulliken charges, ‖μ‖, and μ vector from live or history.
 
     History loads top-level ``result.json`` fields (already persisted by
     ``save_result``) rather than ``spectra`` — charges are not spectra data.
+    Older results may lack ``dipole_vector_debye``; magnitude still loads.
     """
     if ctx.live_result is not None:
         result = ctx.live_result
@@ -702,39 +713,51 @@ def _mulliken_payload(ctx: Any) -> tuple[list[str], list[float], Optional[float]
         charges = list(getattr(result, "mulliken_charges", None) or [])
         dip = getattr(result, "dipole_moment_debye", None)
         dip_f = float(dip) if dip is not None else None
-        return symbols, charges, dip_f
+        vec_raw = getattr(result, "dipole_vector_debye", None)
+        vec = [float(x) for x in vec_raw] if vec_raw is not None else None
+        if vec is not None and len(vec) < 3:
+            vec = None
+        return symbols, charges, dip_f, vec
 
     result_dir = getattr(ctx, "result_dir", None)
     if result_dir is None:
-        return [], [], None
+        return [], [], None, None
     try:
         from quantui import load_result
 
         data = load_result(result_dir)
     except Exception:  # noqa: BLE001 — missing panel, never a crash
-        return [], [], None
+        return [], [], None, None
     symbols = list(data.get("atom_symbols") or [])
     charges_raw = data.get("mulliken_charges")
     if charges_raw is None:
-        return symbols, [], None
+        return symbols, [], None, None
     charges = [float(c) for c in charges_raw]
     dip = data.get("dipole_moment_debye")
     dip_f = float(dip) if dip is not None else None
-    return symbols, charges, dip_f
+    vec_raw = data.get("dipole_vector_debye")
+    vec = [float(x) for x in vec_raw] if vec_raw is not None else None
+    if vec is not None and len(vec) < 3:
+        vec = None
+    return symbols, charges, dip_f, vec
 
 
 def pop_mulliken(app: Any, ctx: Any) -> bool:
-    """Populate the Mulliken Populations panel (table + bar chart).
+    """Populate the Mulliken Populations panel (table + bar chart + overlays).
 
     Returns False when charges are missing so the accordion stays on its
     placeholder (reflections/07 Rules 2–4). Both live and history paths share
     this code via :func:`_mulliken_payload`.
     """
     try:
-        symbols, charges, dipole = _mulliken_payload(ctx)
+        symbols, charges, dipole, dip_vec = _mulliken_payload(ctx)
         if not symbols or not charges or len(symbols) != len(charges):
             return False
-        return bool(show_mulliken_populations(app, symbols, charges, dipole))
+        return bool(
+            show_mulliken_populations(
+                app, symbols, charges, dipole, dipole_vector=dip_vec
+            )
+        )
     except Exception as exc:
         try:
             from quantui import calc_log as _clog
@@ -754,6 +777,8 @@ def show_mulliken_populations(
     atom_symbols: list,
     charges: list,
     dipole_debye: Optional[float] = None,
+    *,
+    dipole_vector: Optional[list] = None,
 ) -> bool:
     """Write Mulliken table + Plotly chart into the Populations accordion."""
     if not atom_symbols or not charges or len(atom_symbols) != len(charges):
@@ -764,6 +789,24 @@ def show_mulliken_populations(
     app._last_mulliken_dipole = (
         float(dipole_debye) if dipole_debye is not None else None
     )
+    if dipole_vector is not None and len(dipole_vector) >= 3:
+        app._last_mulliken_dipole_vector = [float(x) for x in dipole_vector[:3]]
+        if app._last_mulliken_dipole is None:
+            import math
+
+            app._last_mulliken_dipole = math.sqrt(
+                sum(v * v for v in app._last_mulliken_dipole_vector)
+            )
+    else:
+        app._last_mulliken_dipole_vector = None
+
+    # Enable/disable the dipole toggle when no vector is available (old History).
+    dip_cb = getattr(app, "_mulliken_dipole_cb", None)
+    if dip_cb is not None:
+        has_vec = app._last_mulliken_dipole_vector is not None
+        dip_cb.disabled = not has_vec
+        if not has_vec:
+            dip_cb.value = False
 
     q_sum = sum(app._last_mulliken_charges)
     summary_bits = [
@@ -772,11 +815,19 @@ def show_mulliken_populations(
         "(should match the molecular charge)</span>"
     ]
     if app._last_mulliken_dipole is not None:
-        summary_bits.append(
-            f"Dipole moment: <b>{app._last_mulliken_dipole:.4f} D</b>"
-            f' <span style="color:{_theme.TEXT_MUTED_LIGHT};font-size:12px">'
-            "(from the SCF density, not from these charges)</span>"
-        )
+        if app._last_mulliken_dipole_vector is not None:
+            vx, vy, vz = app._last_mulliken_dipole_vector
+            summary_bits.append(
+                f"Dipole moment: <b>{app._last_mulliken_dipole:.4f} D</b>"
+                f' <span style="color:{_theme.TEXT_MUTED_LIGHT};font-size:12px">'
+                f"(μ = [{vx:+.3f}, {vy:+.3f}, {vz:+.3f}] D — SCF density)</span>"
+            )
+        else:
+            summary_bits.append(
+                f"Dipole moment: <b>{app._last_mulliken_dipole:.4f} D</b>"
+                f' <span style="color:{_theme.TEXT_MUTED_LIGHT};font-size:12px">'
+                "(magnitude only — re-run to enable the 3D arrow)</span>"
+            )
     app._mulliken_summary.value = (
         f'<p style="font-size:13px;color:{_theme.TEXT_HEADING};margin:0 0 8px">'
         + "<br>".join(summary_bits)
@@ -802,6 +853,14 @@ def show_mulliken_populations(
     )
 
     update_mulliken_figure(app)
+    # Push 3D overlays after the Analysis viewer has had a tick to finish
+    # attaching (same retry spirit as measure's inject JS).
+    try:
+        from quantui.populations_overlay import push_populations_overlay
+
+        push_populations_overlay(app)
+    except Exception:  # noqa: BLE001 — overlay must never block the panel
+        pass
     return True
 
 

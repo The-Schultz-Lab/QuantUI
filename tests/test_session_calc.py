@@ -145,6 +145,10 @@ class TestSessionResultDataclass:
         result = _make_result()
         assert result.dipole_moment_debye is None
 
+    def test_dipole_vector_default_none(self):
+        result = _make_result()
+        assert result.dipole_vector_debye is None
+
     def test_atom_symbols_default_none(self):
         result = _make_result()
         assert result.atom_symbols is None
@@ -160,6 +164,10 @@ class TestSessionResultDataclass:
     def test_dipole_moment_stored(self):
         result = _make_result(dipole_moment_debye=1.85)
         assert result.dipole_moment_debye == pytest.approx(1.85)
+
+    def test_dipole_vector_stored(self):
+        result = _make_result(dipole_vector_debye=[0.1, 0.2, 1.8])
+        assert result.dipole_vector_debye == pytest.approx([0.1, 0.2, 1.8])
 
 
 class TestMullikenDipolePySCF:
@@ -182,6 +190,19 @@ class TestMullikenDipolePySCF:
         result = run_in_session(_water(), method="RHF", basis="STO-3G", verbose=0)
         assert result.dipole_moment_debye is not None
         assert result.dipole_moment_debye > 0
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_rhf_populates_dipole_vector(self):
+        from quantui.session_calc import run_in_session
+
+        result = run_in_session(_water(), method="RHF", basis="STO-3G", verbose=0)
+        assert result.dipole_vector_debye is not None
+        assert len(result.dipole_vector_debye) == 3
+        import math
+
+        mag = math.sqrt(sum(v * v for v in result.dipole_vector_debye))
+        assert mag == pytest.approx(result.dipole_moment_debye, rel=1e-6)
 
     @pyscf_only
     @pytest.mark.slow
