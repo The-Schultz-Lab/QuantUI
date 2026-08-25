@@ -7,6 +7,128 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-25
+
+### Added
+
+- **Transition-metal and coordination-complex support.** QuantUI now
+  recognizes and handles metal centers throughout the pipeline instead of
+  erroring or silently mishandling them: a pre-run guard catches
+  basis-coverage and charge/multiplicity problems before a run starts (with a
+  one-click "Switch to def2-SVP" fix when that alone resolves it); a GFN-FF
+  (xtb) pre-optimization backend actually relaxes coordination complexes,
+  since RDKit's organic valence model can't; the 3D viewer falls back to
+  py3Dmol instead of showing a "Visualization failed" box; a fetched
+  structure that resolves to a disconnected salt (e.g. cisplatin as separate
+  NH₃/HCl/Pt fragments) is flagged before you compute the wrong geometry;
+  coordination bonds are drawn dashed since 3Dmol.js's own bond perception
+  draws none to a metal; and an oxidation-state → spin-state multiplicity
+  suggestion engine proposes — never auto-sets — physically reasonable
+  multiplicities, naming the strong- vs weak-field ligand ambiguity where one
+  exists.
+- **14 bundled inorganic examples** (up from 3), GFN-FF-validated, spanning
+  octahedral (aqua and cyanide, high- and low-spin), tetrahedral, and
+  square-planar geometries — a teaching spread across spin states and
+  charges.
+- **Density fitting (RI)** as an opt-in SCF speedup — a large win for TD-DFT
+  and larger systems, roughly neutral for small single points, so it defaults
+  off. Shown on/off in the run-header provenance banner and flagged on the
+  result card ("⚡ RI") whenever it was actually applied.
+- **Mulliken Populations Analysis panel.** Per-atom Mulliken charges as a
+  table and bar chart after Single Point and Geometry Optimization runs, with
+  its own 3D viewer below the energy-level diagram: atoms colored by charge,
+  a center-of-mass dipole arrow, a color-vividness slider, and a
+  magnitude-only fallback when an older History result has ‖μ‖ but no saved
+  vector.
+- **NMR stick plot** with a ¹H/¹³C nucleus toggle, mirroring the existing
+  IR/UV-Vis panels; UV-Vis gains λ min/max axis-bound inputs.
+- **Click-to-measure atom selection** on the Analysis-tab viewer — click 2, 3,
+  or 4 atoms to read a bond length, angle, or dihedral, GaussView-style
+  (py3Dmol only for now; the Plotly viewer shows an explanatory message
+  instead of a silent no-op).
+- **Interactive XYZ input.** An atom-row builder and a cleanup-coordinates
+  accept/reject preview on the Calculate tab. Loading no longer enforces
+  charge/multiplicity parity at parse time — an odd-electron geometry loads
+  with a note instead of an error — and charge/multiplicity now stay owned by
+  Calculation Setup.
+- **Suggest charge & multiplicity from geometry** — a Calculation Setup
+  button proposes a neutral charge and a parity-compatible multiplicity from
+  the loaded structure, with an explicit Apply step rather than a silent
+  auto-fill.
+- **Export provenance.** Cube, PNG, and XYZ exports now carry method, basis,
+  and resolution (plus charge/multiplicity for XYZ) as embedded metadata, not
+  just filenames. Reorganization Energy gained its own XYZ export — one file
+  per distinct geometry — and a generalized PNG-capture bridge shared with
+  the isosurface viewer.
+- **Reorganization Energy is checkpointed.** The run most likely to be
+  interrupted — two geometry optimizations plus four SCF energies under one
+  Calculate-tab run — can now resume mid-leg instead of restarting from
+  scratch.
+- Orbital isosurfaces gained **smoothed meshes** (no more visible
+  marching-cubes facets) and a **wireframe finish toggle**.
+- TD-DFT's live status label now surfaces **per-root convergence**
+  ("TD-DFT root 3 converged @ 16.663 eV") during the excited-state solve,
+  instead of only a generic heartbeat.
+- A representative example gallery in the README and GitHub Pages site, and
+  new documentation for inorganic/coordination-complex support.
+
+### Fixed
+
+- **Heavy-element runs on an ECP basis were silently wrong.** Cisplatin and
+  similar complexes on LANL2DZ or def2 were built with the basis set but no
+  effective core potential attached, so PySCF ran all-electron against a
+  valence-only basis — converging to a nonphysical energy (positive HOMO)
+  with garbage gradients, which made a geometry optimization look like it was
+  diverging. ECPs are now attached consistently across every calculation
+  type.
+- **Frequency time estimates for app runs were systematically inflated.** The
+  estimator's fallback cost model wasn't told which pool a run came from, so
+  small-molecule Frequency estimates drew on the calibration pool's
+  fresh-subprocess import overhead instead of the app-run pool.
+- **Density fitting's "⚡ RI" badge could silently vanish.** TD-DFT, NMR,
+  Frequency, and Geometry Optimization results discarded the density-fitting
+  flag instead of storing it, and results were never persisting it to disk
+  for *any* calculation type — so even a live single point's badge
+  disappeared on History replay.
+- **A warm-start rejection could abort an otherwise-good calculation.** A
+  GPU-migrated mean-field rejecting a host density, or an incompatible
+  chkfile density, now logs a warning and retries from a scratch guess
+  instead of failing the whole run.
+- **Resuming a resumed-and-interrupted-again optimization under-reported its
+  progress** — the BFGS step counter wasn't seeded from the checkpoint, so it
+  restarted counting at 0 instead of continuing from what had already been
+  banked.
+- The resume list's Restore/Discard buttons now log an unexpected exception
+  instead of letting it escape into ipywidgets' click dispatch, matching
+  every other action button.
+- **Converged-but-near-degenerate metal runs no longer show a stale "HOMO ==
+  LUMO" warning** (observed on ferrocene) — the check now looks at the
+  converged gap, not PySCF's initial-guess density, which is always
+  near-degenerate for a bare d-manifold starting guess.
+- Click-to-measure's highlight halo no longer sits buried inside larger atoms
+  — it was a fixed radius; ball-and-stick atoms render at a radius scaled
+  from each element's VDW radius.
+- Analysis-tab polish: the welcome logo's SVG fill token, accordions
+  expanding automatically when they have data, scroll-to-top on tab entry,
+  and a shared seed-geometry dropdown for NMR Shielding.
+- **Older History results without saved Mulliken data now say so
+  explicitly**, with a magnitude-only note for dipoles recorded before the
+  full vector was saved, instead of a blank or misleading panel.
+- The CPU Apptainer build crashing on a floating `miniforge3:latest` base
+  image — libmamba choking on a fuzzy version pin. See
+  `apptainer/quantui.def`.
+
+### Changed
+
+- Three separate calc-type label→key mappings, and three separate
+  implementations of the Hill-formula algorithm, had drifted apart; each is
+  now a single shared helper.
+- `python -m quantui.estimator_eval`'s replay is now linear time instead of
+  quadratic.
+- ~380 scattered hex color literals across the chrome files are now one
+  theme token map.
+- Real type checking restored in CI.
+
 ## [0.7.0] - 2026-08-06
 
 ### Fixed
