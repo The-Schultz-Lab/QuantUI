@@ -2381,6 +2381,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         tooltip="Green arrow along μ through the molecular centre of mass",
         layout=layout_fn(width="auto"),
     )
+    # Soft notice under the overlay toggles (e.g. older History without μ vector).
+    app._mulliken_overlay_note = widgets.HTML(
+        value="",
+        layout=layout_fn(width="100%", margin="0 0 6px 0"),
+    )
     # Hidden Output that carries one-shot Javascript for Mulliken/dipole
     # overlays on the live Analysis viewer (same bridge pattern as measure).
     app._populations_js_bridge = widgets.Output(
@@ -2398,7 +2403,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     mulliken_overlay_row = widgets.HBox(
         [app._mulliken_color_cb, app._mulliken_dipole_cb],
-        layout=layout_fn(align_items="center", flex_wrap="wrap", margin="0 0 8px 0"),
+        layout=layout_fn(align_items="center", flex_wrap="wrap", margin="0 0 4px 0"),
     )
     app._mulliken_accordion = widgets.Accordion(
         children=[
@@ -2406,6 +2411,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 [
                     mulliken_header,
                     mulliken_overlay_row,
+                    app._mulliken_overlay_note,
                     app._mulliken_summary,
                     app._mulliken_table,
                     app._mulliken_fig,

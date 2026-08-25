@@ -213,3 +213,51 @@ class TestVectorPersistence:
         assert "Populations" in app._ana_available
         assert app._last_mulliken_dipole_vector is None
         assert app._mulliken_dipole_cb.disabled is True
+        assert "re-run" in app._mulliken_dipole_cb.tooltip.lower()
+        assert "μ" in app._mulliken_overlay_note.value
+        assert "magnitude only" in app._mulliken_summary.value
+
+    def test_history_with_vector_clears_overlay_note(self, tmp_path, app):
+        result = SimpleNamespace(
+            formula="H2O",
+            method="RHF",
+            basis="STO-3G",
+            energy_hartree=-75.0,
+            energy_ev=-2040.0,
+            homo_lumo_gap_ev=10.0,
+            converged=True,
+            n_iterations=5,
+            atom_symbols=["O", "H", "H"],
+            mulliken_charges=[-0.66, 0.33, 0.33],
+            dipole_moment_debye=1.85,
+            dipole_vector_debye=[0.0, 0.0, 1.85],
+            mo_energy_hartree=None,
+            mo_occ=None,
+            mo_coeff=None,
+        )
+        saved = save_result(
+            result, results_dir=tmp_path, calc_type="single_point", spectra={}
+        )
+        # First load an old result so the note is populated, then a full one.
+        old = SimpleNamespace(
+            formula="H2O",
+            method="RHF",
+            basis="STO-3G",
+            energy_hartree=-75.0,
+            energy_ev=-2040.0,
+            homo_lumo_gap_ev=10.0,
+            converged=True,
+            n_iterations=5,
+            atom_symbols=["O", "H", "H"],
+            mulliken_charges=[-0.66, 0.33, 0.33],
+            dipole_moment_debye=1.85,
+        )
+        old_saved = save_result(
+            old, results_dir=tmp_path / "old", calc_type="single_point", spectra={}
+        )
+        app._apply_analysis_context(app._build_history_context(old_saved))
+        assert app._mulliken_overlay_note.value
+        app._apply_analysis_context(app._build_history_context(saved))
+        assert app._mulliken_overlay_note.value == ""
+        assert app._mulliken_dipole_cb.disabled is False
+        assert "centre of mass" in app._mulliken_dipole_cb.tooltip

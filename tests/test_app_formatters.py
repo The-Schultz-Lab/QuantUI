@@ -189,6 +189,30 @@ def test_history_card_graceful_on_pre_parity_result():
     assert "Mulliken charges" not in html
 
 
+def test_history_card_magnitude_only_dipole_notes_missing_components():
+    """Older saves with ‖μ‖ but no vector still show magnitude + a soft note."""
+    html = format_past_result(
+        {
+            "calc_type": "single_point",
+            "converged": True,
+            "homo_lumo_gap_ev": 10.0,
+            "energy_hartree": -76.0,
+            "energy_ev": -2068.0,
+            "n_iterations": 9,
+            "formula": "H2O",
+            "method": "RHF",
+            "basis": "STO-3G",
+            "dipole_moment_debye": 1.85,
+            "mulliken_charges": [-0.66, 0.33, 0.33],
+            "atom_symbols": ["O", "H", "H"],
+        }
+    )
+    assert "1.8500 D" in html
+    assert "magnitude only" in html
+    assert "Mulliken charges" in html
+    assert "+0.100" not in html  # no μ components
+
+
 def test_format_nmr_result_warns_on_small_basis():
     result = _NMRStub(
         converged=True,
