@@ -86,7 +86,11 @@ def _result_extra_rows(get: Any) -> str:
                 f"{float(_vec[2]):+.3f}] D)</span>"
             )
         else:
-            _dip_str = f"{_dip:.4f} D"
+            _dip_str = (
+                f"{_dip:.4f} D"
+                f' <span style="color:{_theme.TEXT_MUTED_LIGHT};font-size:12px">'
+                "(magnitude only — μ components not saved)</span>"
+            )
         rows += _num("Dipole moment", _dip_str)
 
     _chg = get("mulliken_charges")
