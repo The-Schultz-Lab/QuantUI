@@ -836,9 +836,8 @@ def _mulliken_molecule(app: Any, ctx: Any = None) -> Any:
         mol = getattr(ctx, "molecule", None)
         if mol is not None:
             return mol
-    return (
-        getattr(app, "_analysis_displayed_molecule", None)
-        or getattr(app, "_molecule", None)
+    return getattr(app, "_analysis_displayed_molecule", None) or getattr(
+        app, "_molecule", None
     )
 
 

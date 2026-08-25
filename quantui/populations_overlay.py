@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Sequence, Tuple, cast
 
 logger = logging.getLogger(__name__)
 
@@ -248,10 +248,12 @@ def render_mulliken_viewer_html(app: Any, molecule: Any, *, render_html_fn: Any)
         lighting=app._viz_lighting,
         bgcolor=bgcolor,
     )
-    return html
+    return cast(str, html)
 
 
-def show_mulliken_viewer(app: Any, molecule: Any = None, *, render_html_fn: Any) -> None:
+def show_mulliken_viewer(
+    app: Any, molecule: Any = None, *, render_html_fn: Any
+) -> None:
     """Render the molecule into the Mulliken panel's dedicated viewer."""
     out = getattr(app, "_mulliken_mol_output", None)
     if out is None:
