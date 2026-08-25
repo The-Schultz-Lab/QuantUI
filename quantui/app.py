@@ -1247,6 +1247,7 @@ class QuantUIApp:
         _mulliken_help_btn: Any
         _mulliken_color_cb: Any
         _mulliken_dipole_cb: Any
+        _mulliken_overlay_note: Any
         _populations_js_bridge: Any
         _nmr_accordion: Any
         _nmr_output: Any

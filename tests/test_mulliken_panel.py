@@ -158,6 +158,26 @@ class TestPopMullikenHistory:
         ctx = app._build_history_context(saved)
         app._apply_analysis_context(ctx)
         assert "Populations" not in app._ana_available
+        unavail = app._ana_unavail_msgs["Populations"].value
+        assert "Mulliken charges were not saved" in unavail
+        assert "Re-run" in unavail
+
+    def test_live_without_charges_sets_specific_message(self, app):
+        ctx = SimpleNamespace(
+            calc_type="single_point",
+            live_result=_sp_result_with_charges(mulliken_charges=None),
+            result_dir=None,
+            spectra_data={},
+            source="live",
+            formula="H2O",
+            method="RHF",
+            basis="STO-3G",
+            label="H2O",
+            timestamp="",
+        )
+        assert pop_mulliken(app, ctx) is False
+        unavail = app._ana_unavail_msgs["Populations"].value
+        assert "Mulliken charges are not available" in unavail
 
 
 class TestShowMullikenPopulations:

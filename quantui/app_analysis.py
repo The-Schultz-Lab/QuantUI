@@ -14,6 +14,13 @@ _PANEL_UNAVAILABLE_STYLE = (
     "padding:12px 16px;color:#6b7280;font-size:13px;font-style:italic"
 )
 
+_MULLIKEN_DIPOLE_TOOLTIP = (
+    "Green arrow along μ through the molecular centre of mass"
+)
+_MULLIKEN_DIPOLE_TOOLTIP_DISABLED = (
+    "Unavailable: this result has no saved μx, μy, μz — re-run to enable the 3D arrow"
+)
+
 _CALC_TYPE_LABELS = {
     "single_point": "Single Point",
     "geometry_opt": "Geometry Opt",
@@ -191,9 +198,13 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     if dip_cb is not None:
         dip_cb.disabled = False
         dip_cb.value = True
+        dip_cb.tooltip = _MULLIKEN_DIPOLE_TOOLTIP
     color_cb = getattr(app, "_mulliken_color_cb", None)
     if color_cb is not None:
         color_cb.value = True
+    note = getattr(app, "_mulliken_overlay_note", None)
+    if note is not None:
+        note.value = ""
     app._last_orb_mol_atom = None
     app._last_orb_mol_basis = None
     app.traj_accordion.set_title(0, "Trajectory Viewer")
@@ -752,6 +763,18 @@ def pop_mulliken(app: Any, ctx: Any) -> bool:
     try:
         symbols, charges, dipole, dip_vec = _mulliken_payload(ctx)
         if not symbols or not charges or len(symbols) != len(charges):
+            if getattr(ctx, "source", "") == "history":
+                msg = (
+                    "Mulliken charges were not saved with this History result. "
+                    "Re-run Single Point or Geometry Opt to populate this panel "
+                    "(table, chart, charge colours, and dipole arrow)."
+                )
+            else:
+                msg = (
+                    "Mulliken charges are not available for this result "
+                    "(the run may have stopped before population analysis)."
+                )
+            _set_panel_unavailable_message(app, "Populations", msg)
             return False
         return bool(
             show_mulliken_populations(
@@ -769,6 +792,14 @@ def pop_mulliken(app: Any, ctx: Any) -> bool:
             )
         except Exception:  # noqa: BLE001 — telemetry self-guard
             pass
+        _set_panel_unavailable_message(
+            app,
+            "Populations",
+            (
+                "Could not load Mulliken data for this result "
+                f"({type(exc).__name__})."
+            ),
+        )
         return False
 
 
@@ -801,12 +832,27 @@ def show_mulliken_populations(
         app._last_mulliken_dipole_vector = None
 
     # Enable/disable the dipole toggle when no vector is available (old History).
+    has_vec = app._last_mulliken_dipole_vector is not None
     dip_cb = getattr(app, "_mulliken_dipole_cb", None)
     if dip_cb is not None:
-        has_vec = app._last_mulliken_dipole_vector is not None
         dip_cb.disabled = not has_vec
         if not has_vec:
             dip_cb.value = False
+        dip_cb.tooltip = (
+            _MULLIKEN_DIPOLE_TOOLTIP if has_vec else _MULLIKEN_DIPOLE_TOOLTIP_DISABLED
+        )
+
+    note = getattr(app, "_mulliken_overlay_note", None)
+    if note is not None:
+        if has_vec:
+            note.value = ""
+        else:
+            note.value = (
+                f'<p style="font-size:12px;color:{_theme.TEXT_MUTED_LIGHT};'
+                'margin:0 0 8px;font-style:italic">'
+                "Dipole arrow needs saved μ<sub>x</sub>, μ<sub>y</sub>, "
+                "μ<sub>z</sub> — re-run this calculation to enable.</p>"
+            )
 
     q_sum = sum(app._last_mulliken_charges)
     summary_bits = [
@@ -815,7 +861,7 @@ def show_mulliken_populations(
         "(should match the molecular charge)</span>"
     ]
     if app._last_mulliken_dipole is not None:
-        if app._last_mulliken_dipole_vector is not None:
+        if has_vec:
             vx, vy, vz = app._last_mulliken_dipole_vector
             summary_bits.append(
                 f"Dipole moment: <b>{app._last_mulliken_dipole:.4f} D</b>"
