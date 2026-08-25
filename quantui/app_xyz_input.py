@@ -18,7 +18,7 @@ from quantui.xyz_input import (
 def build_xyz_interactive_widgets(app: Any, *, layout_fn: Any) -> None:
     """Create the atom-row builder and cleanup preview widgets on ``app``."""
     app._layout_fn = layout_fn
-    app._xyz_table_rows: List[Tuple[Any, Any, Any, Any, Any]] = []
+    app._xyz_table_rows = []
 
     app.xyz_table_header = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.TEXT_MUTED};margin:6px 0 2px">'
