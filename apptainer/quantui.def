@@ -1,5 +1,14 @@
 Bootstrap: docker
-FROM: condaforge/miniforge3:latest
+# Pinned, not :latest. A floating tag means the base image's bundled Python
+# and its base env's conda-meta/pinned file change out from under this build
+# with no change on our side — which is exactly what broke the 2026-08-25
+# build: miniforge3:latest had rolled to a base env pinned at Python 3.14,
+# and libmamba choked trying to fold that pin into the solve ("Error parsing
+# version '1.*^'" — a libmamba bug mangling the fuzzy pin, not anything wrong
+# with the package list below). Installing into a dedicated env (see %post)
+# sidesteps that pin entirely; pinning the tag here just keeps the rest of
+# the base image (Ubuntu release, conda/mamba versions) from drifting too.
+FROM: condaforge/miniforge3:26.1.1-3
 
 %help
   QuantUI — Educational Quantum Chemistry Interface
@@ -29,7 +38,7 @@ FROM: condaforge/miniforge3:latest
   Source "working tree at build time — see quantui.__version__ in the image"
 
 %environment
-  export PATH="/opt/conda/bin:${PATH}"
+  export PATH="/opt/conda/envs/quantui/bin:${PATH}"
   export PYTHONPATH="/opt/quantui:${PYTHONPATH}"
 
   # Disable user site-packages for reproducibility
@@ -70,12 +79,23 @@ FROM: condaforge/miniforge3:latest
 %post
   export PATH="/opt/conda/bin:${PATH}"
 
+  echo "Creating a dedicated 'quantui' env pinned to Python 3.11 ────────────"
+  # NOT installed into base. Two reasons:
+  #  1. base's Python floats with whatever the miniforge3 image tag bundles
+  #     (see the FROM comment) and inherits that env's own conda-meta/pinned
+  #     file — which is what produced the libmamba "1.*^" parse crash here.
+  #  2. This project's tested/supported matrix is Python 3.9-3.11 (see
+  #     CLAUDE.md and .github/workflows/ci.yml); base's bundled Python is
+  #     whatever the image happens to ship, with no guarantee it's in range.
+  # A fresh named env sidesteps both — it gets its own clean pin state and an
+  # explicit interpreter version.
   echo "Installing dependencies via mamba (libmamba solver — the old classic conda solver hangs for hours on this pyscf + rdkit + jupyterlab spec)."
   # conda-forge only, strict priority: avoids mixing in the base image's
   # implicit 'defaults' channel, which both slows the solve and pulls from a
   # channel with separate terms of service.
   conda config --system --set channel_priority strict
-  mamba install -y --override-channels -c conda-forge \
+  mamba create -y -n quantui --override-channels -c conda-forge \
+    python=3.11 \
     jupyter \
     jupyterlab \
     ipywidgets \
@@ -87,6 +107,8 @@ FROM: condaforge/miniforge3:latest
     plotly \
     h5py \
     rdkit
+
+  export PATH="/opt/conda/envs/quantui/bin:${PATH}"
 
   echo "Installing pip packages..."
   pip install --no-cache-dir \
