@@ -67,6 +67,25 @@ _MEASURE_CLICK_JS = """
   // Highlight picked atoms with a translucent sphere overlay (MEAS.4). Looks
   // the atom's live coordinates up on the model rather than taking them from
   // Python, so this needs nothing but the index the click already sent.
+  //
+  // Radius MUST clear the rendered ball: ball+stick uses sphere.scale 0.3
+  // (Mulliken tint uses 0.35). A fixed 0.4 Å sphere sat *inside* C/O/Cl/…
+  // (VDW×0.3 ≈ 0.51 for carbon) and was only visible on hydrogen.
+  function highlightRadius(a){
+    var SPHERE_SCALE=0.35; // cover ball+stick (0.3) and Mulliken tint (0.35)
+    var MARGIN=1.45;       // sit clearly outside the atom sphere
+    var vdw=1.7;
+    try{
+      var radii=($3Dmol && $3Dmol.GLModel && $3Dmol.GLModel.vdwRadii) || {};
+      var elem=(a.elem || "C").toString();
+      if(radii[elem]!=null){ vdw=radii[elem]; }
+      else if(elem.length>1){
+        var key=elem.charAt(0).toUpperCase()+elem.slice(1).toLowerCase();
+        if(radii[key]!=null){ vdw=radii[key]; }
+      }
+    }catch(e){}
+    return Math.max(0.55, vdw*SPHERE_SCALE*MARGIN);
+  }
   window["__quantuiMeasureHighlight_"+UID] = function(indices){
     var vw=v(); if(!vw){ return false; }
     clearHighlights();
@@ -77,8 +96,8 @@ _MEASURE_CLICK_JS = """
         if(found && found.length){
           var a=found[0];
           shapes.push(vw.addSphere({
-            center:{x:a.x,y:a.y,z:a.z}, radius:0.4,
-            color:"__HL_COLOR__", opacity:0.55
+            center:{x:a.x,y:a.y,z:a.z}, radius:highlightRadius(a),
+            color:"__HL_COLOR__", opacity:__HL_OPACITY__
           }));
         }
       }
@@ -109,7 +128,10 @@ _MEASURE_CLICK_JS = """
 })();
 """
 
-_HIGHLIGHT_COLOR = "yellow"
+# Saturated yellow — named CSS "yellow" (#ffff00) looked washed at low opacity
+# against CPK whites/grays; this chrome-yellow reads as a clear selection cue.
+_HIGHLIGHT_COLOR = "#FFEA00"
+_HIGHLIGHT_OPACITY = "0.80"
 
 
 def inject_click_js(html: str, *, inbox_class: str) -> str:
@@ -132,6 +154,7 @@ def inject_click_js(html: str, *, inbox_class: str) -> str:
         _MEASURE_CLICK_JS.replace("__UID__", uid)
         .replace("__INBOX_CLASS__", inbox_class)
         .replace("__HL_COLOR__", _HIGHLIGHT_COLOR)
+        .replace("__HL_OPACITY__", _HIGHLIGHT_OPACITY)
     )
     return f"{html}<script>{js}</script>"
 
