@@ -1278,6 +1278,25 @@ class TestNMRWidgets:
         assert isinstance(note, widgets.HTML)
         assert "6-31G*" in note.value
 
+    def test_nmr_accordion_has_plot_and_nucleus_toggle(self):
+        app = QuantUIApp()
+        assert isinstance(app._nmr_nucleus_toggle, widgets.ToggleButtons)
+        assert isinstance(app._nmr_fig, widgets.Output)
+        assert isinstance(app._nmr_export_btn, widgets.Button)
+        assert app._nmr_accordion in app.analysis_tab_panel.children
+
+    def test_show_nmr_spectrum_wires_nucleus_options(self):
+        app = QuantUIApp()
+        ok = app._show_nmr_spectrum(
+            atom_symbols=["C", "H", "H", "H", "H"],
+            shielding_iso_ppm=[100.0, 30.0, 30.0, 30.0, 30.0],
+            h_shifts=[(1, 1.2), (2, 1.2), (3, 1.2), (4, 1.2)],
+            c_shifts=[(0, 10.0)],
+            reference="TMS",
+        )
+        assert ok is True
+        assert set(app._nmr_nucleus_toggle.options) == {"¹H", "¹³C"}
+
     def test_nmr_note_mentions_sto3g_warning(self):
         app = QuantUIApp()
         app.calc_type_dd.value = "NMR Shielding"
@@ -2673,6 +2692,23 @@ class TestUVVisSpectrumWidgets:
         assert isinstance(app._uv_export_btn, widgets.Button)
         assert isinstance(app._uv_export_fmt_dd, widgets.Dropdown)
         assert app._uv_export_fmt_dd.value == "html"
+
+    def test_uv_range_inputs_and_hint_exist(self):
+        app = QuantUIApp()
+        assert isinstance(app._uv_xmin_input, widgets.BoundedFloatText)
+        assert isinstance(app._uv_xmax_input, widgets.BoundedFloatText)
+        assert "drag either end" in app._uv_range_hint.value.lower()
+
+    def test_uv_range_change_triggers_figure_update(self):
+        app = QuantUIApp()
+        app._show_uv_vis_spectrum(
+            energies_ev=[5.0, 6.0],
+            oscillator_strengths=[0.5, 0.3],
+            wavelengths_nm=[248.0, 207.0],
+        )
+        with patch.object(app, "_update_uv_vis_figure") as mock_update:
+            app._uv_xmin_input.value = 150.0
+        mock_update.assert_called_once()
 
 
 class TestPESExportWidgets:

@@ -857,6 +857,21 @@ def wire_uv_controls(app: Any) -> None:
     app._uv_mode_toggle.value = "Stick"
     app._uv_fwhm_slider.value = 20.0
     app._uv_fwhm_slider.layout.display = "none"
+    wl = list(getattr(app, "_last_uv_wavelengths_nm", []) or [])
+    if wl:
+        gamma = max(float(app._uv_fwhm_slider.value), 1.0) / 2.0
+        pad = max(80.0, 3.0 * gamma)
+        app._uv_xmin_input.value = round(max(100.0, min(wl) - pad), 1)
+        app._uv_xmax_input.value = round(max(wl) + pad, 1)
+
+
+def on_uv_range_changed(app: Any, _change: dict[str, Any] | None = None) -> None:
+    """Re-render UV-Vis when λ min/max inputs change."""
+    if getattr(app, "_last_uv_wavelengths_nm", None):
+        app._update_uv_vis_figure(
+            app._uv_mode_toggle.value,
+            app._uv_fwhm_slider.value,
+        )
 
 
 def on_uv_mode_changed(app: Any, change: dict[str, Any]) -> None:
@@ -894,8 +909,14 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
         # amount in Stick keeps the layout identical.
         gamma = max(float(fwhm), 1.0) / 2.0
         pad = max(80.0, 3.0 * gamma)
-        x_min = max(100.0, min(wl) - pad)
-        x_max = max(wl) + pad
+        x_min_default = max(100.0, min(wl) - pad)
+        x_max_default = max(wl) + pad
+        xmin_w = getattr(app, "_uv_xmin_input", None)
+        xmax_w = getattr(app, "_uv_xmax_input", None)
+        x_min = float(xmin_w.value if xmin_w is not None else x_min_default)
+        x_max = float(xmax_w.value if xmax_w is not None else x_max_default)
+        if x_min >= x_max:
+            x_min, x_max = x_min_default, x_max_default
 
         if mode_norm == "broadened":
             n_points = max(600, int((x_max - x_min) * 2.0))
@@ -981,6 +1002,150 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
             from quantui import calc_log as _clog
 
             _clog.log_event("uv_fig_error", f"{type(exc).__name__}: {exc}"[:300])
+        except Exception:
+            pass
+
+
+def show_nmr_spectrum(
+    app: Any,
+    *,
+    atom_symbols: List[str],
+    shielding_iso_ppm: List[float],
+    h_shifts: List[tuple[int, float]],
+    c_shifts: List[tuple[int, float]],
+    reference: str = "TMS",
+) -> bool:
+    """Populate NMR accordion with a stick spectrum and shielding tables."""
+    if not atom_symbols:
+        return False
+
+    app._last_nmr_atom_symbols = list(atom_symbols)
+    app._last_nmr_shielding = list(shielding_iso_ppm)
+    app._last_nmr_h_shifts = list(h_shifts)
+    app._last_nmr_c_shifts = list(c_shifts)
+    app._last_nmr_reference = reference
+
+    options: List[str] = []
+    if h_shifts:
+        options.append("¹H")
+    if c_shifts:
+        options.append("¹³C")
+    if not options:
+        # Shielding-only fallback: table without a stick plot.
+        app._last_nmr_fig = None
+        app._nmr_summary.value = _nmr_summary_html(
+            atom_symbols, shielding_iso_ppm, h_shifts, c_shifts, reference
+        )
+        app._set_html_output(app._nmr_fig, "")
+        return True
+
+    app._nmr_nucleus_toggle.options = options
+    app._nmr_nucleus_toggle.value = options[0]
+    app._nmr_summary.value = _nmr_summary_html(
+        atom_symbols, shielding_iso_ppm, h_shifts, c_shifts, reference
+    )
+    app._update_nmr_figure(app._nmr_nucleus_toggle.value)
+    app._queue_main_thread_callback(app._wire_nmr_controls)
+    return True
+
+
+def _nmr_summary_html(
+    atom_symbols: List[str],
+    shielding: List[float],
+    h_shifts: List[tuple[int, float]],
+    c_shifts: List[tuple[int, float]],
+    reference: str,
+) -> str:
+    from . import theme as _theme
+
+    def _shift_table(label: str, shifts: list, sym: str) -> str:
+        if not shifts:
+            return ""
+        rows = "".join(
+            f'<tr><td style="padding:2px 14px 2px 0;color:{_theme.TEXT_SECONDARY}">{sym}-{n}</td>'
+            f'<td style="color:{_theme.TEXT_HEADING}">{d:.2f} ppm</td></tr>'
+            for n, (_i, d) in enumerate(sorted(shifts, key=lambda x: x[0]), 1)
+        )
+        return (
+            f'<tr><td colspan="2" style="padding:8px 0 2px;font-weight:600">'
+            f"{label} shifts (vs. {reference}):</td></tr>"
+            f'<tr><th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px;padding:2px 14px 2px 0">Atom</th>'
+            f'<th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px">δ (ppm)</th></tr>'
+            + rows
+        )
+
+    shielding_rows = "".join(
+        f'<tr><td style="padding:2px 10px 2px 0;color:{_theme.TEXT_SECONDARY}">{sym}{i + 1}</td>'
+        f'<td style="color:{_theme.TEXT_HEADING}">{s:.2f}</td></tr>'
+        for i, (sym, s) in enumerate(zip(atom_symbols, shielding))
+    )
+    return (
+        f'<div style="font-size:13px;margin-top:10px">'
+        f'<table style="border-collapse:collapse;margin-bottom:8px">'
+        f'<tr><th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px;padding:2px 10px 2px 0">Atom</th>'
+        f'<th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px">σ (ppm)</th></tr>'
+        f"{shielding_rows}</table>"
+        f'<table style="border-collapse:collapse">'
+        f"{_shift_table('¹H', h_shifts, 'H')}"
+        f"{_shift_table('¹³C', c_shifts, 'C')}"
+        f"</table></div>"
+    )
+
+
+def wire_nmr_controls(app: Any) -> None:
+    """Reset NMR nucleus toggle default on the main thread after a new result."""
+    options = list(
+        getattr(app, "_nmr_nucleus_toggle", None)
+        and app._nmr_nucleus_toggle.options
+        or []
+    )
+    if options:
+        app._nmr_nucleus_toggle.value = options[0]
+
+
+def on_nmr_nucleus_changed(app: Any, change: dict[str, Any]) -> None:
+    """Switch stick plot between ¹H and ¹³C peaks."""
+    app._update_nmr_figure(change["new"])
+
+
+def update_nmr_figure(app: Any, nucleus: str) -> None:
+    """Re-render the NMR stick spectrum for the selected nucleus."""
+    symbols = list(getattr(app, "_last_nmr_atom_symbols", None) or [])
+    if nucleus == "¹³C":
+        shifts = list(getattr(app, "_last_nmr_c_shifts", None) or [])
+    else:
+        shifts = list(getattr(app, "_last_nmr_h_shifts", None) or [])
+    if not symbols or not shifts:
+        app._last_nmr_fig = None
+        app._set_html_output(app._nmr_fig, "")
+        return
+    try:
+        import plotly.io as _pio
+
+        from quantui.nmr_plot import plot_nmr_spectrum
+
+        fig = plot_nmr_spectrum(
+            shifts,
+            symbols,
+            nucleus_label=nucleus,
+        )
+        app._apply_plotly_theme(fig)
+        app._last_nmr_fig = fig
+        app._set_html_output(
+            app._nmr_fig,
+            _pio.to_html(
+                fig,
+                include_plotlyjs="require",
+                full_html=False,
+                config={"responsive": True},
+            ),
+        )
+    except Exception as exc:
+        app._last_nmr_fig = None
+        try:
+            from quantui import calc_log as _clog
+
+            _clog.log_event("nmr_fig_error", f"{type(exc).__name__}: {exc}"[:300])
         except Exception:
             pass
 

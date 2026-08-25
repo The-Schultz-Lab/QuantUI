@@ -2316,6 +2316,31 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         # to scroll back to the top mid-drag.
         continuous_update=False,
     )
+    app._uv_xmin_input = widgets.BoundedFloatText(
+        value=200.0,
+        min=1.0,
+        max=2000.0,
+        step=1.0,
+        description="λ min (nm):",
+        style={"description_width": "78px"},
+        layout=layout_fn(width="165px"),
+    )
+    app._uv_xmax_input = widgets.BoundedFloatText(
+        value=400.0,
+        min=1.0,
+        max=2000.0,
+        step=1.0,
+        description="λ max (nm):",
+        style={"description_width": "78px"},
+        layout=layout_fn(width="165px"),
+    )
+    app._uv_range_hint = widgets.HTML(
+        value=(
+            f'<p style="font-size:11px;color:{_theme.TEXT_SECONDARY};margin:0 0 6px">'
+            "Tip: drag either end of the horizontal axis in the plot to adjust "
+            "the view, or set λ min/max above for exact bounds.</p>"
+        )
+    )
     # min_height matches the Plotly UV-Vis figure height (320px) so the
     # Output container does not briefly collapse to 0px during the atomic
     # outputs swap on mode/slider changes — same fix as the IR Output above.
@@ -2325,12 +2350,22 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     uv_export_row = _plot_export_row("uv")
     uv_controls = widgets.HBox(
         [app._uv_mode_toggle, app._uv_fwhm_slider],
-        layout=layout_fn(align_items="center", margin="0 0 6px 0"),
+        layout=layout_fn(align_items="center", margin="0 0 4px 0"),
+    )
+    uv_range_row = widgets.HBox(
+        [app._uv_xmin_input, app._uv_xmax_input],
+        layout=layout_fn(align_items="center", gap="8px", margin="0 0 2px 0"),
     )
     app._tddft_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
-                [uv_controls, uv_export_row, app._tddft_fig],
+                [
+                    uv_controls,
+                    uv_range_row,
+                    app._uv_range_hint,
+                    uv_export_row,
+                    app._tddft_fig,
+                ],
                 layout=layout_fn(padding="8px"),
             )
         ],
@@ -2339,11 +2374,26 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._tddft_accordion.set_title(0, "UV-Vis Absorption Spectrum")
     app._tddft_accordion.selected_index = None
 
-    app._nmr_output = widgets.HTML(value="", layout=layout_fn(width="100%"))
+    app._nmr_nucleus_toggle = widgets.ToggleButtons(
+        options=["¹H", "¹³C"],
+        value="¹H",
+        style={"button_width": "72px"},
+        layout=layout_fn(margin="0 0 6px 0"),
+    )
+    app._nmr_fig = widgets.Output(
+        layout=layout_fn(width="100%", min_height="300px"),
+    )
+    app._nmr_summary = widgets.HTML(value="", layout=layout_fn(width="100%"))
+    nmr_export_row = _plot_export_row("nmr")
     app._nmr_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
-                [app._nmr_output],
+                [
+                    app._nmr_nucleus_toggle,
+                    nmr_export_row,
+                    app._nmr_fig,
+                    app._nmr_summary,
+                ],
                 layout=layout_fn(padding="8px"),
             )
         ],
@@ -2351,6 +2401,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._nmr_accordion.set_title(0, "NMR Chemical Shifts")
     app._nmr_accordion.selected_index = None
+    # Legacy alias — older code/tests referenced a single HTML sink.
+    app._nmr_output = app._nmr_summary
 
     # Mulliken Populations — table + Plotly bar chart + 3D overlay toggles
     # (always-mounted; content swapped when activated, DEC-009).
