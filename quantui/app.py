@@ -85,6 +85,9 @@ from quantui.app_analysis import (
     pop_vibrational as _ana_pop_vibrational,
 )
 from quantui.app_analysis import (
+    scroll_analysis_tab_to_top as _ana_scroll_analysis_tab_to_top,
+)
+from quantui.app_analysis import (
     select_ana_panel as _ana_select_ana_panel,
 )
 from quantui.app_analysis import (
@@ -382,6 +385,9 @@ from quantui.app_visualization import (
     on_iso_generate as _viz_on_iso_generate,
 )
 from quantui.app_visualization import (
+    on_nmr_nucleus_changed as _viz_on_nmr_nucleus_changed,
+)
+from quantui.app_visualization import (
     on_orb_range_changed as _viz_on_orb_range_changed,
 )
 from quantui.app_visualization import (
@@ -392,6 +398,9 @@ from quantui.app_visualization import (
 )
 from quantui.app_visualization import (
     on_uv_mode_changed as _viz_on_uv_mode_changed,
+)
+from quantui.app_visualization import (
+    on_uv_range_changed as _viz_on_uv_range_changed,
 )
 from quantui.app_visualization import (
     on_vib_mode_changed as _viz_on_vib_mode_changed,
@@ -410,6 +419,9 @@ from quantui.app_visualization import (
 )
 from quantui.app_visualization import (
     show_ir_spectrum as _viz_show_ir_spectrum,
+)
+from quantui.app_visualization import (
+    show_nmr_spectrum as _viz_show_nmr_spectrum,
 )
 from quantui.app_visualization import (
     show_opt_trajectory as _viz_show_opt_trajectory,
@@ -436,10 +448,16 @@ from quantui.app_visualization import (
     update_ir_figure as _viz_update_ir_figure,
 )
 from quantui.app_visualization import (
+    update_nmr_figure as _viz_update_nmr_figure,
+)
+from quantui.app_visualization import (
     update_uv_vis_figure as _viz_update_uv_vis_figure,
 )
 from quantui.app_visualization import (
     wire_ir_controls as _viz_wire_ir_controls,
+)
+from quantui.app_visualization import (
+    wire_nmr_controls as _viz_wire_nmr_controls,
 )
 from quantui.app_visualization import (
     wire_uv_controls as _viz_wire_uv_controls,
@@ -1250,7 +1268,14 @@ class QuantUIApp:
         _mulliken_overlay_note: Any
         _populations_js_bridge: Any
         _nmr_accordion: Any
+        _nmr_fig: Any
+        _nmr_nucleus_toggle: Any
         _nmr_output: Any
+        _nmr_summary: Any
+        _nmr_export_btn: Any
+        _nmr_export_fmt_dd: Any
+        _nmr_export_status: Any
+        _nmr_copy_data_btn: Any
         _orb_accordion: Any
         _orb_diagram_box: Any
         _orb_diagram_html: Any
@@ -1300,6 +1325,9 @@ class QuantUIApp:
         _uv_copy_data_btn: Any
         _uv_fwhm_slider: Any
         _uv_mode_toggle: Any
+        _uv_xmin_input: Any
+        _uv_xmax_input: Any
+        _uv_range_hint: Any
         _to_analysis_btn: Any
         _viz_backend: Any
         _viz_label: Any
@@ -1392,6 +1420,7 @@ class QuantUIApp:
         self._last_uv_oscillator_strengths: list[float] = []
         self._last_ir_fig: Any = None
         self._last_uv_fig: Any = None
+        self._last_nmr_fig: Any = None
         self._last_orb_fig: Any = None
         self._last_orb_info: Any = None
         # Orbital state consumed by the Isosurface panel populator. Always
@@ -1706,9 +1735,11 @@ class QuantUIApp:
         timer.daemon = True
         timer.start()
 
-    def _on_root_tab_changed(self, _change) -> None:
+    def _on_root_tab_changed(self, change) -> None:
         """Pulse the activity light on tab navigation actions."""
         self._activity_pulse("Switching tabs...", hold_s=0.16, kind="ui")
+        if change.get("new") == 2:
+            _ana_scroll_analysis_tab_to_top(self)
 
     def _go_to_results_tab(self, _btn) -> None:
         """Navigate to Results tab with a visible activity pulse."""
@@ -1719,6 +1750,7 @@ class QuantUIApp:
         """Navigate to Analysis tab with a visible activity pulse."""
         self._activity_pulse("Navigating to Analysis tab...", hold_s=0.16, kind="ui")
         self.root_tab.selected_index = 2
+        _ana_scroll_analysis_tab_to_top(self)
 
     # ── Status panel ──────────────────────────────────────────────────────
 
@@ -1813,6 +1845,10 @@ class QuantUIApp:
                 self._uv_fwhm_slider.value,
             )
 
+    def _on_nmr_accordion_show(self, change) -> None:
+        if change["new"] == 0 and getattr(self, "_last_nmr_atom_symbols", None):
+            self._update_nmr_figure(self._nmr_nucleus_toggle.value)
+
     def _on_orb_accordion_show(self, change) -> None:
         if change["new"] == 0 and getattr(self, "_last_orb_info", None) is not None:
             self._on_orb_range_changed()
@@ -1841,9 +1877,8 @@ class QuantUIApp:
     #
     # Rules:
     #   • populate_method_name is a string — looked up via getattr at runtime.
-    #   • auto_select=True on the FIRST entry that returns True activates that
-    #     panel as the default view; subsequent entries with auto_select=True are
-    #     treated as False (only one panel is auto-selected per result).
+    #   • auto_select=True on the FIRST entry that returns True marks that
+    #     panel as the primary scroll target; every panel with data expands.
     #   • If a populate method returns False / None the panel stays disabled.
     #   • Populate methods must NOT call _activate_ana_panel themselves.
 
@@ -2174,14 +2209,25 @@ class QuantUIApp:
         self._uv_fwhm_slider.observe(
             self._safe_cb(self._on_uv_fwhm_changed), names="value"
         )
+        self._uv_xmin_input.observe(
+            self._safe_cb(self._on_uv_range_changed), names="value"
+        )
+        self._uv_xmax_input.observe(
+            self._safe_cb(self._on_uv_range_changed), names="value"
+        )
+        self._nmr_nucleus_toggle.observe(
+            self._safe_cb(self._on_nmr_nucleus_changed), names="value"
+        )
         self._ir_export_btn.on_click(self._on_ir_export_plot)
         self._uv_export_btn.on_click(self._on_uv_export_plot)
+        self._nmr_export_btn.on_click(self._on_nmr_export_plot)
         self._orb_export_btn.on_click(self._on_orb_export_plot)
         self._pes_export_btn.on_click(self._on_pes_export_plot)
         self._vib_export_btn.on_click(self._on_vib_export_animation)
         # Per-panel CSV-to-clipboard / file buttons.
         self._ir_copy_data_btn.on_click(self._on_ir_copy_data)
         self._uv_copy_data_btn.on_click(self._on_uv_copy_data)
+        self._nmr_copy_data_btn.on_click(self._on_nmr_copy_data)
         self._orb_copy_data_btn.on_click(self._on_orb_copy_data)
         self._pes_copy_data_btn.on_click(self._on_pes_copy_data)
         # Accumulate / export
@@ -3823,6 +3869,14 @@ class QuantUIApp:
             status_widget=self._uv_export_status,
         )
 
+    def _on_nmr_export_plot(self, btn) -> None:
+        self._export_plot_figure(
+            fig=getattr(self, "_last_nmr_fig", None),
+            stem="nmr_spectrum",
+            fmt=self._nmr_export_fmt_dd.value,
+            status_widget=self._nmr_export_status,
+        )
+
     def _on_orb_export_plot(self, btn) -> None:
         self._export_plot_figure(
             fig=getattr(self, "_last_orb_fig", None),
@@ -4117,6 +4171,14 @@ class QuantUIApp:
             stem="uv_vis_spectrum",
             title="UV-Vis Spectrum",
             status_widget=self._uv_export_status,
+        )
+
+    def _on_nmr_copy_data(self, _btn) -> None:
+        self._copy_plot_data(
+            fig=getattr(self, "_last_nmr_fig", None),
+            stem="nmr_spectrum",
+            title="NMR Spectrum",
+            status_widget=self._nmr_export_status,
         )
 
     def _on_orb_copy_data(self, _btn) -> None:
@@ -4648,6 +4710,36 @@ class QuantUIApp:
 
     def _update_uv_vis_figure(self, mode: str, fwhm: float) -> None:
         _viz_update_uv_vis_figure(self, mode, fwhm)
+
+    def _on_uv_range_changed(self, change) -> None:
+        _viz_on_uv_range_changed(self, change)
+
+    def _show_nmr_spectrum(
+        self,
+        *,
+        atom_symbols: list[str],
+        shielding_iso_ppm: list[float],
+        h_shifts: list[tuple[int, float]],
+        c_shifts: list[tuple[int, float]],
+        reference: str = "TMS",
+    ) -> bool:
+        return _viz_show_nmr_spectrum(
+            self,
+            atom_symbols=atom_symbols,
+            shielding_iso_ppm=shielding_iso_ppm,
+            h_shifts=h_shifts,
+            c_shifts=c_shifts,
+            reference=reference,
+        )
+
+    def _wire_nmr_controls(self) -> None:
+        _viz_wire_nmr_controls(self)
+
+    def _on_nmr_nucleus_changed(self, change) -> None:
+        _viz_on_nmr_nucleus_changed(self, change)
+
+    def _update_nmr_figure(self, nucleus: str) -> None:
+        _viz_update_nmr_figure(self, nucleus)
 
     def _show_orbital_diagram(self, result) -> bool:
         return _viz_show_orbital_diagram(self, result)
@@ -5255,6 +5347,19 @@ class QuantUIApp:
                 }
                 save_type = "tddft"
             elif ct == "NMR Shielding":
+                _nmr_seed_path = self._freq_seed_dd.value
+                if _nmr_seed_path:
+                    from quantui.results_storage import load_trajectory
+
+                    self.run_status.value = "Loading seed geometry from history…"
+                    _nmr_seed_traj, _ = load_trajectory(Path(_nmr_seed_path))
+                    calc_mol = _nmr_seed_traj[-1]
+                    log.write(
+                        f"\nSeed geometry loaded from: {Path(_nmr_seed_path).name}\n"
+                        f"  Formula: {calc_mol.get_formula()}  "
+                        f"Atoms: {len(calc_mol.atoms)}\n\n"
+                    )
+
                 self.run_status.value = "Running NMR shielding (SCF + GIAO)..."
                 from quantui.nmr_calc import run_nmr_calc
 

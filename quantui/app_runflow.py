@@ -355,7 +355,13 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
             ),
         ]
     elif ct == "NMR Shielding":
+        app._refresh_freq_seed_options()
         app.calc_extra_opts.children = [
+            widgets.HBox(
+                [app._freq_seed_dd, app._freq_seed_refresh_btn],
+                layout=layout_fn(align_items="center", gap="6px", width="100%"),
+            ),
+            app._freq_seed_note,
             widgets.HTML(
                 f'<span style="color:{_theme.ACCENT_WARNING};font-size:12px">'
                 "⚠ Recommended: B3LYP/6-31G* or better. "
@@ -607,9 +613,9 @@ def _refresh_seed_options(app: Any, dropdown: Any) -> None:
 def refresh_seed_options(app: Any) -> None:
     """Populate the (shared) seed-geometry dropdown with saved optimisations.
 
-    Used by Geometry Opt, Frequency, and UV-Vis (TD-DFT) — only one of which
-    is ever visible at a time, so there is exactly one dropdown to refresh
-    (UXP2.5, M-UX2). Superseded the three near-identical
+    Used by Geometry Opt, Frequency, UV-Vis (TD-DFT), and NMR Shielding —
+    only one of which is ever visible at a time, so there is exactly one
+    dropdown to refresh (UXP2.5, M-UX2). Superseded the three near-identical
     ``refresh_{geo,freq,tddft}_seed_options`` wrappers that used to exist here.
     """
     _refresh_seed_options(app, app._seed_dd)

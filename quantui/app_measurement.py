@@ -72,8 +72,8 @@ _MEASURE_CLICK_JS = """
   // (Mulliken tint uses 0.35). A fixed 0.4 Å sphere sat *inside* C/O/Cl/…
   // (VDW×0.3 ≈ 0.51 for carbon) and was only visible on hydrogen.
   function highlightRadius(a){
-    var SPHERE_SCALE=0.35; // cover ball+stick (0.3) and Mulliken tint (0.35)
-    var MARGIN=1.45;       // sit clearly outside the atom sphere
+    var SPHERE_SCALE=0.35;
+    var MARGIN=1.45;
     var vdw=1.7;
     try{
       var radii=($3Dmol && $3Dmol.GLModel && $3Dmol.GLModel.vdwRadii) || {};
@@ -86,6 +86,91 @@ _MEASURE_CLICK_JS = """
     }catch(e){}
     return Math.max(0.55, vdw*SPHERE_SCALE*MARGIN);
   }
+
+  var MEAS_COLOR="__MEAS_LINE_COLOR__";
+
+  function vSub(a,b){ return {x:a.x-b.x,y:a.y-b.y,z:a.z-b.z}; }
+  function vAdd(a,b){ return {x:a.x+b.x,y:a.y+b.y,z:a.z+b.z}; }
+  function vScale(v,s){ return {x:v.x*s,y:v.y*s,z:v.z*s}; }
+  function vDot(a,b){ return a.x*b.x+a.y*b.y+a.z*b.z; }
+  function vCross(a,b){
+    return {x:a.y*b.z-a.z*b.y,y:a.z*b.x-a.x*b.z,z:a.x*b.y-a.y*b.x};
+  }
+  function vLen(v){ return Math.sqrt(vDot(v,v)); }
+  function vUnit(v){
+    var n=vLen(v);
+    return n<1e-8?{x:0,y:0,z:0}:vScale(v,1/n);
+  }
+  function vMid(a,b){ return vScale(vAdd(a,b),0.5); }
+  function posAt(m, idx){
+    var found=m.selectedAtoms({index: idx});
+    return found&&found.length?found[0]:null;
+  }
+  function addSeg(vw, a, b, dashed){
+    shapes.push(vw.addLine({
+      start:{x:a.x,y:a.y,z:a.z},
+      end:{x:b.x,y:b.y,z:b.z},
+      color:MEAS_COLOR,
+      dashed:!!dashed
+    }));
+  }
+  function addArc(vw, center, u, v, ang, radius){
+    if(ang<1e-4||vLen(u)<1e-6||vLen(v)<1e-6){ return; }
+    var steps=Math.max(10, Math.round(Math.abs(ang)*180/Math.PI/4));
+    var prev=null;
+    for(var s=0;s<=steps;s++){
+      var t=ang*s/steps;
+      var pt=vAdd(center, vAdd(vScale(u,radius*Math.cos(t)), vScale(v,radius*Math.sin(t))));
+      if(prev){ addSeg(vw, prev, pt, false); }
+      prev=pt;
+    }
+  }
+  function drawAngleArc(vw, m, i, j, k){
+    var pa=posAt(m,i), pb=posAt(m,j), pc=posAt(m,k);
+    if(!pa||!pb||!pc){ return; }
+    var u=vUnit(vSub(pa,pb)), w=vUnit(vSub(pc,pb));
+    if(vLen(u)<1e-6||vLen(w)<1e-6){ return; }
+    var ang=Math.acos(Math.max(-1, Math.min(1, vDot(u,w))));
+    var n=vUnit(vCross(u,w));
+    if(vLen(n)<1e-6){ return; }
+    var v=vUnit(vCross(n,u));
+    addArc(vw, pb, u, v, ang, 0.45);
+  }
+  function drawDihedralArc(vw, m, i, j, k, l){
+    var pi=posAt(m,i), pj=posAt(m,j), pk=posAt(m,k), pl=posAt(m,l);
+    if(!pi||!pj||!pk||!pl){ return; }
+    var b1=vUnit(vCross(vSub(pj,pi), vSub(pk,pj)));
+    var b2=vUnit(vCross(vSub(pk,pj), vSub(pl,pk)));
+    var bc=vUnit(vSub(pk,pj));
+    if(vLen(b1)<1e-6||vLen(b2)<1e-6||vLen(bc)<1e-6){ return; }
+    var mid=vMid(pj,pk);
+    var dh=Math.atan2(vDot(vCross(b1,b2), bc), vDot(b1,b2));
+    var steps=Math.max(10, Math.round(Math.abs(dh)*180/Math.PI/4));
+    var prev=null;
+    var r=0.42;
+    for(var s=0;s<=steps;s++){
+      var t=dh*s/steps;
+      var ct=Math.cos(t), st=Math.sin(t);
+      var dir=vAdd(vScale(b1,ct), vScale(vCross(bc,b1),st));
+      var pt=vAdd(mid, vScale(vUnit(dir), r));
+      if(prev){ addSeg(vw, prev, pt, false); }
+      prev=pt;
+    }
+  }
+  function drawMeasurement(vw, m, indices){
+    var n=indices.length;
+    if(n<2){ return; }
+    var pts=[];
+    for(var k=0;k<n;k++){
+      var p=posAt(m, indices[k]);
+      if(!p){ return; }
+      pts.push(p);
+    }
+    for(var k=0;k<n-1;k++){ addSeg(vw, pts[k], pts[k+1], false); }
+    if(n===3){ drawAngleArc(vw, m, indices[0], indices[1], indices[2]); }
+    if(n>=4){ drawDihedralArc(vw, m, indices[0], indices[1], indices[2], indices[3]); }
+  }
+
   window["__quantuiMeasureHighlight_"+UID] = function(indices){
     var vw=v(); if(!vw){ return false; }
     clearHighlights();
@@ -101,6 +186,7 @@ _MEASURE_CLICK_JS = """
           }));
         }
       }
+      if(indices.length>=2){ drawMeasurement(vw, m, indices); }
     }
     vw.render();
     return true;
@@ -132,6 +218,7 @@ _MEASURE_CLICK_JS = """
 # against CPK whites/grays; this chrome-yellow reads as a clear selection cue.
 _HIGHLIGHT_COLOR = "#FFEA00"
 _HIGHLIGHT_OPACITY = "0.80"
+_MEAS_LINE_COLOR = "#06b6d4"
 
 
 def inject_click_js(html: str, *, inbox_class: str) -> str:
@@ -155,6 +242,7 @@ def inject_click_js(html: str, *, inbox_class: str) -> str:
         .replace("__INBOX_CLASS__", inbox_class)
         .replace("__HL_COLOR__", _HIGHLIGHT_COLOR)
         .replace("__HL_OPACITY__", _HIGHLIGHT_OPACITY)
+        .replace("__MEAS_LINE_COLOR__", _MEAS_LINE_COLOR)
     )
     return f"{html}<script>{js}</script>"
 

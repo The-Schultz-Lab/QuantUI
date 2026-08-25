@@ -132,24 +132,69 @@ def build_ana_switcher(app: Any, *, layout_fn: Any) -> None:
     app._mulliken_accordion.observe(
         app._safe_cb(app._on_mulliken_accordion_show), names=["selected_index"]
     )
+    app._nmr_accordion.observe(
+        app._safe_cb(app._on_nmr_accordion_show), names=["selected_index"]
+    )
 
 
 def select_ana_panel(app: Any, name: str) -> None:
-    """Expand the named panel and collapse all others."""
+    """Mark the primary analysis panel for this result (scroll target).
+
+    Does not collapse other panels — every panel with data stays expanded
+    so students can see trajectory, energies, etc. at once.
+    """
     app._ana_active = name
     app._ana_unavail_html.layout.display = "none"
-    for panel_name, acc in zip(app._ana_panel_names, app._ana_accordions):
-        acc.selected_index = 0 if panel_name == name else None
 
 
 def activate_ana_panel(app: Any, name: str, auto_select: bool = True) -> None:
-    """Mark a panel as available and reveal its content."""
+    """Mark a panel as available, reveal its content, and expand it."""
     app._ana_available.add(name)
     if name in app._ana_unavail_msgs:
         app._ana_unavail_msgs[name].layout.display = "none"
         app._ana_content_boxes[name].layout.display = ""
+    for panel_name, acc in zip(app._ana_panel_names, app._ana_accordions):
+        if panel_name == name:
+            acc.selected_index = 0
+            break
     if auto_select:
         app._select_ana_panel(name)
+
+
+def scroll_analysis_tab_to_top(app: Any) -> None:
+    """Scroll the page to the top of the Analysis tab (3D viewer + context).
+
+    Voilà often lands users mid-page (e.g. on the orbital isosurface panel)
+    when switching tabs; nudge the viewport back to the molecule viewer.
+    """
+    bridge = getattr(app, "_analysis_scroll_bridge", None)
+    if bridge is None:
+        return
+    from IPython.display import Javascript, display
+
+    js = """
+(function(){
+  function go(){
+    var panel=document.querySelector(".quantui-analysis-tab-panel");
+    if(panel){
+      panel.scrollIntoView({block:"start",inline:"nearest"});
+      var y=panel.getBoundingClientRect().top+window.pageYOffset-12;
+      window.scrollTo({top:Math.max(0,y),left:0,behavior:"instant"});
+      return;
+    }
+    window.scrollTo(0,0);
+  }
+  go();
+  setTimeout(go,60);
+  setTimeout(go,250);
+})();
+"""
+    try:
+        bridge.clear_output(wait=True)
+        with bridge:
+            display(Javascript(js))
+    except Exception:
+        pass
 
 
 def deactivate_all_ana_panels(app: Any) -> None:
@@ -659,52 +704,24 @@ def pop_nmr_shielding(app: Any, ctx: Any) -> bool:
         chem = nmr.get("chemical_shifts_ppm", {})
         ref = nmr.get("reference_compound", "TMS")
         h_shifts = [
-            (int(i), d)
+            (int(i), float(d))
             for i, d in chem.items()
             if int(i) < len(atom_symbols) and atom_symbols[int(i)] == "H"
         ]
         c_shifts = [
-            (int(i), d)
+            (int(i), float(d))
             for i, d in chem.items()
             if int(i) < len(atom_symbols) and atom_symbols[int(i)] == "C"
         ]
-    if not atom_symbols:
-        return False
-
-    def _shift_table(label: str, shifts: list, sym: str) -> str:
-        if not shifts:
-            return ""
-        rows = "".join(
-            f'<tr><td style="padding:2px 14px 2px 0;color:{_theme.TEXT_SECONDARY}">{sym}-{n}</td>'
-            f'<td style="color:{_theme.TEXT_HEADING}">{d:.2f} ppm</td></tr>'
-            for n, (_i, d) in enumerate(sorted(shifts, key=lambda x: x[0]), 1)
+    return bool(
+        app._show_nmr_spectrum(
+            atom_symbols=atom_symbols,
+            shielding_iso_ppm=shielding,
+            h_shifts=h_shifts,
+            c_shifts=c_shifts,
+            reference=ref,
         )
-        return (
-            f'<tr><td colspan="2" style="padding:8px 0 2px;font-weight:600">'
-            f"{label} shifts (vs. {ref}):</td></tr>"
-            f'<tr><th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px;padding:2px 14px 2px 0">Atom</th>'
-            f'<th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px">δ (ppm)</th></tr>'
-            + rows
-        )
-
-    shielding_rows = "".join(
-        f'<tr><td style="padding:2px 10px 2px 0;color:{_theme.TEXT_SECONDARY}">{sym}{i + 1}</td>'
-        f'<td style="color:{_theme.TEXT_HEADING}">{s:.2f}</td></tr>'
-        for i, (sym, s) in enumerate(zip(atom_symbols, shielding))
     )
-    html = (
-        f'<div style="font-size:13px">'
-        f'<table style="border-collapse:collapse;margin-bottom:8px">'
-        f'<tr><th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px;padding:2px 10px 2px 0">Atom</th>'
-        f'<th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px">σ (ppm)</th></tr>'
-        f"{shielding_rows}</table>"
-        f'<table style="border-collapse:collapse">'
-        f"{_shift_table('¹H', h_shifts, 'H')}"
-        f"{_shift_table('¹³C', c_shifts, 'C')}"
-        f"</table></div>"
-    )
-    app._nmr_output.value = html
-    return True
 
 
 def _mulliken_payload(
