@@ -66,9 +66,9 @@ class TestMullikenPlot:
 
 
 class TestPanelRegistration:
-    def test_populations_in_panel_meta(self):
+    def test_populations_follows_energies_in_panel_meta(self):
         names = [n for n, _, _ in QuantUIApp._PANEL_META]
-        assert "Populations" in names
+        assert names.index("Populations") == names.index("Energies") + 1
 
     def test_single_point_registry_includes_populations(self):
         entries = QuantUIApp._PANEL_REGISTRY["single_point"]
@@ -81,6 +81,17 @@ class TestPanelRegistration:
     def test_accordion_is_a_child_of_analysis_tab(self, app):
         # Missed once for Geometries: registry alone is not enough.
         assert app._mulliken_accordion in app.analysis_tab_panel.children
+
+    def test_mulliken_panel_has_dedicated_viewer_and_vividness(self, app):
+        assert hasattr(app, "_mulliken_mol_output")
+        assert hasattr(app, "_mulliken_vividness_slider")
+        assert app._mulliken_vividness_slider.value == 1.0
+
+    def test_mulliken_panel_follows_energy_diagram(self, app):
+        children = list(app.analysis_tab_panel.children)
+        orb_idx = children.index(app._orb_accordion)
+        mull_idx = children.index(app._mulliken_accordion)
+        assert mull_idx == orb_idx + 1
 
 
 class TestPopMullikenLive:

@@ -3117,6 +3117,7 @@ class TestAnaSwitcher:
         app = QuantUIApp()
         assert app._ana_panel_names == [
             "Energies",
+            "Populations",
             "Trajectory",
             "Vibrational",
             "IR Spectrum",
@@ -3128,7 +3129,6 @@ class TestAnaSwitcher:
             "Geometries",
             "UV-Vis",
             "NMR",
-            "Populations",
         ]
 
     def test_no_panels_available_initially(self):

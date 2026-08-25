@@ -1265,6 +1265,8 @@ class QuantUIApp:
         _mulliken_help_btn: Any
         _mulliken_color_cb: Any
         _mulliken_dipole_cb: Any
+        _mulliken_vividness_slider: Any
+        _mulliken_mol_output: Any
         _mulliken_overlay_note: Any
         _populations_js_bridge: Any
         _nmr_accordion: Any
@@ -1504,6 +1506,7 @@ class QuantUIApp:
         # show_result_3d; consumed by _set_viz_backend to re-render the
         # Analysis-tab viewer when the toggle changes.
         self._analysis_displayed_molecule: Any = None
+        self._mulliken_displayed_molecule: Any = None
 
         # ── Build → wire → assemble ───────────────────────────────────────
         self._build_widgets()
@@ -1856,6 +1859,7 @@ class QuantUIApp:
     def _on_mulliken_accordion_show(self, change) -> None:
         if change["new"] == 0 and getattr(self, "_last_mulliken_charges", None):
             _ana_update_mulliken_figure(self)
+            self._show_mulliken_viewer()
 
     def _select_ana_panel(self, name: str) -> None:
         _ana_select_ana_panel(self, name)
@@ -1884,6 +1888,7 @@ class QuantUIApp:
 
     _PANEL_META: ClassVar[list] = [
         ("Energies", "_orb_accordion", "Single Point / Geometry Opt"),
+        ("Populations", "_mulliken_accordion", "Single Point / Geometry Opt"),
         ("Trajectory", "traj_accordion", "Geometry Opt / PES Scan / Frequency pre-opt"),
         ("Vibrational", "vib_accordion", "Frequency"),
         ("IR Spectrum", "_ir_accordion", "Frequency"),
@@ -1892,7 +1897,6 @@ class QuantUIApp:
         ("Geometries", "_reorg_geom_accordion", "Reorganization Energy"),
         ("UV-Vis", "_tddft_accordion", "UV-Vis (TD-DFT)"),
         ("NMR", "_nmr_accordion", "NMR Shielding"),
-        ("Populations", "_mulliken_accordion", "Single Point / Geometry Opt"),
     ]
 
     _PANEL_REGISTRY: ClassVar[dict] = {
@@ -2363,6 +2367,9 @@ class QuantUIApp:
             self._safe_cb(self._on_mulliken_overlay_changed), names="value"
         )
         self._mulliken_dipole_cb.observe(
+            self._safe_cb(self._on_mulliken_overlay_changed), names="value"
+        )
+        self._mulliken_vividness_slider.observe(
             self._safe_cb(self._on_mulliken_overlay_changed), names="value"
         )
         # Persist the grid choice so it survives a relaunch (ORBX.2).
@@ -3316,15 +3323,15 @@ class QuantUIApp:
                 html = finalize_analysis_html(self, html, chosen)
                 self._set_html_output(self._analysis_mol_output, html)
                 self._update_analysis_backend_label(chosen)
-                if getattr(self, "_last_mulliken_charges", None):
-                    try:
-                        from quantui.populations_overlay import (
-                            push_populations_overlay,
-                        )
 
-                        push_populations_overlay(self)
-                    except Exception:  # noqa: BLE001 — never block the render
-                        pass
+    def _show_mulliken_viewer(self, molecule=None) -> None:
+        from quantui.populations_overlay import show_mulliken_viewer
+
+        show_mulliken_viewer(
+            self,
+            molecule,
+            render_html_fn=_render_molecule_html,
+        )
 
     def _update_analysis_backend_label(self, chosen: VizBackend) -> None:
         """Update the small 'Rendering with: X' label next to the Analysis

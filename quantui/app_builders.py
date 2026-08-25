@@ -2433,6 +2433,22 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         tooltip="Green arrow along μ through the molecular centre of mass",
         layout=layout_fn(width="auto"),
     )
+    app._mulliken_vividness_slider = widgets.FloatSlider(
+        value=1.0,
+        min=0.0,
+        max=1.0,
+        step=0.05,
+        readout_format=".0%",
+        description="Color vividness:",
+        style={"description_width": "96px"},
+        layout=layout_fn(width="260px", margin="0 0 6px 0"),
+        continuous_update=False,
+    )
+    # Dedicated structure viewer for charge colouring — decoupled from the
+    # top Analysis-tab viewer used for click-to-measure.
+    app._mulliken_mol_output = widgets.Output(
+        layout=layout_fn(width="100%", min_height="320px", margin="0 0 8px 0"),
+    )
     # Soft notice under the overlay toggles (e.g. older History without μ vector).
     app._mulliken_overlay_note = widgets.HTML(
         value="",
@@ -2462,7 +2478,9 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             widgets.VBox(
                 [
                     mulliken_header,
+                    app._mulliken_mol_output,
                     mulliken_overlay_row,
+                    app._mulliken_vividness_slider,
                     app._mulliken_overlay_note,
                     app._mulliken_summary,
                     app._mulliken_table,
@@ -2700,6 +2718,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             app._analysis_empty_html,
             app._ana_unavail_html,
             app._orb_accordion,
+            app._mulliken_accordion,
             app._pes_scan_accordion,
             app.traj_accordion,
             app.vib_accordion,
@@ -2712,7 +2731,6 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             app._reorg_geom_accordion,
             app._tddft_accordion,
             app._nmr_accordion,
-            app._mulliken_accordion,
         ]
     )
     app.analysis_tab_panel = widgets.VBox(

@@ -405,13 +405,16 @@ def update_panel_for_backend(app: Any, backend: Any) -> None:
 
 
 def finalize_analysis_html(app: Any, html: str, backend: Any) -> str:
-    """Wire click-to-measure + populations overlays into Analysis-viewer HTML.
+    """Wire click-to-measure into the top Analysis-tab viewer HTML.
 
     Called at both places that render into ``app._analysis_mol_output``
     (the post-calc render in ``app_visualization.show_result_3d`` and the
     backend-toggle re-render in ``app._rerender_3d_views``), so click-to-
     measure and MEAS.3's stale-pick reset apply identically regardless of
     which path produced the view.
+
+    Mulliken charge colouring lives in the dedicated Mulliken-panel viewer
+    (see ``populations_overlay.show_mulliken_viewer``) — not here.
     """
     from .viz_backend_router import VizBackend
 
@@ -419,7 +422,4 @@ def finalize_analysis_html(app: Any, html: str, backend: Any) -> str:
     update_panel_for_backend(app, backend)
     if backend == VizBackend.PY3DMOL:
         html = inject_click_js(html, inbox_class=MEASURE_INBOX_CLASS)
-        from .populations_overlay import inject_populations_js
-
-        html = inject_populations_js(html)
     return html
