@@ -131,6 +131,7 @@ def _full_sp_fields() -> dict:
         gpu_used=True,
         gpu_name="NVIDIA A100",
         dipole_moment_debye=1.85,
+        dipole_vector_debye=[0.1, -0.2, 1.8],
         mulliken_charges=[-0.5, 0.25, 0.25],
         atom_symbols=["O", "H", "H"],
         formula="H2O",
@@ -157,6 +158,7 @@ def test_live_and_history_cards_share_the_same_extra_rows():
         "NVIDIA A100",
         "Dipole moment",
         "1.8500 D",
+        "+0.100",
         "Mulliken charges",
         "O:-0.500",
     ):

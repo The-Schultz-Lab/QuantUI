@@ -67,6 +67,10 @@ class SessionResult:
     atom_symbols: Optional[List[str]] = None
     mulliken_charges: Optional[List[float]] = None
     dipole_moment_debye: Optional[float] = None
+    # Cartesian dipole components in Debye (same frame as molecular coords).
+    # Magnitude is ``dipole_moment_debye``; kept separately so older results
+    # without a vector still show ‖μ‖ on the card.
+    dipole_vector_debye: Optional[List[float]] = None
     mp2_correlation_hartree: Optional[float] = None
     # CCSD post-HF correlation energy (Hartree), populated when method is
     # ``"CCSD"`` or ``"CCSD(T)"``. ``None`` for HF/DFT/MP2 paths. The
@@ -672,6 +676,7 @@ def _run_session_calc_body(
     # left the result card blank for both properties on every UHF run,
     # while UKS (open-shell DFT) went through the identical extraction
     # successfully.
+    dipole_vector_debye: Optional[List[float]] = None
     try:
         # gpu4pyscf doesn't implement population analysis on the GPU object
         # (``mf.mulliken_pop`` is NotImplemented), so on a GPU-offloaded run
@@ -688,7 +693,10 @@ def _run_session_calc_body(
         logger.debug("Mulliken population extraction failed: %s", exc)
     try:
         dip = _to_numpy_array(mf.dip_moment(verbose=0))
-        dipole_moment_debye = float(_np.linalg.norm(dip))
+        dip_list = [float(x) for x in dip.reshape(-1)[:3]]
+        if len(dip_list) == 3:
+            dipole_vector_debye = dip_list
+            dipole_moment_debye = float(_np.linalg.norm(dip_list))
     except Exception as exc:
         logger.debug("Dipole moment extraction failed: %s", exc)
 
@@ -762,6 +770,7 @@ def _run_session_calc_body(
         atom_symbols=list(molecule.atoms),
         mulliken_charges=mulliken_charges,
         dipole_moment_debye=dipole_moment_debye,
+        dipole_vector_debye=dipole_vector_debye,
         mp2_correlation_hartree=mp2_correlation_hartree,
         ccsd_correlation_hartree=ccsd_correlation_hartree,
         ccsd_t_correction_hartree=ccsd_t_correction_hartree,

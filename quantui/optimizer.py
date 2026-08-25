@@ -286,6 +286,7 @@ class OptimizationResult:
     atom_symbols: Optional[List[str]] = None
     mulliken_charges: Optional[List[float]] = None
     dipole_moment_debye: Optional[float] = None
+    dipole_vector_debye: Optional[List[float]] = None
 
     @property
     def energy_hartree(self) -> float:
@@ -727,6 +728,7 @@ def optimize_geometry(
     )
     _opt_mulliken: Optional[List[float]] = None
     _opt_dipole: Optional[float] = None
+    _opt_dipole_vec: Optional[List[float]] = None
     _opt_density_fit = bool(getattr(atoms.calc, "_density_fit_used", False))
     try:
         import numpy as _np_mo
@@ -756,7 +758,10 @@ def optimize_geometry(
                 )
             try:
                 _dip = _np_mo.asarray(_last_mf.dip_moment(verbose=0))
-                _opt_dipole = float(_np_mo.linalg.norm(_dip))
+                _dip_list = [float(x) for x in _dip.reshape(-1)[:3]]
+                if len(_dip_list) == 3:
+                    _opt_dipole_vec = _dip_list
+                    _opt_dipole = float(_np_mo.linalg.norm(_dip_list))
             except Exception as _dip_exc:
                 logger.debug(
                     "Final-step dipole extraction failed in optimizer: %s",
@@ -849,6 +854,7 @@ def optimize_geometry(
         atom_symbols=_opt_atom_symbols,
         mulliken_charges=_opt_mulliken,
         dipole_moment_debye=_opt_dipole,
+        dipole_vector_debye=_opt_dipole_vec,
     )
 
 

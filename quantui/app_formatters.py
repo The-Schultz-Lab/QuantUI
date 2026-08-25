@@ -77,7 +77,17 @@ def _result_extra_rows(get: Any) -> str:
 
     _dip = get("dipole_moment_debye")
     if _dip is not None:
-        rows += _num("Dipole moment", f"{_dip:.4f} D")
+        _vec = get("dipole_vector_debye")
+        if _vec is not None and len(_vec) >= 3:
+            _dip_str = (
+                f"{_dip:.4f} D"
+                f' <span style="color:{_theme.TEXT_MUTED_LIGHT};font-size:12px">'
+                f"(μ = [{float(_vec[0]):+.3f}, {float(_vec[1]):+.3f}, "
+                f"{float(_vec[2]):+.3f}] D)</span>"
+            )
+        else:
+            _dip_str = f"{_dip:.4f} D"
+        rows += _num("Dipole moment", _dip_str)
 
     _chg = get("mulliken_charges")
     _syms = get("atom_symbols")

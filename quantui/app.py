@@ -1245,6 +1245,9 @@ class QuantUIApp:
         _mulliken_table: Any
         _mulliken_fig: Any
         _mulliken_help_btn: Any
+        _mulliken_color_cb: Any
+        _mulliken_dipole_cb: Any
+        _populations_js_bridge: Any
         _nmr_accordion: Any
         _nmr_output: Any
         _orb_accordion: Any
@@ -1404,6 +1407,7 @@ class QuantUIApp:
         self._last_mulliken_symbols: Any = None
         self._last_mulliken_charges: Any = None
         self._last_mulliken_dipole: Any = None
+        self._last_mulliken_dipole_vector: Any = None
         self._last_mulliken_fig: Any = None
         # Last-generated cube file path + orbital label.
         # Set by the isosurface render path; consumed by the Export cube
@@ -2308,6 +2312,12 @@ class QuantUIApp:
         self._measure_clear_btn.on_click(self._on_measure_clear)
         self._measure_help_btn.on_click(self._on_measure_help)
         self._mulliken_help_btn.on_click(self._on_mulliken_help)
+        self._mulliken_color_cb.observe(
+            self._safe_cb(self._on_mulliken_overlay_changed), names="value"
+        )
+        self._mulliken_dipole_cb.observe(
+            self._safe_cb(self._on_mulliken_overlay_changed), names="value"
+        )
         # Persist the grid choice so it survives a relaunch (ORBX.2).
         self._iso_resolution_dd.observe(
             self._safe_cb(self._on_iso_resolution_changed), names="value"
@@ -3259,6 +3269,15 @@ class QuantUIApp:
                 html = finalize_analysis_html(self, html, chosen)
                 self._set_html_output(self._analysis_mol_output, html)
                 self._update_analysis_backend_label(chosen)
+                if getattr(self, "_last_mulliken_charges", None):
+                    try:
+                        from quantui.populations_overlay import (
+                            push_populations_overlay,
+                        )
+
+                        push_populations_overlay(self)
+                    except Exception:  # noqa: BLE001 — never block the render
+                        pass
 
     def _update_analysis_backend_label(self, chosen: VizBackend) -> None:
         """Update the small 'Rendering with: X' label next to the Analysis
@@ -3761,6 +3780,12 @@ class QuantUIApp:
     def _on_mulliken_help(self, btn) -> None:
         _ = btn
         self._show_help_topic("mulliken")
+
+    def _on_mulliken_overlay_changed(self, change=None) -> None:
+        _ = change
+        from quantui.populations_overlay import push_populations_overlay
+
+        push_populations_overlay(self)
 
     def _on_iso_resolution_changed(self, change) -> None:
         """Persist the isosurface grid choice.
