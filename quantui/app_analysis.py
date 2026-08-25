@@ -245,6 +245,13 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     color_cb = getattr(app, "_mulliken_color_cb", None)
     if color_cb is not None:
         color_cb.value = True
+    vivid = getattr(app, "_mulliken_vividness_slider", None)
+    if vivid is not None:
+        vivid.value = 1.0
+    mulliken_out = getattr(app, "_mulliken_mol_output", None)
+    if mulliken_out is not None:
+        mulliken_out.clear_output()
+    app._mulliken_displayed_molecule = None
     note = getattr(app, "_mulliken_overlay_note", None)
     if note is not None:
         note.value = ""
@@ -793,7 +800,12 @@ def pop_mulliken(app: Any, ctx: Any) -> bool:
             return False
         return bool(
             show_mulliken_populations(
-                app, symbols, charges, dipole, dipole_vector=dip_vec
+                app,
+                symbols,
+                charges,
+                dipole,
+                dipole_vector=dip_vec,
+                molecule=_mulliken_molecule(app, ctx),
             )
         )
     except Exception as exc:
@@ -818,6 +830,18 @@ def pop_mulliken(app: Any, ctx: Any) -> bool:
         return False
 
 
+def _mulliken_molecule(app: Any, ctx: Any = None) -> Any:
+    """Best molecule for the Mulliken panel viewer (geometry for overlays)."""
+    if ctx is not None:
+        mol = getattr(ctx, "molecule", None)
+        if mol is not None:
+            return mol
+    return (
+        getattr(app, "_analysis_displayed_molecule", None)
+        or getattr(app, "_molecule", None)
+    )
+
+
 def show_mulliken_populations(
     app: Any,
     atom_symbols: list,
@@ -825,6 +849,7 @@ def show_mulliken_populations(
     dipole_debye: Optional[float] = None,
     *,
     dipole_vector: Optional[list] = None,
+    molecule: Any = None,
 ) -> bool:
     """Write Mulliken table + Plotly chart into the Populations accordion."""
     if not atom_symbols or not charges or len(atom_symbols) != len(charges):
@@ -915,13 +940,9 @@ def show_mulliken_populations(
     )
 
     update_mulliken_figure(app)
-    # Push 3D overlays after the Analysis viewer has had a tick to finish
-    # attaching (same retry spirit as measure's inject JS).
     try:
-        from quantui.populations_overlay import push_populations_overlay
-
-        push_populations_overlay(app)
-    except Exception:  # noqa: BLE001 — overlay must never block the panel
+        app._show_mulliken_viewer(molecule)
+    except Exception:  # noqa: BLE001 — viewer must never block the panel
         pass
     return True
 

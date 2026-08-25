@@ -1,12 +1,12 @@
-"""3D Mulliken color + dipole-arrow overlays for the Analysis viewer.
+"""3D Mulliken color + dipole-arrow overlays for the Mulliken panel viewer.
 
 Mirrors the M-MEASURE highlight bridge: a one-shot ``Javascript`` push into a
 hidden ``Output`` restyles the *live* py3Dmol viewer without a Python HTML
 re-render (which would discard the camera orientation the user rotated into).
 
-Injected by :func:`inject_populations_js` into Analysis-tab HTML only
-(alongside click-to-measure). Plotlymol has no equivalent live API — overlays
-are a silent no-op there.
+Injected by :func:`inject_populations_js` into the dedicated Mulliken-panel
+viewer only (decoupled from the top Analysis-tab structure viewer).
+Plotlymol has no equivalent live API — overlays are a silent no-op there.
 """
 
 from __future__ import annotations
@@ -86,23 +86,32 @@ _POPULATIONS_JS = """
 """
 
 
-def charge_colors(charges: Sequence[float]) -> List[str]:
+def charge_colors(
+    charges: Sequence[float],
+    *,
+    vividness: float = 1.0,
+) -> List[str]:
     """Map Mulliken charges to hex colours (blue = +, red = −).
 
     Normalised to the largest |q| in the molecule so water and a larger
-    zwitterion both span the full palette.
+    zwitterion both span the full palette. ``vividness`` (0–1) blends each
+    colour toward neutral grey — useful when charges are subtle.
     """
     if not charges:
         return []
+    vivid = max(0.0, min(1.0, float(vividness)))
     peak = max(abs(float(c)) for c in charges) or 1.0
     out: List[str] = []
     for c in charges:
         t = max(-1.0, min(1.0, float(c) / peak))
         # t>0 → blue (electron-deficient); t<0 → red (electron-rich).
         if t >= 0:
-            out.append(_lerp_hex("#e5e7eb", "#2563eb", t))
+            color = _lerp_hex("#e5e7eb", "#2563eb", t)
         else:
-            out.append(_lerp_hex("#e5e7eb", "#dc2626", -t))
+            color = _lerp_hex("#e5e7eb", "#dc2626", -t)
+        if vivid < 1.0:
+            color = _lerp_hex("#e5e7eb", color, vivid)
+        out.append(color)
     return out
 
 
@@ -190,11 +199,12 @@ def build_overlay_payload(
     dipole_enabled: bool,
     symbols: Optional[Sequence[str]],
     coordinates: Optional[Sequence[Sequence[float]]],
+    vividness: float = 1.0,
 ) -> dict:
     """Assemble the JSON payload for ``__quantuiPopulationsUpdate``."""
     payload: dict = {"colors": None, "arrow": None}
     if color_enabled and charges:
-        payload["colors"] = charge_colors(charges)
+        payload["colors"] = charge_colors(charges, vividness=vividness)
     if (
         dipole_enabled
         and dipole_vector is not None
@@ -208,12 +218,73 @@ def build_overlay_payload(
     return payload
 
 
+def _mulliken_vividness(app: Any) -> float:
+    slider = getattr(app, "_mulliken_vividness_slider", None)
+    if slider is None:
+        return 1.0
+    return float(getattr(slider, "value", 1.0))
+
+
+def render_mulliken_viewer_html(app: Any, molecule: Any, *, render_html_fn: Any) -> str:
+    """Return self-contained HTML for the Mulliken panel's py3Dmol viewer."""
+    if render_html_fn is None or molecule is None:
+        return ""
+    from quantui.visualization_py3dmol import PY3DMOL_AVAILABLE
+
+    bgcolor = app._plotly_theme_colors()["scene_bgcolor"]
+    if PY3DMOL_AVAILABLE:
+        html = render_html_fn(
+            molecule,
+            backend="py3dmol",
+            style=app._viz_style,
+            lighting=app._viz_lighting,
+            bgcolor=bgcolor,
+        )
+        return inject_populations_js(html)
+    html = render_html_fn(
+        molecule,
+        backend="plotlymol",
+        style=app._viz_style,
+        lighting=app._viz_lighting,
+        bgcolor=bgcolor,
+    )
+    return html
+
+
+def show_mulliken_viewer(app: Any, molecule: Any = None, *, render_html_fn: Any) -> None:
+    """Render the molecule into the Mulliken panel's dedicated viewer."""
+    out = getattr(app, "_mulliken_mol_output", None)
+    if out is None:
+        return
+    mol = (
+        molecule
+        or getattr(app, "_mulliken_displayed_molecule", None)
+        or getattr(app, "_analysis_displayed_molecule", None)
+        or getattr(app, "_molecule", None)
+    )
+    if mol is None:
+        out.clear_output()
+        app._mulliken_displayed_molecule = None
+        return
+    try:
+        html = render_mulliken_viewer_html(app, mol, render_html_fn=render_html_fn)
+        if not html:
+            out.clear_output()
+            return
+        app._set_html_output(out, html)
+        app._mulliken_displayed_molecule = mol
+        push_populations_overlay(app)
+    except Exception as exc:  # noqa: BLE001 — viewer must never block the panel
+        logger.debug("mulliken viewer render failed: %s", exc)
+        out.clear_output()
+
+
 def push_populations_overlay(app: Any) -> None:
-    """Push current Mulliken/dipole overlay state to the live Analysis viewer."""
+    """Push Mulliken/dipole overlay state to the Mulliken panel viewer."""
     bridge = getattr(app, "_populations_js_bridge", None)
     if bridge is None:
         return
-    mol = getattr(app, "_analysis_displayed_molecule", None)
+    mol = getattr(app, "_mulliken_displayed_molecule", None)
     symbols = list(getattr(app, "_last_mulliken_symbols", None) or [])
     charges = list(getattr(app, "_last_mulliken_charges", None) or [])
     dip_vec = getattr(app, "_last_mulliken_dipole_vector", None)
@@ -229,6 +300,7 @@ def push_populations_overlay(app: Any) -> None:
         dipole_enabled=dip_on,
         symbols=symbols or None,
         coordinates=coords or None,
+        vividness=_mulliken_vividness(app),
     )
     try:
         from IPython.display import Javascript, display

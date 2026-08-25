@@ -49,6 +49,15 @@ class TestChargeColors:
         # Both map to the mid grey endpoint.
         assert colors[0] == colors[1]
 
+    def test_vividness_zero_is_all_grey(self):
+        colors = charge_colors([-0.5, 0.5], vividness=0.0)
+        assert colors[0] == colors[1] == "#e5e7eb"
+
+    def test_vividness_scales_saturation(self):
+        full = charge_colors([-0.5], vividness=1.0)
+        muted = charge_colors([-0.5], vividness=0.3)
+        assert full[0] != muted[0]
+
 
 class TestDipoleArrow:
     def test_nonzero_vector_returns_endpoints(self):
@@ -114,7 +123,7 @@ class TestInjectPopulationsJS:
         assert "addArrow" in out
         assert "setStyle" in out
 
-    def test_finalize_injects_both_measure_and_populations(self, app):
+    def test_finalize_injects_measure_only(self, app):
         from quantui.visualization_py3dmol import (
             PY3DMOL_AVAILABLE,
             render_molecule_html,
@@ -125,7 +134,7 @@ class TestInjectPopulationsJS:
         html = render_molecule_html(_water(), backend="py3dmol")
         out = finalize_analysis_html(app, html, VizBackend.PY3DMOL)
         assert "setClickable" in out
-        assert "__quantuiPopulationsUpdate" in out
+        assert "__quantuiPopulationsUpdate" not in out
 
 
 class TestPushOverlaySafe:
@@ -133,6 +142,32 @@ class TestPushOverlaySafe:
         app._populations_js_bridge = None
         app._last_mulliken_charges = [-0.5, 0.25, 0.25]
         push_populations_overlay(app)  # must not raise
+
+    def test_vividness_passed_through_payload(self, app):
+        from quantui.populations_overlay import build_overlay_payload
+
+        app._mulliken_vividness_slider.value = 0.2
+        mol = _water()
+        app._mulliken_displayed_molecule = mol
+        payload_low = build_overlay_payload(
+            charges=[-0.6, 0.3, 0.3],
+            color_enabled=True,
+            dipole_vector=None,
+            dipole_enabled=False,
+            symbols=mol.atoms,
+            coordinates=mol.coordinates,
+            vividness=0.2,
+        )
+        payload_full = build_overlay_payload(
+            charges=[-0.6, 0.3, 0.3],
+            color_enabled=True,
+            dipole_vector=None,
+            dipole_enabled=False,
+            symbols=mol.atoms,
+            coordinates=mol.coordinates,
+            vividness=1.0,
+        )
+        assert payload_low["colors"][0] != payload_full["colors"][0]
 
 
 class TestVectorPersistence:

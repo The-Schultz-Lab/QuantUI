@@ -140,8 +140,7 @@ def show_result_3d(
                 if is_analysis_output:
                     # M-MEASURE: wires click-to-measure into the freshly
                     # rendered HTML (py3Dmol only) and resets any stale picks
-                    # from whatever was shown before. Also injects the
-                    # Mulliken/dipole overlay bridge.
+                    # from whatever was shown before.
                     from quantui.app_measurement import finalize_analysis_html
 
                     html = finalize_analysis_html(app, html, chosen)
@@ -150,17 +149,9 @@ def show_result_3d(
                 app._update_analysis_backend_label(chosen)
 
     # Track the molecule currently shown in the Analysis-tab viewer so the
-    # preference-change re-render path can find it. Set before the overlay
-    # push so COM / atom colours have coordinates to read.
+    # preference-change re-render path can find it.
     if is_analysis_output:
         app._analysis_displayed_molecule = molecule
-        if getattr(app, "_last_mulliken_charges", None):
-            try:
-                from quantui.populations_overlay import push_populations_overlay
-
-                push_populations_overlay(app)
-            except Exception:  # noqa: BLE001 — never block the render
-                pass
 
 
 def on_traj_expand(app: Any, change: dict[str, Any]) -> None:
