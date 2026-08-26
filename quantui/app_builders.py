@@ -39,6 +39,13 @@ _ORB_PNG_INBOX_CLASS = "quantui-orb-png-inbox"
 # a capture from one viewer can never be mistaken for the other's.
 _REORG_PNG_INBOX_CLASS = "quantui-reorg-png-inbox"
 
+# Same pattern again for the geometry-optimization trajectory viewer
+# (M-EXPORT2 EXP2.2). Its inbox is built per-render in
+# app_visualization.show_opt_trajectory rather than once here, since that
+# panel's own widgets (export button/status) are already rebuilt on every
+# render — this just follows that existing convention.
+_TRAJ_PNG_INBOX_CLASS = "quantui-traj-png-inbox"
+
 # Friendlier labels for the library category filter.
 _CATEGORY_LABELS = {
     "diatomic": "Diatomics",

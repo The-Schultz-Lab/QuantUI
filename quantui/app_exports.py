@@ -503,6 +503,88 @@ def on_reorg_png_captured(app: Any, change: dict) -> None:
     _clear_inbox(app)
 
 
+def on_traj_png_captured(
+    app: Any, change: dict, *, formula: str = "", status: Any = None
+) -> None:
+    """Write a PNG captured from the live trajectory viewer (M-EXPORT2 EXP2.2).
+
+    Same capture/decode/save shape as ``on_reorg_png_captured``, but the
+    trajectory panel's widgets (unlike the isosurface/reorg accordions) are
+    rebuilt fresh on every render rather than constructed once in
+    ``app_builders``, so there is no persistent ``app._traj_png_inbox`` /
+    ``app._traj_export_status`` to look up: the inbox to clear and the status
+    label to update are passed in directly by the caller
+    (``app_visualization.show_opt_trajectory``), which is the one place that
+    still holds a reference to this render's widgets. Clearing reads the
+    firing widget straight off ``change["owner"]`` for the same reason.
+    """
+    import base64
+    import binascii
+
+    uri = (change or {}).get("new") or ""
+    if not uri:
+        return
+
+    inbox = (change or {}).get("owner")
+
+    def _fail(msg: str) -> None:
+        if status is not None:
+            status.value = f'<span style="color:#b22">{msg}</span>'
+        _clear_inbox()
+
+    def _clear_inbox() -> None:
+        if inbox is None:
+            return
+        if getattr(inbox, "value", ""):
+            inbox.value = ""
+
+    if not uri.startswith(_PNG_URI_PREFIX):
+        logger.warning("trajectory PNG capture: unexpected data URI prefix")
+        _fail("Capture failed (unexpected image format).")
+        return
+    if len(uri) > _MAX_PNG_BYTES:
+        _fail("Capture failed (image too large).")
+        return
+
+    try:
+        raw = base64.b64decode(uri[len(_PNG_URI_PREFIX) :], validate=True)
+    except (binascii.Error, ValueError) as exc:
+        logger.warning("trajectory PNG capture: could not decode payload: %s", exc)
+        _fail("Capture failed (corrupt image data).")
+        return
+
+    formula = formula or "molecule"
+    method = str(getattr(getattr(app, "method_dd", None), "value", "") or "")
+    basis = str(getattr(getattr(app, "basis_dd", None), "value", "") or "")
+
+    try:
+        dest = export_destination(
+            app, "trajectory PNG", formula, "trajectory", suffix=".png"
+        )
+    except ValueError as exc:
+        _fail(str(exc))
+        return
+
+    # Provenance (M-EXPORT2 EXP2.4) — same argument as the reorg exporter:
+    # cheap now, unrecoverable once the file has left the machine.
+    raw = _with_dpi(
+        raw,
+        None,
+        metadata={"Software": "QuantUI", "Method": method, "Basis": basis},
+    )
+    try:
+        dest.write_bytes(raw)
+    except OSError as exc:
+        logger.warning("trajectory PNG capture: could not write %s: %s", dest, exc)
+        _fail("Could not write the image (see log).")
+        return
+
+    logger.info("Saved trajectory PNG: %s (%d bytes)", dest, len(raw))
+    if status is not None:
+        status.value = f'<span style="color:#2a7">Saved: {dest.name}</span>'
+    _clear_inbox()
+
+
 def on_iso_export_cube(app: Any, btn: Any) -> None:
     """Copy the last-generated cube file to the result folder.
 
