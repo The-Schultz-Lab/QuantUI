@@ -504,6 +504,7 @@ def render_molecule_html(
     height: int = 500,
     bgcolor: str = "#ffffff",
     lighting: str = "soft",
+    capture_class: str = "",
 ) -> str:
     """Return self-contained HTML for the molecule viewer (no display side-effects).
 
@@ -514,6 +515,21 @@ def render_molecule_html(
     family for trajectory and Analysis-tab rendering regressions. Errors are
     caught and returned as inline HTML so the caller sees a
     visible failure message in the viewer slot instead of a blank 🙁 panel.
+
+    ``capture_class`` wires a "Save PNG" button (M-EXPORT2 EXP2.2), the same
+    viewer-agnostic bridge as the reorg/trajectory/vibrational viewers
+    (``orbital_visualization._GENERIC_CAPTURE_JS`` reads
+    ``window["viewer_"+UID]`` directly). **Only wired for the py3Dmol
+    backend** — the plotly path has no equivalent client-side capture global,
+    and Plotly's own modebar already offers a native "download plot as png"
+    button, so this is not a real gap for that backend. Callers that render
+    this molecule into more than one output at once (this function is used
+    for the Calculate-tab preview, the Results-tab viewer, and the
+    Analysis-tab viewer — up to two of which can be showing the same
+    molecule simultaneously) must pass a distinct ``capture_class`` per
+    output slot, or one slot's button can post into a different slot's
+    inbox (``document.querySelector`` matches the first element with that
+    class in the whole page, not scoped to which button was clicked).
     """
     if not is_visualization_available():
         return _unavailable_html(molecule)
@@ -534,7 +550,33 @@ def render_molecule_html(
         )
         make_html = getattr(viz, "_make_html", None)
         if callable(make_html):
-            parts.append(viz._make_html())
+            view_html = viz._make_html()
+            if capture_class:
+                import json
+                import re
+
+                from quantui.orbital_visualization import (
+                    _GENERIC_CAPTURE_JS,
+                    _png_capture_controls,
+                )
+
+                m = re.search(r"3dmolviewer_(\w+)", view_html)
+                if m is not None:
+                    uid = m.group(1)
+                    capture_fn = f"__quantuiMolCapture_{uid}"
+                    capture_js = (
+                        _GENERIC_CAPTURE_JS.replace("__UID__", uid)
+                        .replace("__CAPFN__", capture_fn)
+                        .replace("__BG__", json.dumps(bgcolor))
+                    )
+                    view_html = (
+                        view_html
+                        + f"<script>{capture_js}</script>"
+                        + _png_capture_controls(
+                            uid, capture_class, capture_fn=capture_fn
+                        )
+                    )
+            parts.append(view_html)
         else:
             import plotly.io as _pio
 

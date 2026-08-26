@@ -94,6 +94,10 @@ from quantui.app_analysis import (
     update_mulliken_figure as _ana_update_mulliken_figure,
 )
 from quantui.app_builders import (
+    _MOL_ANALYSIS_PNG_INBOX_CLASS,
+    _MOL_CALC_PNG_INBOX_CLASS,
+)
+from quantui.app_builders import (
     build_calc_setup as _bld_build_calc_setup,
 )
 from quantui.app_builders import (
@@ -164,6 +168,15 @@ from quantui.app_exports import (
 )
 from quantui.app_exports import (
     on_iso_export_cube as _exp_on_iso_export_cube,
+)
+from quantui.app_exports import (
+    on_mol_analysis_png_captured as _exp_on_mol_analysis_png_captured,
+)
+from quantui.app_exports import (
+    on_mol_calc_png_captured as _exp_on_mol_calc_png_captured,
+)
+from quantui.app_exports import (
+    on_mol_results_png_captured as _exp_on_mol_results_png_captured,
 )
 from quantui.app_exports import (
     on_orb_png_captured as _exp_on_orb_png_captured,
@@ -1442,6 +1455,12 @@ class QuantUIApp:
         _vib_export_status: Any
         _vib_png_inbox: Any
         _vib_png_status: Any
+        _mol_calc_png_inbox: Any
+        _mol_calc_png_status: Any
+        _mol_results_png_inbox: Any
+        _mol_results_png_status: Any
+        _mol_analysis_png_inbox: Any
+        _mol_analysis_png_status: Any
         _last_vib_molecule: Any
 
     def __init__(self) -> None:
@@ -2414,6 +2433,20 @@ class QuantUIApp:
         self._vib_png_inbox.observe(
             self._safe_cb(self._on_vib_png_captured), names="value"
         )
+        # Molecule (top) viewer — three independent Save-PNG buttons
+        # (M-EXPORT2 EXP2.2), one per output slot (Calculate/Results/
+        # Analysis). Only fires for the py3Dmol backend; see
+        # visualization_py3dmol.render_molecule_html's capture_class
+        # docstring for why plotlymol has no equivalent button.
+        self._mol_calc_png_inbox.observe(
+            self._safe_cb(self._on_mol_calc_png_captured), names="value"
+        )
+        self._mol_results_png_inbox.observe(
+            self._safe_cb(self._on_mol_results_png_captured), names="value"
+        )
+        self._mol_analysis_png_inbox.observe(
+            self._safe_cb(self._on_mol_analysis_png_captured), names="value"
+        )
         # Click-to-measure (M-MEASURE MEAS.2/3): a click in the Analysis-tab
         # viewer posts an atom index into this inbox the same way the PNG
         # buttons post a data URI.
@@ -3164,6 +3197,7 @@ class QuantUIApp:
             style=self._viz_style,
             lighting=self._viz_lighting,
             bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
+            capture_class=_MOL_CALC_PNG_INBOX_CLASS,
         )
         self._set_html_output(self.viz_output, html)
 
@@ -3374,6 +3408,7 @@ class QuantUIApp:
                     style=self._viz_style,
                     lighting=self._viz_lighting,
                     bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
+                    capture_class=_MOL_ANALYSIS_PNG_INBOX_CLASS,
                 )
                 # M-MEASURE: same wiring as the post-calc render path — a
                 # backend-toggle switch is still a fresh viewer, so stale
@@ -3901,6 +3936,15 @@ class QuantUIApp:
 
     def _on_vib_png_captured(self, change) -> None:
         _exp_on_vib_png_captured(self, change)
+
+    def _on_mol_calc_png_captured(self, change) -> None:
+        _exp_on_mol_calc_png_captured(self, change)
+
+    def _on_mol_results_png_captured(self, change) -> None:
+        _exp_on_mol_results_png_captured(self, change)
+
+    def _on_mol_analysis_png_captured(self, change) -> None:
+        _exp_on_mol_analysis_png_captured(self, change)
 
     def _on_measure_inbox_changed(self, change) -> None:
         _measure_on_inbox_changed(self, change)

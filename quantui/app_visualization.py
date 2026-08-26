@@ -14,11 +14,13 @@ from IPython.display import HTML, display
 
 from quantui import theme as _theme
 from quantui.app_builders import (
+    _MOL_ANALYSIS_PNG_INBOX_CLASS,
+    _MOL_RESULTS_PNG_INBOX_CLASS,
     _ORB_PNG_INBOX_CLASS,
     _TRAJ_PNG_INBOX_CLASS,
     _VIB_PNG_INBOX_CLASS,
 )
-from quantui.orbital_visualization import _png_capture_controls
+from quantui.orbital_visualization import _GENERIC_CAPTURE_JS, _png_capture_controls
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +118,7 @@ def show_result_3d(
                     style=app._viz_style,
                     lighting=app._viz_lighting,
                     bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+                    capture_class=_MOL_RESULTS_PNG_INBOX_CLASS,
                 )
                 app._set_html_output(app.result_viz_output, html)
 
@@ -140,6 +143,9 @@ def show_result_3d(
                     style=app._viz_style,
                     lighting=app._viz_lighting,
                     bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+                    capture_class=(
+                        _MOL_ANALYSIS_PNG_INBOX_CLASS if is_analysis_output else ""
+                    ),
                 )
                 if is_analysis_output:
                     # M-MEASURE: wires click-to-measure into the freshly
@@ -2593,32 +2599,6 @@ def _frame_stepper_controls(
     return bar + f"<script>{js}</script>"
 
 
-# UID-scoped capture function for the reorg-geometry viewer (M-EXPORT2 EXP2.2).
-# Every render of build_reorg_geometry_viewer_html gets a fresh uid (full
-# atomic HTML swap — see app_analysis.render_reorg_geometries), so, unlike the
-# isosurface viewer's single bare window.__quantuiIsoCapture global, this
-# defines a per-render global named after the uid to avoid one render's button
-# capturing a different render's (possibly already-detached) viewer.
-_REORG_CAPTURE_JS = """
-(function(){
-  var UID="__UID__";
-  window["__CAPFN__"] = function(transparent){
-    var vw = window["viewer_"+UID];
-    if(!vw || !vw.pngURI){ return null; }
-    if(!transparent){ return vw.pngURI(); }
-    var uri=null;
-    try{
-      vw.setBackgroundColor(__BG__, 0.0); vw.render();
-      uri=vw.pngURI();
-    } finally {
-      vw.setBackgroundColor(__BG__, 1.0); vw.render();
-    }
-    return uri;
-  };
-})();
-"""
-
-
 def build_reorg_geometry_viewer_html(
     geometries: list[dict],
     *,
@@ -2646,7 +2626,7 @@ def build_reorg_geometry_viewer_html(
 
     ``capture_class`` wires a "Save PNG" button (M-EXPORT2 EXP2.2), mirroring
     the isosurface viewer's capture bridge (ORBX.1) but with a uid-scoped
-    capture function — see ``_REORG_CAPTURE_JS``. Empty omits the button.
+    capture function — see ``_GENERIC_CAPTURE_JS``. Empty omits the button.
     """
     import json
     import re
@@ -2679,7 +2659,7 @@ def build_reorg_geometry_viewer_html(
     if capture_class:
         capture_fn = f"__quantuiReorgCapture_{uid}"
         capture_js = (
-            _REORG_CAPTURE_JS.replace("__UID__", uid)
+            _GENERIC_CAPTURE_JS.replace("__UID__", uid)
             .replace("__CAPFN__", capture_fn)
             .replace("__BG__", json.dumps(bgcolor))
         )
@@ -2928,7 +2908,7 @@ def build_trajectory_viewer_html(
     per-step annotations; a <2-frame trajectory renders as a static structure.
 
     ``capture_class`` wires a "Save PNG" button (M-EXPORT2 EXP2.2), the same
-    bridge as the reorg-geometry viewer (``_REORG_CAPTURE_JS`` reads off
+    bridge as the reorg-geometry viewer (``_GENERIC_CAPTURE_JS`` reads off
     ``window["viewer_"+UID]``, which 3Dmol.js sets regardless of what is
     displayed in it — nothing trajectory-specific needed). Empty omits the
     button.
@@ -2954,7 +2934,7 @@ def build_trajectory_viewer_html(
     if uid is not None and capture_class:
         capture_fn = f"__quantuiTrajCapture_{uid}"
         capture_js = (
-            _REORG_CAPTURE_JS.replace("__UID__", uid)
+            _GENERIC_CAPTURE_JS.replace("__UID__", uid)
             .replace("__CAPFN__", capture_fn)
             .replace("__BG__", json.dumps(bgcolor))
         )
@@ -3084,7 +3064,7 @@ def build_vib_viewer_html(
     caller can fall back to the legacy per-mode renderer.
 
     ``capture_class`` wires a "Save PNG" button (M-EXPORT2 EXP2.2), the same
-    viewer-agnostic bridge as the trajectory/reorg viewers (``_REORG_CAPTURE_JS``
+    viewer-agnostic bridge as the trajectory/reorg viewers (``_GENERIC_CAPTURE_JS``
     reads ``window["viewer_"+UID]`` directly, so it works whether or not the
     viewer has finished loading its initial mode by the time the button
     renders — capture just reads whatever is on screen when clicked). Empty
@@ -3141,7 +3121,7 @@ def build_vib_viewer_html(
     if capture_class:
         capture_fn = f"__quantuiVibCapture_{uid}"
         capture_js = (
-            _REORG_CAPTURE_JS.replace("__UID__", uid)
+            _GENERIC_CAPTURE_JS.replace("__UID__", uid)
             .replace("__CAPFN__", capture_fn)
             .replace("__BG__", json.dumps(bgcolor))
         )

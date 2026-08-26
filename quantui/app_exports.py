@@ -595,6 +595,147 @@ def on_vib_png_captured(app: Any, change: dict) -> None:
     _clear_inbox(app)
 
 
+def _on_mol_png_captured(
+    app: Any,
+    change: dict,
+    *,
+    inbox_attr: str,
+    status_attr: str,
+    molecule: Any,
+    slot_label: str,
+) -> None:
+    """Shared implementation for the molecule (top) viewer's three Save-PNG
+    buttons (M-EXPORT2 EXP2.2) — Calculate-tab preview, Results-tab viewer,
+    Analysis-tab viewer. These are the same underlying viewer
+    (``visualization_py3dmol.render_molecule_html``) rendered into three
+    independent output slots, not three different viewers, so one shared
+    implementation parameterized by which slot fired beats three near-copies
+    of ``on_reorg_png_captured``'s shape.
+
+    Each slot has its own persistent inbox/status attribute (never shared —
+    see the class-name comment on ``_MOL_*_PNG_INBOX_CLASS`` in
+    ``app_builders.py`` for why) and its own ``slot_label`` so a capture from
+    two slots showing the same molecule doesn't overwrite the same filename.
+    ``molecule`` is resolved by the caller at fire time (``app._molecule``
+    for Calculate/Results, ``app._analysis_displayed_molecule`` for
+    Analysis) since the Analysis-tab viewer can show a different molecule
+    than the one currently loaded on the Calculate tab (e.g. after a History
+    replay).
+    """
+    import base64
+    import binascii
+
+    uri = (change or {}).get("new") or ""
+    if not uri:
+        return
+
+    status = getattr(app, status_attr, None)
+
+    def _fail(msg: str) -> None:
+        if status is not None:
+            status.value = f'<span style="color:#b22">{msg}</span>'
+        _clear_inbox(app)
+
+    def _clear_inbox(a: Any) -> None:
+        box = getattr(a, inbox_attr, None)
+        if box is not None and box.value:
+            box.value = ""
+
+    if not uri.startswith(_PNG_URI_PREFIX):
+        logger.warning(
+            "molecule PNG capture (%s): unexpected data URI prefix", slot_label
+        )
+        _fail("Capture failed (unexpected image format).")
+        return
+    if len(uri) > _MAX_PNG_BYTES:
+        _fail("Capture failed (image too large).")
+        return
+
+    try:
+        raw = base64.b64decode(uri[len(_PNG_URI_PREFIX) :], validate=True)
+    except (binascii.Error, ValueError) as exc:
+        logger.warning(
+            "molecule PNG capture (%s): could not decode payload: %s", slot_label, exc
+        )
+        _fail("Capture failed (corrupt image data).")
+        return
+
+    formula = molecule.get_formula() if molecule is not None else "molecule"
+    method = str(getattr(getattr(app, "method_dd", None), "value", "") or "")
+    basis = str(getattr(getattr(app, "basis_dd", None), "value", "") or "")
+
+    try:
+        dest = export_destination(
+            app, "molecule PNG", formula, slot_label, suffix=".png"
+        )
+    except ValueError as exc:
+        _fail(str(exc))
+        return
+
+    # Provenance (M-EXPORT2 EXP2.4) — same argument as every other exporter
+    # in this module: cheap now, unrecoverable once the file has left the
+    # machine.
+    raw = _with_dpi(
+        raw,
+        None,
+        metadata={"Software": "QuantUI", "Method": method, "Basis": basis},
+    )
+    try:
+        dest.write_bytes(raw)
+    except OSError as exc:
+        logger.warning(
+            "molecule PNG capture (%s): could not write %s: %s", slot_label, dest, exc
+        )
+        _fail("Could not write the image (see log).")
+        return
+
+    logger.info("Saved molecule PNG (%s): %s (%d bytes)", slot_label, dest, len(raw))
+    if status is not None:
+        status.value = f'<span style="color:#2a7">Saved: {dest.name}</span>'
+    _clear_inbox(app)
+
+
+def on_mol_calc_png_captured(app: Any, change: dict) -> None:
+    """Save-PNG button on the Calculate-tab molecule preview."""
+    _on_mol_png_captured(
+        app,
+        change,
+        inbox_attr="_mol_calc_png_inbox",
+        status_attr="_mol_calc_png_status",
+        molecule=getattr(app, "_molecule", None),
+        slot_label="calc",
+    )
+
+
+def on_mol_results_png_captured(app: Any, change: dict) -> None:
+    """Save-PNG button on the Results-tab molecule viewer."""
+    _on_mol_png_captured(
+        app,
+        change,
+        inbox_attr="_mol_results_png_inbox",
+        status_attr="_mol_results_png_status",
+        molecule=getattr(app, "_molecule", None),
+        slot_label="results",
+    )
+
+
+def on_mol_analysis_png_captured(app: Any, change: dict) -> None:
+    """Save-PNG button on the Analysis-tab molecule viewer.
+
+    Uses ``_analysis_displayed_molecule``, not ``_molecule`` — the Analysis
+    tab can show a molecule from a History replay that differs from whatever
+    is currently loaded on the Calculate tab.
+    """
+    _on_mol_png_captured(
+        app,
+        change,
+        inbox_attr="_mol_analysis_png_inbox",
+        status_attr="_mol_analysis_png_status",
+        molecule=getattr(app, "_analysis_displayed_molecule", None),
+        slot_label="analysis",
+    )
+
+
 def on_traj_png_captured(
     app: Any, change: dict, *, formula: str = "", status: Any = None
 ) -> None:
