@@ -7,6 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-08-26
+
+### Added
+
+- **PNG export on the geometry-optimization trajectory, vibrational mode, and
+  molecule viewers** — the same camera-accurate Save-PNG capture already
+  available on the orbital isosurface and reorganization-energy geometry
+  viewers now covers every 3-D viewer in the app. The molecule viewer (shown
+  on the Calculate, Results, and Analysis tabs) captures only on the py3Dmol
+  backend, since Plotly already provides its own "download plot as PNG"
+  button; each of its three tabs gets an independent capture button so a
+  save from one tab can never be mislabeled with another tab's molecule or
+  overwrite another tab's file.
+
 ## [0.8.0] - 2026-08-25
 
 ### Added
