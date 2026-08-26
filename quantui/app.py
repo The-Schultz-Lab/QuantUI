@@ -171,6 +171,9 @@ from quantui.app_exports import (
 from quantui.app_exports import (
     on_reorg_png_captured as _exp_on_reorg_png_captured,
 )
+from quantui.app_exports import (
+    on_vib_png_captured as _exp_on_vib_png_captured,
+)
 from quantui.app_formatters import (
     format_freq_result as _fmt_freq_result,
 )
@@ -1437,6 +1440,8 @@ class QuantUIApp:
         vib_next_btn: Any
         _vib_export_btn: Any
         _vib_export_status: Any
+        _vib_png_inbox: Any
+        _vib_png_status: Any
         _last_vib_molecule: Any
 
     def __init__(self) -> None:
@@ -2402,6 +2407,12 @@ class QuantUIApp:
         # (M-EXPORT2 EXP2.2).
         self._reorg_png_inbox.observe(
             self._safe_cb(self._on_reorg_png_captured), names="value"
+        )
+        # Same bridge again — the vibrational single-viewer's Save-PNG button
+        # (M-EXPORT2 EXP2.2). Only fires for that path; the legacy per-mode
+        # plotlymol3d fallback never renders the button.
+        self._vib_png_inbox.observe(
+            self._safe_cb(self._on_vib_png_captured), names="value"
         )
         # Click-to-measure (M-MEASURE MEAS.2/3): a click in the Analysis-tab
         # viewer posts an atom index into this inbox the same way the PNG
@@ -3887,6 +3898,9 @@ class QuantUIApp:
 
     def _on_reorg_png_captured(self, change) -> None:
         _exp_on_reorg_png_captured(self, change)
+
+    def _on_vib_png_captured(self, change) -> None:
+        _exp_on_vib_png_captured(self, change)
 
     def _on_measure_inbox_changed(self, change) -> None:
         _measure_on_inbox_changed(self, change)

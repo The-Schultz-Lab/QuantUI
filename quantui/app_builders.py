@@ -46,6 +46,12 @@ _REORG_PNG_INBOX_CLASS = "quantui-reorg-png-inbox"
 # render — this just follows that existing convention.
 _TRAJ_PNG_INBOX_CLASS = "quantui-traj-png-inbox"
 
+# Same pattern again for the single-persistent-viewer vibrational mode
+# animation (M-EXPORT2 EXP2.2). Built once here, like the isosurface/reorg
+# inboxes — the vib panel's mode dropdown/export button/js bridge are already
+# one-time app_builders widgets, unlike the trajectory panel's.
+_VIB_PNG_INBOX_CLASS = "quantui-vib-png-inbox"
+
 # Friendlier labels for the library category filter.
 _CATEGORY_LABELS = {
     "diatomic": "Diatomics",
@@ -1900,10 +1906,27 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     # takes no visible space. See app_visualization._vib_bridge_set_mode.
     app._vib_js_bridge = widgets.Output(layout=layout_fn(margin="0", padding="0"))
 
+    # Hidden inbox for the single-viewer's Save-PNG button (M-EXPORT2 EXP2.2) —
+    # same write-into-DOM-node-then-sync-to-kernel bridge as the isosurface/
+    # reorg viewers. Only wired for the single-viewer (py3Dmol) path; the
+    # legacy plotlymol3d fallback has no equivalent capture global.
+    app._vib_png_inbox = widgets.Textarea(
+        value="", layout=layout_fn(width="1px", height="1px", visibility="hidden")
+    )
+    app._vib_png_inbox.add_class(_VIB_PNG_INBOX_CLASS)
+    app._vib_png_status = widgets.HTML(value="", layout=layout_fn(margin="0 0 0 8px"))
+
     app.vib_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
-                [vib_mode_row, app.vib_output, vib_export_row, app._vib_js_bridge],
+                [
+                    vib_mode_row,
+                    app.vib_output,
+                    vib_export_row,
+                    app._vib_png_status,
+                    app._vib_js_bridge,
+                    app._vib_png_inbox,
+                ],
                 layout=layout_fn(padding="8px"),
             )
         ],

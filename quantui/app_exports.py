@@ -503,6 +503,98 @@ def on_reorg_png_captured(app: Any, change: dict) -> None:
     _clear_inbox(app)
 
 
+def on_vib_png_captured(app: Any, change: dict) -> None:
+    """Write a PNG captured from the live vibrational single-viewer
+    (M-EXPORT2 EXP2.2).
+
+    Same capture/decode/save shape as ``on_reorg_png_captured``, fed by its
+    own inbox (``_vib_png_inbox`` / ``_VIB_PNG_INBOX_CLASS``). Only the
+    single-persistent-viewer (py3Dmol) path renders the Save-PNG button — see
+    ``build_vib_viewer_html`` — so this never fires from the legacy per-mode
+    plotlymol3d fallback, which has no equivalent capture bridge.
+    """
+    import base64
+    import binascii
+
+    uri = (change or {}).get("new") or ""
+    if not uri:
+        return
+
+    status = getattr(app, "_vib_png_status", None)
+
+    def _fail(msg: str) -> None:
+        if status is not None:
+            status.value = f'<span style="color:#b22">{msg}</span>'
+        _clear_inbox(app)
+
+    def _clear_inbox(a: Any) -> None:
+        box = getattr(a, "_vib_png_inbox", None)
+        if box is not None and box.value:
+            box.value = ""
+
+    if not uri.startswith(_PNG_URI_PREFIX):
+        logger.warning("vib PNG capture: unexpected data URI prefix")
+        _fail("Capture failed (unexpected image format).")
+        return
+    if len(uri) > _MAX_PNG_BYTES:
+        _fail("Capture failed (image too large).")
+        return
+
+    try:
+        raw = base64.b64decode(uri[len(_PNG_URI_PREFIX) :], validate=True)
+    except (binascii.Error, ValueError) as exc:
+        logger.warning("vib PNG capture: could not decode payload: %s", exc)
+        _fail("Capture failed (corrupt image data).")
+        return
+
+    mol = getattr(app, "_last_vib_molecule", None)
+    formula = mol.get_formula() if mol is not None else "molecule"
+
+    mode_label = "mode"
+    freq_cm1: str = ""
+    raw_mode = getattr(getattr(app, "vib_mode_dd", None), "value", None)
+    try:
+        if raw_mode is None:
+            raise TypeError("no mode selected")
+        mode_number = int(raw_mode)
+        mode_label = f"mode{mode_number}"
+        freq_result = getattr(app, "_last_vib_freq_result", None)
+        freqs = getattr(freq_result, "frequencies_cm1", None) if freq_result else None
+        if freqs and 0 < mode_number <= len(freqs):
+            freq_cm1 = f"{freqs[mode_number - 1]:.1f}"
+    except (TypeError, ValueError):
+        pass  # no mode selected yet — fall back to the generic "mode" label
+
+    method = str(getattr(getattr(app, "method_dd", None), "value", "") or "")
+    basis = str(getattr(getattr(app, "basis_dd", None), "value", "") or "")
+
+    try:
+        dest = export_destination(
+            app, "vibrational mode PNG", formula, mode_label, suffix=".png"
+        )
+    except ValueError as exc:
+        _fail(str(exc))
+        return
+
+    # Provenance (M-EXPORT2 EXP2.4) — same argument as the reorg/trajectory
+    # exporters: cheap now, unrecoverable once the file has left the machine.
+    metadata = {"Software": "QuantUI", "Method": method, "Basis": basis}
+    if freq_cm1:
+        metadata["Frequency (cm-1)"] = freq_cm1
+    raw = _with_dpi(raw, None, metadata=metadata)
+    try:
+        dest.write_bytes(raw)
+    except OSError as exc:
+        logger.warning("vib PNG capture: could not write %s: %s", dest, exc)
+        _fail("Could not write the image (see log).")
+        return
+
+    logger.info("Saved vibrational mode PNG: %s (%d bytes)", dest, len(raw))
+    if status is not None:
+        status.value = f'<span style="color:#2a7">Saved: {dest.name}</span>'
+    _clear_inbox(app)
+
+
 def on_traj_png_captured(
     app: Any, change: dict, *, formula: str = "", status: Any = None
 ) -> None:
