@@ -39,6 +39,33 @@ _ORB_PNG_INBOX_CLASS = "quantui-orb-png-inbox"
 # a capture from one viewer can never be mistaken for the other's.
 _REORG_PNG_INBOX_CLASS = "quantui-reorg-png-inbox"
 
+# Same pattern again for the geometry-optimization trajectory viewer
+# (M-EXPORT2 EXP2.2). Its inbox is built per-render in
+# app_visualization.show_opt_trajectory rather than once here, since that
+# panel's own widgets (export button/status) are already rebuilt on every
+# render — this just follows that existing convention.
+_TRAJ_PNG_INBOX_CLASS = "quantui-traj-png-inbox"
+
+# Same pattern again for the single-persistent-viewer vibrational mode
+# animation (M-EXPORT2 EXP2.2). Built once here, like the isosurface/reorg
+# inboxes — the vib panel's mode dropdown/export button/js bridge are already
+# one-time app_builders widgets, unlike the trajectory panel's.
+_VIB_PNG_INBOX_CLASS = "quantui-vib-png-inbox"
+
+# Same pattern for the molecule (top) viewer (M-EXPORT2 EXP2.2) — but this
+# viewer renders into up to THREE independent output slots (Calculate-tab
+# preview, Results-tab viewer, Analysis-tab viewer), and up to two of those
+# can show the same molecule simultaneously (a post-calc render populates
+# both Results and Analysis at once). Each slot needs its OWN class: the
+# capture JS finds its inbox with document.querySelector, which matches the
+# first element with that class anywhere on the page — sharing a class
+# across concurrently-visible viewers would let one viewer's button post
+# into a different viewer's inbox. Only wired for the py3Dmol backend; see
+# visualization_py3dmol.render_molecule_html's capture_class docstring.
+_MOL_CALC_PNG_INBOX_CLASS = "quantui-mol-calc-png-inbox"
+_MOL_RESULTS_PNG_INBOX_CLASS = "quantui-mol-results-png-inbox"
+_MOL_ANALYSIS_PNG_INBOX_CLASS = "quantui-mol-analysis-png-inbox"
+
 # Friendlier labels for the library category filter.
 _CATEGORY_LABELS = {
     "diatomic": "Diatomics",
@@ -1619,10 +1646,22 @@ def build_molecule_section(
         [app.mol_summary_compact, app.change_mol_btn],
         layout=layout_fn(align_items="center", gap="12px", padding="6px 0"),
     )
+    # Hidden inbox + status for the Calculate-tab preview viewer's Save-PNG
+    # button (M-EXPORT2 EXP2.2) — same bridge as the isosurface/reorg/vib
+    # viewers, own class since this slot can be visible at the same time as
+    # the Results/Analysis molecule viewers.
+    app._mol_calc_png_inbox = widgets.Textarea(
+        value="", layout=layout_fn(width="1px", height="1px", visibility="hidden")
+    )
+    app._mol_calc_png_inbox.add_class(_MOL_CALC_PNG_INBOX_CLASS)
+    app._mol_calc_png_status = widgets.HTML(value="")
+
     mol_container_children = [
         app.mol_input_expanded,
         app.mol_info_html,
         app.viz_output,
+        app._mol_calc_png_status,
+        app._mol_calc_png_inbox,
     ]
     if app.viz_backend_toggle is not None:
         mol_container_children.append(app.viz_backend_toggle)
@@ -1893,10 +1932,27 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     # takes no visible space. See app_visualization._vib_bridge_set_mode.
     app._vib_js_bridge = widgets.Output(layout=layout_fn(margin="0", padding="0"))
 
+    # Hidden inbox for the single-viewer's Save-PNG button (M-EXPORT2 EXP2.2) —
+    # same write-into-DOM-node-then-sync-to-kernel bridge as the isosurface/
+    # reorg viewers. Only wired for the single-viewer (py3Dmol) path; the
+    # legacy plotlymol3d fallback has no equivalent capture global.
+    app._vib_png_inbox = widgets.Textarea(
+        value="", layout=layout_fn(width="1px", height="1px", visibility="hidden")
+    )
+    app._vib_png_inbox.add_class(_VIB_PNG_INBOX_CLASS)
+    app._vib_png_status = widgets.HTML(value="", layout=layout_fn(margin="0 0 0 8px"))
+
     app.vib_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
-                [vib_mode_row, app.vib_output, vib_export_row, app._vib_js_bridge],
+                [
+                    vib_mode_row,
+                    app.vib_output,
+                    vib_export_row,
+                    app._vib_png_status,
+                    app._vib_js_bridge,
+                    app._vib_png_inbox,
+                ],
                 layout=layout_fn(padding="8px"),
             )
         ],
@@ -2605,12 +2661,24 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         value="",
         layout=layout_fn(display="none"),
     )
+    # Hidden inbox + status for the Results-tab viewer's Save-PNG button
+    # (M-EXPORT2 EXP2.2) — own class, same reasoning as the Calculate-tab one
+    # above (this slot and the Analysis-tab one can both show the same
+    # molecule at once, right after a calculation completes).
+    app._mol_results_png_inbox = widgets.Textarea(
+        value="", layout=layout_fn(width="1px", height="1px", visibility="hidden")
+    )
+    app._mol_results_png_inbox.add_class(_MOL_RESULTS_PNG_INBOX_CLASS)
+    app._mol_results_png_status = widgets.HTML(value="")
+
     app.results_tab_panel = widgets.VBox(
         [
             widgets.HTML('<h3 style="margin:14px 0 6px">Results</h3>'),
             app.result_output,
             app._viz_label,
             app.result_viz_output,
+            app._mol_results_png_status,
+            app._mol_results_png_inbox,
             app._result_dir_label,
             app._to_analysis_btn,
         ],
@@ -2623,6 +2691,17 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     # border fitted to the viewer. The class would add a second, full-width
     # box around it — the Output widget cannot shrink-wrap.
     app._analysis_mol_output = widgets.Output()
+
+    # Hidden inbox + status for the Analysis-tab viewer's Save-PNG button
+    # (M-EXPORT2 EXP2.2) — own class per the same cross-talk reasoning as the
+    # Calculate/Results slots. This viewer has two render paths (post-calc
+    # via show_result_3d, and the backend-toggle re-render in
+    # app._rerender_3d_views) — both must pass this same capture_class.
+    app._mol_analysis_png_inbox = widgets.Textarea(
+        value="", layout=layout_fn(width="1px", height="1px", visibility="hidden")
+    )
+    app._mol_analysis_png_inbox.add_class(_MOL_ANALYSIS_PNG_INBOX_CLASS)
+    app._mol_analysis_png_status = widgets.HTML(value="")
 
     # ── Click-to-measure (M-MEASURE MEAS.2-.6) ──────────────────────────
     # Hidden inbox for the click JS injected into the py3Dmol-rendered
@@ -2763,6 +2842,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         app._analysis_scroll_bridge,
         app._analysis_context_lbl,
         app._analysis_mol_output,
+        app._mol_analysis_png_status,
+        app._mol_analysis_png_inbox,
         app._measure_panel,
     ]
     if ana_backend_row is not None:

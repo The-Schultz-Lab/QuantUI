@@ -1475,6 +1475,38 @@ def _png_capture_controls(
     )
 
 
+# Generic, viewer-agnostic UID-scoped capture function (M-EXPORT2 EXP2.2).
+# Relocated here from app_visualization.py (2026-08-26) once a fourth viewer
+# (the molecule viewer) needed it from visualization_py3dmol.py, a module
+# below app_visualization.py in the import graph — this module has no
+# app-level dependencies, so it is the safe common home. Unlike
+# _PNG_CAPTURE_JS above (which reads live isosurface render options off the
+# viewer), this one only calls pngURI() on window["viewer_"+UID] — a global
+# 3Dmol.js sets for every viewer regardless of what is displayed in it — so
+# it works unmodified for the reorg-geometry, trajectory, vibrational, and
+# molecule viewers alike. Each caller gets its own uid-scoped
+# window[capture_fn] so one render's button can never capture a different
+# render's (possibly already-detached) viewer.
+_GENERIC_CAPTURE_JS = """
+(function(){
+  var UID="__UID__";
+  window["__CAPFN__"] = function(transparent){
+    var vw = window["viewer_"+UID];
+    if(!vw || !vw.pngURI){ return null; }
+    if(!transparent){ return vw.pngURI(); }
+    var uri=null;
+    try{
+      vw.setBackgroundColor(__BG__, 0.0); vw.render();
+      uri=vw.pngURI();
+    } finally {
+      vw.setBackgroundColor(__BG__, 1.0); vw.render();
+    }
+    return uri;
+  };
+})();
+"""
+
+
 def plot_cube_isosurface(
     cube_path: Path,
     *,

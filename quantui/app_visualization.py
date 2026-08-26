@@ -13,8 +13,14 @@ import ipywidgets as widgets
 from IPython.display import HTML, display
 
 from quantui import theme as _theme
-from quantui.app_builders import _ORB_PNG_INBOX_CLASS
-from quantui.orbital_visualization import _png_capture_controls
+from quantui.app_builders import (
+    _MOL_ANALYSIS_PNG_INBOX_CLASS,
+    _MOL_RESULTS_PNG_INBOX_CLASS,
+    _ORB_PNG_INBOX_CLASS,
+    _TRAJ_PNG_INBOX_CLASS,
+    _VIB_PNG_INBOX_CLASS,
+)
+from quantui.orbital_visualization import _GENERIC_CAPTURE_JS, _png_capture_controls
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +118,7 @@ def show_result_3d(
                     style=app._viz_style,
                     lighting=app._viz_lighting,
                     bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+                    capture_class=_MOL_RESULTS_PNG_INBOX_CLASS,
                 )
                 app._set_html_output(app.result_viz_output, html)
 
@@ -136,6 +143,9 @@ def show_result_3d(
                     style=app._viz_style,
                     lighting=app._viz_lighting,
                     bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+                    capture_class=(
+                        _MOL_ANALYSIS_PNG_INBOX_CLASS if is_analysis_output else ""
+                    ),
                 )
                 if is_analysis_output:
                     # M-MEASURE: wires click-to-measure into the freshly
@@ -327,6 +337,24 @@ def show_opt_trajectory(
             min_height="420px", width="100%", max_width="500px", overflow="hidden"
         )
     )
+    # Hidden inbox for the viewer's Save-PNG button (M-EXPORT2 EXP2.2) — same
+    # write-into-DOM-node-then-sync-to-kernel bridge as the isosurface/reorg
+    # viewers. Rebuilt every render like the export button/status below it,
+    # since this panel's widgets are not part of the one-time app_builders
+    # construction.
+    png_inbox = widgets.Textarea(
+        value="", layout=layout_fn(width="1px", height="1px", visibility="hidden")
+    )
+    png_inbox.add_class(_TRAJ_PNG_INBOX_CLASS)
+    png_status = widgets.HTML(value="", layout=layout_fn(margin="0 0 0 8px"))
+
+    def _on_traj_png_captured(change: dict) -> None:
+        from quantui import app_exports as _exp
+
+        _exp.on_traj_png_captured(app, change, formula=formula, status=png_status)
+
+    png_inbox.observe(app._safe_cb(_on_traj_png_captured), names="value")
+
     try:
         with _viz_render_event(app, task="trajectory", backend="py3dmol", n_frames=n):
             html = build_trajectory_viewer_html(
@@ -335,6 +363,7 @@ def show_opt_trajectory(
                 energies=list(energies) if energies else None,
                 rel_e=rel_e or None,
                 bgcolor=bgcolor,
+                capture_class=_TRAJ_PNG_INBOX_CLASS,
             )
         app._set_html_output(viewer_output, html)
     except Exception as exc:  # noqa: BLE001 — surface inline, never crash the tab
@@ -444,10 +473,11 @@ def show_opt_trajectory(
     new_children.append(viewer_output)
     new_children.append(
         widgets.HBox(
-            [export_btn, export_status],
+            [export_btn, export_status, png_status],
             layout=layout_fn(align_items="center", margin="4px 0"),
         )
     )
+    new_children.append(png_inbox)
     app.traj_output.children = tuple(new_children)
 
     try:
@@ -2569,32 +2599,6 @@ def _frame_stepper_controls(
     return bar + f"<script>{js}</script>"
 
 
-# UID-scoped capture function for the reorg-geometry viewer (M-EXPORT2 EXP2.2).
-# Every render of build_reorg_geometry_viewer_html gets a fresh uid (full
-# atomic HTML swap — see app_analysis.render_reorg_geometries), so, unlike the
-# isosurface viewer's single bare window.__quantuiIsoCapture global, this
-# defines a per-render global named after the uid to avoid one render's button
-# capturing a different render's (possibly already-detached) viewer.
-_REORG_CAPTURE_JS = """
-(function(){
-  var UID="__UID__";
-  window["__CAPFN__"] = function(transparent){
-    var vw = window["viewer_"+UID];
-    if(!vw || !vw.pngURI){ return null; }
-    if(!transparent){ return vw.pngURI(); }
-    var uri=null;
-    try{
-      vw.setBackgroundColor(__BG__, 0.0); vw.render();
-      uri=vw.pngURI();
-    } finally {
-      vw.setBackgroundColor(__BG__, 1.0); vw.render();
-    }
-    return uri;
-  };
-})();
-"""
-
-
 def build_reorg_geometry_viewer_html(
     geometries: list[dict],
     *,
@@ -2622,7 +2626,7 @@ def build_reorg_geometry_viewer_html(
 
     ``capture_class`` wires a "Save PNG" button (M-EXPORT2 EXP2.2), mirroring
     the isosurface viewer's capture bridge (ORBX.1) but with a uid-scoped
-    capture function — see ``_REORG_CAPTURE_JS``. Empty omits the button.
+    capture function — see ``_GENERIC_CAPTURE_JS``. Empty omits the button.
     """
     import json
     import re
@@ -2655,7 +2659,7 @@ def build_reorg_geometry_viewer_html(
     if capture_class:
         capture_fn = f"__quantuiReorgCapture_{uid}"
         capture_js = (
-            _REORG_CAPTURE_JS.replace("__UID__", uid)
+            _GENERIC_CAPTURE_JS.replace("__UID__", uid)
             .replace("__CAPFN__", capture_fn)
             .replace("__BG__", json.dumps(bgcolor))
         )
@@ -2890,6 +2894,7 @@ def build_trajectory_viewer_html(
     width: int = 460,
     height: int = 340,
     fps: int = 8,
+    capture_class: str = "",
 ) -> str:
     """Build an interactive py3Dmol view of a geometry-optimization trajectory.
 
@@ -2901,6 +2906,12 @@ def build_trajectory_viewer_html(
     rotation/zoom and flickering). Offline-safe via the vendored 3Dmol loader
     (``make_view``). ``energies`` (Hartree) and ``rel_e`` (kcal/mol) are optional
     per-step annotations; a <2-frame trajectory renders as a static structure.
+
+    ``capture_class`` wires a "Save PNG" button (M-EXPORT2 EXP2.2), the same
+    bridge as the reorg-geometry viewer (``_GENERIC_CAPTURE_JS`` reads off
+    ``window["viewer_"+UID]``, which 3Dmol.js sets regardless of what is
+    displayed in it — nothing trajectory-specific needed). Empty omits the
+    button.
     """
     import json
     import re
@@ -2917,12 +2928,25 @@ def build_trajectory_viewer_html(
     view.zoomTo()
     view_html = view._make_html()
 
-    if n <= 1:
-        return _theme.frame_viewer_html(view_html, width=width)
-
     m = re.search(r"3dmolviewer_(\w+)", view_html)
-    if m is None:
-        # can't wire controls without the viewer id
+    uid = m.group(1) if m is not None else None
+
+    if uid is not None and capture_class:
+        capture_fn = f"__quantuiTrajCapture_{uid}"
+        capture_js = (
+            _GENERIC_CAPTURE_JS.replace("__UID__", uid)
+            .replace("__CAPFN__", capture_fn)
+            .replace("__BG__", json.dumps(bgcolor))
+        )
+        view_html = (
+            view_html
+            + f"<script>{capture_js}</script>"
+            + _png_capture_controls(uid, capture_class, capture_fn=capture_fn)
+        )
+
+    if n <= 1 or uid is None:
+        # n<=1: static structure, no stepper needed. uid is None: can't wire
+        # controls without the viewer id either way.
         return _theme.frame_viewer_html(view_html, width=width)
 
     interval_ms = max(1, int(round(1000.0 / max(1, fps))))
@@ -2938,7 +2962,7 @@ def build_trajectory_viewer_html(
         "return s;"
     )
     controls = _frame_stepper_controls(
-        m.group(1),
+        uid,
         n,
         interval_ms,
         label_js=label_js,
@@ -3028,6 +3052,7 @@ def build_vib_viewer_html(
     bgcolor: str = "white",
     width: int = 460,
     height: int = 420,
+    capture_class: str = "",
 ) -> str:
     """Build a single py3Dmol viewer that holds every vibrational mode.
 
@@ -3037,6 +3062,16 @@ def build_vib_viewer_html(
     the camera is preserved across modes. Offline-safe via the vendored 3Dmol
     loader (``make_view``). Raises if displacements are missing/misshaped so the
     caller can fall back to the legacy per-mode renderer.
+
+    ``capture_class`` wires a "Save PNG" button (M-EXPORT2 EXP2.2), the same
+    viewer-agnostic bridge as the trajectory/reorg viewers (``_GENERIC_CAPTURE_JS``
+    reads ``window["viewer_"+UID]`` directly, so it works whether or not the
+    viewer has finished loading its initial mode by the time the button
+    renders — capture just reads whatever is on screen when clicked). Empty
+    omits the button. Deliberately not offered on the legacy per-mode
+    plotlymol3d fallback (``_render_vib_mode_plotlymol``) — that backend has no
+    equivalent client-side capture global, same reasoning as the main molecule
+    viewer (see M-EXPORT2 roadmap).
     """
     import json
     import re
@@ -3068,9 +3103,10 @@ def build_vib_viewer_html(
     if m_uid is None:
         raise ValueError("could not find py3Dmol viewer id")
 
+    uid = m_uid.group(1)
     interval_ms = max(1, int(round(1000.0 / max(1, fps))))
     js = (
-        _VIB_VIEWER_JS.replace("__UID__", m_uid.group(1))
+        _VIB_VIEWER_JS.replace("__UID__", uid)
         .replace("__SYM__", json.dumps(atoms))
         .replace("__BASE__", json.dumps(base.tolist()))
         .replace("__DISPL__", json.dumps(displ_map))
@@ -3081,7 +3117,20 @@ def build_vib_viewer_html(
         .replace("__BG__", json.dumps(bgcolor))
         .replace("__INIT__", str(int(initial_mode)))
     )
-    return _theme.frame_viewer_html(f"{view_html}<script>{js}</script>", width=width)
+    body = f"{view_html}<script>{js}</script>"
+    if capture_class:
+        capture_fn = f"__quantuiVibCapture_{uid}"
+        capture_js = (
+            _GENERIC_CAPTURE_JS.replace("__UID__", uid)
+            .replace("__CAPFN__", capture_fn)
+            .replace("__BG__", json.dumps(bgcolor))
+        )
+        body = (
+            body
+            + f"<script>{capture_js}</script>"
+            + _png_capture_controls(uid, capture_class, capture_fn=capture_fn)
+        )
+    return _theme.frame_viewer_html(body, width=width)
 
 
 def _vib_single_viewer_supported(app: Any, freq_result: Any) -> bool:
@@ -3115,7 +3164,13 @@ def _render_vib_single_viewer(
             app, task="vib_interactive", backend="py3dmol", source="single_viewer"
         ):
             html = build_vib_viewer_html(
-                molecule, freq_result, mode_numbers, initial_mode, fps=fps, bgcolor=bg
+                molecule,
+                freq_result,
+                mode_numbers,
+                initial_mode,
+                fps=fps,
+                bgcolor=bg,
+                capture_class=_VIB_PNG_INBOX_CLASS,
             )
     except Exception as exc:  # noqa: BLE001 — fall back to the legacy renderer
         try:
