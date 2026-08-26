@@ -26,7 +26,7 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
     QUANTUI_VERSION=0.8.1
 
 %help
-  QuantUI — GPU image (PySCF + gpu4pyscf on CUDA 12.x)
+  QuantUI — GPU image (PySCF + gpu4pyscf on CUDA 12.x, xtb GFN-FF pre-opt)
 
   Built for NCShare's H200 nodes. Every GPU invocation needs --nv, which is
   what makes the host driver visible inside the container:
@@ -87,10 +87,33 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
   set -eux
   export DEBIAN_FRONTEND=noninteractive
 
-  echo "── System python + venv ─────────────────────────────────────────────"
+  echo "── System python (3.11, via deadsnakes) + venv ──────────────────────"
+  # Ubuntu 24.04's own repos ship python3 as 3.12 ONLY — 3.9/3.10/3.11 are not
+  # packaged for noble at all (confirmed against packages.ubuntu.com; nothing
+  # to apt-pin here). That would silently put this image outside QuantUI's
+  # tested Python matrix (3.9-3.11, CLAUDE.md) and, concretely, outside what
+  # xtb (GFN-FF metal-capable classical pre-opt, DEC-018) can run on: xtb's
+  # PyPI wheels stop at cp311 — no cp312 build — and the sdist fallback means
+  # compiling xtb's own Fortran library from source (meson + a subproject
+  # fetch of xtb-6.5.1 + gfortran + BLAS/LAPACK), which is a heavy, untested
+  # addition to a from-scratch %post for a CPU-only optional backend. Pinning
+  # to 3.11 via deadsnakes is the same combination CI already tests
+  # (ci.yml's ubuntu job, python-version 3.11 + the [xtb] pip wheel) and costs
+  # nothing on the GPU side — cupy-cuda12x/gpu4pyscf-cuda12x/cutensor-cu12 all
+  # publish cp311 wheels too (gpu4pyscf/cutensor are py3-none; only cupy is
+  # version-specific and it covers 3.11 same as 3.12).
+  #
+  # Needs outbound access to ppa.launchpadcontent.net at build time — a build
+  # host whose network policy blocks Launchpad will need a mirrored/vendored
+  # PPA or a from-source python3.11 instead; that's a build-environment
+  # follow-up, not a code change.
   apt-get update
   apt-get install -y --no-install-recommends \
-    python3 python3-venv python3-pip ca-certificates
+    software-properties-common ca-certificates gnupg
+  add-apt-repository -y ppa:deadsnakes/ppa
+  apt-get update
+  apt-get install -y --no-install-recommends \
+    python3.11 python3.11-venv python3.11-distutils
   # No git: nothing is cloned here — QuantUI comes from PyPI — and this apt
   # step is the slowest part of the build on a poor mirror.
   rm -rf /var/lib/apt/lists/*
@@ -99,7 +122,7 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
   # externally-managed (PEP 668), so pip refuses to touch it without
   # --break-system-packages. Breaking the system python inside a container we
   # also want to apt-install into is a bad trade for saving one directory.
-  python3 -m venv /opt/venv
+  python3.11 -m venv /opt/venv
   export PATH="/opt/venv/bin:${PATH}"
   pip install --no-cache-dir --upgrade pip setuptools wheel
 
@@ -121,8 +144,13 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
   # hard-fail on 570. H200 is sm_90 and covered by prebuilt wheels either way,
   # so nothing here needs nvcc — the devel base is for CuPy's runtime JIT
   # (NVRTC), not for compiling this stack.
+  #
+  # xtb: GFN-FF metal-capable classical pre-optimization (DEC-018). Optional
+  # at the quantui.preopt level (falls back to the honest-failure message if
+  # absent) but there is no reason to ship without it here — it's a normal
+  # Linux pip wheel now that the venv above is pinned to 3.11.
   pip install --no-cache-dir \
-    "quantui[pyscf,ase,app,gpu-cuda12x]=={{ QUANTUI_VERSION }}"
+    "quantui[pyscf,ase,app,gpu-cuda12x,xtb]=={{ QUANTUI_VERSION }}"
 
   echo "── Build provenance ─────────────────────────────────────────────────"
   mkdir -p /opt/build-info
@@ -135,6 +163,11 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
 
   echo "── Import checks (CPU-only; device checks belong at runtime) ────────"
   python -c "import quantui, pyscf, ase; print('core OK')"
+
+  # xtb (GFN-FF) has no GPU dependency — unlike gpu4pyscf below, importing it
+  # (and exercising the actual ASE calculator import path quantui.preopt
+  # uses) is safe and meaningful on a GPU-less build host.
+  python -c "from xtb.ase.calculator import XTB; print('xtb (GFN-FF) OK')"
 
   # NOTE: `import gpu4pyscf` CANNOT run here. Its __config__ module calls
   # cupy.cuda.runtime.getDeviceCount() at import time, so merely importing it
@@ -170,29 +203,33 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
   set -eu
   export PATH="/opt/venv/bin:${PATH}"
 
-  echo "[1/6] core imports"
+  echo "[1/7] core imports"
   python -c "import quantui, pyscf, ase, numpy, scipy"
 
-  echo "[2/6] pyscf >= 2.13 (QuantUI's floor; freq/NMR paths depend on it)"
+  echo "[2/7] pyscf >= 2.13 (QuantUI's floor; freq/NMR paths depend on it)"
   python -c "import pyscf; v=tuple(int(x) for x in pyscf.__version__.split('.')[:2]); assert v >= (2,13), pyscf.__version__; print(pyscf.__version__)"
 
-  echo "[3/6] exactly one pyscf install (no second installer clobbered it)"
+  echo "[3/7] exactly one pyscf install (no second installer clobbered it)"
   test "$(pip list 2>/dev/null | grep -c '^pyscf ')" -eq 1
 
-  echo "[4/6] GPU wheels present (WITHOUT importing gpu4pyscf — see %post)"
+  echo "[4/7] GPU wheels present (WITHOUT importing gpu4pyscf — see %post)"
   # Same trap as %post: importing gpu4pyscf calls getDeviceCount() and dies on
   # a GPU-less build host. find_spec answers "is it installed" without running
   # any of its module-level code.
   python -c "import cupy; print('cupy', cupy.__version__)"
   python -c "import importlib.metadata as m; [m.version(d) for d in ('gpu4pyscf-cuda12x', 'cupy-cuda12x', 'cutensor-cu12')]; print('gpu wheels present')"
 
-  echo "[5/6] nothing in the image disables the GPU"
+  echo "[5/7] xtb (GFN-FF metal-capable classical pre-opt, DEC-018) present"
+  # No GPU dependency, so a real import (not find_spec) is safe here too.
+  python -c "from xtb.ase.calculator import XTB; print('xtb OK')"
+
+  echo "[6/7] nothing in the image disables the GPU"
   # A baked-in QUANTUI_DISABLE_GPU would make every run silently fall back to
   # CPU while still converging — the single most expensive failure mode here,
   # because the job succeeds and the number is right.
   test -z "${QUANTUI_DISABLE_GPU:-}"
 
-  echo "[6/6] QuantUI reports the pinned version"
+  echo "[7/7] QuantUI reports the pinned version"
   python -c "import quantui; assert quantui.__version__ == '{{ QUANTUI_VERSION }}', quantui.__version__; print(quantui.__version__)"
 
   echo "All build-time tests passed. Run verify-gpu.sh on a GPU node next."

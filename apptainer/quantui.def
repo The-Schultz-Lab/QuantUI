@@ -14,7 +14,8 @@ FROM: condaforge/miniforge3:26.1.1-3
   QuantUI — Educational Quantum Chemistry Interface
 
   Lightweight local teaching interface for running PySCF calculations
-  without a cluster. Includes PySCF, ASE, py3Dmol, and Voilà.
+  without a cluster. Includes PySCF, ASE, py3Dmol, Voilà, and xtb (GFN-FF
+  metal-capable classical pre-optimization, DEC-018).
 
   Usage:
     # Clean widget UI (students see no code — recommended for class)
@@ -94,6 +95,13 @@ FROM: condaforge/miniforge3:26.1.1-3
   # implicit 'defaults' channel, which both slows the solve and pulls from a
   # channel with separate terms of service.
   conda config --system --set channel_priority strict
+  # xtb-python here, not pip: DEC-018's "Linux gets the pip wheel" rule is
+  # about this project's OWN [xtb] extra for pip-based installs (CI, the cloud
+  # SessionStart hook, the GPU image). This image is conda-based end to end —
+  # environment.yml already carries xtb-python from conda-forge for local/
+  # Win/macOS parity, and conda-forge builds it against THIS env's own
+  # python=3.11 + BLAS, so there is no separate wheel-availability question
+  # here the way there is for pip.
   mamba create -y -n quantui --override-channels -c conda-forge \
     python=3.11 \
     jupyter \
@@ -106,7 +114,8 @@ FROM: condaforge/miniforge3:26.1.1-3
     matplotlib \
     plotly \
     h5py \
-    rdkit
+    rdkit \
+    xtb-python
 
   export PATH="/opt/conda/envs/quantui/bin:${PATH}"
 
@@ -132,6 +141,10 @@ FROM: condaforge/miniforge3:26.1.1-3
   # build here rather than ship blank viewers.
   python -c "from quantui.viz_assets import _JS_PATH, _js_data_uri, make_view; assert _JS_PATH.exists() and _JS_PATH.stat().st_size > 100000, 'vendored 3Dmol.js missing/too small'; assert _js_data_uri().startswith('data:text/javascript;base64,'); v = make_view(width=80, height=80); v.addModel('1\nH\nH 0 0 0', 'xyz'); h = v._make_html(); assert 'jsdelivr' not in h and 'data:text/javascript;base64,' in h, 'viewer not loading vendored 3Dmol offline'; print('offline 3Dmol OK')"
   python -c "import ase; print('ASE OK')"
+  # No GPU dependency (GFN-FF is a Fortran CPU force field, unlike gpu4pyscf
+  # in quantui-gpu.def), so importing — not just find_spec-probing — is safe
+  # on the build host and catches a broken libxtb link at build time.
+  python -c "from xtb.ase.calculator import XTB; print('xtb (GFN-FF) OK')"
   python -c "from quantui import optimize_geometry; print('optimize_geometry OK')"
   python -c "from quantui import run_freq_calc, run_tddft_calc; print('freq/tddft OK')"
   python -c "from quantui.app import QuantUIApp; print('QuantUIApp OK')"
@@ -174,6 +187,7 @@ EOF
   python -c "import pyscf" || exit 1
   python -c "import py3Dmol" || exit 1
   python -c "import ase" || exit 1
+  python -c "from xtb.ase.calculator import XTB; print('xtb (GFN-FF) OK')" || exit 1
   python -c "from quantui import Molecule; print('Molecule OK')" || exit 1
   python -c "from quantui.app import QuantUIApp; print('QuantUIApp OK')" || exit 1
   echo "All tests passed!"

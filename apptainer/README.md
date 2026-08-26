@@ -448,12 +448,14 @@ flagged values in the sbatch template.
 | --- | --- | --- |
 | Base | `condaforge/miniforge3` | `nvidia/cuda:12.8.1-devel-ubuntu24.04` |
 | Installer | mamba + pip | **pip only** |
+| Python | 3.11 (conda env pin) | **3.11 via deadsnakes** (base image ships 3.12 only) |
 | QuantUI source | working tree (`%files`) | **pinned release from PyPI** |
 | GPU | none | `gpu4pyscf` / `cupy` / `cutensor` via the `gpu-cuda12x` extra |
+| Metal pre-opt | xtb-python via conda-forge | xtb via the `xtb` pip extra |
 | Needs `--nv` | no | **yes, on every invocation** |
 | Default action | launches Voilà or JupyterLab | none — `exec` what you want |
 
-Three choices worth the words:
+Four choices worth the words:
 
 **One installer, not two.** The CPU image uses conda for the scientific stack
 because conda-forge's `pyscf` is prebuilt against conda's BLAS. Mixing conda and
@@ -472,6 +474,18 @@ it ties the image to one person's working tree.
 `cuda13x` would hard-fail on 570. H200 is `sm_90` and has prebuilt wheels on
 both lines, so no `nvcc` build is needed either way — the `devel` base image is
 there for CuPy's runtime JIT (NVRTC), not for compiling this stack.
+
+**Python pinned to 3.11 via deadsnakes, not the base image's 3.12.** Ubuntu
+24.04 packages `python3` as 3.12 only — 3.9/3.10/3.11 aren't in noble's repos
+at all. That's outside QuantUI's tested matrix (3.9-3.11), and concretely
+breaks `xtb` (GFN-FF metal-capable classical pre-opt, DEC-018): its PyPI
+wheels stop at `cp311`, so on stock 3.12 `pip install` would fall back to
+building xtb's own Fortran library from source — a heavy addition to a
+minimal `%post` for what's normally a one-line optional extra. Pinning to
+3.11 makes `xtb` a normal wheel install and matches the exact combination CI
+already tests (`ci.yml`'s ubuntu job). All the GPU wheels above (`cupy`,
+`gpu4pyscf`, `cutensor`) publish `cp311` builds too, so nothing is traded away
+to get it. Needs outbound access to `ppa.launchpadcontent.net` at build time.
 
 ### Build
 

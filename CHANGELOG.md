@@ -7,6 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **`apptainer/quantui-gpu.def` never installed the `xtb` extra**, so GFN-FF
+  metal-capable classical pre-optimization (DEC-018) was unavailable in every
+  GPU/HPC image — the app correctly reported the honest-failure message
+  ("RDKit could not perceive bonds ... and the GFN-FF (xtb) metal backend is
+  not installed"), but the underlying cause was a container gap, not a
+  missing local install. Fixed by pinning the image's Python to 3.11 via the
+  deadsnakes PPA (Ubuntu 24.04's own repos ship 3.12 only, and `xtb`'s PyPI
+  wheels stop at `cp311`) and adding `xtb` to the pip extras. `quantui.def`
+  (the CPU teaching image) gained the equivalent `xtb-python` conda-forge
+  package, which it had also been missing despite `local-setup/environment.yml`
+  already carrying it for local conda installs.
+
 ## [0.8.1] - 2026-08-26
 
 ### Added
