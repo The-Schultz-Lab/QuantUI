@@ -1228,6 +1228,7 @@ class QuantUIApp:
         _files_up_btn: Any
         gpu_enabled_cb: Any
         density_fit_enabled_cb: Any
+        execution_backend_dd: Any
         help_content_html: Any
         help_tab_panel: Any
         help_topic_dd: Any
@@ -1266,6 +1267,8 @@ class QuantUIApp:
         run_panel: Any
         run_status: Any
         _run_elapsed_lbl: Any
+        _slurm_job_banner: Any
+        _slurm_reconnect_btn: Any
         solvent_cb: Any
         solvent_dd: Any
         step_progress: Any
