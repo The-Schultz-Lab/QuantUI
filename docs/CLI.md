@@ -292,12 +292,12 @@ quantui analytics build -o /var/reports/quantui-$(date +%F).html
 ## Adding a new subcommand
 
 Each verb is one `_cmd_<verb>(args: argparse.Namespace) -> int` in
-[`quantui/cli.py`](../quantui/cli.py) plus a registration in
+[`quantui/cli.py`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/quantui/cli.py) plus a registration in
 `_build_parser`. The pattern is short by design — `gpu check`,
 `log tail`, and `analytics build` all fit in well under 50 lines of
 production code apiece. See the module docstring for the contract.
 
-Tests live in [`tests/test_cli.py`](../tests/test_cli.py) — every
+Tests live in [`tests/test_cli.py`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/tests/test_cli.py) — every
 subcommand should cover its happy path, its empty/missing-data path,
 and any flag-specific behavior (e.g. `--open` was tested against both
 a successful `webbrowser.open` and a failed one).

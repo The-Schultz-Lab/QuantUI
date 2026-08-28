@@ -1,0 +1,454 @@
+/* QuantUI landing page — scoped inside MkDocs Material content area */
+
+.quantui-landing {
+  --quantui-max: 1160px;
+  --quantui-narrow: 780px;
+  color: #334155;
+  line-height: 1.6;
+}
+
+.quantui-landing a {
+  color: inherit;
+}
+
+.quantui-landing img,
+.quantui-landing svg {
+  display: block;
+  max-width: 100%;
+}
+
+/* Break out of Material article padding for full-bleed sections */
+.quantui-landing .quantui-bleed {
+  width: 100vw;
+  position: relative;
+  left: 50%;
+  right: 50%;
+  margin-left: -50vw;
+  margin-right: -50vw;
+}
+
+.quantui-landing .container {
+  max-width: var(--quantui-max);
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+.quantui-landing .container--narrow {
+  max-width: var(--quantui-narrow);
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+/* Hide the auto-generated page title on the home landing */
+.md-typeset .quantui-landing + h1,
+.md-content__inner > h1:first-child {
+  display: none;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+.quantui-landing .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.7rem 1.4rem;
+  border-radius: 8px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-decoration: none;
+  border: 2px solid transparent;
+  transition: all 0.18s ease;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.quantui-landing .btn--primary {
+  background: #2563eb;
+  color: #ffffff !important;
+  box-shadow: 0 1px 4px rgba(37, 99, 235, 0.35);
+}
+
+.quantui-landing .btn--primary:hover {
+  background: #1d4ed8;
+  box-shadow: 0 4px 18px rgba(37, 99, 235, 0.5);
+  transform: translateY(-1px);
+}
+
+.quantui-landing .btn--outline {
+  background: transparent;
+  color: #f8fafc !important;
+  border-color: rgba(248, 250, 252, 0.28);
+}
+
+.quantui-landing .btn--outline:hover {
+  background: rgba(248, 250, 252, 0.07);
+  border-color: rgba(248, 250, 252, 0.55);
+}
+
+/* ── Pills ─────────────────────────────────────────────────────────── */
+.quantui-landing .pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: rgba(37, 99, 235, 0.15);
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  color: #93c5fd;
+  text-decoration: none;
+}
+
+.quantui-landing .pill--teal {
+  background: rgba(8, 145, 178, 0.14);
+  border-color: rgba(8, 145, 178, 0.35);
+  color: #67e8f9;
+}
+
+/* ── Hero ─────────────────────────────────────────────────────────── */
+.quantui-landing .hero {
+  background:
+    radial-gradient(ellipse 75% 55% at 72% 42%, rgba(8, 145, 178, 0.13) 0%, transparent 58%),
+    radial-gradient(ellipse 55% 75% at 18% 62%, rgba(37, 99, 235, 0.15) 0%, transparent 52%),
+    linear-gradient(158deg, #0f172a 0%, #111827 55%, #0c1928 100%);
+  padding: 4rem 0 4.5rem;
+  overflow: hidden;
+}
+
+.quantui-landing .hero__inner {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 3.5rem;
+  align-items: center;
+}
+
+.quantui-landing .hero__eyebrow {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+
+.quantui-landing .hero__title {
+  font-size: clamp(2.25rem, 5vw, 3.125rem);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+  color: #f8fafc;
+  margin: 0 0 1.25rem;
+  border: none;
+}
+
+.quantui-landing .hero__subtitle {
+  font-size: 1.125rem;
+  color: #94a3b8;
+  line-height: 1.65;
+  max-width: 520px;
+  margin: 0 0 2rem;
+}
+
+.quantui-landing .hero__actions {
+  display: flex;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+  margin-bottom: 2rem;
+}
+
+.quantui-landing .hero__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.quantui-landing .hero__stat {
+  font-size: 0.8125rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.quantui-landing .hero__sep {
+  color: #334155;
+}
+
+.quantui-landing .hero__link {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
+.quantui-landing .hero__link:hover {
+  color: #bfdbfe;
+}
+
+.quantui-landing .hero__visual {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+@media (max-width: 768px) {
+  .quantui-landing .hero__inner {
+    grid-template-columns: 1fr;
+  }
+
+  .quantui-landing .hero__visual {
+    display: none;
+  }
+}
+
+/* Animated atom SVG */
+.quantui-landing .atom-svg {
+  width: 260px;
+  height: 260px;
+}
+
+.quantui-landing .ring {
+  transform-origin: 140px 140px;
+}
+
+.quantui-landing .ring--1 {
+  animation: quantui-spin1 9s linear infinite;
+}
+
+.quantui-landing .ring--2 {
+  animation: quantui-spin2 13s linear infinite reverse;
+  transform: rotate(60deg);
+}
+
+.quantui-landing .ring--3 {
+  animation: quantui-spin3 17s linear infinite;
+  transform: rotate(120deg);
+}
+
+@keyframes quantui-spin1 {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes quantui-spin2 {
+  to {
+    transform: rotate(-300deg);
+  }
+}
+
+@keyframes quantui-spin3 {
+  to {
+    transform: rotate(480deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quantui-landing .ring {
+    animation-play-state: paused;
+  }
+}
+
+/* ── Sections ─────────────────────────────────────────────────────── */
+.quantui-landing .section {
+  padding: 4rem 0;
+  background: var(--md-default-bg-color, #ffffff);
+}
+
+.quantui-landing .section--tinted {
+  background: var(--md-code-bg-color, #f8fafc);
+  border-top: 1px solid var(--md-default-fg-color--lightest, #e2e8f0);
+  border-bottom: 1px solid var(--md-default-fg-color--lightest, #e2e8f0);
+}
+
+[data-md-color-scheme="slate"] .quantui-landing .section--tinted {
+  background: var(--md-code-bg-color, #1e293b);
+}
+
+.quantui-landing .section__title {
+  font-size: clamp(1.5rem, 3vw, 1.875rem);
+  font-weight: 700;
+  color: var(--md-default-fg-color, #0f172a);
+  text-align: center;
+  margin: 0 0 0.6rem;
+  letter-spacing: -0.025em;
+  border: none;
+}
+
+.quantui-landing .section__subtitle {
+  font-size: 1.0625rem;
+  color: var(--md-default-fg-color--light, #64748b);
+  text-align: center;
+  max-width: 540px;
+  margin: 0 auto 2.5rem;
+  line-height: 1.65;
+}
+
+.quantui-landing .section__cta {
+  text-align: center;
+  margin-top: 2rem;
+}
+
+/* ── Feature cards ────────────────────────────────────────────────── */
+.quantui-landing .features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+}
+
+@media (max-width: 900px) {
+  .quantui-landing .features-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .quantui-landing .features-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.quantui-landing .card {
+  background: var(--md-default-bg-color, #ffffff);
+  border-radius: 14px;
+  border: 1px solid var(--md-default-fg-color--lightest, #e2e8f0);
+  padding: 1.75rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 4px 16px rgba(0, 0, 0, 0.07);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.quantui-landing .card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.07), 0 14px 36px rgba(37, 99, 235, 0.15);
+}
+
+.quantui-landing .feature-card__icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  margin-bottom: 1.1rem;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(8, 145, 178, 0.1));
+  border: 1px solid rgba(37, 99, 235, 0.12);
+}
+
+.quantui-landing .feature-card__title {
+  font-size: 1.0625rem;
+  font-weight: 700;
+  color: var(--md-default-fg-color, #0f172a);
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.015em;
+}
+
+.quantui-landing .feature-card__body {
+  font-size: 0.9375rem;
+  color: var(--md-default-fg-color--light, #475569);
+  line-height: 1.65;
+  margin: 0;
+}
+
+.quantui-landing .inline-code {
+  font-family: var(--md-code-font, monospace);
+  font-size: 0.8rem;
+  background: var(--md-code-bg-color, #f1f5f9);
+  border: 1px solid var(--md-default-fg-color--lightest, #e2e8f0);
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+}
+
+/* ── Gallery ──────────────────────────────────────────────────────── */
+.quantui-landing .gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+
+@media (max-width: 720px) {
+  .quantui-landing .gallery-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.quantui-landing .gallery-figure {
+  margin: 0;
+  background: var(--md-default-bg-color, #ffffff);
+  border: 1px solid var(--md-default-fg-color--lightest, #e2e8f0);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 4px 16px rgba(0, 0, 0, 0.07);
+  display: flex;
+  flex-direction: column;
+}
+
+.quantui-landing .gallery-figure img,
+.quantui-landing .gallery-figure iframe {
+  width: 100%;
+  display: block;
+  background: #ffffff;
+  border: 0;
+}
+
+.quantui-landing .gallery-figure iframe {
+  height: 400px;
+}
+
+.quantui-landing .gallery-figure figcaption {
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--md-default-fg-color--lightest, #eef2f7);
+}
+
+.quantui-landing .gallery-figure figcaption strong {
+  display: block;
+  color: var(--md-default-fg-color, #0f172a);
+  font-weight: 650;
+}
+
+.quantui-landing .gallery-figure figcaption span {
+  display: block;
+  color: var(--md-default-fg-color--light, #64748b);
+  font-size: 0.9rem;
+  margin-top: 0.25rem;
+}
+
+.quantui-landing .gallery-figure figcaption a {
+  color: #2563eb;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.quantui-landing .gallery-figure figcaption a:hover {
+  text-decoration: underline;
+}
+
+.quantui-landing .gallery-badge {
+  color: #2563eb;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* ── Quick-start strip ────────────────────────────────────────────── */
+.quantui-landing .quickstart {
+  text-align: center;
+  padding: 3rem 0;
+}
+
+.quantui-landing .quickstart__title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 0.75rem;
+  border: none;
+}
+
+.quantui-landing .quickstart__text {
+  color: var(--md-default-fg-color--light, #64748b);
+  margin: 0 0 1.5rem;
+}
+
+.quantui-landing .quickstart .btn--primary {
+  color: #ffffff !important;
+}
+
+[data-md-color-scheme="slate"] .quantui-landing .quickstart .btn--primary {
+  box-shadow: 0 2px 12px rgba(37, 99, 235, 0.4);
+}
