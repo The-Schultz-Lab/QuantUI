@@ -54,6 +54,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# MkDocs build output
+site/
+
 planning/
 nul
 /temp - untracked/
