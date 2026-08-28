@@ -5,15 +5,12 @@ Tests for SLURM dispatch helpers and app integration utilities.
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
-
-from quantui.backends.base import CalculationRequest
+from quantui.app_slurm import use_slurm_execution
 from quantui.backends.dispatch import (
     build_calculation_request,
     calc_type_key_from_app,
     is_slurm_available,
 )
-from quantui.app_slurm import use_slurm_execution
 
 
 def _fake_app(**overrides):

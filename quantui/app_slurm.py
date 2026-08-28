@@ -12,8 +12,7 @@ import json
 import logging
 import threading
 import time
-from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from IPython.display import HTML
 
@@ -47,9 +46,7 @@ def startup_slurm_check(app: Any) -> None:
         return
     ensure_job_registry(app)
     active = [
-        r
-        for r in app._job_registry.list_active()
-        if r.backend_id == "cluster_slurm"
+        r for r in app._job_registry.list_active() if r.backend_id == "cluster_slurm"
     ]
     if not active:
         return
@@ -65,7 +62,9 @@ def startup_slurm_check(app: Any) -> None:
 def submit_slurm_run(app: Any) -> None:
     """Submit the current configuration to SLURM and start the monitor thread."""
     if not is_slurm_available():
-        app.run_status.value = "SLURM is not available on this system (sbatch not found)."
+        app.run_status.value = (
+            "SLURM is not available on this system (sbatch not found)."
+        )
         return
 
     calc_type = calc_type_key_from_app(app)
@@ -146,7 +145,9 @@ def attach_slurm_job(app: Any, request_id: str) -> None:
     app.cancel_btn.disabled = False
     app.log_clear_btn.disabled = True
     app.run_btn.disabled = True
-    app.run_status.value = f"Reconnected to SLURM job {record.slurm_job_id or request_id}."
+    app.run_status.value = (
+        f"Reconnected to SLURM job {record.slurm_job_id or request_id}."
+    )
     _hide_slurm_banner(app)
     threading.Thread(
         target=_monitor_slurm_job,
@@ -226,7 +227,11 @@ def _ingest_success(app: Any, record: Any) -> None:
         return
 
     payload = json.loads(result_path.read_text(encoding="utf-8"))
-    log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
+    log_text = (
+        log_path.read_text(encoding="utf-8", errors="replace")
+        if log_path.exists()
+        else ""
+    )
 
     from quantui.session_calc import SessionResult
 

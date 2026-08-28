@@ -23,7 +23,9 @@ def calc_type_key_from_app(app: Any) -> str:
     return calc_type_key(app)
 
 
-def build_calculation_request(app: Any, *, request_id: str | None = None) -> CalculationRequest:
+def build_calculation_request(
+    app: Any, *, request_id: str | None = None
+) -> CalculationRequest:
     """Serialize the current Calculate-tab configuration into a backend request."""
     mol = app._molecule
     if mol is None:
