@@ -9,6 +9,9 @@ repos:
       - id: end-of-file-fixer
         exclude: "notebooks/"   # notebooks manage their own line endings
       - id: check-yaml
+        # mkdocs.yml uses Material's !!python/name: tags for emoji config;
+        # the stock YAML parser rejects those without --unsafe.
+        exclude: ^mkdocs\.yml$
       - id: check-json
         exclude: "notebooks/"   # notebook JSON is managed by Jupyter
       - id: check-merge-conflict
