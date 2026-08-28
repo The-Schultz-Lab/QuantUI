@@ -82,7 +82,7 @@ Issues = "https://github.com/The-Schultz-Lab/QuantUI/issues"
 quantui = "quantui.cli:main"
 
 [tool.setuptools]
-packages = ["quantui"]
+packages = ["quantui", "quantui.backends"]
 
 [tool.setuptools.package-data]
 # Bundled molecule library (M-STRUCT): the indexed SQLite store + the
