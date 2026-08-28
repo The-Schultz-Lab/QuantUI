@@ -1092,6 +1092,20 @@ class _LogCapture:
     def getvalue(self) -> str:
         return self._buf.getvalue()
 
+    def seed_prior(self, text: str) -> None:
+        """Prepend output from an earlier interrupted chunk (resume / ISSUE.9).
+
+        Seeds the capture buffer and the live Output widget so the archived
+        ``pyscf.log`` and the on-screen log both show the full story.
+        """
+        if not text:
+            return
+        try:
+            self._w.append_stdout(text)
+        except Exception:  # noqa: BLE001 — never let the log kill a run
+            pass
+        self._buf.write(text)
+
 
 # ══ ANALYSIS CONTEXT ═════════════════════════════════════════════════════════
 
@@ -5138,6 +5152,15 @@ class QuantUIApp:
             and self._resume_cb.value
             and getattr(self, "_checkpoint_resumable", False)
         )
+        if _ckpt is not None and not _resume:
+            _ckpt.clear_run_log()
+        elif _resume and _ckpt is not None:
+            _prior_log = _ckpt.read_run_log()
+            if _prior_log:
+                log.seed_prior(_prior_log)
+
+        _run_saved = False
+        _run_was_cancelled = False
 
         # The run header (structured banner) is written synchronously + atomically
         # on the main thread by ``on_run_clicked`` → ``_write_run_header`` BEFORE
@@ -5700,6 +5723,7 @@ class QuantUIApp:
                     calc_type=save_type,
                     spectra=save_spectra,
                 )
+                _run_saved = True
                 self._last_result_dir = _saved_dir
                 # Result folder is now on disk —
                 # the "Export bundle (.zip)" button has something to zip.
@@ -5941,6 +5965,7 @@ class QuantUIApp:
 
         except _CalcCancelled:
             _elapsed = time.perf_counter() - _run_wall_t
+            _run_was_cancelled = True
             # Clear the cancel flag FIRST: the next line writes through
             # ``log`` (``_LogCapture.write``), which re-raises _CalcCancelled
             # while the flag is still set — that would propagate out of this
@@ -6053,7 +6078,17 @@ class QuantUIApp:
                 log.stop_heartbeat()
             except Exception:  # noqa: BLE001 — teardown must not mask a failure
                 pass
-            self._finish_run_checkpoint(_ckpt)
+            _run_log_text = ""
+            try:
+                _run_log_text = log.getvalue()
+            except Exception:  # noqa: BLE001 — teardown must not mask a failure
+                pass
+            self._finish_run_checkpoint(
+                _ckpt,
+                run_saved=_run_saved,
+                run_cancelled=_run_was_cancelled,
+                run_log=_run_log_text,
+            )
             self._activity_end(kind="compute")
 
     # ── Live elapsed ticker ────────────────────────────────────────────────
@@ -6267,7 +6302,14 @@ class QuantUIApp:
         except Exception:  # noqa: BLE001 — a hint must never mask the error
             return ""
 
-    def _finish_run_checkpoint(self, ckpt: Optional[Any]) -> None:
+    def _finish_run_checkpoint(
+        self,
+        ckpt: Optional[Any],
+        *,
+        run_saved: bool = False,
+        run_cancelled: bool = False,
+        run_log: str = "",
+    ) -> None:
         """Close out *ckpt* after a run ends, however it ended.
 
         Runs from the ``finally`` of ``_do_run``, so it is reached on success,
@@ -6276,12 +6318,20 @@ class QuantUIApp:
         only they know whether "finished" means converged, and a run that
         stopped early must keep its resumable state.
 
-        What happens here is bookkeeping: refresh the resume offer so it
-        reflects reality, and prune old checkpoints so the directory doesn't
-        grow without bound.
+        What happens here is bookkeeping: persist or clear the run log for
+        resume continuity (CHK.8b / ISSUE.9), refresh the resume offer, and
+        prune old checkpoints so the directory doesn't grow without bound.
         """
         try:
-            if ckpt is not None and self._cancel_event.is_set():
+            if ckpt is not None:
+                if run_saved:
+                    ckpt.clear_run_log()
+                elif run_log.strip():
+                    ckpt.write_run_log(run_log)
+        except Exception:  # noqa: BLE001 — teardown must not mask a failure
+            pass
+        try:
+            if ckpt is not None and run_cancelled:
                 ckpt.mark_interrupted()
         except Exception:  # noqa: BLE001 — teardown must not mask a failure
             pass

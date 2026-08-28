@@ -25,24 +25,24 @@ Real output from QuantUI, straight from the app:
 <table>
   <tr>
     <td width="50%" align="center" valign="top">
-      <img src="docs/images/cisplatin_lumo.png" alt="Cisplatin LUMO isosurface" width="400"><br>
+      <img src="https://raw.githubusercontent.com/The-Schultz-Lab/QuantUI/main/docs/images/cisplatin_lumo.png" alt="Cisplatin LUMO isosurface" width="400"><br>
       <b>Cisplatin LUMO</b><br>
       <sub>Molecular-orbital isosurface · B3LYP/LANL2DZ (ECP on Pt &amp; Cl)</sub>
     </td>
     <td width="50%" align="center" valign="top">
-      <img src="docs/images/aspartame_orbital_diagram.png" alt="Aspartame orbital energy-level diagram" width="300"><br>
+      <img src="https://raw.githubusercontent.com/The-Schultz-Lab/QuantUI/main/docs/images/aspartame_orbital_diagram.png" alt="Aspartame orbital energy-level diagram" width="300"><br>
       <b>Aspartame orbital energies</b><br>
       <sub>Occupied/virtual levels · HOMO–LUMO gap 6.09 eV · B3LYP/6-31G*</sub>
     </td>
   </tr>
   <tr>
     <td width="50%" align="center" valign="top">
-      <img src="docs/images/benzene_ir_spectrum.png" alt="Benzene IR spectrum" width="400"><br>
+      <img src="https://raw.githubusercontent.com/The-Schultz-Lab/QuantUI/main/docs/images/benzene_ir_spectrum.png" alt="Benzene IR spectrum" width="400"><br>
       <b>Benzene IR spectrum</b><br>
       <sub>Analytical Hessian · ωB97X-D/6-31G · the four IR-active bands</sub>
     </td>
     <td width="50%" align="center" valign="top">
-      <img src="docs/images/cisplatin_optimization.png" alt="Cisplatin geometry-optimization energy convergence" width="400"><br>
+      <img src="https://raw.githubusercontent.com/The-Schultz-Lab/QuantUI/main/docs/images/cisplatin_optimization.png" alt="Cisplatin geometry-optimization energy convergence" width="400"><br>
       <b>Geometry optimization</b><br>
       <sub>Cisplatin relaxing over 21 BFGS steps · B3LYP/LANL2DZ</sub>
     </td>

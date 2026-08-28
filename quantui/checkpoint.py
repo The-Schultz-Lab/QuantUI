@@ -370,6 +370,35 @@ class Checkpoint:
             detail = ", ".join(f"{k}={v}" for k, v in sorted(fields.items()))
             self._log(f"saved — {detail}")
 
+    @property
+    def run_log_path(self) -> Path:
+        """Accumulated stdout for cancel/resume continuity (CHK.8b / ISSUE.9)."""
+        return self.dir / "run.log"
+
+    def write_run_log(self, text: str) -> None:
+        """Persist the run log snapshot for a later resume."""
+        if not text:
+            return
+        try:
+            self.dir.mkdir(parents=True, exist_ok=True)
+            self.run_log_path.write_text(text, encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001 — never break the calculation
+            logger.debug("checkpoint run-log write failed for %s: %s", self.dir, exc)
+
+    def read_run_log(self) -> str:
+        """Return the log saved from an earlier interrupted chunk, if any."""
+        try:
+            return self.run_log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+
+    def clear_run_log(self) -> None:
+        """Remove any saved log segment (fresh run, not resuming)."""
+        try:
+            self.run_log_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
     def mark_interrupted(self) -> None:
         """Record that the run stopped before finishing — the resumable state."""
         self.update(status=STATUS_INTERRUPTED)
@@ -377,6 +406,7 @@ class Checkpoint:
     def mark_complete(self) -> None:
         """Record success. The checkpoint stays for warm-starting a later run."""
         self.update(status=STATUS_COMPLETE)
+        self.clear_run_log()
 
     def discard(self) -> None:
         """Delete the checkpoint directory entirely. Best-effort."""
@@ -391,18 +421,15 @@ class Checkpoint:
     def log_resumed(self, detail: str) -> None:
         """Announce in the run log that this run continues an earlier one.
 
-        The most important line the checkpoint layer writes. A resumed run's
-        ``pyscf.log`` contains only the *new* portion — the earlier steps
-        were written to a different run's log, in a different result
-        directory. Without this banner the file reads as a complete
-        calculation that started from the geometry at the top, which would
-        quietly misrepresent how the result was obtained.
+        The most important line the checkpoint layer writes. When a run is
+        resumed, earlier output is prepended from :meth:`read_run_log` so the
+        archived ``pyscf.log`` is a complete record across chunks.
         """
         self._log(f"RESUMED from {self.dir}")
         self._log(f"  {detail}")
         self._log(
-            "  this log covers only the continuation; earlier output is in "
-            "the result directory of the interrupted run"
+            "  earlier output from the interrupted run is included above; "
+            "this banner marks where the continuation began"
         )
 
     def resumable_state(self) -> Optional[dict]:
