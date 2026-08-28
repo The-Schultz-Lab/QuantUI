@@ -172,6 +172,13 @@ def on_run_clicked(app: Any, btn: Any) -> None:
     app._completion_banner.layout.display = "none"
     app._to_analysis_btn.layout.display = "none"
     app._analysis_empty_html.layout.display = "none"
+
+    from quantui.app_slurm import submit_slurm_run, use_slurm_execution
+
+    if use_slurm_execution(app):
+        submit_slurm_run(app)
+        return
+
     threading.Thread(target=app._do_run, daemon=True).start()
 
 

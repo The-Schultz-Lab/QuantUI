@@ -55,6 +55,8 @@ _VIB_FPS_DEFAULT = 10
 # zero-dependency reason as _VALID_VIZ_BACKENDS above.
 _VALID_ISO_RESOLUTIONS = ("coarse", "medium", "fine", "very fine")
 
+_VALID_EXECUTION_BACKENDS = ("local", "slurm")
+
 # Default settings path. The QUANTUI_SETTINGS_PATH env var overrides for tests.
 DEFAULT_SETTINGS_PATH = Path.home() / ".quantui" / "settings.json"
 
@@ -90,6 +92,10 @@ class ComputeSettings:
     # quantui.density_fitting and the M-DF roadmap; per-calc-type defaults are
     # set only once the size crossover is measured (DF.2).
     density_fit: bool = False
+
+    # Where calculations run: in the Jupyter kernel (local) or via SLURM batch
+    # (cluster). SLURM is only offered in the UI when ``sbatch`` is available.
+    execution_backend: str = "local"
 
 
 @dataclass
@@ -217,6 +223,19 @@ class UserSettings:
                     "Invalid compute.density_fit %r; using %r",
                     candidate_df,
                     compute.density_fit,
+                )
+        if "execution_backend" in compute_section:
+            candidate_backend = compute_section["execution_backend"]
+            if (
+                isinstance(candidate_backend, str)
+                and candidate_backend in _VALID_EXECUTION_BACKENDS
+            ):
+                compute.execution_backend = candidate_backend
+            else:
+                _LOG.warning(
+                    "Invalid compute.execution_backend %r; using %r",
+                    candidate_backend,
+                    compute.execution_backend,
                 )
 
         return cls(viz=viz, compute=compute)
