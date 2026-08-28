@@ -120,6 +120,8 @@ def build_status_panel(
     vib_framerate_fps: int = 10,
     gpu_enabled: bool = True,
     density_fit_enabled: bool = False,
+    execution_backend: str = "local",
+    slurm_available: bool = False,
 ) -> None:
     """Build the Status tab panel."""
     cores, mem_gb = get_session_resources_fn()
@@ -311,6 +313,31 @@ def build_status_panel(
         layout=layout_fn(width="320px", margin="2px 0 0 0"),
     )
 
+    exec_backend_label = widgets.HTML(
+        f'<div style="font-size:12px;color:{_theme.TEXT_SLATE_DARK};margin-top:12px;'
+        'margin-bottom:0px">Execution backend '
+        f'<span style="color:{_theme.TEXT_SUBTLE};font-size:11px">'
+        "(persists across launches)</span></div>"
+    )
+    exec_options = [("Local (this Jupyter kernel)", "local")]
+    if slurm_available:
+        exec_options.append(("SLURM batch (cluster)", "slurm"))
+    elif execution_backend == "slurm":
+        execution_backend = "local"
+    app.execution_backend_dd = widgets.Dropdown(
+        options=exec_options,
+        value=execution_backend if execution_backend in ("local", "slurm") else "local",
+        description="",
+        layout=layout_fn(width="320px"),
+    )
+    if not slurm_available:
+        exec_backend_note = widgets.HTML(
+            f'<div style="font-size:11px;color:{_theme.TEXT_SUBTLE};margin:2px 0 0 0">'
+            "SLURM unavailable here (sbatch not found).</div>"
+        )
+    else:
+        exec_backend_note = widgets.HTML("")
+
     settings_box = widgets.VBox(
         [
             settings_html,
@@ -321,6 +348,9 @@ def build_status_panel(
             app.gpu_enabled_cb,
             df_toggle_label,
             app.density_fit_enabled_cb,
+            exec_backend_label,
+            app.execution_backend_dd,
+            exec_backend_note,
         ],
         layout=layout_fn(margin="0 0 8px 0"),
     )
@@ -1260,6 +1290,14 @@ def build_shared_widgets(
     # native phase (first gradient / Hessian) visibly advances.
     app._run_elapsed_lbl = widgets.HTML(value="")
 
+    app._slurm_job_banner = widgets.HTML(value="", layout=layout_fn(display="none"))
+    app._slurm_reconnect_btn = widgets.Button(
+        description="View SLURM progress",
+        button_style="info",
+        icon="refresh",
+        layout=layout_fn(width="200px", height="32px", display="none"),
+    )
+
     # Gracefully stops a running calculation at the next SCF cycle / opt step.
     # Disabled unless a calc is in flight (toggled by _do_run).
     app.cancel_btn = widgets.Button(
@@ -1747,6 +1785,11 @@ def build_run_section(app: Any, *, layout_fn: Any) -> None:
             app.perf_estimate_html,
             app._resume_notice_html,
             app._resume_cb,
+            app._slurm_job_banner,
+            widgets.HBox(
+                [app._slurm_reconnect_btn],
+                layout=layout_fn(margin="0 0 4px 0"),
+            ),
             widgets.HBox(
                 [
                     app.run_btn,

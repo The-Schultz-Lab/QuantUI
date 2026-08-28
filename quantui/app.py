@@ -382,6 +382,12 @@ from quantui.app_runflow import (
 from quantui.app_runflow import (
     update_scan_widgets as _run_update_scan_widgets,
 )
+from quantui.app_slurm import (
+    on_slurm_reconnect_clicked as _slurm_on_reconnect_clicked,
+)
+from quantui.app_slurm import (
+    startup_slurm_check as _slurm_startup_check,
+)
 from quantui.app_visualization import (
     build_vib_data_from_freq_result as _viz_build_vib_data_from_freq_result,
 )
@@ -505,6 +511,7 @@ from quantui.app_xyz_input import (
 from quantui.app_xyz_input import (
     on_xyz_fill_table as _xyz_on_fill_table,
 )
+from quantui.backends.dispatch import is_slurm_available
 from quantui.cancellation import CalcCancelled as _CalcCancelled
 
 # Import directly from submodules to avoid circular-import issues.
@@ -1675,10 +1682,12 @@ class QuantUIApp:
             # the targeted resume offer can't fire, because nothing is
             # configured yet.
             loop.add_callback(self._refresh_resume_list)
+            loop.add_callback(_slurm_startup_check, self)
         else:
             self._refresh_results_browser()
             self._populate_compare_list()
             self._refresh_resume_list()
+            _slurm_startup_check(self)
 
     def display(self) -> None:
         """Inject global CSS and render the application widget."""
@@ -1848,6 +1857,8 @@ class QuantUIApp:
             vib_framerate_fps=self._user_settings.viz.vib_framerate_fps,
             gpu_enabled=self._user_settings.compute.gpu_enabled,
             density_fit_enabled=self._user_settings.compute.density_fit,
+            execution_backend=self._user_settings.compute.execution_backend,
+            slurm_available=is_slurm_available(),
         )
 
     # ── Welcome header ────────────────────────────────────────────────────
@@ -2201,6 +2212,9 @@ class QuantUIApp:
         self.density_fit_enabled_cb.observe(
             self._safe_cb(self._on_density_fit_enabled_changed), names="value"
         )
+        self.execution_backend_dd.observe(
+            self._safe_cb(self._on_execution_backend_changed), names="value"
+        )
         # 3D viewer style and lighting controls
         if VISUALIZATION_AVAILABLE:
             self.viz_style_dd.observe(
@@ -2271,6 +2285,9 @@ class QuantUIApp:
         self.calc_type_help_btn.on_click(self._on_calc_type_help)
         # Run
         self.run_btn.on_click(self._on_run_clicked)
+        self._slurm_reconnect_btn.on_click(
+            self._safe_cb(lambda _btn: _slurm_on_reconnect_clicked(self, _btn))
+        )
         self.cancel_btn.on_click(self._safe_cb(self._on_cancel))
         self.basis_fix_btn.on_click(self._safe_cb(self._on_basis_fix))
         self.charge_mult_suggest_btn.on_click(
@@ -3537,6 +3554,18 @@ class QuantUIApp:
         except OSError:
             pass
 
+    def _on_execution_backend_changed(self, change) -> None:
+        """Persist local vs SLURM batch execution preference."""
+        new_val = str(change["new"])
+        if new_val == self._user_settings.compute.execution_backend:
+            return
+        self._user_settings.compute.execution_backend = new_val
+        self._user_settings.save()
+        try:
+            _calc_log.log_event("execution_backend_changed", f"backend={new_val}")
+        except OSError:
+            pass
+
     def _on_vib_framerate_changed(self, change) -> None:
         """Persist the vibrational-animation framerate and re-render the
         current mode so the new fps applies immediately. Re-rendering also
@@ -3863,7 +3892,16 @@ class QuantUIApp:
         line) and disables the button so a second click can't re-fire. The
         actual stop + UI reset happens in ``_do_run`` when the next write raises
         ``_CalcCancelled``.
+
+        For SLURM batch jobs, requests ``scancel`` and stops the monitor thread.
         """
+        if getattr(self, "_slurm_active_request_id", None):
+            from quantui.app_slurm import cancel_slurm_run
+
+            if cancel_slurm_run(self):
+                self.cancel_btn.disabled = True
+                self.cancel_btn.description = "Cancelling…"
+            return
         if not self._calc_running:
             return
         self._cancel_event.set()
