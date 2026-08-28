@@ -57,7 +57,9 @@ def _request(rid: str = "slurm001") -> CalculationRequest:
 
 class TestSlurmBackendSubmit:
     @patch("quantui.backends.slurm.subprocess.run")
-    def test_dispatch_writes_registry_and_scripts(self, mock_run, slurm_backend, tmp_path):
+    def test_dispatch_writes_registry_and_scripts(
+        self, mock_run, slurm_backend, tmp_path
+    ):
         mock_run.return_value.stdout = "Submitted batch job 555666\n"
         mock_run.return_value.stderr = ""
         mock_run.return_value.returncode = 0

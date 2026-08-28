@@ -3,7 +3,6 @@ Tests for the headless batch worker (mocked — no PySCF required in CI).
 """
 
 import json
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 

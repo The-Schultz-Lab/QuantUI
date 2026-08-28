@@ -2,8 +2,6 @@
 Tests for job registry and SLURM resource heuristics.
 """
 
-import json
-
 import pytest
 
 from quantui.backends.base import CalculationRequest
@@ -37,7 +35,7 @@ def _sample_request(request_id: str = "req001") -> CalculationRequest:
 class TestJobRegistry:
     def test_create_and_load(self, registry):
         req = _sample_request()
-        record = registry.create(req, "cluster_slurm", resources={"cores": 4})
+        registry.create(req, "cluster_slurm", resources={"cores": 4})
         loaded = registry.load("req001")
         assert loaded is not None
         assert loaded.backend_id == "cluster_slurm"

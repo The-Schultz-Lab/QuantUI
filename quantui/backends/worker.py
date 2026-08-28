@@ -25,7 +25,9 @@ from .registry import JobRegistry
 logger = logging.getLogger(__name__)
 
 
-def _write_progress(staging_dir: Path, stage: str, message: str, percent: float) -> None:
+def _write_progress(
+    staging_dir: Path, stage: str, message: str, percent: float
+) -> None:
     payload = {
         "stage": stage,
         "message": message,

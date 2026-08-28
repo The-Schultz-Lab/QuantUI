@@ -2,8 +2,6 @@
 Tests for quantui.backends.slurm_errors (salvaged legacy module).
 """
 
-import pytest
-
 from quantui.backends.slurm_errors import (
     ErrorTranslation,
     format_error_for_student,

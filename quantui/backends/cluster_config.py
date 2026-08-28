@@ -41,6 +41,7 @@ DEFAULT_MAIL_EVENTS = ["END", "FAIL"]
 # Status polling (seconds)
 STATUS_REFRESH_INTERVAL = 10
 
+
 # Registry and staging roots
 def default_jobs_root() -> Path:
     override = os.environ.get("QUANTUI_JOBS_DIR")

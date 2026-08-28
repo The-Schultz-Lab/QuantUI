@@ -72,14 +72,10 @@ def validate_resources(
     if not isinstance(cores, int):
         errors.append(f"cores must be an integer, got {type(cores).__name__}")
     elif cores < cfg.MIN_CORES or cores > cfg.MAX_CORES:
-        errors.append(
-            f"cores={cores} out of range [{cfg.MIN_CORES}, {cfg.MAX_CORES}]"
-        )
+        errors.append(f"cores={cores} out of range [{cfg.MIN_CORES}, {cfg.MAX_CORES}]")
 
     if not isinstance(memory_gb, int):
-        errors.append(
-            f"memory_gb must be an integer, got {type(memory_gb).__name__}"
-        )
+        errors.append(f"memory_gb must be an integer, got {type(memory_gb).__name__}")
     elif memory_gb < cfg.MIN_MEMORY_GB or memory_gb > cfg.MAX_MEMORY_GB:
         errors.append(
             f"memory_gb={memory_gb} out of range "
@@ -94,9 +90,7 @@ def validate_resources(
         )
 
     if errors:
-        raise SecurityError(
-            "Resource validation failed:\n  • " + "\n  • ".join(errors)
-        )
+        raise SecurityError("Resource validation failed:\n  • " + "\n  • ".join(errors))
 
     return {"cores": cores, "memory_gb": memory_gb, "walltime": walltime}
 

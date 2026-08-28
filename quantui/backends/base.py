@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
-
 CALC_TYPES = (
     "single_point",
     "geometry_opt",
@@ -39,7 +38,7 @@ class CalculationRequest:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "CalculationRequest":
+    def from_dict(cls, data: Dict[str, Any]) -> CalculationRequest:
         return cls(
             request_id=data["request_id"],
             calc_type=data["calc_type"],

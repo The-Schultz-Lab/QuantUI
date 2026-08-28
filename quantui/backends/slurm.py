@@ -14,7 +14,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from quantui import config
 
@@ -26,7 +26,7 @@ from .cluster_security import (
     validate_mail_events,
     validate_resources,
 )
-from .registry import JobRecord, JobRegistry
+from .registry import JobRegistry
 from .slurm_errors import format_error_for_student
 from .slurm_utils import estimate_slurm_resources, parse_slurm_job_id
 
@@ -112,7 +112,9 @@ class SlurmBackend:
         request_path = staging / "request.json"
         request_path.write_text(json.dumps(request.to_dict(), indent=2))
 
-        label = job_name or f"{request.molecule.get('label', 'quantui')}_{request.method}"
+        label = (
+            job_name or f"{request.molecule.get('label', 'quantui')}_{request.method}"
+        )
         label = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)[:40]
 
         slurm_script = staging / "submit.slurm"
@@ -294,7 +296,11 @@ class SlurmBackend:
                 parts = line.strip().split()
                 if len(parts) == 2:
                     statuses[parts[0]] = parts[1]
-        except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError):
+        except (
+            subprocess.TimeoutExpired,
+            FileNotFoundError,
+            subprocess.CalledProcessError,
+        ):
             return {jid: "UNKNOWN" for jid in slurm_job_ids}
 
         for jid in slurm_job_ids:
@@ -335,7 +341,11 @@ class SlurmBackend:
                 check=True,
                 timeout=10,
             )
-        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        except (
+            subprocess.CalledProcessError,
+            FileNotFoundError,
+            subprocess.TimeoutExpired,
+        ):
             return False
         self.registry.update_status(request_id, "cancelled")
         return True

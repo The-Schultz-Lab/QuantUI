@@ -47,7 +47,7 @@ class JobRecord:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "JobRecord":
+    def from_dict(cls, data: Dict[str, Any]) -> JobRecord:
         return cls(
             request_id=data["request_id"],
             backend_id=data["backend_id"],
