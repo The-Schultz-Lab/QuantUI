@@ -346,6 +346,12 @@ class TestLogCapture:
         cap.write("hello world\n")
         assert "hello world" in cap.getvalue()
 
+    def test_seed_prior_prepends_to_buffer(self):
+        cap, _ = self._make_capture()
+        cap.seed_prior("earlier chunk\n")
+        cap.write("new chunk\n")
+        assert cap.getvalue() == "earlier chunk\nnew chunk\n"
+
     def test_cycle_regex_parses_line(self):
         line = "cycle= 3 E= -76.031234  delta_E= -0.0042"
         m = _RE_CYCLE.search(line)

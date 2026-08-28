@@ -196,8 +196,10 @@ class TestLifecycle:
     def test_mark_complete_is_recorded(self, root):
         ckpt = C.Checkpoint(_identity())
         ckpt.begin()
+        ckpt.write_run_log("partial output")
         ckpt.mark_complete()
         assert ckpt.load_state()["status"] == C.STATUS_COMPLETE
+        assert ckpt.read_run_log() == ""
 
     def test_discard_removes_the_directory(self, root):
         ckpt = C.Checkpoint(_identity())
@@ -287,15 +289,14 @@ class TestCheckpointLogging:
         ckpt.update(steps_done=3)
         assert "steps_done=3" not in stream.text
 
-    def test_resume_banner_states_the_log_is_only_the_continuation(self, root):
-        """The single most important line: a resumed run's log does not
-        contain the earlier steps, and must not pretend otherwise."""
+    def test_resume_banner_marks_where_continuation_began(self, root):
+        """A resumed run must not pretend the log started from scratch."""
         ckpt, stream = self._logged(root)
         ckpt.begin()
         ckpt.log_resumed("continuing from step 12")
         assert "RESUMED" in stream.text
         assert "continuing from step 12" in stream.text
-        assert "only the continuation" in stream.text
+        assert "continuation began" in stream.text
 
     def test_no_stream_attached_is_silent_and_safe(self, root):
         ckpt = C.Checkpoint(_identity())
@@ -601,6 +602,28 @@ class TestPrune:
 
     def test_prune_on_an_empty_root_is_a_no_op(self, root):
         assert C.prune() == 0
+
+
+# ══ Run-log persistence (CHK.8b / ISSUE.9) ═══════════════════════════════════
+
+
+class TestRunLogPersistence:
+    def test_write_read_round_trip(self, root):
+        ckpt = C.Checkpoint(_identity())
+        ckpt.begin()
+        ckpt.write_run_log("first chunk\nline two\n")
+        assert ckpt.read_run_log() == "first chunk\nline two\n"
+
+    def test_clear_run_log(self, root):
+        ckpt = C.Checkpoint(_identity())
+        ckpt.begin()
+        ckpt.write_run_log("chunk")
+        ckpt.clear_run_log()
+        assert ckpt.read_run_log() == ""
+
+    def test_read_missing_log_is_empty(self, root):
+        ckpt = C.Checkpoint(_identity())
+        assert ckpt.read_run_log() == ""
 
 
 # ══ Location ═════════════════════════════════════════════════════════════════
