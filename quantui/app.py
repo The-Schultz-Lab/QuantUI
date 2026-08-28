@@ -131,6 +131,9 @@ from quantui.app_builders import (
     build_shared_widgets as _bld_build_shared_widgets,
 )
 from quantui.app_builders import (
+    build_slurm_jobs_tab as _bld_build_slurm_jobs_tab,
+)
+from quantui.app_builders import (
     build_status_panel as _bld_build_status_panel,
 )
 from quantui.app_builders import (
@@ -383,7 +386,22 @@ from quantui.app_runflow import (
     update_scan_widgets as _run_update_scan_widgets,
 )
 from quantui.app_slurm import (
+    on_slurm_jobs_cancel_clicked as _slurm_on_jobs_cancel_clicked,
+)
+from quantui.app_slurm import (
+    on_slurm_jobs_refresh_clicked as _slurm_on_jobs_refresh_clicked,
+)
+from quantui.app_slurm import (
+    on_slurm_jobs_view_clicked as _slurm_on_jobs_view_clicked,
+)
+from quantui.app_slurm import (
     on_slurm_reconnect_clicked as _slurm_on_reconnect_clicked,
+)
+from quantui.app_slurm import (
+    refresh_slurm_jobs_tab as _slurm_refresh_jobs_tab,
+)
+from quantui.app_slurm import (
+    slurm_jobs_tab_visible as _slurm_jobs_tab_visible,
 )
 from quantui.app_slurm import (
     startup_slurm_check as _slurm_startup_check,
@@ -1269,6 +1287,17 @@ class QuantUIApp:
         _run_elapsed_lbl: Any
         _slurm_job_banner: Any
         _slurm_reconnect_btn: Any
+        _slurm_jobs_summary_html: Any
+        _slurm_jobs_table_html: Any
+        _slurm_jobs_select: Any
+        _slurm_jobs_refresh_btn: Any
+        _slurm_jobs_view_btn: Any
+        _slurm_jobs_cancel_btn: Any
+        _slurm_jobs_status_html: Any
+        slurm_jobs_tab_panel: Any
+        _slurm_jobs_tab_index: int | None
+        _calculate_tab_panel: Any
+        _root_tab_order_cache: list[str]
         solvent_cb: Any
         solvent_dd: Any
         step_progress: Any
@@ -1745,6 +1774,7 @@ class QuantUIApp:
         self._build_history_section()
         self._build_compare_section()
         self._build_output_tab()
+        self._build_slurm_jobs_tab()
         self._build_files_tab()
         self._build_help_section()
         self._build_issue_widgets()
@@ -1830,18 +1860,27 @@ class QuantUIApp:
     def _on_root_tab_changed(self, change) -> None:
         """Pulse the activity light on tab navigation actions."""
         self._activity_pulse("Switching tabs...", hold_s=0.16, kind="ui")
-        if change.get("new") == 2:
+        if change.get("new") == self._tab_index("analysis"):
             _ana_scroll_analysis_tab_to_top(self)
+        if _slurm_jobs_tab_visible(self) and change.get("new") == self._tab_index(
+            "slurm_jobs"
+        ):
+            _slurm_refresh_jobs_tab(self)
+
+    def _go_to_calculate_tab(self) -> None:
+        """Navigate to the Calculate tab."""
+        self._activity_pulse("Navigating to Calculate tab...", hold_s=0.16, kind="ui")
+        self.root_tab.selected_index = self._tab_index("calculate")
 
     def _go_to_results_tab(self, _btn) -> None:
         """Navigate to Results tab with a visible activity pulse."""
         self._activity_pulse("Navigating to Results tab...", hold_s=0.16, kind="ui")
-        self.root_tab.selected_index = 1
+        self.root_tab.selected_index = self._tab_index("results")
 
     def _go_to_analysis_tab(self, _btn) -> None:
         """Navigate to Analysis tab with a visible activity pulse."""
         self._activity_pulse("Navigating to Analysis tab...", hold_s=0.16, kind="ui")
-        self.root_tab.selected_index = 2
+        self.root_tab.selected_index = self._tab_index("analysis")
         _ana_scroll_analysis_tab_to_top(self)
 
     # ── Status panel ──────────────────────────────────────────────────────
@@ -2122,6 +2161,9 @@ class QuantUIApp:
 
     # ── Files tab (Cell 11) ───────────────────────────────────────────────
 
+    def _build_slurm_jobs_tab(self) -> None:
+        _bld_build_slurm_jobs_tab(self, layout_fn=_layout)
+
     def _build_files_tab(self) -> None:
         _bld_build_files_tab(self, layout_fn=_layout)
         self._refresh_file_browser()
@@ -2136,8 +2178,71 @@ class QuantUIApp:
 
     # ── Tab assembly (Cell 10) ────────────────────────────────────────────
 
+    def _root_tab_order(self) -> list[str]:
+        order = ["calculate"]
+        if _slurm_jobs_tab_visible(self):
+            order.append("slurm_jobs")
+        order.extend(["results", "analysis", "history", "compare", "files", "settings"])
+        return order
+
+    def _tab_index(self, name: str) -> int:
+        return self._root_tab_order().index(name)
+
+    def _tab_panel_for(self, name: str) -> Any:
+        panels = {
+            "calculate": self._calculate_tab_panel,
+            "slurm_jobs": self.slurm_jobs_tab_panel,
+            "results": self.results_tab_panel,
+            "analysis": self.analysis_tab_panel,
+            "history": self.history_panel,
+            "compare": self.compare_panel,
+            "files": self.files_tab_panel,
+            "settings": self._status_tab_panel,
+        }
+        return panels[name]
+
+    def _sync_root_tab_layout(self) -> None:
+        """Insert or remove the Cluster Jobs tab when execution backend changes."""
+        order = self._root_tab_order()
+        prev_order = getattr(self, "_root_tab_order_cache", order)
+        preserve_name: str | None = None
+        try:
+            old_idx = self.root_tab.selected_index
+            if 0 <= old_idx < len(prev_order):
+                preserve_name = prev_order[old_idx]
+        except Exception:  # noqa: BLE001 — tab index is cosmetic
+            preserve_name = None
+
+        self.root_tab.children = tuple(self._tab_panel_for(name) for name in order)
+        title_map = {
+            "calculate": "Calculate",
+            "slurm_jobs": "Cluster Jobs",
+            "results": "Results",
+            "analysis": "Analysis",
+            "history": "History",
+            "compare": "Compare",
+            "files": "Files",
+            "settings": "System Settings",
+        }
+        for index, name in enumerate(order):
+            self.root_tab.set_title(index, title_map[name])
+
+        self._slurm_jobs_tab_index = (
+            order.index("slurm_jobs") if "slurm_jobs" in order else None
+        )
+        self._root_tab_order_cache = list(order)
+
+        if "slurm_jobs" in order:
+            _slurm_refresh_jobs_tab(self)
+            from quantui.app_slurm import _update_slurm_jobs_tab_title
+
+            _update_slurm_jobs_tab_title(self)
+
+        if preserve_name in order:
+            self.root_tab.selected_index = order.index(preserve_name)
+
     def _assemble_tabs(self) -> None:
-        _calculate_content = widgets.VBox(
+        self._calculate_tab_panel = widgets.VBox(
             [
                 self.step_progress.widget,
                 self.mol_input_container,
@@ -2155,33 +2260,10 @@ class QuantUIApp:
         _rtp.insert(_rtp.index(self._to_analysis_btn), self.advanced_accordion)
         self.results_tab_panel.children = tuple(_rtp)
 
-        # Log moved to be an
-        # Accordion inside the History tab — see build_output_tab for
-        # the wrap. Tab indices renumbered: Files 6→5, System Settings
-        # 7→6. Update any caller that depended on tab-index 5 being
-        # "Log" (notably _goto_output_tab — now navigates to History
-        # and expands the log accordion).
-        self.root_tab = widgets.Tab(
-            children=[
-                _calculate_content,
-                self.results_tab_panel,
-                self.analysis_tab_panel,
-                self.history_panel,
-                self.compare_panel,
-                self.files_tab_panel,
-                self._status_tab_panel,
-            ]
-        )
-        self.root_tab.set_title(0, "Calculate")
-        self.root_tab.set_title(1, "Results")
-        self.root_tab.set_title(2, "Analysis")
-        self.root_tab.set_title(3, "History")
-        self.root_tab.set_title(4, "Compare")
-        self.root_tab.set_title(5, "Files")
-        # "Status" was ambiguous —
-        # status of what? "System Settings" is what the tab actually
-        # holds (env info + calibration + GPU status + UI prefs).
-        self.root_tab.set_title(6, "System Settings")
+        self._slurm_jobs_tab_index = None
+        self._root_tab_order_cache: list[str] = []
+        self.root_tab = widgets.Tab(children=())
+        self._sync_root_tab_layout()
         self.root_tab.observe(
             self._safe_cb(self._on_root_tab_changed), names="selected_index"
         )
@@ -2290,6 +2372,15 @@ class QuantUIApp:
         self.run_btn.on_click(self._on_run_clicked)
         self._slurm_reconnect_btn.on_click(
             self._safe_cb(lambda _btn: _slurm_on_reconnect_clicked(self, _btn))
+        )
+        self._slurm_jobs_refresh_btn.on_click(
+            self._safe_cb(lambda _btn: _slurm_on_jobs_refresh_clicked(self, _btn))
+        )
+        self._slurm_jobs_view_btn.on_click(
+            self._safe_cb(lambda _btn: _slurm_on_jobs_view_clicked(self, _btn))
+        )
+        self._slurm_jobs_cancel_btn.on_click(
+            self._safe_cb(lambda _btn: _slurm_on_jobs_cancel_clicked(self, _btn))
         )
         self.cancel_btn.on_click(self._safe_cb(self._on_cancel))
         self.basis_fix_btn.on_click(self._safe_cb(self._on_basis_fix))
@@ -3568,6 +3659,7 @@ class QuantUIApp:
             _calc_log.log_event("execution_backend_changed", f"backend={new_val}")
         except OSError:
             pass
+        self._sync_root_tab_layout()
 
     def _on_vib_framerate_changed(self, change) -> None:
         """Persist the vibrational-animation framerate and re-render the
@@ -6296,7 +6388,7 @@ class QuantUIApp:
         # moving them leaves the effect invisible on a tab they aren't
         # looking at, which reads as the button having done nothing.
         try:
-            self.root_tab.selected_index = 1
+            self.root_tab.selected_index = self._tab_index("calculate")
         except Exception:  # noqa: BLE001 — tab index is cosmetic
             pass
 
@@ -6445,7 +6537,7 @@ class QuantUIApp:
         # gone; the PySCF output log now lives in an Accordion inside
         # the History tab (index 3). Switch tabs + expand the log
         # accordion so the user lands directly on the log content.
-        self.root_tab.selected_index = 3
+        self.root_tab.selected_index = self._tab_index("history")
         if hasattr(self, "_history_log_accordion"):
             try:
                 self._history_log_accordion.selected_index = 0

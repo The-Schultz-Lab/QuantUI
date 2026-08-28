@@ -90,7 +90,12 @@ class SlurmBackend:
         if not request.request_id:
             request.request_id = uuid.uuid4().hex[:12]
 
-        check_concurrent_job_limit(len(self.registry.list_active()))
+        active_slurm = sum(
+            1
+            for record in self.registry.list_active()
+            if record.backend_id == self.backend_id
+        )
+        check_concurrent_job_limit(active_slurm)
         estimates = estimate_slurm_resources(request)
         cores = cores or estimates["cores"]
         memory_gb = memory_gb or estimates["memory_gb"]

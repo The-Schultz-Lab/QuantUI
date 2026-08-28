@@ -17,6 +17,7 @@ from quantui.app_xyz_input import (
     build_xyz_interactive_widgets,
     sync_textarea_from_table,
 )
+from quantui.backends.cluster_config import max_concurrent_jobs
 from quantui.help_content import HELP_TOPICS
 from quantui.live_log import LiveLog
 from quantui.orbital_visualization import (
@@ -336,7 +337,12 @@ def build_status_panel(
             "SLURM unavailable here (sbatch not found).</div>"
         )
     else:
-        exec_backend_note = widgets.HTML("")
+        limit = max_concurrent_jobs()
+        exec_backend_note = widgets.HTML(
+            f'<div style="font-size:11px;color:{_theme.TEXT_SUBTLE};margin:2px 0 0 0">'
+            f"Cluster mode allows up to {limit} concurrent job(s). "
+            "Use the Cluster Jobs tab to monitor and cancel runs.</div>"
+        )
 
     settings_box = widgets.VBox(
         [
@@ -3132,6 +3138,72 @@ def build_output_tab(app: Any, *, layout_fn: Any) -> None:
         *app.history_panel.children,
         app._resume_list_box,
         app._history_log_accordion,
+    )
+
+
+def build_slurm_jobs_tab(app: Any, *, layout_fn: Any) -> None:
+    """Build the Cluster Jobs tab (shown when execution backend is SLURM)."""
+    app._slurm_jobs_summary_html = widgets.HTML(
+        value=(
+            f'<div style="font-size:13px;color:{_theme.TEXT_STRONG};margin:4px 0 8px">'
+            "Loading cluster jobs…</div>"
+        )
+    )
+    app._slurm_jobs_table_html = widgets.HTML(value="")
+    app._slurm_jobs_select = widgets.Dropdown(
+        options=[("(no jobs)", "")],
+        value="",
+        description="Select job:",
+        style={"description_width": "80px"},
+        layout=layout_fn(width="100%"),
+        disabled=True,
+    )
+    app._slurm_jobs_refresh_btn = widgets.Button(
+        description="Refresh",
+        icon="refresh",
+        layout=layout_fn(width="110px"),
+        tooltip="Refresh job statuses from SLURM and the registry",
+    )
+    app._slurm_jobs_view_btn = widgets.Button(
+        description="View progress",
+        button_style="primary",
+        icon="play",
+        layout=layout_fn(width="140px"),
+        tooltip="Open Calculate tab and monitor the selected job",
+    )
+    app._slurm_jobs_cancel_btn = widgets.Button(
+        description="Cancel job",
+        button_style="warning",
+        icon="stop",
+        layout=layout_fn(width="120px"),
+        tooltip="Cancel the selected active cluster job",
+    )
+    app._slurm_jobs_status_html = widgets.HTML(
+        value=(
+            f'<span style="font-size:12px;color:{_theme.TEXT_SUBTLE}">'
+            "Select a job and use View progress or Cancel.</span>"
+        )
+    )
+
+    app.slurm_jobs_tab_panel = widgets.VBox(
+        [
+            widgets.HTML(
+                f'<p style="color:{_theme.TEXT_SECONDARY};font-size:13px;margin:4px 0 8px">'
+                "Track SLURM batch jobs submitted from QuantUI. "
+                "Active jobs count toward your concurrent limit — cancel or wait "
+                "before submitting more.</p>"
+            ),
+            app._slurm_jobs_summary_html,
+            app._slurm_jobs_refresh_btn,
+            app._slurm_jobs_table_html,
+            app._slurm_jobs_select,
+            widgets.HBox(
+                [app._slurm_jobs_view_btn, app._slurm_jobs_cancel_btn],
+                layout=layout_fn(gap="8px", margin="6px 0"),
+            ),
+            app._slurm_jobs_status_html,
+        ],
+        layout=layout_fn(padding="8px 0"),
     )
 
 

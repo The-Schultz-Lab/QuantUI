@@ -99,7 +99,7 @@ def check_concurrent_job_limit(
     active_job_count: int,
     max_jobs: Optional[int] = None,
 ) -> None:
-    limit = max_jobs if max_jobs is not None else cfg.MAX_CONCURRENT_JOBS
+    limit = max_jobs if max_jobs is not None else cfg.max_concurrent_jobs()
     if active_job_count >= limit:
         raise SecurityError(
             f"Concurrent job limit reached ({active_job_count}/{limit}). "
