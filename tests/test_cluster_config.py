@@ -1,6 +1,5 @@
 """Tests for cluster configuration helpers."""
 
-
 from quantui.backends import cluster_config as cfg
 
 
