@@ -8,6 +8,7 @@ History. Local in-kernel runs remain the default.
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import threading
@@ -230,11 +231,24 @@ def cancel_slurm_run(app: Any) -> bool:
 def _format_slurm_job_option(record: JobRecord) -> tuple[str, str]:
     req = record.request_obj
     slurm_id = record.slurm_job_id or "pending"
+    err = record.error or {}
+    err_hint = f" | {err['code']}" if err.get("code") else ""
     label = (
         f"{record.status} | {slurm_id} | "
-        f"{req.method}/{req.basis} | {record.request_id[:8]}"
+        f"{req.method}/{req.basis} | {record.request_id[:8]}{err_hint}"
     )
     return label, record.request_id
+
+
+def _slurm_job_error_cell(record: JobRecord) -> str:
+    err = record.error
+    if not err:
+        return "—"
+    code = str(err.get("code") or "error")
+    message = str(err.get("user_message") or err.get("technical_message") or code)
+    if len(message) > 80:
+        message = message[:77] + "…"
+    return f"{html.escape(code)}: {html.escape(message)}"
 
 
 def refresh_slurm_jobs_tab(app: Any) -> None:
@@ -284,6 +298,7 @@ def refresh_slurm_jobs_tab(app: Any) -> None:
             f"<td style='padding:4px 8px'>{req.method}/{req.basis}</td>"
             f"<td style='padding:4px 8px'>{record.calc_type}</td>"
             f"<td style='padding:4px 8px'>{created}</td>"
+            f"<td style='padding:4px 8px'>{_slurm_job_error_cell(record)}</td>"
             f"<td style='padding:4px 8px'><code>{record.request_id}</code></td>"
             "</tr>"
         )
@@ -297,6 +312,7 @@ def refresh_slurm_jobs_tab(app: Any) -> None:
         "<th style='padding:4px 8px;text-align:left'>Method/Basis</th>"
         "<th style='padding:4px 8px;text-align:left'>Type</th>"
         "<th style='padding:4px 8px;text-align:left'>Submitted</th>"
+        "<th style='padding:4px 8px;text-align:left'>Error</th>"
         "<th style='padding:4px 8px;text-align:left'>Request ID</th>"
         "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div>"
     )
