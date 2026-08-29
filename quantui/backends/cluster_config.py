@@ -23,6 +23,9 @@ MAX_CORES = 32
 MIN_MEMORY_GB = 1
 MAX_MEMORY_GB = 128
 MAX_CONCURRENT_JOBS = 2
+SUBMIT_COOLDOWN_SECONDS = 30
+STALE_NO_SLURM_ID_SECONDS = 600
+STALE_MIN_AGE_BEFORE_COMPLETED = 120
 
 
 def max_concurrent_jobs() -> int:
@@ -38,6 +41,41 @@ def max_concurrent_jobs() -> int:
                 MAX_CONCURRENT_JOBS,
             )
     return MAX_CONCURRENT_JOBS
+
+
+def submit_cooldown_seconds() -> int:
+    """Minimum seconds between SLURM submits (0 disables cooldown)."""
+    override = os.environ.get("QUANTUI_SLURM_SUBMIT_COOLDOWN_S")
+    if override:
+        try:
+            return max(0, int(override))
+        except ValueError:
+            logger.warning(
+                "Invalid QUANTUI_SLURM_SUBMIT_COOLDOWN_S=%r; using default %s",
+                override,
+                SUBMIT_COOLDOWN_SECONDS,
+            )
+    return SUBMIT_COOLDOWN_SECONDS
+
+
+def stale_no_slurm_id_seconds() -> int:
+    """Mark active jobs without a SLURM id stale after this many seconds."""
+    override = os.environ.get("QUANTUI_SLURM_STALE_NO_ID_S")
+    if override:
+        try:
+            return max(60, int(override))
+        except ValueError:
+            logger.warning(
+                "Invalid QUANTUI_SLURM_STALE_NO_ID_S=%r; using default %s",
+                override,
+                STALE_NO_SLURM_ID_SECONDS,
+            )
+    return STALE_NO_SLURM_ID_SECONDS
+
+
+def stale_min_age_before_completed() -> int:
+    """Ignore empty-squeue COMPLETED for young jobs (submission race)."""
+    return STALE_MIN_AGE_BEFORE_COMPLETED
 
 
 WALLTIME_OPTIONS = [

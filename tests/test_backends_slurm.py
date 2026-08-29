@@ -4,6 +4,8 @@ Tests for SlurmBackend submit/poll/cancel using mock SLURM scripts.
 
 import json
 import os
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -54,6 +56,19 @@ def _request(rid: str = "slurm001") -> CalculationRequest:
             "coords": [[0, 0, 0], [0, 0, 0.74]],
         },
     )
+
+
+def _age_record(registry: JobRegistry, request_id: str, *, seconds: float) -> None:
+    record = registry.load(request_id)
+    assert record is not None
+    old = (
+        (datetime.now(timezone.utc) - timedelta(seconds=seconds))
+        .replace(microsecond=0)
+        .isoformat()
+    )
+    record.created_at = old
+    record.updated_at = old
+    registry.save(record)
 
 
 class TestSlurmBackendSubmit:
@@ -112,6 +127,69 @@ class TestSlurmBackendSubmit:
 
         rid = slurm_backend.dispatch(_request("slurm-new"))
         assert slurm_backend.registry.load(rid) is not None
+
+    @patch("quantui.backends.slurm.subprocess.run")
+    def test_dispatch_blocks_during_cooldown(
+        self, mock_run, slurm_backend, monkeypatch
+    ):
+        monkeypatch.setenv("QUANTUI_SLURM_SUBMIT_COOLDOWN_S", "30")
+        slurm_backend.registry.record_slurm_submit()
+        time.sleep(0.05)
+
+        with pytest.raises(SecurityError, match="Please wait"):
+            slurm_backend.dispatch(_request("cooldown-blocked"))
+
+        mock_run.assert_not_called()
+
+    @patch("quantui.backends.slurm.subprocess.run")
+    def test_dispatch_records_submit_timestamp(self, mock_run, slurm_backend):
+        mock_run.return_value.stdout = "Submitted batch job 555666\n"
+        mock_run.return_value.stderr = ""
+        mock_run.return_value.returncode = 0
+
+        assert slurm_backend.registry.seconds_since_last_slurm_submit() is None
+        slurm_backend.dispatch(_request("ts001"))
+        since = slurm_backend.registry.seconds_since_last_slurm_submit()
+        assert since is not None
+        assert since < 5
+
+
+class TestSlurmBackendReconcile:
+    def test_reconcile_stale_record_without_slurm_id(self, slurm_backend, monkeypatch):
+        monkeypatch.setenv("QUANTUI_SLURM_STALE_NO_ID_S", "60")
+        slurm_backend.registry.create(_request("stale-no-id"), "cluster_slurm")
+        _age_record(slurm_backend.registry, "stale-no-id", seconds=120)
+
+        assert slurm_backend.reconcile_stale_records() == 1
+        record = slurm_backend.registry.load("stale-no-id")
+        assert record.status == "error"
+        assert record.error["code"] == "STALE_RECORD"
+
+    def test_reconcile_completed_missing_artifact(self, slurm_backend, monkeypatch):
+        monkeypatch.setenv("QUANTUI_SLURM_STALE_NO_ID_S", "60")
+        slurm_backend.registry.create(_request("missing-art"), "cluster_slurm")
+        slurm_backend.registry.update_status(
+            "missing-art", "running", slurm_job_id="888001"
+        )
+        _age_record(slurm_backend.registry, "missing-art", seconds=200)
+
+        with patch.object(slurm_backend, "poll_slurm_status", return_value="COMPLETED"):
+            slurm_backend.reconcile_stale_records()
+
+        record = slurm_backend.registry.load("missing-art")
+        assert record.status == "error"
+        assert record.error["code"] == "ARTIFACT_MISSING"
+
+    def test_reconcile_ignores_young_completed(self, slurm_backend, monkeypatch):
+        monkeypatch.setenv("QUANTUI_SLURM_STALE_NO_ID_S", "60")
+        slurm_backend.registry.create(_request("young"), "cluster_slurm")
+        slurm_backend.registry.update_status("young", "running", slurm_job_id="888002")
+
+        with patch.object(slurm_backend, "poll_slurm_status", return_value="COMPLETED"):
+            assert slurm_backend.reconcile_stale_records() == 0
+
+        record = slurm_backend.registry.load("young")
+        assert record.status == "running"
 
 
 class TestSlurmBackendPolling:

@@ -59,6 +59,13 @@ class TestJobRegistry:
         assert loaded.slurm_job_id == "12345"
         assert loaded.status == "submitted"
 
+    def test_slurm_submit_meta_roundtrip(self, registry):
+        assert registry.seconds_since_last_slurm_submit() is None
+        registry.record_slurm_submit()
+        since = registry.seconds_since_last_slurm_submit()
+        assert since is not None
+        assert 0 <= since < 2
+
 
 class TestSlurmUtils:
     def test_parse_slurm_job_id(self):

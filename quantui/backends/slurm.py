@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -22,6 +23,7 @@ from . import cluster_config as cfg
 from .base import CALC_TYPES, BackendCapabilities, CalculationRequest
 from .cluster_security import (
     check_concurrent_job_limit,
+    check_submit_cooldown,
     validate_email,
     validate_mail_events,
     validate_resources,
@@ -43,6 +45,7 @@ _TERMINAL_SLURM = frozenset(
     }
 )
 _TERMINAL_RECORD = frozenset({"success", "error", "cancelled"})
+_ACTIVE_RECORD = frozenset({"queued", "pending", "running", "submitted"})
 
 
 class SlurmBackend:
@@ -96,6 +99,7 @@ class SlurmBackend:
             if record.backend_id == self.backend_id
         )
         check_concurrent_job_limit(active_slurm)
+        check_submit_cooldown(self.registry.seconds_since_last_slurm_submit())
         estimates = estimate_slurm_resources(request)
         cores = cores or estimates["cores"]
         memory_gb = memory_gb or estimates["memory_gb"]
@@ -155,6 +159,7 @@ class SlurmBackend:
             "submitted",
             slurm_job_id=slurm_job_id,
         )
+        self.registry.record_slurm_submit()
         return request.request_id
 
     def _worker_command(self, request_path: Path, staging_dir: Path) -> str:
@@ -330,9 +335,101 @@ class SlurmBackend:
             if not jid:
                 continue
             slurm_status = statuses.get(jid, "UNKNOWN")
+            if slurm_status in _TERMINAL_SLURM:
+                mapped, error = self._terminal_registry_update(
+                    record, slurm_status, datetime.now(timezone.utc)
+                )
+                if mapped is None:
+                    continue
+                if mapped != record.status and record.status not in _TERMINAL_RECORD:
+                    self.registry.update_status(record.request_id, mapped, error=error)
+                continue
             mapped = _map_slurm_status(slurm_status)
             if mapped != record.status and record.status not in _TERMINAL_RECORD:
                 self.registry.update_status(record.request_id, mapped)
+
+    def _terminal_registry_update(
+        self, record, slurm_status: str, now: datetime
+    ) -> tuple[str | None, dict | None]:
+        """Map a terminal SLURM state to registry status + optional error."""
+        age_s = _record_age_seconds(record.created_at, now)
+        if slurm_status == "COMPLETED" and age_s < cfg.stale_min_age_before_completed():
+            return None, None
+
+        mapped = _map_slurm_status(slurm_status)
+        error: dict | None = None
+        if mapped == "success":
+            result_path = record.staging_path / "result.json"
+            if not result_path.exists():
+                mapped = "error"
+                error = {
+                    "code": "ARTIFACT_MISSING",
+                    "user_message": (
+                        "SLURM job finished but result.json was not written "
+                        "to staging. Check the batch worker log."
+                    ),
+                    "technical_message": f"Missing {result_path}",
+                    "retryable": True,
+                }
+        elif mapped == "error":
+            error = {
+                "code": "SLURM_TERMINAL",
+                "user_message": f"SLURM reported job state {slurm_status}.",
+                "technical_message": slurm_status,
+                "retryable": True,
+            }
+        return mapped, error
+
+    def reconcile_stale_records(self) -> int:
+        """Mark orphaned active SLURM registry rows terminal; return count updated."""
+        self.refresh_registry_statuses()
+        now = datetime.now(timezone.utc)
+        reconciled = 0
+        stale_no_id = cfg.stale_no_slurm_id_seconds()
+
+        for record in list(self.registry.list_active()):
+            if record.backend_id != self.backend_id:
+                continue
+
+            age_s = _record_age_seconds(record.created_at, now)
+
+            if not record.slurm_job_id:
+                if age_s >= stale_no_id:
+                    self._mark_stale_record(
+                        record,
+                        code="STALE_RECORD",
+                        message=(
+                            "Registry entry never received a SLURM job ID. "
+                            "Cancel or delete it from Cluster Jobs before resubmitting."
+                        ),
+                    )
+                    reconciled += 1
+                continue
+
+            if record.status.lower() not in _ACTIVE_RECORD:
+                continue
+
+            slurm_status = self.poll_slurm_status(record.slurm_job_id)
+            mapped, error = self._terminal_registry_update(record, slurm_status, now)
+            if mapped is None:
+                continue
+
+            self.registry.update_status(record.request_id, mapped, error=error)
+            reconciled += 1
+
+        return reconciled
+
+    def _mark_stale_record(self, record, *, code: str, message: str) -> None:
+        self.registry.update_status(
+            record.request_id,
+            "error",
+            error={
+                "code": code,
+                "user_message": message,
+                "technical_message": message,
+                "retryable": False,
+            },
+        )
 
     def cancel(self, request_id: str) -> bool:
         record = self.registry.load(request_id)
@@ -369,3 +466,13 @@ def _map_slurm_status(slurm_status: str) -> str:
             return "cancelled"
         return "error"
     return "submitted"
+
+
+def _record_age_seconds(created_at: str, now: datetime) -> float:
+    try:
+        created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        return max(0.0, (now - created).total_seconds())
+    except (TypeError, ValueError):
+        return 0.0

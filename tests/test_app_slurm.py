@@ -2,8 +2,10 @@
 Tests for SLURM dispatch helpers and app integration utilities.
 """
 
+import time
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from quantui.app_slurm import (
     active_slurm_job_count,
@@ -104,6 +106,53 @@ class TestSlurmSubmitGuards:
         assert reason is not None
         assert "Concurrent job limit" in reason
 
+    @patch("quantui.app_slurm.is_slurm_available", return_value=True)
+    def test_block_reason_during_cooldown(self, _mock_slurm, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_SLURM_SUBMIT_COOLDOWN_S", "30")
+        registry = JobRegistry(
+            jobs_root=tmp_path / "jobs",
+            staging_root=tmp_path / "staging",
+        )
+        registry.record_slurm_submit()
+        time.sleep(0.05)
+        app = _fake_app(_job_registry=registry)
+        reason = slurm_submit_block_reason(app)
+        assert reason is not None
+        assert "Please wait" in reason
+
+    @patch("quantui.app_slurm.is_slurm_available", return_value=True)
+    @patch("quantui.app_slurm.slurm_backend_for_app")
+    def test_block_reason_reconciles_stale_jobs(
+        self, mock_backend_for_app, _mock_slurm, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("QUANTUI_SLURM_STALE_NO_ID_S", "60")
+        registry = JobRegistry(
+            jobs_root=tmp_path / "jobs",
+            staging_root=tmp_path / "staging",
+        )
+        registry.create(
+            build_calculation_request(_fake_app(), request_id="stale"),
+            "cluster_slurm",
+        )
+        record = registry.load("stale")
+        old = (
+            (datetime.now(timezone.utc) - timedelta(seconds=120))
+            .replace(microsecond=0)
+            .isoformat()
+        )
+        record.created_at = old
+        record.updated_at = old
+        registry.save(record)
+
+        backend = SimpleNamespace(reconcile_stale_records=MagicMock(return_value=1))
+        mock_backend_for_app.return_value = backend
+        app = _fake_app(_job_registry=registry)
+
+        slurm_submit_block_reason(app)
+
+        mock_backend_for_app.assert_called_once_with(app)
+        backend.reconcile_stale_records.assert_called_once()
+
     def test_active_count_ignores_other_backends(self, tmp_path):
         registry = JobRegistry(
             jobs_root=tmp_path / "jobs",
@@ -139,6 +188,10 @@ class TestSlurmSubmitGuards:
                 status="running",
             )
 
+        backend = MagicMock()
+        backend.reconcile_stale_records.return_value = 0
+        mock_backend_for_app.return_value = backend
+
         app = _fake_app(
             _job_registry=registry,
             _user_settings=SimpleNamespace(
@@ -157,7 +210,8 @@ class TestSlurmSubmitGuards:
 
         submit_slurm_run(app)
 
-        mock_backend_for_app.assert_not_called()
+        backend.dispatch.assert_not_called()
+        mock_build_request.assert_not_called()
         assert app._calc_running is False
         assert app.run_btn.disabled is False
 
