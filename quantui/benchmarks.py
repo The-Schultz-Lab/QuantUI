@@ -885,6 +885,7 @@ def _save_calibration_step(
             "ir": {
                 "frequencies_cm1": getattr(res, "frequencies_cm1", []),
                 "ir_intensities": getattr(res, "ir_intensities", []),
+                "raman_activities": getattr(res, "raman_activities", []),
                 "zpve_hartree": getattr(res, "zpve_hartree", 0.0),
                 "displacements": displacements_serialized,
             },

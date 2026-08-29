@@ -2051,6 +2051,45 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._ir_accordion.set_title(0, "IR Spectrum")
     app._ir_accordion.selected_index = None
 
+    app._raman_mode_toggle = widgets.ToggleButtons(
+        options=["Stick", "Broadened"],
+        value="Stick",
+        description="Mode:",
+        style={"button_width": "80px"},
+        layout=layout_fn(margin="0 8px 0 0"),
+    )
+    app._raman_fwhm_slider = widgets.FloatSlider(
+        value=20.0,
+        min=5.0,
+        max=100.0,
+        step=5.0,
+        description="Line width (cm⁻¹):",
+        readout_format=".0f",
+        style={"description_width": "120px"},
+        layout=layout_fn(width="300px", display="none"),
+        continuous_update=False,
+    )
+    app._raman_fig = widgets.Output(
+        layout=layout_fn(width="100%", min_height="300px"),
+    )
+    raman_export_row = _plot_export_row("raman")
+    raman_controls = widgets.HBox(
+        [app._raman_mode_toggle, app._raman_fwhm_slider],
+        layout=layout_fn(align_items="center", margin="0 0 6px 0"),
+    )
+    raman_body_children = [raman_controls, raman_export_row, app._raman_fig]
+    app._raman_accordion = widgets.Accordion(
+        children=[
+            widgets.VBox(
+                raman_body_children,
+                layout=layout_fn(padding="8px"),
+            )
+        ],
+        layout=layout_fn(display="none", margin="8px 0"),
+    )
+    app._raman_accordion.set_title(0, "Raman Spectrum")
+    app._raman_accordion.selected_index = None
+
     app._orb_ymin_input = widgets.BoundedFloatText(
         value=-30.0,
         min=-500.0,
@@ -2901,6 +2940,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             app.traj_accordion,
             app.vib_accordion,
             app._ir_accordion,
+            app._raman_accordion,
             app._iso_accordion,
             # Creating the accordion and registering it in _PANEL_META is not
             # enough — it also has to be a child of this VBox or it can never

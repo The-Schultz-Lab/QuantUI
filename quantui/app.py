@@ -58,6 +58,9 @@ from quantui.app_analysis import (
     pop_ir_spectrum as _ana_pop_ir_spectrum,
 )
 from quantui.app_analysis import (
+    pop_raman_spectrum as _ana_pop_raman_spectrum,
+)
+from quantui.app_analysis import (
     pop_isosurface as _ana_pop_isosurface,
 )
 from quantui.app_analysis import (
@@ -404,6 +407,12 @@ from quantui.app_visualization import (
     on_ir_mode_changed as _viz_on_ir_mode_changed,
 )
 from quantui.app_visualization import (
+    on_raman_fwhm_changed as _viz_on_raman_fwhm_changed,
+)
+from quantui.app_visualization import (
+    on_raman_mode_changed as _viz_on_raman_mode_changed,
+)
+from quantui.app_visualization import (
     on_iso_appearance_changed as _viz_on_iso_appearance_changed,
 )
 from quantui.app_visualization import (
@@ -449,6 +458,9 @@ from quantui.app_visualization import (
     show_ir_spectrum as _viz_show_ir_spectrum,
 )
 from quantui.app_visualization import (
+    show_raman_spectrum as _viz_show_raman_spectrum,
+)
+from quantui.app_visualization import (
     show_nmr_spectrum as _viz_show_nmr_spectrum,
 )
 from quantui.app_visualization import (
@@ -476,6 +488,9 @@ from quantui.app_visualization import (
     update_ir_figure as _viz_update_ir_figure,
 )
 from quantui.app_visualization import (
+    update_raman_figure as _viz_update_raman_figure,
+)
+from quantui.app_visualization import (
     update_nmr_figure as _viz_update_nmr_figure,
 )
 from quantui.app_visualization import (
@@ -483,6 +498,9 @@ from quantui.app_visualization import (
 )
 from quantui.app_visualization import (
     wire_ir_controls as _viz_wire_ir_controls,
+)
+from quantui.app_visualization import (
+    wire_raman_controls as _viz_wire_raman_controls,
 )
 from quantui.app_visualization import (
     wire_nmr_controls as _viz_wire_nmr_controls,
@@ -1315,6 +1333,14 @@ class QuantUIApp:
         _ir_mode_toggle: Any
         _ir_accordion: Any
         _ir_copy_data_btn: Any
+        _raman_export_btn: Any
+        _raman_export_fmt_dd: Any
+        _raman_export_status: Any
+        _raman_fig: Any
+        _raman_fwhm_slider: Any
+        _raman_mode_toggle: Any
+        _raman_accordion: Any
+        _raman_copy_data_btn: Any
         _iso_accordion: Any
         _iso_generate_btn: Any
         _iso_cancel_btn: Any
@@ -1932,6 +1958,12 @@ class QuantUIApp:
                 self._ir_mode_toggle.value, self._ir_fwhm_slider.value
             )
 
+    def _on_raman_accordion_show(self, change) -> None:
+        if change["new"] == 0 and getattr(self, "_last_raman_freqs", None):
+            self._update_raman_figure(
+                self._raman_mode_toggle.value, self._raman_fwhm_slider.value
+            )
+
     def _on_tddft_accordion_show(self, change) -> None:
         if change["new"] == 0 and getattr(self, "_last_uv_wavelengths_nm", None):
             self._update_uv_vis_figure(
@@ -1983,6 +2015,7 @@ class QuantUIApp:
         ("Trajectory", "traj_accordion", "Geometry Opt / PES Scan / Frequency pre-opt"),
         ("Vibrational", "vib_accordion", "Frequency"),
         ("IR Spectrum", "_ir_accordion", "Frequency"),
+        ("Raman Spectrum", "_raman_accordion", "Frequency"),
         ("PES Scan", "_pes_scan_accordion", "PES Scan"),
         ("Isosurface", "_iso_accordion", "Single Point (Linux/WSL only)"),
         ("Geometries", "_reorg_geom_accordion", "Reorganization Energy"),
@@ -2027,6 +2060,7 @@ class QuantUIApp:
         "frequency": [
             ("Vibrational", "_pop_vibrational", True),
             ("IR Spectrum", "_pop_ir_spectrum", True),
+            ("Raman Spectrum", "_pop_raman_spectrum", False),
             ("Trajectory", "_pop_preopt_trajectory", False),
             ("Energies", "_pop_energies", True),
         ],
@@ -2078,6 +2112,9 @@ class QuantUIApp:
 
     def _pop_ir_spectrum(self, ctx: _AnalysisContext) -> bool:
         return _ana_pop_ir_spectrum(self, ctx)
+
+    def _pop_raman_spectrum(self, ctx: _AnalysisContext) -> bool:
+        return _ana_pop_raman_spectrum(self, ctx)
 
     def _pop_uv_vis(self, ctx: _AnalysisContext) -> bool:
         return _ana_pop_uv_vis(self, ctx)
@@ -2314,6 +2351,12 @@ class QuantUIApp:
         self._ir_fwhm_slider.observe(
             self._safe_cb(self._on_ir_fwhm_changed), names="value"
         )
+        self._raman_mode_toggle.observe(
+            self._safe_cb(self._on_raman_mode_changed), names="value"
+        )
+        self._raman_fwhm_slider.observe(
+            self._safe_cb(self._on_raman_fwhm_changed), names="value"
+        )
         self._uv_mode_toggle.observe(
             self._safe_cb(self._on_uv_mode_changed), names="value"
         )
@@ -2330,6 +2373,7 @@ class QuantUIApp:
             self._safe_cb(self._on_nmr_nucleus_changed), names="value"
         )
         self._ir_export_btn.on_click(self._on_ir_export_plot)
+        self._raman_export_btn.on_click(self._on_raman_export_plot)
         self._uv_export_btn.on_click(self._on_uv_export_plot)
         self._nmr_export_btn.on_click(self._on_nmr_export_plot)
         self._orb_export_btn.on_click(self._on_orb_export_plot)
@@ -2337,6 +2381,7 @@ class QuantUIApp:
         self._vib_export_btn.on_click(self._on_vib_export_animation)
         # Per-panel CSV-to-clipboard / file buttons.
         self._ir_copy_data_btn.on_click(self._on_ir_copy_data)
+        self._raman_copy_data_btn.on_click(self._on_raman_copy_data)
         self._uv_copy_data_btn.on_click(self._on_uv_copy_data)
         self._nmr_copy_data_btn.on_click(self._on_nmr_copy_data)
         self._orb_copy_data_btn.on_click(self._on_orb_copy_data)
@@ -4048,6 +4093,14 @@ class QuantUIApp:
             status_widget=self._ir_export_status,
         )
 
+    def _on_raman_export_plot(self, btn) -> None:
+        self._export_plot_figure(
+            fig=getattr(self, "_last_raman_fig", None),
+            stem="raman_spectrum",
+            fmt=self._raman_export_fmt_dd.value,
+            status_widget=self._raman_export_status,
+        )
+
     def _on_uv_export_plot(self, btn) -> None:
         self._export_plot_figure(
             fig=getattr(self, "_last_uv_fig", None),
@@ -4350,6 +4403,14 @@ class QuantUIApp:
             stem="ir_spectrum",
             title="IR Spectrum",
             status_widget=self._ir_export_status,
+        )
+
+    def _on_raman_copy_data(self, _btn) -> None:
+        self._copy_plot_data(
+            fig=getattr(self, "_last_raman_fig", None),
+            stem="raman_spectrum",
+            title="Raman Spectrum",
+            status_widget=self._raman_export_status,
         )
 
     def _on_uv_copy_data(self, _btn) -> None:
@@ -4879,6 +4940,21 @@ class QuantUIApp:
 
     def _update_ir_figure(self, mode: str, fwhm: float) -> None:
         _viz_update_ir_figure(self, mode, fwhm)
+
+    def _show_raman_spectrum(self, freq_result) -> bool:
+        return _viz_show_raman_spectrum(self, freq_result)
+
+    def _wire_raman_controls(self) -> None:
+        _viz_wire_raman_controls(self)
+
+    def _on_raman_mode_changed(self, change) -> None:
+        _viz_on_raman_mode_changed(self, change)
+
+    def _on_raman_fwhm_changed(self, change) -> None:
+        _viz_on_raman_fwhm_changed(self, change)
+
+    def _update_raman_figure(self, mode: str, fwhm: float) -> None:
+        _viz_update_raman_figure(self, mode, fwhm)
 
     def _show_uv_vis_spectrum(
         self,
@@ -5453,6 +5529,7 @@ class QuantUIApp:
                     "ir": {
                         "frequencies_cm1": result.frequencies_cm1,
                         "ir_intensities": result.ir_intensities,
+                        "raman_activities": result.raman_activities,
                         "zpve_hartree": result.zpve_hartree,
                         "displacements": _displacements_serialized,
                     },

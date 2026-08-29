@@ -123,6 +123,9 @@ def build_ana_switcher(app: Any, *, layout_fn: Any) -> None:
     app._ir_accordion.observe(
         app._safe_cb(app._on_ir_accordion_show), names=["selected_index"]
     )
+    app._raman_accordion.observe(
+        app._safe_cb(app._on_raman_accordion_show), names=["selected_index"]
+    )
     app._tddft_accordion.observe(
         app._safe_cb(app._on_tddft_accordion_show), names=["selected_index"]
     )
@@ -671,6 +674,22 @@ def pop_ir_spectrum(app: Any, ctx: Any) -> bool:
             ir_intensities=ir.get("ir_intensities") or [],
         )
     return bool(app._show_ir_spectrum(freq_stub))
+
+
+def pop_raman_spectrum(app: Any, ctx: Any) -> bool:
+    """Populate Raman panel from live or history frequency data."""
+    if ctx.live_result is not None:
+        freq_stub = ctx.live_result
+    else:
+        ir = ctx.spectra_data.get("ir", {})
+        freqs = ir.get("frequencies_cm1")
+        if not freqs:
+            return False
+        freq_stub = _types_mod.SimpleNamespace(
+            frequencies_cm1=freqs,
+            raman_activities=ir.get("raman_activities") or [],
+        )
+    return bool(app._show_raman_spectrum(freq_stub))
 
 
 def pop_uv_vis(app: Any, ctx: Any) -> bool:

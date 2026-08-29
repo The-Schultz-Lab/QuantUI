@@ -80,6 +80,8 @@ class FreqResult:
             indicate imaginary frequencies (transition-state modes).
         ir_intensities: IR intensities in km/mol per mode.  Empty list if
             the IR calculation is not available.
+        raman_activities: Static Raman activities in Å⁴/amu per mode.
+            Empty list if Raman is disabled or unavailable.
         zpve_hartree: Zero-point vibrational energy in Hartrees, computed as
             ½·Σ(ν_i) for all positive-frequency modes.
     """
@@ -93,6 +95,7 @@ class FreqResult:
     formula: str
     frequencies_cm1: List[float] = field(default_factory=list)
     ir_intensities: List[float] = field(default_factory=list)
+    raman_activities: List[float] = field(default_factory=list)
     zpve_hartree: float = 0.0
     thermo: Optional[ThermoData] = None
     displacements: Optional[List] = None
@@ -340,6 +343,7 @@ def _run_freq_calc_body(
     # ── Hessian + frequency analysis ─────────────────────────────────────────
     frequencies_cm1: List[float] = []
     ir_intensities: List[float] = []
+    raman_activities: List[float] = []
     zpve_hartree: float = 0.0
     displacements: Optional[List] = None
     thermo_data: Optional[ThermoData] = None
@@ -395,9 +399,12 @@ def _run_freq_calc_body(
         # the harmonic normal modes.
         # Reference: Porezag & Pederson, Phys. Rev. B 54, 7830 (1996).
         if displacements is not None and frequencies_cm1:
-            try:
-                import numpy as _np_ir
+            import numpy as _np_ir
 
+            _dm0 = mf.make_rdm1()
+            _dm0_is_unrestricted = _np_ir.asarray(_dm0).ndim == 3
+
+            try:
                 from .config import BOHR_TO_ANGSTROM as _BOHR_TO_ANG
 
                 _DELTA = 0.01  # Bohr
@@ -407,7 +414,6 @@ def _run_freq_calc_body(
                 _ir_total_solves = _n_ir * 3 * 2
                 _ir_done_solves = 0
                 _coords0 = mol.atom_coords().copy()
-                _dm0 = mf.make_rdm1()
                 _dpdx = _np_ir.zeros((_n_ir * 3, 3))
                 _xc = getattr(mf, "xc", None)
                 # Fix (2026-07-14): whether the inner displaced-SCF
@@ -423,8 +429,6 @@ def _run_freq_calc_body(
                 # raised a shape-mismatch ValueError inside PySCF and
                 # silently dropped IR intensities for the whole calc (caught
                 # by the broad except below).
-                _dm0_is_unrestricted = _np_ir.asarray(_dm0).ndim == 3
-
                 _status(
                     "Numerical IR intensities: "
                     f"{_ir_done_solves}/{_ir_total_solves} finite-difference displacement SCFs done (6 per atom) "
@@ -642,6 +646,33 @@ def _run_freq_calc_body(
                     "Numerical IR intensities failed; continuing without IR intensities."
                 )
 
+            # Static Raman activities: analytical polarizability (pyscf-properties)
+            # + the same ±Δ geometry FD loop as IR (see quantui.raman_calc).
+            if displacements is not None and frequencies_cm1:
+                try:
+                    from quantui.raman_calc import compute_raman_activities
+
+                    _raman = compute_raman_activities(
+                        mf=mf,
+                        mol=mol,
+                        scf=scf,
+                        dft=dft,
+                        displacements=displacements,
+                        frequencies_cm1=frequencies_cm1,
+                        dm0=_dm0,
+                        dm0_is_unrestricted=_dm0_is_unrestricted,
+                        density_fit_used=_density_fit_used,
+                        stream=stream,
+                        status=_status,
+                    )
+                    if len(_raman) == len(frequencies_cm1):
+                        raman_activities = _raman
+                except Exception as _ram_exc:
+                    logger.warning("Numerical Raman activities failed: %s", _ram_exc)
+                    _status(
+                        "Numerical Raman activities failed; continuing without Raman."
+                    )
+
         # Thermochemistry at 298.15 K / 1 atm — best-effort
         try:
             import numpy as _np
@@ -725,6 +756,7 @@ def _run_freq_calc_body(
         formula=molecule.get_formula(),
         frequencies_cm1=frequencies_cm1,
         ir_intensities=ir_intensities,
+        raman_activities=raman_activities,
         zpve_hartree=zpve_hartree,
         thermo=thermo_data,
         displacements=displacements,
