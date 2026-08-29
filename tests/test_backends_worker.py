@@ -6,6 +6,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 
 from quantui.backends.base import CalculationRequest
@@ -65,6 +66,27 @@ class TestWorker:
         assert outcome.result_payload["energy_hartree"] == -1.12
         assert (staging / "result.json").exists()
         assert (staging / "progress.json").exists()
+
+    @patch("quantui.session_calc.run_in_session")
+    def test_single_point_writes_orbitals_sidecar(self, mock_run, staging):
+        mock_run.return_value = SimpleNamespace(
+            energy_hartree=-1.12,
+            homo_lumo_gap_ev=10.0,
+            converged=True,
+            n_iterations=5,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2",
+            mo_energy_hartree=np.array([-1.0, 0.5]),
+            mo_occ=np.array([2.0, 0.0]),
+            mo_coeff=np.eye(2),
+            pyscf_mol_atom=[("H", [0.0, 0.0, 0.0]), ("H", [0.0, 0.0, 0.74])],
+            pyscf_mol_basis="STO-3G",
+        )
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "success"
+        assert (staging / "orbitals.npz").exists()
+        assert (staging / "orbitals_meta.json").exists()
 
     @patch("quantui.optimizer.optimize_geometry")
     def test_geometry_opt_success(self, mock_opt, staging):

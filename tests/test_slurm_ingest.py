@@ -4,6 +4,9 @@ Tests for SLURM staging → History ingest helpers.
 
 import json
 from pathlib import Path
+from unittest.mock import patch
+
+import numpy as np
 
 from quantui.backends.base import CalculationRequest
 from quantui.backends.registry import JobRegistry
@@ -152,3 +155,35 @@ class TestSlurmIngest:
         data = json.loads((saved / "result.json").read_text())
         assert data["calc_type"] == "tddft"
         assert data["spectra"]["uv_vis"]["excitation_energies_ev"] == [4.5]
+
+    def test_ingest_copies_orbitals_and_thumbnail(self, tmp_path, monkeypatch):
+        results_root = tmp_path / "results"
+        monkeypatch.setattr(
+            "quantui.results_storage._default_results_dir",
+            lambda: results_root,
+        )
+        staging = tmp_path / "staging" / "job1"
+        staging.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            staging / "orbitals.npz",
+            mo_energy_hartree=np.array([-1.0, 0.5]),
+            mo_occ=np.array([2.0, 0.0]),
+        )
+        (staging / "orbitals_meta.json").write_text(
+            json.dumps({"mol_atom": [["H", [0, 0, 0]]], "mol_basis": "STO-3G"})
+        )
+        payload = {
+            "calc_type": "single_point",
+            "energy_hartree": -1.12,
+            "converged": True,
+            "n_iterations": 4,
+            "method": "RHF",
+            "basis": "STO-3G",
+            "formula": "H2",
+        }
+        record = _record(tmp_path, payload)
+        with patch("quantui.results_storage.save_thumbnail") as mock_thumb:
+            saved = ingest_staging_success(record)
+            mock_thumb.assert_called_once()
+        assert (saved / "orbitals.npz").exists()
+        assert (saved / "orbitals_meta.json").exists()

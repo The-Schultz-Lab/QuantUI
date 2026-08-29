@@ -14,6 +14,32 @@ from typing import Any
 from .registry import JobRecord
 from .worker_payload import molecule_from_dict
 
+# Sidecar files the batch worker may write for Analysis replay parity.
+_STAGING_SIDECAR_FILES = (
+    "orbitals.npz",
+    "orbitals_meta.json",
+    "result.molden",
+    "trajectory.xyz",
+    "trajectory.traj",
+)
+
+
+def _copy_staging_sidecars(staging: Path, saved_dir: Path) -> None:
+    for name in _STAGING_SIDECAR_FILES:
+        src = staging / name
+        if src.exists():
+            shutil.copy2(src, saved_dir / name)
+
+
+def _finalize_history_entry(saved_dir: Path) -> None:
+    """Generate History dropdown thumbnail (matches local ``_do_run``)."""
+    from quantui.results_storage import load_result, save_thumbnail
+
+    try:
+        save_thumbnail(saved_dir, load_result(saved_dir))
+    except Exception:
+        pass
+
 
 def _basic_result(payload: dict[str, Any], record: JobRecord) -> SimpleNamespace:
     return SimpleNamespace(
@@ -51,7 +77,8 @@ def _ingest_frequency(
     ir = spectra.get("ir") or {}
     freqs = ir.get("frequencies_cm1")
     displacements = ir.get("displacements")
-    if freqs and displacements:
+    _copy_staging_sidecars(staging, saved_dir)
+    if not (saved_dir / "result.molden").exists() and freqs and displacements:
         mol_block = spectra.get("molecule") or {}
         atoms = mol_block.get("atoms") or []
         coords = mol_block.get("coords") or []
@@ -67,6 +94,7 @@ def _ingest_frequency(
             frequencies_cm1=freqs,
             normal_modes=displacements,
         )
+    _finalize_history_entry(saved_dir)
     return saved_dir
 
 
@@ -111,12 +139,27 @@ def _ingest_reorganization_energy(
         molecule=neutral_mol,
         channels=channels,
     )
-    return save_result(
+    saved_dir = save_result(
         result,
         pyscf_log=log_text,
         calc_type="reorganization_energy",
         spectra=payload.get("spectra") or {},
     )
+    _finalize_history_entry(saved_dir)
+    return saved_dir
+
+
+def _ingest_with_sidecars(
+    staging: Path,
+    saved_dir: Path,
+    payload: dict[str, Any],
+) -> Path:
+    if calc_type := payload.get("calc_type"):
+        if calc_type in ("geometry_opt", "pes_scan"):
+            _copy_trajectory(staging, saved_dir, payload)
+    _copy_staging_sidecars(staging, saved_dir)
+    _finalize_history_entry(saved_dir)
+    return saved_dir
 
 
 def ingest_staging_success(record: JobRecord, log_text: str = "") -> Path:
@@ -146,10 +189,7 @@ def ingest_staging_success(record: JobRecord, log_text: str = "") -> Path:
         spectra=spectra if spectra is not None else {},
     )
 
-    if calc_type in ("geometry_opt", "pes_scan"):
-        _copy_trajectory(staging, saved_dir, payload)
-
-    return saved_dir
+    return _ingest_with_sidecars(staging, saved_dir, payload)
 
 
 def completion_summary_html(saved_dir: Path, payload: dict[str, Any]) -> str:
