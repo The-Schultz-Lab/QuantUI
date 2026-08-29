@@ -231,6 +231,55 @@ def write_worker_result(staging_dir: Path, payload: Dict[str, Any]) -> Path:
     return result_path
 
 
+def write_analysis_artifacts(
+    staging_dir: Path,
+    calc_type: str,
+    result,
+    *,
+    charge: int = 0,
+    multiplicity: int = 1,
+    trajectory: list | None = None,
+    energies: list | None = None,
+) -> None:
+    """Write Analysis-replay sidecars into *staging_dir* (mirrors ``app._do_run``).
+
+    Persists MO data, Molden, and external trajectory formats so SLURM ingest
+    can promote them into History the same way local runs do.
+    """
+    from quantui.results_storage import (
+        save_molden,
+        save_orbitals,
+        save_trajectory_ase,
+        save_trajectory_xyz,
+    )
+
+    if calc_type in ("single_point", "geometry_opt", "frequency"):
+        save_orbitals(staging_dir, result)
+        try:
+            save_molden(
+                staging_dir,
+                mo_energy_hartree=getattr(result, "mo_energy_hartree", None),
+                mo_occ=getattr(result, "mo_occ", None),
+                mo_coeff=getattr(result, "mo_coeff", None),
+                pyscf_mol_atom=getattr(result, "pyscf_mol_atom", None),
+                pyscf_mol_basis=getattr(result, "pyscf_mol_basis", None),
+                charge=int(charge),
+                multiplicity=int(multiplicity),
+                frequencies_cm1=getattr(result, "frequencies_cm1", None),
+                normal_modes=getattr(result, "displacements", None),
+            )
+        except Exception:
+            pass
+
+    if calc_type in ("geometry_opt", "pes_scan") and trajectory:
+        e_list = list(energies or [])
+        try:
+            save_trajectory_xyz(staging_dir, frames=trajectory, energies=e_list)
+            save_trajectory_ase(staging_dir, frames=trajectory, energies=e_list)
+        except Exception:
+            pass
+
+
 def unsupported_calc_payload(calc_type: str) -> Dict[str, Any]:
     return {
         "calc_type": calc_type,

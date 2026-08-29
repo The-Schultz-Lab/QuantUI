@@ -29,6 +29,7 @@ from .worker_payload import (
     reorg_result_payload,
     session_result_payload,
     tddft_result_payload,
+    write_analysis_artifacts,
     write_trajectory_json,
     write_worker_result,
 )
@@ -210,18 +211,44 @@ def _run_reorganization_energy(
     )
 
 
-def _build_payload(calc_type: str, outcome: Any, staging_dir: Path) -> dict[str, Any]:
+def _build_payload(
+    calc_type: str, outcome: Any, staging_dir: Path, request: CalculationRequest
+) -> dict[str, Any]:
     if calc_type == "single_point":
-        return session_result_payload(outcome)
+        payload = session_result_payload(outcome)
+        write_analysis_artifacts(
+            staging_dir,
+            calc_type,
+            outcome,
+            charge=request.charge,
+            multiplicity=request.multiplicity,
+        )
+        return payload
     if calc_type == "geometry_opt":
         traj_file = write_trajectory_json(
             staging_dir,
             outcome.trajectory,
             outcome.energies_hartree,
         )
+        write_analysis_artifacts(
+            staging_dir,
+            calc_type,
+            outcome,
+            charge=request.charge,
+            multiplicity=request.multiplicity,
+            trajectory=outcome.trajectory,
+            energies=outcome.energies_hartree,
+        )
         return optimization_result_payload(outcome, trajectory_file=traj_file)
     if calc_type == "frequency":
         result, molecule = outcome
+        write_analysis_artifacts(
+            staging_dir,
+            calc_type,
+            result,
+            charge=molecule.charge,
+            multiplicity=molecule.multiplicity,
+        )
         return freq_result_payload(result, molecule)
     if calc_type == "tddft":
         return tddft_result_payload(outcome)
@@ -232,6 +259,15 @@ def _build_payload(calc_type: str, outcome: Any, staging_dir: Path) -> dict[str,
             staging_dir,
             outcome.coordinates_list,
             outcome.energies_hartree,
+        )
+        write_analysis_artifacts(
+            staging_dir,
+            calc_type,
+            outcome,
+            charge=request.charge,
+            multiplicity=request.multiplicity,
+            trajectory=outcome.coordinates_list,
+            energies=outcome.energies_hartree,
         )
         return pes_scan_result_payload(outcome, trajectory_file=traj_file)
     if calc_type == "reorganization_energy":
@@ -294,7 +330,7 @@ def run_worker_request(request_path: Path) -> CalculationResult:
         )
 
     elapsed = time.perf_counter() - t0
-    payload = _build_payload(calc_type, outcome, staging_dir)
+    payload = _build_payload(calc_type, outcome, staging_dir, request)
     write_worker_result(staging_dir, payload)
 
     registry.update_status(request.request_id, "success", result_dir=str(staging_dir))
