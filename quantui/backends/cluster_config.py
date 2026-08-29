@@ -97,6 +97,22 @@ DEFAULT_MAIL_EVENTS = ["END", "FAIL"]
 
 # Status polling (seconds)
 STATUS_REFRESH_INTERVAL = 10
+CANCEL_CONFIRM_TIMEOUT_SECONDS = 30
+CANCEL_POLL_INTERVAL_SECONDS = 1
+
+
+def cancel_confirm_timeout_seconds() -> float:
+    override = os.environ.get("QUANTUI_SLURM_CANCEL_CONFIRM_S")
+    if override:
+        try:
+            return max(5.0, float(override))
+        except ValueError:
+            logger.warning(
+                "Invalid QUANTUI_SLURM_CANCEL_CONFIRM_S=%r; using default %s",
+                override,
+                CANCEL_CONFIRM_TIMEOUT_SECONDS,
+            )
+    return float(CANCEL_CONFIRM_TIMEOUT_SECONDS)
 
 
 # Registry and staging roots

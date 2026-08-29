@@ -224,6 +224,23 @@ class TestSlurmBackendPolling:
         assert statuses["10002"] == "PENDING"
         assert mock_run.call_count == 1
 
+    def test_poll_uses_sacct_when_not_in_squeue(self, slurm_backend, mock_slurm_env):
+        (mock_slurm_env / "888.json").write_text(
+            json.dumps({"job_id": "888", "status": "FAILED"})
+        )
+        assert slurm_backend.poll_slurm_status("888") == "FAILED"
+
+    def test_batch_poll_falls_back_to_sacct(self, slurm_backend, mock_slurm_env):
+        (mock_slurm_env / "10001.json").write_text(
+            json.dumps({"job_id": "10001", "status": "RUNNING"})
+        )
+        (mock_slurm_env / "10002.json").write_text(
+            json.dumps({"job_id": "10002", "status": "COMPLETED"})
+        )
+        statuses = slurm_backend.batch_poll_slurm_statuses(["10001", "10002"])
+        assert statuses["10001"] == "RUNNING"
+        assert statuses["10002"] == "COMPLETED"
+
     def test_cache_avoids_repeat_squeue(self, slurm_backend):
         with patch("quantui.backends.slurm.subprocess.run") as mock_run:
             mock_run.return_value.stdout = "RUNNING\n"
@@ -234,11 +251,40 @@ class TestSlurmBackendPolling:
 
 
 class TestSlurmBackendCancel:
-    @patch("quantui.backends.slurm.subprocess.run")
-    def test_cancel_updates_registry(self, mock_run, slurm_backend):
-        mock_run.return_value.returncode = 0
+    def test_cancel_confirms_via_sacct(
+        self, slurm_backend, mock_slurm_env, monkeypatch
+    ):
+        monkeypatch.setenv("QUANTUI_SLURM_CANCEL_CONFIRM_S", "5")
         slurm_backend.registry.create(_request("cancelme"), "cluster_slurm")
         slurm_backend.registry.update_status("cancelme", "running", slurm_job_id="777")
+        (mock_slurm_env / "777.json").write_text(
+            json.dumps({"job_id": "777", "status": "RUNNING"})
+        )
+
         assert slurm_backend.cancel("cancelme") is True
         record = slurm_backend.registry.load("cancelme")
+        assert record.status == "cancelled"
+        assert record.error is None
+        data = json.loads((mock_slurm_env / "777.json").read_text())
+        assert data["status"] == "CANCELLED"
+
+    @patch("quantui.backends.slurm.subprocess.run")
+    def test_cancel_already_cancelled_is_idempotent(self, mock_run, slurm_backend):
+        slurm_backend.registry.create(_request("done"), "cluster_slurm")
+        slurm_backend.registry.update_status("done", "running", slurm_job_id="999")
+
+        def _fake_run(args, **_kwargs):
+            cmd = args[0] if args else ""
+            result = mock_run.return_value
+            if cmd == "squeue":
+                result.stdout = ""
+            elif cmd == "sacct":
+                result.stdout = "999|CANCELLED|0:15|00:00:04\n"
+            return result
+
+        mock_run.return_value.returncode = 0
+        mock_run.side_effect = _fake_run
+
+        assert slurm_backend.cancel("done") is True
+        record = slurm_backend.registry.load("done")
         assert record.status == "cancelled"

@@ -26,6 +26,25 @@ def parse_slurm_job_id(sbatch_output: str) -> Optional[str]:
     return None
 
 
+def parse_sacct_states(sacct_output: str) -> Dict[str, str]:
+    """Parse ``sacct -P --format=JobID,State`` lines into a job-id → state map."""
+    states: Dict[str, str] = {}
+    for line in sacct_output.splitlines():
+        line = line.strip()
+        if not line or line.startswith("JobID|"):
+            continue
+        parts = line.split("|")
+        if len(parts) < 2:
+            continue
+        job_id, state = parts[0].strip(), parts[1].strip()
+        if not job_id or not state:
+            continue
+        if "." in job_id:
+            continue
+        states[job_id] = state.upper()
+    return states
+
+
 def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
     """
     Heuristic cores / memory / walltime for a batch submission.

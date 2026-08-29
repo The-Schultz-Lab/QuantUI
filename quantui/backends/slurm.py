@@ -30,7 +30,11 @@ from .cluster_security import (
 )
 from .registry import JobRegistry
 from .slurm_errors import format_error_for_student
-from .slurm_utils import estimate_slurm_resources, parse_slurm_job_id
+from .slurm_utils import (
+    estimate_slurm_resources,
+    parse_sacct_states,
+    parse_slurm_job_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +252,15 @@ class SlurmBackend:
         return status
 
     def _poll_single(self, slurm_job_id: str) -> str:
+        status = self._squeue_status(slurm_job_id)
+        if status:
+            return status
+        sacct_status = self._sacct_status(slurm_job_id)
+        if sacct_status:
+            return sacct_status
+        return "UNKNOWN"
+
+    def _squeue_status(self, slurm_job_id: str) -> str | None:
         try:
             result = subprocess.run(
                 ["squeue", "-j", slurm_job_id, "-h", "-o", "%T"],
@@ -255,13 +268,48 @@ class SlurmBackend:
                 text=True,
                 timeout=10,
             )
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            return "UNKNOWN"
-        except subprocess.CalledProcessError:
-            return "UNKNOWN"
+        except (
+            subprocess.TimeoutExpired,
+            FileNotFoundError,
+            subprocess.CalledProcessError,
+        ):
+            return None
 
         status = result.stdout.strip()
-        return status or "COMPLETED"
+        return status.upper() if status else None
+
+    def _sacct_status(self, slurm_job_id: str) -> str | None:
+        batch = self._batch_sacct([slurm_job_id])
+        return batch.get(slurm_job_id)
+
+    def _batch_sacct(self, slurm_job_ids: List[str]) -> Dict[str, str]:
+        if not slurm_job_ids:
+            return {}
+
+        id_csv = ",".join(slurm_job_ids)
+        try:
+            result = subprocess.run(
+                [
+                    "sacct",
+                    "-j",
+                    id_csv,
+                    "-n",
+                    "-X",
+                    "-P",
+                    "--format=JobID,State,ExitCode,Elapsed",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except (
+            subprocess.TimeoutExpired,
+            FileNotFoundError,
+            subprocess.CalledProcessError,
+        ):
+            return {}
+
+        return parse_sacct_states(result.stdout)
 
     def batch_poll_slurm_statuses(self, slurm_job_ids: List[str]) -> Dict[str, str]:
         if not slurm_job_ids:
@@ -313,8 +361,12 @@ class SlurmBackend:
         ):
             return {jid: "UNKNOWN" for jid in slurm_job_ids}
 
+        missing = [jid for jid in slurm_job_ids if jid not in statuses]
+        if missing:
+            statuses.update(self._batch_sacct(missing))
+
         for jid in slurm_job_ids:
-            statuses.setdefault(jid, "COMPLETED")
+            statuses.setdefault(jid, "UNKNOWN")
         return statuses
 
     def refresh_registry_statuses(self) -> None:
@@ -438,9 +490,15 @@ class SlurmBackend:
         record = self.registry.load(request_id)
         if record is None or not record.slurm_job_id:
             return False
+
+        slurm_job_id = record.slurm_job_id
+        current = self.poll_slurm_status(slurm_job_id)
+        if current in _TERMINAL_SLURM:
+            return self._finalize_cancel_from_slurm_state(record, current)
+
         try:
             subprocess.run(
-                ["scancel", record.slurm_job_id],
+                ["scancel", slurm_job_id],
                 capture_output=True,
                 text=True,
                 check=True,
@@ -451,9 +509,79 @@ class SlurmBackend:
             FileNotFoundError,
             subprocess.TimeoutExpired,
         ):
+            self._record_cancel_failure(
+                record,
+                code="CANCEL_FAILED",
+                message=(
+                    f"Could not cancel SLURM job {slurm_job_id}. "
+                    "Try Refresh on Cluster Jobs or run scancel manually."
+                ),
+            )
             return False
-        self.registry.update_status(request_id, "cancelled")
-        return True
+
+        deadline = time.monotonic() + cfg.cancel_confirm_timeout_seconds()
+        while time.monotonic() < deadline:
+            status = self._sacct_status(slurm_job_id) or self._squeue_status(
+                slurm_job_id
+            )
+            if status in _TERMINAL_SLURM:
+                return self._finalize_cancel_from_slurm_state(record, status)
+            if status and status not in ("PENDING", "RUNNING", "CONFIGURING"):
+                return self._finalize_cancel_from_slurm_state(record, status)
+            time.sleep(cfg.CANCEL_POLL_INTERVAL_SECONDS)
+
+        self._record_cancel_failure(
+            record,
+            code="CANCEL_PENDING",
+            message=(
+                f"Cancellation was sent for job {slurm_job_id}, but SLURM has not "
+                "confirmed it yet. Refresh Cluster Jobs in a few seconds."
+            ),
+        )
+        return False
+
+    def _finalize_cancel_from_slurm_state(self, record, slurm_status: str) -> bool:
+        now = datetime.now(timezone.utc)
+        mapped, error = self._terminal_registry_update(record, slurm_status, now)
+        if mapped == "cancelled":
+            updated = self.registry.load(record.request_id)
+            if updated is not None:
+                updated.status = "cancelled"
+                updated.error = None
+                self.registry.save(updated)
+            if record.slurm_job_id:
+                self._status_cache[record.slurm_job_id] = (
+                    slurm_status,
+                    time.monotonic(),
+                )
+            return True
+        if mapped is not None:
+            self.registry.update_status(record.request_id, mapped, error=error)
+            self._record_cancel_failure(
+                record,
+                code="CANCEL_NOT_NEEDED",
+                message=(
+                    f"SLURM job {record.slurm_job_id} is already finished "
+                    f"({slurm_status})."
+                ),
+            )
+            return False
+        return False
+
+    def _record_cancel_failure(self, record, *, code: str, message: str) -> None:
+        current = self.registry.load(record.request_id)
+        if current is None:
+            return
+        self.registry.update_status(
+            record.request_id,
+            current.status,
+            error={
+                "code": code,
+                "user_message": message,
+                "technical_message": message,
+                "retryable": True,
+            },
+        )
 
 
 def _map_slurm_status(slurm_status: str) -> str:

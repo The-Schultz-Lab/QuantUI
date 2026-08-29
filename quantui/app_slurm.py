@@ -205,7 +205,7 @@ def submit_slurm_run(app: Any) -> None:
 
 
 def cancel_slurm_job(app: Any, request_id: str) -> bool:
-    """Cancel a SLURM job by registry request id."""
+    """Cancel a SLURM job by registry request id. Returns True when confirmed."""
     ensure_job_registry(app)
     backend = slurm_backend_for_app(app)
     if getattr(app, "_slurm_active_request_id", None) == request_id:
@@ -218,13 +218,28 @@ def cancel_slurm_job(app: Any, request_id: str) -> bool:
     return ok
 
 
+def slurm_cancel_user_message(app: Any, request_id: str) -> str:
+    """Return a user-facing cancel outcome message for *request_id*."""
+    record = ensure_job_registry(app).load(request_id)
+    if record is None:
+        return "SLURM job record not found."
+    if record.status == "cancelled":
+        return f"SLURM job {request_id} cancelled."
+    err = record.error or {}
+    if err.get("user_message"):
+        return str(err["user_message"])
+    return f"Could not cancel SLURM job {request_id}."
+
+
 def cancel_slurm_run(app: Any) -> bool:
     """Cancel the active SLURM job if one is being monitored."""
     request_id = getattr(app, "_slurm_active_request_id", None)
     if not request_id:
         return False
     ok = cancel_slurm_job(app, request_id)
-    app.run_status.value = "SLURM cancellation requested."
+    app.run_status.value = slurm_cancel_user_message(app, request_id)
+    if not ok:
+        _append_run_html(app, format_error_html(app.run_status.value))
     return ok
 
 
@@ -368,12 +383,13 @@ def on_slurm_jobs_cancel_clicked(app: Any, _btn: Any = None) -> None:
                 f"Job {request_id} is not active (status: {record.status}).</span>"
             )
         return
-    cancel_slurm_job(app, request_id)
+    ok = cancel_slurm_job(app, request_id)
     status = getattr(app, "_slurm_jobs_status_html", None)
     if status is not None:
+        message = slurm_cancel_user_message(app, request_id)
+        color = _theme.TEXT_STRONG if ok else _theme.ACCENT_ERROR
         status.value = (
-            f'<span style="color:{_theme.TEXT_STRONG};font-size:12px">'
-            f"Cancellation requested for {request_id}.</span>"
+            f'<span style="color:{color};font-size:12px">{html.escape(message)}</span>'
         )
 
 

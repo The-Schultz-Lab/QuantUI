@@ -6,7 +6,11 @@ import pytest
 
 from quantui.backends.base import CalculationRequest
 from quantui.backends.registry import JobRegistry
-from quantui.backends.slurm_utils import estimate_slurm_resources, parse_slurm_job_id
+from quantui.backends.slurm_utils import (
+    estimate_slurm_resources,
+    parse_sacct_states,
+    parse_slurm_job_id,
+)
 
 
 @pytest.fixture
@@ -71,6 +75,15 @@ class TestSlurmUtils:
     def test_parse_slurm_job_id(self):
         assert parse_slurm_job_id("Submitted batch job 123456") == "123456"
         assert parse_slurm_job_id("garbage") is None
+
+    def test_parse_sacct_states(self):
+        output = (
+            "123456|COMPLETED|0:0|00:01:23\n"
+            "123456.batch|COMPLETED|0:0|00:01:23\n"
+            "789|CANCELLED|0:15|00:00:04\n"
+        )
+        states = parse_sacct_states(output)
+        assert states == {"123456": "COMPLETED", "789": "CANCELLED"}
 
     def test_estimate_resources_scales_with_atoms(self):
         small = _sample_request()
