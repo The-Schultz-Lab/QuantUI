@@ -107,6 +107,25 @@ def check_concurrent_job_limit(
         )
 
 
+def check_submit_cooldown(
+    seconds_since_last_submit: Optional[float],
+    cooldown_seconds: Optional[int] = None,
+) -> None:
+    """Raise when a new submit arrives inside the post-submit cooldown window."""
+    cooldown = (
+        cooldown_seconds
+        if cooldown_seconds is not None
+        else cfg.submit_cooldown_seconds()
+    )
+    if cooldown <= 0 or seconds_since_last_submit is None:
+        return
+    if seconds_since_last_submit < cooldown:
+        remaining = max(1, int(cooldown - seconds_since_last_submit + 0.999))
+        raise SecurityError(
+            f"Please wait {remaining}s before submitting another cluster job."
+        )
+
+
 def validate_email(email: Optional[str]) -> Optional[str]:
     if email is None:
         return None

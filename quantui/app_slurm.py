@@ -40,6 +40,21 @@ def max_concurrent_slurm_jobs() -> int:
     return _cluster_cfg.max_concurrent_jobs()
 
 
+def submit_cooldown_seconds() -> int:
+    return _cluster_cfg.submit_cooldown_seconds()
+
+
+def _reconcile_slurm_registry(app: Any) -> None:
+    """Drop stale active rows before limit/cooldown checks or tab refresh."""
+    if not is_slurm_available():
+        return
+    ensure_job_registry(app)
+    try:
+        slurm_backend_for_app(app).reconcile_stale_records()
+    except Exception:  # noqa: BLE001 — reconciliation must not break the UI
+        logger.exception("Failed to reconcile SLURM registry")
+
+
 def list_slurm_jobs(app: Any) -> list[JobRecord]:
     ensure_job_registry(app)
     return [
@@ -59,6 +74,16 @@ def active_slurm_job_count(app: Any) -> int:
 
 def slurm_submit_block_reason(app: Any) -> str | None:
     """Return a user-facing reason when a new SLURM submit should be blocked."""
+    _reconcile_slurm_registry(app)
+
+    cooldown = submit_cooldown_seconds()
+    if cooldown > 0:
+        registry = ensure_job_registry(app)
+        since = registry.seconds_since_last_slurm_submit()
+        if since is not None and since < cooldown:
+            remaining = max(1, int(cooldown - since + 0.999))
+            return f"Please wait {remaining}s before submitting another cluster job."
+
     limit = max_concurrent_slurm_jobs()
     active = active_slurm_job_count(app)
     if active >= limit:
@@ -93,6 +118,7 @@ def startup_slurm_check(app: Any) -> None:
     if not is_slurm_available():
         return
     ensure_job_registry(app)
+    _reconcile_slurm_registry(app)
     active = [
         r for r in app._job_registry.list_active() if r.backend_id == "cluster_slurm"
     ]
@@ -220,6 +246,7 @@ def refresh_slurm_jobs_tab(app: Any) -> None:
         return
 
     if is_slurm_available():
+        _reconcile_slurm_registry(app)
         backend = slurm_backend_for_app(app)
         try:
             backend.refresh_registry_statuses()

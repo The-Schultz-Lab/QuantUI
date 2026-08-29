@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -182,3 +183,24 @@ class JobRegistry:
             record.error = error
         self.save(record)
         return record
+
+    def _submit_meta_path(self) -> Path:
+        return self.jobs_root / ".slurm_submit_meta.json"
+
+    def record_slurm_submit(self) -> None:
+        """Persist the wall-clock time of the most recent successful SLURM submit."""
+        payload = {"last_submit_epoch": time.time()}
+        self._submit_meta_path().write_text(json.dumps(payload), encoding="utf-8")
+
+    def seconds_since_last_slurm_submit(self) -> Optional[float]:
+        path = self._submit_meta_path()
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            epoch = data.get("last_submit_epoch")
+            if epoch is None:
+                return None
+            return time.time() - float(epoch)
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
+            return None
