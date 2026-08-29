@@ -17,19 +17,66 @@ from typing import Any
 from IPython.display import HTML
 
 from quantui import theme as _theme
+from quantui.backends import cluster_config as _cluster_cfg
 from quantui.backends.dispatch import (
     build_calculation_request,
     calc_type_key_from_app,
     is_slurm_available,
     slurm_backend_for_app,
 )
-from quantui.backends.registry import JobRegistry
+from quantui.backends.registry import JobRecord, JobRegistry
 from quantui.backends.slurm_errors import format_error_html
+from quantui.security import SecurityError
 
 logger = logging.getLogger(__name__)
 
 _POLL_INTERVAL_S = 2.0
 _SUPPORTED_SLURM_CALC_TYPES = frozenset({"single_point"})
+_ACTIVE_SLURM_STATUSES = frozenset({"queued", "pending", "running", "submitted"})
+
+
+def max_concurrent_slurm_jobs() -> int:
+    return _cluster_cfg.max_concurrent_jobs()
+
+
+def list_slurm_jobs(app: Any) -> list[JobRecord]:
+    ensure_job_registry(app)
+    return [
+        record
+        for record in app._job_registry.list_all()
+        if record.backend_id == "cluster_slurm"
+    ]
+
+
+def active_slurm_job_count(app: Any) -> int:
+    return sum(
+        1
+        for record in list_slurm_jobs(app)
+        if record.status.lower() in _ACTIVE_SLURM_STATUSES
+    )
+
+
+def slurm_submit_block_reason(app: Any) -> str | None:
+    """Return a user-facing reason when a new SLURM submit should be blocked."""
+    limit = max_concurrent_slurm_jobs()
+    active = active_slurm_job_count(app)
+    if active >= limit:
+        return (
+            f"Concurrent job limit reached ({active}/{limit}). "
+            "Open the Cluster Jobs tab to view running jobs or cancel one."
+        )
+    return None
+
+
+def slurm_jobs_tab_visible(app: Any) -> bool:
+    return use_slurm_execution(app)
+
+
+def _reset_run_ui_after_submit_failure(app: Any) -> None:
+    app._calc_running = False
+    app.run_btn.disabled = False
+    app.cancel_btn.disabled = True
+    app.log_clear_btn.disabled = False
 
 
 def ensure_job_registry(app: Any) -> JobRegistry:
@@ -50,6 +97,8 @@ def startup_slurm_check(app: Any) -> None:
     ]
     if not active:
         return
+    refresh_slurm_jobs_tab(app)
+    _update_slurm_jobs_tab_title(app)
     record = active[0]
     _show_slurm_banner(
         app,
@@ -75,6 +124,12 @@ def submit_slurm_run(app: Any) -> None:
         )
         return
 
+    block_reason = slurm_submit_block_reason(app)
+    if block_reason:
+        app.run_status.value = block_reason
+        _append_run_html(app, format_error_html(block_reason))
+        return
+
     ensure_job_registry(app)
     backend = slurm_backend_for_app(app)
     request = build_calculation_request(app)
@@ -88,14 +143,21 @@ def submit_slurm_run(app: Any) -> None:
 
     try:
         request_id = backend.dispatch(request)
+    except SecurityError as exc:
+        _reset_run_ui_after_submit_failure(app)
+        app.run_status.value = str(exc)
+        _append_run_html(app, format_error_html(str(exc)))
+        refresh_slurm_jobs_tab(app)
+        _update_slurm_jobs_tab_title(app)
+        return
     except RuntimeError as exc:
-        app._calc_running = False
-        app.run_btn.disabled = False
-        app.cancel_btn.disabled = True
-        app.log_clear_btn.disabled = False
+        _reset_run_ui_after_submit_failure(app)
         app.run_status.value = "SLURM submission failed."
         _append_run_html(app, format_error_html(str(exc)))
         return
+
+    refresh_slurm_jobs_tab(app)
+    _update_slurm_jobs_tab_title(app)
 
     app._slurm_active_request_id = request_id
     record = app._job_registry.load(request_id)
@@ -114,18 +176,161 @@ def submit_slurm_run(app: Any) -> None:
     ).start()
 
 
+def cancel_slurm_job(app: Any, request_id: str) -> bool:
+    """Cancel a SLURM job by registry request id."""
+    ensure_job_registry(app)
+    backend = slurm_backend_for_app(app)
+    if getattr(app, "_slurm_active_request_id", None) == request_id:
+        stop = getattr(app, "_slurm_monitor_stop", None)
+        if stop is not None:
+            stop.set()
+    ok = backend.cancel(request_id)
+    refresh_slurm_jobs_tab(app)
+    _update_slurm_jobs_tab_title(app)
+    return ok
+
+
 def cancel_slurm_run(app: Any) -> bool:
     """Cancel the active SLURM job if one is being monitored."""
     request_id = getattr(app, "_slurm_active_request_id", None)
     if not request_id:
         return False
-    stop = getattr(app, "_slurm_monitor_stop", None)
-    if stop is not None:
-        stop.set()
-    backend = slurm_backend_for_app(app)
-    ok = backend.cancel(request_id)
+    ok = cancel_slurm_job(app, request_id)
     app.run_status.value = "SLURM cancellation requested."
     return ok
+
+
+def _format_slurm_job_option(record: JobRecord) -> tuple[str, str]:
+    req = record.request_obj
+    slurm_id = record.slurm_job_id or "pending"
+    label = (
+        f"{record.status} | {slurm_id} | "
+        f"{req.method}/{req.basis} | {record.request_id[:8]}"
+    )
+    return label, record.request_id
+
+
+def refresh_slurm_jobs_tab(app: Any) -> None:
+    """Re-render the Cluster Jobs tab from the on-disk registry."""
+    summary = getattr(app, "_slurm_jobs_summary_html", None)
+    table = getattr(app, "_slurm_jobs_table_html", None)
+    select = getattr(app, "_slurm_jobs_select", None)
+    if summary is None or table is None or select is None:
+        return
+
+    if is_slurm_available():
+        backend = slurm_backend_for_app(app)
+        try:
+            backend.refresh_registry_statuses()
+        except Exception:  # noqa: BLE001 — UI refresh must not crash the app
+            logger.exception("Failed to refresh SLURM registry statuses")
+
+    records = list_slurm_jobs(app)
+    active = active_slurm_job_count(app)
+    limit = max_concurrent_slurm_jobs()
+    summary.value = (
+        f'<div style="font-size:13px;color:{_theme.TEXT_STRONG};margin:4px 0 8px">'
+        f"<b>{active}</b> active / <b>{limit}</b> max concurrent cluster job(s). "
+        f"{len(records)} total in your registry.</div>"
+    )
+
+    if not records:
+        table.value = (
+            f'<div style="font-size:12px;color:{_theme.TEXT_SUBTLE};'
+            f'padding:8px 0">No cluster jobs yet.</div>'
+        )
+        select.options = [("(no jobs)", "")]
+        select.value = ""
+        select.disabled = True
+        return
+
+    rows = []
+    for record in records:
+        req = record.request_obj
+        slurm_id = record.slurm_job_id or "—"
+        created = record.created_at.replace("T", " ").replace("+00:00", " UTC")
+        rows.append(
+            "<tr>"
+            f"<td style='padding:4px 8px'>{record.status}</td>"
+            f"<td style='padding:4px 8px'>{slurm_id}</td>"
+            f"<td style='padding:4px 8px'>{req.method}/{req.basis}</td>"
+            f"<td style='padding:4px 8px'>{record.calc_type}</td>"
+            f"<td style='padding:4px 8px'>{created}</td>"
+            f"<td style='padding:4px 8px'><code>{record.request_id}</code></td>"
+            "</tr>"
+        )
+
+    table.value = (
+        f'<div style="overflow-x:auto;margin:4px 0 8px">'
+        f'<table style="border-collapse:collapse;font-size:12px;width:100%">'
+        f"<thead><tr style='background:{_theme.BG_PANEL}'>"
+        "<th style='padding:4px 8px;text-align:left'>Status</th>"
+        "<th style='padding:4px 8px;text-align:left'>SLURM ID</th>"
+        "<th style='padding:4px 8px;text-align:left'>Method/Basis</th>"
+        "<th style='padding:4px 8px;text-align:left'>Type</th>"
+        "<th style='padding:4px 8px;text-align:left'>Submitted</th>"
+        "<th style='padding:4px 8px;text-align:left'>Request ID</th>"
+        "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div>"
+    )
+
+    options = [_format_slurm_job_option(record) for record in records]
+    select.options = options
+    select.value = options[0][1]
+    select.disabled = False
+
+
+def _update_slurm_jobs_tab_title(app: Any) -> None:
+    root_tab = getattr(app, "root_tab", None)
+    tab_index = getattr(app, "_slurm_jobs_tab_index", None)
+    if root_tab is None or tab_index is None:
+        return
+    active = active_slurm_job_count(app)
+    title = "Cluster Jobs" if active == 0 else f"Cluster Jobs ({active})"
+    try:
+        root_tab.set_title(tab_index, title)
+    except Exception:
+        pass
+
+
+def on_slurm_jobs_refresh_clicked(app: Any, _btn: Any = None) -> None:
+    refresh_slurm_jobs_tab(app)
+    _update_slurm_jobs_tab_title(app)
+
+
+def on_slurm_jobs_view_clicked(app: Any, _btn: Any = None) -> None:
+    select = getattr(app, "_slurm_jobs_select", None)
+    request_id = select.value if select is not None else None
+    if not request_id:
+        return
+    attach_slurm_job(app, request_id)
+    go_to = getattr(app, "_go_to_calculate_tab", None)
+    if callable(go_to):
+        go_to()
+
+
+def on_slurm_jobs_cancel_clicked(app: Any, _btn: Any = None) -> None:
+    select = getattr(app, "_slurm_jobs_select", None)
+    request_id = select.value if select is not None else None
+    if not request_id:
+        return
+    record = ensure_job_registry(app).load(request_id)
+    if record is None:
+        return
+    if record.status.lower() not in _ACTIVE_SLURM_STATUSES:
+        status = getattr(app, "_slurm_jobs_status_html", None)
+        if status is not None:
+            status.value = (
+                f'<span style="color:{_theme.TEXT_SUBTLE};font-size:12px">'
+                f"Job {request_id} is not active (status: {record.status}).</span>"
+            )
+        return
+    cancel_slurm_job(app, request_id)
+    status = getattr(app, "_slurm_jobs_status_html", None)
+    if status is not None:
+        status.value = (
+            f'<span style="color:{_theme.TEXT_STRONG};font-size:12px">'
+            f"Cancellation requested for {request_id}.</span>"
+        )
 
 
 def attach_slurm_job(app: Any, request_id: str) -> None:
@@ -281,6 +486,8 @@ def _finish_slurm_monitor(app: Any) -> None:
     app.cancel_btn.disabled = True
     app.log_clear_btn.disabled = False
     _hide_slurm_banner(app)
+    refresh_slurm_jobs_tab(app)
+    _update_slurm_jobs_tab_title(app)
     stop = getattr(app, "_slurm_monitor_stop", None)
     if stop is not None:
         stop.clear()

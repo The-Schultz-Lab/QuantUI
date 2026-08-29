@@ -12,6 +12,7 @@ import pytest
 from quantui.backends.base import CalculationRequest
 from quantui.backends.registry import JobRegistry
 from quantui.backends.slurm import SlurmBackend
+from quantui.security import SecurityError
 
 MOCK_SLURM_DIR = Path(__file__).resolve().parents[1] / "testing" / "mock-slurm"
 
@@ -85,6 +86,32 @@ class TestSlurmBackendSubmit:
         record = slurm_backend.registry.load("fail001")
         assert record.status == "error"
         assert record.error["code"] == "BACKEND_UNAVAILABLE"
+
+    @patch("quantui.backends.slurm.subprocess.run")
+    def test_dispatch_blocks_at_concurrent_limit(self, mock_run, slurm_backend):
+        for idx in range(2):
+            slurm_backend.registry.create(
+                _request(f"active{idx}"),
+                "cluster_slurm",
+                status="running",
+            )
+
+        with pytest.raises(SecurityError, match="Concurrent job limit"):
+            slurm_backend.dispatch(_request("blocked"))
+
+        mock_run.assert_not_called()
+
+    @patch("quantui.backends.slurm.subprocess.run")
+    def test_dispatch_ignores_non_slurm_active_jobs(self, mock_run, slurm_backend):
+        mock_run.return_value.stdout = "Submitted batch job 555666\n"
+        mock_run.return_value.stderr = ""
+        mock_run.return_value.returncode = 0
+
+        slurm_backend.registry.create(_request("local-active"), "local_stub")
+        slurm_backend.registry.update_status("local-active", "running")
+
+        rid = slurm_backend.dispatch(_request("slurm-new"))
+        assert slurm_backend.registry.load(rid) is not None
 
 
 class TestSlurmBackendPolling:

@@ -7,8 +7,11 @@ not import scheduler settings unless cluster code is used.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Resource defaults and limits (conservative, educational cluster policy)
 DEFAULT_CORES = 4
@@ -19,7 +22,23 @@ MIN_CORES = 1
 MAX_CORES = 32
 MIN_MEMORY_GB = 1
 MAX_MEMORY_GB = 128
-MAX_CONCURRENT_JOBS = 10
+MAX_CONCURRENT_JOBS = 2
+
+
+def max_concurrent_jobs() -> int:
+    """Return the active-job cap (operator override via env)."""
+    override = os.environ.get("QUANTUI_MAX_CONCURRENT_JOBS")
+    if override:
+        try:
+            return max(1, int(override))
+        except ValueError:
+            logger.warning(
+                "Invalid QUANTUI_MAX_CONCURRENT_JOBS=%r; using default %s",
+                override,
+                MAX_CONCURRENT_JOBS,
+            )
+    return MAX_CONCURRENT_JOBS
+
 
 WALLTIME_OPTIONS = [
     "00:30:00",
