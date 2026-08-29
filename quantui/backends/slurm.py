@@ -575,7 +575,6 @@ class SlurmBackend:
         return False
 
     def _finalize_cancel_from_slurm_state(self, record, slurm_status: str) -> bool:
-        now = datetime.now(timezone.utc)
         mapped, error = self._terminal_registry_update(record, slurm_status)
         if mapped == "cancelled":
             updated = self.registry.load(record.request_id)
