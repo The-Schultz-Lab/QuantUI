@@ -189,10 +189,17 @@ class TestSlurmBackendReconcile:
         slurm_backend.registry.create(_request("young"), "cluster_slurm")
         slurm_backend.registry.update_status("young", "running", slurm_job_id="888002")
 
-        with patch.object(
-            slurm_backend,
-            "batch_poll_slurm_statuses",
-            return_value={"888002": "COMPLETED"},
+        with (
+            patch.object(
+                slurm_backend,
+                "batch_poll_slurm_statuses",
+                return_value={"888002": "COMPLETED"},
+            ),
+            patch.object(
+                slurm_backend,
+                "poll_slurm_status",
+                return_value="COMPLETED",
+            ),
         ):
             assert slurm_backend.reconcile_stale_records() == 0
 

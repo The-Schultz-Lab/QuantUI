@@ -352,6 +352,9 @@ class SlurmBackend:
         self, record, slurm_status: str, now: datetime
     ) -> tuple[str | None, dict | None]:
         """Map a terminal SLURM state to registry status + optional error."""
+        if slurm_status not in _TERMINAL_SLURM:
+            return None, None
+
         age_s = _record_age_seconds(record.created_at, now)
         if slurm_status == "COMPLETED" and age_s < cfg.stale_min_age_before_completed():
             return None, None
