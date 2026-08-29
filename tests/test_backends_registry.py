@@ -7,7 +7,9 @@ import pytest
 from quantui.backends.base import CalculationRequest
 from quantui.backends.registry import JobRegistry
 from quantui.backends.slurm_utils import (
+    SlurmJobAccounting,
     estimate_slurm_resources,
+    parse_sacct_accounting,
     parse_sacct_states,
     parse_slurm_job_id,
 )
@@ -84,6 +86,13 @@ class TestSlurmUtils:
         )
         states = parse_sacct_states(output)
         assert states == {"123456": "COMPLETED", "789": "CANCELLED"}
+
+    def test_parse_sacct_accounting(self):
+        output = "123456|FAILED|1:0|00:00:42\n"
+        rows = parse_sacct_accounting(output)
+        assert rows["123456"] == SlurmJobAccounting(
+            state="FAILED", exit_code="1:0", elapsed="00:00:42"
+        )
 
     def test_estimate_resources_scales_with_atoms(self):
         small = _sample_request()

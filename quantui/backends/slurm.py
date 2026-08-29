@@ -31,7 +31,9 @@ from .cluster_security import (
 from .registry import JobRegistry
 from .slurm_errors import format_error_for_student
 from .slurm_utils import (
+    SlurmJobAccounting,
     estimate_slurm_resources,
+    parse_sacct_accounting,
     parse_sacct_states,
     parse_slurm_job_id,
 )
@@ -282,10 +284,9 @@ class SlurmBackend:
         batch = self._batch_sacct([slurm_job_id])
         return batch.get(slurm_job_id)
 
-    def _batch_sacct(self, slurm_job_ids: List[str]) -> Dict[str, str]:
+    def _run_sacct(self, slurm_job_ids: List[str]) -> str:
         if not slurm_job_ids:
-            return {}
-
+            return ""
         id_csv = ",".join(slurm_job_ids)
         try:
             result = subprocess.run(
@@ -307,9 +308,36 @@ class SlurmBackend:
             FileNotFoundError,
             subprocess.CalledProcessError,
         ):
+            return ""
+        return result.stdout
+
+    def _batch_sacct(self, slurm_job_ids: List[str]) -> Dict[str, str]:
+        return parse_sacct_states(self._run_sacct(slurm_job_ids))
+
+    def _batch_sacct_accounting(
+        self, slurm_job_ids: List[str]
+    ) -> Dict[str, SlurmJobAccounting]:
+        return parse_sacct_accounting(self._run_sacct(slurm_job_ids))
+
+    def batch_job_accounting(
+        self, slurm_job_ids: List[str]
+    ) -> Dict[str, SlurmJobAccounting]:
+        """Merge live queue state with sacct exit code / elapsed metadata."""
+        if not slurm_job_ids:
             return {}
 
-        return parse_sacct_states(result.stdout)
+        states = self.batch_poll_slurm_statuses(slurm_job_ids)
+        sacct_rows = self._batch_sacct_accounting(slurm_job_ids)
+        merged: Dict[str, SlurmJobAccounting] = {}
+        for jid in slurm_job_ids:
+            sacct_row = sacct_rows.get(jid)
+            state = states.get(jid) or (sacct_row.state if sacct_row else "UNKNOWN")
+            merged[jid] = SlurmJobAccounting(
+                state=state,
+                exit_code=sacct_row.exit_code if sacct_row else "",
+                elapsed=sacct_row.elapsed if sacct_row else "",
+            )
+        return merged
 
     def batch_poll_slurm_statuses(self, slurm_job_ids: List[str]) -> Dict[str, str]:
         if not slurm_job_ids:
@@ -455,7 +483,7 @@ class SlurmBackend:
                         code="STALE_RECORD",
                         message=(
                             "Registry entry never received a SLURM job ID. "
-                            "Cancel or delete it from Cluster Jobs before resubmitting."
+                            "Remove it from Cluster Jobs, then resubmit."
                         ),
                     )
                     reconciled += 1
@@ -488,7 +516,17 @@ class SlurmBackend:
 
     def cancel(self, request_id: str) -> bool:
         record = self.registry.load(request_id)
-        if record is None or not record.slurm_job_id:
+        if record is None:
+            return False
+        if not record.slurm_job_id:
+            self._record_cancel_failure(
+                record,
+                code="CANCEL_NO_SLURM_ID",
+                message=(
+                    "This registry row has no SLURM job ID. "
+                    "Use Remove on Cluster Jobs to clear it, then resubmit."
+                ),
+            )
             return False
 
         slurm_job_id = record.slurm_job_id
