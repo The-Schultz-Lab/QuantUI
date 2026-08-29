@@ -184,26 +184,21 @@ class TestSlurmBackendReconcile:
         assert record.status == "error"
         assert record.error["code"] == "ARTIFACT_MISSING"
 
-    def test_reconcile_ignores_young_completed(self, slurm_backend, monkeypatch):
+    def test_reconcile_skips_unknown_slurm_state(self, slurm_backend, monkeypatch):
         monkeypatch.setenv("QUANTUI_SLURM_STALE_NO_ID_S", "60")
-        slurm_backend.registry.create(_request("young"), "cluster_slurm")
-        slurm_backend.registry.update_status("young", "running", slurm_job_id="888002")
+        slurm_backend.registry.create(_request("unknown"), "cluster_slurm")
+        slurm_backend.registry.update_status(
+            "unknown", "running", slurm_job_id="888002"
+        )
 
-        with (
-            patch.object(
-                slurm_backend,
-                "batch_poll_slurm_statuses",
-                return_value={"888002": "COMPLETED"},
-            ),
-            patch.object(
-                slurm_backend,
-                "poll_slurm_status",
-                return_value="COMPLETED",
-            ),
+        with patch.object(
+            slurm_backend,
+            "batch_poll_slurm_statuses",
+            return_value={"888002": "UNKNOWN"},
         ):
             assert slurm_backend.reconcile_stale_records() == 0
 
-        record = slurm_backend.registry.load("young")
+        record = slurm_backend.registry.load("unknown")
         assert record.status == "running"
 
 

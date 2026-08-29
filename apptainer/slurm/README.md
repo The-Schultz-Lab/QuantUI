@@ -11,6 +11,8 @@ Reference scripts for operator-driven NCShare / Apptainer batch jobs.
 
 QuantUI generates per-job scripts automatically under `~/.quantui/staging/<request_id>/submit.slurm` when students submit from the UI.
 
+Status polling uses **`squeue`** for active jobs and **`sacct`** for terminal state, exit code, and cancel confirmation. Cluster Jobs **Remove** clears terminal registry rows without deleting staging logs.
+
 ## Operator environment variables
 
 See the [NCShare SLURM batch runbook](https://github.com/The-Schultz-Lab/QuantUI-development-tracking/blob/main/TODO/runbooks/NCShare-SLURM-batch-runbook.md) for the full operator matrix. Key overrides:

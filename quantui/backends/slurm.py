@@ -416,27 +416,23 @@ class SlurmBackend:
                 continue
             slurm_status = statuses.get(jid, "UNKNOWN")
             if slurm_status in _TERMINAL_SLURM:
-                mapped, error = self._terminal_registry_update(
-                    record, slurm_status, datetime.now(timezone.utc)
-                )
+                mapped, error = self._terminal_registry_update(record, slurm_status)
                 if mapped is None:
                     continue
                 if mapped != record.status and record.status not in _TERMINAL_RECORD:
                     self.registry.update_status(record.request_id, mapped, error=error)
+                continue
+            if slurm_status == "UNKNOWN":
                 continue
             mapped = _map_slurm_status(slurm_status)
             if mapped != record.status and record.status not in _TERMINAL_RECORD:
                 self.registry.update_status(record.request_id, mapped)
 
     def _terminal_registry_update(
-        self, record, slurm_status: str, now: datetime
+        self, record, slurm_status: str
     ) -> tuple[str | None, dict | None]:
         """Map a terminal SLURM state to registry status + optional error."""
         if slurm_status not in _TERMINAL_SLURM:
-            return None, None
-
-        age_s = _record_age_seconds(record.created_at, now)
-        if slurm_status == "COMPLETED" and age_s < cfg.stale_min_age_before_completed():
             return None, None
 
         mapped = _map_slurm_status(slurm_status)
@@ -493,7 +489,7 @@ class SlurmBackend:
                 continue
 
             slurm_status = self.poll_slurm_status(record.slurm_job_id)
-            mapped, error = self._terminal_registry_update(record, slurm_status, now)
+            mapped, error = self._terminal_registry_update(record, slurm_status)
             if mapped is None:
                 continue
 
@@ -580,7 +576,7 @@ class SlurmBackend:
 
     def _finalize_cancel_from_slurm_state(self, record, slurm_status: str) -> bool:
         now = datetime.now(timezone.utc)
-        mapped, error = self._terminal_registry_update(record, slurm_status, now)
+        mapped, error = self._terminal_registry_update(record, slurm_status)
         if mapped == "cancelled":
             updated = self.registry.load(record.request_id)
             if updated is not None:

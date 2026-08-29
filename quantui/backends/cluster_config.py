@@ -25,7 +25,6 @@ MAX_MEMORY_GB = 128
 MAX_CONCURRENT_JOBS = 2
 SUBMIT_COOLDOWN_SECONDS = 30
 STALE_NO_SLURM_ID_SECONDS = 600
-STALE_MIN_AGE_BEFORE_COMPLETED = 120
 
 
 def max_concurrent_jobs() -> int:
@@ -71,11 +70,6 @@ def stale_no_slurm_id_seconds() -> int:
                 STALE_NO_SLURM_ID_SECONDS,
             )
     return STALE_NO_SLURM_ID_SECONDS
-
-
-def stale_min_age_before_completed() -> int:
-    """Ignore empty-squeue COMPLETED for young jobs (submission race)."""
-    return STALE_MIN_AGE_BEFORE_COMPLETED
 
 
 WALLTIME_OPTIONS = [
