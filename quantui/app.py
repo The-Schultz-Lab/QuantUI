@@ -58,9 +58,6 @@ from quantui.app_analysis import (
     pop_ir_spectrum as _ana_pop_ir_spectrum,
 )
 from quantui.app_analysis import (
-    pop_raman_spectrum as _ana_pop_raman_spectrum,
-)
-from quantui.app_analysis import (
     pop_isosurface as _ana_pop_isosurface,
 )
 from quantui.app_analysis import (
@@ -77,6 +74,9 @@ from quantui.app_analysis import (
 )
 from quantui.app_analysis import (
     pop_preopt_trajectory as _ana_pop_preopt_trajectory,
+)
+from quantui.app_analysis import (
+    pop_raman_spectrum as _ana_pop_raman_spectrum,
 )
 from quantui.app_analysis import (
     pop_reorg_geometries as _ana_pop_reorg_geometries,
@@ -407,12 +407,6 @@ from quantui.app_visualization import (
     on_ir_mode_changed as _viz_on_ir_mode_changed,
 )
 from quantui.app_visualization import (
-    on_raman_fwhm_changed as _viz_on_raman_fwhm_changed,
-)
-from quantui.app_visualization import (
-    on_raman_mode_changed as _viz_on_raman_mode_changed,
-)
-from quantui.app_visualization import (
     on_iso_appearance_changed as _viz_on_iso_appearance_changed,
 )
 from quantui.app_visualization import (
@@ -426,6 +420,12 @@ from quantui.app_visualization import (
 )
 from quantui.app_visualization import (
     on_orb_range_changed as _viz_on_orb_range_changed,
+)
+from quantui.app_visualization import (
+    on_raman_fwhm_changed as _viz_on_raman_fwhm_changed,
+)
+from quantui.app_visualization import (
+    on_raman_mode_changed as _viz_on_raman_mode_changed,
 )
 from quantui.app_visualization import (
     on_traj_expand as _viz_on_traj_expand,
@@ -458,9 +458,6 @@ from quantui.app_visualization import (
     show_ir_spectrum as _viz_show_ir_spectrum,
 )
 from quantui.app_visualization import (
-    show_raman_spectrum as _viz_show_raman_spectrum,
-)
-from quantui.app_visualization import (
     show_nmr_spectrum as _viz_show_nmr_spectrum,
 )
 from quantui.app_visualization import (
@@ -471,6 +468,9 @@ from quantui.app_visualization import (
 )
 from quantui.app_visualization import (
     show_pes_scan_result as _viz_show_pes_scan_result,
+)
+from quantui.app_visualization import (
+    show_raman_spectrum as _viz_show_raman_spectrum,
 )
 from quantui.app_visualization import (
     show_result_3d as _viz_show_result_3d,
@@ -488,10 +488,10 @@ from quantui.app_visualization import (
     update_ir_figure as _viz_update_ir_figure,
 )
 from quantui.app_visualization import (
-    update_raman_figure as _viz_update_raman_figure,
+    update_nmr_figure as _viz_update_nmr_figure,
 )
 from quantui.app_visualization import (
-    update_nmr_figure as _viz_update_nmr_figure,
+    update_raman_figure as _viz_update_raman_figure,
 )
 from quantui.app_visualization import (
     update_uv_vis_figure as _viz_update_uv_vis_figure,
@@ -500,10 +500,10 @@ from quantui.app_visualization import (
     wire_ir_controls as _viz_wire_ir_controls,
 )
 from quantui.app_visualization import (
-    wire_raman_controls as _viz_wire_raman_controls,
+    wire_nmr_controls as _viz_wire_nmr_controls,
 )
 from quantui.app_visualization import (
-    wire_nmr_controls as _viz_wire_nmr_controls,
+    wire_raman_controls as _viz_wire_raman_controls,
 )
 from quantui.app_visualization import (
     wire_uv_controls as _viz_wire_uv_controls,
