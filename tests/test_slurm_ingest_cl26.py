@@ -146,6 +146,23 @@ class TestCL26AnalysisReplayParity:
         )
         assert orbitals.pyscf_mol_basis == "STO-3G"
 
+    def test_frequency_ingest_copies_preopt_trajectory(self, tmp_path, monkeypatch):
+        patch_results_root(tmp_path, monkeypatch)
+        payload = sample_payload("frequency")
+        record, staging = make_staging_record(tmp_path, payload, calc_type="frequency")
+        preopt = {
+            "atoms": ["H", "H"],
+            "charge": 0,
+            "multiplicity": 1,
+            "steps": [{"coords": [[0, 0, 0], [0, 0, 0.75]], "energy": -1.11}],
+        }
+        (staging / "preopt_trajectory.json").write_text(json.dumps(preopt))
+
+        saved = ingest_staging_success(record)
+        assert (saved / "preopt_trajectory.json").exists()
+        data = json.loads((saved / "preopt_trajectory.json").read_text())
+        assert len(data["steps"]) == 1
+
     def test_frequency_prefers_staging_molden_over_fallback(
         self, tmp_path, monkeypatch
     ):

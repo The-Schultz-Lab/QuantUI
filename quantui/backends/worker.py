@@ -57,6 +57,77 @@ def _append_log(staging_dir: Path, line: str) -> None:
         fh.write(line.rstrip() + "\n")
 
 
+def _log_seed_context(request: CalculationRequest, staging_dir: Path) -> None:
+    ctx = request.run_context or {}
+    seed_label = ctx.get("seed_label")
+    if seed_label:
+        _append_log(
+            staging_dir,
+            f"Seed geometry loaded from: {seed_label}",
+        )
+
+
+def _maybe_run_preopt(
+    request: CalculationRequest,
+    molecule,
+    staging_dir: Path,
+    log_stream,
+    *,
+    stage_label: str,
+    write_preopt_trajectory: bool,
+):
+    """Optional DFT geometry optimization before frequency / TD-DFT (mirrors ``app._do_run``)."""
+    options = request.options or {}
+    if not options.get("preopt_before_run"):
+        return molecule, None
+
+    from quantui.optimizer import optimize_geometry
+
+    _append_log(
+        staging_dir,
+        f"\n── Geometry optimization (before {stage_label}) ──",
+    )
+    _write_progress(
+        staging_dir,
+        "running",
+        f"Optimizing geometry before {stage_label}",
+        12.0,
+    )
+    try:
+        pre_opt = optimize_geometry(
+            molecule=molecule,
+            method=request.method,
+            basis=request.basis,
+            progress_stream=log_stream,
+            status_label=f"SLURM pre-opt before {stage_label}",
+        )
+        conv = "converged" if pre_opt.converged else "did NOT fully converge"
+        energy = (
+            pre_opt.energies_hartree[-1]
+            if getattr(pre_opt, "energies_hartree", None)
+            else float("nan")
+        )
+        _append_log(
+            staging_dir,
+            f"Geometry optimization {conv} in {pre_opt.n_steps} steps.  E = {energy:.8f} Ha",
+        )
+        if write_preopt_trajectory and getattr(pre_opt, "trajectory", None):
+            write_trajectory_json(
+                staging_dir,
+                pre_opt.trajectory,
+                pre_opt.energies_hartree,
+                filename="preopt_trajectory.json",
+            )
+        return pre_opt.molecule, pre_opt
+    except Exception as exc:  # noqa: BLE001 — match local _do_run best-effort pre-opt
+        _append_log(
+            staging_dir,
+            f"⚠ Geometry optimization failed: {exc}\n"
+            "  Proceeding with the input geometry as-is.",
+        )
+        return molecule, None
+
+
 def _error_result(
     request: CalculationRequest,
     staging_dir: Path,
@@ -109,6 +180,7 @@ def _run_geometry_opt(
 ) -> Any:
     from quantui.optimizer import optimize_geometry
 
+    _log_seed_context(request, staging_dir)
     molecule = molecule_from_request(request)
     options = request.options or {}
     fmax = float(options.get("fmax", 0.05))
@@ -130,7 +202,16 @@ def _run_frequency(
 ) -> tuple[Any, Any]:
     from quantui.freq_calc import run_freq_calc
 
+    _log_seed_context(request, staging_dir)
     molecule = molecule_from_request(request)
+    molecule, _pre_opt = _maybe_run_preopt(
+        request,
+        molecule,
+        staging_dir,
+        log_stream,
+        stage_label="frequency analysis",
+        write_preopt_trajectory=True,
+    )
     _write_progress(staging_dir, "running", "Running frequency analysis", 15.0)
     result = run_freq_calc(
         molecule=molecule,
@@ -144,7 +225,16 @@ def _run_frequency(
 def _run_tddft(request: CalculationRequest, staging_dir: Path, log_stream) -> Any:
     from quantui.tddft_calc import run_tddft_calc
 
+    _log_seed_context(request, staging_dir)
     molecule = molecule_from_request(request)
+    molecule, _pre_opt = _maybe_run_preopt(
+        request,
+        molecule,
+        staging_dir,
+        log_stream,
+        stage_label="UV-Vis (TD-DFT)",
+        write_preopt_trajectory=False,
+    )
     options = request.options or {}
     nstates = int(options.get("nstates", 10))
     _write_progress(staging_dir, "running", "Running TD-DFT excited states", 15.0)
@@ -160,6 +250,7 @@ def _run_tddft(request: CalculationRequest, staging_dir: Path, log_stream) -> An
 def _run_nmr(request: CalculationRequest, staging_dir: Path, log_stream) -> Any:
     from quantui.nmr_calc import run_nmr_calc
 
+    _log_seed_context(request, staging_dir)
     molecule = molecule_from_request(request)
     _write_progress(staging_dir, "running", "Running NMR shielding (GIAO)", 15.0)
     return run_nmr_calc(

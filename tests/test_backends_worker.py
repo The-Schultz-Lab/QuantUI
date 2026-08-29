@@ -146,6 +146,52 @@ class TestWorker:
         assert payload["calc_type"] == "frequency"
         assert payload["spectra"]["ir"]["frequencies_cm1"] == [4400.0]
 
+    @patch("quantui.freq_calc.run_freq_calc")
+    @patch("quantui.optimizer.optimize_geometry")
+    def test_frequency_preopt_writes_preopt_trajectory(
+        self, mock_opt, mock_freq, staging
+    ):
+        from quantui.molecule import Molecule
+
+        mol = Molecule(
+            atoms=["H", "H"],
+            coordinates=[[0, 0, 0], [0, 0, 0.74]],
+            charge=0,
+            multiplicity=1,
+        )
+        mock_opt.return_value = SimpleNamespace(
+            molecule=mol,
+            trajectory=[mol],
+            energies_hartree=[-1.12],
+            converged=True,
+            n_steps=0,
+        )
+        mock_freq.return_value = SimpleNamespace(
+            energy_hartree=-1.12,
+            homo_lumo_gap_ev=10.0,
+            converged=True,
+            n_iterations=5,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2",
+            frequencies_cm1=[4400.0],
+            ir_intensities=[1.0],
+            raman_activities=[0.2],
+            zpve_hartree=0.01,
+            displacements=[[[0.0, 0.0, 1.0], [0.0, 0.0, -1.0]]],
+        )
+        data = json.loads((staging / "request.json").read_text())
+        data["calc_type"] = "frequency"
+        data["options"] = {"preopt_before_run": True}
+        data["run_context"] = {"seed_label": "2026-08-29_H2"}
+        (staging / "request.json").write_text(json.dumps(data))
+
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "success"
+        mock_opt.assert_called_once()
+        assert (staging / "preopt_trajectory.json").exists()
+        assert "Seed geometry loaded from" in (staging / "live.log").read_text()
+
     @patch("quantui.tddft_calc.run_tddft_calc")
     def test_tddft_success(self, mock_tddft, staging):
         mock_tddft.return_value = SimpleNamespace(
