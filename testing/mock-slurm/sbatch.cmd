@@ -1,2 +1,2 @@
 @echo off
-bash "%~dp0sbatch" %*
+"C:\Program Files\Git\bin\bash.exe" "%~dp0sbatch.sh" %*

@@ -1,2 +1,2 @@
 @echo off
-bash "%~dp0squeue" %*
+"C:\Program Files\Git\bin\bash.exe" "%~dp0squeue.sh" %*

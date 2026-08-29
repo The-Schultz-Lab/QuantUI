@@ -1,2 +1,2 @@
 @echo off
-bash "%~dp0scancel" %*
+"C:\Program Files\Git\bin\bash.exe" "%~dp0scancel.sh" %*

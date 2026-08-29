@@ -1,2 +1,2 @@
 @echo off
-bash "%~dp0sacct" %*
+"C:\Program Files\Git\bin\bash.exe" "%~dp0sacct.sh" %*
