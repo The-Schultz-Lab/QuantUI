@@ -664,6 +664,7 @@ def _run_freq_calc_body(
                         density_fit_used=_density_fit_used,
                         stream=stream,
                         status=_status,
+                        hessian=h,
                     )
                     if len(_raman) == len(frequencies_cm1):
                         raman_activities = _raman
