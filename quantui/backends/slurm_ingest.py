@@ -21,6 +21,7 @@ _STAGING_SIDECAR_FILES = (
     "result.molden",
     "trajectory.xyz",
     "trajectory.traj",
+    "preopt_trajectory.json",
 )
 
 
