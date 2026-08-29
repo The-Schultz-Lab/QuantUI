@@ -18,13 +18,13 @@ from IPython.display import HTML
 
 from quantui import theme as _theme
 from quantui.backends import cluster_config as _cluster_cfg
+from quantui.backends.base import CALC_TYPES
 from quantui.backends.dispatch import (
     build_calculation_request,
     calc_type_key_from_app,
     is_slurm_available,
     slurm_backend_for_app,
 )
-from quantui.backends.base import CALC_TYPES
 from quantui.backends.registry import JobRecord, JobRegistry
 from quantui.backends.slurm_errors import format_error_html
 from quantui.security import SecurityError
