@@ -19,7 +19,7 @@ from typing import Dict, List, Tuple
 from quantui import config
 
 from . import cluster_config as cfg
-from .base import BackendCapabilities, CalculationRequest
+from .base import CALC_TYPES, BackendCapabilities, CalculationRequest
 from .cluster_security import (
     check_concurrent_job_limit,
     validate_email,
@@ -65,7 +65,7 @@ class SlurmBackend:
     def capabilities(self) -> BackendCapabilities:
         return BackendCapabilities(
             backend_id=self.backend_id,
-            supported_calc_types=("single_point", "geometry_opt", "frequency"),
+            supported_calc_types=CALC_TYPES,
             supported_methods=tuple(config.SUPPORTED_METHODS),
             supports_solvent=True,
             supports_history_artifacts=True,

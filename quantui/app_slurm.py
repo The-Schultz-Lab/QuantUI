@@ -24,6 +24,7 @@ from quantui.backends.dispatch import (
     is_slurm_available,
     slurm_backend_for_app,
 )
+from quantui.backends.base import CALC_TYPES
 from quantui.backends.registry import JobRecord, JobRegistry
 from quantui.backends.slurm_errors import format_error_html
 from quantui.security import SecurityError
@@ -31,7 +32,7 @@ from quantui.security import SecurityError
 logger = logging.getLogger(__name__)
 
 _POLL_INTERVAL_S = 2.0
-_SUPPORTED_SLURM_CALC_TYPES = frozenset({"single_point", "geometry_opt", "frequency"})
+_SUPPORTED_SLURM_CALC_TYPES = frozenset(CALC_TYPES)
 _ACTIVE_SLURM_STATUSES = frozenset({"queued", "pending", "running", "submitted"})
 
 
@@ -119,8 +120,8 @@ def submit_slurm_run(app: Any) -> None:
     calc_type = calc_type_key_from_app(app)
     if calc_type not in _SUPPORTED_SLURM_CALC_TYPES:
         app.run_status.value = (
-            f"SLURM batch mode supports Single Point, Geometry Opt, and Frequency "
-            f"(selected: {app.calc_type_dd.value}). Switch to Local or a supported type."
+            f"SLURM batch mode does not support "
+            f"{app.calc_type_dd.value!r} yet. Switch to Local."
         )
         return
 

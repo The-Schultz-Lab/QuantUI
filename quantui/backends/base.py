@@ -16,6 +16,7 @@ CALC_TYPES = (
     "tddft",
     "nmr",
     "pes_scan",
+    "reorganization_energy",
 )
 
 

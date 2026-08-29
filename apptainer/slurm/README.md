@@ -23,4 +23,4 @@ See the planning repo runbook:
 python -m quantui.backends.worker --request /path/to/staging/request.json
 ```
 
-Supported calc types: `single_point`, `geometry_opt`, `frequency`.
+Supported calc types: `single_point`, `geometry_opt`, `frequency`, `tddft`, `nmr`, `pes_scan`, `reorganization_energy`.
