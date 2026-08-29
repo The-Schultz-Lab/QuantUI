@@ -35,9 +35,32 @@ def build_calculation_request(
     solvent = app.solvent_dd.value if app.solvent_cb.value else None
 
     options: dict[str, object] = {}
-    if calc_type == "geometry_opt":
+    if calc_type in ("geometry_opt", "reorganization_energy"):
         options["fmax"] = float(app.fmax_fi.value)
         options["max_steps"] = int(app.max_steps_si.value)
+    if calc_type == "tddft":
+        options["nstates"] = int(app.nstates_si.value)
+    if calc_type == "reorganization_energy":
+        options["mode"] = str(app._reorg_mode_dd.value)
+    if calc_type == "pes_scan":
+        scan_type = str(app._scan_type_dd.value).lower()
+        atom_indices = [
+            int(app._scan_atom1.value) - 1,
+            int(app._scan_atom2.value) - 1,
+        ]
+        if scan_type in ("angle", "dihedral"):
+            atom_indices.append(int(app._scan_atom3.value) - 1)
+        if scan_type == "dihedral":
+            atom_indices.append(int(app._scan_atom4.value) - 1)
+        options.update(
+            {
+                "scan_type": scan_type,
+                "atom_indices": atom_indices,
+                "start": float(app._scan_start.value),
+                "stop": float(app._scan_stop.value),
+                "steps": int(app._scan_steps.value),
+            }
+        )
 
     return CalculationRequest(
         request_id=request_id or uuid4().hex[:12],

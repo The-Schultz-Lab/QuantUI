@@ -5,7 +5,7 @@ Invoked from a batch script::
 
     python -m quantui.backends.worker --request /path/to/staging/request.json
 
-Supports ``single_point``, ``geometry_opt``, and ``frequency`` calc types.
+Supports all QuantUI Calculate-tab calc types (see ``CALC_TYPES``).
 """
 
 from __future__ import annotations
@@ -18,20 +18,24 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from .base import CalculationRequest, CalculationResult
+from .base import CALC_TYPES, CalculationRequest, CalculationResult
 from .registry import JobRegistry
 from .worker_payload import (
     freq_result_payload,
     molecule_from_request,
+    nmr_result_payload,
     optimization_result_payload,
+    pes_scan_result_payload,
+    reorg_result_payload,
     session_result_payload,
+    tddft_result_payload,
     write_trajectory_json,
     write_worker_result,
 )
 
 logger = logging.getLogger(__name__)
 
-_SUPPORTED_CALC_TYPES = frozenset({"single_point", "geometry_opt", "frequency"})
+_SUPPORTED_CALC_TYPES = frozenset(CALC_TYPES)
 
 
 def _write_progress(
@@ -136,6 +140,76 @@ def _run_frequency(
     return result, molecule
 
 
+def _run_tddft(request: CalculationRequest, staging_dir: Path, log_stream) -> Any:
+    from quantui.tddft_calc import run_tddft_calc
+
+    molecule = molecule_from_request(request)
+    options = request.options or {}
+    nstates = int(options.get("nstates", 10))
+    _write_progress(staging_dir, "running", "Running TD-DFT excited states", 15.0)
+    return run_tddft_calc(
+        molecule=molecule,
+        method=request.method,
+        basis=request.basis,
+        nstates=nstates,
+        progress_stream=log_stream,
+    )
+
+
+def _run_nmr(request: CalculationRequest, staging_dir: Path, log_stream) -> Any:
+    from quantui.nmr_calc import run_nmr_calc
+
+    molecule = molecule_from_request(request)
+    _write_progress(staging_dir, "running", "Running NMR shielding (GIAO)", 15.0)
+    return run_nmr_calc(
+        molecule=molecule,
+        method=request.method,
+        basis=request.basis,
+        progress_stream=log_stream,
+    )
+
+
+def _run_pes_scan(request: CalculationRequest, staging_dir: Path, log_stream) -> Any:
+    from quantui.pes_scan import run_pes_scan
+
+    molecule = molecule_from_request(request)
+    options = request.options or {}
+    scan_type = str(options.get("scan_type", "bond"))
+    atom_indices = list(options.get("atom_indices") or [0, 1])
+    _write_progress(staging_dir, "running", "Running PES scan", 10.0)
+    return run_pes_scan(
+        molecule=molecule,
+        method=request.method,
+        basis=request.basis,
+        scan_type=scan_type,
+        atom_indices=atom_indices,
+        start=float(options.get("start", 0.5)),
+        stop=float(options.get("stop", 2.0)),
+        steps=int(options.get("steps", 10)),
+        progress_stream=log_stream,
+    )
+
+
+def _run_reorganization_energy(
+    request: CalculationRequest, staging_dir: Path, log_stream
+) -> Any:
+    from quantui.reorganization_energy import run_reorganization_energy
+
+    molecule = molecule_from_request(request)
+    options = request.options or {}
+    _write_progress(staging_dir, "running", "Computing reorganization energy", 10.0)
+    return run_reorganization_energy(
+        molecule=molecule,
+        mode=str(options.get("mode", "both")),
+        method=request.method,
+        basis=request.basis,
+        fmax=float(options.get("fmax", 0.05)),
+        steps=int(options.get("max_steps", 200)),
+        progress_stream=log_stream,
+        solvent=request.solvent,
+    )
+
+
 def _build_payload(calc_type: str, outcome: Any, staging_dir: Path) -> dict[str, Any]:
     if calc_type == "single_point":
         return session_result_payload(outcome)
@@ -149,6 +223,19 @@ def _build_payload(calc_type: str, outcome: Any, staging_dir: Path) -> dict[str,
     if calc_type == "frequency":
         result, molecule = outcome
         return freq_result_payload(result, molecule)
+    if calc_type == "tddft":
+        return tddft_result_payload(outcome)
+    if calc_type == "nmr":
+        return nmr_result_payload(outcome)
+    if calc_type == "pes_scan":
+        traj_file = write_trajectory_json(
+            staging_dir,
+            outcome.coordinates_list,
+            outcome.energies_hartree,
+        )
+        return pes_scan_result_payload(outcome, trajectory_file=traj_file)
+    if calc_type == "reorganization_energy":
+        return reorg_result_payload(outcome)
     raise ValueError(f"unsupported calc_type {calc_type!r}")
 
 
@@ -181,6 +268,10 @@ def run_worker_request(request_path: Path) -> CalculationResult:
         "single_point": _run_single_point,
         "geometry_opt": _run_geometry_opt,
         "frequency": _run_frequency,
+        "tddft": _run_tddft,
+        "nmr": _run_nmr,
+        "pes_scan": _run_pes_scan,
+        "reorganization_energy": _run_reorganization_energy,
     }
 
     t0 = time.perf_counter()

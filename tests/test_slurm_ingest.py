@@ -124,3 +124,31 @@ class TestSlurmIngest:
         data = json.loads((saved / "result.json").read_text())
         assert data["calc_type"] == "frequency"
         assert "ir" in data["spectra"]
+
+    def test_ingest_tddft_with_spectra(self, tmp_path, monkeypatch):
+        results_root = tmp_path / "results"
+        monkeypatch.setattr(
+            "quantui.results_storage._default_results_dir",
+            lambda: results_root,
+        )
+        payload = {
+            "calc_type": "tddft",
+            "energy_hartree": -1.12,
+            "converged": True,
+            "n_iterations": 4,
+            "method": "B3LYP",
+            "basis": "STO-3G",
+            "formula": "H2",
+            "spectra": {
+                "uv_vis": {
+                    "excitation_energies_ev": [4.5],
+                    "oscillator_strengths": [0.3],
+                    "wavelengths_nm": [275.5],
+                }
+            },
+        }
+        record = _record(tmp_path, payload, calc_type="tddft")
+        saved = ingest_staging_success(record)
+        data = json.loads((saved / "result.json").read_text())
+        assert data["calc_type"] == "tddft"
+        assert data["spectra"]["uv_vis"]["excitation_energies_ev"] == [4.5]

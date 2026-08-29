@@ -66,6 +66,7 @@ def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
         "tddft": 2.0,
         "nmr": 2.0,
         "pes_scan": 3.0,
+        "reorganization_energy": 6.0,
     }
     calc_factor = calc_factors.get(request.calc_type, 1.5)
 

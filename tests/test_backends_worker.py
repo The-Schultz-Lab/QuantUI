@@ -42,7 +42,7 @@ def staging(tmp_path):
 class TestWorker:
     def test_unsupported_calc_type_returns_error(self, staging):
         data = json.loads((staging / "request.json").read_text())
-        data["calc_type"] = "tddft"
+        data["calc_type"] = "not_a_real_calc"
         (staging / "request.json").write_text(json.dumps(data))
 
         outcome = run_worker_request(staging / "request.json")
@@ -123,3 +123,29 @@ class TestWorker:
         payload = json.loads((staging / "result.json").read_text())
         assert payload["calc_type"] == "frequency"
         assert payload["spectra"]["ir"]["frequencies_cm1"] == [4400.0]
+
+    @patch("quantui.tddft_calc.run_tddft_calc")
+    def test_tddft_success(self, mock_tddft, staging):
+        mock_tddft.return_value = SimpleNamespace(
+            energy_hartree=-1.12,
+            homo_lumo_gap_ev=5.0,
+            converged=True,
+            n_iterations=6,
+            method="B3LYP",
+            basis="STO-3G",
+            formula="H2",
+            excitation_energies_ev=[4.0, 5.0],
+            oscillator_strengths=[0.1, 0.2],
+            nstates=2,
+            wavelengths_nm=lambda: [310.0, 248.0],
+        )
+        data = json.loads((staging / "request.json").read_text())
+        data["calc_type"] = "tddft"
+        data["options"] = {"nstates": 2}
+        (staging / "request.json").write_text(json.dumps(data))
+
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "success"
+        payload = json.loads((staging / "result.json").read_text())
+        assert payload["calc_type"] == "tddft"
+        assert len(payload["spectra"]["uv_vis"]["excitation_energies_ev"]) == 2
