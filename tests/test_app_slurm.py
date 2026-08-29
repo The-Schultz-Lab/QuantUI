@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 from quantui.app_slurm import (
     active_slurm_job_count,
     max_concurrent_slurm_jobs,
+    refresh_slurm_jobs_tab,
     slurm_submit_block_reason,
     submit_slurm_run,
     use_slurm_execution,
@@ -255,3 +256,43 @@ class TestSlurmSubmitGuards:
         assert app._calc_running is False
         assert app.run_btn.disabled is False
         assert "Concurrent job limit" in app.run_status.value
+
+
+class TestClusterJobsTab:
+    @patch("quantui.app_slurm.is_slurm_available", return_value=False)
+    def test_refresh_shows_registry_error_message(self, _mock, tmp_path):
+        registry = JobRegistry(
+            jobs_root=tmp_path / "jobs",
+            staging_root=tmp_path / "staging",
+        )
+        registry.create(
+            build_calculation_request(_fake_app(), request_id="stale1"),
+            "cluster_slurm",
+        )
+        registry.update_status(
+            "stale1",
+            "error",
+            error={
+                "code": "STALE_RECORD",
+                "user_message": (
+                    "Registry entry never received a SLURM job ID. "
+                    "Cancel or delete it from Cluster Jobs before resubmitting."
+                ),
+                "technical_message": "stale",
+                "retryable": False,
+            },
+        )
+        table_html = SimpleNamespace(value="")
+        select = SimpleNamespace(options=[], value="", disabled=False)
+        app = _fake_app(
+            _job_registry=registry,
+            _slurm_jobs_summary_html=SimpleNamespace(value=""),
+            _slurm_jobs_table_html=table_html,
+            _slurm_jobs_select=select,
+        )
+
+        refresh_slurm_jobs_tab(app)
+
+        assert "STALE_RECORD" in table_html.value
+        assert "SLURM job ID" in table_html.value
+        assert select.options[0][0].endswith("| STALE_RECORD")
