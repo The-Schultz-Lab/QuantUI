@@ -149,9 +149,7 @@ class TestCL26AnalysisReplayParity:
     def test_frequency_ingest_copies_preopt_trajectory(self, tmp_path, monkeypatch):
         patch_results_root(tmp_path, monkeypatch)
         payload = sample_payload("frequency")
-        record, staging = make_staging_record(
-            tmp_path, payload, calc_type="frequency"
-        )
+        record, staging = make_staging_record(tmp_path, payload, calc_type="frequency")
         preopt = {
             "atoms": ["H", "H"],
             "charge": 0,
