@@ -21,6 +21,7 @@ SRC = Path(__file__).parent.parent / "quantui"
 _HIGH_RISK_FILES = {
     "session_calc.py",
     "freq_calc.py",
+    "raman_calc.py",
     "tddft_calc.py",
     "nmr_calc.py",
     "optimizer.py",

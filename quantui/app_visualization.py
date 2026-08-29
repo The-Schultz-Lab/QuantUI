@@ -835,6 +835,105 @@ def update_ir_figure(app: Any, mode: str, fwhm: float) -> None:
             pass
 
 
+def show_raman_spectrum(app: Any, freq_result: Any) -> bool:
+    """Populate Raman Spectrum accordion after a Frequency result."""
+    freqs = list(freq_result.frequencies_cm1 or [])
+    acts = list(getattr(freq_result, "raman_activities", None) or [])
+    if not freqs:
+        return False
+
+    app._raman_activities_real = bool(acts)
+    if not acts:
+        acts = [1.0] * len(freqs)
+    app._raman_accordion.set_title(
+        0,
+        (
+            "Raman Spectrum"
+            if app._raman_activities_real
+            else "Raman Spectrum (positions only — activities unavailable)"
+        ),
+    )
+
+    app._last_raman_freqs = freqs
+    app._last_raman_acts = acts
+
+    app._update_raman_figure("Stick", 20.0)
+    app._queue_main_thread_callback(app._wire_raman_controls)
+
+    return True
+
+
+def wire_raman_controls(app: Any) -> None:
+    """Rebind Raman controls and reset defaults on the main thread."""
+    app._raman_mode_toggle.value = "Stick"
+    app._raman_fwhm_slider.value = 20.0
+    app._raman_fwhm_slider.layout.display = "none"
+
+
+def on_raman_mode_changed(app: Any, change: dict[str, Any]) -> None:
+    """Handle Stick/Broadened mode changes for Raman panel."""
+    mode = change["new"]
+    try:
+        import quantui.calc_log as _calc_log
+
+        _calc_log.log_event(
+            "raman_mode_change",
+            mode,
+            mode=mode,
+            session_id=app._session_id,
+        )
+    except Exception:
+        pass
+    app._raman_fwhm_slider.layout.display = "" if mode == "Broadened" else "none"
+    app._update_raman_figure(mode, app._raman_fwhm_slider.value)
+
+
+def on_raman_fwhm_changed(app: Any, change: dict[str, Any]) -> None:
+    """Re-render broadened Raman trace when line width slider changes."""
+    if app._raman_mode_toggle.value == "Broadened":
+        app._update_raman_figure("Broadened", change["new"])
+
+
+def update_raman_figure(app: Any, mode: str, fwhm: float) -> None:
+    """Re-render Raman spectrum chart for mode and FWHM settings."""
+    try:
+        import plotly.io as _pio
+
+        from quantui.raman_plot import plot_raman_spectrum
+
+        y_title = (
+            "Raman Activity (Å⁴/amu)"
+            if getattr(app, "_raman_activities_real", True)
+            else "Relative activity (a.u.)"
+        )
+        fig = plot_raman_spectrum(
+            app._last_raman_freqs,
+            app._last_raman_acts,
+            mode=mode.lower(),
+            fwhm=fwhm,
+            yaxis_title=y_title,
+        )
+        app._apply_plotly_theme(fig)
+        app._last_raman_fig = fig
+        app._set_html_output(
+            app._raman_fig,
+            _pio.to_html(
+                fig,
+                include_plotlyjs="require",
+                full_html=False,
+                config={"responsive": True},
+            ),
+        )
+    except Exception as exc:
+        app._last_raman_fig = None
+        try:
+            from quantui import calc_log as _clog
+
+            _clog.log_event("raman_fig_error", f"{type(exc).__name__}: {exc}"[:300])
+        except Exception:
+            pass
+
+
 def show_uv_vis_spectrum(
     app: Any,
     energies_ev: List[float],

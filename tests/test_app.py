@@ -3127,6 +3127,7 @@ class TestAnaSwitcher:
             "Trajectory",
             "Vibrational",
             "IR Spectrum",
+            "Raman Spectrum",
             "PES Scan",
             "Isosurface",
             # Added 2026-08-05 with M-REORG REORG.7 — reorganization_energy
