@@ -31,7 +31,7 @@ from quantui.security import SecurityError
 logger = logging.getLogger(__name__)
 
 _POLL_INTERVAL_S = 2.0
-_SUPPORTED_SLURM_CALC_TYPES = frozenset({"single_point"})
+_SUPPORTED_SLURM_CALC_TYPES = frozenset({"single_point", "geometry_opt", "frequency"})
 _ACTIVE_SLURM_STATUSES = frozenset({"queued", "pending", "running", "submitted"})
 
 
@@ -119,8 +119,8 @@ def submit_slurm_run(app: Any) -> None:
     calc_type = calc_type_key_from_app(app)
     if calc_type not in _SUPPORTED_SLURM_CALC_TYPES:
         app.run_status.value = (
-            f"SLURM batch mode currently supports Single Point only "
-            f"(selected: {app.calc_type_dd.value}). Switch to Local or Single Point."
+            f"SLURM batch mode supports Single Point, Geometry Opt, and Frequency "
+            f"(selected: {app.calc_type_dd.value}). Switch to Local or a supported type."
         )
         return
 
@@ -438,41 +438,26 @@ def _ingest_success(app: Any, record: Any) -> None:
         else ""
     )
 
-    from quantui.session_calc import SessionResult
-
-    result = SessionResult(
-        energy_hartree=float(payload["energy_hartree"]),
-        homo_lumo_gap_ev=payload.get("homo_lumo_gap_ev"),
-        converged=bool(payload.get("converged", False)),
-        n_iterations=int(payload.get("n_iterations", -1)),
-        method=str(payload.get("method", record.request_obj.method)),
-        basis=str(payload.get("basis", record.request_obj.basis)),
-        formula=str(payload.get("formula", "?")),
-    )
-
     try:
-        from quantui import save_result
         from quantui.app_runflow import refresh_results_browser
-
-        saved_dir = save_result(
-            result,
-            pyscf_log=log_text,
-            calc_type="single_point",
+        from quantui.backends.slurm_ingest import (
+            completion_summary_html,
+            ingest_staging_success,
         )
+
+        saved_dir = ingest_staging_success(record, log_text)
         app._job_registry.update_status(
             record.request_id, "success", result_dir=str(saved_dir)
         )
         app._last_result_dir = saved_dir
         refresh_results_browser(app)
-        app.run_status.value = f"SLURM job complete — saved to {saved_dir.name}."
+        calc_type = payload.get("calc_type", record.calc_type)
+        app.run_status.value = (
+            f"SLURM {calc_type.replace('_', ' ')} complete — saved to {saved_dir.name}."
+        )
         _append_run_stdout(app, f"\n✅ Result saved to {saved_dir}\n")
         app.result_output.append_display_data(
-            HTML(
-                f'<div style="padding:12px;background:#ecfdf5;border-radius:8px;">'
-                f"<b>SLURM calculation complete</b><br>"
-                f"Energy: {result.energy_hartree:.6f} Ha<br>"
-                f"Saved: <code>{saved_dir}</code></div>"
-            )
+            HTML(completion_summary_html(saved_dir, payload))
         )
     except Exception as exc:  # noqa: BLE001 — surface save failures
         logger.exception("Failed to ingest SLURM result")

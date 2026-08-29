@@ -34,6 +34,11 @@ def build_calculation_request(
     calc_type = calc_type_key_from_app(app)
     solvent = app.solvent_dd.value if app.solvent_cb.value else None
 
+    options: dict[str, object] = {}
+    if calc_type == "geometry_opt":
+        options["fmax"] = float(app.fmax_fi.value)
+        options["max_steps"] = int(app.max_steps_si.value)
+
     return CalculationRequest(
         request_id=request_id or uuid4().hex[:12],
         calc_type=calc_type,
@@ -48,7 +53,7 @@ def build_calculation_request(
             "charge": int(mol.charge),
             "multiplicity": int(app.mult_si.value),
         },
-        options={},
+        options=options,
         solvent=solvent,
     )
 

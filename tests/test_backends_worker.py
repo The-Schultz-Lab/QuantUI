@@ -42,7 +42,7 @@ def staging(tmp_path):
 class TestWorker:
     def test_unsupported_calc_type_returns_error(self, staging):
         data = json.loads((staging / "request.json").read_text())
-        data["calc_type"] = "geometry_opt"
+        data["calc_type"] = "tddft"
         (staging / "request.json").write_text(json.dumps(data))
 
         outcome = run_worker_request(staging / "request.json")
@@ -65,3 +65,61 @@ class TestWorker:
         assert outcome.result_payload["energy_hartree"] == -1.12
         assert (staging / "result.json").exists()
         assert (staging / "progress.json").exists()
+
+    @patch("quantui.optimizer.optimize_geometry")
+    def test_geometry_opt_success(self, mock_opt, staging):
+        from quantui.molecule import Molecule
+
+        mol = Molecule(
+            atoms=["H", "H"],
+            coordinates=[[0, 0, 0], [0, 0, 0.74]],
+            charge=0,
+            multiplicity=1,
+        )
+        mock_opt.return_value = SimpleNamespace(
+            molecule=mol,
+            trajectory=[mol],
+            energies_hartree=[-1.12],
+            converged=True,
+            n_steps=0,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2",
+        )
+        data = json.loads((staging / "request.json").read_text())
+        data["calc_type"] = "geometry_opt"
+        data["options"] = {"fmax": 0.05, "max_steps": 50}
+        (staging / "request.json").write_text(json.dumps(data))
+
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "success"
+        assert outcome.save_type == "geometry_opt"
+        payload = json.loads((staging / "result.json").read_text())
+        assert payload["calc_type"] == "geometry_opt"
+        assert (staging / "trajectory.json").exists()
+
+    @patch("quantui.freq_calc.run_freq_calc")
+    def test_frequency_success(self, mock_freq, staging):
+        mock_freq.return_value = SimpleNamespace(
+            energy_hartree=-1.12,
+            homo_lumo_gap_ev=10.0,
+            converged=True,
+            n_iterations=5,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2",
+            frequencies_cm1=[4400.0],
+            ir_intensities=[1.0],
+            raman_activities=[0.2],
+            zpve_hartree=0.01,
+            displacements=[[[0.0, 0.0, 1.0], [0.0, 0.0, -1.0]]],
+        )
+        data = json.loads((staging / "request.json").read_text())
+        data["calc_type"] = "frequency"
+        (staging / "request.json").write_text(json.dumps(data))
+
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "success"
+        payload = json.loads((staging / "result.json").read_text())
+        assert payload["calc_type"] == "frequency"
+        assert payload["spectra"]["ir"]["frequencies_cm1"] == [4400.0]

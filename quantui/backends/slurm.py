@@ -65,7 +65,7 @@ class SlurmBackend:
     def capabilities(self) -> BackendCapabilities:
         return BackendCapabilities(
             backend_id=self.backend_id,
-            supported_calc_types=("single_point",),  # worker parity grows in CL2.2+
+            supported_calc_types=("single_point", "geometry_opt", "frequency"),
             supported_methods=tuple(config.SUPPORTED_METHODS),
             supports_solvent=True,
             supports_history_artifacts=True,
