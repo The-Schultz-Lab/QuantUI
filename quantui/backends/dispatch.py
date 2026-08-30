@@ -4,6 +4,7 @@ Helpers for building backend requests from QuantUI app state.
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -17,10 +18,51 @@ _SEED_CALC_TYPES = frozenset({"geometry_opt", "frequency", "tddft", "nmr"})
 # Calc types that may run a DFT geometry optimization before the main step.
 _PREOPT_CALC_TYPES = frozenset({"frequency", "tddft"})
 
+_TRUTHY_ENV = frozenset({"1", "true", "yes", "on"})
+
+
+def _env_truthy(name: str) -> bool:
+    """Return True when ``name`` is set to a truthy value in the environment."""
+    return os.environ.get(name, "").strip().lower() in _TRUTHY_ENV
+
+
+def is_slurm_cli_present() -> bool:
+    """Return True when the SLURM CLI (``sbatch``) is on PATH."""
+    return shutil.which("sbatch") is not None
+
+
+def is_slurm_site_enabled() -> bool:
+    """Return True when the operator has opted in via ``QUANTUI_ENABLE_SLURM``."""
+    return _env_truthy("QUANTUI_ENABLE_SLURM")
+
 
 def is_slurm_available() -> bool:
-    """Return True when ``sbatch`` is on PATH."""
-    return shutil.which("sbatch") is not None
+    """Return True when SLURM batch mode is available for the UI and dispatch."""
+    return is_slurm_cli_present() and is_slurm_site_enabled()
+
+
+def slurm_unavailable_note() -> str:
+    """Return a short Settings-tab note when SLURM batch mode is not offered."""
+    if is_slurm_available():
+        return ""
+    if not is_slurm_cli_present():
+        return "SLURM unavailable here (sbatch not found)."
+    return (
+        "SLURM batch mode is off for this deployment "
+        "(operator: set QUANTUI_ENABLE_SLURM=1 to enable)."
+    )
+
+
+def slurm_unavailable_user_message() -> str:
+    """Return a user-facing run-status message when SLURM dispatch is blocked."""
+    if is_slurm_available():
+        return ""
+    if not is_slurm_cli_present():
+        return "SLURM is not available on this system (sbatch not found)."
+    return (
+        "SLURM batch mode is disabled on this deployment. "
+        "Ask your instructor to set QUANTUI_ENABLE_SLURM=1."
+    )
 
 
 def calc_type_key_from_app(app: Any) -> str:

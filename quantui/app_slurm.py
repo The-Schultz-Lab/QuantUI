@@ -25,6 +25,7 @@ from quantui.backends.dispatch import (
     calc_type_key_from_app,
     is_slurm_available,
     slurm_backend_for_app,
+    slurm_unavailable_user_message,
 )
 from quantui.backends.registry import JobRecord, JobRegistry
 from quantui.backends.slurm_errors import format_error_html
@@ -140,9 +141,7 @@ def startup_slurm_check(app: Any) -> None:
 def submit_slurm_run(app: Any) -> None:
     """Submit the current configuration to SLURM and start the monitor thread."""
     if not is_slurm_available():
-        app.run_status.value = (
-            "SLURM is not available on this system (sbatch not found)."
-        )
+        app.run_status.value = slurm_unavailable_user_message()
         return
 
     calc_type = calc_type_key_from_app(app)
