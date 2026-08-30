@@ -640,7 +640,6 @@ def _geometries_match(
 
 def _load_freq_result_geometry(result_dir: Path):
     """Return (atoms, coords) from a saved Frequency result, or None."""
-    import json as _json
 
     import numpy as _np
 

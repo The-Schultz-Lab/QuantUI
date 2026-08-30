@@ -1,7 +1,6 @@
 """Tests for normal-mode geometry perturbation (imaginary-frequency follow)."""
 
 from pathlib import Path
-
 from types import SimpleNamespace
 
 import numpy as np

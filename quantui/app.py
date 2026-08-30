@@ -242,6 +242,9 @@ from quantui.app_measurement import (
     on_measure_inbox_changed as _measure_on_inbox_changed,
 )
 from quantui.app_runflow import (
+    apply_vib_mode_for_frequency as _run_apply_vib_mode_for_frequency,
+)
+from quantui.app_runflow import (
     calc_type_key as _run_calc_type_key,
 )
 from quantui.app_runflow import (
@@ -381,9 +384,6 @@ from quantui.app_runflow import (
 )
 from quantui.app_runflow import (
     resolve_seed_geometry as _run_resolve_seed_geometry,
-)
-from quantui.app_runflow import (
-    apply_vib_mode_for_frequency as _run_apply_vib_mode_for_frequency,
 )
 from quantui.app_runflow import (
     update_estimate as _run_update_estimate,
