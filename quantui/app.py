@@ -557,10 +557,6 @@ from quantui.app_xyz_input import (
     on_xyz_fill_table as _xyz_on_fill_table,
 )
 from quantui.backends.dispatch import is_slurm_available
-from quantui.freq_ir_workers import (
-    freq_parallel_env_configured,
-    freq_parallel_opt_in,
-)
 from quantui.cancellation import CalcCancelled as _CalcCancelled
 
 # Import directly from submodules to avoid circular-import issues.
@@ -577,6 +573,10 @@ from quantui.config import (
     DEFAULT_OPT_STEPS,
     SUPPORTED_BASIS_SETS,
     SUPPORTED_METHODS,
+)
+from quantui.freq_ir_workers import (
+    freq_parallel_env_configured,
+    freq_parallel_opt_in,
 )
 from quantui.help_content import HELP_TOPICS
 from quantui.molecule import Molecule, parse_xyz_input

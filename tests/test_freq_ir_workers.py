@@ -152,4 +152,3 @@ class TestEnvConfiguredHelpers:
     def test_freq_parallel_opt_in_public_alias(self, monkeypatch):
         monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "yes")
         assert freq_parallel_opt_in() is True
-
