@@ -18,6 +18,7 @@ from quantui.app_xyz_input import (
     sync_textarea_from_table,
 )
 from quantui.backends.cluster_config import max_concurrent_jobs
+from quantui.backends.dispatch import slurm_unavailable_note
 from quantui.help_content import HELP_TOPICS
 from quantui.live_log import LiveLog
 from quantui.orbital_visualization import (
@@ -349,7 +350,7 @@ def build_status_panel(
     if not slurm_available:
         exec_backend_note = widgets.HTML(
             f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
-            "SLURM unavailable here (sbatch not found).</div>"
+            f"{slurm_unavailable_note()}</div>"
         )
     else:
         limit = max_concurrent_jobs()

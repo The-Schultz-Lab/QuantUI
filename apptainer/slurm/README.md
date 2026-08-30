@@ -19,6 +19,7 @@ See the [NCShare SLURM batch runbook](https://github.com/The-Schultz-Lab/QuantUI
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
+| `QUANTUI_ENABLE_SLURM` | *(unset — off)* | Show **SLURM batch (cluster)** in Settings and allow cluster dispatch. Requires `sbatch` on PATH. Leave unset in student CPU images; set on instructor/test profiles when validating NCShare. |
 | `QUANTUI_MAX_CONCURRENT_JOBS` | `2` | Active SLURM job cap |
 | `QUANTUI_SLURM_SUBMIT_COOLDOWN_S` | `30` | Min seconds between submits (`0` disables) |
 | `QUANTUI_SLURM_STALE_NO_ID_S` | `600` | Stale registry rows without SLURM id |

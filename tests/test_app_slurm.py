@@ -20,6 +20,10 @@ from quantui.backends.dispatch import (
     build_calculation_request,
     calc_type_key_from_app,
     is_slurm_available,
+    is_slurm_cli_present,
+    is_slurm_site_enabled,
+    slurm_unavailable_note,
+    slurm_unavailable_user_message,
 )
 from quantui.backends.registry import JobRegistry
 from quantui.security import SecurityError
@@ -60,11 +64,35 @@ class TestDispatch:
         assert calc_type_key_from_app(app) == "frequency"
 
     @patch("quantui.backends.dispatch.shutil.which")
-    def test_is_slurm_available(self, mock_which):
+    def test_is_slurm_available(self, mock_which, monkeypatch):
         mock_which.return_value = "/usr/bin/sbatch"
-        assert is_slurm_available() is True
-        mock_which.return_value = None
+        monkeypatch.delenv("QUANTUI_ENABLE_SLURM", raising=False)
+        assert is_slurm_cli_present() is True
+        assert is_slurm_site_enabled() is False
         assert is_slurm_available() is False
+
+        monkeypatch.setenv("QUANTUI_ENABLE_SLURM", "1")
+        assert is_slurm_site_enabled() is True
+        assert is_slurm_available() is True
+
+        mock_which.return_value = None
+        assert is_slurm_cli_present() is False
+        assert is_slurm_available() is False
+
+    @patch("quantui.backends.dispatch.shutil.which")
+    def test_slurm_unavailable_messages(self, mock_which, monkeypatch):
+        mock_which.return_value = None
+        monkeypatch.delenv("QUANTUI_ENABLE_SLURM", raising=False)
+        assert "sbatch not found" in slurm_unavailable_note()
+        assert "sbatch not found" in slurm_unavailable_user_message()
+
+        mock_which.return_value = "/usr/bin/sbatch"
+        assert "QUANTUI_ENABLE_SLURM=1" in slurm_unavailable_note()
+        assert "QUANTUI_ENABLE_SLURM=1" in slurm_unavailable_user_message()
+
+        monkeypatch.setenv("QUANTUI_ENABLE_SLURM", "yes")
+        assert slurm_unavailable_note() == ""
+        assert slurm_unavailable_user_message() == ""
 
 
 class TestUseSlurmExecution:

@@ -7,6 +7,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- **`QUANTUI_ENABLE_SLURM` site gate** — SLURM batch mode stays hidden and
+  undispatchable until an operator sets this environment variable. Student CPU
+  images and JupyterHub profiles can omit it (default off); instructors enable
+  cluster testing with `QUANTUI_ENABLE_SLURM=1` without any extra student
+  command.
+
 ### Fixed
 
 - **`apptainer/quantui-gpu.def` never installed the `xtb` extra**, so GFN-FF
