@@ -1,9 +1,8 @@
 """
 Offline evaluation of QuantUI's runtime estimator.
 
-M-PROGRESS Phase C asked for the pre-run time estimate to be "overhauled"
-until it is trustworthy. That is only actionable if a change to the model
-can be *scored*, so this module replays the recorded performance history
+The pre-run time estimate is only actionable if a change to the model can be
+*scored*, so this module replays the recorded performance history
 through :func:`quantui.calc_log.estimate_time_from_records` and reports how
 well the predictor would have done.
 

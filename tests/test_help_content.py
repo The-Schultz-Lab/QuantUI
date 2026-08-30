@@ -82,3 +82,11 @@ class TestHelpPanel:
     def test_basis_set_panel_mentions_sto3g(self):
         panel = help_panel("basis_set")
         assert "STO-3G" in panel.value
+
+    def test_run_progress_panel_covers_status_and_heartbeat(self):
+        panel = help_panel("run_progress")
+        assert "status" in panel.value.lower()
+        assert (
+            "heartbeat" in panel.value.lower() or "still working" in panel.value.lower()
+        )
+        assert "TD-DFT" in panel.value
