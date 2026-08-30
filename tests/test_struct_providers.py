@@ -82,6 +82,37 @@ class TestCactus:
         assert meta["source"] == "cactus"
         assert meta["num_atoms"] == 3
 
+    @rdkit_only
+    @patch("quantui.cactus.requests.get")
+    def test_fetch_from_cactus_keeps_metal_complex_source_coords(
+        self, mock_get, sample_sdf_metal_complex_2d
+    ):
+        """M-METAL MET.1: the CACTUS load path must not scatter a coordination complex.
+
+        PubChem/CACTUS SDFs carry no metal-donor bond records, so RDKit's default
+        re-embed + fragment separation would push ligands away from the metal.
+        ``fetch_from_cactus`` → ``sdf_to_xyz`` must keep the source coordinates
+        so downstream GFN-FF pre-opt can relax the flat layout into 3D.
+        """
+        mock_get.return_value = Mock(status_code=200, text=sample_sdf_metal_complex_2d)
+        xyz, meta = cactus.fetch_from_cactus("cisplatin")
+        assert meta["source"] == "cactus"
+        assert meta["metal_detected"] is True
+        assert meta["coords_embedded"] is False
+
+        lines = xyz.strip().split("\n")[2:]
+        coords = {}
+        for line in lines:
+            parts = line.split()
+            symbol = parts[0]
+            xyz_tuple = tuple(float(v) for v in parts[1:4])
+            coords.setdefault(symbol, []).append(xyz_tuple)
+
+        pt = coords["Pt"][0]
+        for n in coords["N"]:
+            dist = sum((a - b) ** 2 for a, b in zip(pt, n)) ** 0.5
+            assert dist == pytest.approx(2.0, abs=1e-4)
+
 
 # ============================================================================
 # STRUCT.4 — provider chain ordering
