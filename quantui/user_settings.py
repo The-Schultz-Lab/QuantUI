@@ -57,6 +57,8 @@ _VALID_ISO_RESOLUTIONS = ("coarse", "medium", "fine", "very fine")
 
 _VALID_EXECUTION_BACKENDS = ("local", "slurm")
 
+_VALID_QUANTUM_ENGINES = ("auto", "pyscf", "pyfock")
+
 # Default settings path. The QUANTUI_SETTINGS_PATH env var overrides for tests.
 DEFAULT_SETTINGS_PATH = Path.home() / ".quantui" / "settings.json"
 
@@ -96,6 +98,11 @@ class ComputeSettings:
     # Where calculations run: in the Jupyter kernel (local) or via SLURM batch
     # (cluster). SLURM is only offered in the UI when ``sbatch`` is available.
     execution_backend: str = "local"
+
+    # Which quantum chemistry library evaluates integrals and runs SCF.
+    # ``auto`` keeps PySCF when both engines are installed; native Windows with
+    # only PyFock selects PyFock. UI wiring lands in PYF.4 — PYF.1 persists only.
+    quantum_engine: str = "auto"
 
 
 @dataclass
@@ -236,6 +243,19 @@ class UserSettings:
                     "Invalid compute.execution_backend %r; using %r",
                     candidate_backend,
                     compute.execution_backend,
+                )
+        if "quantum_engine" in compute_section:
+            candidate_engine = compute_section["quantum_engine"]
+            if (
+                isinstance(candidate_engine, str)
+                and candidate_engine in _VALID_QUANTUM_ENGINES
+            ):
+                compute.quantum_engine = candidate_engine
+            else:
+                _LOG.warning(
+                    "Invalid compute.quantum_engine %r; using %r",
+                    candidate_engine,
+                    compute.quantum_engine,
                 )
 
         return cls(viz=viz, compute=compute)
