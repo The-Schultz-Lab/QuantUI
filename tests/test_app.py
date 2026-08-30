@@ -2002,7 +2002,7 @@ class TestVibExportAnimation:
         app = QuantUIApp()
         # No _last_vib_freq_result / _last_vib_molecule yet.
         app._on_vib_export_animation(None)
-        assert "color:#b91c1c" in app._vib_export_status.value
+        assert "color:var(--q-accent-error)" in app._vib_export_status.value
         assert "No vibrational mode loaded" in app._vib_export_status.value
 
     def test_export_writes_html_and_reports_backend(self, tmp_path, monkeypatch):
@@ -2021,7 +2021,7 @@ class TestVibExportAnimation:
 
         app._on_vib_export_animation(None)
 
-        assert "color:#16a34a" in app._vib_export_status.value
+        assert "color:var(--q-accent-success)" in app._vib_export_status.value
         assert "Saved (py3dmol)" in app._vib_export_status.value
         # Find the file the handler wrote.
         files = list(tmp_path.glob("vib_*_mode1_*.html"))
@@ -2039,7 +2039,7 @@ class TestVibExportAnimation:
         app._viz_availability = BackendAvailability(py3dmol=False, plotlymol=False)
 
         app._on_vib_export_animation(None)
-        assert "color:#b91c1c" in app._vib_export_status.value
+        assert "color:var(--q-accent-error)" in app._vib_export_status.value
         # Names the backend that is actually missing rather than pinning exact
         # prose. The message changed when vib export became py3Dmol-only
         # (2026-08-04); what matters is that the failure is visible and says
@@ -2472,7 +2472,7 @@ class TestMExportCopyPlotData:
         app = QuantUIApp()
         app._last_ir_fig = None
         app._on_ir_copy_data(None)
-        assert "color:#b91c1c" in app._ir_export_status.value
+        assert "color:var(--q-accent-error)" in app._ir_export_status.value
         assert "No plot data" in app._ir_export_status.value
 
     def test_copy_data_writes_csv_to_result_dir(self, tmp_path, monkeypatch):
@@ -2481,7 +2481,7 @@ class TestMExportCopyPlotData:
         app._last_result_dir = tmp_path
         app._last_ir_fig = self._make_simple_fig()
         app._on_ir_copy_data(None)
-        assert "color:#16a34a" in app._ir_export_status.value
+        assert "color:var(--q-accent-success)" in app._ir_export_status.value
         assert "Saved CSV" in app._ir_export_status.value
         csv_files = list(tmp_path.glob("ir_spectrum_data_*.csv"))
         assert len(csv_files) == 1
@@ -2499,7 +2499,7 @@ class TestMExportCopyPlotData:
         app._last_result_dir = tmp_path
         app._last_ir_fig = go.Figure()  # empty
         app._on_ir_copy_data(None)
-        assert "color:#b91c1c" in app._ir_export_status.value
+        assert "color:var(--q-accent-error)" in app._ir_export_status.value
         assert "no extractable" in app._ir_export_status.value.lower()
 
 

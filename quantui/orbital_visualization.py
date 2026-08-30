@@ -1399,7 +1399,7 @@ def _build_iso_viewer(
 # one family. Duplicated rather than imported: app_visualization imports from
 # this module, and importing back would close the cycle.
 _ORB_BTN_STYLE = (
-    f"padding:2px 9px;border:1px solid {_theme.BORDER};border-radius:4px;"
+    f"padding:2px 9px;border:1px solid {_theme.css.BORDER};border-radius:4px;"
     "background:#f8fafc;color:#334155;cursor:pointer;font-size:13px;line-height:1.4;"
 )
 

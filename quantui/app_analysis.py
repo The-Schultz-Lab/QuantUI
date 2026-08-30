@@ -313,7 +313,7 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     source_suffix = " (from History)" if ctx.source == "history" else ""
     heading = _analysis_heading_label(ctx)
     app._analysis_context_lbl.value = (
-        f'<p style="color:{_theme.TEXT_SECONDARY};font-size:13px;margin:4px 0 12px">'
+        f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:4px 0 12px">'
         f"Analysing: {_html_mod.escape(heading)}{source_suffix}</p>"
     )
     has_any = bool(app._ana_available)
@@ -436,7 +436,7 @@ def render_reorg_geometries(app: Any) -> None:
     except Exception as exc:  # noqa: BLE001
         app._set_html_output(
             app._reorg_geom_output,
-            f'<p style="color:{_theme.ACCENT_ERROR};padding:8px">Geometry view failed: {exc}</p>',
+            f'<p style="color:{_theme.css.ACCENT_ERROR};padding:8px">Geometry view failed: {exc}</p>',
         )
 
 
@@ -906,7 +906,7 @@ def show_mulliken_populations(
             note.value = ""
         else:
             note.value = (
-                f'<p style="font-size:12px;color:{_theme.TEXT_MUTED_LIGHT};'
+                f'<p style="font-size:12px;color:{_theme.css.TEXT_MUTED_LIGHT};'
                 'margin:0 0 8px;font-style:italic">'
                 "Dipole arrow needs saved μ<sub>x</sub>, μ<sub>y</sub>, "
                 "μ<sub>z</sub> — re-run this calculation to enable.</p>"
@@ -915,7 +915,7 @@ def show_mulliken_populations(
     q_sum = sum(app._last_mulliken_charges)
     summary_bits = [
         f"Sum of Mulliken charges: <b>{q_sum:+.4f} e</b>"
-        f' <span style="color:{_theme.TEXT_MUTED_LIGHT};font-size:12px">'
+        f' <span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
         "(should match the molecular charge)</span>"
     ]
     dip_vec = app._last_mulliken_dipole_vector
@@ -924,25 +924,25 @@ def show_mulliken_populations(
             vx, vy, vz = dip_vec
             summary_bits.append(
                 f"Dipole moment: <b>{app._last_mulliken_dipole:.4f} D</b>"
-                f' <span style="color:{_theme.TEXT_MUTED_LIGHT};font-size:12px">'
+                f' <span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
                 f"(μ = [{vx:+.3f}, {vy:+.3f}, {vz:+.3f}] D — SCF density)</span>"
             )
         else:
             summary_bits.append(
                 f"Dipole moment: <b>{app._last_mulliken_dipole:.4f} D</b>"
-                f' <span style="color:{_theme.TEXT_MUTED_LIGHT};font-size:12px">'
+                f' <span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
                 "(magnitude only — re-run to enable the 3D arrow)</span>"
             )
     app._mulliken_summary.value = (
-        f'<p style="font-size:13px;color:{_theme.TEXT_HEADING};margin:0 0 8px">'
+        f'<p style="font-size:13px;color:{_theme.css.TEXT_HEADING};margin:0 0 8px">'
         + "<br>".join(summary_bits)
         + "</p>"
     )
 
     rows = "".join(
-        f'<tr><td style="padding:2px 14px 2px 0;color:{_theme.TEXT_SECONDARY}">'
+        f'<tr><td style="padding:2px 14px 2px 0;color:{_theme.css.TEXT_SECONDARY}">'
         f"{_html_mod.escape(sym)}{i + 1}</td>"
-        f'<td style="color:{_theme.TEXT_HEADING};font-family:monospace">'
+        f'<td style="color:{_theme.css.TEXT_HEADING};font-family:monospace">'
         f"{chg:+.4f}</td></tr>"
         for i, (sym, chg) in enumerate(
             zip(app._last_mulliken_symbols, app._last_mulliken_charges)
@@ -950,9 +950,9 @@ def show_mulliken_populations(
     )
     app._mulliken_table.value = (
         f'<table style="border-collapse:collapse;margin:0 0 10px;font-size:13px">'
-        f'<tr><th style="text-align:left;color:{_theme.TEXT_SECONDARY};'
+        f'<tr><th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};'
         f'font-size:12px;padding:2px 14px 2px 0">Atom</th>'
-        f'<th style="text-align:left;color:{_theme.TEXT_SECONDARY};'
+        f'<th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};'
         f'font-size:12px">Charge (e)</th></tr>'
         f"{rows}</table>"
     )

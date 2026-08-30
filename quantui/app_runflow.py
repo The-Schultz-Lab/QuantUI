@@ -217,7 +217,7 @@ def _update_basis_fix_button(app: Any, mol: Any) -> None:
         _hide_basis_fix_button(app)
 
 
-def _spin_small(text: str, color: str = _theme.TEXT_LABEL) -> str:
+def _spin_small(text: str, color: str = _theme.css.TEXT_LABEL) -> str:
     return f'<span style="font-size:12.5px;color:{color}">{text}</span>'
 
 
@@ -241,12 +241,14 @@ def on_spin_suggest(app: Any, btn: Any = None) -> None:
             app.spin_geom_dd.value,
         )
     except ValueError as exc:
-        app.spin_helper_output.value = _spin_small(f"⚠ {exc}", _theme.ACCENT_WARNING)
+        app.spin_helper_output.value = _spin_small(
+            f"⚠ {exc}", _theme.css.ACCENT_WARNING
+        )
         return
 
     lines = [_spin_small(s.explanation)]
     for c in s.caveats:
-        lines.append(_spin_small(f"⚠ {c}", _theme.ACCENT_WARNING))
+        lines.append(_spin_small(f"⚠ {c}", _theme.css.ACCENT_WARNING))
     app.spin_helper_output.value = "<br>".join(lines)
 
     # Arm one Apply button per candidate spin state, labelled with the state.
@@ -303,7 +305,7 @@ def on_charge_mult_suggest(app: Any, btn: Any = None) -> None:
         suggestion = suggest_charge_multiplicity_from_atoms(atoms, assume_charge=0)
     except Exception as exc:
         app.charge_mult_suggest_output.value = _spin_small(
-            f"⚠ {exc}", _theme.ACCENT_WARNING
+            f"⚠ {exc}", _theme.css.ACCENT_WARNING
         )
         return
 
@@ -328,7 +330,7 @@ def on_charge_mult_suggest(app: Any, btn: Any = None) -> None:
             )
         )
     for caveat in suggestion.caveats:
-        lines.append(_spin_small(f"⚠ {caveat}", _theme.ACCENT_WARNING))
+        lines.append(_spin_small(f"⚠ {caveat}", _theme.css.ACCENT_WARNING))
     app.charge_mult_suggest_output.value = "<br>".join(lines)
     app.charge_mult_apply_btn.description = (
         f"Apply charge {suggestion.charge}, mult {suggestion.multiplicity}"
@@ -452,7 +454,7 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
             ),
             app._tddft_seed_note,
             widgets.HTML(
-                f'<span style="color:{_theme.ACCENT_WARNING};font-size:12px">⚠ Requires a DFT '
+                f'<span style="color:{_theme.css.ACCENT_WARNING};font-size:12px">⚠ Requires a DFT '
                 "functional (e.g. B3LYP, PBE0). RHF/UHF will run TDHF (CIS) "
                 "instead.</span>"
             ),
@@ -466,7 +468,7 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
             ),
             app._freq_seed_note,
             widgets.HTML(
-                f'<span style="color:{_theme.ACCENT_WARNING};font-size:12px">'
+                f'<span style="color:{_theme.css.ACCENT_WARNING};font-size:12px">'
                 "⚠ Recommended: B3LYP/6-31G* or better. "
                 "STO-3G and 3-21G give qualitative results only. "
                 "Start from an optimised geometry for best accuracy.</span>"
@@ -521,21 +523,21 @@ def update_scan_widgets(app: Any, _change: Any = None) -> None:
     if st == "Bond":
         app._scan_atom34_box.layout.display = "none"
         app._scan_unit_lbl.value = (
-            f'<span style="font-size:12px;color:{_theme.TEXT_SECONDARY}">Å</span>'
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">Å</span>'
         )
     elif st == "Angle":
         app._scan_atom4.layout.display = "none"
         app._scan_atom3.layout.display = ""
         app._scan_atom34_box.layout.display = ""
         app._scan_unit_lbl.value = (
-            f'<span style="font-size:12px;color:{_theme.TEXT_SECONDARY}">°</span>'
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">°</span>'
         )
     else:  # Dihedral
         app._scan_atom3.layout.display = ""
         app._scan_atom4.layout.display = ""
         app._scan_atom34_box.layout.display = ""
         app._scan_unit_lbl.value = (
-            f'<span style="font-size:12px;color:{_theme.TEXT_SECONDARY}">°</span>'
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">°</span>'
         )
 
 
@@ -698,7 +700,7 @@ def _update_freq_perturb_seed_ui(app: Any, path_str: str) -> None:
         result_dir = Path(path_str[len(FREQ_SEED_PREFIX) :])
         if not populate_freq_perturb_modes(app, result_dir):
             app._seed_note.value = (
-                f'<span style="font-size:12px;color:{_theme.ACCENT_WARNING}">'
+                f'<span style="font-size:12px;color:{_theme.css.ACCENT_WARNING}">'
                 "⚠ Selected Frequency result has no usable normal modes."
                 "</span>"
             )
@@ -971,14 +973,14 @@ def on_seed_changed(app: Any, change: Any) -> None:
 
         if is_freq_mode_seed(path_str):
             app._seed_note.value = (
-                f'<span style="font-size:12px;color:{_theme.ACCENT_SUCCESS}">'
+                f'<span style="font-size:12px;color:{_theme.css.ACCENT_SUCCESS}">'
                 "✓ The run will start from the selected Frequency geometry "
                 "displaced along the chosen normal mode."
                 "</span>"
             )
         else:
             app._seed_note.value = (
-                f'<span style="font-size:12px;color:{_theme.ACCENT_SUCCESS}">'
+                f'<span style="font-size:12px;color:{_theme.css.ACCENT_SUCCESS}">'
                 "✓ The run will start from the selected result's final geometry "
                 "instead of the current molecule."
                 "</span>"
@@ -1006,7 +1008,7 @@ def on_clear_log(app: Any, btn: Any) -> None:
     app.run_output.clear_output()
 
 
-def _preopt_small(text: str, color: str = _theme.TEXT_SECONDARY) -> str:
+def _preopt_small(text: str, color: str = _theme.css.TEXT_SECONDARY) -> str:
     return f'<small style="color:{color}">{text}</small>'
 
 
@@ -1103,14 +1105,14 @@ def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> No
                 f"{unsupported}. Make sure the starting geometry is sensible first "
                 "(a bundled inorganic example or an XYZ paste are good starting "
                 "points).",
-                _theme.ACCENT_WARNING,
+                _theme.css.ACCENT_WARNING,
             )
         else:
             app.preopt_preview_status.value = _preopt_small(
                 f"Pre-optimization ({engine}) found <b>no meaningful change</b> — "
                 f"RMSD {rmsd:.3f} Å. Your geometry is already reasonable, so there "
                 "is nothing to keep or revert; the calculation will use it as-is.",
-                _theme.TEXT_LABEL,
+                _theme.css.TEXT_LABEL,
             )
         try:
             app._activity_end(kind="ui")
@@ -1135,7 +1137,9 @@ def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> No
         with app.preopt_preview_output:
             display(
                 HTML(
-                    _preopt_small(f"Preview render failed: {exc}", _theme.ACCENT_ERROR)
+                    _preopt_small(
+                        f"Preview render failed: {exc}", _theme.css.ACCENT_ERROR
+                    )
                 )
             )
 
@@ -1146,7 +1150,7 @@ def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> No
         f"Relaxed ({engine}): moved <b>{rmsd:.3f} Å</b> (RMSD) from your "
         "input. Use ⇄ or the slider below to compare input vs relaxed, then "
         "Keep it or revert.",
-        _theme.TEXT_LABEL,
+        _theme.css.TEXT_LABEL,
     )
     app.preopt_accept_btn.disabled = False
     app.preopt_reset_btn.disabled = False
@@ -1158,7 +1162,7 @@ def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> No
 
 def _preopt_preview_failed(app: Any, msg: str) -> None:
     app.preopt_preview_status.value = _preopt_small(
-        f"Preview failed: {msg}", _theme.ACCENT_ERROR
+        f"Preview failed: {msg}", _theme.css.ACCENT_ERROR
     )
     app.preopt_preview_btn.disabled = False
     try:
@@ -1289,7 +1293,7 @@ def on_compare(app: Any, btn: Any, *, layout_fn: Any) -> None:
                 btns.append(button)
             display(
                 widgets.HTML(
-                    f'<p style="margin:12px 0 4px;color:{_theme.TEXT_SLATE_DARK};'
+                    f'<p style="margin:12px 0 4px;color:{_theme.css.TEXT_SLATE_DARK};'
                     'font-size:13px;font-weight:600">Analyse a result:</p>'
                 )
             )
@@ -1320,7 +1324,7 @@ def on_copy_results_path(app: Any, btn: Any) -> None:
     def _reset() -> None:
         time.sleep(3)
         app.results_path_lbl.value = (
-            f'<span style="font-size:13px;color:{_theme.TEXT_SLATE}">{p}</span>'
+            f'<span style="font-size:13px;color:{_theme.css.TEXT_SLATE}">{p}</span>'
         )
 
     threading.Thread(target=_reset, daemon=True).start()
@@ -1345,9 +1349,7 @@ def on_confirm_no(app: Any, btn: Any) -> None:
 
 def on_log_clear(app: Any, btn: Any) -> None:
     """Clear rendered event-log output widgets in the Log tab."""
-    app._log_output_html.value = (
-        f'<span style="color:{_theme.TEXT_SUBTLE};font-size:13px">Log cleared.</span>'
-    )
+    app._log_output_html.value = f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:13px">Log cleared.</span>'
     app._log_source_lbl.value = ""
 
 
@@ -1401,7 +1403,7 @@ def on_issue_submit(app: Any, *, issue_tracker_mod: Any) -> None:
     text = app._issue_textarea.value.strip()
     if not text:
         app._issue_status_html.value = (
-            f'<span style="color:{_theme.ACCENT_ERROR};font-size:12px">'
+            f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
             "Please describe the issue before submitting.</span>"
         )
         return
@@ -1413,12 +1415,12 @@ def on_issue_submit(app: Any, *, issue_tracker_mod: Any) -> None:
             session_id=app._session_id,
         )
         app._issue_status_html.value = (
-            f'<span style="color:{_theme.ACCENT_SUCCESS};font-size:12px">'
+            f'<span style="color:{_theme.css.ACCENT_SUCCESS};font-size:12px">'
             f"&#10003; Issue #{issue_id} saved. Thank you!</span>"
         )
         app._issue_overlay.layout.display = "none"
     except Exception as exc:
-        app._issue_status_html.value = f'<span style="color:{_theme.ACCENT_ERROR};font-size:12px">Save failed: {exc}</span>'
+        app._issue_status_html.value = f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">Save failed: {exc}</span>'
     finally:
         app._issue_submit_btn.disabled = False
 
@@ -1481,7 +1483,7 @@ def _arm_exit(app: Any) -> None:
     app._exit_btn.tooltip = "Click again to stop the server and end this session"
     app._exit_btn.layout.width = "150px"
     app._exit_warn_html.value = (
-        f'<span style="color:{_theme.ACCENT_ERROR};font-size:12px;align-self:center;'
+        f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px;align-self:center;'
         'margin-right:4px">This stops the server and ends your session.</span>'
     )
     app._exit_warn_html.layout.display = ""
@@ -1542,7 +1544,7 @@ def _perform_exit(app: Any) -> None:
     app._welcome_html.value = (
         '<div style="display:flex;align-items:center;justify-content:center;'
         'padding:32px;gap:16px;width:100%">'
-        f'<div style="font-size:20px;color:{_theme.TEXT_SLATE_DARK}">'
+        f'<div style="font-size:20px;color:{_theme.css.TEXT_SLATE_DARK}">'
         "QuantUI has shut down. You may close this tab.</div>"
         "</div>"
     )
@@ -1591,7 +1593,7 @@ def on_cal_run(
     app._cal_progress.layout.display = ""
     app._cal_step_label.layout.display = ""
     app._cal_step_label.value = (
-        f'<span style="font-size:12px;color:{_theme.TEXT_SLATE_DARK}">Starting…</span>'
+        f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK}">Starting…</span>'
         # Reserve a second invisible line so the live-message ticker
         # doesn't jump the accordion height.
         '<br><span style="font-size:11px;color:transparent">.</span>'
@@ -1671,7 +1673,7 @@ def _cal_table_html(steps_so_far, total: int, *, in_flight_step=None) -> str:
         if len(msg) > 140:
             msg = msg[:137] + "…"
         return (
-            f'<br><span style="color:{_theme.TEXT_SUBTLE};font-style:italic;font-size:11px">'
+            f'<br><span style="color:{_theme.css.TEXT_SUBTLE};font-style:italic;font-size:11px">'
             f"{_html_mod.escape(msg)}</span>"
         )
 
@@ -1790,9 +1792,9 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
         # flip-flop. Empty live-message becomes a transparent dot to
         # preserve the line-height.
         live_line_text = live_message if live_message else "."
-        live_line_color = _theme.TEXT_SLATE if live_message else "transparent"
+        live_line_color = _theme.css.TEXT_SLATE if live_message else "transparent"
         app._cal_step_label.value = (
-            f'<span style="font-size:12px;color:{_theme.TEXT_SLATE_DARK}">'
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK}">'
             f"Step {step_n} / {total} — {label} "
             f"[{icon} {elapsed:.1f} s]</span>"
             f'<br><span style="font-size:11px;color:{live_line_color}">'
@@ -1830,7 +1832,7 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
         app._activity_end(kind="compute")
 
     app._cal_step_label.value = (
-        f'<span style="font-size:12px;color:{_theme.ACCENT_SUCCESS}"><b>Calibration complete.</b> '
+        f'<span style="font-size:12px;color:{_theme.css.ACCENT_SUCCESS}"><b>Calibration complete.</b> '
         "Time estimates are now active.</span>"
         '<br><span style="font-size:11px;color:transparent">.</span>'
         if result.n_completed > 0
@@ -1879,7 +1881,7 @@ def _update_open_shell_hint(app: Any) -> None:
     if app.method_dd.value.upper() == "RHF":
         # Actionable: RHF is the one method that will misbehave for open-shell.
         app._open_shell_hint.value = (
-            f'<span style="font-size:12px;color:{_theme.ACCENT_WARNING}">'
+            f'<span style="font-size:12px;color:{_theme.css.ACCENT_WARNING}">'
             f"⚠ Open-shell: {n_unpaired} unpaired electron{plural} "
             f"(multiplicity {mult}). RHF assumes all electrons are paired — "
             "switch to <b>UHF</b> (or a DFT method) for this system.</span>"
@@ -1887,7 +1889,7 @@ def _update_open_shell_hint(app: Any) -> None:
     else:
         # Informational: UHF / DFT already handle open-shell correctly.
         app._open_shell_hint.value = (
-            f'<span style="font-size:12px;color:{_theme.TEXT_SLATE}">'
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE}">'
             f"Open-shell: {n_unpaired} unpaired electron{plural} "
             f"(multiplicity {mult}) — running unrestricted.</span>"
         )
@@ -2030,7 +2032,7 @@ def refresh_resume_notice(app: Any) -> None:
         state = ckpt.resumable_state() or {}
         detail = _resume_detail(ckpt, state)
         notice.value = (
-            f'<span style="font-size:12px;color:{_theme.TEXT_SLATE}">'
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE}">'
             "♻ An interrupted run of this exact calculation was found"
             f"{detail}.</span>"
         )
@@ -2166,7 +2168,7 @@ def describe_resume_entry(app: Any, _change: Any = None) -> None:
             restore_btn.disabled = False
 
     html.value = (
-        f'<span style="font-size:12px;color:{_theme.TEXT_SLATE}">{done}'
+        f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE}">{done}'
         f"; charge {state.get('charge', 0)}, multiplicity "
         f"{state.get('multiplicity', 1)}.{note}</span>"
     )
@@ -2300,7 +2302,7 @@ def refresh_results_browser(app: Any) -> None:
     )
 
     app.results_path_lbl.value = (
-        f'<span style="font-size:13px;color:{_theme.TEXT_SLATE}">'
+        f'<span style="font-size:13px;color:{_theme.css.TEXT_SLATE}">'
         f"{app._get_results_dir()}</span>"
     )
     dirs = list_results()
