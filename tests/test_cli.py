@@ -440,6 +440,163 @@ class TestWslAwareOpener:
         assert opened[0].startswith("file:")
 
 
+class TestAppLauncher:
+    @pytest.fixture
+    def isolated_home(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("QUANTUI_HOME", str(tmp_path / "quantui-home"))
+        monkeypatch.setenv("XDG_BIN_HOME", str(tmp_path / "bin"))
+        return tmp_path
+
+    def test_run_app_parser_registered(self):
+        parser = cli._build_parser()
+        run_app = parser.parse_args(["run", "app"])
+        assert run_app.command == "run"
+        assert run_app.run_command == "app"
+        assert run_app.port == 8867
+        assert run_app.open is False
+
+    def test_setup_parser_registered(self):
+        parser = cli._build_parser()
+        args = parser.parse_args(["setup"])
+        assert args.command == "setup"
+        assert args.force is False
+
+    def test_run_app_missing_voila_returns_one(self, isolated_home, monkeypatch):
+        from quantui import app_launcher
+
+        monkeypatch.setattr(app_launcher, "voila_executable", lambda: None)
+        rc, _, err = _capture(["run", "app"])
+        assert rc == 1
+        assert "Voilà is not installed" in err
+
+    def test_ensure_app_notebook_writes_once(self, isolated_home):
+        from quantui.app_launcher import app_notebook_path, ensure_app_notebook
+
+        path = ensure_app_notebook()
+        assert path == app_notebook_path()
+        assert path.exists()
+        text = path.read_text(encoding="utf-8")
+        assert "QuantUIApp" in text
+        mtime = path.stat().st_mtime_ns
+        again = ensure_app_notebook()
+        assert again.stat().st_mtime_ns == mtime
+
+    def test_setup_writes_notebook_and_script(self, isolated_home):
+        from quantui.app_launcher import (
+            app_notebook_path,
+            launcher_script_path,
+            run_setup,
+        )
+
+        rc, out, _ = _capture(["setup"])
+        assert rc == 0
+        assert app_notebook_path().exists()
+        script = launcher_script_path()
+        assert script.exists()
+        assert script.read_text(encoding="utf-8").startswith("#!/usr/bin/env bash")
+        assert "quantui run app" in script.read_text(encoding="utf-8")
+        assert "Wrote launcher notebook" in out or app_notebook_path().exists()
+
+        # Direct helper also works (covers run_setup print paths).
+        assert run_setup() == 0
+
+    def test_build_voila_argv_matches_native_launchers(self, tmp_path):
+        from quantui.app_launcher import build_voila_argv
+
+        nb = tmp_path / "app.ipynb"
+        nb.write_text("{}", encoding="utf-8")
+        argv = build_voila_argv(nb, port=8867)
+        assert argv[0] == "voila"
+        assert str(nb) in argv
+        assert "--port=8867" in argv
+        assert "--no-browser" in argv
+        assert "--ServerApp.disable_check_xsrf=True" in argv
+
+    def test_run_app_open_mode_waits_on_child(self, isolated_home, monkeypatch):
+        from quantui import app_launcher
+
+        monkeypatch.setattr(app_launcher, "voila_executable", lambda: "/usr/bin/voila")
+        calls: list[list[str]] = []
+
+        class _Proc:
+            def wait(self, timeout=None):
+                return 0
+
+            def terminate(self):
+                pass
+
+            def kill(self):
+                pass
+
+        def _popen(argv):
+            calls.append(argv)
+            return _Proc()
+
+        monkeypatch.setattr(app_launcher.subprocess, "Popen", _popen)
+        monkeypatch.setattr(app_launcher.time, "sleep", lambda _s: None)
+        monkeypatch.setattr(app_launcher, "_open_url_best_effort", lambda _u: None)
+
+        rc = app_launcher.run_voila_app(open_browser=True)
+        assert rc == 0
+        assert calls
+        assert calls[0][0] == "/usr/bin/voila"
+
+    def test_is_apptainer_runtime_detects_env(self, monkeypatch):
+        from quantui.app_launcher import is_apptainer_runtime
+
+        monkeypatch.delenv("APPTAINER_CONTAINER", raising=False)
+        monkeypatch.delenv("SINGULARITY_CONTAINER", raising=False)
+        assert is_apptainer_runtime() is False
+        monkeypatch.setenv("APPTAINER_CONTAINER", "/tmp/quantui.sif")
+        assert is_apptainer_runtime() is True
+
+    def test_is_jupyter_server_context_detects_env(self, monkeypatch):
+        from quantui.app_launcher import is_jupyter_server_context
+
+        monkeypatch.delenv("JUPYTER_SERVER_URL", raising=False)
+        assert is_jupyter_server_context() is False
+        monkeypatch.setenv("JUPYTER_SERVER_URL", "http://127.0.0.1:8888/")
+        assert is_jupyter_server_context() is True
+
+    def test_is_hpc_jupyterlab_session_requires_both(self, monkeypatch):
+        from quantui.app_launcher import is_hpc_jupyterlab_session
+
+        monkeypatch.delenv("APPTAINER_CONTAINER", raising=False)
+        monkeypatch.delenv("JUPYTER_SERVER_URL", raising=False)
+        assert is_hpc_jupyterlab_session() is False
+        monkeypatch.setenv("APPTAINER_CONTAINER", "/tmp/quantui.sif")
+        assert is_hpc_jupyterlab_session() is False
+        monkeypatch.setenv("JUPYTER_SERVER_URL", "http://127.0.0.1:8888/")
+        assert is_hpc_jupyterlab_session() is True
+
+    def test_setup_writes_home_notebook_in_hpc_context(
+        self, isolated_home, monkeypatch
+    ):
+        from quantui.app_launcher import home_launcher_notebook_path
+
+        monkeypatch.setenv("APPTAINER_CONTAINER", "/tmp/quantui.sif")
+        monkeypatch.setenv("JUPYTER_SERVER_URL", "http://127.0.0.1:8888/")
+        rc, out, _ = _capture(["setup"])
+        assert rc == 0
+        home_nb = home_launcher_notebook_path()
+        assert home_nb.exists()
+        assert "QuantUIApp" in home_nb.read_text(encoding="utf-8")
+        assert "Render with Voilà" in out
+        assert "do NOT use ``quantui run app``" in out
+
+    def test_run_app_fails_fast_in_hpc_context(self, isolated_home, monkeypatch):
+        from quantui import app_launcher
+
+        monkeypatch.setenv("APPTAINER_CONTAINER", "/tmp/quantui.sif")
+        monkeypatch.setenv("JUPYTER_SERVER_URL", "http://127.0.0.1:8888/")
+        monkeypatch.setattr(app_launcher, "voila_executable", lambda: "/usr/bin/voila")
+        rc, _, err = _capture(["run", "app"])
+        assert rc == 1
+        assert "HPC JupyterLab session" in err
+        assert "Render with Voilà" in err
+
+
 class TestCliAvoidsGuiStackImport:
     """M13 audit fix: ``import quantui.cli`` must not pull in ipywidgets.
 

@@ -16,6 +16,11 @@ Currently shipped subcommands:
   HTML analytics dashboard from ``perf_log.jsonl``. Default output:
   ``~/.quantui/dashboard.html``. Pass ``--open`` to automatically open
   the file in the default browser after writing.
+* ``quantui run app [--port PORT] [--open]`` — start the Voilà student
+  app. Writes ``~/.quantui/app.ipynb`` on first use (requires the
+  ``[app]`` extra: ``pip install 'quantui[app]'``).
+* ``quantui setup [--force]`` — write ``~/.quantui/app.ipynb`` and a
+  ``quantui-app`` shell shortcut under ``~/.local/bin``.
 
 Adding a new subcommand:
 
@@ -218,6 +223,24 @@ def _cmd_analytics_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_run_app(args: argparse.Namespace) -> int:
+    """Start the Voilà student app (lazy-provisions ~/.quantui/app.ipynb)."""
+    from quantui.app_launcher import run_voila_app
+
+    return run_voila_app(
+        port=args.port,
+        open_browser=args.open,
+        force_notebook_refresh=args.force,
+    )
+
+
+def _cmd_setup(args: argparse.Namespace) -> int:
+    """Write ~/.quantui/app.ipynb and a quantui-app shell shortcut."""
+    from quantui.app_launcher import run_setup
+
+    return run_setup(force=args.force)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="quantui",
@@ -277,6 +300,42 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     analytics_build.set_defaults(func=_cmd_analytics_build)
+
+    setup_parser = sub.add_parser(
+        "setup",
+        help="Write ~/.quantui/app.ipynb and a quantui-app shell shortcut.",
+    )
+    setup_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing launcher notebook or shell script.",
+    )
+    setup_parser.set_defaults(func=_cmd_setup)
+
+    run_parser = sub.add_parser("run", help="Run QuantUI services.")
+    run_sub = run_parser.add_subparsers(dest="run_command", required=True)
+    run_app = run_sub.add_parser(
+        "app",
+        help="Start the Voilà student app (pip install 'quantui[app]').",
+    )
+    run_app.add_argument(
+        "--port",
+        type=int,
+        default=8867,
+        metavar="PORT",
+        help="TCP port for Voilà (default: 8867, matches native launchers).",
+    )
+    run_app.add_argument(
+        "--open",
+        action="store_true",
+        help="Open http://localhost:PORT in the default browser after startup.",
+    )
+    run_app.add_argument(
+        "--force",
+        action="store_true",
+        help="Regenerate ~/.quantui/app.ipynb before starting.",
+    )
+    run_app.set_defaults(func=_cmd_run_app)
 
     return parser
 
