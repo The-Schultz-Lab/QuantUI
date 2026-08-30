@@ -80,7 +80,7 @@ class VizSettings:
 
 @dataclass
 class ThemeSettings:
-    """Visual theme preferences (M-THEME THEME.6)."""
+    """Visual theme preferences (preset palette selection)."""
 
     palette: str = "Dark"
 

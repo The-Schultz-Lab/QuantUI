@@ -290,8 +290,8 @@ def _run_tddft_calc_body(
         td.nstates = nstates
         # verbose=5 (DEBUG) is what surfaces PySCF's per-root "root %d
         # converged" lines during the Davidson solve — the only progress
-        # signal available while it runs (M-PROGRESS D2). _LogCapture.write
-        # in app.py greps for them to update the live status label.
+        # signal available while it runs. _LogCapture.write in app.py greps
+        # for per-root convergence lines to update the live status label.
         td.verbose = 5
         td.stdout = stream
         td.kernel()

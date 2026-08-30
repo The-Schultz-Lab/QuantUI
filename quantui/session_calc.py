@@ -580,7 +580,7 @@ def _run_session_calc_body(
             emit_status(stream, "Running MP2 correlation…")
             _mp2 = _mp.MP2(mf)
             # verbose=5 surfaces integral-transform / kernel milestones for
-            # the live status label (M-PROGRESS D3).
+            # the live status label during the correlation step.
             _mp2.verbose = 5
             _mp2.stdout = stream
             _e_corr, _ = _mp2.kernel()

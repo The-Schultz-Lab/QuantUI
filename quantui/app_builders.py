@@ -1131,9 +1131,8 @@ def build_shared_widgets(
     # molecule (e.g. optimise cheaply, then refine at a higher level of
     # theory). Only one of these three calc types is ever visible at a time,
     # so ONE widget group is built here and referenced under all three
-    # historical per-calc-type attribute names below (UXP2.5, M-UX2,
-    # 2026-07-31) — this used to be three near-identical widget groups.
-    # Real object count is one; the aliases exist so app.py, app_runflow.py,
+    # historical per-calc-type attribute names below — this used to be three
+    # near-identical widget groups. Real object count is one; the aliases exist so app.py, app_runflow.py,
     # and the existing per-calc-type tests keep working unchanged.
     app._seed_dd = widgets.Dropdown(
         options=[("(use current molecule)", "")],
@@ -2651,7 +2650,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._nmr_output = app._nmr_summary
 
     # Mulliken Populations — table + Plotly bar chart + 3D overlay toggles
-    # (always-mounted; content swapped when activated, DEC-009).
+    # (always-mounted; content swapped when activated).
     app._mulliken_summary = widgets.HTML(value="", layout=layout_fn(width="100%"))
     app._mulliken_table = widgets.HTML(value="", layout=layout_fn(width="100%"))
     # min_height matches plot_mulliken_charges height so the Output does not
@@ -2889,7 +2888,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             ),
         ]
     )
-    # DEC-009: the panel stays visible regardless of backend — only its
+    # The panel stays visible regardless of backend — only its
     # content swaps (MEAS.6). Shown when the resolved backend can't support
     # native clicking (plotlymol, or py3Dmol simply unavailable).
     app._measure_fallback_msg = widgets.HTML(

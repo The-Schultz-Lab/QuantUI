@@ -477,9 +477,9 @@ def log_calculation(
     ``quantui.analytics.build_dashboard`` compute GPU-vs-CPU speedups
     across runs of the same (method, basis, formula) tuple.
 
-    ``source`` / ``warm`` / ``import_s`` / ``stages`` (added 2026-08-05,
-    M-PROGRESS Phase C) describe **how the timing was measured**, which
-    turned out to matter more than the cost model itself:
+    ``source`` / ``warm`` / ``import_s`` / ``stages`` (added 2026-08-05)
+    describe **how the timing was measured**, which turned out to matter more
+    than the cost model itself:
 
     * ``source`` — ``"app"`` for a run the user launched in the UI,
       ``"calibration"`` for one the benchmark harness measured in a fresh
@@ -554,8 +554,8 @@ def log_calculation(
 _HESSIAN_MULTIPLIER_HF_DFT: float = 2.0
 _HESSIAN_MULTIPLIER_POST_HF: float = 6.0
 _POST_HF_METHODS: frozenset = frozenset({"MP2", "CCSD", "CCSD(T)"})
-# Minimum tagged frequency records carrying ``stages`` before the learned
-# ratios replace the fixed Hessian / IR multipliers (PROG.C6).
+# Minimum tagged frequency records carrying ``stages`` before learned stage
+# ratios replace the fixed Hessian / IR multipliers.
 _MIN_FREQ_STAGE_SAMPLES: int = 2
 
 
@@ -708,8 +708,8 @@ def _estimate_frequency_cost(
         return None
     scf_anchor_s = float(sp_est["seconds"])
 
-    # PROG.C6 — replace fixed multipliers with medians from tagged stage
-    # records when enough ``source="app"`` frequency runs have accumulated.
+    # Replace fixed multipliers with medians from tagged stage records when
+    # enough ``source="app"`` frequency runs have accumulated.
     learned = _learned_frequency_stage_params(
         records, method=method, basis=basis, source=source
     )
@@ -868,7 +868,7 @@ def estimate_time_from_records(
     label downgraded one notch — better an approximate estimate from
     cross-device data than no estimate at all.
 
-    **Provenance filtering** (2026-08-05, M-PROGRESS Phase C): ``source``
+    **Provenance filtering** (2026-08-05): ``source`` partitions the pool the
     partitions the pool the same way ``gpu_used`` does, and for the same
     reason — the two populations measure different things. A calibration
     record times a fresh subprocess, so it includes PySCF's import cost;

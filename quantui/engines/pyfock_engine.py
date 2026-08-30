@@ -15,7 +15,7 @@ from .base import EngineCapabilities, QuantumEngine
 _PYFOCK_SPEC = importlib.util.find_spec("pyfock")
 _AVAILABLE = _PYFOCK_SPEC is not None
 
-# Phase-1 subset — see QUANTUM-ENGINE-CONTRACT.md and DEC-020.
+# Phase-1 subset — see QUANTUM-ENGINE-CONTRACT.md.
 _PYFOCK_METHODS = ("PBE", "B3LYP", "PBE0")
 _PYFOCK_BASES = ("def2-SVP", "def2-TZVP", "LANL2DZ")
 

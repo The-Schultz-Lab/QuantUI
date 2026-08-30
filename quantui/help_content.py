@@ -48,6 +48,44 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "<code>apptainer run quantui.sif</code></p>"
             "<p>Each dropdown in the Calculate tab has a <b>?</b> button for "
             "context-sensitive help on that specific option.</p>"
+            "<p>While a calculation runs, see <i>Live run progress</i> in the "
+            "Help browser for what the status line and log messages mean.</p>"
+        ),
+    },
+    "run_progress": {
+        "title": "Live run progress — what the status line means",
+        "body": (
+            "<p>Long quantum-chemistry steps can run for minutes with little or "
+            "no new text in the output log. QuantUI keeps you oriented with a "
+            "<b>live status line</b> next to the Run button and, when needed, "
+            "occasional <i>still working</i> lines in the log.</p>"
+            "<p><b>Status chip</b> — shows the current stage, elapsed time, and "
+            "(when history allows) an approximate time remaining. Examples you "
+            "may see:</p>"
+            "<ul>"
+            "<li><b>SCF cycle <i>N</i></b> — the self-consistent field iteration "
+            "is still converging the electron density.</li>"
+            "<li><b>TD-DFT root <i>k</i> converged</b> — excited-state "
+            "calculations report each converged root as it lands.</li>"
+            "<li><b>NMR GIAO · atom <i>k</i>/<i>N</i></b> — shielding tensors "
+            "are computed one atom at a time.</li>"
+            "<li><b>Hessian build · atom <i>k</i></b> — frequency calculations "
+            "building the force-constant matrix.</li>"
+            "<li><b>CCSD cycle <i>N</i></b> or <b>MP2 · …</b> — post-HF "
+            "correlation steps after SCF finishes.</li>"
+            "<li><b>Opt step <i>k</i></b> / <b>Scan point <i>k</i></b> — "
+            "geometry optimizations and PES scans advancing through their "
+            "outer loop.</li>"
+            "</ul>"
+            "<p><b>Log heartbeat</b> — if PySCF prints nothing for ~25 seconds, "
+            "the live log may show a grey <i>… still working — &lt;stage&gt; · "
+            "&lt;elapsed&gt;</i> line. This proves the run is alive; those lines "
+            "are <i>not</i> copied into the saved <code>pyscf.log</code> in your "
+            "results folder.</p>"
+            "<p><b>When in doubt:</b> as long as the status chip or heartbeat is "
+            "advancing, the calculation is progressing. Use <b>Cancel</b> if you "
+            "need to stop — cancellation is checked between SCF cycles and "
+            "optimizer steps.</p>"
         ),
     },
     "calc_type": {
@@ -182,7 +220,7 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "ferrocene) or paste your own coordinates in the <b>XYZ Input</b> "
             "tab rather than relying on an online name search, which often "
             "returns a disconnected salt form for coordination compounds.</p>"
-            # UXP2.1: the two Pople notations are a recurring source of
+            # The two Pople notations are a recurring source of
             # confusion — a reader who only knows 6-31G(d) can conclude the
             # 6-31G* in the dropdown is a different set they can't select.
             "<h4 style='margin:14px 0 4px'>Reading the names: two notations, "

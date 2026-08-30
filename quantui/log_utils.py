@@ -406,7 +406,6 @@ def _extract_warnings(
     (> ``_DEGENERACY_GAP_THRESHOLD_EV``), such lines are dropped as transient:
     they describe a pre-convergence density, not the result. A genuinely
     (near-)degenerate converged state has a small gap and keeps its warning.
-    (M-UX2 UXP2.6.)
     """
     drop_degeneracy = (
         converged_gap_ev is not None and converged_gap_ev > _DEGENERACY_GAP_THRESHOLD_EV
