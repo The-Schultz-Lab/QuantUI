@@ -829,7 +829,7 @@ _RE_CYCLE = re.compile(
 )
 _RE_CONV = re.compile(r"converged SCF energy\s*=\s*([\-\d\.]+)")
 _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
-# TD-DFT root convergence (M-PROGRESS D2). PySCF's Davidson solver prints
+# TD-DFT root convergence. PySCF's Davidson solver prints
 # "root %d converged  |r|= ...  e= <excitation energy, Ha>  max|de|= ..." at
 # verbose=5 (DEBUG) — see tddft_calc.py's td.verbose. This is the only
 # per-root progress signal the solve emits; without it the heartbeat's
@@ -838,7 +838,7 @@ _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
 _RE_TD_ROOT = re.compile(
     r"root\s+(\d+)\s+converged\s+\|r\|=\s*[\d.eE+\-]+\s+e=\s*([\d.eE+\-]+)"
 )
-# M-PROGRESS D3 — per-phase progress for long silent kernels (mirrors D2).
+# Per-phase progress for long silent kernels (NMR, Hessian, post-HF, TD-DFT).
 _RE_CCSD_CYCLE = re.compile(
     r"cycle\s*=\s*(\d+)\s+E_corr\(CCSD\)\s*=\s*[\-\d\.Ee+\-]+\s+dE\s*=\s*([\-\d\.Ee+\-]+)"
 )
@@ -852,7 +852,7 @@ _HARTREE_TO_EV = 27.211386245988
 # message is used as a per-stage timing key — see _LogCapture._stage_key.
 _RE_STAGE_NUMBERS = re.compile(r"\d+(?:[./]\d+)*")
 
-# ── Silent-phase heartbeat (M-PROGRESS Phase D) ──────────────────────────────
+# ── Silent-phase heartbeat ───────────────────────────────────────────────────
 #
 # Seconds of stream silence before the log says it is still alive.
 #
@@ -906,19 +906,18 @@ class _LogCapture:
         # Completion fraction (0..1) reported by calc modules via
         # log_utils.emit_progress; read by the elapsed ticker. None = unknown.
         self._fraction: Optional[float] = None
-        # Silent-phase heartbeat (M-PROGRESS Phase D). Long kernels — the TD-DFT
-        # excited-state solve most of all — print nothing for minutes, so the
-        # log looks hung even though the status label is advancing. A watchdog
-        # appends a "still working" line when the stream has gone quiet.
+        # Silent-phase heartbeat. Long kernels — the TD-DFT excited-state solve
+        # most of all — print nothing for minutes, so the log looks hung even
+        # though the status label is advancing. A watchdog appends a "still
+        # working" line when the stream has gone quiet.
         self._last_write_t = time.monotonic()
         self._hb_started_t = self._last_write_t
         self._hb_stop = threading.Event()
         self._hb_thread: Optional[threading.Thread] = None
-        # Per-stage wall times (M-PROGRESS Phase C, deferred from B3).
-        # Every calc type already announces its phases through
-        # log_utils.emit_status, and every one of those announcements passes
-        # through this object — so stage boundaries can be timed here without
-        # threading a timer through optimizer/freq/tddft/nmr one by one.
+        # Per-stage wall times. Every calc type announces its phases through
+        # log_utils.emit_status, and every announcement passes through this
+        # object — stage boundaries can be timed here without threading a timer
+        # through optimizer/freq/tddft/nmr one by one.
         self._stage_times: dict[str, float] = {}
         self._stage_name: Optional[str] = None
         self._stage_started_t = self._last_write_t
@@ -2410,9 +2409,9 @@ class QuantUIApp:
             self._safe_cb(self._on_calc_type_changed), names="value"
         )
         # Geometry Opt / Frequency / UV-Vis (TD-DFT) share one seed-geometry
-        # dropdown + refresh button (UXP2.5, M-UX2) — only one observer/click
-        # binding is needed, not three, since `_geo_seed_dd`, `_freq_seed_dd`
-        # and `_tddft_seed_dd` are the same underlying widget.
+        # dropdown + refresh button — only one observer/click binding is needed,
+        # not three, since `_geo_seed_dd`, `_freq_seed_dd` and `_tddft_seed_dd`
+        # are the same underlying widget.
         self._seed_dd.observe(self._safe_cb(self._on_seed_changed), names="value")
         self._seed_refresh_btn.on_click(lambda _btn: self._refresh_seed_options())
         self._scan_type_dd.observe(
@@ -4036,7 +4035,7 @@ class QuantUIApp:
 
     # Geometry Opt / Frequency / UV-Vis (TD-DFT) used to each have their own
     # seed-refresh + seed-changed methods; the widget they operate on is now
-    # one shared dropdown (UXP2.5, M-UX2), so these are aliases of the two
+    # one shared dropdown, so these are aliases of the two methods above rather
     # methods above rather than separate implementations. Kept under their
     # original names because app_runflow.py's per-calc-type branches and the
     # existing per-calc-type tests still call them by these names.
@@ -4931,7 +4930,7 @@ class QuantUIApp:
         #
         # This used to refresh only the Frequency/UV-Vis dropdowns, because
         # Geometry Opt's seed dropdown didn't exist yet when this was written.
-        # Now that all three calc types share one dropdown (UXP2.5), a single
+        # Now that all three calc types share one dropdown, a single call here
         # call here also fixes a real gap: switching molecules while already
         # on the Geometry Opt panel used to leave its seed list showing the
         # PREVIOUS molecule's matches until the user switched calc types away
@@ -5378,9 +5377,9 @@ class QuantUIApp:
         # Expose this run's log to the elapsed ticker so it can read the
         # completion fraction calc modules report via emit_progress.
         self._active_log = log
-        # Watch for silent stretches (M-PROGRESS Phase D). Stopped in the
-        # `finally` alongside the elapsed ticker, so it cannot outlive the run
-        # and keep writing into a finished log.
+        # Watch for silent stretches in the output log. Stopped in the `finally`
+        # alongside the elapsed ticker, so it cannot outlive the run and keep
+        # writing into a finished log.
         log.start_heartbeat()
 
         # --- Checkpoint for this run (M-CHECKPOINT) ---

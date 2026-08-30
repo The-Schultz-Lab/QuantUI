@@ -384,7 +384,7 @@ def reset_picks(app: Any) -> None:
 def update_panel_for_backend(app: Any, backend: Any) -> None:
     """Swap the measurement panel between controls and an explanation.
 
-    DEC-009: the panel itself stays visible either way — only its *content*
+    The panel itself stays visible either way — only its *content*
     switches, never a silent no-op when the resolved backend can't support
     clicking.
     """

@@ -404,7 +404,7 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     elif ct in ("Frequency", "UV-Vis (TD-DFT)"):
         app._freq_preopt_cb.layout.display = ""
         # The seed dropdown is shared across all three seed-consuming calc
-        # types (UXP2.5), so it can carry a value in from whichever of these
+        # types, so it can carry a value in from whichever of these
         # two was active before. Re-evaluate .disabled here rather than trust
         # whatever it was left at — otherwise switching Frequency (seeded) ->
         # UV-Vis carries a stale disabled=True even if UV-Vis's own seed slot
@@ -930,7 +930,7 @@ def refresh_seed_options(app: Any) -> None:
 
     Used by Geometry Opt, Frequency, UV-Vis (TD-DFT), and NMR Shielding —
     only one of which is ever visible at a time, so there is exactly one
-    dropdown to refresh (UXP2.5, M-UX2). Superseded the three near-identical
+    dropdown to refresh. Superseded the three near-identical
     ``refresh_{geo,freq,tddft}_seed_options`` wrappers that used to exist here.
     """
     include_freq = getattr(app, "calc_type_dd", None)
@@ -943,7 +943,7 @@ def on_seed_changed(app: Any, change: Any) -> None:
     redundant.
 
     Superseded the three near-identical ``on_{geo,freq,tddft}_seed_changed``
-    handlers (UXP2.5, M-UX2) — the dropdown is now one shared widget, so one
+    handlers — the dropdown is now one shared widget, so one
     handler suffices, made calc-type-aware where the three used to differ:
 
     - **Frequency / UV-Vis (TD-DFT):** a selected seed is already an optimised

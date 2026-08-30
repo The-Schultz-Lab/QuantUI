@@ -1,4 +1,4 @@
-"""Theme colour tokens and preset palettes (M-THEME).
+"""Theme colour tokens and preset palettes.
 
 QuantUI themes are **preset palettes** backed by CSS custom properties. Each
 palette defines independent light/dark (or tinted) values — the whole-page

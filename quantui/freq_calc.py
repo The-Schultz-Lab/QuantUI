@@ -496,8 +496,8 @@ def _run_freq_calc_body(
     try:
         hess_obj = mf.Hessian()
         # verbose=6 surfaces per-atom integral contractions — the only
-        # in-kernel progress signal during an analytical Hessian build
-        # (M-PROGRESS D3). _LogCapture.write greps for them.
+        # in-kernel progress signal during an analytical Hessian build.
+        # _LogCapture.write greps for per-atom contraction lines.
         hess_obj.verbose = 6
         hess_obj.stdout = stream
 
