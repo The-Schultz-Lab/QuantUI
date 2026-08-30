@@ -192,7 +192,9 @@ def perturb_along_mode(
     )
 
 
-def load_frequency_mode_seed_data(result_dir: Path) -> tuple[Molecule, List, List[float]]:
+def load_frequency_mode_seed_data(
+    result_dir: Path,
+) -> tuple[Molecule, List, List[float]]:
     """Load geometry and mode data from a saved Frequency ``result.json``."""
     from quantui.results_storage import load_result
 

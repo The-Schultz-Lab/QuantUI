@@ -382,7 +382,10 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
 
     from quantui.freq_calc import is_freq_mode_seed
 
-    if is_freq_mode_seed(getattr(app._seed_dd, "value", "") or "") and ct != "Frequency":
+    if (
+        is_freq_mode_seed(getattr(app._seed_dd, "value", "") or "")
+        and ct != "Frequency"
+    ):
         app._seed_dd.value = ""
 
     # The "geometry optimization before this calc" checkbox is meaningful
@@ -894,7 +897,10 @@ def _refresh_seed_options(
                 ir = (data.get("spectra") or {}).get("ir") or {}
                 if not ir.get("displacements"):
                     continue
-                if current_formula is not None and data.get("formula") != current_formula:
+                if (
+                    current_formula is not None
+                    and data.get("formula") != current_formula
+                ):
                     continue
                 if current_atoms is not None and current_coords is not None:
                     freq_geom = _load_freq_result_geometry(d)
@@ -926,12 +932,8 @@ def refresh_seed_options(app: Any) -> None:
     ``refresh_{geo,freq,tddft}_seed_options`` wrappers that used to exist here.
     """
     include_freq = getattr(app, "calc_type_dd", None)
-    include_freq_seeds = (
-        include_freq is not None and include_freq.value == "Frequency"
-    )
-    _refresh_seed_options(
-        app, app._seed_dd, include_freq_seeds=include_freq_seeds
-    )
+    include_freq_seeds = include_freq is not None and include_freq.value == "Frequency"
+    _refresh_seed_options(app, app._seed_dd, include_freq_seeds=include_freq_seeds)
 
 
 def on_seed_changed(app: Any, change: Any) -> None:
