@@ -418,6 +418,7 @@ def _run_freq_calc_body(
 
     attach_scf_cancel_callback(mf, cancel_check_from_stream(stream))
 
+    _status("Running SCF…")
     try:
         energy_hartree = float(mf.kernel())
     except Exception as exc:
@@ -494,7 +495,10 @@ def _run_freq_calc_body(
 
     try:
         hess_obj = mf.Hessian()
-        hess_obj.verbose = mol.verbose
+        # verbose=6 surfaces per-atom integral contractions — the only
+        # in-kernel progress signal during an analytical Hessian build
+        # (M-PROGRESS D3). _LogCapture.write greps for them.
+        hess_obj.verbose = 6
         hess_obj.stdout = stream
 
         h = hess_obj.kernel()

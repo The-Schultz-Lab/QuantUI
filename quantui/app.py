@@ -838,6 +838,15 @@ _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
 _RE_TD_ROOT = re.compile(
     r"root\s+(\d+)\s+converged\s+\|r\|=\s*[\d.eE+\-]+\s+e=\s*([\d.eE+\-]+)"
 )
+# M-PROGRESS D3 — per-phase progress for long silent kernels (mirrors D2).
+_RE_CCSD_CYCLE = re.compile(
+    r"cycle\s*=\s*(\d+)\s+E_corr\(CCSD\)\s*=\s*[\-\d\.Ee+\-]+\s+dE\s*=\s*([\-\d\.Ee+\-]+)"
+)
+_RE_NMR_RANGE = re.compile(r"shielding for atoms range\(0,\s*(\d+)\)")
+_RE_NMR_ATOM = re.compile(r"total shielding of atom\s+(\d+)")
+_RE_HESS_ATOM = re.compile(r"contracting int2e_ip1ip2 for atom\s+(\d+)")
+_RE_MP2_TRANSFORM = re.compile(r"transform \(ia\|jb\)")
+_RE_MP2_KERNEL = re.compile(r"CPU time for kernel")
 _HARTREE_TO_EV = 27.211386245988
 # Step/point/state counters inside a status message. Removed before the
 # message is used as a per-stage timing key — see _LogCapture._stage_key.
@@ -913,6 +922,8 @@ class _LogCapture:
         self._stage_times: dict[str, float] = {}
         self._stage_name: Optional[str] = None
         self._stage_started_t = self._last_write_t
+        # D3: atom totals parsed from PySCF's NMR header line.
+        self._nmr_atom_total: Optional[int] = None
 
     # ── Per-stage timing ────────────────────────────────────────────────────
 
@@ -1057,6 +1068,51 @@ class _LogCapture:
                     )
                 except Exception:
                     self._status.value = f"TD-DFT root {root} converged"
+                continue
+            m = _RE_CCSD_CYCLE.search(line)
+            if m and self._status is not None:
+                cycle, d_e = m.group(1), m.group(2)
+                try:
+                    self._status.value = (
+                        f"CCSD cycle {cycle}  ·  ΔE = {float(d_e):.4g} Ha"
+                    )
+                except Exception:
+                    self._status.value = f"CCSD cycle {cycle}"
+                continue
+            m = _RE_NMR_RANGE.search(line)
+            if m:
+                try:
+                    self._nmr_atom_total = int(m.group(1))
+                except Exception:
+                    self._nmr_atom_total = None
+                continue
+            m = _RE_NMR_ATOM.search(line)
+            if m and self._status is not None:
+                atom_idx = m.group(1)
+                try:
+                    atom_n = int(atom_idx) + 1
+                    if self._nmr_atom_total:
+                        self._status.value = (
+                            f"NMR GIAO · atom {atom_n}/{self._nmr_atom_total}"
+                        )
+                    else:
+                        self._status.value = f"NMR GIAO · atom {atom_n}"
+                except Exception:
+                    self._status.value = f"NMR GIAO · atom {atom_idx}"
+                continue
+            m = _RE_HESS_ATOM.search(line)
+            if m and self._status is not None:
+                atom_idx = m.group(1)
+                try:
+                    self._status.value = f"Hessian build · atom {int(atom_idx) + 1}…"
+                except Exception:
+                    self._status.value = f"Hessian build · atom {atom_idx}…"
+                continue
+            if _RE_MP2_TRANSFORM.search(line) and self._status is not None:
+                self._status.value = "MP2 · transforming integrals…"
+                continue
+            if _RE_MP2_KERNEL.search(line) and self._status is not None:
+                self._status.value = "MP2 · correlation kernel…"
                 continue
             m = _RE_CONV.search(line)
             if m:

@@ -579,6 +579,10 @@ def _run_session_calc_body(
 
             emit_status(stream, "Running MP2 correlation…")
             _mp2 = _mp.MP2(mf)
+            # verbose=5 surfaces integral-transform / kernel milestones for
+            # the live status label (M-PROGRESS D3).
+            _mp2.verbose = 5
+            _mp2.stdout = stream
             _e_corr, _ = _mp2.kernel()
             mp2_correlation_hartree = float(_e_corr)
             energy_hartree += float(_e_corr)
@@ -600,6 +604,8 @@ def _run_session_calc_body(
 
             emit_status(stream, "Running CCSD correlation…")
             _ccsd_obj = _cc.CCSD(mf)
+            _ccsd_obj.verbose = 4
+            _ccsd_obj.stdout = stream
             _e_corr_ccsd, _t1, _t2 = _ccsd_obj.kernel()
             ccsd_correlation_hartree = float(_e_corr_ccsd)
             energy_hartree += float(_e_corr_ccsd)
@@ -610,6 +616,8 @@ def _run_session_calc_body(
         if method_upper == "CCSD(T)":
             try:
                 emit_status(stream, "Computing CCSD(T) triples…")
+                _ccsd_obj.verbose = 4
+                _ccsd_obj.stdout = stream
                 _e_t = _ccsd_obj.ccsd_t()
                 ccsd_t_correction_hartree = float(_e_t)
                 energy_hartree += float(_e_t)
