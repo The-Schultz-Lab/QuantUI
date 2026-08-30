@@ -13,13 +13,11 @@ import pytest
 
 from quantui.engines import (
     DEFAULT_ENGINE_PREFERENCE,
+    VALID_ENGINE_PREFERENCES,
     EngineUnavailableError,
     PyfockEngine,
     PyscfEngine,
-    VALID_ENGINE_PREFERENCES,
-    build_pyfock_engine,
     build_pyscf_engine,
-    is_pyfock_available,
     is_pyscf_available,
     list_engines,
     resolve_engine,

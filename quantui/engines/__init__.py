@@ -11,7 +11,7 @@ calls ``session_calc`` directly until PYF.3 wires dispatch through this registry
 from __future__ import annotations
 
 import sys
-from typing import Literal, Optional
+from typing import Literal
 
 from .base import (
     CALC_TYPES,
