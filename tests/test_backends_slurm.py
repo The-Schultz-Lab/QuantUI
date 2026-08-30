@@ -4,6 +4,7 @@ Tests for SlurmBackend submit/poll/cancel using mock SLURM scripts.
 
 import json
 import os
+import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -28,27 +29,16 @@ def mock_slurm_env(tmp_path, monkeypatch):
     monkeypatch.setenv("MOCK_SLURM_STATE", str(state))
     monkeypatch.setenv("MOCK_SLURM_AUTO_COMPLETE", "1")
 
-    bin_dir = tmp_path / "mock_slurm_bin"
-    bin_dir.mkdir()
-    cli_path = str(MOCK_SLURM_CLI)
-    for name in ("squeue", "sacct", "scancel", "sbatch"):
-        if sys.platform == "win32":
-            launcher = bin_dir / f"{name}.cmd"
-            launcher.write_text(
-                f'@echo off\r\n"{sys.executable}" "{cli_path}" {name} %*\r\n',
-                encoding="utf-8",
-            )
-        else:
-            launcher = bin_dir / name
-            launcher.write_text(
-                "#!/usr/bin/env python3\n"
-                "import subprocess, sys\n"
-                f'subprocess.run([sys.executable, r"{cli_path}", "{name}", *sys.argv[1:]], check=True)\n',
-                encoding="utf-8",
-            )
-            launcher.chmod(0o755)
-    path_entries = [str(bin_dir), *os.environ.get("PATH", "").split(os.pathsep)]
-    monkeypatch.setenv("PATH", os.pathsep.join(path_entries))
+    real_run = subprocess.run
+
+    def _mock_slurm_run(args, **kwargs):
+        if args and args[0] in ("squeue", "sacct", "scancel", "sbatch"):
+            cmd = args[0]
+            new_args = [sys.executable, str(MOCK_SLURM_CLI), cmd, *args[1:]]
+            return real_run(new_args, **kwargs)
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr("quantui.backends.slurm.subprocess.run", _mock_slurm_run)
     return state
 
 
