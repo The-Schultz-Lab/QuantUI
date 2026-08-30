@@ -1,2 +1,2 @@
 @echo off
-"C:\Program Files\Git\bin\bash.exe" "%~dp0sacct.sh" %*
+python3 "%~dp0mock_slurm_cli.py" sacct %*

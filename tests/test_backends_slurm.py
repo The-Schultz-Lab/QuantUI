@@ -4,6 +4,7 @@ Tests for SlurmBackend submit/poll/cancel using mock SLURM scripts.
 
 import json
 import os
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -17,6 +18,7 @@ from quantui.backends.slurm import SlurmBackend
 from quantui.security import SecurityError
 
 MOCK_SLURM_DIR = Path(__file__).resolve().parents[1] / "testing" / "mock-slurm"
+MOCK_SLURM_CLI = MOCK_SLURM_DIR / "mock_slurm_cli.py"
 
 
 @pytest.fixture
@@ -25,8 +27,28 @@ def mock_slurm_env(tmp_path, monkeypatch):
     state.mkdir()
     monkeypatch.setenv("MOCK_SLURM_STATE", str(state))
     monkeypatch.setenv("MOCK_SLURM_AUTO_COMPLETE", "1")
-    path_entries = [str(MOCK_SLURM_DIR), *os.environ.get("PATH", "").split(":")]
-    monkeypatch.setenv("PATH", ":".join(path_entries))
+
+    bin_dir = tmp_path / "mock_slurm_bin"
+    bin_dir.mkdir()
+    cli_path = str(MOCK_SLURM_CLI)
+    for name in ("squeue", "sacct", "scancel", "sbatch"):
+        if sys.platform == "win32":
+            launcher = bin_dir / f"{name}.cmd"
+            launcher.write_text(
+                f'@echo off\r\n"{sys.executable}" "{cli_path}" {name} %*\r\n',
+                encoding="utf-8",
+            )
+        else:
+            launcher = bin_dir / name
+            launcher.write_text(
+                "#!/usr/bin/env python3\n"
+                "import subprocess, sys\n"
+                f'subprocess.run([sys.executable, r"{cli_path}", "{name}", *sys.argv[1:]], check=True)\n',
+                encoding="utf-8",
+            )
+            launcher.chmod(0o755)
+    path_entries = [str(bin_dir), *os.environ.get("PATH", "").split(os.pathsep)]
+    monkeypatch.setenv("PATH", os.pathsep.join(path_entries))
     return state
 
 
