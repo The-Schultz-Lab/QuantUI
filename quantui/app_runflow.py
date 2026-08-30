@@ -731,7 +731,9 @@ def resolve_seed_geometry(app: Any, base_mol: Any, *, log: Any | None = None) ->
         )
         if log is not None:
             freq_raw = meta.get("frequency_cm1")
-            freq_val = float(freq_raw) if freq_raw is not None else None
+            freq_val = (
+                float(freq_raw) if isinstance(freq_raw, (int, float)) else None
+            )
             freq_label = f"{freq_val:.1f} cm⁻¹" if freq_val is not None else "n/a"
             imag_note = " (imaginary)" if freq_val is not None and freq_val < 0 else ""
             log.write(
