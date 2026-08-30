@@ -410,6 +410,10 @@ def _run_nmr_calc_body(
             nmr_obj = _pyscf_nmr.UHF(mf)
         else:
             nmr_obj = _pyscf_nmr.RKS(mf) if mol.spin == 0 else _pyscf_nmr.UKS(mf)
+        # verbose=4 prints per-atom shielding blocks — parsed by _LogCapture
+        # for live GIAO progress (M-PROGRESS D3).
+        nmr_obj.verbose = 4
+        nmr_obj.stdout = stream
         tensors = nmr_obj.kernel()
     except Exception as exc:
         raise RuntimeError(

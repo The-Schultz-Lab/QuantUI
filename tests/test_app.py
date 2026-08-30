@@ -18,8 +18,11 @@ import ipywidgets as widgets
 import pytest
 
 from quantui.app import (
+    _RE_CCSD_CYCLE,
     _RE_CONV,
     _RE_CYCLE,
+    _RE_HESS_ATOM,
+    _RE_NMR_RANGE,
     _RE_TD_ROOT,
     QuantUIApp,
     _AnalysisContext,
@@ -430,6 +433,52 @@ class TestLogCapture:
         # Fallback uses the raw captured (0-based) index, same as the
         # existing SCF-cycle fallback a few lines above.
         assert "TD-DFT root 3 converged" in status.value
+
+    def test_ccsd_cycle_regex_parses_line(self):
+        line = (
+            "cycle = 3  E_corr(CCSD) = -0.0205260239111729  "
+            "dE = -0.000925427303  norm(t1,t2) = 0.00330372"
+        )
+        m = _RE_CCSD_CYCLE.search(line)
+        assert m is not None
+        assert m.group(1) == "3"
+
+    def test_status_label_updated_on_ccsd_cycle(self):
+        cap, status = self._make_capture()
+        cap.write(
+            "cycle = 2  E_corr(CCSD) = -0.0196005966081793  "
+            "dE = -0.00169551069  norm(t1,t2) = 0.00935658\n"
+        )
+        assert "CCSD cycle 2" in status.value
+        assert "ΔE" in status.value
+
+    def test_nmr_range_sets_atom_total(self):
+        line = "shielding for atoms range(0, 3)"
+        m = _RE_NMR_RANGE.search(line)
+        assert m is not None
+        assert m.group(1) == "3"
+
+    def test_status_label_updated_on_nmr_atom(self):
+        cap, status = self._make_capture()
+        cap.write("shielding for atoms range(0, 3)\n")
+        cap.write("total shielding of atom 1 H\n")
+        assert "NMR GIAO · atom 2/3" in status.value
+
+    def test_hessian_atom_regex_and_status(self):
+        line = "    CPU time for contracting int2e_ip1ip2 for atom 2"
+        m = _RE_HESS_ATOM.search(line)
+        assert m is not None
+        assert m.group(1) == "2"
+        cap, status = self._make_capture()
+        cap.write(line + "\n")
+        assert "Hessian build · atom 3" in status.value
+
+    def test_mp2_milestone_lines_update_status(self):
+        cap, status = self._make_capture()
+        cap.write("transform (ia|jb) incore\n")
+        assert "MP2 · transforming integrals" in status.value
+        cap.write("    CPU time for kernel      0.00 sec, wall time      0.00 sec\n")
+        assert "MP2 · correlation kernel" in status.value
 
     def test_close_is_noop_and_does_not_raise(self):
         """Regression (found via the L6 audit fix's Python 3.9 CI matrix):

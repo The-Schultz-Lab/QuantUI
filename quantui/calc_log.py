@@ -554,6 +554,91 @@ def log_calculation(
 _HESSIAN_MULTIPLIER_HF_DFT: float = 2.0
 _HESSIAN_MULTIPLIER_POST_HF: float = 6.0
 _POST_HF_METHODS: frozenset = frozenset({"MP2", "CCSD", "CCSD(T)"})
+# Minimum tagged frequency records carrying ``stages`` before the learned
+# ratios replace the fixed Hessian / IR multipliers (PROG.C6).
+_MIN_FREQ_STAGE_SAMPLES: int = 2
+
+
+def _bucket_freq_stages(stages: dict[str, float]) -> dict[str, float]:
+    """Collapse raw ``_LogCapture`` stage keys into {scf, hessian, ir}.
+
+    Status text is written for humans; keys therefore vary ("Building
+    Hessian…", "SCF converged. Computing analytical Hessian…", "Numerical
+    IR intensities: 4/24 …"). Bucketing keeps the cost model stable.
+    """
+    buckets = {"scf": 0.0, "hessian": 0.0, "ir": 0.0}
+    for key, seconds in stages.items():
+        k = str(key).lower()
+        val = float(seconds)
+        if not val:
+            continue
+        if "numerical ir" in k or "ir intens" in k:
+            buckets["ir"] += val
+        elif "displacement" in k and "scf" in k:
+            buckets["ir"] += val
+        elif "hessian" in k or "harmonic analysis" in k:
+            buckets["hessian"] += val
+        elif "running scf" in k or k.strip() == "scf":
+            buckets["scf"] += val
+        elif "scf converged" in k and "hessian" in k:
+            # freq_calc announces Hessian work under this label.
+            buckets["hessian"] += val
+    return buckets
+
+
+def _learned_frequency_stage_params(
+    records: list[dict],
+    *,
+    method: str,
+    basis: str,
+    source: Optional[str] = None,
+) -> Optional[dict]:
+    """Median Hessian / IR ratios from tagged frequency ``stages`` records.
+
+    Returns ``None`` when fewer than :data:`_MIN_FREQ_STAGE_SAMPLES` usable
+    records exist. Callers fall back to the fixed multipliers in that case.
+    """
+    pool = [
+        r
+        for r in records
+        if r.get("converged")
+        and r.get("calc_type") == "frequency"
+        and isinstance(r.get("stages"), dict)
+        and r["stages"]
+    ]
+    if not pool:
+        return None
+
+    if source is not None:
+        same_source = [r for r in pool if r.get("source") == source]
+        if len(same_source) >= _MIN_FREQ_STAGE_SAMPLES:
+            pool = same_source
+
+    exact = [r for r in pool if r.get("method") == method and r.get("basis") == basis]
+    if len(exact) >= _MIN_FREQ_STAGE_SAMPLES:
+        pool = exact
+
+    hess_mults: list[float] = []
+    ir_per_disp: list[float] = []
+    for rec in pool:
+        buckets = _bucket_freq_stages(rec["stages"])
+        scf_s = buckets["scf"]
+        if scf_s <= 0:
+            continue
+        if buckets["hessian"] > 0:
+            hess_mults.append(buckets["hessian"] / scf_s)
+        n_atoms = int(rec.get("n_atoms") or 0)
+        if buckets["ir"] > 0 and n_atoms > 0:
+            ir_per_disp.append(buckets["ir"] / (scf_s * 6 * n_atoms))
+
+    out: dict = {"n_stage_samples": len(pool)}
+    if len(hess_mults) >= _MIN_FREQ_STAGE_SAMPLES:
+        out["hessian_mult"] = statistics.median(hess_mults)
+    if len(ir_per_disp) >= _MIN_FREQ_STAGE_SAMPLES:
+        out["ir_per_disp_scf"] = statistics.median(ir_per_disp)
+    if "hessian_mult" not in out and "ir_per_disp_scf" not in out:
+        return None
+    return out
 
 
 def _estimate_frequency_cost(
@@ -623,13 +708,22 @@ def _estimate_frequency_cost(
         return None
     scf_anchor_s = float(sp_est["seconds"])
 
+    # PROG.C6 — replace fixed multipliers with medians from tagged stage
+    # records when enough ``source="app"`` frequency runs have accumulated.
+    learned = _learned_frequency_stage_params(
+        records, method=method, basis=basis, source=source
+    )
+
     # Hessian term.
     method_upper = method.strip().upper()
-    hessian_mult = (
-        _HESSIAN_MULTIPLIER_POST_HF
-        if method_upper in _POST_HF_METHODS
-        else _HESSIAN_MULTIPLIER_HF_DFT
-    )
+    if learned and "hessian_mult" in learned:
+        hessian_mult = float(learned["hessian_mult"])
+    else:
+        hessian_mult = (
+            _HESSIAN_MULTIPLIER_POST_HF
+            if method_upper in _POST_HF_METHODS
+            else _HESSIAN_MULTIPLIER_HF_DFT
+        )
     hessian_term_s = hessian_mult * scf_anchor_s
 
     # IR intensity term — 6N inner SCFs, possibly parallelized.
@@ -650,15 +744,26 @@ def _estimate_frequency_cost(
             effective_workers = pick_worker_count(cpu_count, displacement_count)
     except Exception:  # noqa: BLE001 — gating is best-effort
         effective_workers = 1
-    ir_term_s = displacement_count * scf_anchor_s / max(1, effective_workers)
+    if learned and "ir_per_disp_scf" in learned:
+        ir_term_s = (
+            float(learned["ir_per_disp_scf"])
+            * scf_anchor_s
+            * displacement_count
+            / max(1, effective_workers)
+        )
+    else:
+        ir_term_s = displacement_count * scf_anchor_s / max(1, effective_workers)
 
     total_s = scf_anchor_s + hessian_term_s + ir_term_s
+    n_samples = sp_est["n_samples"]
+    if learned:
+        n_samples = max(n_samples, int(learned.get("n_stage_samples", 0)))
     return {
         "seconds": total_s,
         # Cost model adds structural assumptions but no new data — don't
         # claim more confidence than the SP anchor it leans on.
         "confidence": sp_est["confidence"],
-        "n_samples": sp_est["n_samples"],
+        "n_samples": n_samples,
     }
 
 

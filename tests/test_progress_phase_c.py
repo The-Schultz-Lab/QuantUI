@@ -312,6 +312,68 @@ class TestEstimateTimeWrapper:
         assert est["seconds"] == pytest.approx(42.0, rel=0.05)
 
 
+class TestStageAwareFrequencyCostModel:
+    """PROG.C6 — learned Hessian / IR ratios from tagged ``stages`` records."""
+
+    def test_learned_ratios_replace_fixed_multipliers(self):
+        """Two tagged freq records with stages → cost model uses medians."""
+        records = [_record(calc_type="single_point", elapsed_s=2.0) for _ in range(4)]
+        stage_rec = {
+            "running scf": 10.0,
+            "building hessian": 30.0,
+            "numerical ir intensities": 90.0,
+        }
+        for _ in range(2):
+            records.append(
+                _record(
+                    calc_type="frequency",
+                    elapsed_s=130.0,
+                    n_atoms=3,
+                    source="app",
+                    stages=dict(stage_rec),
+                )
+            )
+        cost = calc_log._estimate_frequency_cost(
+            records,
+            n_atoms=3,
+            n_electrons=10,
+            method="RHF",
+            basis="6-31G",
+            n_basis=13,
+            source="app",
+        )
+        assert cost is not None
+        # Fixed model: 2 + 4 + 36 = 42 s. Learned: hess=3×, ir=0.5× per disp →
+        # 2 + 6 + 18 = 26 s.
+        assert cost["seconds"] == pytest.approx(26.0, rel=0.05)
+        assert cost["n_samples"] >= 2
+
+    def test_falls_back_to_fixed_multipliers_without_stage_history(self):
+        records = [_record(calc_type="single_point", elapsed_s=2.0) for _ in range(4)]
+        est = calc_log.estimate_time_from_records(
+            records,
+            n_atoms=3,
+            n_electrons=10,
+            method="RHF",
+            basis="6-31G",
+            n_basis=13,
+            calc_type="frequency",
+        )
+        assert est is not None
+        assert est["seconds"] == pytest.approx(42.0, rel=0.05)
+
+    def test_buckets_freq_calc_stage_keys(self):
+        buckets = calc_log._bucket_freq_stages(
+            {
+                "scf converged computing analytical hessian": 12.0,
+                "numerical ir intensities": 40.0,
+            }
+        )
+        assert buckets["hessian"] == pytest.approx(12.0)
+        assert buckets["ir"] == pytest.approx(40.0)
+        assert buckets["scf"] == pytest.approx(0.0)
+
+
 # ══ Stage timing ═════════════════════════════════════════════════════════════
 
 
