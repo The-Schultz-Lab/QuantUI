@@ -225,6 +225,27 @@ def _mulliken_vividness(app: Any) -> float:
     return float(getattr(slider, "value", 1.0))
 
 
+def _mulliken_viewer_unavailable_html() -> str:
+    style = "padding:12px 16px;color:#6b7280;font-size:13px;font-style:italic"
+    return (
+        f'<div style="{style}">'
+        "3D structure unavailable: this result has no saved coordinates. "
+        "Re-run the calculation to enable the charge-coloured viewer "
+        "(table and chart above are still valid).</div>"
+    )
+
+
+def _resolve_mulliken_molecule(app: Any, molecule: Any = None) -> Any:
+    """Return the best molecule for the Mulliken viewer slot."""
+    return (
+        molecule
+        or getattr(app, "_mulliken_pending_molecule", None)
+        or getattr(app, "_mulliken_displayed_molecule", None)
+        or getattr(app, "_analysis_displayed_molecule", None)
+        or getattr(app, "_molecule", None)
+    )
+
+
 def render_mulliken_viewer_html(app: Any, molecule: Any, *, render_html_fn: Any) -> str:
     """Return self-contained HTML for the Mulliken panel's py3Dmol viewer."""
     if render_html_fn is None or molecule is None:
@@ -239,6 +260,7 @@ def render_mulliken_viewer_html(app: Any, molecule: Any, *, render_html_fn: Any)
             style=app._viz_style,
             lighting=app._viz_lighting,
             bgcolor=bgcolor,
+            show_info=False,
         )
         return inject_populations_js(html)
     html = render_html_fn(
@@ -247,6 +269,7 @@ def render_mulliken_viewer_html(app: Any, molecule: Any, *, render_html_fn: Any)
         style=app._viz_style,
         lighting=app._viz_lighting,
         bgcolor=bgcolor,
+        show_info=False,
     )
     return cast(str, html)
 
@@ -258,27 +281,22 @@ def show_mulliken_viewer(
     out = getattr(app, "_mulliken_mol_output", None)
     if out is None:
         return
-    mol = (
-        molecule
-        or getattr(app, "_mulliken_displayed_molecule", None)
-        or getattr(app, "_analysis_displayed_molecule", None)
-        or getattr(app, "_molecule", None)
-    )
+    mol = _resolve_mulliken_molecule(app, molecule)
     if mol is None:
-        out.clear_output()
+        app._set_html_output(out, _mulliken_viewer_unavailable_html())
         app._mulliken_displayed_molecule = None
         return
     try:
         html = render_mulliken_viewer_html(app, mol, render_html_fn=render_html_fn)
         if not html:
-            out.clear_output()
+            app._set_html_output(out, _mulliken_viewer_unavailable_html())
             return
         app._set_html_output(out, html)
         app._mulliken_displayed_molecule = mol
         push_populations_overlay(app)
     except Exception as exc:  # noqa: BLE001 — viewer must never block the panel
         logger.debug("mulliken viewer render failed: %s", exc)
-        out.clear_output()
+        app._set_html_output(out, _mulliken_viewer_unavailable_html())
 
 
 def push_populations_overlay(app: Any) -> None:

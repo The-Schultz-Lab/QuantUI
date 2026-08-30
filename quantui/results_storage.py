@@ -48,6 +48,79 @@ _SCHEMA_VERSION = 2
 _ANGSTROM_TO_BOHR = 1.0 / _BOHR_TO_ANGSTROM
 
 
+def _geometry_payload_from_molecule(molecule: Any) -> dict:
+    """Return a JSON-safe geometry dict from a :class:`~quantui.molecule.Molecule`."""
+    return {
+        "atoms": list(molecule.atoms),
+        "coordinates": [list(map(float, row)) for row in molecule.coordinates],
+        "charge": int(getattr(molecule, "charge", 0) or 0),
+        "multiplicity": int(getattr(molecule, "multiplicity", 1) or 1),
+    }
+
+
+def geometry_payload_for_result(result: object, molecule: Any = None) -> Optional[dict]:
+    """Best-effort geometry extraction for ``result.json`` persistence.
+
+    Prefers an explicit *molecule* (the geometry the calc actually used),
+    then duck-typed attributes on *result* (``molecule``, ``pyscf_mol_atom``,
+    final trajectory frame, …). Returns ``None`` when no coordinates are found.
+    """
+    if molecule is not None:
+        try:
+            return _geometry_payload_from_molecule(molecule)
+        except Exception:
+            return None
+
+    mol = getattr(result, "molecule", None)
+    if mol is not None:
+        try:
+            return _geometry_payload_from_molecule(mol)
+        except Exception:
+            pass
+
+    pyscf_mol_atom = getattr(result, "pyscf_mol_atom", None)
+    if pyscf_mol_atom:
+        try:
+            atoms = [str(sym) for sym, _ in pyscf_mol_atom]
+            coordinates = [list(map(float, coords)) for _, coords in pyscf_mol_atom]
+            if atoms and coordinates and len(atoms) == len(coordinates):
+                return {
+                    "atoms": atoms,
+                    "coordinates": coordinates,
+                    "charge": int(getattr(result, "charge", 0) or 0),
+                    "multiplicity": int(getattr(result, "multiplicity", 1) or 1),
+                }
+        except Exception:
+            pass
+
+    for traj_attr in ("trajectory", "coordinates_list"):
+        traj = getattr(result, traj_attr, None)
+        if traj:
+            try:
+                last = traj[-1]
+                return _geometry_payload_from_molecule(last)
+            except Exception:
+                pass
+
+    return None
+
+
+def molecule_from_geometry_payload(payload: dict) -> Any:
+    """Reconstruct a :class:`~quantui.molecule.Molecule` from a saved geometry dict."""
+    from quantui.molecule import Molecule
+
+    atoms = payload.get("atoms") or payload.get("atom_symbols")
+    coordinates = payload.get("coordinates") or payload.get("coords")
+    if not atoms or not coordinates:
+        raise ValueError("geometry payload missing atoms or coordinates")
+    return Molecule(
+        atoms=list(atoms),
+        coordinates=[list(map(float, row)) for row in coordinates],
+        charge=int(payload.get("charge", 0) or 0),
+        multiplicity=int(payload.get("multiplicity", 1) or 1),
+    )
+
+
 def _default_results_dir() -> Path:
     env = os.environ.get("QUANTUI_RESULTS_DIR")
     return Path(env) if env else Path("results")
@@ -168,6 +241,7 @@ def save_result(
     calc_type: str = "single_point",
     spectra: Optional[dict] = None,
     extras: Optional[dict] = None,
+    molecule: Any = None,
 ) -> Path:
     """Write *result* to a new timestamped subdirectory of *results_dir*.
 
@@ -201,6 +275,11 @@ def save_result(
         Keys clash with built-in result.json fields (``timestamp``,
         ``formula``, etc.) overwrite them — by design, since the
         caller is asserting they want to override.
+    molecule:
+        Optional :class:`~quantui.molecule.Molecule` for the geometry used
+        in this calculation. When provided, written to the top-level
+        ``geometry`` field in ``result.json`` so History replay and the
+        Mulliken panel viewer do not depend on ``orbitals_meta.json``.
 
     Returns
     -------
@@ -289,6 +368,9 @@ def save_result(
         "atom_symbols": _opt_str_list(getattr(result, "atom_symbols", None)),
         "spectra": spectra if spectra is not None else {},
     }
+    _geom = geometry_payload_for_result(result, molecule=molecule)
+    if _geom is not None:
+        data["geometry"] = _geom
     if extras:
         data.update(extras)
     (dest / "result.json").write_text(json.dumps(data, indent=2))

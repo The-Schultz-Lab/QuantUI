@@ -200,6 +200,104 @@ class TestShowMullikenPopulations:
         assert "H2" in app._mulliken_table.value
         assert app._last_mulliken_dipole == pytest.approx(1.2)
 
+    def test_lazy_render_defers_viewer_until_accordion_expand(self, app):
+        mol = _water()
+        show_mulliken_populations(
+            app, ["O", "H", "H"], [-0.5, 0.25, 0.25], molecule=mol
+        )
+        assert app._mulliken_pending_molecule is mol
+        assert len(app._mulliken_mol_output.outputs) == 0
+        app._on_mulliken_accordion_show({"new": 0})
+        assert len(app._mulliken_mol_output.outputs) == 1
+        html = app._mulliken_mol_output.outputs[0]["data"]["text/html"]
+        assert html.strip() != ""
+        assert app._mulliken_displayed_molecule is mol
+
+
+class TestMullikenViewerRender:
+    def test_live_populate_renders_on_accordion_expand(self, app):
+        from quantui.app import _render_molecule_html
+
+        if _render_molecule_html is None:
+            pytest.skip("No 3D visualization backend installed")
+        ctx = SimpleNamespace(
+            calc_type="single_point",
+            live_result=_sp_result_with_charges(),
+            result_dir=None,
+            spectra_data={},
+            source="live",
+            formula="H2O",
+            method="RHF",
+            basis="STO-3G",
+            label="H2O",
+            timestamp="",
+            molecule=_water(),
+        )
+        assert pop_mulliken(app, ctx) is True
+        app._on_mulliken_accordion_show({"new": 0})
+        assert len(app._mulliken_mol_output.outputs) == 1
+        html = app._mulliken_mol_output.outputs[0]["data"]["text/html"]
+        assert "3D structure unavailable" not in html
+
+    def test_history_geometry_in_result_json_renders_without_orbitals(
+        self, tmp_path, app
+    ):
+        from quantui.app import _render_molecule_html
+
+        if _render_molecule_html is None:
+            pytest.skip("No 3D visualization backend installed")
+        mol = _water()
+        saved = save_result(
+            _sp_result_with_charges(),
+            results_dir=tmp_path,
+            calc_type="single_point",
+            spectra={},
+            molecule=mol,
+        )
+        for p in saved.glob("orbitals*"):
+            p.unlink()
+        ctx = app._build_history_context(saved)
+        assert ctx.molecule is not None
+        app._apply_analysis_context(ctx)
+        app._on_mulliken_accordion_show({"new": 0})
+        assert len(app._mulliken_mol_output.outputs) == 1
+        html = app._mulliken_mol_output.outputs[0]["data"]["text/html"]
+        assert "3D structure unavailable" not in html
+
+    def test_missing_geometry_shows_unavailable_message(self, tmp_path, app):
+        app._molecule = None
+        app._analysis_displayed_molecule = None
+        saved = save_result(
+            _sp_result_with_charges(),
+            results_dir=tmp_path,
+            calc_type="single_point",
+            spectra={},
+        )
+        for p in saved.glob("orbitals*"):
+            p.unlink()
+        ctx = app._build_history_context(saved)
+        app._apply_analysis_context(ctx)
+        app._on_mulliken_accordion_show({"new": 0})
+        assert len(app._mulliken_mol_output.outputs) == 1
+        html = app._mulliken_mol_output.outputs[0]["data"]["text/html"]
+        assert "3D structure unavailable" in html
+        assert "O1" in app._mulliken_table.value
+
+    def test_theme_rerender_refreshes_mulliken_viewer(self, app):
+        from quantui.app import _render_molecule_html
+
+        if _render_molecule_html is None:
+            pytest.skip("No 3D visualization backend installed")
+        show_mulliken_populations(
+            app, ["O", "H", "H"], [-0.5, 0.25, 0.25], molecule=_water()
+        )
+        app._on_mulliken_accordion_show({"new": 0})
+        before = app._mulliken_mol_output.outputs[0]["data"]["text/html"]
+        app._rerender_3d_views()
+        after = app._mulliken_mol_output.outputs[0]["data"]["text/html"]
+        assert before.strip() != ""
+        assert after.strip() != ""
+
 
 class TestHelpTopic:
     def test_mulliken_topic_exists(self):

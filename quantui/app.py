@@ -1696,6 +1696,7 @@ class QuantUIApp:
         # Analysis-tab viewer when the toggle changes.
         self._analysis_displayed_molecule: Any = None
         self._mulliken_displayed_molecule: Any = None
+        self._mulliken_pending_molecule: Any = None
 
         # ── Build → wire → assemble ───────────────────────────────────────
         self._build_widgets()
@@ -3635,6 +3636,10 @@ class QuantUIApp:
                 html = finalize_analysis_html(self, html, chosen)
                 self._set_html_output(self._analysis_mol_output, html)
                 self._update_analysis_backend_label(chosen)
+
+        # Mulliken Populations dedicated viewer (py3Dmol charge overlays).
+        if getattr(self, "_last_mulliken_charges", None):
+            self._show_mulliken_viewer()
 
     def _show_mulliken_viewer(self, molecule=None) -> None:
         from quantui.populations_overlay import show_mulliken_viewer
@@ -5991,6 +5996,7 @@ class QuantUIApp:
                     pyscf_log=log.getvalue(),
                     calc_type=save_type,
                     spectra=save_spectra,
+                    molecule=calc_mol,
                 )
                 _run_saved = True
                 self._last_result_dir = _saved_dir

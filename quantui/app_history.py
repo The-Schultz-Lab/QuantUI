@@ -387,11 +387,20 @@ def mol_from_result_dir(result_dir: Path, data: dict[str, Any]) -> Any:
     """Try to reconstruct a displayable Molecule from a saved result directory.
 
     Returns a Molecule or None if geometry data is not available.
-    Tries sources in order: frequency spectra -> orbitals_meta -> trajectory.
+    Tries sources in order: result.json geometry -> frequency spectra ->
+    orbitals_meta -> trajectory.
     """
     from quantui.molecule import Molecule
+    from quantui.results_storage import molecule_from_geometry_payload
 
     calc_type = data.get("calc_type", "")
+
+    geom = data.get("geometry")
+    if isinstance(geom, dict) and geom.get("atoms") and geom.get("coordinates"):
+        try:
+            return molecule_from_geometry_payload(geom)
+        except Exception:
+            pass
 
     # Frequency: geometry stored inside spectra.molecule
     if calc_type == "frequency":
@@ -614,6 +623,7 @@ def build_history_context(result_dir: Path, *, context_cls: Any) -> Optional[Any
         data = load_result(result_dir)
     except Exception:
         return None
+    molecule = mol_from_result_dir(result_dir, data)
     return context_cls(
         calc_type=data.get("calc_type", ""),
         formula=data.get("formula", result_dir.name),
@@ -623,4 +633,5 @@ def build_history_context(result_dir: Path, *, context_cls: Any) -> Optional[Any
         spectra_data=data.get("spectra", {}),
         timestamp=data.get("timestamp", ""),
         source="history",
+        molecule=molecule,
     )
