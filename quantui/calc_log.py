@@ -669,9 +669,8 @@ def _estimate_frequency_cost(
     - ``ir_intensity_term`` — the 6N inner SCFs that compute ∂μ/∂R for
       IR intensities, divided by ``effective_workers`` when the
       ``QUANTUI_FREQ_PARALLEL`` cross-displacement worker pool is gated
-      on (requires no GPU + ≥4 cores + ≥6 displacements). On a GPU host
-      the inner SCFs are already accelerated by gpu4pyscf, so parallel
-      adds little and stays serial.
+      on (requires opt-in env var + ≥4 cores + ≥6 displacements). Workers
+      are CPU-only even when the reference SCF used gpu4pyscf.
 
     Returns ``None`` when the SP anchor can't be produced (no usable
     history for the SP profile). In that case ``estimate_time``'s
@@ -739,7 +738,6 @@ def _estimate_frequency_cost(
         if parallel_enabled_for_run(
             cpu_count=cpu_count,
             displacement_count=displacement_count,
-            gpu_available=bool(gpu_used),
         ):
             effective_workers = pick_worker_count(cpu_count, displacement_count)
     except Exception:  # noqa: BLE001 — gating is best-effort

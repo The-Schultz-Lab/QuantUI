@@ -620,21 +620,20 @@ def _run_freq_calc_body(
                     )
 
                 # Opt-in parallel path (Pass B). When (a) the user has
-                # set ``QUANTUI_FREQ_PARALLEL=1``, (b) no GPU is available,
-                # (c) the host has >= 4 cores, and (d) the molecule has >= 2
-                # atoms, we fan the per-displacement SCFs out across a
-                # ProcessPoolExecutor. The decision is centralised in
+                # set ``QUANTUI_FREQ_PARALLEL=1``, (b) the host has >= 4
+                # cores, and (c) the molecule has >= 2 atoms, we fan the
+                # per-displacement SCFs out across a ProcessPoolExecutor
+                # (CPU workers — see freq_ir_workers). Without the env var,
+                # displaced SCFs stay serial and may use gpu4pyscf when
+                # available. The decision is centralised in
                 # ``freq_ir_workers.parallel_enabled_for_run`` so tests
                 # can pin the contract.
                 from quantui import freq_ir_workers as _ir_par
-                from quantui.gpu_offload import is_gpu_available
 
-                _gpu_ok, _ = is_gpu_available()
                 _cpu_count = os.cpu_count() or 1
                 _use_parallel = _ir_par.parallel_enabled_for_run(
                     cpu_count=_cpu_count,
                     displacement_count=_ir_total_solves,
-                    gpu_available=_gpu_ok,
                 )
 
                 _mol_v = mol.verbose
