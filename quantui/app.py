@@ -3758,7 +3758,9 @@ class QuantUIApp:
         except Exception:  # noqa: BLE001 — best-effort estimate refresh
             pass
         try:
-            _calc_log.log_event("freq_parallel_enabled_changed", f"freq_parallel={new_val}")
+            _calc_log.log_event(
+                "freq_parallel_enabled_changed", f"freq_parallel={new_val}"
+            )
         except OSError:
             pass
 
