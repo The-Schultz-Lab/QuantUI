@@ -345,7 +345,8 @@ def run_setup(*, force: bool = False) -> int:
         print("Run the app with either:")
         print("  quantui run app")
         print(f"  {script}")
-        if bindir not in os.environ.get("PATH", "").split(os.pathsep):
+        path_entries = os.environ.get("PATH", "").split(os.pathsep)
+        if str(bindir) not in path_entries:
             print()
             print(f"Add {bindir} to your PATH to run ``quantui-app`` from anywhere:")
             print(f'  export PATH="{bindir}:$PATH"')
