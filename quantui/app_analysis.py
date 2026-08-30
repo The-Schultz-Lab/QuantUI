@@ -255,6 +255,7 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     if mulliken_out is not None:
         mulliken_out.clear_output()
     app._mulliken_displayed_molecule = None
+    app._mulliken_pending_molecule = None
     note = getattr(app, "_mulliken_overlay_note", None)
     if note is not None:
         note.value = ""
@@ -855,6 +856,18 @@ def _mulliken_molecule(app: Any, ctx: Any = None) -> Any:
         mol = getattr(ctx, "molecule", None)
         if mol is not None:
             return mol
+        result_dir = getattr(ctx, "result_dir", None)
+        if result_dir is not None:
+            try:
+                from quantui import load_result
+                from quantui.app_history import mol_from_result_dir
+
+                data = load_result(result_dir)
+                mol = mol_from_result_dir(result_dir, data)
+                if mol is not None:
+                    return mol
+            except Exception:
+                pass
     return getattr(app, "_analysis_displayed_molecule", None) or getattr(
         app, "_molecule", None
     )
@@ -958,10 +971,10 @@ def show_mulliken_populations(
     )
 
     update_mulliken_figure(app)
-    try:
-        app._show_mulliken_viewer(molecule)
-    except Exception:  # noqa: BLE001 — viewer must never block the panel
-        pass
+    # Cache geometry for lazy render when the accordion becomes visible.
+    # Voilà often skips <script> execution in hidden DOM; the authoritative
+    # draw happens in ``_on_mulliken_accordion_show``.
+    app._mulliken_pending_molecule = molecule
     return True
 
 

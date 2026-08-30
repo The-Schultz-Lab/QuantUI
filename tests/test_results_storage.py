@@ -16,10 +16,12 @@ import pytest
 
 from quantui.molecule import Molecule
 from quantui.results_storage import (
+    geometry_payload_for_result,
     list_results,
     load_orbitals,
     load_result,
     load_trajectory,
+    molecule_from_geometry_payload,
     save_orbitals,
     save_result,
     save_thumbnail,
@@ -77,6 +79,37 @@ class TestSaveResult:
         assert data["converged"] is True
         assert data["calc_type"] == "single_point"
         assert data["_schema_version"] == 2
+
+    def test_geometry_persisted_when_molecule_provided(self, tmp_path):
+        mol = Molecule(
+            ["O", "H", "H"],
+            [[0.0, 0.0, 0.0], [0.757, 0.586, 0.0], [-0.757, 0.586, 0.0]],
+        )
+        saved = save_result(
+            _make_result(), results_dir=tmp_path, calc_type="single_point", molecule=mol
+        )
+        data = json.loads((saved / "result.json").read_text())
+        assert data["geometry"]["atoms"] == ["O", "H", "H"]
+        assert len(data["geometry"]["coordinates"]) == 3
+        restored = molecule_from_geometry_payload(data["geometry"])
+        assert restored.atoms == mol.atoms
+        for row, expected in zip(restored.coordinates, mol.coordinates):
+            assert row == pytest.approx(expected)
+
+    def test_geometry_payload_from_pyscf_mol_atom(self, tmp_path):
+        result = _make_result(
+            pyscf_mol_atom=[
+                ("O", [0.0, 0.0, 0.0]),
+                ("H", [0.757, 0.586, 0.0]),
+                ("H", [-0.757, 0.586, 0.0]),
+            ]
+        )
+        payload = geometry_payload_for_result(result)
+        assert payload is not None
+        assert payload["atoms"] == ["O", "H", "H"]
+        saved = save_result(result, results_dir=tmp_path)
+        data = json.loads((saved / "result.json").read_text())
+        assert "geometry" in data
 
     def test_spectra_stored_in_json(self, tmp_path):
         spectra = {
