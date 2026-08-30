@@ -102,9 +102,18 @@ def build_calculation_request(
     seed_path = seed_path_from_app(app)
     calc_mol = mol
     if seed_path and calc_type in _SEED_CALC_TYPES:
-        calc_mol = load_seed_molecule(seed_path)
-        run_context["seed_result_dir"] = str(seed_path)
-        run_context["seed_label"] = Path(seed_path).name
+        from quantui.app_runflow import resolve_seed_geometry
+
+        calc_mol = resolve_seed_geometry(app, mol)
+        run_context["seed_result_dir"] = str(
+            seed_path[5:] if seed_path.startswith("freq:") else seed_path
+        )
+        run_context["seed_label"] = Path(
+            seed_path[5:] if seed_path.startswith("freq:") else seed_path
+        ).name
+        if seed_path.startswith("freq:"):
+            run_context["seed_mode_number"] = int(app._freq_perturb_mode_dd.value)
+            run_context["seed_mode_fraction"] = float(app._freq_perturb_fraction.value)
 
     if calc_type in _PREOPT_CALC_TYPES and not seed_path:
         preopt_cb = getattr(app, "_freq_preopt_cb", None)
