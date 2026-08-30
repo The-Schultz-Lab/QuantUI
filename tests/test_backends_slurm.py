@@ -3,7 +3,6 @@ Tests for SlurmBackend submit/poll/cancel using mock SLURM scripts.
 """
 
 import json
-import os
 import subprocess
 import sys
 import time
