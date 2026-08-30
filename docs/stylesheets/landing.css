@@ -3,8 +3,65 @@
 .quantui-landing {
   --quantui-max: 1160px;
   --quantui-narrow: 780px;
-  color: #334155;
+
+  /* Theme-aware tokens — default palette is Material "default" (light) */
+  --quantui-hero-bg:
+    radial-gradient(ellipse 80% 60% at 72% 38%, rgba(8, 145, 178, 0.12) 0%, transparent 58%),
+    radial-gradient(ellipse 60% 70% at 16% 68%, rgba(37, 99, 235, 0.14) 0%, transparent 54%),
+    linear-gradient(
+      165deg,
+      #eef2ff 0%,
+      #f8fafc 42%,
+      var(--md-default-bg-color, #ffffff) 100%
+    );
+  --quantui-hero-title: var(--md-default-fg-color, #0f172a);
+  --quantui-hero-subtitle: var(--md-default-fg-color--light, #475569);
+  --quantui-hero-stat: var(--md-default-fg-color--light, #64748b);
+  --quantui-hero-sep: var(--md-default-fg-color--lighter, #94a3b8);
+  --quantui-hero-link: #2563eb;
+  --quantui-hero-link-hover: #1d4ed8;
+  --quantui-pill-bg: rgba(37, 99, 235, 0.1);
+  --quantui-pill-border: rgba(37, 99, 235, 0.28);
+  --quantui-pill-fg: #1d4ed8;
+  --quantui-pill-teal-bg: rgba(8, 145, 178, 0.1);
+  --quantui-pill-teal-border: rgba(8, 145, 178, 0.28);
+  --quantui-pill-teal-fg: #0e7490;
+  --quantui-outline-fg: var(--md-default-fg-color, #0f172a);
+  --quantui-outline-border: rgba(15, 23, 42, 0.18);
+  --quantui-outline-hover-bg: rgba(37, 99, 235, 0.06);
+  --quantui-outline-hover-border: rgba(37, 99, 235, 0.35);
+
+  color: var(--md-default-fg-color, #334155);
   line-height: 1.6;
+  background: var(--md-default-bg-color, #ffffff);
+}
+
+[data-md-color-scheme="slate"] .quantui-landing {
+  --quantui-hero-bg:
+    radial-gradient(ellipse 75% 55% at 72% 42%, rgba(8, 145, 178, 0.13) 0%, transparent 58%),
+    radial-gradient(ellipse 55% 75% at 18% 62%, rgba(37, 99, 235, 0.15) 0%, transparent 52%),
+    linear-gradient(
+      158deg,
+      #0f172a 0%,
+      #111827 55%,
+      var(--md-default-bg-color, #1e2129) 100%
+    );
+  --quantui-hero-title: #f8fafc;
+  --quantui-hero-subtitle: #94a3b8;
+  --quantui-hero-stat: #64748b;
+  --quantui-hero-sep: #334155;
+  --quantui-hero-link: #93c5fd;
+  --quantui-hero-link-hover: #bfdbfe;
+  --quantui-pill-bg: rgba(37, 99, 235, 0.15);
+  --quantui-pill-border: rgba(37, 99, 235, 0.35);
+  --quantui-pill-fg: #93c5fd;
+  --quantui-pill-teal-bg: rgba(8, 145, 178, 0.14);
+  --quantui-pill-teal-border: rgba(8, 145, 178, 0.35);
+  --quantui-pill-teal-fg: #67e8f9;
+  --quantui-outline-fg: #f8fafc;
+  --quantui-outline-border: rgba(248, 250, 252, 0.28);
+  --quantui-outline-hover-bg: rgba(248, 250, 252, 0.07);
+  --quantui-outline-hover-border: rgba(248, 250, 252, 0.55);
 }
 
 .quantui-landing a {
@@ -75,13 +132,13 @@
 
 .quantui-landing .btn--outline {
   background: transparent;
-  color: #f8fafc !important;
-  border-color: rgba(248, 250, 252, 0.28);
+  color: var(--quantui-outline-fg) !important;
+  border-color: var(--quantui-outline-border);
 }
 
 .quantui-landing .btn--outline:hover {
-  background: rgba(248, 250, 252, 0.07);
-  border-color: rgba(248, 250, 252, 0.55);
+  background: var(--quantui-outline-hover-bg);
+  border-color: var(--quantui-outline-hover-border);
 }
 
 /* ── Pills ─────────────────────────────────────────────────────────── */
@@ -93,24 +150,21 @@
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-  background: rgba(37, 99, 235, 0.15);
-  border: 1px solid rgba(37, 99, 235, 0.35);
-  color: #93c5fd;
+  background: var(--quantui-pill-bg);
+  border: 1px solid var(--quantui-pill-border);
+  color: var(--quantui-pill-fg);
   text-decoration: none;
 }
 
 .quantui-landing .pill--teal {
-  background: rgba(8, 145, 178, 0.14);
-  border-color: rgba(8, 145, 178, 0.35);
-  color: #67e8f9;
+  background: var(--quantui-pill-teal-bg);
+  border-color: var(--quantui-pill-teal-border);
+  color: var(--quantui-pill-teal-fg);
 }
 
 /* ── Hero ─────────────────────────────────────────────────────────── */
 .quantui-landing .hero {
-  background:
-    radial-gradient(ellipse 75% 55% at 72% 42%, rgba(8, 145, 178, 0.13) 0%, transparent 58%),
-    radial-gradient(ellipse 55% 75% at 18% 62%, rgba(37, 99, 235, 0.15) 0%, transparent 52%),
-    linear-gradient(158deg, #0f172a 0%, #111827 55%, #0c1928 100%);
+  background: var(--quantui-hero-bg);
   padding: 4rem 0 4.5rem;
   overflow: hidden;
 }
@@ -134,14 +188,14 @@
   font-weight: 800;
   line-height: 1.1;
   letter-spacing: -0.04em;
-  color: #f8fafc;
+  color: var(--quantui-hero-title);
   margin: 0 0 1.25rem;
   border: none;
 }
 
 .quantui-landing .hero__subtitle {
   font-size: 1.125rem;
-  color: #94a3b8;
+  color: var(--quantui-hero-subtitle);
   line-height: 1.65;
   max-width: 520px;
   margin: 0 0 2rem;
@@ -163,21 +217,21 @@
 
 .quantui-landing .hero__stat {
   font-size: 0.8125rem;
-  color: #64748b;
+  color: var(--quantui-hero-stat);
   font-weight: 500;
 }
 
 .quantui-landing .hero__sep {
-  color: #334155;
+  color: var(--quantui-hero-sep);
 }
 
 .quantui-landing .hero__link {
-  color: #93c5fd;
+  color: var(--quantui-hero-link);
   text-decoration: underline;
 }
 
 .quantui-landing .hero__link:hover {
-  color: #bfdbfe;
+  color: var(--quantui-hero-link-hover);
 }
 
 .quantui-landing .hero__visual {
@@ -258,6 +312,8 @@
 
 [data-md-color-scheme="slate"] .quantui-landing .section--tinted {
   background: var(--md-code-bg-color, #1e293b);
+  border-top-color: var(--md-default-fg-color--lightest, rgba(255, 255, 255, 0.08));
+  border-bottom-color: var(--md-default-fg-color--lightest, rgba(255, 255, 255, 0.08));
 }
 
 .quantui-landing .section__title {
@@ -383,7 +439,7 @@
 .quantui-landing .gallery-figure iframe {
   width: 100%;
   display: block;
-  background: #ffffff;
+  background: var(--md-default-bg-color, #ffffff);
   border: 0;
 }
 
@@ -431,6 +487,7 @@
 .quantui-landing .quickstart {
   text-align: center;
   padding: 3rem 0;
+  background: var(--md-default-bg-color, #ffffff);
 }
 
 .quantui-landing .quickstart__title {
