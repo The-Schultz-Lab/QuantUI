@@ -76,6 +76,9 @@ quantui run app --port 8888
 
 - Exit code `1` when Voilà is not installed — install `quantui[app]`
   and ensure `voila` is on your `PATH`.
+- Exit code `1` in **Apptainer + JupyterLab** sessions (NCShare and
+  similar HPC portals) — use `quantui setup` and launch from JupyterLab
+  instead; see [`quantui setup`](#ncshare--hpc-jupyterlab).
 - Override the config directory with `QUANTUI_HOME` (useful in tests).
 
 ---
@@ -94,6 +97,30 @@ quantui-app          # after ~/.local/bin is on PATH
 ```
 
 Pass `--force` to overwrite an existing notebook or script.
+
+### NCShare / HPC JupyterLab
+
+On cluster portals that launch QuantUI inside **Apptainer + JupyterLab**
+(NCShare is the primary example), the browser proxies only the Jupyter
+connection. A standalone Voilà server on port 8867 is **not reachable**.
+
+When the CLI detects that environment (Apptainer + Jupyter server env
+vars), `quantui setup` also writes **`~/QuantUI.ipynb`** — visible in the
+JupyterLab file browser — and prints NCShare-specific launch instructions
+instead of the usual `quantui run app` guidance.
+
+Launch QuantUI from JupyterLab:
+
+1. Open **`~/QuantUI.ipynb`** and click **Render with Voilà** (clean
+   student view), or
+2. Run the one-liner in any notebook:
+   ```python
+   from quantui.app import QuantUIApp
+   QuantUIApp().display()
+   ```
+
+`quantui run app` exits with code `1` in this context and explains the
+above — do not use it for browser access on NCShare.
 
 ---
 

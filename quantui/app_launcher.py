@@ -23,6 +23,7 @@ from typing import List, Optional
 
 DEFAULT_APP_PORT = 8867
 APP_NOTEBOOK_NAME = "app.ipynb"
+HOME_LAUNCHER_NOTEBOOK_NAME = "QuantUI.ipynb"
 LAUNCHER_SCRIPT_NAME = "quantui-app"
 
 # Minimal nbformat v4 notebook — mirrors notebooks/molecule_computations.ipynb
@@ -75,6 +76,42 @@ def app_notebook_path() -> Path:
     return quantui_home() / APP_NOTEBOOK_NAME
 
 
+def home_launcher_notebook_path() -> Path:
+    """Path to a JupyterLab-visible launcher notebook in the user's home."""
+    return Path.home() / HOME_LAUNCHER_NOTEBOOK_NAME
+
+
+def is_apptainer_runtime() -> bool:
+    """Return True when running inside Apptainer/Singularity."""
+    for key in (
+        "APPTAINER_CONTAINER",
+        "APPTAINER_NAME",
+        "SINGULARITY_CONTAINER",
+        "SINGULARITY_NAME",
+    ):
+        if os.environ.get(key):
+            return True
+    return Path("/.singularity.d").is_dir()
+
+
+def is_jupyter_server_context() -> bool:
+    """Return True when a Jupyter server session is active in this environment."""
+    for key in (
+        "JUPYTER_SERVER_URL",
+        "JUPYTERHUB_SERVICE_URL",
+        "JUPYTERHUB_USER",
+        "JPY_SESSION_NAME",
+    ):
+        if os.environ.get(key):
+            return True
+    return False
+
+
+def is_hpc_jupyterlab_session() -> bool:
+    """Heuristic for NCShare-style Apptainer + JupyterLab interactive sessions."""
+    return is_apptainer_runtime() and is_jupyter_server_context()
+
+
 def launcher_bin_dir() -> Path:
     """Preferred directory for the ``quantui-app`` shell wrapper."""
     xdg = os.environ.get("XDG_BIN_HOME")
@@ -114,6 +151,55 @@ def ensure_app_notebook(*, force: bool = False) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def ensure_home_launcher_notebook(*, force: bool = False) -> Path:
+    """Write ``~/QuantUI.ipynb`` for JupyterLab file-browser visibility."""
+    path = home_launcher_notebook_path()
+    if path.exists() and not force:
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(_APP_NOTEBOOK, indent=1) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def hpc_jupyterlab_run_app_message() -> str:
+    """Explain why ``quantui run app`` is the wrong entry point on NCShare."""
+    nb = home_launcher_notebook_path()
+    return (
+        "QuantUI detected an HPC JupyterLab session (Apptainer + Jupyter).\n"
+        "\n"
+        "``quantui run app`` starts a standalone Voilà server on a separate\n"
+        "port. Cluster portals (including NCShare) proxy only the Jupyter\n"
+        "connection, so that port is not reachable from your browser.\n"
+        "\n"
+        "Use one of these instead:\n"
+        f"  1. Open {nb} in JupyterLab and click \"Render with Voilà\"\n"
+        "  2. Run the first cell in any notebook:\n"
+        "       from quantui.app import QuantUIApp\n"
+        "       QuantUIApp().display()\n"
+        "\n"
+        "Run ``quantui setup`` once to create ~/QuantUI.ipynb if it is missing."
+    )
+
+
+def hpc_jupyterlab_setup_message(home_nb: Path) -> str:
+    """Post-setup instructions for NCShare-style JupyterLab sessions."""
+    return (
+        "HPC JupyterLab session detected (Apptainer + Jupyter).\n"
+        "\n"
+        "On NCShare and similar clusters, do NOT use ``quantui run app`` — the\n"
+        "browser cannot reach a second Voilà port.\n"
+        "\n"
+        "Launch QuantUI from JupyterLab instead:\n"
+        f"  • Open {home_nb} and click \"Render with Voilà\" (clean student view)\n"
+        "  • Or run the first cell in any notebook:\n"
+        "      from quantui.app import QuantUIApp\n"
+        "      QuantUIApp().display()\n"
+    )
 
 
 def build_voila_argv(
@@ -164,6 +250,10 @@ def run_voila_app(
     (the common case). When *open_browser* is True, Voilà runs in a child
     process so the CLI can open the URL after a short bind delay.
     """
+    if is_hpc_jupyterlab_session():
+        print(hpc_jupyterlab_run_app_message(), file=sys.stderr)
+        return 1
+
     voila = voila_executable()
     if voila is None:
         print(voila_missing_message(), file=sys.stderr)
@@ -236,16 +326,26 @@ def run_setup(*, force: bool = False) -> int:
     notebook = ensure_app_notebook(force=force)
     script = write_launcher_script(force=force)
     bindir = launcher_bin_dir()
+    hpc = is_hpc_jupyterlab_session()
+    home_nb: Optional[Path] = None
+    if hpc:
+        home_nb = ensure_home_launcher_notebook(force=force)
+
     print(f"Wrote launcher notebook: {notebook}")
+    if home_nb is not None:
+        print(f"Wrote home launcher:     {home_nb}")
     print(f"Wrote shell shortcut:    {script}")
     print()
-    print("Run the app with either:")
-    print("  quantui run app")
-    print(f"  {script}")
-    if bindir not in os.environ.get("PATH", "").split(os.pathsep):
-        print()
-        print(f"Add {bindir} to your PATH to run ``quantui-app`` from anywhere:")
-        print(f'  export PATH="{bindir}:$PATH"')
+    if hpc and home_nb is not None:
+        print(hpc_jupyterlab_setup_message(home_nb))
+    else:
+        print("Run the app with either:")
+        print("  quantui run app")
+        print(f"  {script}")
+        if bindir not in os.environ.get("PATH", "").split(os.pathsep):
+            print()
+            print(f"Add {bindir} to your PATH to run ``quantui-app`` from anywhere:")
+            print(f'  export PATH="{bindir}:$PATH"')
     return 0
 
 
@@ -254,6 +354,13 @@ __all__ = [
     "app_notebook_path",
     "build_voila_argv",
     "ensure_app_notebook",
+    "ensure_home_launcher_notebook",
+    "home_launcher_notebook_path",
+    "hpc_jupyterlab_run_app_message",
+    "hpc_jupyterlab_setup_message",
+    "is_apptainer_runtime",
+    "is_hpc_jupyterlab_session",
+    "is_jupyter_server_context",
     "launcher_script_path",
     "quantui_home",
     "run_setup",

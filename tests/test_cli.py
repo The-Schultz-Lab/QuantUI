@@ -443,6 +443,7 @@ class TestWslAwareOpener:
 class TestAppLauncher:
     @pytest.fixture
     def isolated_home(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
         monkeypatch.setenv("QUANTUI_HOME", str(tmp_path / "quantui-home"))
         monkeypatch.setenv("XDG_BIN_HOME", str(tmp_path / "bin"))
         return tmp_path
@@ -540,6 +541,58 @@ class TestAppLauncher:
         assert rc == 0
         assert calls
         assert calls[0][0] == "/usr/bin/voila"
+
+    def test_is_apptainer_runtime_detects_env(self, monkeypatch):
+        from quantui.app_launcher import is_apptainer_runtime
+
+        monkeypatch.delenv("APPTAINER_CONTAINER", raising=False)
+        monkeypatch.delenv("SINGULARITY_CONTAINER", raising=False)
+        assert is_apptainer_runtime() is False
+        monkeypatch.setenv("APPTAINER_CONTAINER", "/tmp/quantui.sif")
+        assert is_apptainer_runtime() is True
+
+    def test_is_jupyter_server_context_detects_env(self, monkeypatch):
+        from quantui.app_launcher import is_jupyter_server_context
+
+        monkeypatch.delenv("JUPYTER_SERVER_URL", raising=False)
+        assert is_jupyter_server_context() is False
+        monkeypatch.setenv("JUPYTER_SERVER_URL", "http://127.0.0.1:8888/")
+        assert is_jupyter_server_context() is True
+
+    def test_is_hpc_jupyterlab_session_requires_both(self, monkeypatch):
+        from quantui.app_launcher import is_hpc_jupyterlab_session
+
+        monkeypatch.delenv("APPTAINER_CONTAINER", raising=False)
+        monkeypatch.delenv("JUPYTER_SERVER_URL", raising=False)
+        assert is_hpc_jupyterlab_session() is False
+        monkeypatch.setenv("APPTAINER_CONTAINER", "/tmp/quantui.sif")
+        assert is_hpc_jupyterlab_session() is False
+        monkeypatch.setenv("JUPYTER_SERVER_URL", "http://127.0.0.1:8888/")
+        assert is_hpc_jupyterlab_session() is True
+
+    def test_setup_writes_home_notebook_in_hpc_context(self, isolated_home, monkeypatch):
+        from quantui.app_launcher import home_launcher_notebook_path
+
+        monkeypatch.setenv("APPTAINER_CONTAINER", "/tmp/quantui.sif")
+        monkeypatch.setenv("JUPYTER_SERVER_URL", "http://127.0.0.1:8888/")
+        rc, out, _ = _capture(["setup"])
+        assert rc == 0
+        home_nb = home_launcher_notebook_path()
+        assert home_nb.exists()
+        assert "QuantUIApp" in home_nb.read_text(encoding="utf-8")
+        assert "Render with Voilà" in out
+        assert "do NOT use ``quantui run app``" in out
+
+    def test_run_app_fails_fast_in_hpc_context(self, isolated_home, monkeypatch):
+        from quantui import app_launcher
+
+        monkeypatch.setenv("APPTAINER_CONTAINER", "/tmp/quantui.sif")
+        monkeypatch.setenv("JUPYTER_SERVER_URL", "http://127.0.0.1:8888/")
+        monkeypatch.setattr(app_launcher, "voila_executable", lambda: "/usr/bin/voila")
+        rc, _, err = _capture(["run", "app"])
+        assert rc == 1
+        assert "HPC JupyterLab session" in err
+        assert "Render with Voilà" in err
 
 
 class TestCliAvoidsGuiStackImport:
