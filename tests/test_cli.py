@@ -570,7 +570,9 @@ class TestAppLauncher:
         monkeypatch.setenv("JUPYTER_SERVER_URL", "http://127.0.0.1:8888/")
         assert is_hpc_jupyterlab_session() is True
 
-    def test_setup_writes_home_notebook_in_hpc_context(self, isolated_home, monkeypatch):
+    def test_setup_writes_home_notebook_in_hpc_context(
+        self, isolated_home, monkeypatch
+    ):
         from quantui.app_launcher import home_launcher_notebook_path
 
         monkeypatch.setenv("APPTAINER_CONTAINER", "/tmp/quantui.sif")

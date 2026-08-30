@@ -177,7 +177,7 @@ def hpc_jupyterlab_run_app_message() -> str:
         "connection, so that port is not reachable from your browser.\n"
         "\n"
         "Use one of these instead:\n"
-        f"  1. Open {nb} in JupyterLab and click \"Render with Voilà\"\n"
+        f'  1. Open {nb} in JupyterLab and click "Render with Voilà"\n'
         "  2. Run the first cell in any notebook:\n"
         "       from quantui.app import QuantUIApp\n"
         "       QuantUIApp().display()\n"
@@ -195,7 +195,7 @@ def hpc_jupyterlab_setup_message(home_nb: Path) -> str:
         "browser cannot reach a second Voilà port.\n"
         "\n"
         "Launch QuantUI from JupyterLab instead:\n"
-        f"  • Open {home_nb} and click \"Render with Voilà\" (clean student view)\n"
+        f'  • Open {home_nb} and click "Render with Voilà" (clean student view)\n'
         "  • Or run the first cell in any notebook:\n"
         "      from quantui.app import QuantUIApp\n"
         "      QuantUIApp().display()\n"
@@ -293,12 +293,15 @@ def _open_url_best_effort(url: str) -> None:
     if os.environ.get("WSL_DISTRO_NAME") or _is_wsl():
         for tool in ("wslview", "explorer.exe"):
             try:
-                if subprocess.run(
-                    [tool, url],
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                ).returncode == 0:
+                if (
+                    subprocess.run(
+                        [tool, url],
+                        check=False,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    ).returncode
+                    == 0
+                ):
                     return
             except (FileNotFoundError, OSError):
                 continue
