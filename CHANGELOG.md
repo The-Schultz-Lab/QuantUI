@@ -7,21 +7,41 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-08-30
+
 ### Added
 
-- **`QUANTUI_ENABLE_SLURM` site gate** — SLURM batch mode stays hidden and
+- **SLURM batch execution (M-CLUSTER2)** — optional cluster backend when
+  `QUANTUI_ENABLE_SLURM=1` and `sbatch` is on PATH: submit from the same UI,
+  monitor on the **Cluster Jobs** tab, hybrid `squeue`/`sacct` polling, submit
+  cooldown, and stale-registry cleanup. All Calculate-tab calc types supported
+  on the batch worker path.
+- **`QUANTUI_ENABLE_SLURM` site gate** — SLURM batch stays hidden and
   undispatchable until an operator sets this environment variable. Student CPU
   images and JupyterHub profiles can omit it (default off); instructors enable
   cluster testing with `QUANTUI_ENABLE_SLURM=1` without any extra student
   command.
-- **CPU teaching SIF defaults** — `quantui.def` sets `QUANTUI_FREQ_PARALLEL=1`
-  so NCShare classroom sessions parallelize IR-intensity displacements on
-  multi-core nodes. The Settings checkbox reflects the deployment value and is
-  locked while the variable is set; use `QUANTUI_FREQ_PARALLEL=0` to force off
-  site-wide.
+- **`quantui setup` and `quantui run app`** — writes `~/QuantUI.ipynb` for
+  NCShare/JupyterLab (Render with Voilà). `run app` detects Apptainer +
+  Jupyter and exits with Voilà instructions instead of opening an unreachable
+  second port.
+- **Parallel IR intensity displacements (CPU)** — Settings checkbox
+  (`compute.freq_parallel`) plus `QUANTUI_FREQ_PARALLEL` env override fans out
+  the 6N finite-difference SCF loop on hosts with ≥4 cores and ≥2 atoms. The
+  **CPU teaching SIF** sets `QUANTUI_FREQ_PARALLEL=1` by default; the checkbox
+  reflects the deployment value and locks while the env var is set.
+- **Imaginary-mode perturbation** for Frequency reruns seeded from History.
+- **Stage-aware frequency cost estimate** and per-phase run status labels (NMR,
+  Hessian, post-HF).
+- **Preset theme palettes** replacing the invert filter (M-THEME THEME.6).
+- **Quantum engine registry** (`quantui/engines/`) and
+  `ComputeSettings.quantum_engine` field (M-PYFOCK PYF.1 groundwork).
+- **Static Raman spectrum** on the Analysis tab (M-SPECTRA2).
 
 ### Fixed
 
+- **Mulliken 3D viewer** could render blank after geometry persistence and lazy
+  panel activation (#103).
 - **`apptainer/quantui-gpu.def` never installed the `xtb` extra**, so GFN-FF
   metal-capable classical pre-optimization (DEC-018) was unavailable in every
   GPU/HPC image — the app correctly reported the honest-failure message
