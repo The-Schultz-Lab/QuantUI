@@ -14,6 +14,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   images and JupyterHub profiles can omit it (default off); instructors enable
   cluster testing with `QUANTUI_ENABLE_SLURM=1` without any extra student
   command.
+- **CPU teaching SIF defaults** — `quantui.def` sets `QUANTUI_FREQ_PARALLEL=1`
+  so NCShare classroom sessions parallelize IR-intensity displacements on
+  multi-core nodes. The Settings checkbox reflects the deployment value and is
+  locked while the variable is set; use `QUANTUI_FREQ_PARALLEL=0` to force off
+  site-wide.
 
 ### Fixed
 

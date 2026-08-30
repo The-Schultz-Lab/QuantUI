@@ -557,6 +557,10 @@ from quantui.app_xyz_input import (
     on_xyz_fill_table as _xyz_on_fill_table,
 )
 from quantui.backends.dispatch import is_slurm_available
+from quantui.freq_ir_workers import (
+    freq_parallel_env_configured,
+    freq_parallel_opt_in,
+)
 from quantui.cancellation import CalcCancelled as _CalcCancelled
 
 # Import directly from submodules to avoid circular-import issues.
@@ -1964,7 +1968,12 @@ class QuantUIApp:
             vib_framerate_fps=self._user_settings.viz.vib_framerate_fps,
             gpu_enabled=self._user_settings.compute.gpu_enabled,
             density_fit_enabled=self._user_settings.compute.density_fit,
-            freq_parallel_enabled=self._user_settings.compute.freq_parallel,
+            freq_parallel_enabled=(
+                freq_parallel_opt_in()
+                if freq_parallel_env_configured()
+                else self._user_settings.compute.freq_parallel
+            ),
+            freq_parallel_env_locked=freq_parallel_env_configured(),
             execution_backend=self._user_settings.compute.execution_backend,
             slurm_available=is_slurm_available(),
         )
@@ -3748,10 +3757,12 @@ class QuantUIApp:
     def _on_freq_parallel_enabled_changed(self, change) -> None:
         """Persist the parallel IR finite-difference preference.
 
-        The freq_calc driver reads this via :func:`freq_ir_workers._freq_parallel_opt_in`
+        The freq_calc driver reads this via :func:`freq_ir_workers.freq_parallel_opt_in`
         on each run (unless ``QUANTUI_FREQ_PARALLEL`` overrides in the environment).
         Refresh the time estimate because parallel divides the IR term in the model.
         """
+        if freq_parallel_env_configured():
+            return
         new_val = bool(change["new"])
         if new_val == self._user_settings.compute.freq_parallel:
             return

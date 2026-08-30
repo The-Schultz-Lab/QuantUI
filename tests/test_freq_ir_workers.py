@@ -17,6 +17,8 @@ import pytest
 
 from quantui.freq_ir_workers import (
     _truthy,
+    freq_parallel_env_configured,
+    freq_parallel_opt_in,
     parallel_enabled_for_run,
     pick_worker_count,
     threads_per_worker,
@@ -138,3 +140,16 @@ class TestTruthyParser:
     def test_whitespace_stripped(self):
         assert _truthy("  1  ") is True
         assert _truthy("\ttrue\n") is True
+
+
+class TestEnvConfiguredHelpers:
+    def test_freq_parallel_env_configured(self, monkeypatch):
+        monkeypatch.delenv("QUANTUI_FREQ_PARALLEL", raising=False)
+        assert freq_parallel_env_configured() is False
+        monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "0")
+        assert freq_parallel_env_configured() is True
+
+    def test_freq_parallel_opt_in_public_alias(self, monkeypatch):
+        monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "yes")
+        assert freq_parallel_opt_in() is True
+
