@@ -9,17 +9,19 @@ command is on your `PATH`.
 quantui --help
 ```
 
-The CLI is meant to *complement* the Voilà app — not replace it. Reach
-for the CLI when you want to:
+The CLI is meant to *complement* the Voilà app. Most commands are
+read-only diagnostics against `~/.quantui/` (or whatever
+`QUANTUI_LOG_DIR` points at). The exception is **`quantui run app`**
+and **`quantui setup`**, which start (or prepare) the student-facing
+Voilà interface.
 
+Reach for the CLI when you want to:
+
+- **launch the app** without remembering Voilà flags or notebook paths
 - check what the app has been doing without opening a notebook
 - confirm GPU offload is wired correctly before starting a long run
 - generate a usage / GPU-speedup report you can share or pin to a tab
 - script log inspection or analytics into a shell pipeline / cron job
-
-The CLI never touches your live calculations or notebook server. All
-commands are read-only against `~/.quantui/` (or whatever
-`QUANTUI_LOG_DIR` points at).
 
 ---
 
@@ -27,9 +29,71 @@ commands are read-only against `~/.quantui/` (or whatever
 
 | Command | What it does |
 | --- | --- |
+| [`quantui run app`](#quantui-run-app) | Start the Voilà student app |
+| [`quantui setup`](#quantui-setup) | Write `~/.quantui/app.ipynb` and a `quantui-app` shell shortcut |
 | [`quantui log tail`](#quantui-log-tail) | Print recent events from `event_log.jsonl` |
 | [`quantui gpu check`](#quantui-gpu-check) | Probe GPU-offload availability and explain failures |
 | [`quantui analytics build`](#quantui-analytics-build) | Build an HTML usage dashboard from `perf_log.jsonl` |
+
+---
+
+## `quantui run app`
+
+Start the student-facing Voilà interface. On first use (or after
+`quantui setup`), the CLI writes a thin launcher notebook to
+`~/.quantui/app.ipynb` — the same three-line pattern as the repo's
+`notebooks/molecule_computations.ipynb`, without requiring a git clone.
+
+Requires the **`[app]` extra**:
+
+```bash
+pip install 'quantui[app]'
+quantui run app
+```
+
+### Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--port PORT` | `8867` | TCP port (matches the native `launchers/` scripts) |
+| `--open` | off | Open `http://localhost:PORT` in the default browser after startup |
+| `--force` | off | Regenerate `~/.quantui/app.ipynb` before starting |
+
+### Examples
+
+```bash
+# Default — prints the URL, runs until Ctrl-C
+quantui run app
+
+# Open the browser automatically (WSL-aware)
+quantui run app --open
+
+# Custom port
+quantui run app --port 8888
+```
+
+### Notes
+
+- Exit code `1` when Voilà is not installed — install `quantui[app]`
+  and ensure `voila` is on your `PATH`.
+- Override the config directory with `QUANTUI_HOME` (useful in tests).
+
+---
+
+## `quantui setup`
+
+One-time (or idempotent) provisioning for users who want a persistent
+shell shortcut:
+
+1. Writes `~/.quantui/app.ipynb` (same as `quantui run app` uses)
+2. Writes `~/.local/bin/quantui-app` (or `$XDG_BIN_HOME/quantui-app`)
+
+```bash
+quantui setup
+quantui-app          # after ~/.local/bin is on PATH
+```
+
+Pass `--force` to overwrite an existing notebook or script.
 
 ---
 
@@ -249,6 +313,8 @@ successfully; only the auto-open is best-effort.
 
 | Variable | Effect |
 | --- | --- |
+| `QUANTUI_HOME` | Override `~/.quantui/` for the generated launcher notebook (`app.ipynb`) and setup output. |
+| `XDG_BIN_HOME` | Override `~/.local/bin` as the destination for the `quantui-app` shell shortcut. |
 | `QUANTUI_LOG_DIR` | Override the default `~/.quantui/logs/` location. The dashboard's default output (`~/.quantui/dashboard.html`) follows: it lives one level up from the active `QUANTUI_LOG_DIR`. |
 | `QUANTUI_DISABLE_GPU` | Force CPU mode even when gpu4pyscf is installed. `quantui gpu check` reports this as the reason. Accepted truthy values: `1`, `true`, `True`. |
 | `QUANTUI_FREQ_PARALLEL` | Opt in to parallel **CPU** workers for the IR-intensity finite-difference loop in frequency calculations (`6N` displaced SCFs). Same effect as the **Parallelize IR intensity displacements** checkbox on the System Settings tab; when this env var is set it overrides the saved setting. Reference SCF and Hessian still use gpu4pyscf when available. Requires ≥4 cores and ≥2 atoms. Off by default. Accepted truthy values: `1`, `true`, `yes`, `on`. |
@@ -260,11 +326,20 @@ successfully; only the auto-open is best-effort.
 ### Verify GPU is wired before a long run
 
 ```bash
-quantui gpu check && voila notebooks/molecule_computations.ipynb
+quantui gpu check && quantui run app
 ```
 
-If `gpu check` exits non-zero, the Voilà launch is skipped and the
+If `gpu check` exits non-zero, the app launch is skipped and the
 reason was printed to stderr.
+
+### Launch the app (pip install, no git clone)
+
+```bash
+pip install 'quantui[app]'
+quantui run app
+# optional one-time shell shortcut:
+quantui setup
+```
 
 ### Quick "what happened in my last session?"
 
