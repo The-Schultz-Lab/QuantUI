@@ -380,6 +380,12 @@ from quantui.app_runflow import (
     refresh_seed_options as _run_refresh_seed_options,
 )
 from quantui.app_runflow import (
+    resolve_seed_geometry as _run_resolve_seed_geometry,
+)
+from quantui.app_runflow import (
+    apply_vib_mode_for_frequency as _run_apply_vib_mode_for_frequency,
+)
+from quantui.app_runflow import (
     update_estimate as _run_update_estimate,
 )
 from quantui.app_runflow import (
@@ -2566,6 +2572,9 @@ class QuantUIApp:
         )
         self.vib_prev_btn.on_click(self._on_vib_prev_clicked)
         self.vib_next_btn.on_click(self._on_vib_next_clicked)
+        self._vib_apply_mode_btn.on_click(
+            self._safe_cb(lambda _btn: _run_apply_vib_mode_for_frequency(self))
+        )
         # Orbital diagram axis controls
         self._orb_ymin_input.observe(
             self._safe_cb(self._on_orb_range_changed), names="value"
@@ -5535,19 +5544,8 @@ class QuantUIApp:
             elif ct == "Frequency":
                 from quantui.freq_calc import run_freq_calc
 
-                # ── Step 1: resolve seed geometry ─────────────────────────────
-                _seed_path = self._freq_seed_dd.value
-                if _seed_path:
-                    from quantui.results_storage import load_trajectory
-
-                    self.run_status.value = "Loading seed geometry from history…"
-                    _seed_traj, _ = load_trajectory(Path(_seed_path))
-                    calc_mol = _seed_traj[-1]
-                    log.write(
-                        f"\nSeed geometry loaded from: {Path(_seed_path).name}\n"
-                        f"  Formula: {calc_mol.get_formula()}  "
-                        f"Atoms: {len(calc_mol.atoms)}\n\n"
-                    )
+                # ── Step 1: resolve seed geometry (geo-opt or mode perturbation)
+                calc_mol = _run_resolve_seed_geometry(self, calc_mol, log=log)
 
                 # ── Step 2: optional geometry optimization ────────────────────
                 #

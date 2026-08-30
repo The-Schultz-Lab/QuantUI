@@ -1141,8 +1141,38 @@ def build_shared_widgets(
         style={"description_width": "110px"},
         layout=layout_fn(width="auto", flex="1 1 auto", min_width="260px"),
         tooltip=(
-            "Optionally start from the final geometry of a previous Geo Opt "
-            "result — e.g. optimise at a low level of theory, then refine here"
+            "Optionally start from a previous result: Geo Opt final geometry, "
+            "or a Frequency result perturbed along a normal mode (imaginary "
+            "modes help leave a saddle point)"
+        ),
+    )
+    app._freq_perturb_mode_dd = widgets.Dropdown(
+        description="Perturb mode:",
+        options=[],
+        style={"description_width": "90px"},
+        layout=layout_fn(width="360px"),
+        tooltip="Normal mode to displace along when a Frequency result is selected as seed",
+    )
+    app._freq_perturb_fraction = widgets.BoundedFloatText(
+        value=0.75,
+        min=0.05,
+        max=1.0,
+        step=0.05,
+        description="Scale:",
+        style={"description_width": "40px"},
+        layout=layout_fn(width="120px"),
+        tooltip=(
+            "Fraction of the animation displacement amplitude (0.4 Å) "
+            "applied per atom along the selected mode"
+        ),
+    )
+    app._freq_perturb_box = widgets.HBox(
+        [app._freq_perturb_mode_dd, app._freq_perturb_fraction],
+        layout=layout_fn(
+            align_items="center",
+            gap="8px",
+            width="100%",
+            display="none",
         ),
     )
     app._seed_refresh_btn = widgets.Button(
@@ -1941,6 +1971,15 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         [app.vib_prev_btn, app.vib_mode_dd, app.vib_next_btn],
         layout=layout_fn(align_items="center", margin="0 0 4px 0"),
     )
+    app._vib_apply_mode_btn = widgets.Button(
+        description="Use mode → new Frequency calc",
+        icon="share",
+        layout=layout_fn(width="auto", margin="0 0 8px 0"),
+        tooltip=(
+            "Displace the structure 75% along the selected normal mode "
+            "(same scale as the animation) and switch to a new Frequency run"
+        ),
+    )
     # Fixed-dimension Output container so the box never resizes between
     # content swaps (placeholder ↔ 3Dmol HTML). Without this, the empty
     # state between atomic outputs assignments briefly collapses the
@@ -1996,6 +2035,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             widgets.VBox(
                 [
                     vib_mode_row,
+                    app._vib_apply_mode_btn,
                     app.vib_output,
                     vib_export_row,
                     app._vib_png_status,
