@@ -70,11 +70,10 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "  <td style='padding:3px 12px;'>Moderate</td></tr>"
             "<tr><td style='padding:3px 12px;'><b>Frequency</b></td>"
             "  <td style='padding:3px 12px;'>Vibrational modes + IR spectrum; "
-            "confirms a true minimum (no imaginary modes). On HPC clusters with "
-            "many CPU cores, admins can set "
-            "<code>QUANTUI_FREQ_PARALLEL=1</code> to parallelize the IR "
-            "finite-difference step on CPU while the main SCF still uses the "
-            "GPU when available.</td>"
+            "confirms a true minimum (no imaginary modes). On multi-core hosts "
+            "(e.g. NCShare), enable <b>Parallel IR finite differences</b> on the "
+            "System Settings tab to speed the IR-intensity step with CPU workers "
+            "while the main SCF still uses the GPU when available.</td>"
             "  <td style='padding:3px 12px;'>Higher</td></tr>"
             "<tr><td style='padding:3px 12px;'><b>UV-Vis (TD-DFT)</b></td>"
             "  <td style='padding:3px 12px;'>Electronic excitations / absorption "
@@ -257,6 +256,28 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "you want the number to match a textbook or a reference exactly, or "
             "for small quick calculations where it will not help. If you are "
             "unsure, leaving it off is the safe, exact choice.</p>"
+        ),
+    },
+    "freq_parallel": {
+        "title": "Parallel IR finite differences — when to enable",
+        "body": (
+            "<p>After the Hessian is built, QuantUI runs many small SCF "
+            "calculations at slightly displaced geometries to compute "
+            "<b>IR intensities</b> (how strongly each vibration absorbs "
+            "infrared light). By default these run one at a time.</p>"
+            "<p>On a <b>multi-core</b> machine — especially HPC nodes with "
+            "one GPU and dozens or hundreds of CPU cores — you can enable "
+            "<b>Parallelize IR intensity displacements (CPU)</b> on the "
+            "<b>System Settings</b> tab. QuantUI then spreads those "
+            "displacements across CPU worker processes while the reference "
+            "SCF and Hessian still use the GPU when available.</p>"
+            "<p><b>Requirements:</b> at least 4 CPU cores and a molecule "
+            "with 2 or more atoms. Off by default — try it when a frequency "
+            "run spends a long time on the IR-intensity step.</p>"
+            "<p><b>Cluster jobs:</b> you can also set "
+            "<code>QUANTUI_FREQ_PARALLEL=1</code> in the environment before "
+            "launching Voilà; that overrides the Settings checkbox for that "
+            "session.</p>"
         ),
     },
     "homo_lumo": {

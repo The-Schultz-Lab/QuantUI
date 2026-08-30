@@ -251,7 +251,7 @@ successfully; only the auto-open is best-effort.
 | --- | --- |
 | `QUANTUI_LOG_DIR` | Override the default `~/.quantui/logs/` location. The dashboard's default output (`~/.quantui/dashboard.html`) follows: it lives one level up from the active `QUANTUI_LOG_DIR`. |
 | `QUANTUI_DISABLE_GPU` | Force CPU mode even when gpu4pyscf is installed. `quantui gpu check` reports this as the reason. Accepted truthy values: `1`, `true`, `True`. |
-| `QUANTUI_FREQ_PARALLEL` | Opt in to parallel **CPU** workers for the IR-intensity finite-difference loop in frequency calculations (`6N` displaced SCFs). Reference SCF and Hessian still use gpu4pyscf when available; only the displacement loop fans out to processes. Useful on HPC nodes with one GPU and many cores (e.g. NCShare). Requires ≥4 cores and ≥2 atoms. Off by default. Accepted truthy values: `1`, `true`, `yes`, `on`. |
+| `QUANTUI_FREQ_PARALLEL` | Opt in to parallel **CPU** workers for the IR-intensity finite-difference loop in frequency calculations (`6N` displaced SCFs). Same effect as the **Parallelize IR intensity displacements** checkbox on the System Settings tab; when this env var is set it overrides the saved setting. Reference SCF and Hessian still use gpu4pyscf when available. Requires ≥4 cores and ≥2 atoms. Off by default. Accepted truthy values: `1`, `true`, `yes`, `on`. |
 
 ---
 

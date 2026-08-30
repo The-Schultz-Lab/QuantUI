@@ -21,6 +21,7 @@ from quantui.freq_ir_workers import (
     pick_worker_count,
     threads_per_worker,
 )
+from quantui.user_settings import UserSettings
 
 
 class TestParallelEnabledGate:
@@ -100,6 +101,32 @@ class TestParallelEnabledGate:
                 cpu_count=16, displacement_count=6
             )
             is True
+        )
+
+    def test_settings_checkbox_opt_in_without_env(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("QUANTUI_FREQ_PARALLEL", raising=False)
+        monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(tmp_path / "settings.json"))
+        settings = UserSettings()
+        settings.compute.freq_parallel = True
+        settings.save()
+        assert (
+            parallel_enabled_for_run(
+                cpu_count=8, displacement_count=18
+            )
+            is True
+        )
+
+    def test_env_var_overrides_settings_off(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(tmp_path / "settings.json"))
+        settings = UserSettings()
+        settings.compute.freq_parallel = True
+        settings.save()
+        monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "0")
+        assert (
+            parallel_enabled_for_run(
+                cpu_count=16, displacement_count=60
+            )
+            is False
         )
 
 

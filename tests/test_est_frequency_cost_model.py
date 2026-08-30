@@ -281,7 +281,7 @@ class TestParallelIrAwareness:
             basis="6-31G*",
             n_basis=120,
             n_cores=8,
-            gpu_used=False,  # parallel gated off on GPU
+            gpu_used=False,  # parallel gated by opt-in, not GPU
         )
         # Compare to serial (same params, different env var).
         monkeypatch.delenv("QUANTUI_FREQ_PARALLEL")

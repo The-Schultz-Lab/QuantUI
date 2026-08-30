@@ -678,7 +678,7 @@ Install all runtime + dev extras: `pip install -e ".[pyscf,ase,app,notebook,dev]
 | --- | --- | --- |
 | `QUANTUI_RESULTS_DIR` | `./results` | Where calculation results are saved |
 | `QUANTUI_LOG_DIR` | `~/.quantui/logs` | Where perf_log and event_log live |
-| `QUANTUI_FREQ_PARALLEL` | (unset / off) | When truthy (`1`, `true`, `yes`, `on`), fan out IR-intensity finite-difference SCFs across CPU worker processes in `freq_calc.py` (via `freq_ir_workers.py`). Reference SCF + Hessian still use gpu4pyscf when available; workers are CPU-only. Requires ≥4 cores and ≥2 atoms. Useful on NCShare-style nodes (one GPU, many cores). |
+| `QUANTUI_FREQ_PARALLEL` | (unset / off) | When truthy (`1`, `true`, `yes`, `on`), fan out IR-intensity finite-difference SCFs across CPU worker processes. Same as the System Settings checkbox; **overrides** the saved setting when set. Reference SCF + Hessian still use gpu4pyscf when available. Requires ≥4 cores and ≥2 atoms. |
 | `QUANTUI_SETTINGS_PATH` | `~/.quantui/settings.json` | User-preferences file (`user_settings.py`); override for tests |
 
 ---

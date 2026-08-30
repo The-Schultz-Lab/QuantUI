@@ -5,8 +5,9 @@ finite-difference geometries (one per Cartesian displacement of each atom,
 +Δ and −Δ). The default path in :mod:`quantui.freq_calc` runs them
 serially with each SCF internally parallelized via BLAS + libcint OpenMP.
 
-When the user opts in via ``QUANTUI_FREQ_PARALLEL=1`` AND the host has
-``>= 4`` cores AND the molecule has ``>= 2`` atoms (i.e. ``>= 6``
+When the user opts in via the System Settings checkbox (persisted as
+``compute.freq_parallel``) or ``QUANTUI_FREQ_PARALLEL=1`` (env overrides
+settings when set) AND the host has ``>= 4`` cores AND the molecule has ``>= 2`` atoms (i.e. ``>= 6``
 displacements), the freq_calc driver hands this loop off to a
 ``ProcessPoolExecutor`` whose workers each call :func:`run_displaced_scf`
 on one displaced geometry. Workers are **CPU-only** (no gpu4pyscf) even
@@ -168,6 +169,24 @@ def run_displaced_scf(coords_bohr_flat) -> Any:
     return np.array(mf.dip_moment(verbose=0))
 
 
+def _freq_parallel_opt_in() -> bool:
+    """Whether parallel IR displacements are opted in.
+
+    Precedence:
+    1. ``QUANTUI_FREQ_PARALLEL`` env var when set (HPC job-script override).
+    2. ``compute.freq_parallel`` in :mod:`quantui.user_settings` (Settings tab).
+    """
+    env_val = os.environ.get("QUANTUI_FREQ_PARALLEL")
+    if env_val is not None:
+        return _truthy(env_val)
+    try:
+        from quantui.user_settings import UserSettings
+
+        return bool(UserSettings.load().compute.freq_parallel)
+    except Exception:  # noqa: BLE001 — settings must never gate a calc
+        return False
+
+
 def parallel_enabled_for_run(
     cpu_count: int,
     displacement_count: int,
@@ -177,9 +196,9 @@ def parallel_enabled_for_run(
     Centralised in this module so both the driver and the tests can
     consult the same predicate. The current rules:
 
-    - **Opt-in**: ``QUANTUI_FREQ_PARALLEL`` env var must be truthy
-      (``"1"`` / ``"true"`` / ``"True"``). Off by default while the
-      parallel path matures.
+    - **Opt-in**: :func:`_freq_parallel_opt_in` must be true — from the
+      Settings tab checkbox (persisted) or ``QUANTUI_FREQ_PARALLEL=1`` in
+      the environment (overrides settings when set). Off by default.
     - **Cores threshold**: at least 4 cores. Below that, the BLAS
       oversubscription tradeoff doesn't pay off.
     - **Displacement threshold**: at least 6 (i.e. ``>= 2`` atoms). For a
@@ -189,7 +208,7 @@ def parallel_enabled_for_run(
     When this returns ``True``, displaced SCFs run on CPU worker processes
     regardless of whether gpu4pyscf accelerated the reference SCF/Hessian.
     """
-    if not _truthy(os.environ.get("QUANTUI_FREQ_PARALLEL", "")):
+    if not _freq_parallel_opt_in():
         return False
     if cpu_count < 4:
         return False

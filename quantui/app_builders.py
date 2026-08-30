@@ -121,6 +121,7 @@ def build_status_panel(
     vib_framerate_fps: int = 10,
     gpu_enabled: bool = True,
     density_fit_enabled: bool = False,
+    freq_parallel_enabled: bool = False,
     execution_backend: str = "local",
     slurm_available: bool = False,
 ) -> None:
@@ -314,6 +315,20 @@ def build_status_panel(
         layout=layout_fn(width="320px", margin="2px 0 0 0"),
     )
 
+    fp_toggle_label = widgets.HTML(
+        f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:12px;'
+        'margin-bottom:0px">Parallel IR finite differences '
+        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
+        "(persists across launches; CPU workers for IR intensities on "
+        "multi-core hosts — see Help → Parallel IR finite differences)</span></div>"
+    )
+    app.freq_parallel_enabled_cb = widgets.Checkbox(
+        value=freq_parallel_enabled,
+        description="Parallelize IR intensity displacements (CPU)",
+        indent=False,
+        layout=layout_fn(width="320px", margin="2px 0 0 0"),
+    )
+
     exec_backend_label = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:12px;'
         'margin-bottom:0px">Execution backend '
@@ -354,6 +369,8 @@ def build_status_panel(
             app.gpu_enabled_cb,
             df_toggle_label,
             app.density_fit_enabled_cb,
+            fp_toggle_label,
+            app.freq_parallel_enabled_cb,
             exec_backend_label,
             app.execution_backend_dd,
             exec_backend_note,
