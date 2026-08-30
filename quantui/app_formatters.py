@@ -22,8 +22,8 @@ def _result_extra_rows(get: Any) -> str:
 
     def _num(label: str, value: str) -> str:
         return (
-            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">{label}</td>'
-            f'<td style="color:{_theme.TEXT_HEADING}">{value}</td></tr>'
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">{label}</td>'
+            f'<td style="color:{_theme.css.TEXT_HEADING}">{value}</td></tr>'
         )
 
     rows = ""
@@ -52,15 +52,15 @@ def _result_extra_rows(get: Any) -> str:
     if bool(get("gpu_used", False)):
         _name = get("gpu_name")
         _device = (
-            f'<span style="color:{_theme.ACCENT_SUCCESS}">🚀 GPU</span>'
+            f'<span style="color:{_theme.css.ACCENT_SUCCESS}">🚀 GPU</span>'
             f' &mdash; <span style="font-family:monospace">{_name}</span>'
             if _name
-            else f'<span style="color:{_theme.ACCENT_SUCCESS}">🚀 GPU</span>'
+            else f'<span style="color:{_theme.css.ACCENT_SUCCESS}">🚀 GPU</span>'
         )
     else:
-        _device = f'<span style="color:{_theme.TEXT_SECONDARY}">CPU</span>'
+        _device = f'<span style="color:{_theme.css.TEXT_SECONDARY}">CPU</span>'
     rows += (
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">Compute device</td>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Compute device</td>'
         f"<td>{_device}</td></tr>"
     )
 
@@ -69,9 +69,9 @@ def _result_extra_rows(get: Any) -> str:
     # result types without the field safely omit it.
     if bool(get("density_fit", False)):
         rows += (
-            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">Density fitting</td>'
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Density fitting</td>'
             '<td><span style="color:#0369a1">⚡ RI</span> '
-            f'<span style="color:{_theme.TEXT_MUTED_LIGHT};font-size:12px">'
+            f'<span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
             "(approximate 2-electron integrals)</span></td></tr>"
         )
 
@@ -81,14 +81,14 @@ def _result_extra_rows(get: Any) -> str:
         if _vec is not None and len(_vec) >= 3:
             _dip_str = (
                 f"{_dip:.4f} D"
-                f' <span style="color:{_theme.TEXT_MUTED_LIGHT};font-size:12px">'
+                f' <span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
                 f"(μ = [{float(_vec[0]):+.3f}, {float(_vec[1]):+.3f}, "
                 f"{float(_vec[2]):+.3f}] D)</span>"
             )
         else:
             _dip_str = (
                 f"{_dip:.4f} D"
-                f' <span style="color:{_theme.TEXT_MUTED_LIGHT};font-size:12px">'
+                f' <span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
                 "(magnitude only — μ components not saved)</span>"
             )
         rows += _num("Dipole moment", _dip_str)
@@ -98,9 +98,9 @@ def _result_extra_rows(get: Any) -> str:
     if _chg is not None and _syms is not None:
         _charge_str = "  ".join(f"{sym}:{c:+.3f}" for sym, c in zip(_syms, _chg))
         rows += (
-            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL};vertical-align:top">'
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL};vertical-align:top">'
             f"Mulliken charges</td>"
-            f'<td style="color:{_theme.TEXT_HEADING};font-family:monospace;font-size:12px;'
+            f'<td style="color:{_theme.css.TEXT_HEADING};font-family:monospace;font-size:12px;'
             f'word-break:break-all">{_charge_str}</td></tr>'
         )
     return rows
@@ -109,20 +109,20 @@ def _result_extra_rows(get: Any) -> str:
 def format_result(r: Any) -> str:
     """Format a single-point-style result card."""
     _conv = "Yes" if r.converged else "No (treat results with caution)"
-    _cc = "green" if r.converged else _theme.ACCENT_ERROR_ALT
+    _cc = "green" if r.converged else _theme.css.ACCENT_ERROR_ALT
     _gap = f"{r.homo_lumo_gap_ev:.4f} eV" if r.homo_lumo_gap_ev is not None else "N/A"
     _rows = "".join(
         f"<tr>"
-        f'<td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">{k}</td>'
+        f'<td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">{k}</td>'
         f'<td style="color:{vc}">{v}</td>'
         f"</tr>"
         for k, v, vc in [
             (
                 "Total energy",
                 f"{r.energy_hartree:.8f} Ha &ensp;({r.energy_ev:.4f} eV)",
-                _theme.TEXT_HEADING,
+                _theme.css.TEXT_HEADING,
             ),
-            ("HOMO-LUMO gap", _gap, _theme.TEXT_HEADING),
+            ("HOMO-LUMO gap", _gap, _theme.css.TEXT_HEADING),
             ("SCF converged", _conv, _cc),
             (
                 "SCF iterations",
@@ -131,13 +131,13 @@ def format_result(r: Any) -> str:
                     if getattr(r, "n_iterations", None) in (None, -1)
                     else str(r.n_iterations)
                 ),
-                _theme.TEXT_HEADING,
+                _theme.css.TEXT_HEADING,
             ),
         ]
     )
     _extra = _result_extra_rows(lambda k, d=None: getattr(r, k, d))
     return (
-        f'<div style="background:{_theme.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.ACCENT_SUCCESS_ALT};'
+        f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
         f'padding:10px 14px;border-radius:4px;margin:6px 0">'
         f"<b>{r.formula} &mdash; {r.method}/{r.basis}</b>"
         f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
@@ -148,26 +148,26 @@ def format_result(r: Any) -> str:
 def format_opt_result(r: Any) -> str:
     """Format a geometry-optimization result card."""
     _conv = "Yes" if r.converged else "No (max steps reached)"
-    _cc = "green" if r.converged else _theme.ACCENT_ERROR_ALT
+    _cc = "green" if r.converged else _theme.css.ACCENT_ERROR_ALT
     _rows = "".join(
         f"<tr>"
-        f'<td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">{k}</td>'
+        f'<td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">{k}</td>'
         f'<td style="color:{vc}">{v}</td>'
         f"</tr>"
         for k, v, vc in [
-            ("Final energy", f"{r.energy_hartree:.8f} Ha", _theme.TEXT_HEADING),
+            ("Final energy", f"{r.energy_hartree:.8f} Ha", _theme.css.TEXT_HEADING),
             (
                 "Energy change",
                 f"{r.energy_change_hartree:+.6f} Ha",
-                _theme.TEXT_HEADING,
+                _theme.css.TEXT_HEADING,
             ),
             ("Opt converged", _conv, _cc),
-            ("Steps taken", str(r.n_steps), _theme.TEXT_HEADING),
-            ("Geometry RMSD", f"{r.rmsd_angstrom:.4f} Å", _theme.TEXT_HEADING),
+            ("Steps taken", str(r.n_steps), _theme.css.TEXT_HEADING),
+            ("Geometry RMSD", f"{r.rmsd_angstrom:.4f} Å", _theme.css.TEXT_HEADING),
         ]
     )
     return (
-        f'<div style="background:{_theme.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.ACCENT_SUCCESS_ALT};'
+        f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
         f'padding:10px 14px;border-radius:4px;margin:6px 0">'
         f"<b>Geometry Optimisation &mdash; {r.formula} ({r.method}/{r.basis})</b>"
         f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
@@ -178,7 +178,7 @@ def format_opt_result(r: Any) -> str:
 def format_freq_result(r: Any) -> str:
     """Format a frequency-analysis result card."""
     _conv = "Yes" if r.converged else "No (treat with caution)"
-    _cc = "green" if r.converged else _theme.ACCENT_ERROR_ALT
+    _cc = "green" if r.converged else _theme.css.ACCENT_ERROR_ALT
     n_real = r.n_real_modes()
     n_imag = r.n_imaginary_modes()
     real_freqs = sorted(f for f in r.frequencies_cm1 if f > 0)[:6]
@@ -188,25 +188,25 @@ def format_freq_result(r: Any) -> str:
     imag_note = ""
     if n_imag > 0:
         imag_note = (
-            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">Imaginary modes</td>'
-            f'<td style="color:{_theme.ACCENT_ERROR_ALT}">{n_imag} — geometry may not be a minimum</td></tr>'
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Imaginary modes</td>'
+            f'<td style="color:{_theme.css.ACCENT_ERROR_ALT}">{n_imag} — geometry may not be a minimum</td></tr>'
         )
     _rows = (
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">SCF energy</td>'
-        f'<td style="color:{_theme.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">SCF converged</td>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF energy</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">Real modes</td>'
-        f'<td style="color:{_theme.TEXT_HEADING}">{n_real}</td></tr>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Real modes</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{n_real}</td></tr>'
         + imag_note
         + (
-            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">Frequencies (cm⁻¹)</td>'
-            f'<td style="color:{_theme.TEXT_HEADING};font-family:monospace">{freq_str or "none"}</td></tr>'
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Frequencies (cm⁻¹)</td>'
+            f'<td style="color:{_theme.css.TEXT_HEADING};font-family:monospace">{freq_str or "none"}</td></tr>'
             if real_freqs
             else ""
         )
-        + f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">ZPVE</td>'
-        f'<td style="color:{_theme.TEXT_HEADING}">{r.zpve_hartree:.6f} Ha '
+        + f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">ZPVE</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{r.zpve_hartree:.6f} Ha '
         f"({r.zpve_hartree * 27.211386245988:.4f} eV)</td></tr>"
     )
     _thermo_rows = ""
@@ -214,20 +214,20 @@ def format_freq_result(r: Any) -> str:
     if _thermo is not None:
         _kj = 2625.5  # kJ/mol per Hartree
         _thermo_rows = (
-            f'<tr><td colspan="2" style="padding:6px 0 2px 0;color:{_theme.TEXT_MUTED};'
+            f'<tr><td colspan="2" style="padding:6px 0 2px 0;color:{_theme.css.TEXT_MUTED};'
             f'font-size:12px;font-style:italic">'
             f"&#8212; Thermochemistry at {_thermo.temperature_k:.0f} K / 1 atm &#8212;"
             f"</td></tr>"
-            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">H (298 K)</td>'
-            f'<td style="color:{_theme.TEXT_HEADING}">{_thermo.H_hartree:.6f} Ha</td></tr>'
-            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">S (298 K)</td>'
-            f'<td style="color:{_theme.TEXT_HEADING}">{_thermo.S_jmol:.2f} J/(mol·K)</td></tr>'
-            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">G (298 K)</td>'
-            f'<td style="color:{_theme.TEXT_HEADING}">{_thermo.G_hartree:.6f} Ha'
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">H (298 K)</td>'
+            f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo.H_hartree:.6f} Ha</td></tr>'
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">S (298 K)</td>'
+            f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo.S_jmol:.2f} J/(mol·K)</td></tr>'
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">G (298 K)</td>'
+            f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo.G_hartree:.6f} Ha'
             f" ({_thermo.G_hartree * _kj:.2f} kJ/mol)</td></tr>"
         )
     return (
-        f'<div style="background:{_theme.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.ACCENT_SUCCESS_ALT};'
+        f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
         f'padding:10px 14px;border-radius:4px;margin:6px 0">'
         f"<b>Frequency Analysis &mdash; {r.formula} ({r.method}/{r.basis})</b>"
         f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
@@ -238,14 +238,14 @@ def format_freq_result(r: Any) -> str:
 def format_tddft_result(r: Any) -> str:
     """Format a TD-DFT / UV-Vis result card."""
     _conv = "Yes" if r.converged else "No (treat with caution)"
-    _cc = "green" if r.converged else _theme.ACCENT_ERROR_ALT
+    _cc = "green" if r.converged else _theme.css.ACCENT_ERROR_ALT
     header_rows = (
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">Ground-state energy</td>'
-        f'<td style="color:{_theme.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">SCF converged</td>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Ground-state energy</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">States computed</td>'
-        f'<td style="color:{_theme.TEXT_HEADING}">{len(r.excitation_energies_ev)}</td></tr>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">States computed</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{len(r.excitation_energies_ev)}</td></tr>'
     )
     exc_table = ""
     if r.excitation_energies_ev:
@@ -257,29 +257,29 @@ def format_tddft_result(r: Any) -> str:
             bold = "font-weight:bold" if f_osc > 0.05 else ""
             exc_rows.append(
                 f'<tr style="{bold}">'
-                f'<td style="padding:2px 12px 2px 0;color:{_theme.TEXT_SECONDARY}">S{i}</td>'
-                f'<td style="padding:2px 12px 2px 0;color:{_theme.TEXT_HEADING}">{e_ev:.3f} eV</td>'
-                f'<td style="padding:2px 12px 2px 0;color:{_theme.TEXT_HEADING}">{wl[i - 1]:.1f} nm</td>'
-                f'<td style="padding:2px 4px 2px 0;color:{_theme.TEXT_HEADING}">f = {f_osc:.4f}</td>'
+                f'<td style="padding:2px 12px 2px 0;color:{_theme.css.TEXT_SECONDARY}">S{i}</td>'
+                f'<td style="padding:2px 12px 2px 0;color:{_theme.css.TEXT_HEADING}">{e_ev:.3f} eV</td>'
+                f'<td style="padding:2px 12px 2px 0;color:{_theme.css.TEXT_HEADING}">{wl[i - 1]:.1f} nm</td>'
+                f'<td style="padding:2px 4px 2px 0;color:{_theme.css.TEXT_HEADING}">f = {f_osc:.4f}</td>'
                 f"</tr>"
             )
         if len(r.excitation_energies_ev) > 8:
             exc_rows.append(
-                f'<tr><td colspan="4" style="color:{_theme.TEXT_FAINT};font-size:12px">… '
+                f'<tr><td colspan="4" style="color:{_theme.css.TEXT_FAINT};font-size:12px">… '
                 f"and {len(r.excitation_energies_ev) - 8} more states</td></tr>"
             )
         exc_table = (
-            f'<tr><td colspan="2" style="padding:8px 0 2px;color:{_theme.TEXT_LABEL};font-weight:bold">'
+            f'<tr><td colspan="2" style="padding:8px 0 2px;color:{_theme.css.TEXT_LABEL};font-weight:bold">'
             "Vertical excitations:</td></tr>"
             "<tr>"
-            f'<th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px;padding:2px 12px 2px 0">State</th>'
-            f'<th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px;padding:2px 12px 2px 0">Energy</th>'
-            f'<th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px;padding:2px 12px 2px 0">λ</th>'
-            f'<th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px">Osc. str.</th></tr>'
+            f'<th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px;padding:2px 12px 2px 0">State</th>'
+            f'<th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px;padding:2px 12px 2px 0">Energy</th>'
+            f'<th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px;padding:2px 12px 2px 0">λ</th>'
+            f'<th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px">Osc. str.</th></tr>'
             + "".join(exc_rows)
         )
     return (
-        f'<div style="background:{_theme.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.ACCENT_SUCCESS_ALT};'
+        f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
         f'padding:10px 14px;border-radius:4px;margin:6px 0">'
         f"<b>TD-DFT / UV-Vis &mdash; {r.formula} ({r.method}/{r.basis})</b>"
         f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
@@ -290,12 +290,12 @@ def format_tddft_result(r: Any) -> str:
 def format_nmr_result(r: Any) -> str:
     """Format an NMR shielding result card."""
     _conv = "Yes" if r.converged else "No (treat with caution)"
-    _cc = "green" if r.converged else _theme.ACCENT_ERROR_ALT
+    _cc = "green" if r.converged else _theme.css.ACCENT_ERROR_ALT
     header_rows = (
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">SCF converged</td>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">Reference</td>'
-        f'<td style="color:{_theme.TEXT_HEADING}">{r.reference_compound} ({r.method}/{r.basis})</td></tr>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Reference</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{r.reference_compound} ({r.method}/{r.basis})</td></tr>'
     )
 
     def _nmr_table(label: str, shifts: list, sym: str) -> str:
@@ -303,17 +303,17 @@ def format_nmr_result(r: Any) -> str:
             return ""
         rows = "".join(
             f"<tr>"
-            f'<td style="padding:2px 14px 2px 0;color:{_theme.TEXT_SECONDARY}">{sym}-{n}</td>'
-            f'<td style="color:{_theme.TEXT_HEADING}">{d:.2f} ppm</td>'
+            f'<td style="padding:2px 14px 2px 0;color:{_theme.css.TEXT_SECONDARY}">{sym}-{n}</td>'
+            f'<td style="color:{_theme.css.TEXT_HEADING}">{d:.2f} ppm</td>'
             f"</tr>"
             for n, (_i, d) in enumerate(shifts, 1)
         )
         return (
-            f'<tr><td colspan="2" style="padding:8px 0 2px;color:{_theme.TEXT_LABEL};font-weight:bold">'
+            f'<tr><td colspan="2" style="padding:8px 0 2px;color:{_theme.css.TEXT_LABEL};font-weight:bold">'
             f"{label} shifts (vs. TMS):</td></tr>"
             f"<tr>"
-            f'<th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px;padding:2px 14px 2px 0">Atom</th>'
-            f'<th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px">δ (ppm)</th></tr>'
+            f'<th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px;padding:2px 14px 2px 0">Atom</th>'
+            f'<th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px">δ (ppm)</th></tr>'
             + rows
         )
 
@@ -324,7 +324,7 @@ def format_nmr_result(r: Any) -> str:
     if r.basis.upper() in ("STO-3G", "3-21G"):
         _basis_warn = (
             '<tr><td colspan="2" style="padding:6px 0 0">'
-            f'<span style="color:{_theme.ACCENT_WARNING};font-size:12px">'
+            f'<span style="color:{_theme.css.ACCENT_WARNING};font-size:12px">'
             f"⚠ {r.basis} gives qualitative NMR only — use 6-31G* or better.</span>"
             "</td></tr>"
         )
@@ -338,7 +338,7 @@ def format_nmr_result(r: Any) -> str:
     if getattr(r, "is_fallback_reference", False):
         _ref_warn = (
             '<tr><td colspan="2" style="padding:6px 0 0">'
-            f'<span style="color:{_theme.ACCENT_WARNING};font-size:12px">'
+            f'<span style="color:{_theme.css.ACCENT_WARNING};font-size:12px">'
             f"⚠ No calibrated TMS reference for {r.method}/{r.basis} — using "
             f"{getattr(r, 'reference_key', 'B3LYP/6-31G*')} constants instead. "
             "Shifts may be off by a few ppm.</span>"
@@ -348,12 +348,12 @@ def format_nmr_result(r: Any) -> str:
     _empty = ""
     if not r.h_shifts() and not r.c_shifts():
         _empty = (
-            f'<tr><td colspan="2" style="color:{_theme.TEXT_FAINT};font-size:12px">'
+            f'<tr><td colspan="2" style="color:{_theme.css.TEXT_FAINT};font-size:12px">'
             "No ¹H or ¹³C atoms found in this molecule.</td></tr>"
         )
 
     return (
-        f'<div style="background:{_theme.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.ACCENT_SUCCESS_ALT};'
+        f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
         f'padding:10px 14px;border-radius:4px;margin:6px 0">'
         f"<b>NMR Shielding &mdash; {r.formula} ({r.method}/{r.basis})</b>"
         f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
@@ -364,33 +364,33 @@ def format_nmr_result(r: Any) -> str:
 def format_pes_scan_result(r: Any) -> str:
     """Format a PESScanResult as an HTML result card."""
     _conv = "Yes" if r.converged_all else "No (some points did not converge)"
-    _cc = "green" if r.converged_all else _theme.ACCENT_ERROR_ALT
+    _cc = "green" if r.converged_all else _theme.css.ACCENT_ERROR_ALT
     if r.energies_hartree:
         e_min = min(r.energies_hartree)
         e_max = max(r.energies_hartree)
         barrier_kcal = (e_max - e_min) * 627.509474
         _e_row = (
-            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">Min energy</td>'
-            f'<td style="color:{_theme.TEXT_HEADING}">{e_min:.8f} Ha</td></tr>'
-            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">Energy range</td>'
-            f'<td style="color:{_theme.TEXT_HEADING}">{barrier_kcal:.2f} kcal/mol</td></tr>'
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Min energy</td>'
+            f'<td style="color:{_theme.css.TEXT_HEADING}">{e_min:.8f} Ha</td></tr>'
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Energy range</td>'
+            f'<td style="color:{_theme.css.TEXT_HEADING}">{barrier_kcal:.2f} kcal/mol</td></tr>'
         )
     else:
         _e_row = ""
     _idx_str = "–".join(str(i + 1) for i in r.atom_indices)
     return (
-        f'<div style="background:{_theme.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.ACCENT_SUCCESS_ALT};'
+        f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
         f'padding:10px 14px;border-radius:4px;margin:6px 0">'
         f"<b>PES Scan &mdash; {r.formula} ({r.method}/{r.basis})</b>"
         f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">Scan type</td>'
-        f'<td style="color:{_theme.TEXT_HEADING}">{r.scan_type.capitalize()} ({_idx_str})</td></tr>'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">Range</td>'
-        f'<td style="color:{_theme.TEXT_HEADING}">{r.scan_parameter_values[0]:.3f} → '
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Scan type</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{r.scan_type.capitalize()} ({_idx_str})</td></tr>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Range</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{r.scan_parameter_values[0]:.3f} → '
         f"{r.scan_parameter_values[-1]:.3f} {r.scan_unit} "
         f"({r.n_steps} points)</td></tr>"
         f"{_e_row}"
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">All converged</td>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">All converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
         f"</table></div>"
     )
@@ -498,8 +498,8 @@ def reorg_comparison_html(entries: list[tuple[str, dict]]) -> str:
     # inversion, so a light grey rule inverts to near-black on a near-black page
     # and vanishes — the defect THEME.5 fixed, and which this table reintroduced
     # until test_retired_border_greys_are_gone_from_in_app_chrome caught it.
-    th = f"text-align:left;padding:6px 12px;border-bottom:2px solid {_theme.BORDER}"
-    td = f"padding:5px 12px;border-bottom:1px solid {_theme.BORDER}"
+    th = f"text-align:left;padding:6px 12px;border-bottom:2px solid {_theme.css.BORDER}"
+    td = f"padding:5px 12px;border-bottom:1px solid {_theme.css.BORDER}"
     head = (
         f'<th style="{th}">Result</th><th style="{th}">Method / basis</th>'
         + "".join(f'<th style="{th}">λ {k} (eV)</th>' for k in kinds)
@@ -540,7 +540,7 @@ def reorg_comparison_html(entries: list[tuple[str, dict]]) -> str:
     return (
         '<div style="margin-top:14px">'
         '<h4 style="margin:0 0 4px">Reorganization energy</h4>'
-        f'<p style="color:{_theme.TEXT_SECONDARY};font-size:12px;margin:0 0 6px">'
+        f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:12px;margin:0 0 6px">'
         "Lower λ means less geometric reorganization on charging — generally "
         "favourable for charge transport. Relaxation is the largest per-channel "
         "RMSD between the neutral and ion geometries.</p>"
@@ -599,8 +599,8 @@ def reorg_channels_html(channels: list[dict]) -> str:
                 idx, dist = relax["max_atom"]
                 rows.append(("Largest atom shift", f"{dist:.4f} Å (atom {idx + 1})"))
         body = "".join(
-            f'<tr><td style="padding:2px 18px 2px 0;color:{_theme.TEXT_LABEL}">{k}</td>'
-            f'<td style="color:{_theme.TEXT_HEADING};font-family:monospace">{v}</td></tr>'
+            f'<tr><td style="padding:2px 18px 2px 0;color:{_theme.css.TEXT_LABEL}">{k}</td>'
+            f'<td style="color:{_theme.css.TEXT_HEADING};font-family:monospace">{v}</td></tr>'
             for k, v in rows
         )
         blocks.append(
@@ -629,7 +629,7 @@ def reorg_missing_data_notice() -> str:
     """
     return (
         '<div style="margin-top:8px;padding:8px 10px;border-radius:6px;'
-        f'background:#fef3c7;border:1px solid {_theme.ACCENT_WARNING_LIGHT};font-size:13px;color:#78350f">'
+        f'background:#fef3c7;border:1px solid {_theme.css.ACCENT_WARNING_LIGHT};font-size:13px;color:#78350f">'
         "<b>⚠ Reorganization-energy details were not saved for this result.</b><br>"
         "Results produced before QuantUI gained λ persistence did not store the "
         "per-channel energies or geometries, and they cannot be recovered from "
@@ -642,7 +642,7 @@ def reorg_missing_data_notice() -> str:
 def format_reorg_result(r: Any) -> str:
     """Format a reorganization-energy (Marcus 4-point) result card."""
     _conv = "Yes" if r.converged else "No (some steps did not converge)"
-    _cc = "green" if r.converged else _theme.ACCENT_ERROR_ALT
+    _cc = "green" if r.converged else _theme.css.ACCENT_ERROR_ALT
 
     # Same renderer, same shape as the saved payload — see reorg_channels_html.
     from quantui.results_storage import _reorg_channels_payload
@@ -651,16 +651,16 @@ def format_reorg_result(r: Any) -> str:
     _attach_relaxation(_payload, r)
     _channels_html = reorg_channels_html(_payload)
     return (
-        f'<div style="background:{_theme.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.ACCENT_SUCCESS_ALT};'
+        f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
         f'padding:10px 14px;border-radius:4px;margin:6px 0">'
         f"<b>Reorganization Energy (Marcus 4-point) &mdash; "
         f"{r.formula} ({r.method}/{r.basis})</b>"
         f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">Neutral energy</td>'
-        f'<td style="color:{_theme.TEXT_HEADING}">{r.neutral_energy_hartree:.8f} Ha</td></tr>'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">Total opt steps</td>'
-        f'<td style="color:{_theme.TEXT_HEADING}">{r.n_total_opt_steps}</td></tr>'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">All converged</td>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Neutral energy</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{r.neutral_energy_hartree:.8f} Ha</td></tr>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Total opt steps</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{r.n_total_opt_steps}</td></tr>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">All converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
         f"</table>{_channels_html}</div>"
     )
@@ -671,16 +671,16 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     import base64 as _b64
 
     _ct_labels = {
-        "single_point": ("Single Point", _theme.ACCENT_INFO, "#dbeafe"),
-        "geometry_opt": ("Geometry Optimization", _theme.ACCENT_PURPLE, "#ede9fe"),
+        "single_point": ("Single Point", _theme.css.ACCENT_INFO, "#dbeafe"),
+        "geometry_opt": ("Geometry Optimization", _theme.css.ACCENT_PURPLE, "#ede9fe"),
         "frequency": ("Frequency Analysis", "#15803d", "#dcfce7"),
-        "tddft": ("TD-DFT", _theme.ACCENT_WARNING, "#fef3c7"),
-        "nmr": ("NMR", _theme.ACCENT_TEAL, "#ccfbf1"),
+        "tddft": ("TD-DFT", _theme.css.ACCENT_WARNING, "#fef3c7"),
+        "nmr": ("NMR", _theme.css.ACCENT_TEAL, "#ccfbf1"),
         "pes_scan": ("PES Scan", "#c2410c", "#ffedd5"),
     }
     ct = data.get("calc_type", "")
     _ct_label, _ct_fg, _ct_bg = _ct_labels.get(
-        ct, (ct.replace("_", " ").title(), _theme.TEXT_SECONDARY, "#f3f4f6")
+        ct, (ct.replace("_", " ").title(), _theme.css.TEXT_SECONDARY, "#f3f4f6")
     )
     _ct_badge = (
         f'<span style="display:inline-block;padding:2px 10px;border-radius:12px;'
@@ -688,7 +688,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         f'letter-spacing:0.03em;margin-bottom:6px">{_ct_label}</span>'
     )
     _conv = "Yes" if data.get("converged") else "No (treat results with caution)"
-    _cc = "green" if data.get("converged") else _theme.ACCENT_ERROR_ALT
+    _cc = "green" if data.get("converged") else _theme.css.ACCENT_ERROR_ALT
     _gap = (
         f"{data['homo_lumo_gap_ev']:.4f} eV"
         if data.get("homo_lumo_gap_ev") is not None
@@ -696,16 +696,16 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     )
     _rows = "".join(
         f"<tr>"
-        f'<td style="padding:3px 18px 3px 0;color:{_theme.TEXT_LABEL}">{k}</td>'
+        f'<td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">{k}</td>'
         f'<td style="color:{vc}">{v}</td>'
         f"</tr>"
         for k, v, vc in [
             (
                 "Total energy",
                 f"{data['energy_hartree']:.8f} Ha &ensp;({data['energy_ev']:.4f} eV)",
-                _theme.TEXT_HEADING,
+                _theme.css.TEXT_HEADING,
             ),
-            ("HOMO-LUMO gap", _gap, _theme.TEXT_HEADING),
+            ("HOMO-LUMO gap", _gap, _theme.css.TEXT_HEADING),
             ("SCF converged", _conv, _cc),
             (
                 "SCF iterations",
@@ -714,7 +714,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
                     if data.get("n_iterations") in (None, -1)
                     else str(data.get("n_iterations"))
                 ),
-                _theme.TEXT_HEADING,
+                _theme.css.TEXT_HEADING,
             ),
         ]
     )
@@ -733,7 +733,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
             _thumb_html = (
                 f'<img src="data:image/png;base64,{_img_b64}" '
                 f'style="float:right;margin:0 0 6px 14px;border-radius:4px;'
-                f'border:1px solid {_theme.BORDER}" width="173" height="108" />'
+                f'border:1px solid {_theme.css.BORDER}" width="173" height="108" />'
             )
 
     # Reorganization-energy channels (REORG.1). This is the reported bug: the
@@ -750,12 +750,12 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
             _reorg_html = reorg_missing_data_notice()
 
     return (
-        f'<div style="background:{_theme.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.ACCENT_SUCCESS_ALT};'
+        f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
         f'padding:10px 14px;border-radius:4px;margin:6px 0;overflow:hidden">'
         f"{_thumb_html}"
         f"{_ct_badge}<br>"
         f'<b>{data["formula"]} &mdash; {data["method"]}/{data["basis"]}</b>'
-        f'&ensp;<small style="color:{_theme.TEXT_MUTED_LIGHT}">{ts}</small>'
+        f'&ensp;<small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{ts}</small>'
         f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
         f"{_rows}{_extra}</table>{_reorg_html}</div>"
     )

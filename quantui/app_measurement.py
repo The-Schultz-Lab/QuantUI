@@ -287,9 +287,9 @@ _PLACEHOLDER_TEXT = "Click an atom in the viewer to start measuring."
 
 def _readout_html(text: str) -> str:
     return (
-        f'<div style="border:1px solid {_theme.BORDER};background:{_theme.BG_PANEL};'
+        f'<div style="border:1px solid {_theme.css.BORDER};background:{_theme.css.BG_PANEL};'
         f"border-radius:4px;padding:6px 10px;margin:4px 0;font-size:13px;"
-        f'color:{_theme.TEXT_BODY}">{text}</div>'
+        f'color:{_theme.css.TEXT_BODY}">{text}</div>'
     )
 
 

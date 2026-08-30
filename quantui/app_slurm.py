@@ -331,14 +331,14 @@ def refresh_slurm_jobs_tab(app: Any) -> None:
                 logger.exception("Failed to load SLURM job accounting")
 
     summary.value = (
-        f'<div style="font-size:13px;color:{_theme.TEXT_STRONG};margin:4px 0 8px">'
+        f'<div style="font-size:13px;color:{_theme.css.TEXT_STRONG};margin:4px 0 8px">'
         f"<b>{active}</b> active / <b>{limit}</b> max concurrent cluster job(s). "
         f"{len(records)} total in your registry.</div>"
     )
 
     if not records:
         table.value = (
-            f'<div style="font-size:12px;color:{_theme.TEXT_SUBTLE};'
+            f'<div style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};'
             f'padding:8px 0">No cluster jobs yet.</div>'
         )
         select.options = [("(no jobs)", "")]
@@ -373,7 +373,7 @@ def refresh_slurm_jobs_tab(app: Any) -> None:
     table.value = (
         f'<div style="overflow-x:auto;margin:4px 0 8px">'
         f'<table style="border-collapse:collapse;font-size:12px;width:100%">'
-        f"<thead><tr style='background:{_theme.BG_PANEL}'>"
+        f"<thead><tr style='background:{_theme.css.BG_PANEL}'>"
         "<th style='padding:4px 8px;text-align:left'>Status</th>"
         "<th style='padding:4px 8px;text-align:left'>SLURM ID</th>"
         "<th style='padding:4px 8px;text-align:left'>SLURM state</th>"
@@ -434,7 +434,7 @@ def on_slurm_jobs_cancel_clicked(app: Any, _btn: Any = None) -> None:
         status = getattr(app, "_slurm_jobs_status_html", None)
         if status is not None:
             status.value = (
-                f'<span style="color:{_theme.TEXT_SUBTLE};font-size:12px">'
+                f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:12px">'
                 f"Job {request_id} is not active (status: {record.status}).</span>"
             )
         return
@@ -442,7 +442,7 @@ def on_slurm_jobs_cancel_clicked(app: Any, _btn: Any = None) -> None:
     status = getattr(app, "_slurm_jobs_status_html", None)
     if status is not None:
         message = slurm_cancel_user_message(app, request_id)
-        color = _theme.TEXT_STRONG if ok else _theme.ACCENT_ERROR
+        color = _theme.css.TEXT_STRONG if ok else _theme.css.ACCENT_ERROR
         status.value = (
             f'<span style="color:{color};font-size:12px">{html.escape(message)}</span>'
         )
@@ -459,7 +459,7 @@ def on_slurm_jobs_remove_clicked(app: Any, _btn: Any = None) -> None:
     status = getattr(app, "_slurm_jobs_status_html", None)
     if status is not None:
         message = slurm_remove_user_message(app, request_id, removed=removed)
-        color = _theme.TEXT_STRONG if removed else _theme.ACCENT_ERROR
+        color = _theme.css.TEXT_STRONG if removed else _theme.css.ACCENT_ERROR
         status.value = (
             f'<span style="color:{color};font-size:12px">{html.escape(message)}</span>'
         )
@@ -616,7 +616,7 @@ def _show_slurm_banner(app: Any, message: str, *, request_id: str) -> None:
         return
     banner.value = (
         f'<div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;'
-        f'padding:10px 12px;margin:6px 0;font-size:13px;color:{_theme.TEXT_STRONG}">'
+        f'padding:10px 12px;margin:6px 0;font-size:13px;color:{_theme.css.TEXT_STRONG}">'
         f"ℹ️ {message}</div>"
     )
     banner.layout.display = ""

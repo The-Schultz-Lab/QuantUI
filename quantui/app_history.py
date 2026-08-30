@@ -225,7 +225,7 @@ def apply_history_filter(app: Any) -> None:
     count_lbl = getattr(app, "history_count_lbl", None)
     if count_lbl is not None:
         count_lbl.value = (
-            f'<span style="color:{_theme.TEXT_FAINT};font-size:12px">'
+            f'<span style="color:{_theme.css.TEXT_FAINT};font-size:12px">'
             f"{len(matches)} of {len(entries)} shown</span>"
         )
 

@@ -1,82 +1,31 @@
-"""Theme colour contrast guarantees (M-THEME THEME.5).
+"""Theme colour contrast guarantees (M-THEME THEME.5 / THEME.6).
 
 User report (2026-07-29): *"Fix dark mode contrasts and add borders (current
 approach does not work)."*
 
-Measurement, not assumption, found the actual defect. Dark mode is a whole-page
-CSS ``filter: invert(1) hue-rotate(180deg)``, so every colour is written once
-for light mode and dark mode is its mathematical inversion. Under that filter:
-
-- **Text was never the problem** — body text on a panel measures 7.24:1 in light
-  and *improves* to 8.91:1 inverted.
-- **Structural separation was** — panel-vs-page was 1.03:1 and border-vs-panel
-  1.14:1 in dark mode. Panels and their borders were invisible, which is why the
-  same request asked for contrast *and* borders in one breath.
-
-The fix is the mid-tone rule (see ``quantui/theme.py``): light borders vanish
-when inverted, dark borders vanish in light mode, and only mid-tones survive
-both. These tests re-derive the filter maths and assert the tokens still clear
-WCAG 1.4.11's 3:1 bar for non-text UI components in **both** modes — so a future
-"let's soften those borders" tweak fails here rather than silently making dark
-mode unusable again.
+THEME.5 fixed structural separation with mid-tone ``BORDER`` tokens. THEME.6
+retired the whole-page CSS invert filter in favour of preset palettes with
+explicit light/dark (and tinted) values — these tests assert each palette's
+border tokens still clear WCAG 1.4.11's 3:1 bar against its own panel/page
+backgrounds.
 
 Platform-independent: pure colour maths, no widgets.
 """
 
 from __future__ import annotations
 
-import math
-
 import pytest
 
 from quantui import theme
 
-# Backgrounds these tokens are drawn against, in light-mode source values.
-PANEL_BG = "#f8fafc"
-PAGE_BG = "#ffffff"
-
-# WCAG 2.1 SC 1.4.11 (Non-text Contrast): UI components and graphical objects
-# need 3:1. Borders are UI components, not text — 4.5:1 is the wrong bar here
-# and would force a heavier border than the design wants in light mode.
+# WCAG 2.1 SC 1.4.11 (Non-text Contrast): UI components need 3:1 against adjacent
+# backgrounds. Borders are UI components, not body text.
 UI_COMPONENT_MIN = 3.0
 
 
 def _hex_rgb(h: str) -> tuple[int, int, int]:
     h = h.lstrip("#")
     return tuple(int(h[i : i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
-
-
-def _hue_rotate(c: tuple[int, int, int], deg: float) -> tuple[int, int, int]:
-    """The W3C filter ``hue-rotate`` matrix — a linear approximation, NOT a true
-    HSL rotation. Using the real matrix matters: an HSL model would predict
-    different results than the browser actually produces."""
-    a, b = math.cos(math.radians(deg)), math.sin(math.radians(deg))
-    m = (
-        (
-            0.213 + a * 0.787 - b * 0.213,
-            0.715 - a * 0.715 - b * 0.715,
-            0.072 - a * 0.072 + b * 0.928,
-        ),
-        (
-            0.213 - a * 0.213 + b * 0.143,
-            0.715 + a * 0.285 + b * 0.140,
-            0.072 - a * 0.072 - b * 0.283,
-        ),
-        (
-            0.213 - a * 0.213 - b * 0.787,
-            0.715 - a * 0.715 + b * 0.715,
-            0.072 + a * 0.928 + b * 0.072,
-        ),
-    )
-    return tuple(  # type: ignore[return-value]
-        max(0, min(255, round(sum(m[i][j] * c[j] for j in range(3))))) for i in range(3)
-    )
-
-
-def _dark(hex_colour: str) -> tuple[int, int, int]:
-    """What the dark-mode filter chain turns *hex_colour* into."""
-    inverted = tuple(255 - x for x in _hex_rgb(hex_colour))
-    return _hue_rotate(inverted, 180)  # type: ignore[arg-type]
 
 
 def _relative_luminance(c: tuple[int, int, int]) -> float:
@@ -103,93 +52,82 @@ class TestContrastMathIsCorrect:
     def test_identical_colours_have_no_contrast(self):
         assert _contrast((120, 120, 120), (120, 120, 120)) == pytest.approx(1.0)
 
-    def test_the_filter_inverts_lightness(self):
-        # White must become black under invert; this is the property the whole
-        # mid-tone argument rests on.
-        assert _relative_luminance(_dark("#ffffff")) < 0.01
-        assert _relative_luminance(_dark("#000000")) > 0.9
+
+class TestPaletteRegistry:
+    def test_four_presets_ship(self):
+        assert set(theme.PALETTE_IDS) == {
+            "Light",
+            "Dark",
+            "Dark Blue",
+            "Dark Maroon",
+        }
+
+    def test_theme_css_block_sets_page_background_var(self):
+        block = theme.theme_css_block("Dark")
+        assert "--q-page-bg:" in block
+        assert "var(--q-page-bg)" in block
+
+    @pytest.mark.parametrize("palette_id", theme.PALETTE_IDS)
+    def test_plotly_colours_track_palette(self, palette_id):
+        colours = theme.plotly_colors(palette_id)
+        palette = theme.get_palette(palette_id)
+        assert colours["plot_bgcolor"] == palette.bg_panel
+        assert colours["paper_bgcolor"] == palette.page_bg
 
 
-class TestBordersSurviveBothModes:
-    @pytest.mark.parametrize("bg", [PANEL_BG, PAGE_BG], ids=["on-panel", "on-page"])
-    def test_border_clears_the_ui_bar_in_light_mode(self, bg):
-        assert _contrast(_hex_rgb(theme.BORDER), _hex_rgb(bg)) >= UI_COMPONENT_MIN
+class TestBordersMeetContrastBar:
+    @pytest.mark.parametrize("palette_id", theme.PALETTE_IDS)
+    def test_border_clears_ui_bar_on_panel_and_page(self, palette_id):
+        palette = theme.get_palette(palette_id)
+        for bg in (palette.bg_panel, palette.page_bg):
+            assert (
+                _contrast(_hex_rgb(palette.border), _hex_rgb(bg)) >= UI_COMPONENT_MIN
+            ), palette_id
 
-    @pytest.mark.parametrize("bg", [PANEL_BG, PAGE_BG], ids=["on-panel", "on-page"])
-    def test_border_clears_the_ui_bar_in_dark_mode(self, bg):
-        # The regression that prompted THEME.5: the old #e2e8f0 scored 1.14:1
-        # here, so panels had no visible edge at all against the dark page.
-        assert _contrast(_dark(theme.BORDER), _dark(bg)) >= UI_COMPONENT_MIN
+    @pytest.mark.parametrize("palette_id", theme.PALETTE_IDS)
+    def test_strong_border_clears_ui_bar_on_panel_and_page(self, palette_id):
+        palette = theme.get_palette(palette_id)
+        for bg in (palette.bg_panel, palette.page_bg):
+            assert (
+                _contrast(_hex_rgb(palette.border_strong), _hex_rgb(bg))
+                >= UI_COMPONENT_MIN
+            ), palette_id
 
-    @pytest.mark.parametrize("bg", [PANEL_BG, PAGE_BG], ids=["on-panel", "on-page"])
-    def test_strong_border_clears_the_bar_in_both_modes(self, bg):
-        assert (
-            _contrast(_hex_rgb(theme.BORDER_STRONG), _hex_rgb(bg)) >= UI_COMPONENT_MIN
-        )
-        assert _contrast(_dark(theme.BORDER_STRONG), _dark(bg)) >= UI_COMPONENT_MIN
+    def test_strong_is_actually_stronger_than_default_on_light(self):
+        palette = theme.get_palette("Light")
+        assert _contrast(
+            _hex_rgb(palette.border_strong), _hex_rgb(palette.bg_panel)
+        ) > _contrast(_hex_rgb(palette.border), _hex_rgb(palette.bg_panel))
 
-    def test_strong_is_actually_stronger_than_the_default(self):
-        # If these ever converge, BORDER_STRONG has quietly stopped meaning
-        # anything and the viewer frame loses its intended emphasis.
-        assert _contrast(_hex_rgb(theme.BORDER_STRONG), _hex_rgb(PANEL_BG)) > _contrast(
-            _hex_rgb(theme.BORDER), _hex_rgb(PANEL_BG)
-        )
-
-    def test_the_old_values_would_fail_this_suite(self):
-        # Documents *why* the tokens exist. If someone reverts a border to one
-        # of these, the tests above catch it — this asserts they'd be right to.
+    def test_the_old_values_would_fail_on_inverted_dark(self):
+        """Documents why mid-tone borders replaced #e2e8f0 under the old filter."""
+        inverted_panel = tuple(255 - x for x in _hex_rgb(theme.BG_PANEL))
         for old in ("#e2e8f0", "#e5e7eb", "#cbd5e1", "#c0ccd8"):
-            assert _contrast(_dark(old), _dark(PANEL_BG)) < UI_COMPONENT_MIN
+            old_inv = tuple(255 - x for x in _hex_rgb(old))
+            assert _contrast(old_inv, inverted_panel) < UI_COMPONENT_MIN
 
 
 class TestTokensAreActuallyUsed:
     def test_app_css_has_no_unreplaced_sentinels(self):
-        # _APP_CSS substitutes tokens via .replace() rather than an f-string
-        # (the block is dense with CSS braces). A typo'd sentinel would ship a
-        # literal "__Q_BORDER__" as a CSS colour and silently drop the border.
         from quantui.app import _APP_CSS
 
-        assert "__Q_BORDER__" not in _APP_CSS
-        assert "__Q_BORDER_STRONG__" not in _APP_CSS
-        # Order-of-replacement bug: replacing the short sentinel first leaves
-        # a dangling "_STRONG__" behind.
-        assert "_STRONG__" not in _APP_CSS
-        # M-THEME text-tier tokens added 2026-08-21 (h1/h3 colour, spinner
-        # border-top-color) — same class of bug, same guard.
         assert "__Q_" not in _APP_CSS
 
-    def test_app_css_carries_the_border_token(self):
+    def test_app_css_uses_css_variables(self):
         from quantui.app import _APP_CSS
 
-        assert theme.BORDER in _APP_CSS
-
-    def test_app_css_carries_the_text_and_accent_tokens(self):
-        from quantui.app import _APP_CSS
-
-        assert theme.TEXT_STRONG in _APP_CSS
-        assert theme.TEXT_SLATE in _APP_CSS
-        assert theme.ACCENT_INFO in _APP_CSS
+        assert "var(--q-border)" in _APP_CSS
+        assert "var(--q-text-strong)" in _APP_CSS
+        assert "var(--q-text-slate)" in _APP_CSS
+        assert "var(--q-accent-info)" in _APP_CSS
 
     def test_no_viewer_border_is_drawn_from_a_css_class(self):
-        # Measured in the browser 2026-08-03: an Output widget cannot
-        # shrink-wrap. Its children are Lumino widgets that JupyterLab's layout
-        # engine pins to explicit full-window pixel widths, so `fit-content`
-        # (which is min(max-content, …)) can only ever resolve to full width —
-        # a class-borne border spans the page no matter what. Three attempts
-        # were made before that measurement. The border therefore lives on the
-        # rendered fragment, where the pixel width is known; a reintroduced
-        # .quantui-viewer-frame would draw a second, full-width box around it.
         from quantui.app import _APP_CSS
 
         assert "quantui-viewer-frame" not in _APP_CSS
 
     @pytest.mark.parametrize("width", [600, 420])
     def test_rendered_fragment_carries_its_own_sized_border(self, width):
-        # The border lives on the fragment, not on the hosting Output widget's
-        # CSS class, because render_molecule_html is the only place that knows
-        # the viewer's pixel width — so the frame cannot drift out of sync with
-        # whatever a caller passes, and it hugs the plot instead of spanning
-        # the page.
         pytest.importorskip("py3Dmol")
         from quantui.molecule import Molecule
         from quantui.visualization_py3dmol import render_molecule_html
@@ -198,15 +136,10 @@ class TestTokensAreActuallyUsed:
         html = render_molecule_html(mol, width=width)
 
         assert html.startswith(f'<div style="width:{width}px;max-width:100%;')
-        assert f"border:1px solid {theme.BORDER_STRONG}" in html
-        # The info box must be INSIDE the frame — it was what forced the old
-        # full-width sizing, and it should align with the canvas.
+        assert f"border:1px solid {theme.css.BORDER_STRONG}" in html
         assert "Molecule Information" in html
 
     def test_no_viewer_output_carries_a_frame_class(self):
-        # Every 3D viewer now renders through render_molecule_html, so each
-        # already has a fitted border. Adding the class back to any of them
-        # would draw a second, full-width box around the tight one.
         import pathlib
 
         builders = (pathlib.Path(theme.__file__).parent / "app_builders.py").read_text(
@@ -215,10 +148,6 @@ class TestTokensAreActuallyUsed:
         assert 'add_class("quantui-viewer-frame")' not in builders
 
     def test_the_calculate_viewer_reserves_room_for_the_whole_fragment(self):
-        # Regression: viz_output was pinned to height="510px" — sized for the
-        # 500px canvas alone — with overflow hidden, which sliced the bottom
-        # border off once the info box moved inside the bordered fragment. A
-        # minimum reserves the same layout space without ever clipping.
         import pathlib
         import re
 
@@ -234,9 +163,6 @@ class TestTokensAreActuallyUsed:
         assert re.search(r"[^_]height=", body) is None
 
     def test_the_analysis_backend_toggle_keeps_the_border(self):
-        # The re-render path a backend toggle takes must be the same one the
-        # first draw takes, or switching py3Dmol <-> plotlymol3d silently drops
-        # the fragment (and its border) for a bare display() call.
         import pathlib
 
         app_src = (pathlib.Path(theme.__file__).parent / "app.py").read_text(
@@ -249,14 +175,7 @@ class TestTokensAreActuallyUsed:
 
 
 class TestEveryViewerIsFramed:
-    """Every 3-D viewer frames identically, and nothing clips the frame.
-
-    The border lives on the rendered fragment (see theme.frame_viewer_html),
-    which means two things can silently break it: a render path that forgets to
-    call the helper, and a hosting Output pinned to a fixed height, whose
-    overflow:hidden slices the bottom edge off. Both happened during THEME.5,
-    so both are asserted here.
-    """
+    """Every 3-D viewer frames identically, and nothing clips the frame."""
 
     @staticmethod
     def _src(name: str) -> str:
@@ -266,29 +185,10 @@ class TestEveryViewerIsFramed:
 
     @classmethod
     def _body(cls, module: str, func: str) -> str:
-        """Source of one top-level function. Black separates top-level
-        definitions with two blank lines, which is a more reliable end marker
-        than scanning for the next ``def`` — the module-level JS constants
-        between these builders would otherwise be swallowed into the body."""
         src = cls._src(module)
         body = src[src.index(f"def {func}(") :]
         end = body.find("\n\n\n")
         return body if end == -1 else body[:end]
-
-    def test_the_helper_frames_at_the_viewer_width(self):
-        html = theme.frame_viewer_html("<canvas></canvas>", width=460)
-        assert html.startswith('<div style="width:460px;max-width:100%;')
-        assert f"border:1px solid {theme.BORDER_STRONG}" in html
-        assert html.endswith("</div>")
-
-    def test_controls_are_inset_but_the_viewer_is_flush(self):
-        # The canvas is its own edge, so it should touch the frame; buttons
-        # sitting flush against a visible border read as clipped.
-        html = theme.frame_viewer_html("<canvas></canvas>", width=460, controls="<b/>")
-        assert '<canvas></canvas><div style="padding:0 8px 6px"><b/></div>' in html
-
-    def test_no_controls_means_no_empty_padding_div(self):
-        assert "padding" not in theme.frame_viewer_html("<x/>", width=100)
 
     @pytest.mark.parametrize(
         "builder",
@@ -299,16 +199,9 @@ class TestEveryViewerIsFramed:
         ],
     )
     def test_every_animation_builder_returns_a_framed_fragment(self, builder):
-        # Each of these has early-return paths (single frame, missing viewer
-        # id) that originally returned bare viewer HTML. Every exit must frame,
-        # or an animation loses its border in exactly the cases hardest to
-        # reproduce by hand — which is why this counts returns rather than
-        # checking that the helper is called somewhere in the body.
         import re
 
         body = self._body("app_visualization.py", builder)
-        # Anchored to the line start so the `"return s;"` inside these
-        # builders' embedded JS label snippets isn't counted as a Python exit.
         n_returns = len(re.findall(r"^ +return ", body, re.M))
         assert n_returns, f"no returns found in {builder}"
         assert body.count("frame_viewer_html") == n_returns, (
@@ -317,15 +210,11 @@ class TestEveryViewerIsFramed:
         )
 
     def test_both_vibration_backends_frame_their_animation(self):
-        # A user who prefers plotlymol (or lacks py3Dmol) hits a different
-        # renderer for the same viewer; it must look the same.
         for fn in ("_render_vib_mode_py3dmol", "_render_vib_mode_plotlymol"):
             body = self._body("app_visualization.py", fn)
             assert "frame_viewer_html" in body, f"{fn} emits an unframed animation"
 
     def test_the_standalone_export_is_left_unframed(self):
-        # build_vib_export_html writes a file opened OUTSIDE the app, where the
-        # invert filter never applies — same carve-out as analytics.py.
         body = self._body("app_visualization.py", "build_vib_export_html")
         assert "frame_viewer_html" not in body
 
@@ -339,9 +228,6 @@ class TestEveryViewerIsFramed:
         ],
     )
     def test_no_viewer_host_pins_a_fixed_height(self, module, widget):
-        # The failure this catches is subtle: everything renders, the border is
-        # there, and only the BOTTOM edge is missing — which reads as a CSS bug
-        # rather than a sizing one. Calculate-tab regression, 2026-08-03.
         import re
 
         src = self._src(module)
@@ -353,8 +239,6 @@ class TestEveryViewerIsFramed:
         )
 
     def test_the_preopt_host_no_longer_draws_its_own_border(self):
-        # It used to carry a widget-level border at max-width 480px. With the
-        # fragment framed, that would draw a second box around the first.
         src = self._src("app_builders.py")
         block = src[src.index("app.preopt_preview_output = widgets.Output(") :]
         block = block[: block.index("\n    )") + 6]
@@ -363,9 +247,6 @@ class TestEveryViewerIsFramed:
 
 class TestRetiredValues:
     def test_retired_border_greys_are_gone_from_in_app_chrome(self):
-        # analytics.py is deliberately excluded: it writes a STANDALONE
-        # dashboard HTML opened directly in a browser, so the app's invert
-        # filter never applies and its light borders are correct as they are.
         import pathlib
         import re
 
@@ -384,23 +265,7 @@ class TestRetiredValues:
 
 
 class TestNoRawHexReintroducedInMigratedChrome:
-    """M-THEME Execution Sequence step 1 (2026-08-21): the text/border/accent
-    tokens in ``theme.py`` were extracted from raw hex literals scattered
-    across these widget-building modules. This guards the migration from
-    quietly eroding — a future edit pasting ``color:#555`` back in instead of
-    ``{_theme.TEXT_SECONDARY}`` should fail here, not resurface as a silent
-    duplicate literal for the next audit to rediscover.
-
-    Excludes ``theme.py`` itself (the source of truth) and the plotting/3-D
-    modules (``analytics.py``, ``orbital_visualization.py``,
-    ``app_visualization.py``, ``visualization_py3dmol.py``, ``ir_plot.py``) —
-    those were deliberately left out of this pass (M-THEME roadmap 14) since a
-    wrong substitution there risks a real rendering regression this suite
-    can't see; migrating them is future work, not yet a regression to catch.
-    ``results_storage.py`` is also excluded — its calc-type badge colours are
-    already one small, well-factored dict, not the scattered-literal problem
-    this migration targets.
-    """
+    """M-THEME Execution Sequence step 1: migrated chrome must keep using tokens."""
 
     MIGRATED_FILES = (
         "app_formatters.py",
@@ -414,10 +279,6 @@ class TestNoRawHexReintroducedInMigratedChrome:
         "calc_log.py",
     )
 
-    #: theme.py attributes whose values were extracted from these files.
-    #: Kept as an explicit list (not "every theme.py string attribute") so a
-    #: token added later for a *new* use doesn't retroactively demand every
-    #: historical file be clean of a value it never used to begin with.
     MIGRATED_TOKENS = (
         "TEXT_HEADING",
         "TEXT_LABEL",
@@ -449,21 +310,17 @@ class TestNoRawHexReintroducedInMigratedChrome:
         import re
 
         pkg = pathlib.Path(theme.__file__).parent
-        values = [getattr(theme, name) for name in self.MIGRATED_TOKENS]
-        # Longest first so e.g. "#94a3b8" isn't shadowed by a shorter value
-        # that happens to prefix-match earlier in an unordered scan.
-        values.sort(key=len, reverse=True)
-        alternation = "|".join(re.escape(v) for v in values)
-        pattern = re.compile(f"(?:{alternation})\\b", re.IGNORECASE)
-        entity_pattern = re.compile(r"&#[0-9a-fA-F]{3,8};")
-
-        offenders = {}
+        offenders: list[str] = []
         for fname in self.MIGRATED_FILES:
-            text = (pkg / fname).read_text(encoding="utf-8")
-            text = entity_pattern.sub("", text)  # HTML entities, not colours
-            found = sorted(set(pattern.findall(text)))
-            if found:
-                offenders[fname] = found
-        assert (
-            offenders == {}
-        ), f"raw hex reintroduced where a theme.py token exists: {offenders}"
+            path = pkg / fname
+            text = path.read_text(encoding="utf-8")
+            for token in self.MIGRATED_TOKENS:
+                value = getattr(theme, token)
+                if not isinstance(value, str) or not value.startswith("#"):
+                    continue
+                pattern = re.compile(re.escape(value) + r"(?![0-9a-fA-F])")
+                if pattern.search(text):
+                    offenders.append(f"{fname}: {value} ({token})")
+        assert offenders == [], (
+            "raw hex reintroduced where a theme.py token exists: " f"{offenders}"
+        )

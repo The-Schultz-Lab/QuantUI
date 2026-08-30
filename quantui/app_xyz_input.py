@@ -21,7 +21,7 @@ def build_xyz_interactive_widgets(app: Any, *, layout_fn: Any) -> None:
     app._xyz_table_rows = []
 
     app.xyz_table_header = widgets.HTML(
-        f'<div style="font-size:12px;color:{_theme.TEXT_MUTED};margin:6px 0 2px">'
+        f'<div style="font-size:12px;color:{_theme.css.TEXT_MUTED};margin:6px 0 2px">'
         "<b>Element</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
         "<b>X (Å)</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
         "<b>Y (Å)</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
@@ -75,7 +75,7 @@ def build_xyz_interactive_widgets(app: Any, *, layout_fn: Any) -> None:
     app.xyz_cleanup_preview_box = widgets.VBox(
         [
             widgets.HTML(
-                f'<span style="font-size:13px;color:{_theme.TEXT_BODY}">'
+                f'<span style="font-size:13px;color:{_theme.css.TEXT_BODY}">'
                 "Proposed cleanup</span>"
             ),
             app.xyz_cleanup_notes,
@@ -202,7 +202,7 @@ def on_xyz_cleanup(app: Any, _btn: Any = None) -> None:
     note_html = "".join(f'<li style="margin:2px 0">{note}</li>' for note in notes)
     app.xyz_cleanup_notes.value = (
         f'<ul style="margin:4px 0 6px;padding-left:18px;'
-        f'color:{_theme.TEXT_MUTED};font-size:12px">{note_html}</ul>'
+        f'color:{_theme.css.TEXT_MUTED};font-size:12px">{note_html}</ul>'
     )
     app.xyz_cleanup_preview.value = cleaned
     app.xyz_cleanup_preview_box.layout.display = ""

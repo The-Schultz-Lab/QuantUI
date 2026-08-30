@@ -59,6 +59,8 @@ _VALID_EXECUTION_BACKENDS = ("local", "slurm")
 
 _VALID_QUANTUM_ENGINES = ("auto", "pyscf", "pyfock")
 
+_VALID_THEME_PALETTES = ("Light", "Dark", "Dark Blue", "Dark Maroon")
+
 # Default settings path. The QUANTUI_SETTINGS_PATH env var overrides for tests.
 DEFAULT_SETTINGS_PATH = Path.home() / ".quantui" / "settings.json"
 
@@ -74,6 +76,13 @@ class VizSettings:
     # sizes, and so a settings file written by a future version with more
     # presets degrades to the default instead of a nonsense number.
     iso_resolution: str = "medium"  # one of _VALID_ISO_RESOLUTIONS
+
+
+@dataclass
+class ThemeSettings:
+    """Visual theme preferences (M-THEME THEME.6)."""
+
+    palette: str = "Dark"
 
 
 @dataclass
@@ -110,6 +119,7 @@ class UserSettings:
     """Root user settings container — section-based for additive growth."""
 
     viz: VizSettings = field(default_factory=VizSettings)
+    theme: ThemeSettings = field(default_factory=ThemeSettings)
     compute: ComputeSettings = field(default_factory=ComputeSettings)
 
     @classmethod
@@ -210,6 +220,29 @@ class UserSettings:
             )
             compute_section = {}
 
+        theme_section = data.get("theme", {})
+        if not isinstance(theme_section, dict):
+            _LOG.warning(
+                "Settings 'theme' section is not an object (got %s); "
+                "using theme defaults",
+                type(theme_section).__name__,
+            )
+            theme_section = {}
+
+        theme = ThemeSettings()
+        candidate_palette = theme_section.get("palette", theme.palette)
+        if (
+            isinstance(candidate_palette, str)
+            and candidate_palette in _VALID_THEME_PALETTES
+        ):
+            theme.palette = candidate_palette
+        else:
+            _LOG.warning(
+                "Invalid theme.palette %r; using %r",
+                candidate_palette,
+                theme.palette,
+            )
+
         compute = ComputeSettings()
         if "gpu_enabled" in compute_section:
             candidate_gpu = compute_section["gpu_enabled"]
@@ -258,13 +291,14 @@ class UserSettings:
                     compute.quantum_engine,
                 )
 
-        return cls(viz=viz, compute=compute)
+        return cls(viz=viz, theme=theme, compute=compute)
 
     def to_dict(self) -> dict:
         """Serialize to a dict for JSON storage with the current schema version."""
         return {
             "_schema_version": _SCHEMA_VERSION,
             "viz": asdict(self.viz),
+            "theme": asdict(self.theme),
             "compute": asdict(self.compute),
         }
 

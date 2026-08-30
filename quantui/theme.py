@@ -1,136 +1,31 @@
-"""Theme colour tokens (M-THEME).
+"""Theme colour tokens and preset palettes (M-THEME).
 
-Why this module exists
-----------------------
-QuantUI's dark mode is **not a palette swap** — it is a whole-page CSS filter::
+QuantUI themes are **preset palettes** backed by CSS custom properties. Each
+palette defines independent light/dark (or tinted) values — the whole-page
+``filter: invert(1) hue-rotate(180deg)`` approach was retired in THEME.6.
 
-    html { filter: invert(1) hue-rotate(180deg) !important; }
-    canvas, img, iframe, video { filter: invert(1) hue-rotate(180deg) !important; }
+Inline HTML and app chrome reference tokens via ``theme.css.BORDER`` etc.
+(``var(--q-border)``), so a theme switch updates every surface that uses those
+vars without re-rendering widget HTML.
 
-(see ``app.QuantUIApp._theme_css``). Every colour in the UI is written once, for
-light mode, and dark mode is that same colour mathematically inverted. The
-counter-filter on ``canvas/img/iframe/video`` double-inverts embedded renderers
-(3-D viewers, plots) back to their intended appearance.
-
-**The consequence that matters, and the reason this module exists:** you cannot
-tune light and dark independently. There is exactly one source value per colour,
-and dark mode is whatever that value inverts to.
-
-The mid-tone rule
------------------
-That constraint has a non-obvious implication for anything whose job is
-*separation* rather than *legibility*:
-
-- A **light** grey border (``#e2e8f0``) looks correct on a white page, but
-  inverts to a near-black border (``#121820``) on a near-black panel — invisible.
-- A **dark** border has the mirror-image problem: fine in dark mode, invisible
-  in light.
-- A **mid-tone** border stays mid-tone under inversion, so it is visible in
-  *both*. Mid-tones are the only values that survive.
-
-Measured, not assumed (2026-07-31)
-----------------------------------
-Contrast ratios computed through the actual filter chain (invert, then the W3C
-``hue-rotate`` matrix), against the panel background ``#f8fafc``:
-
-===========  ==============  =============  ==================================
-candidate    light vs panel  dark vs panel  verdict
-===========  ==============  =============  ==================================
-``#e2e8f0``  1.18:1          1.14:1         the old value — fails both
-``#c0ccd8``  1.56:1          1.65:1         fails both
-``#94a3b8``  2.45:1          3.12:1         passes dark only
-``#7d8ea3``  3.20:1          4.30:1         **passes both** — chosen
-``#64748b``  4.55:1          6.17:1         passes both, but heavy in light
-===========  ==============  =============  ==================================
-
-``BORDER`` is the *lightest* value clearing WCAG 1.4.11's **3:1** bar for
-non-text UI components in both modes. ``#64748b`` clears it more comfortably but
-reads as a heavy rule in light mode, which is a real cost for a subtle panel
-divider.
-
-What was NOT the problem
-------------------------
-Text contrast was measured too, and it was never broken — body text on a panel
-is 7.24:1 in light and *improves* to 8.91:1 inverted. The user-reported "fix
-dark mode contrasts" was, on measurement, entirely about **structural
-separation**: panels and their borders were invisible against the page, which is
-why the same request also asked to "add borders". Text colours are deliberately
-left alone here.
-
-Scope of this module today
---------------------------
-Originally just the THEME.5 border fix. As of 2026-08-21, also a text-tier
-greyscale set and a status-accent set (see below) extracted from the 9
-widget-building "chrome" modules (``app.py``, ``app_builders.py``,
-``app_formatters.py``, ``app_runflow.py``, and others) — 379 of that file
-set's ~436 hardcoded-hex occurrences, covering the 22 highest-frequency
-distinct values. Still not a full-palette migration: the plotting/3-D-viewer
-modules (``analytics.py``, ``orbital_visualization.py``,
-``app_visualization.py``, ``visualization_py3dmol.py``, ``ir_plot.py``) are
-untouched — a wrong substitution there risks an actual rendering regression
-a cloud session with no browser can't catch — and a long tail of ~70
-low-frequency chrome values remains too. Most of what's *left* is still
-*semantic* accents (error red, success green, link blue) whose hue survives
-``hue-rotate(180)`` and looks correct in both modes already; the text/accent
-tokens added here are a maintainability move (one name instead of ~380
-copy-pasted literals), not a correctness fix — unlike ``BORDER``/
-``BORDER_STRONG`` above, which changed values and needed real contrast
-measurement.
-
-When THEME.6 (customisable palettes) lands, the invert filter has to go — a
-palette system cannot work when dark mode is a derived inversion rather than an
-independent set of values. At that point these tokens become the seam: they
-grow light/dark variants and the ``_theme_css`` filter is replaced. Keeping them
-named here means that change edits this file plus the CSS, not hundreds of call
-sites again.
+Plot/3-D modules still carry some hardcoded plot colours; those are routed
+through ``plotly_colors()`` where the app layer applies themes.
 """
 
 from __future__ import annotations
 
-# ── Structural / chrome ──────────────────────────────────────────────────────
+from dataclasses import dataclass
+from typing import Dict, Tuple
 
-#: Panel, card, and viewer borders. Mid-tone so it survives inversion — see the
-#: module docstring's table. Replaced ``#e2e8f0`` / ``#e5e7eb`` / ``#cbd5e1`` /
-#: ``#c0ccd8``, all of which were invisible in dark mode (1.14-1.65:1).
+# ── Default (Light) token values ─────────────────────────────────────────────
+# Kept as module-level names for tests and callers that need a concrete hex.
+
 BORDER = "#7d8ea3"
-
-#: Emphasised border for elements that should read as framed even at a glance
-#: (the 3-D viewer frame, which sits on its own rather than in a card stack).
 BORDER_STRONG = "#64748b"
-
-#: Light legacy border/rule colour (tables, dividers). Kept distinct from
-#: ``BORDER`` rather than merged into it — this module's own docstring warns
-#: that a light border like this one is exactly the shape of value that
-#: disappears under the dark-mode invert filter; flagged here, not yet
-#: re-measured or replaced, so a later contrast pass has one name to fix
-#: instead of the original scattered literal.
 BORDER_LEGACY = "#ccc"
-
-#: Background used for panel/card chrome (result cards, descriptor cards).
-#: Also the reference panel background this module's own WCAG measurements
-#: (see the docstring table) were computed against.
 BG_PANEL = "#f8fafc"
+PAGE_BG = "#ffffff"
 
-# ── Text (greyscale tiers) ────────────────────────────────────────────────────
-# Extracted 2026-08-21 (M-THEME Execution Sequence step 1) from ~300 scattered
-# literal occurrences across app_formatters.py, app_builders.py, app.py,
-# app_runflow.py, descriptor_cards.py, and other widget-building modules —
-# named so they're one greppable set instead of loose hex strings, and so a
-# future *harmonization* pass (there are more of these than there should be;
-# see below) only has to touch this file plus whatever it introduces, not 300
-# call sites again.
-#
-# Deliberately NOT harmonized to fewer distinct shades in this pass: each
-# token keeps its call sites' exact original value, so migrating call sites to
-# reference these is a pure extract-to-constant refactor with zero rendered-
-# pixel change — safe to do without a browser, unlike the border fix (THEME.5)
-# above, which needed real contrast measurement because it *changed* values.
-# This module's own docstring already argues these greys were not the
-# reported defect ("text contrast was never broken") — the value here is
-# maintainability (one name per shade, no more copy-pasted hex) and getting
-# migrated code ready for THEME.6, not a correctness fix. A later, visually
-# verified pass can still collapse TEXT_MUTED/_MUTED_LIGHT/_FAINT into fewer
-# WCAG-measured values the way BORDER/BORDER_STRONG already were.
 TEXT_HEADING = "#000"
 TEXT_LABEL = "#444"
 TEXT_SECONDARY = "#555"
@@ -140,22 +35,9 @@ TEXT_FAINT = "#888"
 TEXT_SUBTLE = "#94a3b8"
 TEXT_BODY = "#334155"
 TEXT_STRONG = "#1e293b"
-#: Same numeric value as ``BORDER_STRONG`` today, coincidentally — kept as a
-#: separate name because the ~25 call sites using it are text colour, not
-#: borders. Decoupled on purpose: a later border-only or text-only retune
-#: must not silently move the other.
 TEXT_SLATE = "#64748b"
 TEXT_SLATE_DARK = "#475569"
 
-# ── Status accents ────────────────────────────────────────────────────────────
-# This module's docstring notes semantic accents (error/success/warning hues)
-# were not the reported defect — they survive ``hue-rotate(180)`` and read
-# correctly in both modes already. Named here anyway for the same
-# maintainability reason as the text tier: one call site can't drift from
-# another when they share a name instead of a copy-pasted literal. The "_ALT"
-# / "_LIGHT" siblings are distinct pre-existing values (a second red, a
-# lighter amber, …), not renamed — see the text-tier note above on why this
-# pass doesn't consolidate them.
 ACCENT_ERROR = "#b91c1c"
 ACCENT_ERROR_ALT = "#c00"
 ACCENT_SUCCESS = "#16a34a"
@@ -167,66 +49,342 @@ ACCENT_INFO = "#2563eb"
 ACCENT_PURPLE = "#7c3aed"
 ACCENT_TEAL = "#0d9488"
 
+_TOKEN_FIELDS: Tuple[str, ...] = (
+    "page_bg",
+    "border",
+    "border_strong",
+    "border_legacy",
+    "bg_panel",
+    "text_heading",
+    "text_label",
+    "text_secondary",
+    "text_muted",
+    "text_muted_light",
+    "text_faint",
+    "text_subtle",
+    "text_body",
+    "text_strong",
+    "text_slate",
+    "text_slate_dark",
+    "accent_error",
+    "accent_error_alt",
+    "accent_success",
+    "accent_success_bg",
+    "accent_success_alt",
+    "accent_warning",
+    "accent_warning_light",
+    "accent_info",
+    "accent_purple",
+    "accent_teal",
+)
+
+
+@dataclass(frozen=True)
+class ThemePalette:
+    """One named preset palette — all chrome/plot base colours."""
+
+    palette_id: str
+    display_name: str
+    is_dark: bool
+    page_bg: str
+    border: str
+    border_strong: str
+    border_legacy: str
+    bg_panel: str
+    text_heading: str
+    text_label: str
+    text_secondary: str
+    text_muted: str
+    text_muted_light: str
+    text_faint: str
+    text_subtle: str
+    text_body: str
+    text_strong: str
+    text_slate: str
+    text_slate_dark: str
+    accent_error: str
+    accent_error_alt: str
+    accent_success: str
+    accent_success_bg: str
+    accent_success_alt: str
+    accent_warning: str
+    accent_warning_light: str
+    accent_info: str
+    accent_purple: str
+    accent_teal: str
+
+    def css_variables(self) -> Dict[str, str]:
+        """Map ``--q-*`` custom-property names to hex values."""
+        out: Dict[str, str] = {}
+        for field in _TOKEN_FIELDS:
+            key = field.replace("_", "-")
+            out[f"--q-{key}"] = getattr(self, field)
+        return out
+
+
+def _light_palette() -> ThemePalette:
+    return ThemePalette(
+        palette_id="Light",
+        display_name="Light",
+        is_dark=False,
+        page_bg=PAGE_BG,
+        border=BORDER,
+        border_strong=BORDER_STRONG,
+        border_legacy=BORDER_LEGACY,
+        bg_panel=BG_PANEL,
+        text_heading=TEXT_HEADING,
+        text_label=TEXT_LABEL,
+        text_secondary=TEXT_SECONDARY,
+        text_muted=TEXT_MUTED,
+        text_muted_light=TEXT_MUTED_LIGHT,
+        text_faint=TEXT_FAINT,
+        text_subtle=TEXT_SUBTLE,
+        text_body=TEXT_BODY,
+        text_strong=TEXT_STRONG,
+        text_slate=TEXT_SLATE,
+        text_slate_dark=TEXT_SLATE_DARK,
+        accent_error=ACCENT_ERROR,
+        accent_error_alt=ACCENT_ERROR_ALT,
+        accent_success=ACCENT_SUCCESS,
+        accent_success_bg=ACCENT_SUCCESS_BG,
+        accent_success_alt=ACCENT_SUCCESS_ALT,
+        accent_warning=ACCENT_WARNING,
+        accent_warning_light=ACCENT_WARNING_LIGHT,
+        accent_info=ACCENT_INFO,
+        accent_purple=ACCENT_PURPLE,
+        accent_teal=ACCENT_TEAL,
+    )
+
+
+def _dark_palette() -> ThemePalette:
+    return ThemePalette(
+        palette_id="Dark",
+        display_name="Dark",
+        is_dark=True,
+        page_bg="#0f172a",
+        border="#64748b",
+        border_strong="#94a3b8",
+        border_legacy="#475569",
+        bg_panel="#1e293b",
+        text_heading="#f8fafc",
+        text_label="#e2e8f0",
+        text_secondary="#cbd5e1",
+        text_muted="#94a3b8",
+        text_muted_light="#94a3b8",
+        text_faint="#64748b",
+        text_subtle="#64748b",
+        text_body="#e2e8f0",
+        text_strong="#f1f5f9",
+        text_slate="#94a3b8",
+        text_slate_dark="#cbd5e1",
+        accent_error="#f87171",
+        accent_error_alt="#ef4444",
+        accent_success="#4ade80",
+        accent_success_bg="#14532d",
+        accent_success_alt="#22c55e",
+        accent_warning="#fbbf24",
+        accent_warning_light="#fcd34d",
+        accent_info="#60a5fa",
+        accent_purple="#a78bfa",
+        accent_teal="#2dd4bf",
+    )
+
+
+def _dark_blue_palette() -> ThemePalette:
+    return ThemePalette(
+        palette_id="Dark Blue",
+        display_name="Dark Blue",
+        is_dark=True,
+        page_bg="#0a1628",
+        border="#7a9fcc",
+        border_strong="#8fb0d9",
+        border_legacy="#3d5a80",
+        bg_panel="#0f2847",
+        text_heading="#e8f0ff",
+        text_label="#c5d9f2",
+        text_secondary="#a8c4e8",
+        text_muted="#8fb0d9",
+        text_muted_light="#7a9fcc",
+        text_faint="#6b8fbf",
+        text_subtle="#6b8fbf",
+        text_body="#d6e6ff",
+        text_strong="#f0f6ff",
+        text_slate="#8fb0d9",
+        text_slate_dark="#a8c4e8",
+        accent_error="#f87171",
+        accent_error_alt="#ef4444",
+        accent_success="#4ade80",
+        accent_success_bg="#0d3320",
+        accent_success_alt="#22c55e",
+        accent_warning="#fbbf24",
+        accent_warning_light="#fcd34d",
+        accent_info="#7eb6ff",
+        accent_purple="#a78bfa",
+        accent_teal="#5eead4",
+    )
+
+
+def _dark_maroon_palette() -> ThemePalette:
+    return ThemePalette(
+        palette_id="Dark Maroon",
+        display_name="Dark Maroon",
+        is_dark=True,
+        page_bg="#1a0a0f",
+        border="#8b5a6b",
+        border_strong="#a06b7d",
+        border_legacy="#6b4554",
+        bg_panel="#2d1219",
+        text_heading="#fce8ef",
+        text_label="#e8c4d0",
+        text_secondary="#d4a8b8",
+        text_muted="#b88898",
+        text_muted_light="#a87888",
+        text_faint="#986878",
+        text_subtle="#986878",
+        text_body="#f0d8e0",
+        text_strong="#fff5f8",
+        text_slate="#b88898",
+        text_slate_dark="#d4a8b8",
+        accent_error="#f87171",
+        accent_error_alt="#ef4444",
+        accent_success="#4ade80",
+        accent_success_bg="#1a3320",
+        accent_success_alt="#22c55e",
+        accent_warning="#fbbf24",
+        accent_warning_light="#fcd34d",
+        accent_info="#93c5fd",
+        accent_purple="#c4b5fd",
+        accent_teal="#5eead4",
+    )
+
+
+PALETTES: Dict[str, ThemePalette] = {
+    p.palette_id: p
+    for p in (
+        _light_palette(),
+        _dark_palette(),
+        _dark_blue_palette(),
+        _dark_maroon_palette(),
+    )
+}
+
+PALETTE_IDS: Tuple[str, ...] = tuple(PALETTES.keys())
+DEFAULT_PALETTE_ID = "Dark"
+
+
+def get_palette(palette_id: str) -> ThemePalette:
+    """Return a palette by id, falling back to the default."""
+    return PALETTES.get(palette_id, PALETTES[DEFAULT_PALETTE_ID])
+
+
+def theme_css_block(palette_id: str) -> str:
+    """Inject CSS custom properties for *palette_id* (THEME.6)."""
+    palette = get_palette(palette_id)
+    lines = [f"  {k}: {v};" for k, v in palette.css_variables().items()]
+    vars_block = "\n".join(lines)
+    return (
+        "<style>"
+        ":root {\n"
+        f"{vars_block}\n"
+        "}\n"
+        "html, body, .jp-OutputArea-output, .widget-html-content "
+        "{ background-color: var(--q-page-bg) !important; "
+        "color: var(--q-text-body) !important; }\n"
+        "</style>"
+    )
+
+
+def plotly_colors(palette_id: str) -> dict:
+    """Plotly layout colours for the selected palette."""
+    palette = get_palette(palette_id)
+    return {
+        "plot_bgcolor": palette.bg_panel,
+        "paper_bgcolor": palette.page_bg,
+        "font_color": palette.text_strong,
+        "grid_color": palette.border,
+        "scene_bgcolor": "#000000" if palette.is_dark else "#ffffff",
+    }
+
+
+class _CssVarRefs:
+    """CSS ``var(--q-*)`` references for inline HTML — theme-switchable."""
+
+    BORDER = "var(--q-border)"
+    BORDER_STRONG = "var(--q-border-strong)"
+    BORDER_LEGACY = "var(--q-border-legacy)"
+    BG_PANEL = "var(--q-bg-panel)"
+    PAGE_BG = "var(--q-page-bg)"
+    TEXT_HEADING = "var(--q-text-heading)"
+    TEXT_LABEL = "var(--q-text-label)"
+    TEXT_SECONDARY = "var(--q-text-secondary)"
+    TEXT_MUTED = "var(--q-text-muted)"
+    TEXT_MUTED_LIGHT = "var(--q-text-muted-light)"
+    TEXT_FAINT = "var(--q-text-faint)"
+    TEXT_SUBTLE = "var(--q-text-subtle)"
+    TEXT_BODY = "var(--q-text-body)"
+    TEXT_STRONG = "var(--q-text-strong)"
+    TEXT_SLATE = "var(--q-text-slate)"
+    TEXT_SLATE_DARK = "var(--q-text-slate-dark)"
+    ACCENT_ERROR = "var(--q-accent-error)"
+    ACCENT_ERROR_ALT = "var(--q-accent-error-alt)"
+    ACCENT_SUCCESS = "var(--q-accent-success)"
+    ACCENT_SUCCESS_BG = "var(--q-accent-success-bg)"
+    ACCENT_SUCCESS_ALT = "var(--q-accent-success-alt)"
+    ACCENT_WARNING = "var(--q-accent-warning)"
+    ACCENT_WARNING_LIGHT = "var(--q-accent-warning-light)"
+    ACCENT_INFO = "var(--q-accent-info)"
+    ACCENT_PURPLE = "var(--q-accent-purple)"
+    ACCENT_TEAL = "var(--q-accent-teal)"
+
+
+css = _CssVarRefs()
+
 
 def frame_viewer_html(view_html: str, *, width: int, controls: str = "") -> str:
-    """Wrap a 3-D viewer fragment in the standard frame, sized to the viewer.
-
-    Every 3-D viewer in the app — static molecule, optimization trajectory,
-    vibrational mode, classical pre-opt preview — goes through here so they all
-    frame identically and a token change lands everywhere at once.
-
-    ``width`` must be the viewer's own pixel width. The frame is built at that
-    width **here**, in the code that knows it, rather than as a CSS class on the
-    hosting ``widgets.Output``. Measured in the browser 2026-08-03: an Output's
-    children are Lumino widgets that JupyterLab sizes with explicit pixel widths
-    tracking the window, so a class-borne ``fit-content`` always resolves to the
-    full page width. The border then enclosed a wide strip of dead space beside
-    the plot, which is actively misleading — it implies the whole strip is
-    interactive and hides where the page can be scrolled without dragging the
-    3-D view.
-
-    ``controls`` is optional stepper/player markup rendered below the viewer.
-    It is inset so the buttons don't sit flush against the frame; the viewer
-    itself stays flush, since its canvas is its own edge.
-
-    Note for callers: the hosting Output must not pin a fixed ``height``, or the
-    frame's bottom edge is clipped off by ``overflow: hidden``. Use
-    ``min_height`` — see ``app_builders.build_shared_widgets``.
-    """
+    """Wrap a 3-D viewer fragment in the standard frame, sized to the viewer."""
     if controls:
         controls = f'<div style="padding:0 8px 6px">{controls}</div>'
     return (
         f'<div style="width:{width}px;max-width:100%;'
-        f"border:1px solid {BORDER_STRONG};border-radius:6px;"
+        f"border:1px solid {css.BORDER_STRONG};border-radius:6px;"
         f'overflow:hidden">{view_html}{controls}</div>'
     )
 
 
 __all__ = [
-    "BORDER",
-    "BORDER_STRONG",
-    "BORDER_LEGACY",
-    "BG_PANEL",
-    "TEXT_HEADING",
-    "TEXT_LABEL",
-    "TEXT_SECONDARY",
-    "TEXT_MUTED",
-    "TEXT_MUTED_LIGHT",
-    "TEXT_FAINT",
-    "TEXT_SUBTLE",
-    "TEXT_BODY",
-    "TEXT_STRONG",
-    "TEXT_SLATE",
-    "TEXT_SLATE_DARK",
     "ACCENT_ERROR",
     "ACCENT_ERROR_ALT",
-    "ACCENT_SUCCESS",
-    "ACCENT_SUCCESS_BG",
-    "ACCENT_SUCCESS_ALT",
-    "ACCENT_WARNING",
-    "ACCENT_WARNING_LIGHT",
     "ACCENT_INFO",
     "ACCENT_PURPLE",
+    "ACCENT_SUCCESS",
+    "ACCENT_SUCCESS_ALT",
+    "ACCENT_SUCCESS_BG",
     "ACCENT_TEAL",
+    "ACCENT_WARNING",
+    "ACCENT_WARNING_LIGHT",
+    "BG_PANEL",
+    "BORDER",
+    "BORDER_LEGACY",
+    "BORDER_STRONG",
+    "DEFAULT_PALETTE_ID",
+    "PAGE_BG",
+    "PALETTE_IDS",
+    "PALETTES",
+    "TEXT_BODY",
+    "TEXT_FAINT",
+    "TEXT_HEADING",
+    "TEXT_LABEL",
+    "TEXT_MUTED",
+    "TEXT_MUTED_LIGHT",
+    "TEXT_SECONDARY",
+    "TEXT_SLATE",
+    "TEXT_SLATE_DARK",
+    "TEXT_STRONG",
+    "TEXT_SUBTLE",
+    "ThemePalette",
+    "css",
     "frame_viewer_html",
+    "get_palette",
+    "plotly_colors",
+    "theme_css_block",
 ]

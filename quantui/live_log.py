@@ -90,7 +90,7 @@ _MAIL_CLASS = "quantui-live-mail"
 # ASCII header exactly as .jp-OutputArea-output did (see GOTCHAS).
 _CONTAINER_STYLE = (
     "height:300px;overflow-y:auto;overflow-anchor:auto;"
-    f"border:1px solid {_theme.BORDER};border-radius:2px;padding:8px;"
+    f"border:1px solid {_theme.css.BORDER};border-radius:2px;padding:8px;"
     "font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,"
     "'Liberation Mono','Courier New',monospace;"
     "font-size:12.5px;line-height:1.35;white-space:pre-wrap;"

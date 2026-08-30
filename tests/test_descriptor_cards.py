@@ -56,9 +56,9 @@ class TestMethodCard:
         hf = method_card_html("RHF")
         dft = method_card_html("B3LYP")
         wfn = method_card_html("CCSD")
-        assert "#2563eb" in hf  # hf blue
-        assert "#7c3aed" in dft  # dft violet
-        assert "#b45309" in wfn  # wavefunction amber
+        assert "var(--q-accent-info)" in hf
+        assert "var(--q-accent-purple)" in dft
+        assert "var(--q-accent-warning)" in wfn
 
     def test_unknown_method_does_not_raise(self):
         html = method_card_html("NOT_A_METHOD")

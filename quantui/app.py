@@ -722,10 +722,8 @@ def _load_last_calibration_label() -> str:
 
 
 # ── Module-level constants ────────────────────────────────────────────────────
-_THEME_HUE: dict = {"Dark": 180}
 
-_APP_CSS: str = (
-    """<style>
+_APP_CSS: str = """<style>
 /* System font stack ---------------------------------------------------- */
 body, p, span, li, td, th, label, input, select, textarea, blockquote,
 .jp-OutputArea-output, .widget-html-content, .widget-label-basic,
@@ -739,7 +737,7 @@ body, p, span, li, td, th, label, input, select, textarea, blockquote,
 h1 {
     font-size: 20px !important;
     font-weight: 700 !important;
-    color: __Q_TEXT_STRONG__ !important;
+    color: var(--q-text-strong) !important;
     letter-spacing: -0.01em !important;
     margin: 10px 0 4px !important;
     border-bottom: none !important;
@@ -772,10 +770,10 @@ h3 {
     font-weight: 700 !important;
     letter-spacing: 0.09em !important;
     text-transform: uppercase !important;
-    color: __Q_TEXT_SLATE__ !important;
+    color: var(--q-text-slate) !important;
     margin: 24px 0 10px !important;
     padding-bottom: 5px !important;
-    border-bottom: 1px solid __Q_BORDER__ !important;
+    border-bottom: 1px solid var(--q-border) !important;
 }
 
 /* Rounded corners on inputs, dropdowns, and buttons -------------------- */
@@ -786,7 +784,7 @@ h3 {
 .widget-dropdown select { border-radius: 5px !important; }
 .widget-button, .widget-toggle-button { border-radius: 5px !important; }
 
-/* Suppress Jupyter stderr pink — invert+hue-rotate turns it dark red in Dark mode */
+/* Suppress Jupyter stderr pink in dark palettes */
 .jp-OutputArea-stderr, .output_stderr {
     background: transparent !important;
 }
@@ -798,34 +796,13 @@ h3 {
     display: inline-block;
     width: 14px;
     height: 14px;
-    border: 2px solid __Q_BORDER__;
-    border-top-color: __Q_ACCENT_INFO__;
+    border: 2px solid var(--q-border);
+    border-top-color: var(--q-accent-info);
     border-radius: 50%;
     animation: quantui-spin 0.7s linear infinite;
     vertical-align: middle;
 }
-</style>""".replace(
-        # Sentinel substitution rather than an f-string: this block is dense with
-        # CSS braces, every one of which would need doubling. Substitute longer
-        # names before any name they're a prefix of — "__Q_BORDER__" matches
-        # inside "__Q_BORDER_STRONG__" and would leave a dangling "_STRONG__". None
-        # of the sentinels below are prefixes of one another, so order is free.
-        "__Q_BORDER__",
-        _theme.BORDER,
-    )
-    .replace(
-        "__Q_TEXT_STRONG__",
-        _theme.TEXT_STRONG,
-    )
-    .replace(
-        "__Q_TEXT_SLATE__",
-        _theme.TEXT_SLATE,
-    )
-    .replace(
-        "__Q_ACCENT_INFO__",
-        _theme.ACCENT_INFO,
-    )
-)
+</style>"""
 
 _LAYOUT_TRAITS: frozenset[str] = frozenset(widgets.Layout.class_trait_names())
 
@@ -1824,18 +1801,9 @@ class QuantUIApp:
     def _build_theme_selector(self) -> None:
         _bld_build_theme_selector(self, layout_fn=_layout)
 
-    def _theme_css(self, theme: str) -> str:
-        """Return the CSS filter block for *theme*, or '' for Light."""
-        if theme not in _THEME_HUE:
-            return ""
-        deg = _THEME_HUE[theme]
-        return (
-            "<style>"
-            f"html {{ filter: invert(1) hue-rotate({deg}deg) !important; }}"
-            "canvas, img, iframe, video "
-            f"{{ filter: invert(1) hue-rotate({deg}deg) !important; }}"
-            "</style>"
-        )
+    def _theme_css(self, palette_id: str) -> str:
+        """Return the CSS variable block for *palette_id*."""
+        return _theme.theme_css_block(palette_id)
 
     def _set_activity_indicator(self, state: str = "idle", message: str = "") -> None:
         """Update the toolbar activity light state and tooltip."""
@@ -2723,7 +2691,9 @@ class QuantUIApp:
             return f"{size_bytes / 1024:.1f} KB"
         return f"{size_bytes / (1024 * 1024):.1f} MB"
 
-    def _set_files_status(self, message: str, color: str = _theme.TEXT_SLATE) -> None:
+    def _set_files_status(
+        self, message: str, color: str = _theme.css.TEXT_SLATE
+    ) -> None:
         """Update Files tab status text."""
         self._files_status_html.value = (
             f'<span style="font-size:12px;color:{color}">'
@@ -2783,12 +2753,14 @@ class QuantUIApp:
             self._files_current_dir = None
             self._files_selected_path = None
             self._files_path_html.value = (
-                f'<span style="font-size:12px;color:{_theme.TEXT_SLATE}">'
+                f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE}">'
                 "Current folder: unavailable</span>"
             )
             self._files_open_btn.disabled = True
             self._files_up_btn.disabled = True
-            self._set_files_status("No readable roots available.", _theme.ACCENT_ERROR)
+            self._set_files_status(
+                "No readable roots available.", _theme.css.ACCENT_ERROR
+            )
             self._files_preview_output.clear_output(wait=True)
             return
 
@@ -2840,7 +2812,7 @@ class QuantUIApp:
 
         self._files_current_dir = current
         self._files_path_html.value = (
-            f'<span style="font-size:12px;color:{_theme.TEXT_SLATE_DARK}">Current folder: '
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK}">Current folder: '
             f"{_html.escape(str(current))}</span>"
         )
 
@@ -2853,7 +2825,9 @@ class QuantUIApp:
             self._files_open_btn.disabled = True
             self._files_up_btn.disabled = True
             self._files_preview_output.clear_output(wait=True)
-            self._set_files_status(f"Cannot list folder: {exc}", _theme.ACCENT_ERROR)
+            self._set_files_status(
+                f"Cannot list folder: {exc}", _theme.css.ACCENT_ERROR
+            )
             return
 
         children.sort(key=lambda p: (not p.is_dir(), p.name.lower()))
@@ -2899,12 +2873,12 @@ class QuantUIApp:
         roots = self._files_allowed_roots()
         if not self._is_path_in_allowed_roots(path, roots):
             self._set_files_status(
-                "Selected path is outside allowed roots.", _theme.ACCENT_ERROR
+                "Selected path is outside allowed roots.", _theme.css.ACCENT_ERROR
             )
             return
         if not path.exists() or not path.is_file():
             self._set_files_status(
-                "Selected file no longer exists.", _theme.ACCENT_ERROR
+                "Selected file no longer exists.", _theme.css.ACCENT_ERROR
             )
             return
 
@@ -3039,7 +3013,7 @@ class QuantUIApp:
                 with self._files_preview_output:
                     display(
                         HTML(
-                            f"<p style='font-size:11px;color:{_theme.TEXT_SLATE};margin:0 0 4px'>"
+                            f"<p style='font-size:11px;color:{_theme.css.TEXT_SLATE};margin:0 0 4px'>"
                             f"{_html.escape(note)}</p>"
                             "<pre style='white-space:pre-wrap;word-break:break-word;"
                             "font-size:12px;line-height:1.35;margin:0'>"
@@ -3067,15 +3041,15 @@ class QuantUIApp:
                     body = rows[1:]
                     head_html = "".join(
                         f'<th style="padding:4px 10px;text-align:left;'
-                        f"border-bottom:1px solid {_theme.BORDER};font-size:12px;"
-                        f'color:{_theme.TEXT_STRONG}">{_html.escape(str(c))}</th>'
+                        f"border-bottom:1px solid {_theme.css.BORDER};font-size:12px;"
+                        f'color:{_theme.css.TEXT_STRONG}">{_html.escape(str(c))}</th>'
                         for c in header
                     )
                     body_html = "".join(
                         "<tr>"
                         + "".join(
                             f'<td style="padding:3px 10px;font-size:12px;'
-                            f"border-bottom:1px solid #f1f5f9;color:{_theme.TEXT_BODY};"
+                            f"border-bottom:1px solid #f1f5f9;color:{_theme.css.TEXT_BODY};"
                             f'font-variant-numeric:tabular-nums">{_html.escape(str(c))}</td>'
                             for c in r
                         )
@@ -3083,7 +3057,7 @@ class QuantUIApp:
                         for r in body
                     )
                     note = (
-                        f'<p style="font-size:11px;color:{_theme.TEXT_SUBTLE};margin:4px 0 6px">'
+                        f'<p style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:4px 0 6px">'
                         f"First {len(rows)} rows shown.</p>"
                         if len(rows) >= 50
                         else ""
@@ -3111,7 +3085,7 @@ class QuantUIApp:
                     # reach the parent app.
                     iframe_html = (
                         '<iframe sandbox="allow-scripts" '
-                        f'style="width:100%;height:400px;border:1px solid {_theme.BORDER};'
+                        f'style="width:100%;height:400px;border:1px solid {_theme.css.BORDER};'
                         'border-radius:4px" '
                         f'srcdoc="{_html.escape(html_text, quote=True)}"></iframe>'
                     )
@@ -3136,17 +3110,17 @@ class QuantUIApp:
                 header_text = "\n".join(head_lines)
                 size_mb = stat.st_size / (1024 * 1024)
                 msg_html = (
-                    f'<p style="font-size:13px;color:{_theme.TEXT_SLATE_DARK};margin:0 0 6px">'
+                    f'<p style="font-size:13px;color:{_theme.css.TEXT_SLATE_DARK};margin:0 0 6px">'
                     f"<b>Cube file:</b> {_html.escape(path.name)} "
                     f"&middot; {size_mb:.2f} MB</p>"
-                    f'<p style="font-size:12px;color:{_theme.TEXT_SLATE};margin:0 0 6px">'
+                    f'<p style="font-size:12px;color:{_theme.css.TEXT_SLATE};margin:0 0 6px">'
                     "Use the <b>Analysis</b> tab's Orbital Isosurface panel to "
                     "render volumetric data; the raw file is too large to "
                     "preview inline.</p>"
-                    f'<p style="font-size:11px;color:{_theme.TEXT_SUBTLE};margin:6px 0 4px">'
+                    f'<p style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:6px 0 4px">'
                     "Header (first 6 lines):</p>"
                     '<pre style="white-space:pre-wrap;font-size:11px;'
-                    f"line-height:1.35;margin:0;background:{_theme.BG_PANEL};padding:6px;"
+                    f"line-height:1.35;margin:0;background:{_theme.css.BG_PANEL};padding:6px;"
                     'border-radius:4px">'
                     f"{_html.escape(header_text)}</pre>"
                 )
@@ -3162,7 +3136,9 @@ class QuantUIApp:
             try:
                 sample = path.read_bytes()[:512]
             except OSError as exc:
-                self._set_files_status(f"Cannot read file: {exc}", _theme.ACCENT_ERROR)
+                self._set_files_status(
+                    f"Cannot read file: {exc}", _theme.css.ACCENT_ERROR
+                )
                 return
             is_text = b"\x00" not in sample
 
@@ -3170,7 +3146,7 @@ class QuantUIApp:
             with self._files_preview_output:
                 display(
                     HTML(
-                        f"<p style='font-size:12px;color:{_theme.TEXT_SLATE_DARK};margin:4px 0'>"
+                        f"<p style='font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin:4px 0'>"
                         "Binary preview is not available for this file type."
                         "</p>"
                     )
@@ -3182,7 +3158,7 @@ class QuantUIApp:
         try:
             raw = path.read_bytes()
         except OSError as exc:
-            self._set_files_status(f"Cannot read file: {exc}", _theme.ACCENT_ERROR)
+            self._set_files_status(f"Cannot read file: {exc}", _theme.css.ACCENT_ERROR)
             return
 
         truncated = len(raw) > max_bytes
@@ -3212,7 +3188,9 @@ class QuantUIApp:
         new_root = Path(new_value)
         roots = self._files_allowed_roots()
         if not self._is_path_in_allowed_roots(new_root, roots):
-            self._set_files_status("Selected root is not allowed.", _theme.ACCENT_ERROR)
+            self._set_files_status(
+                "Selected root is not allowed.", _theme.css.ACCENT_ERROR
+            )
             return
 
         self._files_current_dir = new_root
@@ -3258,7 +3236,7 @@ class QuantUIApp:
         try:
             if self._files_current_dir is None:
                 self._set_files_status(
-                    "No current folder selected.", _theme.ACCENT_ERROR
+                    "No current folder selected.", _theme.css.ACCENT_ERROR
                 )
                 return
 
@@ -3288,30 +3266,19 @@ class QuantUIApp:
     # ── Theme ─────────────────────────────────────────────────────────────
 
     def _on_theme_changed(self, change) -> None:
+        palette_id = change["new"]
+        if palette_id not in _theme.PALETTE_IDS:
+            return
+        self._user_settings.theme.palette = palette_id
+        self._user_settings.save()
         self._theme_style.clear_output()
-        css = self._theme_css(change["new"])
-        if css:
-            with self._theme_style:
-                display(HTML(css))
+        with self._theme_style:
+            display(HTML(self._theme_css(palette_id)))
         self._rerender_plotly_theme()
 
     def _plotly_theme_colors(self) -> dict:
-        """Return plot colors tuned for the current theme.
-
-        The dark theme is a CSS invert+hue-rotate filter on the whole page.
-        For SVG/div elements (2D charts): html filter already inverts, so we
-        use light values and let the filter make them dark.
-        For WebGL canvas (3D scenes): canvas has a counter-filter that cancels
-        the html filter, so the color appears as-is — use scene_bgcolor.
-        """
-        is_dark = self.theme_btn.value == "Dark"
-        return {
-            "plot_bgcolor": "white",  # html filter darkens this in dark mode
-            "paper_bgcolor": "white",  # html filter darkens this in dark mode
-            "font_color": "#111827",  # html filter lightens → white text in dark
-            "grid_color": "#e5e7eb",  # html filter darkens → subtle grid in dark
-            "scene_bgcolor": "#000000" if is_dark else "#ffffff",
-        }
+        """Return plot colours for the active palette."""
+        return _theme.plotly_colors(self.theme_btn.value)
 
     def _apply_plotly_theme(self, fig) -> None:
         """Apply current theme colors to a plotly Figure in-place."""
@@ -3627,7 +3594,7 @@ class QuantUIApp:
             return
         display_name = "py3Dmol" if chosen == VizBackend.PY3DMOL else "plotlymol3d"
         label.value = (
-            f'<span style="font-size:11px;color:{_theme.TEXT_SUBTLE};font-style:italic">'
+            f'<span style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};font-style:italic">'
             f"Rendering with: {display_name}</span>"
         )
 
@@ -3782,7 +3749,7 @@ class QuantUIApp:
         finally:
             self._lib_refreshing = False
         self.lib_count_lbl.value = (
-            f'<span style="color:{_theme.TEXT_FAINT};font-size:12px">{note}</span>'
+            f'<span style="color:{_theme.css.TEXT_FAINT};font-size:12px">{note}</span>'
         )
 
     def _on_lib_filter_changed(self, change) -> None:
@@ -4256,7 +4223,7 @@ class QuantUIApp:
             or getattr(self, "_last_vib_molecule", None) is None
         ):
             status.value = (
-                f'<span style="color:{_theme.ACCENT_ERROR};font-size:12px">'
+                f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
                 "No vibrational mode loaded — run a Frequency calculation first."
                 "</span>"
             )
@@ -4266,7 +4233,7 @@ class QuantUIApp:
             mode_number = int(self.vib_mode_dd.value)
         except (TypeError, ValueError):
             status.value = (
-                f'<span style="color:{_theme.ACCENT_ERROR};font-size:12px">'
+                f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
                 "No vibrational mode selected.</span>"
             )
             return
@@ -4275,7 +4242,7 @@ class QuantUIApp:
             backend, html_str = _viz_build_vib_export_html(self, mode_number)
         except Exception as exc:
             status.value = (
-                f'<span style="color:{_theme.ACCENT_ERROR};font-size:12px">'
+                f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
                 f"Export failed: {exc}</span>"
             )
             try:
@@ -4303,13 +4270,13 @@ class QuantUIApp:
             dest.write_text(html_str, encoding="utf-8")
         except Exception as exc:
             status.value = (
-                f'<span style="color:{_theme.ACCENT_ERROR};font-size:12px">'
+                f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
                 f"Write failed: {exc}</span>"
             )
             return
 
         status.value = (
-            f'<span style="color:{_theme.ACCENT_SUCCESS};font-size:12px">'
+            f'<span style="color:{_theme.css.ACCENT_SUCCESS};font-size:12px">'
             f"Saved ({backend}): {dest}</span>"
         )
         try:
@@ -4339,7 +4306,7 @@ class QuantUIApp:
         """Export a plotly figure to HTML or PNG in the current result folder."""
         if fig is None:
             status_widget.value = (
-                f'<span style="color:{_theme.ACCENT_ERROR};font-size:12px">'
+                f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
                 "No plot available to export yet.</span>"
             )
             return
@@ -4375,7 +4342,7 @@ class QuantUIApp:
                 dest.write_text(html_str, encoding="utf-8")
 
             status_widget.value = (
-                f'<span style="color:{_theme.ACCENT_SUCCESS};font-size:12px">'
+                f'<span style="color:{_theme.css.ACCENT_SUCCESS};font-size:12px">'
                 f"Saved: {dest}</span>"
             )
         except Exception as exc:
@@ -4385,7 +4352,7 @@ class QuantUIApp:
                     "PNG export requires kaleido. " "Install with: pip install kaleido"
                 )
             status_widget.value = (
-                f'<span style="color:{_theme.ACCENT_ERROR};font-size:12px">'
+                f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
                 f"Export failed: {msg}</span>"
             )
 
@@ -4450,7 +4417,7 @@ class QuantUIApp:
         """
         if fig is None:
             status_widget.value = (
-                f'<span style="color:{_theme.ACCENT_ERROR};font-size:12px">'
+                f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
                 "No plot data to copy yet.</span>"
             )
             return
@@ -4458,7 +4425,7 @@ class QuantUIApp:
         csv_text = self._fig_to_csv(fig, title=title)
         if not csv_text:
             status_widget.value = (
-                f'<span style="color:{_theme.ACCENT_ERROR};font-size:12px">'
+                f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
                 "Figure had no extractable (x, y) traces.</span>"
             )
             return
@@ -4482,7 +4449,7 @@ class QuantUIApp:
             dest.write_text(csv_text, encoding="utf-8")
         except Exception as exc:
             status_widget.value = (
-                f'<span style="color:{_theme.ACCENT_ERROR};font-size:12px">'
+                f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
                 f"Write failed: {exc}</span>"
             )
             return
@@ -4504,7 +4471,7 @@ class QuantUIApp:
             pass  # Clipboard is best-effort; the file is the canonical artifact.
 
         status_widget.value = (
-            f'<span style="color:{_theme.ACCENT_SUCCESS};font-size:12px">'
+            f'<span style="color:{_theme.css.ACCENT_SUCCESS};font-size:12px">'
             f"Saved CSV: {dest} &mdash; copied to clipboard"
             "</span>"
         )
@@ -4831,13 +4798,13 @@ class QuantUIApp:
             e_str = ""
 
         _lbl = (
-            f'<br><small style="color:{_theme.TEXT_MUTED_LIGHT}">{label}</small>'
+            f'<br><small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{label}</small>'
             if label
             else ""
         )
         _summary = (
             f'<b style="font-size:15px">{mol.get_formula()}</b>'
-            f'&ensp;<span style="color:{_theme.TEXT_SECONDARY};font-size:13px">'
+            f'&ensp;<span style="color:{_theme.css.TEXT_SECONDARY};font-size:13px">'
             f"{len(mol.atoms)} atoms"
             + (f" &bull; {e_str}" if e_str else "")
             + f" &bull; charge {mol.charge} &bull; mult {mol.multiplicity}"
@@ -4978,7 +4945,7 @@ class QuantUIApp:
         """
         # Path label
         self._result_dir_label.value = (
-            f'<span style="font-size:12px;color:{_theme.TEXT_SECONDARY};font-family:monospace">'
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY};font-family:monospace">'
             f"Saved to: {saved_dir}</span>"
         )
         self._result_dir_label.layout.display = ""
@@ -5831,7 +5798,7 @@ class QuantUIApp:
                     if _n_heavy > 20:
                         self.result_output.append_display_data(
                             HTML(
-                                f'<div style="background:#fffbe6;border-left:4px solid {_theme.ACCENT_WARNING_LIGHT};'
+                                f'<div style="background:#fffbe6;border-left:4px solid {_theme.css.ACCENT_WARNING_LIGHT};'
                                 'padding:8px 12px;border-radius:4px;margin:4px 0;font-size:13px">'
                                 f"⚠️ MP2 scales as O(N⁵) — this molecule has {_n_heavy} heavy atoms "
                                 "and may be slow. Consider using DFT instead.</div>"
@@ -5868,13 +5835,13 @@ class QuantUIApp:
             )
             if ct == "Geometry Opt":
                 self._viz_label.value = (
-                    f'<p style="color:{_theme.TEXT_SECONDARY};font-size:12px;font-weight:600;'
+                    f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:12px;font-weight:600;'
                     'margin:6px 0 2px">Optimized geometry</p>'
                 )
                 self._viz_label.layout.display = ""
             elif ct == "Reorganization Energy":
                 self._viz_label.value = (
-                    f'<p style="color:{_theme.TEXT_SECONDARY};font-size:12px;font-weight:600;'
+                    f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:12px;font-weight:600;'
                     'margin:6px 0 2px">Optimized neutral geometry</p>'
                 )
                 self._viz_label.layout.display = ""
@@ -5904,7 +5871,7 @@ class QuantUIApp:
             # Update completion banner
             _mol_label = _ana_ctx.label
             self._completion_mol_lbl.value = (
-                f'<span style="color:{_theme.TEXT_STRONG};font-size:13px;font-weight:500">'
+                f'<span style="color:{_theme.css.TEXT_STRONG};font-size:13px;font-weight:500">'
                 f"{_mol_label}</span>"
             )
             self._completion_banner.layout.display = ""
@@ -6170,7 +6137,7 @@ class QuantUIApp:
             _err_html = (
                 '<div style="background:#fef2f2;border:1px solid #fca5a5;'
                 'border-radius:8px;padding:16px;margin:8px 0">'
-                f'<b style="color:{_theme.ACCENT_ERROR}">&#9888; Dependency Not Available</b><br>'
+                f'<b style="color:{_theme.css.ACCENT_ERROR}">&#9888; Dependency Not Available</b><br>'
                 f'<span style="color:#7f1d1d">{_err_detail}</span><br><br>'
                 '<small style="color:#991b1b">On Windows, use the Apptainer container: '
                 "<code>apptainer run quantui.sif</code>. "
@@ -6268,7 +6235,7 @@ class QuantUIApp:
             _err_html = (
                 '<div style="background:#fef2f2;border:1px solid #fca5a5;'
                 'border-radius:8px;padding:16px;margin:8px 0">'
-                f'<b style="color:{_theme.ACCENT_ERROR}">&#9888; Calculation Failed</b><br>'
+                f'<b style="color:{_theme.css.ACCENT_ERROR}">&#9888; Calculation Failed</b><br>'
                 f'<code style="color:#7f1d1d">{exc}</code><br><br>'
                 '<small style="color:#991b1b">'
                 "Tips: try a smaller basis set (STO-3G), use a geometry-optimized "
@@ -6365,7 +6332,7 @@ class QuantUIApp:
         if frac is not None and frac >= 0.03 and elapsed > 0:
             remaining = elapsed * (1.0 - frac) / frac
             return (
-                f'<span style="color:{_theme.TEXT_SLATE};font-size:13px">'
+                f'<span style="color:{_theme.css.TEXT_SLATE};font-size:13px">'
                 f"{base} · ~{format_elapsed(remaining)} left</span>"
             )
 
@@ -6382,7 +6349,9 @@ class QuantUIApp:
                 base = f"{base} · ~{format_elapsed(remaining)} left{rough}"
             else:
                 base = f"{base} · longer than estimated"
-        return f'<span style="color:{_theme.TEXT_SLATE};font-size:13px">{base}</span>'
+        return (
+            f'<span style="color:{_theme.css.TEXT_SLATE};font-size:13px">{base}</span>'
+        )
 
     def _stop_elapsed_ticker(self) -> None:
         """Stop the elapsed ticker and clear the chip."""
@@ -6646,9 +6615,9 @@ class QuantUIApp:
             elif "QuantUI — Quantum Chemistry Interface" in line:
                 style = "color:#6d28d9;font-weight:700"
             elif line.startswith("  ── "):
-                style = f"color:{_theme.TEXT_BODY};font-weight:700"
+                style = f"color:{_theme.css.TEXT_BODY};font-weight:700"
             elif line.startswith("  ✓"):
-                style = f"color:{_theme.ACCENT_SUCCESS};font-weight:700"
+                style = f"color:{_theme.css.ACCENT_SUCCESS};font-weight:700"
             elif line.startswith("  ✗"):
                 style = "color:#dc2626;font-weight:700"
             elif (
@@ -6656,7 +6625,7 @@ class QuantUIApp:
                 or line.startswith("  GPU:")
                 or line.startswith("  Threads:")
             ):
-                style = f"color:{_theme.TEXT_SLATE_DARK}"
+                style = f"color:{_theme.css.TEXT_SLATE_DARK}"
             elif (
                 line.startswith("  Molecule:")
                 or line.startswith("  Method/Basis:")
@@ -6671,7 +6640,7 @@ class QuantUIApp:
             ):
                 style = "color:#0f766e;font-weight:600"
             elif line.startswith("    Wall time:"):
-                style = f"color:{_theme.TEXT_SLATE}"
+                style = f"color:{_theme.css.TEXT_SLATE}"
             elif line.startswith("    ✔") or line.startswith("    ⚠"):
                 style = "color:#d97706"
             # ── Geometry optimisation (ASE BFGS) ──────────────────────────────
@@ -6681,14 +6650,14 @@ class QuantUIApp:
                     fmax = float(m.group(3))
                     # Colour by convergence: green when nearly converged, teal otherwise
                     style = (
-                        f"color:{_theme.ACCENT_SUCCESS};font-weight:600"
+                        f"color:{_theme.css.ACCENT_SUCCESS};font-weight:600"
                         if fmax < 0.1
-                        else f"color:{_theme.ACCENT_TEAL}"
+                        else f"color:{_theme.css.ACCENT_TEAL}"
                     )
                 else:
-                    style = f"color:{_theme.ACCENT_TEAL}"
+                    style = f"color:{_theme.css.ACCENT_TEAL}"
             elif line.strip() == "Step Time Energy fmax":
-                style = f"color:{_theme.TEXT_BODY};font-weight:700"
+                style = f"color:{_theme.css.TEXT_BODY};font-weight:700"
             # ── Post-optimisation summary ──────────────────────────────────────
             elif line.startswith("── Final SCF"):
                 style = "color:#6d28d9;font-weight:600"
@@ -6696,25 +6665,25 @@ class QuantUIApp:
                 style = "color:#6d28d9;font-weight:600"
             # ── SCF convergence ────────────────────────────────────────────────
             elif "converged SCF energy" in line or "SCF converged" in line:
-                style = f"color:{_theme.ACCENT_SUCCESS};font-weight:600"
+                style = f"color:{_theme.css.ACCENT_SUCCESS};font-weight:600"
             elif line.lstrip().startswith("cycle=") and "E=" in line:
-                style = f"color:{_theme.TEXT_SLATE}"
+                style = f"color:{_theme.css.TEXT_SLATE}"
             # ── MO / orbital info (verbose=4) ──────────────────────────────────
             elif "MO energies" in line or "** MO" in line:
                 style = "color:#1d4ed8;font-weight:600"
             elif "HOMO" in line or "LUMO" in line or "All MO energies" in line:
-                style = f"color:{_theme.ACCENT_INFO}"
+                style = f"color:{_theme.css.ACCENT_INFO}"
             elif line.lstrip().startswith("occupied:") or line.lstrip().startswith(
                 "virtual:"
             ):
                 style = "color:#3b82f6"
             # ── Thermo / properties ────────────────────────────────────────────
             elif "Mulliken" in line or "mulliken" in line:
-                style = f"color:{_theme.ACCENT_PURPLE}"
+                style = f"color:{_theme.css.ACCENT_PURPLE}"
             elif "dipole" in line.lower() or "Dipole" in line:
-                style = f"color:{_theme.ACCENT_PURPLE}"
+                style = f"color:{_theme.css.ACCENT_PURPLE}"
             elif "nuclear repulsion" in line.lower() or "Nuclear repulsion" in line:
-                style = f"color:{_theme.TEXT_SUBTLE}"
+                style = f"color:{_theme.css.TEXT_SUBTLE}"
             elif "E(MP2)" in line or "MP2 correlation" in line:
                 style = "color:#0891b2"
             # ── Warnings / errors ──────────────────────────────────────────────
@@ -6723,17 +6692,17 @@ class QuantUIApp:
             elif "Error" in line or "error" in line or "failed" in line:
                 style = "color:#dc2626"
             else:
-                style = f"color:{_theme.TEXT_STRONG}"
+                style = f"color:{_theme.css.TEXT_STRONG}"
             rows.append(f'<div style="{style}">{esc}</div>')
         self._log_output_html.value = (
             '<div style="font-family:monospace;font-size:12px;line-height:1.4;'
-            f"padding:8px 10px;background:{_theme.BG_PANEL};border:1px solid {_theme.BORDER};"
+            f"padding:8px 10px;background:{_theme.css.BG_PANEL};border:1px solid {_theme.css.BORDER};"
             'border-radius:4px;overflow-x:auto;max-height:550px;overflow-y:auto">'
             + "".join(rows)
             + "</div>"
         )
         self._log_source_lbl.value = (
-            f'<span style="font-size:12px;color:{_theme.TEXT_SLATE}">Source: {source_label}</span>'
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE}">Source: {source_label}</span>'
             if source_label
             else ""
         )
@@ -6743,11 +6712,11 @@ class QuantUIApp:
         if key and key in HELP_TOPICS:
             entry = HELP_TOPICS[key]
             self.help_content_html.value = (
-                f'<div style="border:1px solid {_theme.BORDER};border-radius:6px;'
-                f'padding:14px 18px;margin:8px 0;background:{_theme.BG_PANEL};max-width:700px">'
-                f'<h4 style="margin:0 0 10px;color:{_theme.TEXT_STRONG};font-size:15px;font-weight:700">'
+                f'<div style="border:1px solid {_theme.css.BORDER};border-radius:6px;'
+                f'padding:14px 18px;margin:8px 0;background:{_theme.css.BG_PANEL};max-width:700px">'
+                f'<h4 style="margin:0 0 10px;color:{_theme.css.TEXT_STRONG};font-size:15px;font-weight:700">'
                 f'{entry["title"]}</h4>'
-                f'<div style="font-size:14px;color:{_theme.TEXT_BODY};line-height:1.6">'
+                f'<div style="font-size:14px;color:{_theme.css.TEXT_BODY};line-height:1.6">'
                 f'{entry["body"]}</div>'
                 f"</div>"
             )
@@ -6762,7 +6731,7 @@ class QuantUIApp:
         records = get_perf_history()
         if not records:
             return (
-                f'<span style="color:{_theme.TEXT_SUBTLE};font-size:13px">'
+                f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:13px">'
                 "No performance data recorded yet.</span>"
             )
         groups: dict = {}
@@ -6787,12 +6756,12 @@ class QuantUIApp:
                 )
         header = (
             "<tr>"
-            f'<th style="text-align:left;padding:2px 12px 2px 0;color:{_theme.TEXT_SLATE}">Method</th>'
-            f'<th style="text-align:left;padding:2px 12px 2px 0;color:{_theme.TEXT_SLATE}">Basis</th>'
-            f'<th style="text-align:right;padding:2px 12px 2px 0;color:{_theme.TEXT_SLATE}">Runs</th>'
-            f'<th style="text-align:right;padding:2px 12px 2px 0;color:{_theme.TEXT_SLATE}">Avg</th>'
-            f'<th style="text-align:right;padding:2px 12px 2px 0;color:{_theme.TEXT_SLATE}">Min</th>'
-            f'<th style="text-align:right;padding:2px 12px 2px 0;color:{_theme.TEXT_SLATE}">Max</th>'
+            f'<th style="text-align:left;padding:2px 12px 2px 0;color:{_theme.css.TEXT_SLATE}">Method</th>'
+            f'<th style="text-align:left;padding:2px 12px 2px 0;color:{_theme.css.TEXT_SLATE}">Basis</th>'
+            f'<th style="text-align:right;padding:2px 12px 2px 0;color:{_theme.css.TEXT_SLATE}">Runs</th>'
+            f'<th style="text-align:right;padding:2px 12px 2px 0;color:{_theme.css.TEXT_SLATE}">Avg</th>'
+            f'<th style="text-align:right;padding:2px 12px 2px 0;color:{_theme.css.TEXT_SLATE}">Min</th>'
+            f'<th style="text-align:right;padding:2px 12px 2px 0;color:{_theme.css.TEXT_SLATE}">Max</th>'
             "</tr>"
         )
         return (
@@ -6806,7 +6775,7 @@ class QuantUIApp:
         events = get_recent_events(20)
         if not events:
             return (
-                f'<span style="color:{_theme.TEXT_SUBTLE};font-size:13px">'
+                f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:13px">'
                 "No events recorded yet.</span>"
             )
         rows = ""
@@ -6816,9 +6785,9 @@ class QuantUIApp:
             msg = e.get("message", "")
             rows += (
                 "<tr>"
-                f'<td style="padding:1px 10px 1px 0;color:{_theme.TEXT_SUBTLE};font-size:11px;white-space:nowrap">{ts}</td>'
-                f'<td style="padding:1px 10px 1px 0;color:{_theme.TEXT_SLATE_DARK};font-size:12px">{evt}</td>'
-                f'<td style="padding:1px 0;color:{_theme.TEXT_BODY};font-size:12px">{msg}</td>'
+                f'<td style="padding:1px 10px 1px 0;color:{_theme.css.TEXT_SUBTLE};font-size:11px;white-space:nowrap">{ts}</td>'
+                f'<td style="padding:1px 10px 1px 0;color:{_theme.css.TEXT_SLATE_DARK};font-size:12px">{evt}</td>'
+                f'<td style="padding:1px 0;color:{_theme.css.TEXT_BODY};font-size:12px">{msg}</td>'
                 "</tr>"
             )
         return (

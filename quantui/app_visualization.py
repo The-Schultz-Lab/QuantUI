@@ -1182,28 +1182,28 @@ def _nmr_summary_html(
         if not shifts:
             return ""
         rows = "".join(
-            f'<tr><td style="padding:2px 14px 2px 0;color:{_theme.TEXT_SECONDARY}">{sym}-{n}</td>'
-            f'<td style="color:{_theme.TEXT_HEADING}">{d:.2f} ppm</td></tr>'
+            f'<tr><td style="padding:2px 14px 2px 0;color:{_theme.css.TEXT_SECONDARY}">{sym}-{n}</td>'
+            f'<td style="color:{_theme.css.TEXT_HEADING}">{d:.2f} ppm</td></tr>'
             for n, (_i, d) in enumerate(sorted(shifts, key=lambda x: x[0]), 1)
         )
         return (
             f'<tr><td colspan="2" style="padding:8px 0 2px;font-weight:600">'
             f"{label} shifts (vs. {reference}):</td></tr>"
-            f'<tr><th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px;padding:2px 14px 2px 0">Atom</th>'
-            f'<th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px">δ (ppm)</th></tr>'
+            f'<tr><th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px;padding:2px 14px 2px 0">Atom</th>'
+            f'<th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px">δ (ppm)</th></tr>'
             + rows
         )
 
     shielding_rows = "".join(
-        f'<tr><td style="padding:2px 10px 2px 0;color:{_theme.TEXT_SECONDARY}">{sym}{i + 1}</td>'
-        f'<td style="color:{_theme.TEXT_HEADING}">{s:.2f}</td></tr>'
+        f'<tr><td style="padding:2px 10px 2px 0;color:{_theme.css.TEXT_SECONDARY}">{sym}{i + 1}</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{s:.2f}</td></tr>'
         for i, (sym, s) in enumerate(zip(atom_symbols, shielding))
     )
     return (
         f'<div style="font-size:13px;margin-top:10px">'
         f'<table style="border-collapse:collapse;margin-bottom:8px">'
-        f'<tr><th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px;padding:2px 10px 2px 0">Atom</th>'
-        f'<th style="text-align:left;color:{_theme.TEXT_SECONDARY};font-size:12px">σ (ppm)</th></tr>'
+        f'<tr><th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px;padding:2px 10px 2px 0">Atom</th>'
+        f'<th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px">σ (ppm)</th></tr>'
         f"{shielding_rows}</table>"
         f'<table style="border-collapse:collapse">'
         f"{_shift_table('¹H', h_shifts, 'H')}"
@@ -1643,7 +1643,7 @@ def render_orbital_isosurface(
                     cube_path, **iso_render_options(app)
                 )
             else:
-                is_dark = app.theme_btn.value == "Dark"
+                is_dark = _theme.get_palette(app.theme_btn.value).is_dark
                 axis_color = "#dbeafe" if is_dark else "#1f2937"
                 bond_color = "#cbd5e1" if is_dark else "#4b5563"
                 title_color = app._plotly_theme_colors()["font_color"]
@@ -2049,7 +2049,7 @@ def _render_vib_mode_py3dmol(
         view = make_view(width=vib_width, height=420)
         view.addModelsAsFrames(xyz_string, "xyz")
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
-        bg = "white" if app.theme_btn.value == "Light" else "#1e1e1e"
+        bg = _theme.plotly_colors(app.theme_btn.value)["scene_bgcolor"]
         view.setBackgroundColor(bg)
         view.zoomTo()
         view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
@@ -2571,7 +2571,7 @@ def on_vib_mode_changed(app: Any, change: dict[str, Any]) -> None:
 
 
 _STEPPER_BTN_STYLE = (
-    f"padding:2px 9px;border:1px solid {_theme.BORDER};border-radius:4px;"
+    f"padding:2px 9px;border:1px solid {_theme.css.BORDER};border-radius:4px;"
     "background:#f8fafc;color:#334155;cursor:pointer;font-size:13px;line-height:1.4;"
 )
 
@@ -3258,7 +3258,7 @@ def _render_vib_single_viewer(
     try:
         viz_settings = getattr(getattr(app, "_user_settings", None), "viz", None)
         fps = max(1, int(getattr(viz_settings, "vib_framerate_fps", 10)))
-        bg = "white" if app.theme_btn.value == "Light" else "#1e1e1e"
+        bg = _theme.plotly_colors(app.theme_btn.value)["scene_bgcolor"]
         with _viz_render_event(
             app, task="vib_interactive", backend="py3dmol", source="single_viewer"
         ):

@@ -80,18 +80,18 @@ _ICON_BASIS_DEF2 = (
 # app reads as one system.
 
 _METHOD_FAMILY_STYLE = {
-    "hf": (_theme.ACCENT_INFO, "#eff6ff", _ICON_HF),
-    "dft": (_theme.ACCENT_PURPLE, "#f5f3ff", _ICON_DFT),
-    "wavefunction": (_theme.ACCENT_WARNING, "#fffbeb", _ICON_WAVE),
+    "hf": (_theme.css.ACCENT_INFO, "#eff6ff", _ICON_HF),
+    "dft": (_theme.css.ACCENT_PURPLE, "#f5f3ff", _ICON_DFT),
+    "wavefunction": (_theme.css.ACCENT_WARNING, "#fffbeb", _ICON_WAVE),
 }
-_METHOD_FALLBACK_STYLE = (_theme.TEXT_SLATE_DARK, _theme.BG_PANEL, _ICON_HF)
+_METHOD_FALLBACK_STYLE = (_theme.css.TEXT_SLATE_DARK, _theme.css.BG_PANEL, _ICON_HF)
 
 _BASIS_FAMILY_STYLE = {
-    "minimal": (_theme.TEXT_SLATE, _theme.BG_PANEL, _ICON_BASIS_MINIMAL),
-    "pople": (_theme.ACCENT_TEAL, "#f0fdfa", _ICON_BASIS_POPLE),
+    "minimal": (_theme.css.TEXT_SLATE, _theme.css.BG_PANEL, _ICON_BASIS_MINIMAL),
+    "pople": (_theme.css.ACCENT_TEAL, "#f0fdfa", _ICON_BASIS_POPLE),
     "cc": ("#15803d", "#f0fdf4", _ICON_BASIS_CC),
     "def2": ("#c2410c", "#fff7ed", _ICON_BASIS_DEF2),
-    "ecp": (_theme.ACCENT_PURPLE, "#f5f3ff", _ICON_BASIS_DEF2),
+    "ecp": (_theme.css.ACCENT_PURPLE, "#f5f3ff", _ICON_BASIS_DEF2),
 }
 
 # ── Basis family classification + one-line copy ──────────────────────────────
@@ -153,7 +153,7 @@ def _card_html(*, fg: str, bg: str, icon: str, title: str, body: str) -> str:
         f'<div style="min-width:0">'
         f'<div style="font-weight:700;font-size:12px;color:{fg};'
         f'letter-spacing:0.01em">{title}</div>'
-        f'<div style="font-size:11.5px;color:{_theme.TEXT_SLATE_DARK};line-height:1.35;'
+        f'<div style="font-size:11.5px;color:{_theme.css.TEXT_SLATE_DARK};line-height:1.35;'
         f'margin-top:2px">{body}</div>'
         f"</div></div>"
     )
@@ -191,5 +191,5 @@ def basis_card_html(basis: str) -> str:
     # the basis-set help topic instead.
     alias = config.pople_notation_alias(basis)
     if alias:
-        body += f' <span style="color:{_theme.TEXT_SLATE}">Also written <b>{alias}</b>.</span>'
+        body += f' <span style="color:{_theme.css.TEXT_SLATE}">Also written <b>{alias}</b>.</span>'
     return _card_html(fg=fg, bg=bg, icon=icon, title=title, body=body)
