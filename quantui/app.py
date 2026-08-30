@@ -1353,6 +1353,9 @@ class QuantUIApp:
         xyz_fill_table_btn: Any
         xyz_table_box: Any
         _freq_preopt_cb: Any
+        _freq_perturb_box: Any
+        _freq_perturb_fraction: Any
+        _freq_perturb_mode_dd: Any
         _seed_dd: Any
         _seed_note: Any
         _seed_refresh_btn: Any
@@ -1540,6 +1543,7 @@ class QuantUIApp:
         vib_output: Any
         vib_prev_btn: Any
         vib_next_btn: Any
+        _vib_apply_mode_btn: Any
         _vib_export_btn: Any
         _vib_export_status: Any
         _vib_png_inbox: Any
