@@ -113,6 +113,11 @@ class ComputeSettings:
     # only PyFock selects PyFock. UI wiring lands in PYF.4 — PYF.1 persists only.
     quantum_engine: str = "auto"
 
+    # Whether the IR-intensity finite-difference loop may fan displaced SCFs
+    # out to parallel CPU workers (see quantui.freq_ir_workers). Default off.
+    # ``QUANTUI_FREQ_PARALLEL`` in the environment overrides this when set.
+    freq_parallel: bool = False
+
 
 @dataclass
 class UserSettings:
@@ -289,6 +294,16 @@ class UserSettings:
                     "Invalid compute.quantum_engine %r; using %r",
                     candidate_engine,
                     compute.quantum_engine,
+                )
+        if "freq_parallel" in compute_section:
+            candidate_fp = compute_section["freq_parallel"]
+            if isinstance(candidate_fp, bool):
+                compute.freq_parallel = candidate_fp
+            else:
+                _LOG.warning(
+                    "Invalid compute.freq_parallel %r; using %r",
+                    candidate_fp,
+                    compute.freq_parallel,
                 )
 
         return cls(viz=viz, theme=theme, compute=compute)

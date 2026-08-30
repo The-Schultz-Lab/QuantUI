@@ -39,6 +39,9 @@ class TestDefaults:
     def test_default_vib_framerate_is_10(self):
         assert UserSettings().viz.vib_framerate_fps == 10
 
+    def test_default_freq_parallel_is_off(self):
+        assert UserSettings().compute.freq_parallel is False
+
 
 class TestLoad:
     def test_missing_file_returns_defaults(self, tmp_path):
@@ -163,6 +166,19 @@ class TestLoad:
         )
         settings = UserSettings.load(path)
         assert settings.viz.default_backend == "py3dmol"
+
+    def test_freq_parallel_round_trips(self, tmp_path):
+        path = tmp_path / "settings.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "_schema_version": 1,
+                    "compute": {"freq_parallel": True},
+                }
+            )
+        )
+        settings = UserSettings.load(path)
+        assert settings.compute.freq_parallel is True
 
 
 class TestSave:

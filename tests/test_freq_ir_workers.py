@@ -4,7 +4,7 @@ The actual ProcessPoolExecutor + PySCF integration lives in the
 PySCF-gated ``test_freq_calc.py::TestIRIntensities`` path and runs on
 WSL. These tests pin the contracts that don't require PySCF:
 
-- ``parallel_enabled_for_run`` gate logic (env-var opt-in, GPU veto, core
+- ``parallel_enabled_for_run`` gate logic (env-var opt-in, core
   threshold, displacement threshold).
 - ``pick_worker_count`` heuristic.
 - ``threads_per_worker`` BLAS budgeting math.
@@ -21,6 +21,7 @@ from quantui.freq_ir_workers import (
     pick_worker_count,
     threads_per_worker,
 )
+from quantui.user_settings import UserSettings
 
 
 class TestParallelEnabledGate:
@@ -28,60 +29,34 @@ class TestParallelEnabledGate:
 
     def test_off_by_default_when_env_unset(self, monkeypatch):
         monkeypatch.delenv("QUANTUI_FREQ_PARALLEL", raising=False)
-        assert (
-            parallel_enabled_for_run(
-                cpu_count=16, displacement_count=60, gpu_available=False
-            )
-            is False
-        )
+        assert parallel_enabled_for_run(cpu_count=16, displacement_count=60) is False
 
     def test_off_when_env_falsy(self, monkeypatch):
         monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "0")
-        assert (
-            parallel_enabled_for_run(
-                cpu_count=16, displacement_count=60, gpu_available=False
-            )
-            is False
-        )
+        assert parallel_enabled_for_run(cpu_count=16, displacement_count=60) is False
 
     def test_on_when_env_truthy_and_conditions_met(self, monkeypatch):
         monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "1")
-        assert (
-            parallel_enabled_for_run(
-                cpu_count=8, displacement_count=18, gpu_available=False
-            )
-            is True
-        )
+        assert parallel_enabled_for_run(cpu_count=8, displacement_count=18) is True
 
     def test_env_truthy_string_variants_accepted(self, monkeypatch):
         for val in ("1", "true", "True", "yes", "on"):
             monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", val)
             assert parallel_enabled_for_run(
-                cpu_count=8, displacement_count=18, gpu_available=False
+                cpu_count=8, displacement_count=18
             ), f"value {val!r} should be truthy"
 
-    def test_gpu_available_vetoes_parallel(self, monkeypatch):
-        # Even with the env opt-in + enough cores + enough displacements,
-        # an available GPU keeps the loop serial (one SCF at a time, each
-        # on GPU). Multiple workers sharing one GPU is not worth the
-        # complexity for v1.
+    def test_gpu_available_does_not_veto_parallel(self, monkeypatch):
+        # NCShare-style nodes: one GPU, many CPU cores. Opt-in parallel
+        # uses CPU workers for displacements while the reference SCF/Hessian
+        # may still have used gpu4pyscf.
         monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "1")
-        assert (
-            parallel_enabled_for_run(
-                cpu_count=16, displacement_count=60, gpu_available=True
-            )
-            is False
-        )
+        assert parallel_enabled_for_run(cpu_count=16, displacement_count=60) is True
 
     def test_too_few_cores_vetoes_parallel(self, monkeypatch):
         # Below 4 cores the BLAS-oversubscription tradeoff doesn't pay off.
         monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "1")
-        assert (
-            parallel_enabled_for_run(
-                cpu_count=2, displacement_count=60, gpu_available=False
-            )
-            is False
-        )
+        assert parallel_enabled_for_run(cpu_count=2, displacement_count=60) is False
 
     def test_too_few_displacements_vetoes_parallel(self, monkeypatch):
         # For a diatomic (2 atoms → 12 displacements? No, 2*3*2=12) we still
@@ -89,19 +64,25 @@ class TestParallelEnabledGate:
         # For a hypothetical 5-displacement case (not real, but the gate is
         # generic) we'd skip parallel.
         monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "1")
-        assert (
-            parallel_enabled_for_run(
-                cpu_count=16, displacement_count=4, gpu_available=False
-            )
-            is False
-        )
+        assert parallel_enabled_for_run(cpu_count=16, displacement_count=4) is False
         # 6 displacements is exactly at the threshold and should pass.
-        assert (
-            parallel_enabled_for_run(
-                cpu_count=16, displacement_count=6, gpu_available=False
-            )
-            is True
-        )
+        assert parallel_enabled_for_run(cpu_count=16, displacement_count=6) is True
+
+    def test_settings_checkbox_opt_in_without_env(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("QUANTUI_FREQ_PARALLEL", raising=False)
+        monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(tmp_path / "settings.json"))
+        settings = UserSettings()
+        settings.compute.freq_parallel = True
+        settings.save()
+        assert parallel_enabled_for_run(cpu_count=8, displacement_count=18) is True
+
+    def test_env_var_overrides_settings_off(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(tmp_path / "settings.json"))
+        settings = UserSettings()
+        settings.compute.freq_parallel = True
+        settings.save()
+        monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "0")
+        assert parallel_enabled_for_run(cpu_count=16, displacement_count=60) is False
 
 
 class TestPickWorkerCount:

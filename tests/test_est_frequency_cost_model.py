@@ -281,7 +281,7 @@ class TestParallelIrAwareness:
             basis="6-31G*",
             n_basis=120,
             n_cores=8,
-            gpu_used=False,  # parallel gated off on GPU
+            gpu_used=False,  # parallel gated by opt-in, not GPU
         )
         # Compare to serial (same params, different env var).
         monkeypatch.delenv("QUANTUI_FREQ_PARALLEL")
@@ -305,10 +305,9 @@ class TestParallelIrAwareness:
         # the floor is 3× scf — which is well above zero/negative.
         assert cost_parallel["seconds"] > cost_serial["seconds"] * 0.1
 
-    def test_gpu_run_stays_serial_even_with_env_var(
+    def test_gpu_run_uses_parallel_estimate_when_env_var_on(
         self, isolated_perf_log, monkeypatch
     ):
-        # parallel_enabled_for_run gates off when gpu_available=True.
         monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "1")
         for _ in range(5):
             _seed_sp_record(
@@ -321,34 +320,28 @@ class TestParallelIrAwareness:
                 n_basis=120,
                 gpu_used=True,
             )
-        cost = _estimate_frequency_cost(
+        cost_parallel = _estimate_frequency_cost(
             n_atoms=12,
             n_electrons=42,
             method="B3LYP",
             basis="6-31G*",
             n_basis=120,
             n_cores=8,
-            gpu_used=True,  # ← GPU run — parallel must NOT engage
-        )
-        assert cost is not None
-        sp = estimate_time(
-            n_atoms=12,
-            n_electrons=42,
-            method="B3LYP",
-            basis="6-31G*",
-            n_basis=120,
-            n_cores=8,
-            calc_type="single_point",
             gpu_used=True,
         )
-        assert sp is not None
-        # Serial expectation despite env var.
-        expected = (
-            sp["seconds"]
-            + _HESSIAN_MULTIPLIER_HF_DFT * sp["seconds"]
-            + 6 * 12 * sp["seconds"]
+        monkeypatch.delenv("QUANTUI_FREQ_PARALLEL")
+        cost_serial = _estimate_frequency_cost(
+            n_atoms=12,
+            n_electrons=42,
+            method="B3LYP",
+            basis="6-31G*",
+            n_basis=120,
+            n_cores=8,
+            gpu_used=True,
         )
-        assert cost["seconds"] == pytest.approx(expected, rel=1e-6)
+        assert cost_parallel is not None
+        assert cost_serial is not None
+        assert cost_parallel["seconds"] < cost_serial["seconds"]
 
 
 class TestEstimateTimeIntegration:

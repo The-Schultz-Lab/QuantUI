@@ -1305,6 +1305,7 @@ class QuantUIApp:
         _files_up_btn: Any
         gpu_enabled_cb: Any
         density_fit_enabled_cb: Any
+        freq_parallel_enabled_cb: Any
         execution_backend_dd: Any
         help_content_html: Any
         help_tab_panel: Any
@@ -1962,6 +1963,7 @@ class QuantUIApp:
             vib_framerate_fps=self._user_settings.viz.vib_framerate_fps,
             gpu_enabled=self._user_settings.compute.gpu_enabled,
             density_fit_enabled=self._user_settings.compute.density_fit,
+            freq_parallel_enabled=self._user_settings.compute.freq_parallel,
             execution_backend=self._user_settings.compute.execution_backend,
             slurm_available=is_slurm_available(),
         )
@@ -2370,6 +2372,9 @@ class QuantUIApp:
         # Settings → density fitting (RI) on/off (Status tab; persisted).
         self.density_fit_enabled_cb.observe(
             self._safe_cb(self._on_density_fit_enabled_changed), names="value"
+        )
+        self.freq_parallel_enabled_cb.observe(
+            self._safe_cb(self._on_freq_parallel_enabled_changed), names="value"
         )
         self.execution_backend_dd.observe(
             self._safe_cb(self._on_execution_backend_changed), names="value"
@@ -3732,6 +3737,29 @@ class QuantUIApp:
             pass
         try:
             _calc_log.log_event("density_fit_enabled_changed", f"density_fit={new_val}")
+        except OSError:
+            pass
+
+    def _on_freq_parallel_enabled_changed(self, change) -> None:
+        """Persist the parallel IR finite-difference preference.
+
+        The freq_calc driver reads this via :func:`freq_ir_workers._freq_parallel_opt_in`
+        on each run (unless ``QUANTUI_FREQ_PARALLEL`` overrides in the environment).
+        Refresh the time estimate because parallel divides the IR term in the model.
+        """
+        new_val = bool(change["new"])
+        if new_val == self._user_settings.compute.freq_parallel:
+            return
+        self._user_settings.compute.freq_parallel = new_val
+        self._user_settings.save()
+        try:
+            self._update_estimate()
+        except Exception:  # noqa: BLE001 — best-effort estimate refresh
+            pass
+        try:
+            _calc_log.log_event(
+                "freq_parallel_enabled_changed", f"freq_parallel={new_val}"
+            )
         except OSError:
             pass
 

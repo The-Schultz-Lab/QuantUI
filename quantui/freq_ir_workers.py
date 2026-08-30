@@ -5,16 +5,20 @@ finite-difference geometries (one per Cartesian displacement of each atom,
 +Δ and −Δ). The default path in :mod:`quantui.freq_calc` runs them
 serially with each SCF internally parallelized via BLAS + libcint OpenMP.
 
-When the user opts in via ``QUANTUI_FREQ_PARALLEL=1`` AND no GPU is
-available AND the host has ``>= 4`` cores AND the molecule has
-``>= 2`` atoms (i.e. ``>= 6`` displacements), the freq_calc driver hands
-this loop off to a ``ProcessPoolExecutor`` whose workers each call
-:func:`run_displaced_scf` on one displaced geometry. Each worker process
-re-imports PySCF, rebuilds the ``gto.Mole`` from the same atom string /
-basis / charge / spin as the parent, applies the displacement, and runs
-the SCF. The initial guess ``dm0`` is shared once per worker via a temp
-pickle file (the path is passed through ``initargs``) so we don't pay
-per-task IPC for a 100×100 matrix.
+When the user opts in via the System Settings checkbox (persisted as
+``compute.freq_parallel``) or ``QUANTUI_FREQ_PARALLEL=1`` (env overrides
+settings when set) AND the host has ``>= 4`` cores AND the molecule has ``>= 2`` atoms (i.e. ``>= 6``
+displacements), the freq_calc driver hands this loop off to a
+``ProcessPoolExecutor`` whose workers each call :func:`run_displaced_scf`
+on one displaced geometry. Workers are **CPU-only** (no gpu4pyscf) even
+when the parent run used the GPU for the reference SCF and Hessian — on
+HPC nodes with one GPU and many cores, parallel CPU displacements often
+beat serial GPU ones. Each worker process re-imports PySCF, rebuilds the
+``gto.Mole`` from the same atom string / basis / charge / spin as the
+parent, applies the displacement, and runs the SCF. The initial guess
+``dm0`` is shared once per worker via a temp pickle file (the path is
+passed through ``initargs``) so we don't pay per-task IPC for a 100×100
+matrix.
 
 The functions in this module are intentionally top-level (not nested in
 ``freq_calc.py``) because ``ProcessPoolExecutor`` requires picklable
@@ -165,31 +169,46 @@ def run_displaced_scf(coords_bohr_flat) -> Any:
     return np.array(mf.dip_moment(verbose=0))
 
 
+def _freq_parallel_opt_in() -> bool:
+    """Whether parallel IR displacements are opted in.
+
+    Precedence:
+    1. ``QUANTUI_FREQ_PARALLEL`` env var when set (HPC job-script override).
+    2. ``compute.freq_parallel`` in :mod:`quantui.user_settings` (Settings tab).
+    """
+    env_val = os.environ.get("QUANTUI_FREQ_PARALLEL")
+    if env_val is not None:
+        return _truthy(env_val)
+    try:
+        from quantui.user_settings import UserSettings
+
+        return bool(UserSettings.load().compute.freq_parallel)
+    except Exception:  # noqa: BLE001 — settings must never gate a calc
+        return False
+
+
 def parallel_enabled_for_run(
     cpu_count: int,
     displacement_count: int,
-    gpu_available: bool,
 ) -> bool:
     """Decide whether the freq_calc IR loop should use the parallel path.
 
     Centralised in this module so both the driver and the tests can
     consult the same predicate. The current rules:
 
-    - **Opt-in**: ``QUANTUI_FREQ_PARALLEL`` env var must be truthy
-      (``"1"`` / ``"true"`` / ``"True"``). Shipping this off-by-default
-      while the parallel path matures.
-    - **No GPU**: if gpu4pyscf is doing the offload, each SCF is already
-      ~10× faster; running multiple in parallel would compete for one
-      GPU's VRAM and is not worth the complexity. Stay serial.
+    - **Opt-in**: :func:`_freq_parallel_opt_in` must be true — from the
+      Settings tab checkbox (persisted) or ``QUANTUI_FREQ_PARALLEL=1`` in
+      the environment (overrides settings when set). Off by default.
     - **Cores threshold**: at least 4 cores. Below that, the BLAS
       oversubscription tradeoff doesn't pay off.
     - **Displacement threshold**: at least 6 (i.e. ``>= 2`` atoms). For a
       diatomic the serial loop is 12 SCFs at most and parallel overhead
       dominates.
+
+    When this returns ``True``, displaced SCFs run on CPU worker processes
+    regardless of whether gpu4pyscf accelerated the reference SCF/Hessian.
     """
-    if not _truthy(os.environ.get("QUANTUI_FREQ_PARALLEL", "")):
-        return False
-    if gpu_available:
+    if not _freq_parallel_opt_in():
         return False
     if cpu_count < 4:
         return False
