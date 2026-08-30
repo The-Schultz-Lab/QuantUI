@@ -574,6 +574,10 @@ from quantui.config import (
     SUPPORTED_BASIS_SETS,
     SUPPORTED_METHODS,
 )
+from quantui.freq_ir_workers import (
+    freq_parallel_env_configured,
+    freq_parallel_opt_in,
+)
 from quantui.help_content import HELP_TOPICS
 from quantui.molecule import Molecule, parse_xyz_input
 from quantui.progress import StepProgress
@@ -1964,7 +1968,12 @@ class QuantUIApp:
             vib_framerate_fps=self._user_settings.viz.vib_framerate_fps,
             gpu_enabled=self._user_settings.compute.gpu_enabled,
             density_fit_enabled=self._user_settings.compute.density_fit,
-            freq_parallel_enabled=self._user_settings.compute.freq_parallel,
+            freq_parallel_enabled=(
+                freq_parallel_opt_in()
+                if freq_parallel_env_configured()
+                else self._user_settings.compute.freq_parallel
+            ),
+            freq_parallel_env_locked=freq_parallel_env_configured(),
             execution_backend=self._user_settings.compute.execution_backend,
             slurm_available=is_slurm_available(),
         )
@@ -3748,10 +3757,12 @@ class QuantUIApp:
     def _on_freq_parallel_enabled_changed(self, change) -> None:
         """Persist the parallel IR finite-difference preference.
 
-        The freq_calc driver reads this via :func:`freq_ir_workers._freq_parallel_opt_in`
+        The freq_calc driver reads this via :func:`freq_ir_workers.freq_parallel_opt_in`
         on each run (unless ``QUANTUI_FREQ_PARALLEL`` overrides in the environment).
         Refresh the time estimate because parallel divides the IR term in the model.
         """
+        if freq_parallel_env_configured():
+            return
         new_val = bool(change["new"])
         if new_val == self._user_settings.compute.freq_parallel:
             return

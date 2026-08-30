@@ -169,6 +169,16 @@ def run_displaced_scf(coords_bohr_flat) -> Any:
     return np.array(mf.dip_moment(verbose=0))
 
 
+def freq_parallel_opt_in() -> bool:
+    """Return whether parallel IR displacements are enabled for the next run."""
+    return _freq_parallel_opt_in()
+
+
+def freq_parallel_env_configured() -> bool:
+    """Return True when ``QUANTUI_FREQ_PARALLEL`` is set in the environment."""
+    return os.environ.get("QUANTUI_FREQ_PARALLEL") is not None
+
+
 def _freq_parallel_opt_in() -> bool:
     """Whether parallel IR displacements are opted in.
 

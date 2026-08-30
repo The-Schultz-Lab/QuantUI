@@ -35,6 +35,13 @@ every layer (CUDA base image, all-pip install, a pinned PyPI release rather than
 the working tree). Merging them would ship a multi-GB CUDA stack to students who
 will never have a GPU. See [GPU image](#gpu-image) below.
 
+**CPU image environment defaults** (set in `quantui.def` `%environment`):
+
+| Variable | CPU `quantui.sif` | GPU `quantui-gpu.sif` |
+| --- | --- | --- |
+| `QUANTUI_FREQ_PARALLEL` | `1` — parallel CPU workers for IR-intensity displacements on frequency calcs (≥4 cores, ≥2 atoms). Overrides the Settings checkbox while set. | unset (off unless you set it) |
+| `QUANTUI_ENABLE_SLURM` | unset (class stays in-kernel) | unset |
+
 The compiled `.sif` image is **not** committed to git — it is too large (~4–5 GB).
 Build it locally (see below) or download the latest release asset from the
 [GitHub Releases page](https://github.com/The-Schultz-Lab/QuantUI/releases).

@@ -123,6 +123,7 @@ def build_status_panel(
     gpu_enabled: bool = True,
     density_fit_enabled: bool = False,
     freq_parallel_enabled: bool = False,
+    freq_parallel_env_locked: bool = False,
     execution_backend: str = "local",
     slurm_available: bool = False,
 ) -> None:
@@ -327,8 +328,17 @@ def build_status_panel(
         value=freq_parallel_enabled,
         description="Parallelize IR intensity displacements (CPU)",
         indent=False,
+        disabled=freq_parallel_env_locked,
         layout=layout_fn(width="320px", margin="2px 0 0 0"),
     )
+    if freq_parallel_env_locked:
+        fp_env_note = widgets.HTML(
+            f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
+            "Controlled by deployment (<code>QUANTUI_FREQ_PARALLEL</code> in the "
+            "container or session environment).</div>"
+        )
+    else:
+        fp_env_note = None
 
     exec_backend_label = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:12px;'
@@ -360,6 +370,13 @@ def build_status_panel(
             "Use the Cluster Jobs tab to monitor and cancel runs.</div>"
         )
 
+    fp_settings_rows: list[Any] = [
+        fp_toggle_label,
+        app.freq_parallel_enabled_cb,
+    ]
+    if fp_env_note is not None:
+        fp_settings_rows.append(fp_env_note)
+
     settings_box = widgets.VBox(
         [
             settings_html,
@@ -370,8 +387,7 @@ def build_status_panel(
             app.gpu_enabled_cb,
             df_toggle_label,
             app.density_fit_enabled_cb,
-            fp_toggle_label,
-            app.freq_parallel_enabled_cb,
+            *fp_settings_rows,
             exec_backend_label,
             app.execution_backend_dd,
             exec_backend_note,
