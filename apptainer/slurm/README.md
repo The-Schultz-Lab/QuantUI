@@ -11,6 +11,8 @@ Reference scripts for operator-driven NCShare / Apptainer batch jobs.
 
 QuantUI generates per-job scripts automatically under `~/.quantui/staging/<request_id>/submit.slurm` when students submit from the UI.
 
+Status polling uses **`squeue`** for active jobs and **`sacct`** for terminal state, exit code, and cancel confirmation. Cluster Jobs **Remove** clears terminal registry rows without deleting staging logs.
+
 ## Operator environment variables
 
 See the [NCShare SLURM batch runbook](https://github.com/The-Schultz-Lab/QuantUI-development-tracking/blob/main/TODO/runbooks/NCShare-SLURM-batch-runbook.md) for the full operator matrix. Key overrides:
@@ -20,6 +22,7 @@ See the [NCShare SLURM batch runbook](https://github.com/The-Schultz-Lab/QuantUI
 | `QUANTUI_MAX_CONCURRENT_JOBS` | `2` | Active SLURM job cap |
 | `QUANTUI_SLURM_SUBMIT_COOLDOWN_S` | `30` | Min seconds between submits (`0` disables) |
 | `QUANTUI_SLURM_STALE_NO_ID_S` | `600` | Stale registry rows without SLURM id |
+| `QUANTUI_SLURM_CANCEL_CONFIRM_S` | `30` | Seconds to wait for `scancel` confirmation via `sacct` |
 | `QUANTUI_SLURM_PARTITION` | `common` | Default `#SBATCH` partition |
 | `QUANTUI_BATCH_IMAGE` | `~/quantui-gpu.sif` | Apptainer image for batch worker |
 

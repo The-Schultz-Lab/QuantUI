@@ -25,7 +25,6 @@ MAX_MEMORY_GB = 128
 MAX_CONCURRENT_JOBS = 2
 SUBMIT_COOLDOWN_SECONDS = 30
 STALE_NO_SLURM_ID_SECONDS = 600
-STALE_MIN_AGE_BEFORE_COMPLETED = 120
 
 
 def max_concurrent_jobs() -> int:
@@ -73,11 +72,6 @@ def stale_no_slurm_id_seconds() -> int:
     return STALE_NO_SLURM_ID_SECONDS
 
 
-def stale_min_age_before_completed() -> int:
-    """Ignore empty-squeue COMPLETED for young jobs (submission race)."""
-    return STALE_MIN_AGE_BEFORE_COMPLETED
-
-
 WALLTIME_OPTIONS = [
     "00:30:00",
     "01:00:00",
@@ -97,6 +91,22 @@ DEFAULT_MAIL_EVENTS = ["END", "FAIL"]
 
 # Status polling (seconds)
 STATUS_REFRESH_INTERVAL = 10
+CANCEL_CONFIRM_TIMEOUT_SECONDS = 30
+CANCEL_POLL_INTERVAL_SECONDS = 1
+
+
+def cancel_confirm_timeout_seconds() -> float:
+    override = os.environ.get("QUANTUI_SLURM_CANCEL_CONFIRM_S")
+    if override:
+        try:
+            return max(5.0, float(override))
+        except ValueError:
+            logger.warning(
+                "Invalid QUANTUI_SLURM_CANCEL_CONFIRM_S=%r; using default %s",
+                override,
+                CANCEL_CONFIRM_TIMEOUT_SECONDS,
+            )
+    return float(CANCEL_CONFIRM_TIMEOUT_SECONDS)
 
 
 # Registry and staging roots

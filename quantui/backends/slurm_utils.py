@@ -5,10 +5,20 @@ SLURM helper utilities salvaged from the legacy QuantUI archive.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from . import cluster_config as cfg
 from .base import CalculationRequest
+
+
+@dataclass(frozen=True)
+class SlurmJobAccounting:
+    """Normalized SLURM accounting row for one batch job."""
+
+    state: str
+    exit_code: str = ""
+    elapsed: str = ""
 
 
 def format_walltime(hours: float) -> str:
@@ -24,6 +34,36 @@ def parse_slurm_job_id(sbatch_output: str) -> Optional[str]:
     if match:
         return match.group(1)
     return None
+
+
+def parse_sacct_accounting(sacct_output: str) -> Dict[str, SlurmJobAccounting]:
+    """Parse ``sacct -P --format=JobID,State,ExitCode,Elapsed`` output."""
+    rows: Dict[str, SlurmJobAccounting] = {}
+    for line in sacct_output.splitlines():
+        line = line.strip()
+        if not line or line.startswith("JobID|"):
+            continue
+        parts = line.split("|")
+        if len(parts) < 2:
+            continue
+        job_id = parts[0].strip()
+        state = parts[1].strip().upper()
+        if not job_id or not state or "." in job_id:
+            continue
+        exit_code = parts[2].strip() if len(parts) > 2 else ""
+        elapsed = parts[3].strip() if len(parts) > 3 else ""
+        rows[job_id] = SlurmJobAccounting(
+            state=state, exit_code=exit_code, elapsed=elapsed
+        )
+    return rows
+
+
+def parse_sacct_states(sacct_output: str) -> Dict[str, str]:
+    """Parse ``sacct -P --format=JobID,State`` lines into a job-id → state map."""
+    return {
+        job_id: row.state
+        for job_id, row in parse_sacct_accounting(sacct_output).items()
+    }
 
 
 def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:

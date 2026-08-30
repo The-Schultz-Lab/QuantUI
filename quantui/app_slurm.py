@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 _POLL_INTERVAL_S = 2.0
 _SUPPORTED_SLURM_CALC_TYPES = frozenset(CALC_TYPES)
 _ACTIVE_SLURM_STATUSES = frozenset({"queued", "pending", "running", "submitted"})
+_DISMISSABLE_SLURM_STATUSES = frozenset({"success", "error", "cancelled"})
 
 
 def max_concurrent_slurm_jobs() -> int:
@@ -205,7 +206,7 @@ def submit_slurm_run(app: Any) -> None:
 
 
 def cancel_slurm_job(app: Any, request_id: str) -> bool:
-    """Cancel a SLURM job by registry request id."""
+    """Cancel a SLURM job by registry request id. Returns True when confirmed."""
     ensure_job_registry(app)
     backend = slurm_backend_for_app(app)
     if getattr(app, "_slurm_active_request_id", None) == request_id:
@@ -218,14 +219,61 @@ def cancel_slurm_job(app: Any, request_id: str) -> bool:
     return ok
 
 
+def slurm_cancel_user_message(app: Any, request_id: str) -> str:
+    """Return a user-facing cancel outcome message for *request_id*."""
+    record = ensure_job_registry(app).load(request_id)
+    if record is None:
+        return "SLURM job record not found."
+    if record.status == "cancelled":
+        return f"SLURM job {request_id} cancelled."
+    err = record.error or {}
+    if err.get("user_message"):
+        return str(err["user_message"])
+    return f"Could not cancel SLURM job {request_id}."
+
+
 def cancel_slurm_run(app: Any) -> bool:
     """Cancel the active SLURM job if one is being monitored."""
     request_id = getattr(app, "_slurm_active_request_id", None)
     if not request_id:
         return False
     ok = cancel_slurm_job(app, request_id)
-    app.run_status.value = "SLURM cancellation requested."
+    app.run_status.value = slurm_cancel_user_message(app, request_id)
+    if ok:
+        _finish_slurm_monitor(app)
+    else:
+        _append_run_html(app, format_error_html(app.run_status.value))
     return ok
+
+
+def remove_slurm_job_record(app: Any, request_id: str) -> bool:
+    """Delete a terminal registry row (does not remove staging files)."""
+    registry = ensure_job_registry(app)
+    record = registry.load(request_id)
+    if record is None:
+        return False
+    if record.status.lower() in _ACTIVE_SLURM_STATUSES:
+        return False
+    if getattr(app, "_slurm_active_request_id", None) == request_id:
+        stop = getattr(app, "_slurm_monitor_stop", None)
+        if stop is not None:
+            stop.set()
+        _finish_slurm_monitor(app)
+    return registry.delete(request_id)
+
+
+def slurm_remove_user_message(app: Any, request_id: str, *, removed: bool) -> str:
+    if removed:
+        return f"Removed job {request_id} from your registry."
+    record = ensure_job_registry(app).load(request_id)
+    if record is None:
+        return f"Job {request_id} is not in your registry."
+    if record.status.lower() in _ACTIVE_SLURM_STATUSES:
+        return (
+            f"Job {request_id} is still active ({record.status}). "
+            "Cancel it before removing."
+        )
+    return f"Could not remove job {request_id}."
 
 
 def _format_slurm_job_option(record: JobRecord) -> tuple[str, str]:
@@ -270,6 +318,18 @@ def refresh_slurm_jobs_tab(app: Any) -> None:
     records = list_slurm_jobs(app)
     active = active_slurm_job_count(app)
     limit = max_concurrent_slurm_jobs()
+
+    accounting: dict[str, Any] = {}
+    if is_slurm_available():
+        slurm_ids = [r.slurm_job_id for r in records if r.slurm_job_id]
+        if slurm_ids:
+            try:
+                accounting = slurm_backend_for_app(app).batch_job_accounting(
+                    slurm_ids  # type: ignore[arg-type]
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to load SLURM job accounting")
+
     summary.value = (
         f'<div style="font-size:13px;color:{_theme.TEXT_STRONG};margin:4px 0 8px">'
         f"<b>{active}</b> active / <b>{limit}</b> max concurrent cluster job(s). "
@@ -291,10 +351,17 @@ def refresh_slurm_jobs_tab(app: Any) -> None:
         req = record.request_obj
         slurm_id = record.slurm_job_id or "—"
         created = record.created_at.replace("T", " ").replace("+00:00", " UTC")
+        acct = accounting.get(record.slurm_job_id or "")
+        slurm_state = acct.state if acct else "—"
+        elapsed = acct.elapsed if acct and acct.elapsed else "—"
+        exit_code = acct.exit_code if acct and acct.exit_code else "—"
         rows.append(
             "<tr>"
             f"<td style='padding:4px 8px'>{record.status}</td>"
             f"<td style='padding:4px 8px'>{slurm_id}</td>"
+            f"<td style='padding:4px 8px'>{html.escape(slurm_state)}</td>"
+            f"<td style='padding:4px 8px'>{html.escape(elapsed)}</td>"
+            f"<td style='padding:4px 8px'>{html.escape(exit_code)}</td>"
             f"<td style='padding:4px 8px'>{req.method}/{req.basis}</td>"
             f"<td style='padding:4px 8px'>{record.calc_type}</td>"
             f"<td style='padding:4px 8px'>{created}</td>"
@@ -309,6 +376,9 @@ def refresh_slurm_jobs_tab(app: Any) -> None:
         f"<thead><tr style='background:{_theme.BG_PANEL}'>"
         "<th style='padding:4px 8px;text-align:left'>Status</th>"
         "<th style='padding:4px 8px;text-align:left'>SLURM ID</th>"
+        "<th style='padding:4px 8px;text-align:left'>SLURM state</th>"
+        "<th style='padding:4px 8px;text-align:left'>Elapsed</th>"
+        "<th style='padding:4px 8px;text-align:left'>Exit</th>"
         "<th style='padding:4px 8px;text-align:left'>Method/Basis</th>"
         "<th style='padding:4px 8px;text-align:left'>Type</th>"
         "<th style='padding:4px 8px;text-align:left'>Submitted</th>"
@@ -368,12 +438,30 @@ def on_slurm_jobs_cancel_clicked(app: Any, _btn: Any = None) -> None:
                 f"Job {request_id} is not active (status: {record.status}).</span>"
             )
         return
-    cancel_slurm_job(app, request_id)
+    ok = cancel_slurm_job(app, request_id)
     status = getattr(app, "_slurm_jobs_status_html", None)
     if status is not None:
+        message = slurm_cancel_user_message(app, request_id)
+        color = _theme.TEXT_STRONG if ok else _theme.ACCENT_ERROR
         status.value = (
-            f'<span style="color:{_theme.TEXT_STRONG};font-size:12px">'
-            f"Cancellation requested for {request_id}.</span>"
+            f'<span style="color:{color};font-size:12px">{html.escape(message)}</span>'
+        )
+
+
+def on_slurm_jobs_remove_clicked(app: Any, _btn: Any = None) -> None:
+    select = getattr(app, "_slurm_jobs_select", None)
+    request_id = select.value if select is not None else None
+    if not request_id:
+        return
+    removed = remove_slurm_job_record(app, request_id)
+    refresh_slurm_jobs_tab(app)
+    _update_slurm_jobs_tab_title(app)
+    status = getattr(app, "_slurm_jobs_status_html", None)
+    if status is not None:
+        message = slurm_remove_user_message(app, request_id, removed=removed)
+        color = _theme.TEXT_STRONG if removed else _theme.ACCENT_ERROR
+        status.value = (
+            f'<span style="color:{color};font-size:12px">{html.escape(message)}</span>'
         )
 
 

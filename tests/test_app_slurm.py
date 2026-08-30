@@ -11,6 +11,7 @@ from quantui.app_slurm import (
     active_slurm_job_count,
     max_concurrent_slurm_jobs,
     refresh_slurm_jobs_tab,
+    remove_slurm_job_record,
     slurm_submit_block_reason,
     submit_slurm_run,
     use_slurm_execution,
@@ -296,3 +297,34 @@ class TestClusterJobsTab:
         assert "STALE_RECORD" in table_html.value
         assert "SLURM job ID" in table_html.value
         assert select.options[0][0].endswith("| STALE_RECORD")
+
+    @patch("quantui.app_slurm.is_slurm_available", return_value=False)
+    def test_remove_terminal_registry_row(self, _mock, tmp_path):
+        registry = JobRegistry(
+            jobs_root=tmp_path / "jobs",
+            staging_root=tmp_path / "staging",
+        )
+        registry.create(
+            build_calculation_request(_fake_app(), request_id="old1"),
+            "cluster_slurm",
+        )
+        registry.update_status("old1", "error")
+
+        app = _fake_app(_job_registry=registry)
+        assert remove_slurm_job_record(app, "old1") is True
+        assert registry.load("old1") is None
+
+    @patch("quantui.app_slurm.is_slurm_available", return_value=False)
+    def test_remove_active_job_is_blocked(self, _mock, tmp_path):
+        registry = JobRegistry(
+            jobs_root=tmp_path / "jobs",
+            staging_root=tmp_path / "staging",
+        )
+        registry.create(
+            build_calculation_request(_fake_app(), request_id="live1"),
+            "cluster_slurm",
+            status="running",
+        )
+        app = _fake_app(_job_registry=registry)
+        assert remove_slurm_job_record(app, "live1") is False
+        assert registry.load("live1") is not None
