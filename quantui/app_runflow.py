@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import ipywidgets as widgets
@@ -379,6 +380,14 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     """Update extra options panel based on selected calculation type."""
     ct = change["new"]
 
+    from quantui.freq_calc import is_freq_mode_seed
+
+    if (
+        is_freq_mode_seed(getattr(app._seed_dd, "value", "") or "")
+        and ct != "Frequency"
+    ):
+        app._seed_dd.value = ""
+
     # The "geometry optimization before this calc" checkbox is meaningful
     # for all workflows except Geometry Opt itself (which IS the geom-opt
     # workflow). This was previously called "pre-optimisation"; the
@@ -429,8 +438,10 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
                 [app._freq_seed_dd, app._freq_seed_refresh_btn],
                 layout=layout_fn(align_items="center", gap="6px", width="100%"),
             ),
+            app._freq_perturb_box,
             app._freq_seed_note,
         ]
+        _update_freq_perturb_seed_ui(app, app._seed_dd.value or "")
     elif ct == "UV-Vis (TD-DFT)":
         app._refresh_tddft_seed_options()
         app.calc_extra_opts.children = [
@@ -627,10 +638,185 @@ def _geometries_match(
     return rmsd <= rmsd_tol
 
 
-def _refresh_seed_options(app: Any, dropdown: Any) -> None:
-    """Populate a geo-opt seed dropdown filtered by strict atom+coord match.
+def _load_freq_result_geometry(result_dir: Path):
+    """Return (atoms, coords) from a saved Frequency result, or None."""
 
-    Shared helper used by both Frequency and UV-Vis (TD-DFT) seed dropdowns.
+    import numpy as _np
+
+    from quantui.results_storage import load_result
+
+    try:
+        data = load_result(result_dir)
+        if data.get("calc_type") != "frequency":
+            return None
+        mol_data = (data.get("spectra") or {}).get("molecule") or {}
+        atoms = mol_data.get("atoms")
+        coords = mol_data.get("coords")
+        if not atoms or not coords:
+            return None
+        arr = _np.array(coords, dtype=float)
+        if arr.shape != (len(atoms), 3):
+            return None
+        return list(atoms), arr
+    except Exception:
+        return None
+
+
+def populate_freq_perturb_modes(app: Any, result_dir: Path) -> bool:
+    """Fill the mode dropdown from a Frequency result directory."""
+    from quantui.freq_calc import load_frequency_mode_seed_data
+
+    try:
+        _mol, _disps, freqs = load_frequency_mode_seed_data(result_dir)
+    except Exception:
+        app._freq_perturb_mode_dd.options = []
+        return False
+
+    options = []
+    for i, freq_val in enumerate(freqs, start=1):
+        if abs(freq_val) < 10:
+            continue
+        label = (
+            f"Mode {i}: {freq_val:.1f} cm⁻¹"
+            if freq_val >= 0
+            else f"Mode {i}: {freq_val:.1f} cm⁻¹ (imaginary)"
+        )
+        options.append((label, i))
+    if not options:
+        return False
+    app._freq_perturb_mode_dd.options = options
+    app._freq_perturb_mode_dd.value = options[0][1]
+    return True
+
+
+def _update_freq_perturb_seed_ui(app: Any, path_str: str) -> None:
+    from quantui.freq_calc import FREQ_SEED_PREFIX, is_freq_mode_seed
+
+    box = app._freq_perturb_box
+    if is_freq_mode_seed(path_str):
+        box.layout.display = ""
+        result_dir = Path(path_str[len(FREQ_SEED_PREFIX) :])
+        if not populate_freq_perturb_modes(app, result_dir):
+            app._seed_note.value = (
+                f'<span style="font-size:12px;color:{_theme.ACCENT_WARNING}">'
+                "⚠ Selected Frequency result has no usable normal modes."
+                "</span>"
+            )
+    else:
+        box.layout.display = "none"
+
+
+def resolve_seed_geometry(app: Any, base_mol: Any, *, log: Any | None = None) -> Any:
+    """Apply seed geometry (geo-opt final frame or freq mode perturbation)."""
+    from quantui.backends.dispatch import load_seed_molecule
+    from quantui.freq_calc import (
+        VIB_MODE_DISPLAY_AMPLITUDE_ANGSTROM,
+        freq_mode_seed_result_dir,
+        is_freq_mode_seed,
+        molecule_from_freq_mode_seed,
+    )
+
+    seed_path = getattr(getattr(app, "_seed_dd", None), "value", "") or ""
+    if not seed_path:
+        return base_mol
+
+    if is_freq_mode_seed(seed_path):
+        result_dir = freq_mode_seed_result_dir(seed_path)
+        mode_number = int(app._freq_perturb_mode_dd.value)
+        fraction = float(app._freq_perturb_fraction.value)
+        mol, meta = molecule_from_freq_mode_seed(
+            result_dir,
+            mode_number,
+            fraction=fraction,
+        )
+        if log is not None:
+            freq_raw = meta.get("frequency_cm1")
+            freq_val = float(freq_raw) if isinstance(freq_raw, (int, float)) else None
+            freq_label = f"{freq_val:.1f} cm⁻¹" if freq_val is not None else "n/a"
+            imag_note = " (imaginary)" if freq_val is not None and freq_val < 0 else ""
+            log.write(
+                f"\nMode-following seed from Frequency result: {result_dir.name}\n"
+                f"  Mode {mode_number}: {freq_label}{imag_note}\n"
+                f"  Displacement: {fraction:.0%} × "
+                f"{VIB_MODE_DISPLAY_AMPLITUDE_ANGSTROM} Å per normalized mode vector\n\n"
+            )
+        return mol
+
+    mol = load_seed_molecule(seed_path)
+    if log is not None:
+        log.write(
+            f"\nSeed geometry loaded from: {Path(seed_path).name}\n"
+            f"  Formula: {mol.get_formula()}  Atoms: {len(mol.atoms)}\n\n"
+        )
+    return mol
+
+
+def apply_vib_mode_for_frequency(app: Any) -> None:
+    """Perturb the active structure along the selected vib mode → Frequency calc."""
+    from quantui.freq_calc import (
+        DEFAULT_MODE_PERTURBATION_FRACTION,
+        perturb_along_mode,
+    )
+
+    freq_result = getattr(app, "_last_vib_freq_result", None)
+    molecule = getattr(app, "_last_vib_molecule", None)
+    mode_dd = getattr(app, "vib_mode_dd", None)
+    if freq_result is None or molecule is None or mode_dd is None:
+        app.run_status.value = (
+            "Open a Frequency result with normal modes in the Vibrational panel first."
+        )
+        return
+    mode_number = mode_dd.value
+    if not mode_number:
+        app.run_status.value = "Select a vibrational mode first."
+        return
+    disps = getattr(freq_result, "displacements", None)
+    if not disps:
+        app.run_status.value = "This result has no saved normal-mode displacements."
+        return
+
+    fraction = float(
+        getattr(
+            app._freq_perturb_fraction,
+            "value",
+            DEFAULT_MODE_PERTURBATION_FRACTION,
+        )
+    )
+    try:
+        perturbed = perturb_along_mode(
+            molecule,
+            disps,
+            int(mode_number) - 1,
+            fraction=fraction,
+        )
+    except ValueError as exc:
+        app.run_status.value = f"Could not apply mode displacement: {exc}"
+        return
+
+    freqs = getattr(freq_result, "frequencies_cm1", []) or []
+    idx = int(mode_number) - 1
+    freq_val = freqs[idx] if 0 <= idx < len(freqs) else None
+    imag = "imaginary " if freq_val is not None and freq_val < 0 else ""
+    freq_note = f" ({imag}{freq_val:.1f} cm⁻¹)" if freq_val is not None else ""
+    app._set_molecule(
+        perturbed,
+        f"Mode {mode_number} perturbation ({fraction:.0%} scale){freq_note}",
+    )
+    app.calc_type_dd.value = "Frequency"
+    app._seed_dd.value = ""
+    _update_freq_perturb_seed_ui(app, "")
+    app.run_status.value = (
+        f"Applied mode {mode_number} displacement — ready to rerun Frequency."
+    )
+
+
+def _refresh_seed_options(
+    app: Any, dropdown: Any, *, include_freq_seeds: bool = False
+) -> None:
+    """Populate a seed dropdown filtered by strict atom+coord match.
+
+    Shared helper used by Geometry Opt, Frequency, UV-Vis (TD-DFT), and NMR.
+    Lists geometry-opt final frames and Frequency results (mode perturbation).
     Filter cascade:
 
     1. No active molecule → list every geo-opt result (no filter; lets the
@@ -699,6 +885,41 @@ def _refresh_seed_options(app: Any, dropdown: Any) -> None:
             options.append((label, str(d)))
         except Exception:
             continue
+
+    from quantui.freq_calc import FREQ_SEED_PREFIX
+
+    if include_freq_seeds:
+        for d in list_results():
+            try:
+                data = load_result(d)
+                if data.get("calc_type") != "frequency":
+                    continue
+                ir = (data.get("spectra") or {}).get("ir") or {}
+                if not ir.get("displacements"):
+                    continue
+                if (
+                    current_formula is not None
+                    and data.get("formula") != current_formula
+                ):
+                    continue
+                if current_atoms is not None and current_coords is not None:
+                    freq_geom = _load_freq_result_geometry(d)
+                    if freq_geom is not None:
+                        cand_atoms, cand_coords = freq_geom
+                        if not _geometries_match(
+                            current_atoms, current_coords, cand_atoms, cand_coords
+                        ):
+                            continue
+                ts = data.get("timestamp", d.name[:19])
+                n_imag = sum(1 for f in ir.get("frequencies_cm1") or [] if f < 0)
+                imag_note = f", {n_imag} imag" if n_imag else ""
+                label = (
+                    f"📈 Freq · {data['formula']}  "
+                    f"{data['method']}/{data['basis']}{imag_note}  —  {ts}"
+                )
+                options.append((label, f"{FREQ_SEED_PREFIX}{d}"))
+            except Exception:
+                continue
     dropdown.options = options
 
 
@@ -710,7 +931,9 @@ def refresh_seed_options(app: Any) -> None:
     dropdown to refresh (UXP2.5, M-UX2). Superseded the three near-identical
     ``refresh_{geo,freq,tddft}_seed_options`` wrappers that used to exist here.
     """
-    _refresh_seed_options(app, app._seed_dd)
+    include_freq = getattr(app, "calc_type_dd", None)
+    include_freq_seeds = include_freq is not None and include_freq.value == "Frequency"
+    _refresh_seed_options(app, app._seed_dd, include_freq_seeds=include_freq_seeds)
 
 
 def on_seed_changed(app: Any, change: Any) -> None:
@@ -741,13 +964,25 @@ def on_seed_changed(app: Any, change: Any) -> None:
             app._freq_preopt_cb.disabled = True
         else:
             app._freq_preopt_cb.disabled = False
+    if ct == "Frequency":
+        _update_freq_perturb_seed_ui(app, path_str)
     if path_str:
-        app._seed_note.value = (
-            f'<span style="font-size:12px;color:{_theme.ACCENT_SUCCESS}">'
-            "✓ The run will start from the selected result's final geometry "
-            "instead of the current molecule."
-            "</span>"
-        )
+        from quantui.freq_calc import is_freq_mode_seed
+
+        if is_freq_mode_seed(path_str):
+            app._seed_note.value = (
+                f'<span style="font-size:12px;color:{_theme.ACCENT_SUCCESS}">'
+                "✓ The run will start from the selected Frequency geometry "
+                "displaced along the chosen normal mode."
+                "</span>"
+            )
+        else:
+            app._seed_note.value = (
+                f'<span style="font-size:12px;color:{_theme.ACCENT_SUCCESS}">'
+                "✓ The run will start from the selected result's final geometry "
+                "instead of the current molecule."
+                "</span>"
+            )
     else:
         app._seed_note.value = ""
 

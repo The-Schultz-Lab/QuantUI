@@ -30,6 +30,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import IO, Any, List, Optional, cast
 
 from .molecule import Molecule
@@ -123,6 +124,149 @@ class FreqResult:
     def n_imaginary_modes(self) -> int:
         """Number of imaginary (negative-frequency) modes."""
         return sum(1 for f in self.frequencies_cm1 if f < 0)
+
+
+# ============================================================================
+# Mode-following geometry perturbation (imaginary / TS modes)
+# ============================================================================
+
+# Matches the default vibrational animation amplitude in ``app_visualization``.
+VIB_MODE_DISPLAY_AMPLITUDE_ANGSTROM: float = 0.4
+
+# Typical scale when following an imaginary mode off a saddle point.
+DEFAULT_MODE_PERTURBATION_FRACTION: float = 0.75
+
+# Seed-dropdown prefix for a saved Frequency result (mode chosen separately).
+FREQ_SEED_PREFIX: str = "freq:"
+
+
+def perturb_along_mode(
+    molecule: Molecule,
+    displacements: List,
+    mode_index: int,
+    *,
+    fraction: float = DEFAULT_MODE_PERTURBATION_FRACTION,
+    amplitude: float = VIB_MODE_DISPLAY_AMPLITUDE_ANGSTROM,
+    sign: float = 1.0,
+) -> Molecule:
+    """Return a copy of *molecule* displaced along one normal mode.
+
+    PySCF ``norm_mode`` vectors are unit-normalized; *amplitude* (Å) scales
+    them the same way as the Vibrational panel animation.  *fraction* is the
+    user-facing scale (default 75%).  Per-atom displacement is
+    ``sign * fraction * amplitude * mode_vector[atom]``.
+
+    Args:
+        molecule: Starting geometry (Å).
+        displacements: Nested list shaped ``(n_modes, n_atoms, 3)``.
+        mode_index: **0-based** index into *displacements* / ``frequencies_cm1``.
+        fraction: Scalar multiplier on *amplitude* (0–1 typical).
+        amplitude: Base displacement scale in Å (animation default 0.4).
+        sign: ``+1`` or ``-1`` to flip mode direction.
+
+    Raises:
+        ValueError: On shape mismatch or out-of-range *mode_index*.
+    """
+    import numpy as np
+
+    if mode_index < 0 or mode_index >= len(displacements):
+        raise ValueError(
+            f"mode_index {mode_index} out of range for {len(displacements)} modes"
+        )
+
+    disp = np.asarray(displacements[mode_index], dtype=float)
+    coords = np.asarray(molecule.coordinates, dtype=float)
+    if disp.shape != coords.shape:
+        raise ValueError(
+            f"displacement shape {disp.shape} != coordinates shape {coords.shape}"
+        )
+
+    scale = float(sign) * float(fraction) * float(amplitude)
+    new_coords = (coords + scale * disp).tolist()
+    return Molecule(
+        atoms=list(molecule.atoms),
+        coordinates=new_coords,
+        charge=int(molecule.charge),
+        multiplicity=int(molecule.multiplicity),
+        validate_spin=molecule._validate_spin,
+    )
+
+
+def load_frequency_mode_seed_data(
+    result_dir: Path,
+) -> tuple[Molecule, List, List[float]]:
+    """Load geometry and mode data from a saved Frequency ``result.json``."""
+    from quantui.results_storage import load_result
+
+    data = load_result(result_dir)
+    if data.get("calc_type") != "frequency":
+        raise ValueError(f"Not a frequency result: {result_dir}")
+
+    spectra = data.get("spectra") or {}
+    ir = spectra.get("ir") or {}
+    mol_data = spectra.get("molecule") or {}
+    displacements = ir.get("displacements")
+    frequencies = ir.get("frequencies_cm1") or []
+
+    if not mol_data.get("atoms"):
+        raise ValueError(f"No molecule geometry in frequency result: {result_dir}")
+    if not displacements:
+        raise ValueError(
+            f"No normal-mode displacements in frequency result: {result_dir}"
+        )
+
+    molecule = Molecule(
+        atoms=list(mol_data["atoms"]),
+        coordinates=[list(c) for c in mol_data["coords"]],
+        charge=int(mol_data.get("charge", 0)),
+        multiplicity=int(mol_data.get("multiplicity", 1)),
+    )
+    return molecule, displacements, [float(f) for f in frequencies]
+
+
+def molecule_from_freq_mode_seed(
+    result_dir: Path,
+    mode_number: int,
+    *,
+    fraction: float = DEFAULT_MODE_PERTURBATION_FRACTION,
+    amplitude: float = VIB_MODE_DISPLAY_AMPLITUDE_ANGSTROM,
+    sign: float = 1.0,
+) -> tuple[Molecule, dict[str, object]]:
+    """Build a perturbed molecule from a saved freq result and 1-based mode index."""
+    molecule, displacements, frequencies = load_frequency_mode_seed_data(result_dir)
+    if mode_number < 1 or mode_number > len(displacements):
+        raise ValueError(
+            f"mode_number {mode_number} out of range for {len(displacements)} modes"
+        )
+    mode_index = mode_number - 1
+    perturbed = perturb_along_mode(
+        molecule,
+        displacements,
+        mode_index,
+        fraction=fraction,
+        amplitude=amplitude,
+        sign=sign,
+    )
+    freq_cm1 = frequencies[mode_index] if mode_index < len(frequencies) else None
+    meta = {
+        "result_dir": str(result_dir),
+        "mode_number": mode_number,
+        "frequency_cm1": freq_cm1,
+        "fraction": fraction,
+        "amplitude_angstrom": amplitude,
+        "sign": sign,
+    }
+    return perturbed, meta
+
+
+def is_freq_mode_seed(path_str: str) -> bool:
+    return bool(path_str) and path_str.startswith(FREQ_SEED_PREFIX)
+
+
+def freq_mode_seed_result_dir(path_str: str) -> Path:
+    if not is_freq_mode_seed(path_str):
+        raise ValueError(f"Not a frequency mode seed: {path_str!r}")
+    return Path(path_str[len(FREQ_SEED_PREFIX) :])
 
 
 # ============================================================================
