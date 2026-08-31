@@ -547,7 +547,15 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
                 layout=layout_fn(gap="4px", align_items="center"),
             ),
             widgets.HBox(
-                [app._scan_suggest_btn, app._scan_suggest_around_btn],
+                [
+                    app._scan_around_margin,
+                    app._scan_around_margin_unit,
+                    app._scan_suggest_around_btn,
+                ],
+                layout=layout_fn(gap="6px", align_items="center"),
+            ),
+            widgets.HBox(
+                [app._scan_suggest_btn],
                 layout=layout_fn(gap="6px"),
             ),
             widgets.HBox(
@@ -593,6 +601,7 @@ def update_scan_widgets(app: Any, _change: Any = None) -> None:
         and _change.get("owner") is app._scan_type_dd
         and _change.get("name") == "value"
     ):
+        _sync_scan_around_margin_ui(app, st)
         mol = getattr(app, "_molecule", None)
         old = _change.get("old") or "Bond"
         if mol is not None and mol.atoms:
@@ -705,10 +714,36 @@ def apply_scan_range_around_current(app: Any) -> None:
 
     mol = getattr(app, "_molecule", None)
     start, stop = scan_range_around_current(
-        mol, app._scan_type_dd.value, _selected_scan_atoms(app)
+        mol,
+        app._scan_type_dd.value,
+        _selected_scan_atoms(app),
+        margin=float(app._scan_around_margin.value),
     )
     app._scan_start.value = float(start)
     app._scan_stop.value = float(stop)
+
+
+def _sync_scan_around_margin_ui(app: Any, scan_type: str | None = None) -> None:
+    """Update ± window default, bounds, and unit label for the scan type."""
+    from quantui.pes_scan_ui import around_margin_defaults
+
+    st = (scan_type or app._scan_type_dd.value).lower()
+    default, unit = around_margin_defaults(st)
+    margin_w = app._scan_around_margin
+    if st == "bond":
+        margin_w.min = 1.0
+        margin_w.max = 100.0
+        margin_w.step = 1.0
+    else:
+        margin_w.min = 0.1
+        margin_w.max = 180.0
+        margin_w.step = 1.0
+    margin_w.value = float(default)
+    unit_lbl = getattr(app, "_scan_around_margin_unit", None)
+    if unit_lbl is not None:
+        unit_lbl.value = (
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE}">{unit}</span>'
+        )
 
 
 def refresh_pes_seed_options(app: Any) -> None:
@@ -755,6 +790,7 @@ def refresh_pes_scan_widgets(
     app._scan_atom_list_html.value = atom_list_html(
         mol, chip_bg=chip_bg, chip_fg=chip_fg, muted_fg=muted_fg
     )
+    _sync_scan_around_margin_ui(app, st)
     update_scan_widgets(app)
     if suggest_range and n_atoms > 0:
         apply_suggested_scan_range(app)
@@ -2489,6 +2525,7 @@ def _restore_calc_settings(app: Any, settings: dict) -> None:
         ("scan_stop", "_scan_stop"),
         ("scan_steps", "_scan_steps"),
         ("scan_grid", "_scan_grid_dd"),
+        ("scan_around_margin", "_scan_around_margin"),
     ):
         if key in settings:
             _assign_widget_value(getattr(app, attr, None), settings[key])

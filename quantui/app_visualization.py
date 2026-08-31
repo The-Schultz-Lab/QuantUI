@@ -311,6 +311,7 @@ def show_opt_trajectory(
             height=220,
             margin=dict(l=60, r=20, t=40, b=40),
         )
+        app._apply_plotly_theme(energy_fig)
         has_plotly = True
     except ImportError:
         pass
@@ -3465,20 +3466,17 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
                 )
             )
 
-        tc = app._plotly_theme_colors()
         fig.update_layout(
             xaxis_title=result.scan_coordinate_label,
             yaxis_title="Relative energy / kcal mol⁻¹",
             height=380,
             margin=dict(l=60, r=20, t=30, b=50),
-            plot_bgcolor=tc["plot_bgcolor"],
-            paper_bgcolor=tc["paper_bgcolor"],
-            font=dict(color=tc["font_color"]),
-            xaxis=dict(showgrid=True, gridcolor=tc["grid_color"]),
-            yaxis=dict(showgrid=True, gridcolor=tc["grid_color"]),
             hovermode="closest",
             showlegend=len(fig.data) > 1,
         )
+        app._apply_plotly_theme(fig)
+        fig.update_xaxes(showgrid=True)
+        fig.update_yaxes(showgrid=True)
         app._last_pes_fig = fig
         plot_html = pio.to_html(
             fig,

@@ -1354,6 +1354,19 @@ def build_shared_widgets(
         tooltip="Set Start/Stop in a window around the current coordinate value",
         layout=layout_fn(width="150px"),
     )
+    app._scan_around_margin = widgets.BoundedFloatText(
+        value=20.0,
+        min=0.1,
+        max=180.0,
+        step=1.0,
+        description="± window:",
+        style={"description_width": "72px"},
+        layout=layout_fn(width="170px"),
+        tooltip="Half-width for ± around current (° for angle/dihedral; % of current for bond)",
+    )
+    app._scan_around_margin_unit = widgets.HTML(
+        value=f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE}">°</span>'
+    )
     app._scan_grid_dd = widgets.Dropdown(
         options=[("Linear spacing", "linear"), ("Log spacing (bond)", "log")],
         value="linear",
