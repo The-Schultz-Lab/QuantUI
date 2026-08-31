@@ -7,10 +7,14 @@ import pytest
 from quantui.measurement import atom_label
 from quantui.molecule import Molecule
 from quantui.pes_scan_ui import (
+    adapt_atoms_for_scan_type_change,
     atom_dropdown_options,
     atom_list_html,
+    build_scan_grid,
+    current_coordinate_value,
     default_atom_selection,
     format_scan_atom_summary,
+    scan_range_around_current,
     suggest_scan_range,
     validate_pes_scan_inputs,
 )
@@ -99,3 +103,48 @@ class TestFormatScanAtomSummary:
         summary = format_scan_atom_summary(_water(), "angle", [1, 2, 3])
         assert "vertex" in summary.lower()
         assert "O1" in summary or "1 (" in summary
+
+
+class TestAdaptAtomsForScanTypeChange:
+    def test_bond_to_angle_preserves_atoms_when_possible(self):
+        adapted = adapt_atoms_for_scan_type_change("bond", "angle", [1, 2], 3)
+        assert adapted[:2] == [1, 2]
+        assert adapted[2] == 3
+
+    def test_angle_to_bond_keeps_first_two(self):
+        adapted = adapt_atoms_for_scan_type_change("angle", "bond", [2, 1, 3], 3)
+        assert adapted == [2, 1]
+
+
+class TestCurrentCoordinateValue:
+    def test_bond_distance_for_water(self):
+        cur = current_coordinate_value(_water(), "bond", [1, 2])
+        assert cur is not None
+        val, unit = cur
+        assert unit == "Å"
+        assert val > 0.5
+
+
+class TestBuildScanGrid:
+    def test_linear_bond_grid(self):
+        vals = build_scan_grid(1.0, 2.0, 5, scan_type="bond", grid="linear")
+        assert len(vals) == 5
+        assert vals[0] == pytest.approx(1.0)
+        assert vals[-1] == pytest.approx(2.0)
+
+    def test_log_bond_grid(self):
+        vals = build_scan_grid(1.0, 2.0, 5, scan_type="bond", grid="log")
+        assert len(vals) == 5
+        assert vals[0] == pytest.approx(1.0)
+        assert vals[-1] == pytest.approx(2.0)
+        assert vals[1] > vals[0]
+
+
+class TestScanRangeAroundCurrent:
+    def test_angle_window_around_current(self):
+        mol = _water()
+        start, stop = scan_range_around_current(mol, "angle", [2, 1, 3])
+        cur = current_coordinate_value(mol, "angle", [2, 1, 3])
+        assert cur is not None
+        val, _ = cur
+        assert start < val < stop

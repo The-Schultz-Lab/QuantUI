@@ -276,6 +276,7 @@ def visualize_molecule_plotlymol(
     height: int = 500,
     bgcolor: str = "#ffffff",
     lighting: str = "soft",
+    show_atom_indices: bool = False,
 ):
     """
     Create interactive 3D visualization using PlotlyMol (optional backend).
@@ -360,6 +361,25 @@ def visualize_molecule_plotlymol(
         paper_bgcolor=bgcolor,
         scene=dict(bgcolor=bgcolor),
     )
+    if show_atom_indices:
+        import plotly.graph_objects as go
+
+        xs = [float(c[0]) for c in molecule.coordinates]
+        ys = [float(c[1]) for c in molecule.coordinates]
+        zs = [float(c[2]) for c in molecule.coordinates]
+        labels = [str(i + 1) for i in range(len(molecule.atoms))]
+        fig.add_trace(
+            go.Scatter3d(
+                x=xs,
+                y=ys,
+                z=zs,
+                mode="text",
+                text=labels,
+                textfont=dict(size=14, color="#111827"),
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
     return fig
 
 
@@ -441,6 +461,8 @@ def visualize_molecule(
         }
         mode = mode_map.get(style, "ball+stick")
         try:
+            plotly_kwargs = dict(kwargs)
+            show_indices = bool(plotly_kwargs.pop("show_atom_indices", False))
             return visualize_molecule_plotlymol(
                 molecule,
                 mode=mode,
@@ -448,7 +470,8 @@ def visualize_molecule(
                 height=height,
                 bgcolor=bgcolor,
                 lighting=lighting,
-                **kwargs,
+                show_atom_indices=show_indices,
+                **plotly_kwargs,
             )
         except Exception as exc:  # noqa: BLE001 — a viewer must never hard-error
             # MET.3: PlotlyMol runs RDKit valence perception, which raises on

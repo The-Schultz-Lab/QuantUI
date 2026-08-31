@@ -227,6 +227,7 @@ def run_pes_scan(
     progress_stream: Optional[IO[str]] = None,
     checkpoint: Optional[Any] = None,
     resume: bool = False,
+    grid: str = "linear",
 ) -> PESScanResult:
     """Run a 1D PES scan along an internal coordinate.
 
@@ -246,6 +247,8 @@ def run_pes_scan(
             (Å for bond; degrees for angle/dihedral).
         stop: Ending value.
         steps: Number of evenly spaced scan points (including start and stop).
+        grid: ``'linear'`` (default) or ``'log'`` (bond scans only — logarithmic
+            spacing in Å).
         fmax: Force convergence threshold (eV/Å) for each constrained optimization.
         max_opt_steps: Maximum BFGS steps per scan point.
         progress_stream: Optional writable stream for per-step progress messages.
@@ -351,7 +354,18 @@ def run_pes_scan(
 
     import numpy as np
 
-    scan_values = np.linspace(start, stop, steps).tolist()
+    grid = (grid or "linear").lower()
+    if (
+        grid == "log"
+        and scan_type == "bond"
+        and start > 0
+        and stop > 0
+        and start != stop
+    ):
+        lo, hi = (start, stop) if start < stop else (stop, start)
+        scan_values = np.geomspace(lo, hi, steps).tolist()
+    else:
+        scan_values = np.linspace(start, stop, steps).tolist()
 
     energies_hartree: List[float] = []
     coordinates_list: List[Molecule] = []

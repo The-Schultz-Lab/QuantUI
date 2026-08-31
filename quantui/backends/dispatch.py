@@ -13,8 +13,8 @@ from uuid import uuid4
 from .base import CalculationRequest
 from .slurm import SlurmBackend
 
-# Calc types that can consume a History seed geometry (shared ``_seed_dd`` widget).
-_SEED_CALC_TYPES = frozenset({"geometry_opt", "frequency", "tddft", "nmr"})
+# Calc types that can consume a History seed geometry.
+_SEED_CALC_TYPES = frozenset({"geometry_opt", "frequency", "tddft", "nmr", "pes_scan"})
 # Calc types that may run a DFT geometry optimization before the main step.
 _PREOPT_CALC_TYPES = frozenset({"frequency", "tddft"})
 
@@ -73,7 +73,11 @@ def calc_type_key_from_app(app: Any) -> str:
 
 def seed_path_from_app(app: Any) -> str | None:
     """Return the selected History seed result dir, if any."""
-    seed_dd = getattr(app, "_seed_dd", None)
+    calc_type = calc_type_key_from_app(app)
+    if calc_type == "pes_scan":
+        seed_dd = getattr(app, "_scan_seed_dd", None)
+    else:
+        seed_dd = getattr(app, "_seed_dd", None)
     if seed_dd is None:
         return None
     path = getattr(seed_dd, "value", "") or ""
@@ -137,6 +141,9 @@ def build_calculation_request(
                 "start": float(app._scan_start.value),
                 "stop": float(app._scan_stop.value),
                 "steps": int(app._scan_steps.value),
+                "grid": str(getattr(app._scan_grid_dd, "value", "linear")),
+                "fmax": float(app.fmax_fi.value),
+                "max_opt_steps": int(app.max_steps_si.value),
             }
         )
 
@@ -158,6 +165,10 @@ def build_calculation_request(
             run_context["seed_mode_fraction"] = float(app._freq_perturb_fraction.value)
 
     if calc_type in _PREOPT_CALC_TYPES and not seed_path:
+        preopt_cb = getattr(app, "_freq_preopt_cb", None)
+        if preopt_cb is not None and bool(preopt_cb.value):
+            options["preopt_before_run"] = True
+    if calc_type == "pes_scan" and not seed_path:
         preopt_cb = getattr(app, "_freq_preopt_cb", None)
         if preopt_cb is not None and bool(preopt_cb.value):
             options["preopt_before_run"] = True

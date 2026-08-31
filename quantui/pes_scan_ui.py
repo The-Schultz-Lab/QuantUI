@@ -15,10 +15,15 @@ from .measurement import angle, atom_label, dihedral, distance
 from .molecule import Molecule
 
 __all__ = [
+    "adapt_atoms_for_scan_type_change",
     "atom_dropdown_options",
     "atom_list_html",
+    "build_scan_grid",
+    "current_coordinate_value",
     "default_atom_selection",
+    "format_current_coordinate_html",
     "format_scan_atom_summary",
+    "scan_range_around_current",
     "scan_range_bounds",
     "suggest_scan_range",
     "validate_pes_scan_inputs",
@@ -55,14 +60,12 @@ def atom_list_html(molecule: Optional[Molecule]) -> str:
         lbl = atom_label(molecule, i)
         cells.append(
             f'<span style="display:inline-block;margin:0 6px 4px 0;'
-            f'padding:2px 7px;border-radius:4px;background:#f1f5f9;'
+            f"padding:2px 7px;border-radius:4px;background:#f1f5f9;"
             f'font-size:12px;font-family:monospace">'
             f"<b>{i + 1}</b>&nbsp;{html.escape(lbl)} ({html.escape(sym)})</span>"
         )
     return (
-        '<div style="line-height:1.6;margin:2px 0 4px 0">'
-        + "".join(cells)
-        + "</div>"
+        '<div style="line-height:1.6;margin:2px 0 4px 0">' + "".join(cells) + "</div>"
     )
 
 
@@ -80,6 +83,130 @@ def default_atom_selection(n_atoms: int, scan_type: str) -> List[int]:
         return [1, 1, min(3, n_atoms)]
     # dihedral
     return [1, min(2, n_atoms), min(3, n_atoms), min(4, n_atoms)]
+
+
+def adapt_atoms_for_scan_type_change(
+    old_type: str,
+    new_type: str,
+    atom_numbers: Sequence[int],
+    n_atoms: int,
+) -> List[int]:
+    """Preserve atom picks when switching scan type where possible."""
+    if n_atoms < 1:
+        return default_atom_selection(0, new_type)
+    old_type = old_type.lower()
+    new_type = new_type.lower()
+    nums = [max(1, min(int(a), n_atoms)) for a in atom_numbers if int(a) >= 1]
+    if new_type == "bond":
+        if len(nums) >= 2 and nums[0] != nums[1]:
+            return [nums[0], nums[1]]
+        return default_atom_selection(n_atoms, "bond")
+    if new_type == "angle":
+        if len(nums) >= 3 and len(set(nums[:3])) == 3:
+            return list(nums[:3])
+        if len(nums) >= 2 and nums[0] != nums[1]:
+            third = next((i for i in range(1, n_atoms + 1) if i not in nums[:2]), 3)
+            return [nums[0], nums[1], min(third, n_atoms)]
+        return default_atom_selection(n_atoms, "angle")
+    # dihedral
+    if len(nums) >= 4 and len(set(nums[:4])) == 4:
+        return list(nums[:4])
+    base = adapt_atoms_for_scan_type_change(old_type, "angle", nums, n_atoms)
+    fourth = next((i for i in range(1, n_atoms + 1) if i not in base), 4)
+    return base + [min(fourth, n_atoms)]
+
+
+def current_coordinate_value(
+    molecule: Optional[Molecule],
+    scan_type: str,
+    atom_numbers: Sequence[int],
+) -> Optional[Tuple[float, str]]:
+    """Return ``(value, unit)`` for the current geometry, or ``None``."""
+    if molecule is None or not molecule.atoms:
+        return None
+    scan_type = scan_type.lower()
+    idx = [int(a) - 1 for a in atom_numbers]
+    n_atoms = len(molecule.atoms)
+    if any(i < 0 or i >= n_atoms for i in idx):
+        return None
+    try:
+        if scan_type == "bond" and len(idx) >= 2:
+            return distance(molecule, idx[0], idx[1]), "Å"
+        if scan_type == "angle" and len(idx) >= 3:
+            return angle(molecule, idx[0], idx[1], idx[2]), "°"
+        if scan_type == "dihedral" and len(idx) >= 4:
+            return dihedral(molecule, idx[0], idx[1], idx[2], idx[3]), "°"
+    except (ZeroDivisionError, ValueError):
+        return None
+    return None
+
+
+def format_current_coordinate_html(
+    molecule: Optional[Molecule],
+    scan_type: str,
+    atom_numbers: Sequence[int],
+) -> str:
+    cur = current_coordinate_value(molecule, scan_type, atom_numbers)
+    if cur is None:
+        return (
+            '<span style="font-size:12px;color:#64748b">'
+            "Current value: — (pick valid atoms)</span>"
+        )
+    val, unit = cur
+    return (
+        f'<span style="font-size:12px;color:#334155">'
+        f"<b>Current value:</b> {val:.3f} {unit}</span>"
+    )
+
+
+def scan_range_around_current(
+    molecule: Optional[Molecule],
+    scan_type: str,
+    atom_numbers: Sequence[int],
+    *,
+    bond_fraction: float = 0.25,
+    angle_delta: float = 20.0,
+    dihedral_delta: float = 60.0,
+) -> Tuple[float, float]:
+    """Suggest a window around the current coordinate value."""
+    cur = current_coordinate_value(molecule, scan_type, atom_numbers)
+    scan_type = scan_type.lower()
+    if cur is None:
+        return suggest_scan_range(molecule, scan_type, atom_numbers)
+    val, _unit = cur
+    if scan_type == "bond":
+        margin = max(0.2, bond_fraction * val)
+        return (max(_BOND_MIN, val - margin), val + margin)
+    if scan_type == "angle":
+        return (val - angle_delta, val + angle_delta)
+    return (val - dihedral_delta, val + dihedral_delta)
+
+
+def build_scan_grid(
+    start: float,
+    stop: float,
+    steps: int,
+    *,
+    scan_type: str,
+    grid: str = "linear",
+) -> List[float]:
+    """Evenly spaced (or log-spaced bond) scan coordinate values."""
+    import numpy as np
+
+    if steps < 2:
+        raise ValueError("steps must be >= 2")
+    scan_type = scan_type.lower()
+    grid = (grid or "linear").lower()
+    if (
+        grid == "log"
+        and scan_type == "bond"
+        and start > 0
+        and stop > 0
+        and start != stop
+    ):
+        lo, hi = (start, stop) if start < stop else (stop, start)
+        return np.geomspace(lo, hi, steps).tolist()
+    return np.linspace(start, stop, steps).tolist()
 
 
 def _clamp_selection(values: Sequence[int], n_atoms: int) -> List[int]:

@@ -383,6 +383,47 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "run multiple calculations and view energy differences in one table.</p>"
         ),
     },
+    "pes_scan": {
+        "title": "PES Scan — potential energy surface along one coordinate",
+        "body": (
+            "<p>A <b>PES scan</b> computes the energy while varying one "
+            "internal coordinate. At each point all other degrees of freedom "
+            "are relaxed (constrained optimization), giving a 1D energy profile.</p>"
+            "<table style='border-collapse:collapse; margin:6px 0;'>"
+            f"<tr style='border-bottom:1px solid {_theme.css.BORDER_LEGACY};'>"
+            "  <th style='padding:3px 12px; text-align:left;'>Scan type</th>"
+            "  <th style='padding:3px 12px; text-align:left;'>Atoms needed</th>"
+            "  <th style='padding:3px 12px; text-align:left;'>Unit</th></tr>"
+            "<tr><td style='padding:3px 12px;'><b>Bond</b></td>"
+            "  <td style='padding:3px 12px;'>2 atoms (the bond)</td>"
+            "  <td style='padding:3px 12px;'>Å</td></tr>"
+            "<tr><td style='padding:3px 12px;'><b>Angle</b></td>"
+            "  <td style='padding:3px 12px;'>3 atoms — vertex is <b>atom 2</b> "
+            "(middle atom)</td>"
+            "  <td style='padding:3px 12px;'>degrees</td></tr>"
+            "<tr><td style='padding:3px 12px;'><b>Dihedral</b></td>"
+            "  <td style='padding:3px 12px;'>4 atoms in order along the chain</td>"
+            "  <td style='padding:3px 12px;'>degrees</td></tr>"
+            "</table>"
+            "<p><b>Recommended workflow:</b></p>"
+            "<ol>"
+            "<li>Build or import your molecule and inspect atom numbers in the "
+            "3D viewer (py3Dmol shows index labels during PES setup).</li>"
+            "<li>Run <b>Geometry Opt</b> first, or enable "
+            "<b>Pre-optimize starting geometry</b> — scans are most meaningful "
+            "from a good starting structure.</li>"
+            "<li>Pick atoms via the dropdowns or by clicking in the viewer "
+            "(py3Dmol only).</li>"
+            "<li>Use <b>Suggest range</b> or <b>± around current</b> to fill "
+            "Start/Stop from the current geometry.</li>"
+            "<li>Each scan <b>point</b> runs a constrained QM optimization + "
+            "SCF — total cost ≈ (points) × (time per point).</li>"
+            "</ol>"
+            "<p>In the Analysis tab, click a point on the energy curve to jump "
+            "the Trajectory viewer to that geometry. Failed points appear as red "
+            "× markers; the gold star marks the minimum.</p>"
+        ),
+    },
     "measure": {
         "title": "Click-to-measure (bond / angle / dihedral)",
         "body": (
