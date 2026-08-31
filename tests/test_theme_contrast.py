@@ -73,7 +73,9 @@ class TestPaletteRegistry:
         palette = theme.get_palette(palette_id)
         bridge = palette.jupyterlab_variables()
         assert bridge["--jp-layout-color0"] == palette.page_bg
-        assert bridge["--jp-input-background"] == palette.page_bg
+        assert bridge["--jp-layout-color1"] == palette.bg_panel
+        assert bridge["--jp-layout-color2"] == palette.bg_panel
+        assert bridge["--jp-input-background"] == palette.bg_panel
         assert bridge["--jp-ui-font-color1"] == palette.text_body
 
     @pytest.mark.parametrize("palette_id", theme.PALETTE_IDS)
@@ -135,6 +137,8 @@ class TestTokensAreActuallyUsed:
     def test_theme_css_block_styles_widget_tabs(self):
         block = theme.theme_css_block("Dark")
         assert ".lm-TabBar-tab" in block
+        assert ".lm-AccordionPanel-title" in block
+        assert "quantui-info-box" in block
         assert "var(--q-bg-panel)" in block
 
     def test_no_viewer_border_is_drawn_from_a_css_class(self):

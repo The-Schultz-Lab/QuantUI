@@ -507,16 +507,14 @@ def _info_box_html(molecule, backend: str) -> str:
     backend_str = ", ".join(backends)
     selected = backend if backend != "auto" else (backends[0] if backends else "")
     return (
-        '<div style="background-color: #f0f8ff; padding: 10px;'
-        " border-radius: 5px; margin-bottom: 10px;"
-        ' border-left: 4px solid #4a90e2;">'
+        '<div class="quantui-info-box">'
         "<strong>📊 Molecule Information</strong><br>"
         f"<strong>Formula:</strong> {molecule.get_formula()} | "
         f"<strong>Atoms:</strong> {len(molecule.atoms)} | "
         f"<strong>Electrons:</strong> {molecule.get_electron_count()} | "
         f"<strong>Charge:</strong> {molecule.charge} | "
         f"<strong>Multiplicity:</strong> {molecule.multiplicity}<br>"
-        f'<small style="color: #666;">Using: {selected} '
+        f"<small>Using: {selected} "
         f"(available: {backend_str})</small>"
         "</div>"
     )
@@ -702,18 +700,17 @@ def display_molecule(
         backend_str = ", ".join(backends)
         selected = backend if backend != "auto" else backends[0]
 
-        info_html = f"""
-        <div style="background-color: #f0f8ff; padding: 10px; border-radius: 5px;
-                    margin-bottom: 10px; border-left: 4px solid #4a90e2;">
-            <strong>📊 Molecule Information</strong><br>
-            <strong>Formula:</strong> {molecule.get_formula()} |
-            <strong>Atoms:</strong> {len(molecule.atoms)} |
-            <strong>Electrons:</strong> {molecule.get_electron_count()} |
-            <strong>Charge:</strong> {molecule.charge} |
-            <strong>Multiplicity:</strong> {molecule.multiplicity}<br>
-            <small style="color: #666;">Using: {selected} (available: {backend_str})</small>
-        </div>
-        """
+        info_html = (
+            '<div class="quantui-info-box">'
+            "<strong>📊 Molecule Information</strong><br>"
+            f"<strong>Formula:</strong> {molecule.get_formula()} | "
+            f"<strong>Atoms:</strong> {len(molecule.atoms)} | "
+            f"<strong>Electrons:</strong> {molecule.get_electron_count()} | "
+            f"<strong>Charge:</strong> {molecule.charge} | "
+            f"<strong>Multiplicity:</strong> {molecule.multiplicity}<br>"
+            f"<small>Using: {selected} (available: {backend_str})</small>"
+            "</div>"
+        )
         display(HTML(info_html))
 
     # Create and display visualization

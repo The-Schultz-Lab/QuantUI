@@ -800,7 +800,7 @@ h3 {
 .widget-select select,
 .widget-int input,
 .widget-float input {
-    background-color: var(--q-page-bg) !important;
+    background-color: var(--q-bg-panel) !important;
     color: var(--q-text-body) !important;
     border: 1px solid var(--q-border) !important;
     border-radius: 5px !important;
@@ -839,7 +839,13 @@ h3 {
     color: var(--q-text-label) !important;
 }
 .widget-accordion .p-Collapse-header,
-.widget-accordion .lm-AccordionPanel-title {
+.widget-accordion .lm-AccordionPanel-title,
+.lm-AccordionPanel-title {
+    background: var(--q-bg-panel) !important;
+    color: var(--q-text-body) !important;
+}
+.widget-accordion .p-Collapse-contents,
+.widget-accordion .lm-AccordionPanel-child {
     background: var(--q-bg-panel) !important;
     color: var(--q-text-body) !important;
 }
@@ -5116,7 +5122,7 @@ class QuantUIApp:
         )
         self.mol_info_html.value = _summary
         self.mol_summary_compact.value = (
-            f'<div style="background:{_theme.css.SURFACE_INFO_BG};'
+            f'<div style="background:{_theme.css.BG_PANEL};'
             f"border:1px solid {_theme.css.BORDER};"
             f'border-radius:6px;padding:7px 14px;font-size:14px;display:inline-block">'
             f"{_summary}</div>"
