@@ -160,9 +160,7 @@ class TestScanRangeAroundCurrent:
 
     def test_angle_uses_margin_degrees(self):
         mol = _water()
-        start, stop = scan_range_around_current(
-            mol, "angle", [2, 1, 3], margin=30.0
-        )
+        start, stop = scan_range_around_current(mol, "angle", [2, 1, 3], margin=30.0)
         cur = current_coordinate_value(mol, "angle", [2, 1, 3])
         assert cur is not None
         val, _ = cur

@@ -2791,7 +2791,10 @@ def build_reorg_geometry_viewer_html(
     uid = m.group(1)
 
     slugs = json.dumps(
-        [g.get("label", f"geometry_{i + 1}").split(" — ")[0] for i, g in enumerate(geometries)]
+        [
+            g.get("label", f"geometry_{i + 1}").split(" — ")[0]
+            for i, g in enumerate(geometries)
+        ]
     )
 
     if capture_class:

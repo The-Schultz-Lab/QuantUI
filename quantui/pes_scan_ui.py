@@ -11,9 +11,9 @@ from __future__ import annotations
 import html
 from typing import List, Optional, Sequence, Tuple
 
+from . import theme as _theme
 from .measurement import angle, atom_label, dihedral, distance
 from .molecule import Molecule
-from . import theme as _theme
 
 __all__ = [
     "adapt_atoms_for_scan_type_change",
