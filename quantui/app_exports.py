@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional
 
 from .results_storage import _safe_name
+
+
+def general_figures_dir() -> Path:
+    """Folder for viewer/plot PNGs that are not tied to a calculation run."""
+    dest = Path.home() / ".quantui" / "figures"
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
 
 
 def export_destination(
@@ -14,6 +22,8 @@ def export_destination(
     category: str,
     *name_parts: str,
     suffix: str,
+    general_if_no_result: bool = False,
+    timestamp: bool = False,
 ) -> Path:
     """The one place that decides where a new export lands and what it's
     called (M-EXPORT2 EXP2.3).
@@ -53,16 +63,25 @@ def export_destination(
         ValueError: no result directory is available yet.
     """
     result_dir = getattr(app, "_last_result_dir", None)
-    if result_dir is None or not isinstance(result_dir, Path):
+    using_general = result_dir is None or not isinstance(result_dir, Path)
+    if using_general:
+        if general_if_no_result:
+            dest_dir = general_figures_dir()
+        else:
+            raise ValueError(
+                f"No result folder yet — run a calculation before exporting {category}."
+            )
+    elif isinstance(result_dir, Path):
+        dest_dir = result_dir
+    else:
         raise ValueError(
             f"No result folder yet — run a calculation before exporting {category}."
         )
-    stem = "_".join(_safe_name(str(p)) for p in name_parts if p)
-    # result_dir is narrowed to Path by the isinstance check above, but mypy's
-    # Path.__truediv__ overload resolution still infers Any from an
-    # originally-Any-typed (getattr on `app: Any`) operand — verified in
-    # isolation; the isinstance check is the real, working type guard.
-    return cast(Path, result_dir / f"{stem}{suffix}")
+    parts = list(name_parts)
+    if timestamp and using_general:
+        parts.append(datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f"))
+    stem = "_".join(_safe_name(str(p)) for p in parts if p)
+    return dest_dir / f"{stem}{suffix}"
 
 
 def on_export(app: Any, btn: Any) -> None:
@@ -666,7 +685,13 @@ def _on_mol_png_captured(
 
     try:
         dest = export_destination(
-            app, "molecule PNG", formula, slot_label, suffix=".png"
+            app,
+            "molecule PNG",
+            formula,
+            slot_label,
+            suffix=".png",
+            general_if_no_result=True,
+            timestamp=True,
         )
     except ValueError as exc:
         _fail(str(exc))

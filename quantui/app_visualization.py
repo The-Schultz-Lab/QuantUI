@@ -1089,8 +1089,8 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
             height=320,
             margin=dict(l=60, r=20, t=30, b=50),
             showlegend=False,
-            plot_bgcolor=tc["plot_bgcolor"],
-            paper_bgcolor=tc["paper_bgcolor"],
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
             font=dict(color=tc["font_color"]),
         )
         fig.update_xaxes(
@@ -1296,7 +1296,11 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
 
         from quantui.orbital_visualization import plot_orbital_diagram_plotly
 
-        fig = plot_orbital_diagram_plotly(info, max_orbitals=app._orb_n_orb_input.value)
+        fig = plot_orbital_diagram_plotly(
+            info,
+            max_orbitals=app._orb_n_orb_input.value,
+            font_scale=app._orb_font_scale_slider.value,
+        )
         yr = fig.layout.yaxis.range
         if yr is not None:
             app._orb_ymin_input.value = round(float(yr[0]), 2)
@@ -1482,6 +1486,7 @@ def on_orb_range_changed(app: Any, _change: Any = None) -> None:
             info,
             max_orbitals=app._orb_n_orb_input.value,
             yrange=(ymin, ymax),
+            font_scale=app._orb_font_scale_slider.value,
         )
         app._apply_plotly_theme(fig)
         app._last_orb_fig = fig
