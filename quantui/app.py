@@ -792,13 +792,64 @@ h3 {
     border-bottom: 1px solid var(--q-border) !important;
 }
 
-/* Rounded corners on inputs, dropdowns, and buttons -------------------- */
-.widget-text input, .widget-textarea textarea {
-    border-color: #d1d5db !important;
+/* Rounded corners and theme-aware chrome on native widget controls -------- */
+.widget-text input,
+.widget-textarea textarea,
+.widget-dropdown select,
+.widget-combobox select,
+.widget-select select,
+.widget-int input,
+.widget-float input {
+    background-color: var(--q-page-bg) !important;
+    color: var(--q-text-body) !important;
+    border: 1px solid var(--q-border) !important;
     border-radius: 5px !important;
 }
 .widget-dropdown select { border-radius: 5px !important; }
-.widget-button, .widget-toggle-button { border-radius: 5px !important; }
+.widget-button button,
+.widget-toggle-button button {
+    background-color: var(--q-bg-panel) !important;
+    color: var(--q-text-body) !important;
+    border: 1px solid var(--q-border) !important;
+    border-radius: 5px !important;
+}
+.widget-button.mod-info button {
+    background-color: var(--q-accent-info) !important;
+    color: var(--q-page-bg) !important;
+    border-color: var(--q-accent-info) !important;
+}
+.widget-button.mod-success button {
+    background-color: var(--q-accent-success) !important;
+    color: var(--q-page-bg) !important;
+    border-color: var(--q-accent-success) !important;
+}
+.widget-button.mod-warning button {
+    background-color: var(--q-accent-warning) !important;
+    color: var(--q-page-bg) !important;
+    border-color: var(--q-accent-warning) !important;
+}
+.widget-button.mod-danger button {
+    background-color: var(--q-accent-error) !important;
+    color: var(--q-page-bg) !important;
+    border-color: var(--q-accent-error) !important;
+}
+.widget-label,
+.widget-label-basic,
+.jupyter-widget-label {
+    color: var(--q-text-label) !important;
+}
+.widget-accordion .p-Collapse-header,
+.widget-accordion .lm-AccordionPanel-title {
+    background: var(--q-bg-panel) !important;
+    color: var(--q-text-body) !important;
+}
+.quantui-completion-banner {
+    padding: 10px 12px;
+    border: 1px solid var(--q-accent-success);
+    border-radius: 6px;
+    background: var(--q-accent-success-bg);
+    margin: 8px 0;
+}
 
 /* Suppress Jupyter stderr pink in dark palettes */
 .jp-OutputArea-stderr, .output_stderr {
@@ -3901,7 +3952,7 @@ class QuantUIApp:
         finally:
             self._lib_refreshing = False
         self.lib_count_lbl.value = (
-            f'<span style="color:{_theme.css.TEXT_FAINT};font-size:12px">{note}</span>'
+            f'<span style="color:{_theme.css.TEXT_MUTED};font-size:12px">{note}</span>'
         )
 
     def _on_lib_filter_changed(self, change) -> None:
@@ -5064,7 +5115,8 @@ class QuantUIApp:
         )
         self.mol_info_html.value = _summary
         self.mol_summary_compact.value = (
-            f'<div style="background:#f0f9ff;border:1px solid #bae6fd;'
+            f'<div style="background:{_theme.css.SURFACE_INFO_BG};'
+            f"border:1px solid {_theme.css.BORDER};"
             f'border-radius:6px;padding:7px 14px;font-size:14px;display:inline-block">'
             f"{_summary}</div>"
         )

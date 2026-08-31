@@ -120,6 +120,13 @@ class TestTokensAreActuallyUsed:
         assert "var(--q-text-strong)" in _APP_CSS
         assert "var(--q-text-slate)" in _APP_CSS
         assert "var(--q-accent-info)" in _APP_CSS
+        assert "var(--q-page-bg)" in _APP_CSS
+        assert ".widget-dropdown select" in _APP_CSS
+
+    def test_theme_css_block_styles_widget_tabs(self):
+        block = theme.theme_css_block("Dark")
+        assert ".widget-tab" in block
+        assert "var(--q-bg-panel)" in block
 
     def test_no_viewer_border_is_drawn_from_a_css_class(self):
         from quantui.app import _APP_CSS
@@ -277,6 +284,7 @@ class TestNoRawHexReintroducedInMigratedChrome:
         "app_analysis.py",
         "app_history.py",
         "calc_log.py",
+        "progress.py",
     )
 
     MIGRATED_TOKENS = (

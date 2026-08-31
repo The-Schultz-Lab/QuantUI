@@ -29,6 +29,8 @@ from typing import List, Optional
 
 import ipywidgets as widgets
 
+from quantui import theme as _theme
+
 
 class StepProgress:
     """
@@ -93,7 +95,7 @@ class StepProgress:
         for i, (label, state) in enumerate(zip(self._labels, self._states)):
             icon = self._ICONS[state]
             weight = "bold" if state == "active" else "normal"
-            color = "#d32f2f" if state == "fail" else "#333"
+            color = _theme.css.ACCENT_ERROR if state == "fail" else _theme.css.TEXT_BODY
             line = (
                 f'<div style="font-size:13px; padding:2px 0; '
                 f'font-weight:{weight}; color:{color};">'
@@ -106,7 +108,7 @@ class StepProgress:
             lines.append(line)
 
         self._html.value = (
-            '<div style="border:1px solid #e0e0e0; border-radius:6px; '
-            "padding:8px 12px; margin:6px 0; background:#fafafa; "
+            f'<div style="border:1px solid {_theme.css.BORDER}; border-radius:6px; '
+            f"padding:8px 12px; margin:6px 0; background:{_theme.css.BG_PANEL}; "
             'max-width:600px;">' + "\n".join(lines) + "</div>"
         )

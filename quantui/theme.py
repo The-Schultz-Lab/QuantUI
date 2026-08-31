@@ -49,6 +49,14 @@ ACCENT_INFO = "#2563eb"
 ACCENT_PURPLE = "#7c3aed"
 ACCENT_TEAL = "#0d9488"
 
+SURFACE_INFO_BG = "#eff6ff"
+SURFACE_PURPLE_BG = "#f5f3ff"
+SURFACE_WARNING_BG = "#fffbeb"
+SURFACE_TEAL_BG = "#f0fdfa"
+SURFACE_GREEN_BG = "#f0fdf4"
+SURFACE_ORANGE_BG = "#fff7ed"
+SURFACE_MUTED_BG = "#e0e7ef"
+
 _TOKEN_FIELDS: Tuple[str, ...] = (
     "page_bg",
     "border",
@@ -76,6 +84,13 @@ _TOKEN_FIELDS: Tuple[str, ...] = (
     "accent_info",
     "accent_purple",
     "accent_teal",
+    "surface_info_bg",
+    "surface_purple_bg",
+    "surface_warning_bg",
+    "surface_teal_bg",
+    "surface_green_bg",
+    "surface_orange_bg",
+    "surface_muted_bg",
 )
 
 
@@ -112,6 +127,13 @@ class ThemePalette:
     accent_info: str
     accent_purple: str
     accent_teal: str
+    surface_info_bg: str
+    surface_purple_bg: str
+    surface_warning_bg: str
+    surface_teal_bg: str
+    surface_green_bg: str
+    surface_orange_bg: str
+    surface_muted_bg: str
 
     def css_variables(self) -> Dict[str, str]:
         """Map ``--q-*`` custom-property names to hex values."""
@@ -153,6 +175,13 @@ def _light_palette() -> ThemePalette:
         accent_info=ACCENT_INFO,
         accent_purple=ACCENT_PURPLE,
         accent_teal=ACCENT_TEAL,
+        surface_info_bg=SURFACE_INFO_BG,
+        surface_purple_bg=SURFACE_PURPLE_BG,
+        surface_warning_bg=SURFACE_WARNING_BG,
+        surface_teal_bg=SURFACE_TEAL_BG,
+        surface_green_bg=SURFACE_GREEN_BG,
+        surface_orange_bg=SURFACE_ORANGE_BG,
+        surface_muted_bg=SURFACE_MUTED_BG,
     )
 
 
@@ -187,6 +216,13 @@ def _dark_palette() -> ThemePalette:
         accent_info="#60a5fa",
         accent_purple="#a78bfa",
         accent_teal="#2dd4bf",
+        surface_info_bg="#1e3a5f",
+        surface_purple_bg="#2e1f5e",
+        surface_warning_bg="#422006",
+        surface_teal_bg="#134e4a",
+        surface_green_bg="#14532d",
+        surface_orange_bg="#431407",
+        surface_muted_bg="#334155",
     )
 
 
@@ -221,6 +257,13 @@ def _dark_blue_palette() -> ThemePalette:
         accent_info="#7eb6ff",
         accent_purple="#a78bfa",
         accent_teal="#5eead4",
+        surface_info_bg="#0f2847",
+        surface_purple_bg="#1a1a4e",
+        surface_warning_bg="#3d2a06",
+        surface_teal_bg="#0d3330",
+        surface_green_bg="#0d3320",
+        surface_orange_bg="#3d1a0a",
+        surface_muted_bg="#1a3352",
     )
 
 
@@ -255,6 +298,13 @@ def _dark_maroon_palette() -> ThemePalette:
         accent_info="#93c5fd",
         accent_purple="#c4b5fd",
         accent_teal="#5eead4",
+        surface_info_bg="#2d1219",
+        surface_purple_bg="#2a1a3d",
+        surface_warning_bg="#3d2a10",
+        surface_teal_bg="#1a2e2a",
+        surface_green_bg="#1a3320",
+        surface_orange_bg="#3d2010",
+        surface_muted_bg="#3d2430",
     )
 
 
@@ -290,6 +340,20 @@ def theme_css_block(palette_id: str) -> str:
         "html, body, .jp-OutputArea-output, .widget-html-content "
         "{ background-color: var(--q-page-bg) !important; "
         "color: var(--q-text-body) !important; }\n"
+        ".widget-tab, .widget-tab > .lm-TabBar, .widget-tab > .p-TabBar "
+        "{ background: var(--q-bg-panel) !important; }\n"
+        ".widget-tab .lm-TabBar-tab, .widget-tab .p-TabBar-tab "
+        "{ background: var(--q-bg-panel) !important; "
+        "color: var(--q-text-body) !important; "
+        "border-color: var(--q-border) !important; }\n"
+        ".widget-tab .lm-TabBar-tab.lm-mod-current, "
+        ".widget-tab .p-TabBar-tab.p-mod-current "
+        "{ background: var(--q-page-bg) !important; "
+        "color: var(--q-text-strong) !important; "
+        "border-bottom: 2px solid var(--q-accent-info) !important; }\n"
+        ".widget-tab .lm-TabBar-content, .widget-tab .p-TabBar-content "
+        "{ background: var(--q-page-bg) !important; "
+        "border-color: var(--q-border) !important; }\n"
         "</style>"
     )
 
@@ -335,6 +399,13 @@ class _CssVarRefs:
     ACCENT_INFO = "var(--q-accent-info)"
     ACCENT_PURPLE = "var(--q-accent-purple)"
     ACCENT_TEAL = "var(--q-accent-teal)"
+    SURFACE_INFO_BG = "var(--q-surface-info-bg)"
+    SURFACE_PURPLE_BG = "var(--q-surface-purple-bg)"
+    SURFACE_WARNING_BG = "var(--q-surface-warning-bg)"
+    SURFACE_TEAL_BG = "var(--q-surface-teal-bg)"
+    SURFACE_GREEN_BG = "var(--q-surface-green-bg)"
+    SURFACE_ORANGE_BG = "var(--q-surface-orange-bg)"
+    SURFACE_MUTED_BG = "var(--q-surface-muted-bg)"
 
 
 css = _CssVarRefs()
