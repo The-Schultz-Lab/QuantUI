@@ -17,6 +17,7 @@ from . import theme as _theme
 
 __all__ = [
     "adapt_atoms_for_scan_type_change",
+    "around_margin_defaults",
     "atom_dropdown_options",
     "atom_list_html",
     "build_scan_grid",
@@ -175,16 +176,40 @@ def format_current_coordinate_html(
     )
 
 
+def around_margin_defaults(scan_type: str) -> Tuple[float, str]:
+    """Default ± window and unit label for ``scan_range_around_current``."""
+    scan_type = scan_type.lower()
+    if scan_type == "bond":
+        return 25.0, "% of current"
+    if scan_type == "angle":
+        return 20.0, "°"
+    return 60.0, "°"
+
+
 def scan_range_around_current(
     molecule: Optional[Molecule],
     scan_type: str,
     atom_numbers: Sequence[int],
     *,
+    margin: Optional[float] = None,
     bond_fraction: float = 0.25,
     angle_delta: float = 20.0,
     dihedral_delta: float = 60.0,
 ) -> Tuple[float, float]:
-    """Suggest a window around the current coordinate value."""
+    """Suggest a window around the current coordinate value.
+
+    When *margin* is given it overrides the type-specific default:
+    bond scans treat it as a percent of the current length; angle and
+    dihedral scans treat it as degrees.
+    """
+    if margin is not None:
+        scan_type = scan_type.lower()
+        if scan_type == "bond":
+            bond_fraction = max(0.01, float(margin)) / 100.0
+        elif scan_type == "angle":
+            angle_delta = float(margin)
+        else:
+            dihedral_delta = float(margin)
     cur = current_coordinate_value(molecule, scan_type, atom_numbers)
     scan_type = scan_type.lower()
     if cur is None:

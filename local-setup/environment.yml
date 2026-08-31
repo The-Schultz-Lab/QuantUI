@@ -25,6 +25,7 @@ dependencies:
   - py3dmol>=2.0.0       # Primary 3D molecular viewer
   - matplotlib>=3.7.0
   - plotly>=5.0.0        # Orbital diagrams and comparison plots
+  - kaleido>=0.2.1       # Static PNG export for Plotly figures
 
   # Web APIs (PubChem integration)
   - requests>=2.28.0

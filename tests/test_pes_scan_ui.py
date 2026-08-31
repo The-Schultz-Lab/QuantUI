@@ -8,6 +8,7 @@ from quantui.measurement import atom_label
 from quantui.molecule import Molecule
 from quantui.pes_scan_ui import (
     adapt_atoms_for_scan_type_change,
+    around_margin_defaults,
     atom_dropdown_options,
     atom_list_html,
     build_scan_grid,
@@ -156,3 +157,26 @@ class TestScanRangeAroundCurrent:
         assert cur is not None
         val, _ = cur
         assert start < val < stop
+
+    def test_angle_uses_margin_degrees(self):
+        mol = _water()
+        start, stop = scan_range_around_current(
+            mol, "angle", [2, 1, 3], margin=30.0
+        )
+        cur = current_coordinate_value(mol, "angle", [2, 1, 3])
+        assert cur is not None
+        val, _ = cur
+        assert start == pytest.approx(val - 30.0)
+        assert stop == pytest.approx(val + 30.0)
+
+
+class TestAroundMarginDefaults:
+    def test_bond_is_percent(self):
+        val, unit = around_margin_defaults("bond")
+        assert val == 25.0
+        assert "%" in unit
+
+    def test_dihedral_is_degrees(self):
+        val, unit = around_margin_defaults("dihedral")
+        assert val == 60.0
+        assert unit == "°"
