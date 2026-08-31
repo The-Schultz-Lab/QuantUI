@@ -769,6 +769,9 @@ def refresh_pes_scan_widgets(
     while len(defaults) < 4:
         defaults.append(defaults[-1] if defaults else 1)
 
+    chip_bg: str | None
+    chip_fg: str | None
+    muted_fg: str | None
     try:
         from quantui import theme as _theme
 
