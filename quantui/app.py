@@ -1192,7 +1192,9 @@ class _LogCapture:
                 ):
                     denom = _math.log(self.opt_fmax0 / target)
                     if denom > 0:
-                        fmax_frac = _math.log(self.opt_fmax0 / max(fmax_val, target)) / denom
+                        fmax_frac = (
+                            _math.log(self.opt_fmax0 / max(fmax_val, target)) / denom
+                        )
                 self.set_progress_fraction(
                     max(0.03, min(max(step_frac, fmax_frac), 0.99))
                 )
