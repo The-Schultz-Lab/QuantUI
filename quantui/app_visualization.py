@@ -539,6 +539,11 @@ def render_traj_frame(app: Any, molecule: Any, output_widget: Any) -> None:
         view = make_view(width=460, height=340)
         view.addModel(xyz, "xyz")
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
+        from quantui.visualization_py3dmol import decorate_py3dmol_coordination_bonds
+
+        decorate_py3dmol_coordination_bonds(
+            view, molecule.atoms, molecule.coordinates
+        )
         view.setBackgroundColor("white")
         view.zoomTo()
         output_widget.clear_output()
@@ -2710,7 +2715,7 @@ def _frame_stepper_controls(
         f'style="{btn}">&#9654; Play</button>'
         f'<button id="st_next_{uid}" type="button" title="Next frame" '
         f'style="{btn}">&#9654;</button>'
-        f'<input id="st_slider_{uid}" type="range" min="0" max="{n - 1}" '
+        f'<input id="st_slider_{uid}" class="quantui-range" type="range" min="0" max="{n - 1}" '
         f'value="{start}" step="1" title="{scrub_title}" '
         'style="flex:1;min-width:110px;vertical-align:middle;">'
         f"{ab_html}"

@@ -232,6 +232,62 @@ def _neutral_button_css() -> str:
     )
 
 
+def slider_chrome_css() -> str:
+    """High-contrast range-slider styling for ipywidgets and in-viewer scrubbers.
+
+    WebKit requires ``-webkit-slider-runnable-track`` / ``-webkit-slider-thumb``;
+    styling ``input[type=range]`` alone is often ignored. Thumb uses the accent
+    colour with a page-bg ring so it stays visible on every palette.
+    """
+    selectors = (
+        ".jupyter-widgets input[type=range], "
+        ".widget-slider input[type=range], "
+        ".widget-hslider input[type=range], "
+        "input.quantui-range[type=range]"
+    )
+    thumb = (
+        f"{selectors}::-webkit-slider-thumb, "
+        ".jupyter-widgets input[type=range]::-moz-range-thumb, "
+        ".widget-slider input[type=range]::-moz-range-thumb, "
+        ".widget-hslider input[type=range]::-moz-range-thumb, "
+        "input.quantui-range[type=range]::-moz-range-thumb"
+    )
+    track = (
+        f"{selectors}::-webkit-slider-runnable-track, "
+        ".jupyter-widgets input[type=range]::-moz-range-track, "
+        ".widget-slider input[type=range]::-moz-range-track, "
+        ".widget-hslider input[type=range]::-moz-range-track, "
+        "input.quantui-range[type=range]::-moz-range-track"
+    )
+    return (
+        f"{selectors} "
+        "{ -webkit-appearance: none !important; appearance: none !important; "
+        "width: 100% !important; height: 20px !important; "
+        "background: transparent !important; "
+        "accent-color: var(--q-accent-info) !important; "
+        "cursor: pointer !important; }\n"
+        f"{track} "
+        "{ height: 10px !important; border-radius: 5px !important; "
+        "background: var(--q-border-strong) !important; "
+        "border: 1px solid var(--q-border) !important; "
+        "box-shadow: inset 0 0 0 1px var(--q-page-bg) !important; }\n"
+        f"{thumb} "
+        "{ -webkit-appearance: none !important; appearance: none !important; "
+        "width: 20px !important; height: 20px !important; "
+        "border-radius: 50% !important; "
+        "background: var(--q-accent-info) !important; "
+        "border: 2px solid var(--q-page-bg) !important; "
+        "box-shadow: 0 0 0 1px var(--q-accent-info), "
+        "0 1px 4px rgba(0,0,0,0.45) !important; "
+        "cursor: pointer !important; margin-top: -6px !important; }\n"
+        ".widget-hslider .widget-readout, "
+        ".widget-slider .widget-readout, "
+        ".widget-float-slider .widget-readout "
+        "{ color: var(--q-text-strong) !important; "
+        "font-weight: 600 !important; min-width: 2.5em !important; }\n"
+    )
+
+
 def _widget_chrome_css() -> str:
     """CSS rules for ipywidgets/Lumino chrome (palette-agnostic — uses vars)."""
     surface = "var(--q-bg-panel)"
@@ -266,28 +322,7 @@ def _widget_chrome_css() -> str:
         "border-color: var(--q-border) !important; }}\n"
         f"{_neutral_button_css()}"
         f"{_accent_button_css()}"
-        ".jupyter-widgets input[type=range], "
-        ".widget-slider input[type=range] "
-        "{ height: 6px !important; border-radius: 3px !important; "
-        "background: var(--q-border-strong) !important; "
-        "accent-color: var(--q-accent-info) !important; }\n"
-        ".jupyter-widgets input[type=range]::-webkit-slider-thumb, "
-        ".widget-slider input[type=range]::-webkit-slider-thumb "
-        "{ -webkit-appearance: none !important; width: 16px !important; "
-        "height: 16px !important; border-radius: 50% !important; "
-        "background: var(--q-text-strong) !important; "
-        "border: 2px solid var(--q-accent-info) !important; "
-        "cursor: pointer !important; }\n"
-        ".jupyter-widgets input[type=range]::-moz-range-track, "
-        ".widget-slider input[type=range]::-moz-range-track "
-        "{ background: var(--q-border-strong) !important; "
-        "height: 6px !important; border-radius: 3px !important; }\n"
-        ".jupyter-widgets input[type=range]::-moz-range-thumb, "
-        ".widget-slider input[type=range]::-moz-range-thumb "
-        "{ width: 16px !important; height: 16px !important; "
-        "border-radius: 50% !important; background: var(--q-text-strong) !important; "
-        "border: 2px solid var(--q-accent-info) !important; "
-        "cursor: pointer !important; }\n"
+        f"{slider_chrome_css()}"
         ".quantui-info-box "
         f"{{ background: {surface} !important; "
         "color: var(--q-text-body) !important; "
