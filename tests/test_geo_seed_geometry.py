@@ -193,3 +193,58 @@ class TestPreoptCheckboxDoesNotGetStuckDisabled:
 
         assert app._freq_preopt_cb.layout.display == "none"
         assert app._freq_preopt_cb.value is False
+
+
+class TestPesPreoptCheckboxPlacement:
+    def test_preopt_checkbox_is_above_pes_extra_opts(self, app):
+        app.calc_type_dd.value = "PES Scan"
+        children = list(app.calc_setup_panel.children)
+        preopt_idx = children.index(app._freq_preopt_cb)
+        extra_idx = children.index(app.calc_extra_opts)
+        assert preopt_idx < extra_idx
+
+
+class TestPesSeedMatchesFinalGeometry:
+    def test_seed_lists_geo_opt_when_current_matches_optimized_frame(
+        self, app, tmp_path, monkeypatch
+    ):
+        import json
+
+        from quantui.molecule import Molecule
+
+        result_dir = tmp_path / "geo_result"
+        result_dir.mkdir()
+        (result_dir / "result.json").write_text(
+            json.dumps(
+                {
+                    "calc_type": "geometry_opt",
+                    "formula": "H2O",
+                    "method": "RHF",
+                    "basis": "STO-3G",
+                    "timestamp": "2026-01-01T00:00:00",
+                }
+            )
+        )
+        start = [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]]
+        final = [[0.0, 0.0, 0.1], [0.95, 0.0, 0.0], [-0.25, 0.92, 0.0]]
+        (result_dir / "trajectory.json").write_text(
+            json.dumps(
+                {
+                    "atoms": ["O", "H", "H"],
+                    "steps": [
+                        {"coords": start},
+                        {"coords": final},
+                    ],
+                }
+            )
+        )
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app._molecule = Molecule(
+            atoms=["O", "H", "H"],
+            coordinates=final,
+        )
+        from quantui.app_runflow import _refresh_seed_options
+
+        _refresh_seed_options(app, app._scan_seed_dd)
+        values = [v for _, v in app._scan_seed_dd.options]
+        assert str(result_dir) in values

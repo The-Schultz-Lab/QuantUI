@@ -149,8 +149,11 @@ def _cpu_raman_activities_fd(
     density_fit_used: bool,
     stream: IO[str],
     status: Callable[[str], None],
+    atom_str: str | None = None,
 ) -> List[float]:
     """CPU Raman via pyscf-properties polarizability + geometry FD."""
+    import os
+
     pol_mod = _polarizability_module(mf, dm0_is_unrestricted)
 
     from quantui.density_fitting import try_density_fit as _try_density_fit
@@ -195,12 +198,122 @@ def _cpu_raman_activities_fd(
     dalpha = np.zeros((_n_atoms * 3, 3, 3), dtype=float)
     _mol_v = mol.verbose
     mol.verbose = 0
+
+    from quantui import freq_ir_workers as _ir_par
+    from quantui import freq_raman_workers as _ram_par
+
+    _cpu_count = os.cpu_count() or 1
+    _use_parallel = _ir_par.parallel_enabled_for_run(
+        cpu_count=_cpu_count,
+        displacement_count=_total,
+    )
+    _parallel_failed = False
     try:
-        for atom_idx in range(_n_atoms):
-            for ax in range(3):
-                ap = _displaced_alpha(atom_idx, ax, +1)
-                am = _displaced_alpha(atom_idx, ax, -1)
-                dalpha[3 * atom_idx + ax] = (ap - am) / (2.0 * _DELTA_BOHR)
+        if _use_parallel:
+            try:
+                import concurrent.futures as _cf
+                import multiprocessing as _mp
+                import pickle as _pickle
+                import tempfile as _tempfile
+
+                _n_workers = _ir_par.pick_worker_count(_cpu_count, _total)
+                _threads_each = _ir_par.threads_per_worker(_cpu_count, _n_workers)
+
+                _tasks: list[tuple[int, int, int, list[float]]] = []
+                for atom_idx in range(_n_atoms):
+                    for ax in range(3):
+                        cp = _coords0.copy()
+                        cp[atom_idx, ax] += _DELTA_BOHR
+                        _tasks.append((atom_idx, ax, +1, cp.flatten().tolist()))
+                        cm = _coords0.copy()
+                        cm[atom_idx, ax] -= _DELTA_BOHR
+                        _tasks.append((atom_idx, ax, -1, cm.flatten().tolist()))
+
+                _dm0_handle = _tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".dm0.pkl"
+                )
+                try:
+                    _pickle.dump(dm0, _dm0_handle)
+                    _dm0_handle.close()
+
+                    _atom_str = atom_str
+                    if not _atom_str:
+                        from pyscf import lib as _pyscf_lib
+
+                        _atom_str = "; ".join(
+                            f"{sym} {pos[0] / _pyscf_lib.param.BOHR} "
+                            f"{pos[1] / _pyscf_lib.param.BOHR} "
+                            f"{pos[2] / _pyscf_lib.param.BOHR}"
+                            for sym, pos in mol._atom
+                        )
+
+                    _spin = mol.spin
+                    _charge = mol.charge
+                    _ctx = _mp.get_context("spawn")
+                    with _cf.ProcessPoolExecutor(
+                        max_workers=_n_workers,
+                        mp_context=_ctx,
+                        initializer=_ram_par.init_raman_worker,
+                        initargs=(
+                            _atom_str,
+                            mol.basis,
+                            _charge,
+                            _spin,
+                            _xc,
+                            _dm0_handle.name,
+                            _threads_each,
+                            dm0_is_unrestricted,
+                            density_fit_used,
+                        ),
+                    ) as _pool:
+                        _alphas: dict = {}
+                        _futs = {
+                            _pool.submit(
+                                _ram_par.run_displaced_polarizability, task[3]
+                            ): task
+                            for task in _tasks
+                        }
+                        for _fut in _cf.as_completed(_futs):
+                            atom_idx, ax, sign, _coords_done = _futs[_fut]
+                            _alphas[(atom_idx, ax, sign)] = np.asarray(
+                                _fut.result(), dtype=float
+                            )
+                            _done += 1
+                            status(
+                                "Numerical Raman activities (parallel ×"
+                                f"{_n_workers}): "
+                                f"{_done}/{_total} finite-difference "
+                                "polarizability evaluations "
+                                f"({_total - _done} remaining)"
+                            )
+                finally:
+                    try:
+                        os.unlink(_dm0_handle.name)
+                    except OSError:
+                        pass
+
+                for atom_idx in range(_n_atoms):
+                    for ax in range(3):
+                        ap = _alphas[(atom_idx, ax, +1)]
+                        am = _alphas[(atom_idx, ax, -1)]
+                        dalpha[3 * atom_idx + ax] = (ap - am) / (2.0 * _DELTA_BOHR)
+            except Exception as _par_exc:
+                logger.warning(
+                    "Parallel Raman computation failed (%s); falling back to serial.",
+                    _par_exc,
+                )
+                status(
+                    "Parallel Raman activities failed; falling back to serial computation."
+                )
+                _parallel_failed = True
+                _done = 0
+
+        if not _use_parallel or _parallel_failed:
+            for atom_idx in range(_n_atoms):
+                for ax in range(3):
+                    ap = _displaced_alpha(atom_idx, ax, +1)
+                    am = _displaced_alpha(atom_idx, ax, -1)
+                    dalpha[3 * atom_idx + ax] = (ap - am) / (2.0 * _DELTA_BOHR)
     finally:
         mol.set_geom_(_coords0, unit="Bohr")
         mol.verbose = _mol_v
@@ -242,6 +355,7 @@ def compute_raman_activities(
     stream: IO[str],
     status: Callable[[str], None],
     hessian: Any = None,
+    atom_str: str | None = None,
 ) -> List[float]:
     """Compute static Raman activities (Å⁴/amu) per normal mode.
 
@@ -281,6 +395,7 @@ def compute_raman_activities(
             density_fit_used=density_fit_used,
             stream=stream,
             status=status,
+            atom_str=atom_str,
         )
     except ImportError as exc:
         logger.warning("pyscf-properties polarizability unavailable: %s", exc)

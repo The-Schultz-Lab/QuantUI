@@ -812,6 +812,7 @@ def _run_freq_calc_body(
                         stream=stream,
                         status=_status,
                         hessian=h,
+                        atom_str=molecule.to_pyscf_format(),
                     )
                     if len(_raman) == len(frequencies_cm1):
                         raman_activities = _raman
