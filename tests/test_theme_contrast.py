@@ -139,7 +139,16 @@ class TestTokensAreActuallyUsed:
         assert ".lm-TabBar-tab" in block
         assert ".lm-AccordionPanel-title" in block
         assert "quantui-info-box" in block
+        assert ".widget-button.mod-danger button" in block
         assert "var(--q-bg-panel)" in block
+        assert ":not(.mod-danger)" in block
+
+    def test_app_css_preserves_accent_buttons(self):
+        from quantui.app import _APP_CSS
+
+        assert ".widget-button.mod-danger button" in _APP_CSS
+        assert ".widget-button.mod-warning button" in _APP_CSS
+        assert ":not(.mod-danger)" in _APP_CSS
 
     def test_no_viewer_border_is_drawn_from_a_css_class(self):
         from quantui.app import _APP_CSS

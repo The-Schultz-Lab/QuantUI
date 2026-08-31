@@ -806,13 +806,14 @@ h3 {
     border-radius: 5px !important;
 }
 .widget-dropdown select { border-radius: 5px !important; }
-.widget-button button,
-.widget-toggle-button button {
+.widget-button:not(.mod-info):not(.mod-success):not(.mod-warning):not(.mod-danger):not(.mod-primary) button,
+.widget-toggle-button:not(.mod-info):not(.mod-success):not(.mod-warning):not(.mod-danger) button {
     background-color: var(--q-bg-panel) !important;
     color: var(--q-text-body) !important;
     border: 1px solid var(--q-border) !important;
     border-radius: 5px !important;
 }
+.widget-button.mod-primary button,
 .widget-button.mod-info button {
     background-color: var(--q-accent-info) !important;
     color: var(--q-page-bg) !important;

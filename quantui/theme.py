@@ -182,6 +182,46 @@ class ThemePalette:
         }
 
 
+def _accent_button_css() -> str:
+    """Keep semantic ipywidgets buttons visibly distinct from chrome."""
+    return (
+        ".widget-button.mod-primary button "
+        "{ background-color: var(--q-accent-info) !important; "
+        "color: var(--q-page-bg) !important; "
+        "border-color: var(--q-accent-info) !important; }\n"
+        ".widget-button.mod-info button "
+        "{ background-color: var(--q-accent-info) !important; "
+        "color: var(--q-page-bg) !important; "
+        "border-color: var(--q-accent-info) !important; }\n"
+        ".widget-button.mod-success button "
+        "{ background-color: var(--q-accent-success) !important; "
+        "color: var(--q-page-bg) !important; "
+        "border-color: var(--q-accent-success) !important; }\n"
+        ".widget-button.mod-warning button "
+        "{ background-color: var(--q-accent-warning) !important; "
+        "color: var(--q-page-bg) !important; "
+        "border-color: var(--q-accent-warning) !important; }\n"
+        ".widget-button.mod-danger button "
+        "{ background-color: var(--q-accent-error) !important; "
+        "color: var(--q-page-bg) !important; "
+        "border-color: var(--q-accent-error) !important; }\n"
+    )
+
+
+def _neutral_button_css() -> str:
+    """Default/neutral buttons blend with unified chrome surfaces."""
+    return (
+        ".widget-button:not(.mod-info):not(.mod-success):not(.mod-warning)"
+        ":not(.mod-danger):not(.mod-primary) button, "
+        ".widget-toggle-button:not(.mod-info):not(.mod-success)"
+        ":not(.mod-warning):not(.mod-danger) button "
+        "{ background-color: var(--q-bg-panel) !important; "
+        "color: var(--q-text-body) !important; "
+        "border: 1px solid var(--q-border) !important; "
+        "border-radius: 5px !important; }\n"
+    )
+
+
 def _widget_chrome_css() -> str:
     """CSS rules for ipywidgets/Lumino chrome (palette-agnostic — uses vars)."""
     surface = "var(--q-bg-panel)"
@@ -210,11 +250,12 @@ def _widget_chrome_css() -> str:
         "color: var(--q-text-body) !important; "
         "border-color: var(--q-border) !important; }}\n"
         ".jupyter-widgets select, .jupyter-widgets input, "
-        ".jupyter-widgets textarea, .jupyter-widgets button, "
-        ".widget-button button, .widget-toggle-button button "
+        ".jupyter-widgets textarea "
         f"{{ background-color: {surface} !important; "
         "color: var(--q-text-body) !important; "
         "border-color: var(--q-border) !important; }}\n"
+        f"{_neutral_button_css()}"
+        f"{_accent_button_css()}"
         ".quantui-info-box "
         f"{{ background: {surface} !important; "
         "color: var(--q-text-body) !important; "
