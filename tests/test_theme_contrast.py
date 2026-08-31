@@ -54,10 +54,11 @@ class TestContrastMathIsCorrect:
 
 
 class TestPaletteRegistry:
-    def test_four_presets_ship(self):
+    def test_presets_ship(self):
         assert set(theme.PALETTE_IDS) == {
             "Light",
             "Dark",
+            "Midnight",
             "Dark Blue",
             "Dark Maroon",
         }
@@ -139,16 +140,29 @@ class TestTokensAreActuallyUsed:
         assert ".lm-TabBar-tab" in block
         assert ".lm-AccordionPanel-title" in block
         assert "quantui-info-box" in block
-        assert ".widget-button.mod-danger button" in block
+        assert ".jupyter-button.mod-danger" in block
         assert "var(--q-bg-panel)" in block
         assert ":not(.mod-danger)" in block
 
     def test_app_css_preserves_accent_buttons(self):
         from quantui.app import _APP_CSS
 
-        assert ".widget-button.mod-danger button" in _APP_CSS
-        assert ".widget-button.mod-warning button" in _APP_CSS
+        assert ".jupyter-button.mod-danger" in _APP_CSS
+        assert ".jupyter-button.mod-warning" in _APP_CSS
         assert ":not(.mod-danger)" in _APP_CSS
+
+    def test_jupyterlab_bridge_maps_semantic_button_colors(self):
+        palette = theme.get_palette("Dark")
+        bridge = palette.jupyterlab_variables()
+        assert bridge["--jp-error-color1"] == palette.accent_error
+        assert bridge["--jp-warn-color1"] == palette.accent_warning
+        assert bridge["--jp-success-color1"] == palette.accent_success
+
+    def test_midnight_uses_pure_black_surfaces(self):
+        palette = theme.get_palette("Midnight")
+        assert palette.page_bg == "#000000"
+        assert palette.bg_panel == "#000000"
+        assert palette.is_dark is True
 
     def test_no_viewer_border_is_drawn_from_a_css_class(self):
         from quantui.app import _APP_CSS

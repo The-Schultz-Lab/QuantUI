@@ -239,7 +239,9 @@ class TestRoundtrip:
         loaded = UserSettings.load(path)
         assert loaded.viz.default_backend == "py3dmol"
 
-    @pytest.mark.parametrize("palette", ["Light", "Dark", "Dark Blue", "Dark Maroon"])
+    @pytest.mark.parametrize(
+        "palette", ["Light", "Dark", "Midnight", "Dark Blue", "Dark Maroon"]
+    )
     def test_theme_palette_round_trips(self, tmp_path, palette):
         path = tmp_path / "settings.json"
         settings = UserSettings()

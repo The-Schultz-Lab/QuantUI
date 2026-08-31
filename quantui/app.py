@@ -806,30 +806,35 @@ h3 {
     border-radius: 5px !important;
 }
 .widget-dropdown select { border-radius: 5px !important; }
-.widget-button:not(.mod-info):not(.mod-success):not(.mod-warning):not(.mod-danger):not(.mod-primary) button,
-.widget-toggle-button:not(.mod-info):not(.mod-success):not(.mod-warning):not(.mod-danger) button {
+.jupyter-button:not(.mod-info):not(.mod-success):not(.mod-warning):not(.mod-danger):not(.mod-primary),
+button.jupyter-button:not(.mod-info):not(.mod-success):not(.mod-warning):not(.mod-danger):not(.mod-primary) {
     background-color: var(--q-bg-panel) !important;
     color: var(--q-text-body) !important;
     border: 1px solid var(--q-border) !important;
     border-radius: 5px !important;
 }
-.widget-button.mod-primary button,
-.widget-button.mod-info button {
+.jupyter-button.mod-primary,
+.jupyter-button.mod-info,
+button.jupyter-button.mod-primary,
+button.jupyter-button.mod-info {
     background-color: var(--q-accent-info) !important;
     color: var(--q-page-bg) !important;
     border-color: var(--q-accent-info) !important;
 }
-.widget-button.mod-success button {
+.jupyter-button.mod-success,
+button.jupyter-button.mod-success {
     background-color: var(--q-accent-success) !important;
     color: var(--q-page-bg) !important;
     border-color: var(--q-accent-success) !important;
 }
-.widget-button.mod-warning button {
+.jupyter-button.mod-warning,
+button.jupyter-button.mod-warning {
     background-color: var(--q-accent-warning) !important;
     color: var(--q-page-bg) !important;
     border-color: var(--q-accent-warning) !important;
 }
-.widget-button.mod-danger button {
+.jupyter-button.mod-danger,
+button.jupyter-button.mod-danger {
     background-color: var(--q-accent-error) !important;
     color: var(--q-page-bg) !important;
     border-color: var(--q-accent-error) !important;

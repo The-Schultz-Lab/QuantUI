@@ -177,6 +177,16 @@ class ThemePalette:
             "--jp-toolbar-active-background": surface,
             "--jp-brand-color1": p.accent_info,
             "--jp-brand-color2": p.accent_info,
+            "--jp-error-color0": p.accent_error,
+            "--jp-error-color1": p.accent_error,
+            "--jp-warn-color0": p.accent_warning,
+            "--jp-warn-color1": p.accent_warning,
+            "--jp-success-color0": p.accent_success,
+            "--jp-success-color1": p.accent_success,
+            "--jp-info-color0": p.accent_info,
+            "--jp-info-color1": p.accent_info,
+            "--jp-ui-inverse-font-color0": p.page_bg,
+            "--jp-ui-inverse-font-color1": p.page_bg,
             "--jp-inverse-layout-color0": p.text_strong if p.is_dark else p.page_bg,
             "--jp-inverse-layout-color1": p.text_body if p.is_dark else p.bg_panel,
         }
@@ -185,23 +195,23 @@ class ThemePalette:
 def _accent_button_css() -> str:
     """Keep semantic ipywidgets buttons visibly distinct from chrome."""
     return (
-        ".widget-button.mod-primary button "
+        ".jupyter-button.mod-primary, button.jupyter-button.mod-primary "
         "{ background-color: var(--q-accent-info) !important; "
         "color: var(--q-page-bg) !important; "
         "border-color: var(--q-accent-info) !important; }\n"
-        ".widget-button.mod-info button "
+        ".jupyter-button.mod-info, button.jupyter-button.mod-info "
         "{ background-color: var(--q-accent-info) !important; "
         "color: var(--q-page-bg) !important; "
         "border-color: var(--q-accent-info) !important; }\n"
-        ".widget-button.mod-success button "
+        ".jupyter-button.mod-success, button.jupyter-button.mod-success "
         "{ background-color: var(--q-accent-success) !important; "
         "color: var(--q-page-bg) !important; "
         "border-color: var(--q-accent-success) !important; }\n"
-        ".widget-button.mod-warning button "
+        ".jupyter-button.mod-warning, button.jupyter-button.mod-warning "
         "{ background-color: var(--q-accent-warning) !important; "
         "color: var(--q-page-bg) !important; "
         "border-color: var(--q-accent-warning) !important; }\n"
-        ".widget-button.mod-danger button "
+        ".jupyter-button.mod-danger, button.jupyter-button.mod-danger "
         "{ background-color: var(--q-accent-error) !important; "
         "color: var(--q-page-bg) !important; "
         "border-color: var(--q-accent-error) !important; }\n"
@@ -211,10 +221,10 @@ def _accent_button_css() -> str:
 def _neutral_button_css() -> str:
     """Default/neutral buttons blend with unified chrome surfaces."""
     return (
-        ".widget-button:not(.mod-info):not(.mod-success):not(.mod-warning)"
-        ":not(.mod-danger):not(.mod-primary) button, "
-        ".widget-toggle-button:not(.mod-info):not(.mod-success)"
-        ":not(.mod-warning):not(.mod-danger) button "
+        ".jupyter-button:not(.mod-info):not(.mod-success):not(.mod-warning)"
+        ":not(.mod-danger):not(.mod-primary), "
+        "button.jupyter-button:not(.mod-info):not(.mod-success)"
+        ":not(.mod-warning):not(.mod-danger):not(.mod-primary) "
         "{ background-color: var(--q-bg-panel) !important; "
         "color: var(--q-text-body) !important; "
         "border: 1px solid var(--q-border) !important; "
@@ -349,6 +359,47 @@ def _dark_palette() -> ThemePalette:
     )
 
 
+def _midnight_palette() -> ThemePalette:
+    return ThemePalette(
+        palette_id="Midnight",
+        display_name="Midnight",
+        is_dark=True,
+        page_bg="#000000",
+        border="#64748b",
+        border_strong="#94a3b8",
+        border_legacy="#475569",
+        bg_panel="#000000",
+        text_heading="#f8fafc",
+        text_label="#e2e8f0",
+        text_secondary="#cbd5e1",
+        text_muted="#94a3b8",
+        text_muted_light="#94a3b8",
+        text_faint="#64748b",
+        text_subtle="#64748b",
+        text_body="#e2e8f0",
+        text_strong="#f1f5f9",
+        text_slate="#94a3b8",
+        text_slate_dark="#cbd5e1",
+        accent_error="#f87171",
+        accent_error_alt="#ef4444",
+        accent_success="#4ade80",
+        accent_success_bg="#052e16",
+        accent_success_alt="#22c55e",
+        accent_warning="#fbbf24",
+        accent_warning_light="#fcd34d",
+        accent_info="#60a5fa",
+        accent_purple="#a78bfa",
+        accent_teal="#2dd4bf",
+        surface_info_bg="#000000",
+        surface_purple_bg="#000000",
+        surface_warning_bg="#000000",
+        surface_teal_bg="#000000",
+        surface_green_bg="#000000",
+        surface_orange_bg="#000000",
+        surface_muted_bg="#111111",
+    )
+
+
 def _dark_blue_palette() -> ThemePalette:
     return ThemePalette(
         palette_id="Dark Blue",
@@ -436,6 +487,7 @@ PALETTES: Dict[str, ThemePalette] = {
     for p in (
         _light_palette(),
         _dark_palette(),
+        _midnight_palette(),
         _dark_blue_palette(),
         _dark_maroon_palette(),
     )
