@@ -66,7 +66,8 @@ def plot_ir_spectrum(
         showlegend=False,
         margin=dict(l=60, r=20, t=20, b=55),
         height=300,
-        plot_bgcolor="#fafafa",
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
     )
 
     fig = go.Figure(layout=_base_layout)

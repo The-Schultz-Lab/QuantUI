@@ -197,6 +197,7 @@ class TestCaptureButtonIsOptIn:
         html = render_orbital_isosurface_py3dmol(cube_file, capture_class="x")
         assert 'dispatchEvent(new Event("input"' in html
         assert "bubbles:true" in html
+        assert "findInbox" in html
 
     def test_the_button_binds_to_this_viewer(self, cube_file):
         html = render_orbital_isosurface_py3dmol(cube_file, capture_class="x")

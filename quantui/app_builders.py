@@ -1838,7 +1838,8 @@ def build_molecule_section(
     # viewers, own class since this slot can be visible at the same time as
     # the Results/Analysis molecule viewers.
     app._mol_calc_png_inbox = widgets.Textarea(
-        value="", layout=layout_fn(width="1px", height="1px", visibility="hidden")
+        value="",
+        layout=layout_fn(width="0px", height="0px", overflow="hidden", margin="0", padding="0"),
     )
     app._mol_calc_png_inbox.add_class(_MOL_CALC_PNG_INBOX_CLASS)
     app._mol_calc_png_status = widgets.HTML(value="")
@@ -1846,9 +1847,9 @@ def build_molecule_section(
     mol_container_children = [
         app.mol_input_expanded,
         app.mol_info_html,
+        app._mol_calc_png_inbox,
         app.viz_output,
         app._mol_calc_png_status,
-        app._mol_calc_png_inbox,
     ]
     if app.viz_backend_toggle is not None:
         mol_container_children.append(app.viz_backend_toggle)
@@ -2293,6 +2294,17 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="120px"),
         style={"description_width": "50px"},
     )
+    app._orb_font_scale_slider = widgets.FloatSlider(
+        value=1.0,
+        min=0.75,
+        max=2.0,
+        step=0.05,
+        readout_format=".2f",
+        description="Font scale:",
+        layout=layout_fn(width="220px"),
+        style={"description_width": "72px"},
+        tooltip="Scale axis labels, title, and MO annotations",
+    )
     orb_controls_row = widgets.HBox(
         [
             widgets.HTML(
@@ -2305,6 +2317,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 "Levels shown:</span>"
             ),
             app._orb_n_orb_input,
+            app._orb_font_scale_slider,
         ],
         layout=layout_fn(
             align_items="center",

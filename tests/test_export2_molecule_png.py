@@ -204,11 +204,19 @@ class TestMolPngCaptureHandlers:
         assert not list(tmp_path.glob("*.png"))
         assert "too large" in app._mol_calc_png_status.value
 
-    def test_missing_result_dir_is_reported(self):
+    def test_missing_result_dir_saves_to_general_figures_folder(self, tmp_path, monkeypatch):
+        figures = tmp_path / "figures"
+        figures.mkdir()
+        monkeypatch.setattr(
+            "quantui.app_exports.general_figures_dir",
+            lambda: figures,
+        )
         app = self._app(Path("unused"), molecule=_water())
         app._last_result_dir = None
         on_mol_calc_png_captured(app, {"new": _png_uri()})
-        assert "run a calculation" in app._mol_calc_png_status.value
+        written = list(figures.glob("H2O_calc_*.png"))
+        assert len(written) == 1
+        assert "Saved" in app._mol_calc_png_status.value
 
     def test_empty_change_is_a_no_op(self, tmp_path):
         app = self._app(tmp_path, molecule=_water())

@@ -349,6 +349,7 @@ def plot_orbital_diagram_plotly(
     title: Optional[str] = None,
     width: int = 380,
     height: int = 460,
+    font_scale: float = 1.0,
 ):
     """Interactive Plotly orbital energy-level diagram.
 
@@ -375,6 +376,12 @@ def plot_orbital_diagram_plotly(
     plotly.graph_objects.Figure
     """
     import plotly.graph_objects as go
+
+    scale = max(0.5, float(font_scale))
+    fs_title = max(9, int(round(13 * scale)))
+    fs_axis = max(8, int(round(12 * scale)))
+    fs_label = max(8, int(round(11 * scale)))
+    fs_gap = max(8, int(round(10 * scale)))
 
     energies = info.mo_energies_ev
     n_occ = info.n_occupied
@@ -431,7 +438,7 @@ def plot_orbital_diagram_plotly(
             yref="y",
             text="<b>HOMO</b>",
             showarrow=False,
-            font=dict(size=11, color="#2171b5"),
+            font=dict(size=fs_label, color="#2171b5"),
             xanchor="left",
             yanchor="middle",
         ),
@@ -442,7 +449,7 @@ def plot_orbital_diagram_plotly(
             yref="y",
             text="<b>LUMO</b>",
             showarrow=False,
-            font=dict(size=11, color="#e6550d"),
+            font=dict(size=fs_label, color="#e6550d"),
             xanchor="left",
             yanchor="middle",
         ),
@@ -456,7 +463,7 @@ def plot_orbital_diagram_plotly(
             axref="x",
             ayref="y",
             text=f"<b>{gap:.2f} eV</b>",
-            font=dict(size=10, color="#e6550d"),
+            font=dict(size=fs_gap, color="#e6550d"),
             arrowhead=2,
             arrowwidth=1.5,
             arrowcolor="#e6550d",
@@ -480,7 +487,7 @@ def plot_orbital_diagram_plotly(
         margin=dict(l=60, r=110, t=50, b=30),
         title=dict(
             text=title or f"Orbital Energy Levels — {info.formula}",
-            font=dict(size=13, family="Arial"),
+            font=dict(size=fs_title, family="Arial"),
         ),
         xaxis=dict(
             range=[-0.9, 0.9],
@@ -490,14 +497,15 @@ def plot_orbital_diagram_plotly(
             fixedrange=True,
         ),
         yaxis=dict(
-            title="Energy (eV)",
+            title=dict(text="Energy (eV)", font=dict(size=fs_axis)),
             range=[y_min, y_max],
             showgrid=True,
             gridcolor="#e5e7eb",
             tickformat=".1f",
+            tickfont=dict(size=fs_axis),
         ),
-        plot_bgcolor="white",
-        paper_bgcolor="white",
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
         annotations=annotations,
         hovermode="closest",
     )
@@ -1436,13 +1444,33 @@ _PNG_CAPTURE_JS = """
     var uri=null;
     try{ uri=cap(wantAlpha); }catch(e){ btn.textContent="\\u26a0 capture failed"; return; }
     if(!uri){ btn.textContent="\\u26a0 capture failed"; return; }
-    var box=document.querySelector("."+CLS+" textarea");
-    if(!box){ btn.textContent="\\u26a0 no inbox"; return; }
-    box.value=uri;
-    box.dispatchEvent(new Event("input", {bubbles:true}));
-    var old=btn.textContent;
-    btn.textContent="\\u2713 saved";
-    setTimeout(function(){ btn.textContent=old; }, 2000);
+    function findInbox(){
+      var selectors=["."+CLS+" textarea","textarea."+CLS,"."+CLS+" .widget-textarea textarea"];
+      for(var i=0;i<selectors.length;i++){
+        var el=document.querySelector(selectors[i]);
+        if(el){ return el; }
+      }
+      var all=document.querySelectorAll("textarea");
+      for(var j=0;j<all.length;j++){
+        var t=all[j];
+        if(t.classList && t.classList.contains(CLS)){ return t; }
+        if(t.closest && t.closest("."+CLS)){ return t; }
+      }
+      return null;
+    }
+    function deliver(tries){
+      var box=findInbox();
+      if(!box){
+        if(tries>0){ setTimeout(function(){ deliver(tries-1); }, 50); return; }
+        btn.textContent="\\u26a0 no inbox"; return;
+      }
+      box.value=uri;
+      box.dispatchEvent(new Event("input", {bubbles:true}));
+      var old=btn.textContent;
+      btn.textContent="\\u2713 saved";
+      setTimeout(function(){ btn.textContent=old; }, 2000);
+    }
+    deliver(20);
   });
 })();
 """

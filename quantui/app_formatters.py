@@ -8,6 +8,32 @@ from typing import Any, Optional
 from quantui import theme as _theme
 
 
+def _converged_color(converged: bool) -> str:
+    return _theme.css.ACCENT_SUCCESS if converged else _theme.css.ACCENT_ERROR_ALT
+
+
+def _result_card_open(*, accent: str | None = None, extra_style: str = "") -> str:
+    border = accent or _theme.css.ACCENT_SUCCESS_ALT
+    style = (
+        f"background:{_theme.css.BG_PANEL};border:1px solid {_theme.css.BORDER};"
+        f"border-left:4px solid {border};padding:10px 14px;border-radius:4px;"
+        f"margin:6px 0"
+    )
+    if extra_style:
+        style = f"{style};{extra_style}"
+    return f'<div class="quantui-result-card" style="{style}">'
+
+
+_RESULT_CARD_CLOSE = "</div>"
+
+
+def _result_card_table_open() -> str:
+    return (
+        f'<table class="quantui-result-card-table" '
+        f'style="margin-top:8px;font-size:14px;border-collapse:collapse;width:100%">'
+    )
+
+
 def _result_extra_rows(get: Any) -> str:
     """Build the shared 'extra' result-card rows from an accessor.
 
@@ -109,7 +135,7 @@ def _result_extra_rows(get: Any) -> str:
 def format_result(r: Any) -> str:
     """Format a single-point-style result card."""
     _conv = "Yes" if r.converged else "No (treat results with caution)"
-    _cc = "green" if r.converged else _theme.css.ACCENT_ERROR_ALT
+    _cc = _converged_color(r.converged)
     _gap = f"{r.homo_lumo_gap_ev:.4f} eV" if r.homo_lumo_gap_ev is not None else "N/A"
     _rows = "".join(
         f"<tr>"
@@ -137,18 +163,18 @@ def format_result(r: Any) -> str:
     )
     _extra = _result_extra_rows(lambda k, d=None: getattr(r, k, d))
     return (
-        f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
-        f'padding:10px 14px;border-radius:4px;margin:6px 0">'
-        f"<b>{r.formula} &mdash; {r.method}/{r.basis}</b>"
-        f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-        f"{_rows}{_extra}</table></div>"
+        _result_card_open()
+        + f"<b>{r.formula} &mdash; {r.method}/{r.basis}</b>"
+        + _result_card_table_open()
+        + f"{_rows}{_extra}</table>"
+        + _RESULT_CARD_CLOSE
     )
 
 
 def format_opt_result(r: Any) -> str:
     """Format a geometry-optimization result card."""
     _conv = "Yes" if r.converged else "No (max steps reached)"
-    _cc = "green" if r.converged else _theme.css.ACCENT_ERROR_ALT
+    _cc = _converged_color(r.converged)
     _rows = "".join(
         f"<tr>"
         f'<td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">{k}</td>'
@@ -167,18 +193,18 @@ def format_opt_result(r: Any) -> str:
         ]
     )
     return (
-        f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
-        f'padding:10px 14px;border-radius:4px;margin:6px 0">'
-        f"<b>Geometry Optimisation &mdash; {r.formula} ({r.method}/{r.basis})</b>"
-        f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-        f"{_rows}</table></div>"
+        _result_card_open()
+        + f"<b>Geometry Optimisation &mdash; {r.formula} ({r.method}/{r.basis})</b>"
+        + _result_card_table_open()
+        + f"{_rows}</table>"
+        + _RESULT_CARD_CLOSE
     )
 
 
 def format_freq_result(r: Any) -> str:
     """Format a frequency-analysis result card."""
     _conv = "Yes" if r.converged else "No (treat with caution)"
-    _cc = "green" if r.converged else _theme.css.ACCENT_ERROR_ALT
+    _cc = _converged_color(r.converged)
     n_real = r.n_real_modes()
     n_imag = r.n_imaginary_modes()
     real_freqs = sorted(f for f in r.frequencies_cm1 if f > 0)[:6]
@@ -227,18 +253,18 @@ def format_freq_result(r: Any) -> str:
             f" ({_thermo.G_hartree * _kj:.2f} kJ/mol)</td></tr>"
         )
     return (
-        f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
-        f'padding:10px 14px;border-radius:4px;margin:6px 0">'
-        f"<b>Frequency Analysis &mdash; {r.formula} ({r.method}/{r.basis})</b>"
-        f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-        f"{_rows}{_thermo_rows}</table></div>"
+        _result_card_open()
+        + f"<b>Frequency Analysis &mdash; {r.formula} ({r.method}/{r.basis})</b>"
+        + _result_card_table_open()
+        + f"{_rows}{_thermo_rows}</table>"
+        + _RESULT_CARD_CLOSE
     )
 
 
 def format_tddft_result(r: Any) -> str:
     """Format a TD-DFT / UV-Vis result card."""
     _conv = "Yes" if r.converged else "No (treat with caution)"
-    _cc = "green" if r.converged else _theme.css.ACCENT_ERROR_ALT
+    _cc = _converged_color(r.converged)
     header_rows = (
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Ground-state energy</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>'
@@ -279,18 +305,18 @@ def format_tddft_result(r: Any) -> str:
             + "".join(exc_rows)
         )
     return (
-        f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
-        f'padding:10px 14px;border-radius:4px;margin:6px 0">'
-        f"<b>TD-DFT / UV-Vis &mdash; {r.formula} ({r.method}/{r.basis})</b>"
-        f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-        f"{header_rows}{exc_table}</table></div>"
+        _result_card_open()
+        + f"<b>TD-DFT / UV-Vis &mdash; {r.formula} ({r.method}/{r.basis})</b>"
+        + _result_card_table_open()
+        + f"{header_rows}{exc_table}</table>"
+        + _RESULT_CARD_CLOSE
     )
 
 
 def format_nmr_result(r: Any) -> str:
     """Format an NMR shielding result card."""
     _conv = "Yes" if r.converged else "No (treat with caution)"
-    _cc = "green" if r.converged else _theme.css.ACCENT_ERROR_ALT
+    _cc = _converged_color(r.converged)
     header_rows = (
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
@@ -353,11 +379,11 @@ def format_nmr_result(r: Any) -> str:
         )
 
     return (
-        f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
-        f'padding:10px 14px;border-radius:4px;margin:6px 0">'
-        f"<b>NMR Shielding &mdash; {r.formula} ({r.method}/{r.basis})</b>"
-        f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-        f"{header_rows}{h_table}{c_table}{_empty}{_basis_warn}{_ref_warn}</table></div>"
+        _result_card_open()
+        + f"<b>NMR Shielding &mdash; {r.formula} ({r.method}/{r.basis})</b>"
+        + _result_card_table_open()
+        + f"{header_rows}{h_table}{c_table}{_empty}{_basis_warn}{_ref_warn}</table>"
+        + _RESULT_CARD_CLOSE
     )
 
 
@@ -373,7 +399,7 @@ def format_pes_scan_result(r: Any) -> str:
         if r.converged_all
         else f"No ({n_fail} failed point{'s' if n_fail != 1 else ''})"
     )
-    _cc = "green" if r.converged_all else _theme.css.ACCENT_ERROR_ALT
+    _cc = _converged_color(r.converged_all)
 
     finite = [e for e in r.energies_hartree if math.isfinite(e)]
     _e_row = ""
@@ -398,11 +424,10 @@ def format_pes_scan_result(r: Any) -> str:
         _idx_str = " – ".join(str(i + 1) for i in r.atom_indices)
 
     return (
-        f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
-        f'padding:10px 14px;border-radius:4px;margin:6px 0">'
-        f"<b>PES Scan &mdash; {r.formula} ({r.method}/{r.basis})</b>"
-        f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Scan type</td>'
+        _result_card_open()
+        + f"<b>PES Scan &mdash; {r.formula} ({r.method}/{r.basis})</b>"
+        + _result_card_table_open()
+        + f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Scan type</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.scan_type.capitalize()} ({_idx_str})</td></tr>'
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Range</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.scan_parameter_values[0]:.3f} → '
@@ -411,7 +436,8 @@ def format_pes_scan_result(r: Any) -> str:
         f"{_e_row}"
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">All converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
-        f"</table></div>"
+        f"</table>"
+        + _RESULT_CARD_CLOSE
     )
 
 
@@ -648,7 +674,8 @@ def reorg_missing_data_notice() -> str:
     """
     return (
         '<div style="margin-top:8px;padding:8px 10px;border-radius:6px;'
-        f'background:#fef3c7;border:1px solid {_theme.css.ACCENT_WARNING_LIGHT};font-size:13px;color:#78350f">'
+        f'background:{_theme.css.SURFACE_WARNING_BG};border:1px solid {_theme.css.ACCENT_WARNING_LIGHT};'
+        f'font-size:13px;color:{_theme.css.TEXT_BODY}">'
         "<b>⚠ Reorganization-energy details were not saved for this result.</b><br>"
         "Results produced before QuantUI gained λ persistence did not store the "
         "per-channel energies or geometries, and they cannot be recovered from "
@@ -661,7 +688,7 @@ def reorg_missing_data_notice() -> str:
 def format_reorg_result(r: Any) -> str:
     """Format a reorganization-energy (Marcus 4-point) result card."""
     _conv = "Yes" if r.converged else "No (some steps did not converge)"
-    _cc = "green" if r.converged else _theme.css.ACCENT_ERROR_ALT
+    _cc = _converged_color(r.converged)
 
     # Same renderer, same shape as the saved payload — see reorg_channels_html.
     from quantui.results_storage import _reorg_channels_payload
@@ -670,18 +697,18 @@ def format_reorg_result(r: Any) -> str:
     _attach_relaxation(_payload, r)
     _channels_html = reorg_channels_html(_payload)
     return (
-        f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
-        f'padding:10px 14px;border-radius:4px;margin:6px 0">'
-        f"<b>Reorganization Energy (Marcus 4-point) &mdash; "
+        _result_card_open()
+        + f"<b>Reorganization Energy (Marcus 4-point) &mdash; "
         f"{r.formula} ({r.method}/{r.basis})</b>"
-        f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Neutral energy</td>'
+        + _result_card_table_open()
+        + f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Neutral energy</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.neutral_energy_hartree:.8f} Ha</td></tr>'
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Total opt steps</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.n_total_opt_steps}</td></tr>'
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">All converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
-        f"</table>{_channels_html}</div>"
+        f"</table>{_channels_html}"
+        + _RESULT_CARD_CLOSE
     )
 
 
@@ -690,16 +717,29 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     import base64 as _b64
 
     _ct_labels = {
-        "single_point": ("Single Point", _theme.css.ACCENT_INFO, "#dbeafe"),
-        "geometry_opt": ("Geometry Optimization", _theme.css.ACCENT_PURPLE, "#ede9fe"),
-        "frequency": ("Frequency Analysis", "#15803d", "#dcfce7"),
-        "tddft": ("TD-DFT", _theme.css.ACCENT_WARNING, "#fef3c7"),
-        "nmr": ("NMR", _theme.css.ACCENT_TEAL, "#ccfbf1"),
-        "pes_scan": ("PES Scan", "#c2410c", "#ffedd5"),
+        "single_point": ("Single Point", _theme.css.ACCENT_INFO, _theme.css.SURFACE_INFO_BG),
+        "geometry_opt": (
+            "Geometry Optimization",
+            _theme.css.ACCENT_PURPLE,
+            _theme.css.SURFACE_PURPLE_BG,
+        ),
+        "frequency": (
+            "Frequency Analysis",
+            _theme.css.ACCENT_SUCCESS,
+            _theme.css.SURFACE_GREEN_BG,
+        ),
+        "tddft": ("TD-DFT", _theme.css.ACCENT_WARNING, _theme.css.SURFACE_WARNING_BG),
+        "nmr": ("NMR", _theme.css.ACCENT_TEAL, _theme.css.SURFACE_TEAL_BG),
+        "pes_scan": ("PES Scan", _theme.css.ACCENT_WARNING, _theme.css.SURFACE_ORANGE_BG),
     }
     ct = data.get("calc_type", "")
     _ct_label, _ct_fg, _ct_bg = _ct_labels.get(
-        ct, (ct.replace("_", " ").title(), _theme.css.TEXT_SECONDARY, "#f3f4f6")
+        ct,
+        (
+            ct.replace("_", " ").title(),
+            _theme.css.TEXT_SECONDARY,
+            _theme.css.SURFACE_MUTED_BG,
+        ),
     )
     _ct_badge = (
         f'<span style="display:inline-block;padding:2px 10px;border-radius:12px;'
@@ -707,7 +747,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         f'letter-spacing:0.03em;margin-bottom:6px">{_ct_label}</span>'
     )
     _conv = "Yes" if data.get("converged") else "No (treat results with caution)"
-    _cc = "green" if data.get("converged") else _theme.css.ACCENT_ERROR_ALT
+    _cc = _converged_color(bool(data.get("converged")))
     _gap = (
         f"{data['homo_lumo_gap_ev']:.4f} eV"
         if data.get("homo_lumo_gap_ev") is not None
@@ -769,12 +809,12 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
             _reorg_html = reorg_missing_data_notice()
 
     return (
-        f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
-        f'padding:10px 14px;border-radius:4px;margin:6px 0;overflow:hidden">'
-        f"{_thumb_html}"
-        f"{_ct_badge}<br>"
-        f'<b>{data["formula"]} &mdash; {data["method"]}/{data["basis"]}</b>'
+        _result_card_open(extra_style="overflow:hidden")
+        + f"{_thumb_html}"
+        + f"{_ct_badge}<br>"
+        + f'<b>{data["formula"]} &mdash; {data["method"]}/{data["basis"]}</b>'
         f'&ensp;<small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{ts}</small>'
-        f'<table style="margin-top:8px;font-size:14px;border-collapse:collapse">'
-        f"{_rows}{_extra}</table>{_reorg_html}</div>"
+        + _result_card_table_open()
+        + f"{_rows}{_extra}</table>{_reorg_html}"
+        + _RESULT_CARD_CLOSE
     )

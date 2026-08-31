@@ -855,6 +855,47 @@ button.jupyter-button.mod-danger {
     background: var(--q-bg-panel) !important;
     color: var(--q-text-body) !important;
 }
+.quantui-result-card table tr,
+.quantui-result-card table th,
+.quantui-result-card table td {
+    background: transparent !important;
+}
+.quantui-result-card,
+.quantui-result-card table {
+    color: var(--q-text-body) !important;
+}
+.jupyter-widgets input[type=range],
+.widget-slider input[type=range] {
+    height: 6px !important;
+    border-radius: 3px !important;
+    background: var(--q-border-strong) !important;
+    accent-color: var(--q-accent-info) !important;
+}
+.jupyter-widgets input[type=range]::-webkit-slider-thumb,
+.widget-slider input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none !important;
+    width: 16px !important;
+    height: 16px !important;
+    border-radius: 50% !important;
+    background: var(--q-text-strong) !important;
+    border: 2px solid var(--q-accent-info) !important;
+    cursor: pointer !important;
+}
+.jupyter-widgets input[type=range]::-moz-range-track,
+.widget-slider input[type=range]::-moz-range-track {
+    background: var(--q-border-strong) !important;
+    height: 6px !important;
+    border-radius: 3px !important;
+}
+.jupyter-widgets input[type=range]::-moz-range-thumb,
+.widget-slider input[type=range]::-moz-range-thumb {
+    width: 16px !important;
+    height: 16px !important;
+    border-radius: 50% !important;
+    background: var(--q-text-strong) !important;
+    border: 2px solid var(--q-accent-info) !important;
+    cursor: pointer !important;
+}
 .quantui-completion-banner {
     padding: 10px 12px;
     border: 1px solid var(--q-accent-success);
@@ -1544,6 +1585,7 @@ class QuantUIApp:
         _orb_iso_controls: Any
         _orb_iso_output: Any
         _orb_n_orb_input: Any
+        _orb_font_scale_slider: Any
         _orb_index_input: Any
         _orb_png_inbox: Any
         _orb_toggle: Any
@@ -2738,6 +2780,9 @@ class QuantUIApp:
         self._orb_n_orb_input.observe(
             self._safe_cb(self._on_orb_range_changed), names="value"
         )
+        self._orb_font_scale_slider.observe(
+            self._safe_cb(self._on_orb_range_changed), names="value"
+        )
         # Orbital isosurface generate button
         self._iso_generate_btn.on_click(self._on_iso_generate)
         # Reveal the free-entry MO-index input only in "By index" mode.
@@ -3465,8 +3510,8 @@ class QuantUIApp:
         """Apply current theme colors to a plotly Figure in-place."""
         tc = self._plotly_theme_colors()
         fig.update_layout(
-            plot_bgcolor=tc["plot_bgcolor"],
-            paper_bgcolor=tc["paper_bgcolor"],
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
             font=dict(color=tc["font_color"]),
             xaxis=dict(gridcolor=tc["grid_color"]),
             yaxis=dict(gridcolor=tc["grid_color"]),
