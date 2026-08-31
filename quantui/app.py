@@ -1507,11 +1507,19 @@ class QuantUIApp:
         _scan_atom3: Any
         _scan_atom34_box: Any
         _scan_atom4: Any
+        _scan_help_btn: Any
+        _scan_grid_dd: Any
+        _scan_pick_clear_btn: Any
+        _scan_pick_inbox: Any
+        _scan_seed_refresh_btn: Any
         _scan_start: Any
         _scan_steps: Any
         _scan_stop: Any
+        _scan_suggest_around_btn: Any
+        _scan_suggest_btn: Any
         _scan_type_dd: Any
         _scan_unit_lbl: Any
+        _pes_export_min_btn: Any
         _tddft_accordion: Any
         _tddft_fig: Any
         _uv_export_btn: Any

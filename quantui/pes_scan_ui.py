@@ -205,8 +205,8 @@ def build_scan_grid(
         and start != stop
     ):
         lo, hi = (start, stop) if start < stop else (stop, start)
-        return np.geomspace(lo, hi, steps).tolist()
-    return np.linspace(start, stop, steps).tolist()
+        return [float(v) for v in np.geomspace(lo, hi, steps).tolist()]
+    return [float(v) for v in np.linspace(start, stop, steps).tolist()]
 
 
 def _clamp_selection(values: Sequence[int], n_atoms: int) -> List[int]:
