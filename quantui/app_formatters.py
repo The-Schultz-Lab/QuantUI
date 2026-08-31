@@ -29,8 +29,8 @@ _RESULT_CARD_CLOSE = "</div>"
 
 def _result_card_table_open() -> str:
     return (
-        f'<table class="quantui-result-card-table" '
-        f'style="margin-top:8px;font-size:14px;border-collapse:collapse;width:100%">'
+        '<table class="quantui-result-card-table" '
+        'style="margin-top:8px;font-size:14px;border-collapse:collapse;width:100%">'
     )
 
 
@@ -436,8 +436,7 @@ def format_pes_scan_result(r: Any) -> str:
         f"{_e_row}"
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">All converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
-        f"</table>"
-        + _RESULT_CARD_CLOSE
+        f"</table>" + _RESULT_CARD_CLOSE
     )
 
 
@@ -674,7 +673,7 @@ def reorg_missing_data_notice() -> str:
     """
     return (
         '<div style="margin-top:8px;padding:8px 10px;border-radius:6px;'
-        f'background:{_theme.css.SURFACE_WARNING_BG};border:1px solid {_theme.css.ACCENT_WARNING_LIGHT};'
+        f"background:{_theme.css.SURFACE_WARNING_BG};border:1px solid {_theme.css.ACCENT_WARNING_LIGHT};"
         f'font-size:13px;color:{_theme.css.TEXT_BODY}">'
         "<b>⚠ Reorganization-energy details were not saved for this result.</b><br>"
         "Results produced before QuantUI gained λ persistence did not store the "
@@ -697,8 +696,7 @@ def format_reorg_result(r: Any) -> str:
     _attach_relaxation(_payload, r)
     _channels_html = reorg_channels_html(_payload)
     return (
-        _result_card_open()
-        + f"<b>Reorganization Energy (Marcus 4-point) &mdash; "
+        _result_card_open() + f"<b>Reorganization Energy (Marcus 4-point) &mdash; "
         f"{r.formula} ({r.method}/{r.basis})</b>"
         + _result_card_table_open()
         + f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Neutral energy</td>'
@@ -707,8 +705,7 @@ def format_reorg_result(r: Any) -> str:
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.n_total_opt_steps}</td></tr>'
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">All converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
-        f"</table>{_channels_html}"
-        + _RESULT_CARD_CLOSE
+        f"</table>{_channels_html}" + _RESULT_CARD_CLOSE
     )
 
 
@@ -717,7 +714,11 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     import base64 as _b64
 
     _ct_labels = {
-        "single_point": ("Single Point", _theme.css.ACCENT_INFO, _theme.css.SURFACE_INFO_BG),
+        "single_point": (
+            "Single Point",
+            _theme.css.ACCENT_INFO,
+            _theme.css.SURFACE_INFO_BG,
+        ),
         "geometry_opt": (
             "Geometry Optimization",
             _theme.css.ACCENT_PURPLE,
@@ -730,7 +731,11 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         ),
         "tddft": ("TD-DFT", _theme.css.ACCENT_WARNING, _theme.css.SURFACE_WARNING_BG),
         "nmr": ("NMR", _theme.css.ACCENT_TEAL, _theme.css.SURFACE_TEAL_BG),
-        "pes_scan": ("PES Scan", _theme.css.ACCENT_WARNING, _theme.css.SURFACE_ORANGE_BG),
+        "pes_scan": (
+            "PES Scan",
+            _theme.css.ACCENT_WARNING,
+            _theme.css.SURFACE_ORANGE_BG,
+        ),
     }
     ct = data.get("calc_type", "")
     _ct_label, _ct_fg, _ct_bg = _ct_labels.get(

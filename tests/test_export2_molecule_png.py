@@ -204,7 +204,9 @@ class TestMolPngCaptureHandlers:
         assert not list(tmp_path.glob("*.png"))
         assert "too large" in app._mol_calc_png_status.value
 
-    def test_missing_result_dir_saves_to_general_figures_folder(self, tmp_path, monkeypatch):
+    def test_missing_result_dir_saves_to_general_figures_folder(
+        self, tmp_path, monkeypatch
+    ):
         figures = tmp_path / "figures"
         figures.mkdir()
         monkeypatch.setattr(

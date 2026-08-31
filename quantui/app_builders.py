@@ -1839,7 +1839,9 @@ def build_molecule_section(
     # the Results/Analysis molecule viewers.
     app._mol_calc_png_inbox = widgets.Textarea(
         value="",
-        layout=layout_fn(width="0px", height="0px", overflow="hidden", margin="0", padding="0"),
+        layout=layout_fn(
+            width="0px", height="0px", overflow="hidden", margin="0", padding="0"
+        ),
     )
     app._mol_calc_png_inbox.add_class(_MOL_CALC_PNG_INBOX_CLASS)
     app._mol_calc_png_status = widgets.HTML(value="")

@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, cast
-
-from datetime import datetime
 
 from .results_storage import _safe_name
 
