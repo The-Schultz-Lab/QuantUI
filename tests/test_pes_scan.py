@@ -253,8 +253,48 @@ class TestPesScanWidgets:
         from quantui.app import QuantUIApp
 
         app = QuantUIApp()
-        assert app._scan_start.value == pytest.approx(0.5)
-        assert app._scan_stop.value == pytest.approx(2.0)
+        # Populated from geometry when PES Scan is first selected
+        app.calc_type_dd.value = "PES Scan"
+        assert app._scan_start.value != 0  # bond default from suggest
+        assert app._scan_stop.value > app._scan_start.value
+
+    def test_scan_atoms_are_dropdowns(self):
+        from ipywidgets import Dropdown
+
+        from quantui.app import QuantUIApp
+
+        app = QuantUIApp()
+        assert isinstance(app._scan_atom1, Dropdown)
+        assert isinstance(app._scan_atom2, Dropdown)
+
+    def test_angle_scan_accepts_negative_start(self):
+        from quantui.app import QuantUIApp
+
+        app = QuantUIApp()
+        app.calc_type_dd.value = "PES Scan"
+        app._scan_type_dd.value = "Angle"
+        app._scan_start.value = -45.0
+        app._scan_stop.value = 45.0
+        assert app._scan_start.value == pytest.approx(-45.0)
+
+    def test_pes_scan_shows_atom_reference(self):
+        from quantui.app import QuantUIApp
+        from quantui.molecule import Molecule
+
+        app = QuantUIApp()
+        app._set_molecule(
+            Molecule(
+                atoms=["O", "H", "H"],
+                coordinates=[
+                    [0.0, 0.0, 0.0],
+                    [0.757, 0.587, 0.0],
+                    [-0.757, 0.587, 0.0],
+                ],
+            ),
+            label="test",
+        )
+        app.calc_type_dd.value = "PES Scan"
+        assert "O1" in app._scan_atom_list_html.value
 
     def test_scan_steps_default(self):
         from quantui.app import QuantUIApp

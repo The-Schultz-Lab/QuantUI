@@ -44,6 +44,8 @@ def _fake_app(**overrides):
         _scan_start=SimpleNamespace(value=0.5),
         _scan_stop=SimpleNamespace(value=2.0),
         _scan_steps=SimpleNamespace(value=10),
+        _scan_grid_dd=SimpleNamespace(value="linear"),
+        _scan_seed_dd=SimpleNamespace(value=""),
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -131,3 +133,34 @@ class TestSeedGeometryDispatch:
         app = _fake_app(_seed_dd=SimpleNamespace(value=str(seed_dir)))
         req = build_calculation_request(app, request_id="sp")
         assert req.molecule["coordinates"][1][2] == pytest.approx(0.74)
+
+    def test_pes_scan_request_includes_grid_and_opt_options(self):
+        app = _fake_app(
+            calc_type_dd=SimpleNamespace(value="PES Scan"),
+            _scan_grid_dd=SimpleNamespace(value="log"),
+            fmax_fi=SimpleNamespace(value=0.03),
+            max_steps_si=SimpleNamespace(value=80),
+        )
+        req = build_calculation_request(app, request_id="pes1")
+        assert req.calc_type == "pes_scan"
+        assert req.options["grid"] == "log"
+        assert req.options["fmax"] == pytest.approx(0.03)
+        assert req.options["max_opt_steps"] == 80
+
+    def test_pes_scan_uses_scan_seed_dropdown(self, tmp_path):
+        seed_dir = _write_seed_trajectory(tmp_path, final_bond=0.83)
+        app = _fake_app(
+            calc_type_dd=SimpleNamespace(value="PES Scan"),
+            _scan_seed_dd=SimpleNamespace(value=str(seed_dir)),
+        )
+        req = build_calculation_request(app, request_id="pes-seed")
+        assert req.molecule["coordinates"][1][2] == pytest.approx(0.83)
+        assert req.run_context["seed_result_dir"] == str(seed_dir)
+
+    def test_pes_scan_preopt_flag_when_checkbox_set(self):
+        app = _fake_app(
+            calc_type_dd=SimpleNamespace(value="PES Scan"),
+            _freq_preopt_cb=SimpleNamespace(value=True),
+        )
+        req = build_calculation_request(app, request_id="pes-preopt")
+        assert req.options.get("preopt_before_run") is True

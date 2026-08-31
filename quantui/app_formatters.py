@@ -363,21 +363,40 @@ def format_nmr_result(r: Any) -> str:
 
 def format_pes_scan_result(r: Any) -> str:
     """Format a PESScanResult as an HTML result card."""
-    _conv = "Yes" if r.converged_all else "No (some points did not converge)"
+    import math
+
+    from quantui.measurement import atom_label
+
+    n_fail = sum(1 for e in r.energies_hartree if not math.isfinite(e))
+    _conv = (
+        "Yes"
+        if r.converged_all
+        else f"No ({n_fail} failed point{'s' if n_fail != 1 else ''})"
+    )
     _cc = "green" if r.converged_all else _theme.css.ACCENT_ERROR_ALT
-    if r.energies_hartree:
-        e_min = min(r.energies_hartree)
-        e_max = max(r.energies_hartree)
+
+    finite = [e for e in r.energies_hartree if math.isfinite(e)]
+    _e_row = ""
+    if finite:
+        e_min = min(finite)
+        e_max = max(finite)
         barrier_kcal = (e_max - e_min) * 627.509474
+        min_i = r.energies_hartree.index(e_min)
+        min_coord = r.scan_parameter_values[min_i]
         _e_row = (
             f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Min energy</td>'
-            f'<td style="color:{_theme.css.TEXT_HEADING}">{e_min:.8f} Ha</td></tr>'
+            f'<td style="color:{_theme.css.TEXT_HEADING}">{e_min:.8f} Ha '
+            f"(point {min_i + 1}, {min_coord:.3f} {r.scan_unit})</td></tr>"
             f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Energy range</td>'
             f'<td style="color:{_theme.css.TEXT_HEADING}">{barrier_kcal:.2f} kcal/mol</td></tr>'
         )
+
+    mol = r.coordinates_list[0] if getattr(r, "coordinates_list", None) else None
+    if mol is not None:
+        _idx_str = " – ".join(atom_label(mol, i) for i in r.atom_indices)
     else:
-        _e_row = ""
-    _idx_str = "–".join(str(i + 1) for i in r.atom_indices)
+        _idx_str = " – ".join(str(i + 1) for i in r.atom_indices)
+
     return (
         f'<div style="background:{_theme.css.ACCENT_SUCCESS_BG};border-left:4px solid {_theme.css.ACCENT_SUCCESS_ALT};'
         f'padding:10px 14px;border-radius:4px;margin:6px 0">'

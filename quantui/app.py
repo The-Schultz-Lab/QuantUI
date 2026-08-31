@@ -242,6 +242,12 @@ from quantui.app_measurement import (
     on_measure_inbox_changed as _measure_on_inbox_changed,
 )
 from quantui.app_runflow import (
+    apply_scan_range_around_current as _run_apply_scan_range_around_current,
+)
+from quantui.app_runflow import (
+    apply_suggested_scan_range as _run_apply_suggested_scan_range,
+)
+from quantui.app_runflow import (
     apply_vib_mode_for_frequency as _run_apply_vib_mode_for_frequency,
 )
 from quantui.app_runflow import (
@@ -375,6 +381,12 @@ from quantui.app_runflow import (
 )
 from quantui.app_runflow import (
     refresh_comparison as _run_refresh_comparison,
+)
+from quantui.app_runflow import (
+    refresh_pes_scan_widgets as _run_refresh_pes_scan_widgets,
+)
+from quantui.app_runflow import (
+    refresh_pes_seed_options as _run_refresh_pes_seed_options,
 )
 from quantui.app_runflow import (
     refresh_results_browser as _run_refresh_results_browser,
@@ -1495,11 +1507,19 @@ class QuantUIApp:
         _scan_atom3: Any
         _scan_atom34_box: Any
         _scan_atom4: Any
+        _scan_help_btn: Any
+        _scan_grid_dd: Any
+        _scan_pick_clear_btn: Any
+        _scan_pick_inbox: Any
+        _scan_seed_refresh_btn: Any
         _scan_start: Any
         _scan_steps: Any
         _scan_stop: Any
+        _scan_suggest_around_btn: Any
+        _scan_suggest_btn: Any
         _scan_type_dd: Any
         _scan_unit_lbl: Any
+        _pes_export_min_btn: Any
         _tddft_accordion: Any
         _tddft_fig: Any
         _uv_export_btn: Any
@@ -1670,6 +1690,7 @@ class QuantUIApp:
         self._warm_calc_types: set[str] = set()
         # Relaxed molecule from a pending pre-opt preview, awaiting Keep/Revert.
         self._preopt_relaxed_mol: Optional[Molecule] = None
+        self._scan_pick_buffer: list[int] = []
         # Cache kernel io_loop once on the main thread so worker threads can
         # reliably schedule UI callbacks even when get_ipython() is thread-local.
         self._kernel_io_loop: Any = getattr(
@@ -2432,6 +2453,31 @@ class QuantUIApp:
         self._scan_type_dd.observe(
             self._safe_cb(self._update_scan_widgets), names="value"
         )
+        for _scan_atom_w in (
+            self._scan_atom1,
+            self._scan_atom2,
+            self._scan_atom3,
+            self._scan_atom4,
+        ):
+            _scan_atom_w.observe(
+                self._safe_cb(self._on_scan_atom_changed), names="value"
+            )
+        self._scan_suggest_btn.on_click(
+            self._safe_cb(lambda _btn: _run_apply_suggested_scan_range(self))
+        )
+        self._scan_suggest_around_btn.on_click(
+            self._safe_cb(lambda _btn: _run_apply_scan_range_around_current(self))
+        )
+        self._scan_seed_refresh_btn.on_click(
+            self._safe_cb(lambda _btn: _run_refresh_pes_seed_options(self))
+        )
+        self._scan_pick_inbox.observe(
+            self._safe_cb(self._on_pes_pick_inbox_changed), names="value"
+        )
+        self._scan_pick_clear_btn.on_click(self._safe_cb(self._on_pes_pick_clear))
+        self._scan_help_btn.on_click(
+            self._safe_cb(lambda _btn: self._show_help_topic("pes_scan"))
+        )
         # Notes + estimate
         self.method_dd.observe(self._safe_cb(self._update_notes), names="value")
         self.basis_dd.observe(self._safe_cb(self._update_notes), names="value")
@@ -2524,6 +2570,7 @@ class QuantUIApp:
         self._nmr_export_btn.on_click(self._on_nmr_export_plot)
         self._orb_export_btn.on_click(self._on_orb_export_plot)
         self._pes_export_btn.on_click(self._on_pes_export_plot)
+        self._pes_export_min_btn.on_click(self._on_pes_export_min_geometry)
         self._vib_export_btn.on_click(self._on_vib_export_animation)
         # Per-panel CSV-to-clipboard / file buttons.
         self._ir_copy_data_btn.on_click(self._on_ir_copy_data)
@@ -3418,6 +3465,7 @@ class QuantUIApp:
         if self._molecule is None or _render_molecule_html is None:
             return
         backend_to_use = backend if backend is not None else self._viz_backend
+        show_atom_indices = self.calc_type_dd.value == "PES Scan"
         html = _render_molecule_html(
             self._molecule,
             backend=backend_to_use,
@@ -3425,7 +3473,12 @@ class QuantUIApp:
             lighting=self._viz_lighting,
             bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
             capture_class=_MOL_CALC_PNG_INBOX_CLASS,
+            show_atom_indices=show_atom_indices,
         )
+        if show_atom_indices and str(backend_to_use) == "py3dmol":
+            from quantui.app_pes_pick import finalize_pes_calc_html
+
+            html = finalize_pes_calc_html(self, html, backend_to_use)
         self._set_html_output(self.viz_output, html)
 
     def _get_kernel_io_loop(self) -> Any:
@@ -4071,6 +4124,29 @@ class QuantUIApp:
     def _update_scan_widgets(self, _change=None) -> None:
         _run_update_scan_widgets(self, _change)
 
+    def _on_scan_atom_changed(self, _change=None) -> None:
+        from quantui.app_pes_pick import push_scan_highlight
+        from quantui.app_runflow import _update_scan_coord_summary
+
+        _update_scan_coord_summary(self)
+        st = self._scan_type_dd.value.lower()
+        idx = [int(self._scan_atom1.value) - 1, int(self._scan_atom2.value) - 1]
+        if st in ("angle", "dihedral"):
+            idx.append(int(self._scan_atom3.value) - 1)
+        if st == "dihedral":
+            idx.append(int(self._scan_atom4.value) - 1)
+        push_scan_highlight(self, idx)
+
+    def _on_pes_pick_inbox_changed(self, change) -> None:
+        from quantui.app_pes_pick import on_pes_pick_inbox_changed
+
+        on_pes_pick_inbox_changed(self, change)
+
+    def _on_pes_pick_clear(self, _btn=None) -> None:
+        from quantui.app_pes_pick import clear_pes_pick
+
+        clear_pes_pick(self)
+
     def _refresh_seed_options(self) -> None:
         _run_refresh_seed_options(self)
 
@@ -4393,6 +4469,83 @@ class QuantUIApp:
             fmt=self._pes_export_fmt_dd.value,
             status_widget=self._pes_export_status,
         )
+
+    def _on_pes_export_min_geometry(self, _btn=None) -> None:
+        """Save the lowest-energy PES scan frame as an XYZ file."""
+        import math
+        import re as _re
+        from datetime import datetime as _dt
+
+        result = getattr(self, "_last_pes_result", None)
+        status = getattr(self, "_pes_export_status", None)
+        if result is None:
+            if status is not None:
+                status.value = (
+                    f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
+                    "No PES scan result available yet.</span>"
+                )
+            return
+
+        energies = list(getattr(result, "energies_hartree", []) or [])
+        frames = list(getattr(result, "coordinates_list", []) or [])
+        if not energies or not frames:
+            if status is not None:
+                status.value = (
+                    f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
+                    "PES result has no saved geometries.</span>"
+                )
+            return
+
+        finite = [
+            (i, e)
+            for i, e in enumerate(energies)
+            if math.isfinite(e) and i < len(frames)
+        ]
+        if not finite:
+            if status is not None:
+                status.value = (
+                    f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
+                    "No converged scan points to export.</span>"
+                )
+            return
+
+        min_i, min_e = min(finite, key=lambda pair: pair[1])
+        mol = frames[min_i]
+        coord = result.scan_parameter_values[min_i]
+        unit = getattr(result, "scan_unit", "")
+        target_dir = (
+            self._last_result_dir
+            if isinstance(self._last_result_dir, Path)
+            else self._get_results_dir()
+        )
+        target_dir.mkdir(parents=True, exist_ok=True)
+        safe_formula = (
+            _re.sub(r"[^A-Za-z0-9_.-]+", "_", mol.get_formula()) or "molecule"
+        )
+        ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S")
+        dest = target_dir / f"{safe_formula}_pes_min_{ts}.xyz"
+        comment = (
+            f"{mol.get_formula()}  charge={mol.charge} multiplicity={mol.multiplicity}  "
+            f"PES minimum point {min_i + 1}/{len(frames)}  "
+            f"{result.scan_coordinate_label}={coord:.4f} {unit}  "
+            f"E={min_e:.10f} Ha  {result.method}/{result.basis}"
+        )
+        try:
+            dest.write_text(
+                f"{len(mol.atoms)}\n{comment}\n{mol.to_xyz_string()}\n",
+                encoding="utf-8",
+            )
+            if status is not None:
+                status.value = (
+                    f'<span style="color:{_theme.css.ACCENT_SUCCESS_ALT};font-size:12px">'
+                    f"Saved minimum geometry: {dest.name}</span>"
+                )
+        except Exception as exc:
+            if status is not None:
+                status.value = (
+                    f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
+                    f"Export failed: {exc}</span>"
+                )
 
     def _export_plot_figure(
         self,
@@ -4934,6 +5087,9 @@ class QuantUIApp:
         self._refresh_calc_mol_viewer()
 
         self._update_notes()
+
+        if self.calc_type_dd.value == "PES Scan":
+            _run_refresh_pes_scan_widgets(self)
 
         # Any pending pre-opt preview was for the previous geometry — invalidate
         # it so a stale "Keep/Revert" can't apply to a different molecule.
@@ -5832,6 +5988,21 @@ class QuantUIApp:
                 self.run_status.value = "Running PES scan…"
                 from quantui.pes_scan import run_pes_scan
 
+                _scan_seed = getattr(self, "_scan_seed_dd", None)
+                if _scan_seed is not None and _scan_seed.value:
+                    from quantui.results_storage import load_trajectory
+
+                    self.run_status.value = "Loading seed geometry from history…"
+                    _seed_traj, _ = load_trajectory(Path(_scan_seed.value))
+                    if _seed_traj:
+                        calc_mol = _seed_traj[-1]
+                        log.write(
+                            f"\nSeed geometry loaded from: "
+                            f"{Path(_scan_seed.value).name}\n"
+                            f"  Formula: {calc_mol.get_formula()}  "
+                            f"Atoms: {len(calc_mol.atoms)}\n"
+                        )
+
                 _st = self._scan_type_dd.value.lower()
                 _atom_idx: list = [
                     self._scan_atom1.value - 1,
@@ -5851,6 +6022,9 @@ class QuantUIApp:
                     start=self._scan_start.value,
                     stop=self._scan_stop.value,
                     steps=self._scan_steps.value,
+                    grid=str(getattr(self._scan_grid_dd, "value", "linear")),
+                    fmax=self.fmax_fi.value,
+                    max_opt_steps=self.max_steps_si.value,
                     progress_stream=log,  # type: ignore[arg-type]
                     checkpoint=_ckpt,
                     resume=_resume,

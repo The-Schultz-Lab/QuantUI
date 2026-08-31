@@ -264,11 +264,20 @@ def _run_nmr(request: CalculationRequest, staging_dir: Path, log_stream) -> Any:
 def _run_pes_scan(request: CalculationRequest, staging_dir: Path, log_stream) -> Any:
     from quantui.pes_scan import run_pes_scan
 
+    _log_seed_context(request, staging_dir)
     molecule = molecule_from_request(request)
     options = request.options or {}
     scan_type = str(options.get("scan_type", "bond"))
     atom_indices = list(options.get("atom_indices") or [0, 1])
     _write_progress(staging_dir, "running", "Running PES scan", 10.0)
+    molecule, _pre_opt = _maybe_run_preopt(
+        request,
+        molecule,
+        staging_dir,
+        log_stream,
+        stage_label="PES scan",
+        write_preopt_trajectory=False,
+    )
     return run_pes_scan(
         molecule=molecule,
         method=request.method,
@@ -278,6 +287,9 @@ def _run_pes_scan(request: CalculationRequest, staging_dir: Path, log_stream) ->
         start=float(options.get("start", 0.5)),
         stop=float(options.get("stop", 2.0)),
         steps=int(options.get("steps", 10)),
+        grid=str(options.get("grid", "linear")),
+        fmax=float(options.get("fmax", 0.05)),
+        max_opt_steps=int(options.get("max_opt_steps", 100)),
         progress_stream=log_stream,
     )
 

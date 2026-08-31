@@ -1235,36 +1235,33 @@ def build_shared_widgets(
         style={"description_width": "80px"},
         layout=layout_fn(width="220px"),
     )
-    atom_idx_layout = layout_fn(width="95px")
+    atom_idx_layout = layout_fn(width="155px")
     atom_idx_style = {"description_width": "50px"}
-    app._scan_atom1 = widgets.BoundedIntText(
+    _scan_atom_opts = [("1", 1), ("2", 2)]
+    app._scan_atom1 = widgets.Dropdown(
+        options=_scan_atom_opts,
         value=1,
-        min=1,
-        max=999,
         description="Atom 1:",
         style=atom_idx_style,
         layout=atom_idx_layout,
     )
-    app._scan_atom2 = widgets.BoundedIntText(
+    app._scan_atom2 = widgets.Dropdown(
+        options=_scan_atom_opts,
         value=2,
-        min=1,
-        max=999,
         description="Atom 2:",
         style=atom_idx_style,
         layout=atom_idx_layout,
     )
-    app._scan_atom3 = widgets.BoundedIntText(
+    app._scan_atom3 = widgets.Dropdown(
+        options=_scan_atom_opts + [("3", 3)],
         value=3,
-        min=1,
-        max=999,
         description="Atom 3:",
         style=atom_idx_style,
         layout=atom_idx_layout,
     )
-    app._scan_atom4 = widgets.BoundedIntText(
+    app._scan_atom4 = widgets.Dropdown(
+        options=_scan_atom_opts + [("3", 3), ("4", 4)],
         value=4,
-        min=1,
-        max=999,
         description="Atom 4:",
         style=atom_idx_style,
         layout=atom_idx_layout,
@@ -1273,19 +1270,28 @@ def build_shared_widgets(
         [app._scan_atom3, app._scan_atom4],
         layout=layout_fn(gap="4px"),
     )
-    app._scan_start = widgets.BoundedFloatText(
-        value=0.5,
-        min=0.01,
-        max=1000.0,
+    app._scan_atom_list_html = widgets.HTML(
+        value=(
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">'
+            "Load a molecule to see atom numbers.</span>"
+        )
+    )
+    app._scan_coord_summary = widgets.HTML(value="")
+    app._scan_suggest_btn = widgets.Button(
+        description="Suggest range",
+        icon="magic",
+        tooltip="Fill Start/Stop from the current geometry",
+        layout=layout_fn(width="130px"),
+    )
+    app._scan_start = widgets.FloatText(
+        value=0.8,
         step=0.1,
         description="Start:",
         style={"description_width": "40px"},
         layout=layout_fn(width="140px"),
     )
-    app._scan_stop = widgets.BoundedFloatText(
+    app._scan_stop = widgets.FloatText(
         value=2.0,
-        min=0.01,
-        max=1000.0,
         step=0.1,
         description="Stop:",
         style={"description_width": "40px"},
@@ -1301,6 +1307,72 @@ def build_shared_widgets(
     )
     app._scan_unit_lbl = widgets.HTML(
         f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">Å</span>'
+    )
+    app._scan_current_value_html = widgets.HTML(value="")
+    app._scan_pick_readout = widgets.HTML(
+        value=(
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">'
+            "Click atoms in the viewer above (py3Dmol) to fill the fields.</span>"
+        )
+    )
+    app._scan_pick_clear_btn = widgets.Button(
+        description="Clear picks",
+        icon="eraser",
+        layout=layout_fn(width="110px"),
+        tooltip="Clear click-to-pick progress",
+    )
+    app._scan_help_btn = widgets.Button(
+        description="?",
+        layout=layout_fn(width="28px", height="28px"),
+        tooltip="PES Scan setup help",
+    )
+    app._scan_preopt_note = widgets.HTML(
+        value=(
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">'
+            "Tip: enable <b>Pre-optimize starting geometry</b> above for best "
+            "results. Each scan point runs its own constrained optimization.</span>"
+        )
+    )
+    app._scan_seed_dd = widgets.Dropdown(
+        options=[("(use current molecule)", "")],
+        value="",
+        description="Seed:",
+        style={"description_width": "40px"},
+        layout=layout_fn(width="100%"),
+        tooltip="Optional optimized geometry from history",
+    )
+    app._scan_seed_refresh_btn = widgets.Button(
+        description="",
+        icon="refresh",
+        layout=layout_fn(width="32px", height="28px"),
+        tooltip="Refresh seed geometry list",
+    )
+    app._scan_suggest_around_btn = widgets.Button(
+        description="± around current",
+        icon="crosshairs",
+        tooltip="Set Start/Stop in a window around the current coordinate value",
+        layout=layout_fn(width="150px"),
+    )
+    app._scan_grid_dd = widgets.Dropdown(
+        options=[("Linear spacing", "linear"), ("Log spacing (bond)", "log")],
+        value="linear",
+        description="Grid:",
+        style={"description_width": "40px"},
+        layout=layout_fn(width="200px"),
+    )
+    app._scan_pick_inbox = widgets.Textarea(
+        value="", layout=layout_fn(width="1px", height="1px", visibility="hidden")
+    )
+    app._scan_pick_inbox.add_class("quantui-pes-pick-inbox")
+    app._scan_pick_bridge = widgets.Output(
+        layout=layout_fn(width="1px", height="1px", visibility="hidden")
+    )
+    app._scan_plotly_note = widgets.HTML(
+        value=(
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_MUTED_LIGHT};'
+            f'display:none">Number labels in the viewer require py3Dmol — '
+            f"switch backends above or use the atom list.</span>"
+        )
     )
 
     # Reorganization energy (Marcus 4-point). The mode selector chooses which
@@ -1957,11 +2029,28 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         )
 
     pes_export_row = _plot_export_row("pes")
+    app._pes_export_min_btn = widgets.Button(
+        description="Save min geometry",
+        icon="download",
+        layout=layout_fn(width="150px"),
+        tooltip="Export the lowest-energy scan point as XYZ",
+    )
+    app._pes_plot_hint = widgets.HTML(
+        value=(
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">'
+            "Click a point to jump the Trajectory viewer to that scan step.</span>"
+        )
+    )
     app._pes_plot_html = widgets.Output(layout=layout_fn(width="100%"))
     app._pes_scan_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
-                [pes_export_row, app._pes_plot_html],
+                [
+                    pes_export_row,
+                    app._pes_export_min_btn,
+                    app._pes_plot_hint,
+                    app._pes_plot_html,
+                ],
                 layout=layout_fn(padding="8px"),
             )
         ],

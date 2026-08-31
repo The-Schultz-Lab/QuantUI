@@ -12,6 +12,8 @@ from IPython.display import HTML, Javascript, display
 
 from quantui import theme as _theme
 
+_METAL_FIX_BASIS = "def2-SVP"
+
 
 def _calc_type_badge(calc_type: str) -> str:
     return {
@@ -155,6 +157,31 @@ def on_run_clicked(app: Any, btn: Any) -> None:
             return
         _hide_basis_fix_button(app)
 
+    if mol is not None and app.calc_type_dd.value == "PES Scan":
+        pes_problems = validate_pes_scan_before_run(app)
+        if pes_problems:
+            body = "\n\n".join(f"  • {p}" for p in pes_problems)
+            _set_run_output(
+                app,
+                (
+                    {
+                        "output_type": "stream",
+                        "name": "stdout",
+                        "text": (
+                            "⚠  PES scan was not started — please fix "
+                            "the scan settings first:\n\n" + body + "\n"
+                        ),
+                    },
+                ),
+            )
+            try:
+                app.run_status.value = (
+                    "Adjust the PES scan settings above, then Run again."
+                )
+            except Exception:  # noqa: BLE001 — status label is best-effort
+                pass
+            return
+
     # Write the header FIRST (atomic, main thread) — this also clears the
     # previous run's log via the single ``outputs`` assignment.
     _write_run_header(app)
@@ -183,8 +210,7 @@ def on_run_clicked(app: Any, btn: Any) -> None:
     threading.Thread(target=app._do_run, daemon=True).start()
 
 
-# The metal-capable basis the one-click MET.5 fix switches to.
-_METAL_FIX_BASIS = "def2-SVP"
+_FREQ_PREOPT_DESC_DEFAULT = "Geometry optimization before calculation (QM, slower)"
 
 
 def _hide_basis_fix_button(app: Any) -> None:
@@ -480,28 +506,60 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
             app._reorg_note,
         ]
     elif ct == "PES Scan":
-        app._update_scan_widgets()
+        app._freq_preopt_cb.layout.display = ""
+        app._freq_preopt_cb.disabled = False
+        app._freq_preopt_cb.description = (
+            "Pre-optimize starting geometry before scan (recommended)"
+        )
+        refresh_pes_scan_widgets(app, suggest_range=True, reset_atoms=True)
+        refresh_pes_seed_options(app)
         app.calc_extra_opts.children = [
             widgets.HBox(
-                [app._scan_type_dd],
-                layout=layout_fn(margin="0 0 4px 0"),
+                [app._scan_type_dd, app._scan_help_btn],
+                layout=layout_fn(margin="0 0 4px 0", align_items="center"),
             ),
+            app._scan_preopt_note,
+            widgets.HBox(
+                [app._scan_seed_dd, app._scan_seed_refresh_btn],
+                layout=layout_fn(align_items="center", gap="6px", width="100%"),
+            ),
+            app._scan_atom_list_html,
+            app._scan_plotly_note,
             widgets.HBox(
                 [app._scan_atom1, app._scan_atom2],
                 layout=layout_fn(gap="4px"),
             ),
             app._scan_atom34_box,
             widgets.HBox(
+                [app._scan_pick_readout, app._scan_pick_clear_btn],
+                layout=layout_fn(gap="6px", align_items="center"),
+            ),
+            app._scan_coord_summary,
+            app._scan_current_value_html,
+            widgets.HBox(
                 [
                     app._scan_start,
                     app._scan_stop,
                     app._scan_steps,
                     app._scan_unit_lbl,
+                    app._scan_grid_dd,
                 ],
                 layout=layout_fn(gap="4px", align_items="center"),
             ),
+            widgets.HBox(
+                [app._scan_suggest_btn, app._scan_suggest_around_btn],
+                layout=layout_fn(gap="6px"),
+            ),
+            widgets.HBox(
+                [app.fmax_fi, app.max_steps_si],
+                layout=layout_fn(gap="8px"),
+            ),
+            app._scan_pick_inbox,
+            app._scan_pick_bridge,
         ]
     else:
+        if change.get("old") == "PES Scan":
+            app._freq_preopt_cb.description = _FREQ_PREOPT_DESC_DEFAULT
         app.calc_extra_opts.children = []
 
     # Both the runtime estimate and the resume offer are per-calc-type, and
@@ -516,29 +574,193 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     except Exception:  # noqa: BLE001 — a stale hint must not break the tab
         pass
 
+    # PES Scan overlays 1-based atom indices on the Calculate-tab viewer.
+    old_ct = change.get("old")
+    if ct == "PES Scan" or old_ct == "PES Scan":
+        try:
+            app._refresh_calc_mol_viewer()
+        except Exception:  # noqa: BLE001 — viewer refresh must not break the tab
+            pass
+
 
 def update_scan_widgets(app: Any, _change: Any = None) -> None:
-    """Show/hide atom inputs and unit label based on scan type."""
+    """Show/hide atom inputs, unit label, and range hints based on scan type."""
+    from quantui.pes_scan_ui import adapt_atoms_for_scan_type_change
+
     st = app._scan_type_dd.value
+    if (
+        _change is not None
+        and _change.get("owner") is app._scan_type_dd
+        and _change.get("name") == "value"
+    ):
+        mol = getattr(app, "_molecule", None)
+        old = _change.get("old") or "Bond"
+        if mol is not None and mol.atoms:
+            nums = _selected_scan_atoms(app)
+            adapted = adapt_atoms_for_scan_type_change(old, st, nums, len(mol.atoms))
+            app._scan_atom1.value = adapted[0]
+            app._scan_atom2.value = adapted[1]
+            if st in ("Angle", "Dihedral"):
+                app._scan_atom3.value = adapted[2]
+            if st == "Dihedral":
+                app._scan_atom4.value = adapted[3]
+            apply_suggested_scan_range(app)
+        app._scan_pick_buffer = []
+
     if st == "Bond":
         app._scan_atom34_box.layout.display = "none"
+        app._scan_grid_dd.layout.display = ""
         app._scan_unit_lbl.value = (
             f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">Å</span>'
         )
+        app._scan_start.step = 0.1
+        app._scan_stop.step = 0.1
     elif st == "Angle":
         app._scan_atom4.layout.display = "none"
         app._scan_atom3.layout.display = ""
         app._scan_atom34_box.layout.display = ""
+        app._scan_grid_dd.layout.display = "none"
+        if app._scan_grid_dd.value != "linear":
+            app._scan_grid_dd.value = "linear"
         app._scan_unit_lbl.value = (
             f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">°</span>'
         )
+        app._scan_start.step = 1.0
+        app._scan_stop.step = 1.0
     else:  # Dihedral
         app._scan_atom3.layout.display = ""
         app._scan_atom4.layout.display = ""
         app._scan_atom34_box.layout.display = ""
+        app._scan_grid_dd.layout.display = "none"
+        if app._scan_grid_dd.value != "linear":
+            app._scan_grid_dd.value = "linear"
         app._scan_unit_lbl.value = (
             f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">°</span>'
         )
+        app._scan_start.step = 5.0
+        app._scan_stop.step = 5.0
+    _update_scan_coord_summary(app)
+    try:
+        from quantui.app_pes_pick import push_scan_highlight
+
+        push_scan_highlight(app, [n - 1 for n in _selected_scan_atoms(app)])
+    except Exception:  # noqa: BLE001 — highlight is best-effort
+        pass
+
+
+def _scan_atom_widgets(app: Any) -> list:
+    return [app._scan_atom1, app._scan_atom2, app._scan_atom3, app._scan_atom4]
+
+
+def _selected_scan_atoms(app: Any) -> list[int]:
+    st = app._scan_type_dd.value.lower()
+    nums = [
+        int(app._scan_atom1.value),
+        int(app._scan_atom2.value),
+    ]
+    if st in ("angle", "dihedral"):
+        nums.append(int(app._scan_atom3.value))
+    if st == "dihedral":
+        nums.append(int(app._scan_atom4.value))
+    return nums
+
+
+def _update_scan_coord_summary(app: Any) -> None:
+    from quantui.pes_scan_ui import (
+        format_current_coordinate_html,
+        format_scan_atom_summary,
+    )
+
+    mol = getattr(app, "_molecule", None)
+    atoms = _selected_scan_atoms(app)
+    summary = format_scan_atom_summary(mol, app._scan_type_dd.value, atoms)
+    app._scan_coord_summary.value = (
+        f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">'
+        f"{summary}</span>"
+    )
+    app._scan_current_value_html.value = format_current_coordinate_html(
+        mol, app._scan_type_dd.value, atoms
+    )
+    note = getattr(app, "_scan_plotly_note", None)
+    if note is not None:
+        backend = getattr(app, "_viz_backend", "auto")
+        note.layout.display = "" if str(backend) == "plotlymol" else "none"
+
+
+def apply_suggested_scan_range(app: Any) -> None:
+    """Fill Start/Stop from the current geometry and atom selection."""
+    from quantui.pes_scan_ui import suggest_scan_range
+
+    mol = getattr(app, "_molecule", None)
+    start, stop = suggest_scan_range(
+        mol, app._scan_type_dd.value, _selected_scan_atoms(app)
+    )
+    app._scan_start.value = float(start)
+    app._scan_stop.value = float(stop)
+
+
+def apply_scan_range_around_current(app: Any) -> None:
+    """Fill Start/Stop in a window around the current coordinate."""
+    from quantui.pes_scan_ui import scan_range_around_current
+
+    mol = getattr(app, "_molecule", None)
+    start, stop = scan_range_around_current(
+        mol, app._scan_type_dd.value, _selected_scan_atoms(app)
+    )
+    app._scan_start.value = float(start)
+    app._scan_stop.value = float(stop)
+
+
+def refresh_pes_seed_options(app: Any) -> None:
+    """Populate the PES seed-geometry dropdown from saved geo opts."""
+    _refresh_seed_options(app, app._scan_seed_dd)
+
+
+def refresh_pes_scan_widgets(
+    app: Any, *, suggest_range: bool = False, reset_atoms: bool = False
+) -> None:
+    """Refresh atom dropdowns and the numbered-atom reference for PES Scan."""
+    from quantui.pes_scan_ui import (
+        atom_dropdown_options,
+        atom_list_html,
+        default_atom_selection,
+    )
+
+    mol = getattr(app, "_molecule", None)
+    opts = atom_dropdown_options(mol)
+    n_atoms = len(mol.atoms) if mol is not None else 0
+    st = app._scan_type_dd.value.lower()
+    defaults = default_atom_selection(n_atoms, st) if n_atoms > 0 else [1, 2, 3, 4]
+    while len(defaults) < 4:
+        defaults.append(defaults[-1] if defaults else 1)
+
+    for i, w in enumerate(_scan_atom_widgets(app)):
+        w.options = opts
+        if n_atoms == 0:
+            continue
+        if reset_atoms:
+            w.value = defaults[i]
+        else:
+            w.value = max(1, min(int(w.value), n_atoms))
+
+    app._scan_atom_list_html.value = atom_list_html(mol)
+    update_scan_widgets(app)
+    if suggest_range and n_atoms > 0:
+        apply_suggested_scan_range(app)
+
+
+def validate_pes_scan_before_run(app: Any) -> list[str]:
+    """Pre-run validation for PES Scan; empty list means OK to proceed."""
+    from quantui.pes_scan_ui import validate_pes_scan_inputs
+
+    return validate_pes_scan_inputs(
+        getattr(app, "_molecule", None),
+        app._scan_type_dd.value,
+        _selected_scan_atoms(app),
+        float(app._scan_start.value),
+        float(app._scan_stop.value),
+        int(app._scan_steps.value),
+    )
 
 
 # Default RMSD tolerance for the seed-geometry "same molecule" check.
@@ -710,7 +932,7 @@ def _update_freq_perturb_seed_ui(app: Any, path_str: str) -> None:
 
 def resolve_seed_geometry(app: Any, base_mol: Any, *, log: Any | None = None) -> Any:
     """Apply seed geometry (geo-opt final frame or freq mode perturbation)."""
-    from quantui.backends.dispatch import load_seed_molecule
+    from quantui.backends.dispatch import load_seed_molecule, seed_path_from_app
     from quantui.freq_calc import (
         VIB_MODE_DISPLAY_AMPLITUDE_ANGSTROM,
         freq_mode_seed_result_dir,
@@ -718,7 +940,7 @@ def resolve_seed_geometry(app: Any, base_mol: Any, *, log: Any | None = None) ->
         molecule_from_freq_mode_seed,
     )
 
-    seed_path = getattr(getattr(app, "_seed_dd", None), "value", "") or ""
+    seed_path = seed_path_from_app(app) or ""
     if not seed_path:
         return base_mol
 
@@ -1451,6 +1673,10 @@ def on_basis_help(app: Any, btn: Any) -> None:
 def on_calc_type_help(app: Any, btn: Any) -> None:
     """Open help overlay focused on calculation-type guidance."""
     _ = btn
+    if getattr(app, "calc_type_dd", None) is not None:
+        if app.calc_type_dd.value == "PES Scan":
+            app._show_help_topic("pes_scan")
+            return
     app._show_help_topic("calc_type")
 
 
@@ -2233,6 +2459,7 @@ def _restore_calc_settings(app: Any, settings: dict) -> None:
         ("scan_start", "_scan_start"),
         ("scan_stop", "_scan_stop"),
         ("scan_steps", "_scan_steps"),
+        ("scan_grid", "_scan_grid_dd"),
     ):
         if key in settings:
             _assign_widget_value(getattr(app, attr, None), settings[key])

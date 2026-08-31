@@ -2618,6 +2618,8 @@ _STEPPER_JS = """
   if(playB) playB.onclick=function(){ timer?stop():play(); };
   if(abB)   abB.onclick  =function(){ stop();draw(cur===0?N-1:0); };
   if(slider)slider.oninput=function(){ stop();draw(parseInt(slider.value,10)); };
+  window["__quantuiTrajGoTo_"+UID]=function(i){ stop(); draw(i); };
+  window.__quantuiTrajGoTo=window["__quantuiTrajGoTo_"+UID];
   var t=0, poll=setInterval(function(){ t++;
     if(vw()){ clearInterval(poll); draw(cur); }
     else if(t>200){ clearInterval(poll);
@@ -3337,6 +3339,8 @@ def _vib_bridge_set_fps(app: Any, fps: int) -> None:
 
 def show_pes_scan_result(app: Any, result: Any) -> bool:
     """Render PES energy profile chart and stash latest PES result."""
+    import math
+
     app._last_pes_result = result
     try:
         import plotly.graph_objects as go
@@ -3344,25 +3348,76 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
 
         e_rel = result.energies_relative_kcal
         x_vals = result.scan_parameter_values
+        energies = result.energies_hartree
 
-        hover_text = [
-            f"{result.scan_coordinate_label}: {x:.4f}<br>"
-            f"ΔE = {de:.3f} kcal/mol<br>"
-            f"E = {e:.8f} Ha"
-            for x, de, e in zip(x_vals, e_rel, result.energies_hartree)
-        ]
+        valid_x: list = []
+        valid_y: list = []
+        valid_hover: list = []
+        valid_idx: list = []
+        fail_x: list = []
+        fail_y: list = []
+        fail_hover: list = []
+        y_top = 0.0
+        for i, (x, de, e) in enumerate(zip(x_vals, e_rel, energies)):
+            if math.isfinite(de) and math.isfinite(e):
+                valid_x.append(x)
+                valid_y.append(de)
+                valid_idx.append(i)
+                y_top = max(y_top, de)
+                valid_hover.append(
+                    f"{result.scan_coordinate_label}: {x:.4f}<br>"
+                    f"ΔE = {de:.3f} kcal/mol<br>"
+                    f"E = {e:.8f} Ha<br>"
+                    f"Point {i + 1}/{len(x_vals)} — click to view geometry"
+                )
+            else:
+                fail_x.append(x)
+                fail_hover.append(
+                    f"{result.scan_coordinate_label}: {x:.4f}<br>"
+                    f"Point {i + 1}: <b>failed to converge</b>"
+                )
+        fail_y = [(y_top + 2.0) if valid_y else 0.0] * len(fail_x)
 
-        fig = go.Figure(
-            go.Scatter(
-                x=x_vals,
-                y=e_rel,
-                mode="lines+markers",
-                line=dict(color="#2563eb", width=2),
-                marker=dict(size=8, color="#2563eb"),
-                hovertext=hover_text,
-                hoverinfo="text",
+        fig = go.Figure()
+        if valid_x:
+            fig.add_trace(
+                go.Scatter(
+                    x=valid_x,
+                    y=valid_y,
+                    customdata=valid_idx,
+                    mode="lines+markers",
+                    name="Profile",
+                    line=dict(color="#2563eb", width=2),
+                    marker=dict(size=8, color="#2563eb"),
+                    hovertext=valid_hover,
+                    hoverinfo="text",
+                )
             )
-        )
+            min_idx = valid_y.index(min(valid_y))
+            fig.add_trace(
+                go.Scatter(
+                    x=[valid_x[min_idx]],
+                    y=[valid_y[min_idx]],
+                    mode="markers",
+                    name="Minimum",
+                    marker=dict(size=14, color="#ca8a04", symbol="star"),
+                    hovertext=[valid_hover[min_idx] + "<br><b>Minimum energy</b>"],
+                    hoverinfo="text",
+                )
+            )
+        if fail_x:
+            fig.add_trace(
+                go.Scatter(
+                    x=fail_x,
+                    y=fail_y,
+                    mode="markers",
+                    name="Failed",
+                    marker=dict(size=11, color="#dc2626", symbol="x"),
+                    hovertext=fail_hover,
+                    hoverinfo="text",
+                )
+            )
+
         tc = app._plotly_theme_colors()
         fig.update_layout(
             xaxis_title=result.scan_coordinate_label,
@@ -3375,17 +3430,33 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
             xaxis=dict(showgrid=True, gridcolor=tc["grid_color"]),
             yaxis=dict(showgrid=True, gridcolor=tc["grid_color"]),
             hovermode="closest",
+            showlegend=len(fig.data) > 1,
         )
         app._last_pes_fig = fig
-        app._set_html_output(
-            app._pes_plot_html,
-            pio.to_html(
-                fig,
-                include_plotlyjs="require",
-                full_html=False,
-                config={"responsive": True},
-            ),
+        plot_html = pio.to_html(
+            fig,
+            include_plotlyjs="require",
+            full_html=False,
+            config={"responsive": True},
+            div_id="quantui-pes-plot",
         )
+        link_js = """
+<script>
+(function(){
+  function attach(){
+    var gd=document.getElementById("quantui-pes-plot");
+    if(!gd){ setTimeout(attach,100); return; }
+    gd.on("plotly_click", function(ev){
+      if(!ev.points||!ev.points.length) return;
+      var pt=ev.points[0];
+      var i=(pt.customdata!=null)?pt.customdata:pt.pointIndex;
+      if(window.__quantuiTrajGoTo){ window.__quantuiTrajGoTo(i); }
+    });
+  }
+  attach();
+})();
+</script>"""
+        app._set_html_output(app._pes_plot_html, plot_html + link_js)
     except Exception:
         app._last_pes_fig = None
         pass

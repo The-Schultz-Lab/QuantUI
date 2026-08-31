@@ -115,6 +115,24 @@ def molecule_to_xyz_string(molecule) -> str:
     return molecule.to_xyz_string()
 
 
+def _add_atom_index_labels(view, molecule) -> None:
+    """Overlay 1-based atom indices on a py3Dmol viewer."""
+    for i, coord in enumerate(molecule.coordinates):
+        x, y, z = (float(c) for c in coord)
+        view.addLabel(
+            str(i + 1),
+            {
+                "position": {"x": x, "y": y, "z": z},
+                "backgroundColor": "white",
+                "backgroundOpacity": 0.75,
+                "fontColor": "black",
+                "fontSize": 14,
+                "borderThickness": 0.5,
+                "borderColor": "gray",
+            },
+        )
+
+
 def visualize_molecule_py3dmol(
     molecule,
     style: Py3DmolStyle = "ball+stick",
@@ -122,6 +140,7 @@ def visualize_molecule_py3dmol(
     height: int = 500,
     bgcolor: str = "white",
     lighting: str = "soft",  # accepted for API symmetry; py3Dmol has no preset lighting
+    show_atom_indices: bool = False,
 ):
     """
     Create interactive 3D visualization using py3Dmol.
@@ -190,6 +209,9 @@ def visualize_molecule_py3dmol(
     # Set background
     view.setBackgroundColor(bgcolor)
 
+    if show_atom_indices:
+        _add_atom_index_labels(view, molecule)
+
     # Zoom to fit — includes the (now bonded) metal, so it is never off-screen.
     view.zoomTo()
 
@@ -254,6 +276,7 @@ def visualize_molecule_plotlymol(
     height: int = 500,
     bgcolor: str = "#ffffff",
     lighting: str = "soft",
+    show_atom_indices: bool = False,
 ):
     """
     Create interactive 3D visualization using PlotlyMol (optional backend).
@@ -338,6 +361,25 @@ def visualize_molecule_plotlymol(
         paper_bgcolor=bgcolor,
         scene=dict(bgcolor=bgcolor),
     )
+    if show_atom_indices:
+        import plotly.graph_objects as go
+
+        xs = [float(c[0]) for c in molecule.coordinates]
+        ys = [float(c[1]) for c in molecule.coordinates]
+        zs = [float(c[2]) for c in molecule.coordinates]
+        labels = [str(i + 1) for i in range(len(molecule.atoms))]
+        fig.add_trace(
+            go.Scatter3d(
+                x=xs,
+                y=ys,
+                z=zs,
+                mode="text",
+                text=labels,
+                textfont=dict(size=14, color="#111827"),
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
     return fig
 
 
@@ -407,6 +449,7 @@ def visualize_molecule(
             height=height,
             bgcolor=bgcolor,
             lighting=lighting,
+            show_atom_indices=bool(kwargs.get("show_atom_indices", False)),
         )
     elif backend == "plotlymol":
         # Map UI style keys to PlotlyMol mode names
@@ -418,6 +461,8 @@ def visualize_molecule(
         }
         mode = mode_map.get(style, "ball+stick")
         try:
+            plotly_kwargs = dict(kwargs)
+            show_indices = bool(plotly_kwargs.pop("show_atom_indices", False))
             return visualize_molecule_plotlymol(
                 molecule,
                 mode=mode,
@@ -425,7 +470,8 @@ def visualize_molecule(
                 height=height,
                 bgcolor=bgcolor,
                 lighting=lighting,
-                **kwargs,
+                show_atom_indices=show_indices,
+                **plotly_kwargs,
             )
         except Exception as exc:  # noqa: BLE001 — a viewer must never hard-error
             # MET.3: PlotlyMol runs RDKit valence perception, which raises on
@@ -505,6 +551,7 @@ def render_molecule_html(
     bgcolor: str = "#ffffff",
     lighting: str = "soft",
     capture_class: str = "",
+    show_atom_indices: bool = False,
 ) -> str:
     """Return self-contained HTML for the molecule viewer (no display side-effects).
 
@@ -547,6 +594,7 @@ def render_molecule_html(
             height=height,
             bgcolor=bgcolor,
             lighting=lighting,
+            show_atom_indices=show_atom_indices,
         )
         make_html = getattr(viz, "_make_html", None)
         if callable(make_html):
