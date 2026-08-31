@@ -91,6 +91,16 @@ class TestCoordinationBonds:
         assert "addCylinder" in html  # coordination bonds drawn
         assert "dashed" in html
 
+    def test_ferrocene_hides_default_metal_sticks(self):
+        pytest.importorskip("py3Dmol")
+        from quantui.visualization_py3dmol import render_molecule_html
+
+        html = render_molecule_html(
+            _mol("inorganic-ferrocene"), backend="py3dmol", width=300, height=250
+        )
+        assert '"hidden": true' in html
+        assert html.count("addCylinder") == 10
+
     def test_organic_html_has_no_cylinders(self):
         pytest.importorskip("py3Dmol")
         from quantui.visualization_py3dmol import render_molecule_html

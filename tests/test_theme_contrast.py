@@ -135,6 +135,7 @@ class TestTokensAreActuallyUsed:
         assert "var(--q-accent-info)" in _APP_CSS
         assert "var(--q-page-bg)" in _APP_CSS
         assert ".widget-dropdown select" in _APP_CSS
+        assert "-webkit-slider-runnable-track" in _APP_CSS
 
     def test_theme_css_block_styles_widget_tabs(self):
         block = theme.theme_css_block("Dark")
@@ -144,6 +145,12 @@ class TestTokensAreActuallyUsed:
         assert ".jupyter-button.mod-danger" in block
         assert "var(--q-bg-panel)" in block
         assert ":not(.mod-danger)" in block
+
+    def test_theme_css_block_styles_sliders_with_webkit_track(self):
+        block = theme.theme_css_block("Dark")
+        assert "-webkit-slider-runnable-track" in block
+        assert "quantui-range" in block
+        assert "var(--q-accent-info)" in block
 
     def test_app_css_preserves_accent_buttons(self):
         from quantui.app import _APP_CSS

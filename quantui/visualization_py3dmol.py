@@ -12,7 +12,7 @@ Created: 2026-02-17
 import logging
 import os
 import tempfile
-from typing import Literal, cast
+from typing import Literal, Sequence, cast
 
 from quantui import theme as _theme
 
@@ -200,11 +200,10 @@ def visualize_molecule_py3dmol(
     else:
         view.setStyle({style: {}})
 
-    # MET.6: 3Dmol.js's own bond perception leaves a coordination metal as a lone
-    # dot — it draws no bonds to the centre. Draw the metal↔donor bonds ourselves,
-    # dashed (GaussView convention), from the same distance-based connectivity the
-    # salt-warning uses. No-op for purely organic molecules.
-    _add_coordination_bonds(view, molecule)
+    # MET.6: 3Dmol.js now infers some metal-ligand contacts as covalent sticks,
+    # which render as thick tapered spokes (ferrocene). Hide those and draw
+    # dashed coordination bonds ourselves (GaussView convention).
+    decorate_py3dmol_coordination_bonds(view, molecule.atoms, molecule.coordinates)
 
     # Set background
     view.setBackgroundColor(bgcolor)
@@ -220,11 +219,41 @@ def visualize_molecule_py3dmol(
 
 # Dashed coordination-bond styling (py3Dmol addCylinder): a thin gray dashed
 # cylinder from the metal centre to each donor atom.
-_COORD_BOND_RADIUS = 0.06
-_COORD_BOND_COLOR = "#777777"
+_COORD_BOND_RADIUS = 0.05
+_COORD_BOND_COLOR = "#888888"
 
 
-def _add_coordination_bonds(view, molecule) -> None:
+def _suppress_metal_coordination_sticks(
+    view,
+    atoms: Sequence[str],
+    coords: Sequence[Sequence[float]],
+) -> None:
+    """Hide 3Dmol's default sticks on metal↔donor pairs before overlaying dashes."""
+    try:
+        from quantui.connectivity import metal_coordination_bonds
+
+        for i, j in metal_coordination_bonds(atoms, coords):
+            view.setStyle({"atom": i, "bond": j}, {"stick": {"hidden": True}})
+            view.setStyle({"atom": j, "bond": i}, {"stick": {"hidden": True}})
+    except Exception:  # noqa: BLE001 — bond decoration must never break the viewer
+        logger.debug("coordination-stick suppression skipped", exc_info=True)
+
+
+def decorate_py3dmol_coordination_bonds(
+    view,
+    atoms: Sequence[str],
+    coords: Sequence[Sequence[float]],
+) -> None:
+    """Hide metal-ligand sticks and draw dashed coordination bonds (MET.6)."""
+    _suppress_metal_coordination_sticks(view, atoms, coords)
+    _add_coordination_bonds(view, atoms, coords)
+
+
+def _add_coordination_bonds(
+    view,
+    atoms: Sequence[str],
+    coords: Sequence[Sequence[float]],
+) -> None:
     """Draw dashed metal↔donor cylinders so a metal centre isn't a lone dot.
 
     Uses the distance-based, metal-aware connectivity finder. Best-effort: any
@@ -233,8 +262,7 @@ def _add_coordination_bonds(view, molecule) -> None:
     try:
         from quantui.connectivity import metal_coordination_bonds
 
-        coords = molecule.coordinates
-        bonds = metal_coordination_bonds(molecule.atoms, coords)
+        bonds = metal_coordination_bonds(atoms, coords)
         for i, j in bonds:
             xi, yi, zi = coords[i]
             xj, yj, zj = coords[j]
@@ -245,8 +273,8 @@ def _add_coordination_bonds(view, molecule) -> None:
                     "radius": _COORD_BOND_RADIUS,
                     "color": _COORD_BOND_COLOR,
                     "dashed": True,
-                    "fromCap": 1,
-                    "toCap": 1,
+                    "fromCap": 0,
+                    "toCap": 0,
                 }
             )
     except Exception:  # noqa: BLE001 — bond decoration must never break the viewer

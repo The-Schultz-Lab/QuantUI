@@ -739,7 +739,8 @@ def _load_last_calibration_label() -> str:
 
 # ── Module-level constants ────────────────────────────────────────────────────
 
-_APP_CSS: str = """<style>
+_APP_CSS: str = (
+    """<style>
 /* System font stack ---------------------------------------------------- */
 body, p, span, li, td, th, label, input, select, textarea, blockquote,
 .jp-OutputArea-output, .widget-html-content, .widget-label-basic,
@@ -864,38 +865,9 @@ button.jupyter-button.mod-danger {
 .quantui-result-card table {
     color: var(--q-text-body) !important;
 }
-.jupyter-widgets input[type=range],
-.widget-slider input[type=range] {
-    height: 6px !important;
-    border-radius: 3px !important;
-    background: var(--q-border-strong) !important;
-    accent-color: var(--q-accent-info) !important;
-}
-.jupyter-widgets input[type=range]::-webkit-slider-thumb,
-.widget-slider input[type=range]::-webkit-slider-thumb {
-    -webkit-appearance: none !important;
-    width: 16px !important;
-    height: 16px !important;
-    border-radius: 50% !important;
-    background: var(--q-text-strong) !important;
-    border: 2px solid var(--q-accent-info) !important;
-    cursor: pointer !important;
-}
-.jupyter-widgets input[type=range]::-moz-range-track,
-.widget-slider input[type=range]::-moz-range-track {
-    background: var(--q-border-strong) !important;
-    height: 6px !important;
-    border-radius: 3px !important;
-}
-.jupyter-widgets input[type=range]::-moz-range-thumb,
-.widget-slider input[type=range]::-moz-range-thumb {
-    width: 16px !important;
-    height: 16px !important;
-    border-radius: 50% !important;
-    background: var(--q-text-strong) !important;
-    border: 2px solid var(--q-accent-info) !important;
-    cursor: pointer !important;
-}
+"""
+    + _theme.slider_chrome_css()
+    + """
 .quantui-completion-banner {
     padding: 10px 12px;
     border: 1px solid var(--q-accent-success);
@@ -923,6 +895,7 @@ button.jupyter-button.mod-danger {
     vertical-align: middle;
 }
 </style>"""
+)
 
 _LAYOUT_TRAITS: frozenset[str] = frozenset(widgets.Layout.class_trait_names())
 
