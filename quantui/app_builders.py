@@ -1235,36 +1235,33 @@ def build_shared_widgets(
         style={"description_width": "80px"},
         layout=layout_fn(width="220px"),
     )
-    atom_idx_layout = layout_fn(width="95px")
+    atom_idx_layout = layout_fn(width="155px")
     atom_idx_style = {"description_width": "50px"}
-    app._scan_atom1 = widgets.BoundedIntText(
+    _scan_atom_opts = [("1", 1), ("2", 2)]
+    app._scan_atom1 = widgets.Dropdown(
+        options=_scan_atom_opts,
         value=1,
-        min=1,
-        max=999,
         description="Atom 1:",
         style=atom_idx_style,
         layout=atom_idx_layout,
     )
-    app._scan_atom2 = widgets.BoundedIntText(
+    app._scan_atom2 = widgets.Dropdown(
+        options=_scan_atom_opts,
         value=2,
-        min=1,
-        max=999,
         description="Atom 2:",
         style=atom_idx_style,
         layout=atom_idx_layout,
     )
-    app._scan_atom3 = widgets.BoundedIntText(
+    app._scan_atom3 = widgets.Dropdown(
+        options=_scan_atom_opts + [("3", 3)],
         value=3,
-        min=1,
-        max=999,
         description="Atom 3:",
         style=atom_idx_style,
         layout=atom_idx_layout,
     )
-    app._scan_atom4 = widgets.BoundedIntText(
+    app._scan_atom4 = widgets.Dropdown(
+        options=_scan_atom_opts + [("3", 3), ("4", 4)],
         value=4,
-        min=1,
-        max=999,
         description="Atom 4:",
         style=atom_idx_style,
         layout=atom_idx_layout,
@@ -1273,19 +1270,28 @@ def build_shared_widgets(
         [app._scan_atom3, app._scan_atom4],
         layout=layout_fn(gap="4px"),
     )
-    app._scan_start = widgets.BoundedFloatText(
-        value=0.5,
-        min=0.01,
-        max=1000.0,
+    app._scan_atom_list_html = widgets.HTML(
+        value=(
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">'
+            "Load a molecule to see atom numbers.</span>"
+        )
+    )
+    app._scan_coord_summary = widgets.HTML(value="")
+    app._scan_suggest_btn = widgets.Button(
+        description="Suggest range",
+        icon="magic",
+        tooltip="Fill Start/Stop from the current geometry",
+        layout=layout_fn(width="130px"),
+    )
+    app._scan_start = widgets.FloatText(
+        value=0.8,
         step=0.1,
         description="Start:",
         style={"description_width": "40px"},
         layout=layout_fn(width="140px"),
     )
-    app._scan_stop = widgets.BoundedFloatText(
+    app._scan_stop = widgets.FloatText(
         value=2.0,
-        min=0.01,
-        max=1000.0,
         step=0.1,
         description="Stop:",
         style={"description_width": "40px"},

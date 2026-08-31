@@ -392,6 +392,12 @@ from quantui.app_runflow import (
     update_notes as _run_update_notes,
 )
 from quantui.app_runflow import (
+    apply_suggested_scan_range as _run_apply_suggested_scan_range,
+)
+from quantui.app_runflow import (
+    refresh_pes_scan_widgets as _run_refresh_pes_scan_widgets,
+)
+from quantui.app_runflow import (
     update_scan_widgets as _run_update_scan_widgets,
 )
 from quantui.app_slurm import (
@@ -2432,6 +2438,18 @@ class QuantUIApp:
         self._scan_type_dd.observe(
             self._safe_cb(self._update_scan_widgets), names="value"
         )
+        for _scan_atom_w in (
+            self._scan_atom1,
+            self._scan_atom2,
+            self._scan_atom3,
+            self._scan_atom4,
+        ):
+            _scan_atom_w.observe(
+                self._safe_cb(self._on_scan_atom_changed), names="value"
+            )
+        self._scan_suggest_btn.on_click(
+            self._safe_cb(lambda _btn: _run_apply_suggested_scan_range(self))
+        )
         # Notes + estimate
         self.method_dd.observe(self._safe_cb(self._update_notes), names="value")
         self.basis_dd.observe(self._safe_cb(self._update_notes), names="value")
@@ -3418,6 +3436,7 @@ class QuantUIApp:
         if self._molecule is None or _render_molecule_html is None:
             return
         backend_to_use = backend if backend is not None else self._viz_backend
+        show_atom_indices = self.calc_type_dd.value == "PES Scan"
         html = _render_molecule_html(
             self._molecule,
             backend=backend_to_use,
@@ -3425,6 +3444,7 @@ class QuantUIApp:
             lighting=self._viz_lighting,
             bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
             capture_class=_MOL_CALC_PNG_INBOX_CLASS,
+            show_atom_indices=show_atom_indices,
         )
         self._set_html_output(self.viz_output, html)
 
@@ -4070,6 +4090,11 @@ class QuantUIApp:
 
     def _update_scan_widgets(self, _change=None) -> None:
         _run_update_scan_widgets(self, _change)
+
+    def _on_scan_atom_changed(self, _change=None) -> None:
+        from quantui.app_runflow import _update_scan_coord_summary
+
+        _update_scan_coord_summary(self)
 
     def _refresh_seed_options(self) -> None:
         _run_refresh_seed_options(self)
@@ -4934,6 +4959,9 @@ class QuantUIApp:
         self._refresh_calc_mol_viewer()
 
         self._update_notes()
+
+        if self.calc_type_dd.value == "PES Scan":
+            _run_refresh_pes_scan_widgets(self)
 
         # Any pending pre-opt preview was for the previous geometry — invalidate
         # it so a stale "Keep/Revert" can't apply to a different molecule.
