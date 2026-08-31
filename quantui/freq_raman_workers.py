@@ -99,4 +99,5 @@ def run_displaced_polarizability(coords_bohr_flat) -> list[list[float]]:
 
     pol_mod = _polarizability_module(mol, dm0_is_unrestricted)
     alpha = np.asarray(pol_mod.polarizability(pol_mod.Polarizability(mf)), dtype=float)
-    return alpha.reshape(3, 3).tolist()
+    reshaped = alpha.reshape(3, 3)
+    return [[float(x) for x in row] for row in reshaped.tolist()]
