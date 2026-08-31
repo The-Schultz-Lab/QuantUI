@@ -164,9 +164,35 @@
 
 /* ── Hero ─────────────────────────────────────────────────────────── */
 .quantui-landing .hero {
-  background: var(--quantui-hero-bg);
+  position: relative;
+  background: transparent;
   padding: 4rem 0 4.5rem;
   overflow: hidden;
+  isolation: isolate;
+}
+
+/* Gradient sits behind content and fades to transparent at the edges so the
+   full-bleed hero does not show a hard rectangular cutoff against the page. */
+.quantui-landing .hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--quantui-hero-bg);
+  pointer-events: none;
+  -webkit-mask-image:
+    linear-gradient(to right, transparent 0%, #000 10%, #000 90%, transparent 100%),
+    linear-gradient(to bottom, transparent 0%, #000 8%, #000 92%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(to right, transparent 0%, #000 10%, #000 90%, transparent 100%),
+    linear-gradient(to bottom, transparent 0%, #000 8%, #000 92%, transparent 100%);
+  mask-composite: intersect;
+}
+
+.quantui-landing .hero > .container {
+  position: relative;
+  z-index: 1;
 }
 
 .quantui-landing .hero__inner {

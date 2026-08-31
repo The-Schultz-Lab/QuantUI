@@ -541,9 +541,7 @@ def render_traj_frame(app: Any, molecule: Any, output_widget: Any) -> None:
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
         from quantui.visualization_py3dmol import decorate_py3dmol_coordination_bonds
 
-        decorate_py3dmol_coordination_bonds(
-            view, molecule.atoms, molecule.coordinates
-        )
+        decorate_py3dmol_coordination_bonds(view, molecule.atoms, molecule.coordinates)
         view.setBackgroundColor("white")
         view.zoomTo()
         output_widget.clear_output()
