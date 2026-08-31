@@ -441,6 +441,47 @@ def _dark_blue_palette() -> ThemePalette:
     )
 
 
+def _hot_pink_palette() -> ThemePalette:
+    return ThemePalette(
+        palette_id="Hot Pink",
+        display_name="Hot Pink",
+        is_dark=True,
+        page_bg="#1a0514",
+        border="#ec4899",
+        border_strong="#f472b6",
+        border_legacy="#db2777",
+        bg_panel="#3b0d3f",
+        text_heading="#fff0f6",
+        text_label="#fbcfe8",
+        text_secondary="#f9a8d4",
+        text_muted="#f472b6",
+        text_muted_light="#ec4899",
+        text_faint="#db2777",
+        text_subtle="#db2777",
+        text_body="#fce7f3",
+        text_strong="#fff5f8",
+        text_slate="#f472b6",
+        text_slate_dark="#f9a8d4",
+        accent_error="#f87171",
+        accent_error_alt="#ef4444",
+        accent_success="#4ade80",
+        accent_success_bg="#1a3320",
+        accent_success_alt="#22c55e",
+        accent_warning="#fbbf24",
+        accent_warning_light="#fcd34d",
+        accent_info="#38bdf8",
+        accent_purple="#e879f9",
+        accent_teal="#2dd4bf",
+        surface_info_bg="#2d0f35",
+        surface_purple_bg="#4a0d52",
+        surface_warning_bg="#3d1a20",
+        surface_teal_bg="#1a2e2a",
+        surface_green_bg="#1a3320",
+        surface_orange_bg="#3d2010",
+        surface_muted_bg="#4a1548",
+    )
+
+
 def _dark_maroon_palette() -> ThemePalette:
     return ThemePalette(
         palette_id="Dark Maroon",
@@ -490,6 +531,7 @@ PALETTES: Dict[str, ThemePalette] = {
         _midnight_palette(),
         _dark_blue_palette(),
         _dark_maroon_palette(),
+        _hot_pink_palette(),
     )
 }
 

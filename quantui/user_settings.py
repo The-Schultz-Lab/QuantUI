@@ -59,7 +59,14 @@ _VALID_EXECUTION_BACKENDS = ("local", "slurm")
 
 _VALID_QUANTUM_ENGINES = ("auto", "pyscf", "pyfock")
 
-_VALID_THEME_PALETTES = ("Light", "Dark", "Midnight", "Dark Blue", "Dark Maroon")
+_VALID_THEME_PALETTES = (
+    "Light",
+    "Dark",
+    "Midnight",
+    "Dark Blue",
+    "Dark Maroon",
+    "Hot Pink",
+)
 
 # Default settings path. The QUANTUI_SETTINGS_PATH env var overrides for tests.
 DEFAULT_SETTINGS_PATH = Path.home() / ".quantui" / "settings.json"

@@ -61,6 +61,7 @@ class TestPaletteRegistry:
             "Midnight",
             "Dark Blue",
             "Dark Maroon",
+            "Hot Pink",
         }
 
     def test_theme_css_block_sets_page_background_var(self):
@@ -162,6 +163,12 @@ class TestTokensAreActuallyUsed:
         palette = theme.get_palette("Midnight")
         assert palette.page_bg == "#000000"
         assert palette.bg_panel == "#000000"
+        assert palette.is_dark is True
+
+    def test_hot_pink_uses_pink_tinted_surfaces(self):
+        palette = theme.get_palette("Hot Pink")
+        assert palette.page_bg == "#1a0514"
+        assert palette.bg_panel == "#3b0d3f"
         assert palette.is_dark is True
 
     def test_no_viewer_border_is_drawn_from_a_css_class(self):
