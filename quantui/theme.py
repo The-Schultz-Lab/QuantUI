@@ -49,6 +49,14 @@ ACCENT_INFO = "#2563eb"
 ACCENT_PURPLE = "#7c3aed"
 ACCENT_TEAL = "#0d9488"
 
+SURFACE_INFO_BG = "#eff6ff"
+SURFACE_PURPLE_BG = "#f5f3ff"
+SURFACE_WARNING_BG = "#fffbeb"
+SURFACE_TEAL_BG = "#f0fdfa"
+SURFACE_GREEN_BG = "#f0fdf4"
+SURFACE_ORANGE_BG = "#fff7ed"
+SURFACE_MUTED_BG = "#e0e7ef"
+
 _TOKEN_FIELDS: Tuple[str, ...] = (
     "page_bg",
     "border",
@@ -76,6 +84,13 @@ _TOKEN_FIELDS: Tuple[str, ...] = (
     "accent_info",
     "accent_purple",
     "accent_teal",
+    "surface_info_bg",
+    "surface_purple_bg",
+    "surface_warning_bg",
+    "surface_teal_bg",
+    "surface_green_bg",
+    "surface_orange_bg",
+    "surface_muted_bg",
 )
 
 
@@ -112,6 +127,13 @@ class ThemePalette:
     accent_info: str
     accent_purple: str
     accent_teal: str
+    surface_info_bg: str
+    surface_purple_bg: str
+    surface_warning_bg: str
+    surface_teal_bg: str
+    surface_green_bg: str
+    surface_orange_bg: str
+    surface_muted_bg: str
 
     def css_variables(self) -> Dict[str, str]:
         """Map ``--q-*`` custom-property names to hex values."""
@@ -120,6 +142,139 @@ class ThemePalette:
             key = field.replace("_", "-")
             out[f"--q-{key}"] = getattr(self, field)
         return out
+
+    def jupyterlab_variables(self) -> Dict[str, str]:
+        """Bridge QuantUI palette tokens onto JupyterLab/Voilà ``--jp-*`` vars.
+
+        ipywidgets tab bars, dropdowns, and inputs read JupyterLab theme
+        variables — not ``--q-*`` — so palette switches must remap both.
+        """
+        p = self
+        surface = p.bg_panel
+        return {
+            "--jp-layout-color0": p.page_bg,
+            "--jp-layout-color1": surface,
+            "--jp-layout-color2": surface,
+            "--jp-layout-color3": surface,
+            "--jp-ui-font-color0": p.text_strong,
+            "--jp-ui-font-color1": p.text_body,
+            "--jp-ui-font-color2": p.text_muted,
+            "--jp-ui-font-color3": p.text_subtle,
+            "--jp-content-font-color0": p.text_strong,
+            "--jp-content-font-color1": p.text_body,
+            "--jp-content-font-color2": p.text_muted,
+            "--jp-content-font-color3": p.text_subtle,
+            "--jp-border-color0": p.border,
+            "--jp-border-color1": p.border,
+            "--jp-border-color2": p.border_strong,
+            "--jp-input-background": surface,
+            "--jp-input-border-color": p.border,
+            "--jp-input-active-background": surface,
+            "--jp-input-hover-background": surface,
+            "--jp-cell-editor-background": surface,
+            "--jp-cell-editor-active-background": surface,
+            "--jp-toolbar-background": surface,
+            "--jp-toolbar-active-background": surface,
+            "--jp-brand-color1": p.accent_info,
+            "--jp-brand-color2": p.accent_info,
+            "--jp-error-color0": p.accent_error,
+            "--jp-error-color1": p.accent_error,
+            "--jp-warn-color0": p.accent_warning,
+            "--jp-warn-color1": p.accent_warning,
+            "--jp-success-color0": p.accent_success,
+            "--jp-success-color1": p.accent_success,
+            "--jp-info-color0": p.accent_info,
+            "--jp-info-color1": p.accent_info,
+            "--jp-ui-inverse-font-color0": p.page_bg,
+            "--jp-ui-inverse-font-color1": p.page_bg,
+            "--jp-inverse-layout-color0": p.text_strong if p.is_dark else p.page_bg,
+            "--jp-inverse-layout-color1": p.text_body if p.is_dark else p.bg_panel,
+        }
+
+
+def _accent_button_css() -> str:
+    """Keep semantic ipywidgets buttons visibly distinct from chrome."""
+    return (
+        ".jupyter-button.mod-primary, button.jupyter-button.mod-primary "
+        "{ background-color: var(--q-accent-info) !important; "
+        "color: var(--q-page-bg) !important; "
+        "border-color: var(--q-accent-info) !important; }\n"
+        ".jupyter-button.mod-info, button.jupyter-button.mod-info "
+        "{ background-color: var(--q-accent-info) !important; "
+        "color: var(--q-page-bg) !important; "
+        "border-color: var(--q-accent-info) !important; }\n"
+        ".jupyter-button.mod-success, button.jupyter-button.mod-success "
+        "{ background-color: var(--q-accent-success) !important; "
+        "color: var(--q-page-bg) !important; "
+        "border-color: var(--q-accent-success) !important; }\n"
+        ".jupyter-button.mod-warning, button.jupyter-button.mod-warning "
+        "{ background-color: var(--q-accent-warning) !important; "
+        "color: var(--q-page-bg) !important; "
+        "border-color: var(--q-accent-warning) !important; }\n"
+        ".jupyter-button.mod-danger, button.jupyter-button.mod-danger "
+        "{ background-color: var(--q-accent-error) !important; "
+        "color: var(--q-page-bg) !important; "
+        "border-color: var(--q-accent-error) !important; }\n"
+    )
+
+
+def _neutral_button_css() -> str:
+    """Default/neutral buttons blend with unified chrome surfaces."""
+    return (
+        ".jupyter-button:not(.mod-info):not(.mod-success):not(.mod-warning)"
+        ":not(.mod-danger):not(.mod-primary), "
+        "button.jupyter-button:not(.mod-info):not(.mod-success)"
+        ":not(.mod-warning):not(.mod-danger):not(.mod-primary) "
+        "{ background-color: var(--q-bg-panel) !important; "
+        "color: var(--q-text-body) !important; "
+        "border: 1px solid var(--q-border) !important; "
+        "border-radius: 5px !important; }\n"
+    )
+
+
+def _widget_chrome_css() -> str:
+    """CSS rules for ipywidgets/Lumino chrome (palette-agnostic — uses vars)."""
+    surface = "var(--q-bg-panel)"
+    return (
+        "html, body, .voila-app, #voila-app-main "
+        "{ background-color: var(--q-page-bg) !important; "
+        "color: var(--q-text-body) !important; }\n"
+        ".jp-OutputArea-output, .widget-html-content, .jp-RenderedHTMLCommon, "
+        ".jupyter-widgets, .lm-Widget, .widget-tab-contents "
+        f"{{ background-color: {surface} !important; "
+        "color: var(--q-text-body) !important; }\n"
+        ".lm-TabBar, .p-TabBar, .lm-TabBar-content, .p-TabBar-content "
+        f"{{ background: {surface} !important; "
+        "border-color: var(--q-border) !important; }}\n"
+        ".lm-TabBar-tab, .p-TabBar-tab "
+        f"{{ background: {surface} !important; "
+        "color: var(--q-text-body) !important; "
+        "border-color: var(--q-border) !important; }}\n"
+        ".lm-TabBar-tab.lm-mod-current, .p-TabBar-tab.p-mod-current "
+        f"{{ background: {surface} !important; "
+        "color: var(--q-text-strong) !important; "
+        "border-bottom: 2px solid var(--q-accent-info) !important; }}\n"
+        ".lm-AccordionPanel-title, .lm-AccordionPanel-child, "
+        ".p-Collapse-header, .p-Collapse-contents "
+        f"{{ background: {surface} !important; "
+        "color: var(--q-text-body) !important; "
+        "border-color: var(--q-border) !important; }}\n"
+        ".jupyter-widgets select, .jupyter-widgets input, "
+        ".jupyter-widgets textarea "
+        f"{{ background-color: {surface} !important; "
+        "color: var(--q-text-body) !important; "
+        "border-color: var(--q-border) !important; }}\n"
+        f"{_neutral_button_css()}"
+        f"{_accent_button_css()}"
+        ".quantui-info-box "
+        f"{{ background: {surface} !important; "
+        "color: var(--q-text-body) !important; "
+        "border: 1px solid var(--q-border) !important; "
+        "border-left: 4px solid var(--q-accent-info) !important; "
+        "padding: 10px; border-radius: 5px; margin-bottom: 10px; }}\n"
+        ".quantui-info-box small "
+        "{ color: var(--q-text-muted) !important; }\n"
+    )
 
 
 def _light_palette() -> ThemePalette:
@@ -153,6 +308,13 @@ def _light_palette() -> ThemePalette:
         accent_info=ACCENT_INFO,
         accent_purple=ACCENT_PURPLE,
         accent_teal=ACCENT_TEAL,
+        surface_info_bg=SURFACE_INFO_BG,
+        surface_purple_bg=SURFACE_PURPLE_BG,
+        surface_warning_bg=SURFACE_WARNING_BG,
+        surface_teal_bg=SURFACE_TEAL_BG,
+        surface_green_bg=SURFACE_GREEN_BG,
+        surface_orange_bg=SURFACE_ORANGE_BG,
+        surface_muted_bg=SURFACE_MUTED_BG,
     )
 
 
@@ -187,6 +349,54 @@ def _dark_palette() -> ThemePalette:
         accent_info="#60a5fa",
         accent_purple="#a78bfa",
         accent_teal="#2dd4bf",
+        surface_info_bg="#1e3a5f",
+        surface_purple_bg="#2e1f5e",
+        surface_warning_bg="#422006",
+        surface_teal_bg="#134e4a",
+        surface_green_bg="#14532d",
+        surface_orange_bg="#431407",
+        surface_muted_bg="#334155",
+    )
+
+
+def _midnight_palette() -> ThemePalette:
+    return ThemePalette(
+        palette_id="Midnight",
+        display_name="Midnight",
+        is_dark=True,
+        page_bg="#000000",
+        border="#64748b",
+        border_strong="#94a3b8",
+        border_legacy="#475569",
+        bg_panel="#000000",
+        text_heading="#f8fafc",
+        text_label="#e2e8f0",
+        text_secondary="#cbd5e1",
+        text_muted="#94a3b8",
+        text_muted_light="#94a3b8",
+        text_faint="#64748b",
+        text_subtle="#64748b",
+        text_body="#e2e8f0",
+        text_strong="#f1f5f9",
+        text_slate="#94a3b8",
+        text_slate_dark="#cbd5e1",
+        accent_error="#f87171",
+        accent_error_alt="#ef4444",
+        accent_success="#4ade80",
+        accent_success_bg="#052e16",
+        accent_success_alt="#22c55e",
+        accent_warning="#fbbf24",
+        accent_warning_light="#fcd34d",
+        accent_info="#60a5fa",
+        accent_purple="#a78bfa",
+        accent_teal="#2dd4bf",
+        surface_info_bg="#000000",
+        surface_purple_bg="#000000",
+        surface_warning_bg="#000000",
+        surface_teal_bg="#000000",
+        surface_green_bg="#000000",
+        surface_orange_bg="#000000",
+        surface_muted_bg="#111111",
     )
 
 
@@ -221,6 +431,54 @@ def _dark_blue_palette() -> ThemePalette:
         accent_info="#7eb6ff",
         accent_purple="#a78bfa",
         accent_teal="#5eead4",
+        surface_info_bg="#0f2847",
+        surface_purple_bg="#1a1a4e",
+        surface_warning_bg="#3d2a06",
+        surface_teal_bg="#0d3330",
+        surface_green_bg="#0d3320",
+        surface_orange_bg="#3d1a0a",
+        surface_muted_bg="#1a3352",
+    )
+
+
+def _hot_pink_palette() -> ThemePalette:
+    return ThemePalette(
+        palette_id="Hot Pink",
+        display_name="Hot Pink",
+        is_dark=True,
+        page_bg="#1a0514",
+        border="#ec4899",
+        border_strong="#f472b6",
+        border_legacy="#db2777",
+        bg_panel="#3b0d3f",
+        text_heading="#fff0f6",
+        text_label="#fbcfe8",
+        text_secondary="#f9a8d4",
+        text_muted="#f472b6",
+        text_muted_light="#ec4899",
+        text_faint="#db2777",
+        text_subtle="#db2777",
+        text_body="#fce7f3",
+        text_strong="#fff5f8",
+        text_slate="#f472b6",
+        text_slate_dark="#f9a8d4",
+        accent_error="#f87171",
+        accent_error_alt="#ef4444",
+        accent_success="#4ade80",
+        accent_success_bg="#1a3320",
+        accent_success_alt="#22c55e",
+        accent_warning="#fbbf24",
+        accent_warning_light="#fcd34d",
+        accent_info="#38bdf8",
+        accent_purple="#e879f9",
+        accent_teal="#2dd4bf",
+        surface_info_bg="#2d0f35",
+        surface_purple_bg="#4a0d52",
+        surface_warning_bg="#3d1a20",
+        surface_teal_bg="#1a2e2a",
+        surface_green_bg="#1a3320",
+        surface_orange_bg="#3d2010",
+        surface_muted_bg="#4a1548",
     )
 
 
@@ -255,6 +513,13 @@ def _dark_maroon_palette() -> ThemePalette:
         accent_info="#93c5fd",
         accent_purple="#c4b5fd",
         accent_teal="#5eead4",
+        surface_info_bg="#2d1219",
+        surface_purple_bg="#2a1a3d",
+        surface_warning_bg="#3d2a10",
+        surface_teal_bg="#1a2e2a",
+        surface_green_bg="#1a3320",
+        surface_orange_bg="#3d2010",
+        surface_muted_bg="#3d2430",
     )
 
 
@@ -263,8 +528,10 @@ PALETTES: Dict[str, ThemePalette] = {
     for p in (
         _light_palette(),
         _dark_palette(),
+        _midnight_palette(),
         _dark_blue_palette(),
         _dark_maroon_palette(),
+        _hot_pink_palette(),
     )
 }
 
@@ -280,17 +547,37 @@ def get_palette(palette_id: str) -> ThemePalette:
 def theme_css_block(palette_id: str) -> str:
     """Inject CSS custom properties for *palette_id* (THEME.6)."""
     palette = get_palette(palette_id)
-    lines = [f"  {k}: {v};" for k, v in palette.css_variables().items()]
+    merged: Dict[str, str] = {}
+    merged.update(palette.css_variables())
+    merged.update(palette.jupyterlab_variables())
+    lines = [f"  {k}: {v};" for k, v in merged.items()]
     vars_block = "\n".join(lines)
+    chrome = _widget_chrome_css()
+    css_text = ":root {\n" f"{vars_block}\n" "}\n" f"{chrome}"
+    return theme_injection_html(css_text)
+
+
+def theme_injection_html(css_text: str, *, style_id: str = "quantui-theme-css") -> str:
+    """Return HTML that installs *css_text* on ``document.head`` (Voilà-safe).
+
+    ``<style>`` tags emitted inside widget Output areas are not always applied
+    globally under Voilà; installing (or updating) a single head ``<style>``
+    element keeps palette + JupyterLab bridge vars authoritative.
+    """
+    import json
+
+    payload = json.dumps(css_text)
+    sid = json.dumps(style_id)
     return (
-        "<style>"
-        ":root {\n"
-        f"{vars_block}\n"
-        "}\n"
-        "html, body, .jp-OutputArea-output, .widget-html-content "
-        "{ background-color: var(--q-page-bg) !important; "
-        "color: var(--q-text-body) !important; }\n"
-        "</style>"
+        "<script>"
+        "(function(){"
+        f"var id={sid};"
+        f"var css={payload};"
+        "var el=document.getElementById(id);"
+        "if(!el){el=document.createElement('style');el.id=id;document.head.appendChild(el);}"
+        "el.textContent=css;"
+        "})();"
+        "</script>"
     )
 
 
@@ -335,6 +622,13 @@ class _CssVarRefs:
     ACCENT_INFO = "var(--q-accent-info)"
     ACCENT_PURPLE = "var(--q-accent-purple)"
     ACCENT_TEAL = "var(--q-accent-teal)"
+    SURFACE_INFO_BG = "var(--q-surface-info-bg)"
+    SURFACE_PURPLE_BG = "var(--q-surface-purple-bg)"
+    SURFACE_WARNING_BG = "var(--q-surface-warning-bg)"
+    SURFACE_TEAL_BG = "var(--q-surface-teal-bg)"
+    SURFACE_GREEN_BG = "var(--q-surface-green-bg)"
+    SURFACE_ORANGE_BG = "var(--q-surface-orange-bg)"
+    SURFACE_MUTED_BG = "var(--q-surface-muted-bg)"
 
 
 css = _CssVarRefs()
@@ -387,4 +681,5 @@ __all__ = [
     "get_palette",
     "plotly_colors",
     "theme_css_block",
+    "theme_injection_html",
 ]

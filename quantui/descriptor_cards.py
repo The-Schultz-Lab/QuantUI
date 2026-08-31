@@ -80,18 +80,22 @@ _ICON_BASIS_DEF2 = (
 # app reads as one system.
 
 _METHOD_FAMILY_STYLE = {
-    "hf": (_theme.css.ACCENT_INFO, "#eff6ff", _ICON_HF),
-    "dft": (_theme.css.ACCENT_PURPLE, "#f5f3ff", _ICON_DFT),
-    "wavefunction": (_theme.css.ACCENT_WARNING, "#fffbeb", _ICON_WAVE),
+    "hf": (_theme.css.ACCENT_INFO, _theme.css.SURFACE_INFO_BG, _ICON_HF),
+    "dft": (_theme.css.ACCENT_PURPLE, _theme.css.SURFACE_PURPLE_BG, _ICON_DFT),
+    "wavefunction": (
+        _theme.css.ACCENT_WARNING,
+        _theme.css.SURFACE_WARNING_BG,
+        _ICON_WAVE,
+    ),
 }
 _METHOD_FALLBACK_STYLE = (_theme.css.TEXT_SLATE_DARK, _theme.css.BG_PANEL, _ICON_HF)
 
 _BASIS_FAMILY_STYLE = {
     "minimal": (_theme.css.TEXT_SLATE, _theme.css.BG_PANEL, _ICON_BASIS_MINIMAL),
-    "pople": (_theme.css.ACCENT_TEAL, "#f0fdfa", _ICON_BASIS_POPLE),
-    "cc": ("#15803d", "#f0fdf4", _ICON_BASIS_CC),
-    "def2": ("#c2410c", "#fff7ed", _ICON_BASIS_DEF2),
-    "ecp": (_theme.css.ACCENT_PURPLE, "#f5f3ff", _ICON_BASIS_DEF2),
+    "pople": (_theme.css.ACCENT_TEAL, _theme.css.SURFACE_TEAL_BG, _ICON_BASIS_POPLE),
+    "cc": (_theme.css.ACCENT_SUCCESS, _theme.css.SURFACE_GREEN_BG, _ICON_BASIS_CC),
+    "def2": (_theme.css.ACCENT_WARNING, _theme.css.SURFACE_ORANGE_BG, _ICON_BASIS_DEF2),
+    "ecp": (_theme.css.ACCENT_PURPLE, _theme.css.SURFACE_PURPLE_BG, _ICON_BASIS_DEF2),
 }
 
 # ── Basis family classification + one-line copy ──────────────────────────────

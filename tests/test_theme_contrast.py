@@ -54,18 +54,31 @@ class TestContrastMathIsCorrect:
 
 
 class TestPaletteRegistry:
-    def test_four_presets_ship(self):
+    def test_presets_ship(self):
         assert set(theme.PALETTE_IDS) == {
             "Light",
             "Dark",
+            "Midnight",
             "Dark Blue",
             "Dark Maroon",
+            "Hot Pink",
         }
 
     def test_theme_css_block_sets_page_background_var(self):
         block = theme.theme_css_block("Dark")
         assert "--q-page-bg:" in block
-        assert "var(--q-page-bg)" in block
+        assert "--jp-layout-color1:" in block
+        assert "quantui-theme-css" in block
+
+    @pytest.mark.parametrize("palette_id", theme.PALETTE_IDS)
+    def test_jupyterlab_bridge_tracks_palette(self, palette_id):
+        palette = theme.get_palette(palette_id)
+        bridge = palette.jupyterlab_variables()
+        assert bridge["--jp-layout-color0"] == palette.page_bg
+        assert bridge["--jp-layout-color1"] == palette.bg_panel
+        assert bridge["--jp-layout-color2"] == palette.bg_panel
+        assert bridge["--jp-input-background"] == palette.bg_panel
+        assert bridge["--jp-ui-font-color1"] == palette.text_body
 
     @pytest.mark.parametrize("palette_id", theme.PALETTE_IDS)
     def test_plotly_colours_track_palette(self, palette_id):
@@ -120,6 +133,43 @@ class TestTokensAreActuallyUsed:
         assert "var(--q-text-strong)" in _APP_CSS
         assert "var(--q-text-slate)" in _APP_CSS
         assert "var(--q-accent-info)" in _APP_CSS
+        assert "var(--q-page-bg)" in _APP_CSS
+        assert ".widget-dropdown select" in _APP_CSS
+
+    def test_theme_css_block_styles_widget_tabs(self):
+        block = theme.theme_css_block("Dark")
+        assert ".lm-TabBar-tab" in block
+        assert ".lm-AccordionPanel-title" in block
+        assert "quantui-info-box" in block
+        assert ".jupyter-button.mod-danger" in block
+        assert "var(--q-bg-panel)" in block
+        assert ":not(.mod-danger)" in block
+
+    def test_app_css_preserves_accent_buttons(self):
+        from quantui.app import _APP_CSS
+
+        assert ".jupyter-button.mod-danger" in _APP_CSS
+        assert ".jupyter-button.mod-warning" in _APP_CSS
+        assert ":not(.mod-danger)" in _APP_CSS
+
+    def test_jupyterlab_bridge_maps_semantic_button_colors(self):
+        palette = theme.get_palette("Dark")
+        bridge = palette.jupyterlab_variables()
+        assert bridge["--jp-error-color1"] == palette.accent_error
+        assert bridge["--jp-warn-color1"] == palette.accent_warning
+        assert bridge["--jp-success-color1"] == palette.accent_success
+
+    def test_midnight_uses_pure_black_surfaces(self):
+        palette = theme.get_palette("Midnight")
+        assert palette.page_bg == "#000000"
+        assert palette.bg_panel == "#000000"
+        assert palette.is_dark is True
+
+    def test_hot_pink_uses_pink_tinted_surfaces(self):
+        palette = theme.get_palette("Hot Pink")
+        assert palette.page_bg == "#1a0514"
+        assert palette.bg_panel == "#3b0d3f"
+        assert palette.is_dark is True
 
     def test_no_viewer_border_is_drawn_from_a_css_class(self):
         from quantui.app import _APP_CSS
@@ -277,6 +327,7 @@ class TestNoRawHexReintroducedInMigratedChrome:
         "app_analysis.py",
         "app_history.py",
         "calc_log.py",
+        "progress.py",
     )
 
     MIGRATED_TOKENS = (

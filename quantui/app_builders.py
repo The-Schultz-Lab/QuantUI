@@ -139,12 +139,12 @@ def build_status_panel(
     cal_label = load_last_calibration_label_fn()
 
     def _ok(flag: bool, extra: str = "") -> str:
-        tick = '<span style="color:#22c55e">&#10003;</span>'
-        cross = '<span style="color:#ef4444">&#10007;</span>'
+        tick = f'<span style="color:{_theme.css.ACCENT_SUCCESS}">&#10003;</span>'
+        cross = f'<span style="color:{_theme.css.ACCENT_ERROR}">&#10007;</span>'
         return (tick if flag else cross) + (" " + extra if extra else "")
 
     env_badge = (
-        f'&nbsp;&nbsp;<code style="font-size:11px;background:#e0e7ef;'
+        f'&nbsp;&nbsp;<code style="font-size:11px;background:{_theme.css.SURFACE_MUTED_BG};'
         f'padding:1px 5px;border-radius:3px;color:{_theme.css.TEXT_BODY}">{env}</code>'
         if env and env not in ("base", "")
         else ""
@@ -779,7 +779,7 @@ def build_shared_widgets(
 ) -> None:
     """Build shared widgets used across tabs and callbacks."""
     app.mol_info_html = widgets.HTML(
-        value=f'<i style="color:{_theme.css.TEXT_FAINT}">No molecule loaded yet.</i>'
+        value=f'<i style="color:{_theme.css.TEXT_MUTED}">No molecule loaded yet.</i>'
     )
     app.mol_summary_compact = widgets.HTML(value="")
     # Fixed heights reserve space so swapping content (backend/palette toggle)
@@ -1650,7 +1650,7 @@ def build_welcome_header(app: Any, *, layout_fn: Any = None) -> None:
     text_html = (
         "<div>"
         '<div style="font-size:44px;font-weight:700;letter-spacing:-0.8px;'
-        'color:#0f172a;line-height:1.05">QuantUI</div>'
+        f'color:{_theme.css.TEXT_STRONG};line-height:1.05">QuantUI</div>'
         f'<div style="font-size:20px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:7px">'
         "Free, open, and interactive quantum chemistry</div>"
         f'<div style="font-size:13px;color:{_theme.css.TEXT_SUBTLE};margin-top:5px">'
@@ -1711,7 +1711,7 @@ def build_molecule_section(
         layout=layout_fn(width="420px"),
     )
     app.lib_count_lbl = widgets.HTML(
-        f'<span style="color:{_theme.css.TEXT_FAINT};font-size:12px">{init_note}</span>'
+        f'<span style="color:{_theme.css.TEXT_MUTED};font-size:12px">{init_note}</span>'
     )
 
     app.xyz_area = widgets.Textarea(
@@ -2890,7 +2890,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._completion_banner = widgets.HBox(
         [
             widgets.HTML(
-                '<span style="color:#22c55e;font-weight:600;font-size:13px">'
+                f'<span style="color:{_theme.css.ACCENT_SUCCESS};font-weight:600;font-size:13px">'
                 "✓ Calculation complete — </span>"
             ),
             app._completion_mol_lbl,
@@ -2901,13 +2901,9 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             display="none",
             align_items="center",
             gap="8px",
-            padding="10px 12px",
-            border="1px solid #bbf7d0",
-            border_radius="6px",
-            background_color="#f0fdf4",
-            margin="8px 0",
         ),
     )
+    app._completion_banner.add_class("quantui-completion-banner")
 
     app._to_analysis_btn = widgets.Button(
         description="→ View Analysis",
