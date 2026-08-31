@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional
 
 from .results_storage import _safe_name
 
@@ -66,20 +66,22 @@ def export_destination(
     using_general = result_dir is None or not isinstance(result_dir, Path)
     if using_general:
         if general_if_no_result:
-            result_dir = general_figures_dir()
+            dest_dir = general_figures_dir()
         else:
             raise ValueError(
                 f"No result folder yet — run a calculation before exporting {category}."
             )
+    elif isinstance(result_dir, Path):
+        dest_dir = result_dir
+    else:
+        raise ValueError(
+            f"No result folder yet — run a calculation before exporting {category}."
+        )
     parts = list(name_parts)
     if timestamp and using_general:
         parts.append(datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f"))
     stem = "_".join(_safe_name(str(p)) for p in parts if p)
-    # result_dir is narrowed to Path by the isinstance check above, but mypy's
-    # Path.__truediv__ overload resolution still infers Any from an
-    # originally-Any-typed (getattr on `app: Any`) operand — verified in
-    # isolation; the isinstance check is the real, working type guard.
-    return cast(Path, result_dir / f"{stem}{suffix}")
+    return dest_dir / f"{stem}{suffix}"
 
 
 def on_export(app: Any, btn: Any) -> None:
