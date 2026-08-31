@@ -734,6 +734,15 @@ def refresh_pes_scan_widgets(
     while len(defaults) < 4:
         defaults.append(defaults[-1] if defaults else 1)
 
+    try:
+        from quantui import theme as _theme
+
+        chip_bg = _theme.css.BG_PANEL
+        chip_fg = _theme.css.TEXT_BODY
+        muted_fg = _theme.css.TEXT_SLATE
+    except Exception:
+        chip_bg = chip_fg = muted_fg = None
+
     for i, w in enumerate(_scan_atom_widgets(app)):
         w.options = opts
         if n_atoms == 0:
@@ -743,7 +752,9 @@ def refresh_pes_scan_widgets(
         else:
             w.value = max(1, min(int(w.value), n_atoms))
 
-    app._scan_atom_list_html.value = atom_list_html(mol)
+    app._scan_atom_list_html.value = atom_list_html(
+        mol, chip_bg=chip_bg, chip_fg=chip_fg, muted_fg=muted_fg
+    )
     update_scan_widgets(app)
     if suggest_range and n_atoms > 0:
         apply_suggested_scan_range(app)
@@ -779,19 +790,19 @@ _SEED_GEOMETRY_RMSD_TOLERANCE: float = 0.1
 _SEED_GEOMETRY_CACHE: dict = {}
 
 
-def _load_starting_geometry(result_dir: Any):
-    """Read the starting-frame atom list + coordinates from a geo-opt result.
+def _load_trajectory_geometry(result_dir: Any, *, frame: str = "first"):
+    """Read atom list + coordinates from a geo-opt ``trajectory.json``.
 
-    Returns ``(atoms, coords_ndarray)`` where ``coords_ndarray`` has shape
-    ``(N, 3)``, or ``None`` if ``trajectory.json`` is missing / malformed.
-    Per-session cache avoids re-parsing on every dropdown refresh.
+    *frame* is ``"first"`` (starting geometry) or ``"last"`` (optimized).
+    Returns ``(atoms, coords_ndarray)`` or ``None`` when missing/malformed.
     """
     try:
         key = str(result_dir.resolve())
     except OSError:
         key = str(result_dir)
-    if key in _SEED_GEOMETRY_CACHE:
-        return _SEED_GEOMETRY_CACHE[key]
+    full_key = f"{frame}:{key}"
+    if full_key in _SEED_GEOMETRY_CACHE:
+        return _SEED_GEOMETRY_CACHE[full_key]
 
     import json as _json
 
@@ -799,25 +810,41 @@ def _load_starting_geometry(result_dir: Any):
 
     traj_path = result_dir / "trajectory.json"
     if not traj_path.exists():
-        _SEED_GEOMETRY_CACHE[key] = None
+        _SEED_GEOMETRY_CACHE[full_key] = None
         return None
     try:
         data = _json.loads(traj_path.read_text())
         atoms = data.get("atoms")
         steps = data.get("steps", [])
         if not atoms or not steps:
-            _SEED_GEOMETRY_CACHE[key] = None
+            _SEED_GEOMETRY_CACHE[full_key] = None
             return None
-        coords = _np.array(steps[0]["coords"], dtype=float)
+        idx = 0 if frame == "first" else -1
+        coords = _np.array(steps[idx]["coords"], dtype=float)
         if coords.shape != (len(atoms), 3):
-            _SEED_GEOMETRY_CACHE[key] = None
+            _SEED_GEOMETRY_CACHE[full_key] = None
             return None
         result = (list(atoms), coords)
-        _SEED_GEOMETRY_CACHE[key] = result
+        _SEED_GEOMETRY_CACHE[full_key] = result
         return result
     except Exception:
-        _SEED_GEOMETRY_CACHE[key] = None
+        _SEED_GEOMETRY_CACHE[full_key] = None
         return None
+
+
+def _load_starting_geometry(result_dir: Any):
+    """Read the starting-frame atom list + coordinates from a geo-opt result.
+
+    Returns ``(atoms, coords_ndarray)`` where ``coords_ndarray`` has shape
+    ``(N, 3)``, or ``None`` if ``trajectory.json`` is missing / malformed.
+    Per-session cache avoids re-parsing on every dropdown refresh.
+    """
+    return _load_trajectory_geometry(result_dir, frame="first")
+
+
+def _load_final_geometry(result_dir: Any):
+    """Read the final optimized geometry from a geo-opt result."""
+    return _load_trajectory_geometry(result_dir, frame="last")
 
 
 def _geometries_match(
@@ -1089,9 +1116,11 @@ def _refresh_seed_options(
                 continue
             # Strict atom + coord match when we have something to compare to.
             if current_atoms is not None and current_coords is not None:
-                starting = _load_starting_geometry(d)
-                if starting is not None:
-                    cand_atoms, cand_coords = starting
+                # Seeds load the *final* optimized frame; match against that
+                # geometry rather than the pre-optimization starting structure.
+                final_geom = _load_final_geometry(d)
+                if final_geom is not None:
+                    cand_atoms, cand_coords = final_geom
                     if not _geometries_match(
                         current_atoms, current_coords, cand_atoms, cand_coords
                     ):

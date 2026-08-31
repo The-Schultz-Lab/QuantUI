@@ -8,8 +8,9 @@ serially with each SCF internally parallelized via BLAS + libcint OpenMP.
 When the user opts in via the System Settings checkbox (persisted as
 ``compute.freq_parallel``) or ``QUANTUI_FREQ_PARALLEL=1`` (env overrides
 settings when set) AND the host has ``>= 4`` cores AND the molecule has ``>= 2`` atoms (i.e. ``>= 6``
-displacements), the freq_calc driver hands this loop off to a
-``ProcessPoolExecutor`` whose workers each call :func:`run_displaced_scf`
+displacements), the freq_calc driver hands the IR loop off to a
+``ProcessPoolExecutor``; the Raman polarizability loop uses the same opt-in
+and worker-pool pattern via :mod:`quantui.freq_raman_workers`.
 on one displaced geometry. Workers are **CPU-only** (no gpu4pyscf) even
 when the parent run used the GPU for the reference SCF and Hessian — on
 HPC nodes with one GPU and many cores, parallel CPU displacements often

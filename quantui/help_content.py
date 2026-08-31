@@ -297,15 +297,15 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
         ),
     },
     "freq_parallel": {
-        "title": "Parallel IR finite differences — when to enable",
+        "title": "Parallel IR/Raman finite differences — when to enable",
         "body": (
             "<p>After the Hessian is built, QuantUI runs many small SCF "
             "calculations at slightly displaced geometries to compute "
-            "<b>IR intensities</b> (how strongly each vibration absorbs "
-            "infrared light). By default these run one at a time.</p>"
+            "<b>IR intensities</b> and <b>Raman activities</b>. By default "
+            "these run one at a time.</p>"
             "<p>On a <b>multi-core</b> machine — especially HPC nodes with "
             "one GPU and dozens or hundreds of CPU cores — you can enable "
-            "<b>Parallelize IR intensity displacements (CPU)</b> on the "
+            "<b>Parallelize IR/Raman displacements (CPU)</b> on the "
             "<b>System Settings</b> tab. QuantUI then spreads those "
             "displacements across CPU worker processes while the reference "
             "SCF and Hessian still use the GPU when available.</p>"

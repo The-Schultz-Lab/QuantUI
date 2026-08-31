@@ -319,14 +319,14 @@ def build_status_panel(
 
     fp_toggle_label = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:12px;'
-        'margin-bottom:0px">Parallel IR finite differences '
+        'margin-bottom:0px">Parallel IR/Raman finite differences '
         f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-        "(persists across launches; CPU workers for IR intensities on "
-        "multi-core hosts — see Help → Parallel IR finite differences)</span></div>"
+        "(persists across launches; CPU workers for IR + Raman displacements on "
+        "multi-core hosts — see Help → Parallel IR/Raman finite differences)</span></div>"
     )
     app.freq_parallel_enabled_cb = widgets.Checkbox(
         value=freq_parallel_enabled,
-        description="Parallelize IR intensity displacements (CPU)",
+        description="Parallelize IR/Raman displacements (CPU)",
         indent=False,
         disabled=freq_parallel_env_locked,
         layout=layout_fn(width="320px", margin="2px 0 0 0"),
@@ -1329,8 +1329,9 @@ def build_shared_widgets(
     app._scan_preopt_note = widgets.HTML(
         value=(
             f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">'
-            "Tip: enable <b>Pre-optimize starting geometry</b> above for best "
-            "results. Each scan point runs its own constrained optimization.</span>"
+            "Tip: enable <b>Pre-optimize starting geometry</b> (checkbox just "
+            "above) for best results. Each scan point runs its own constrained "
+            "optimization.</span>"
         )
     )
     app._scan_seed_dd = widgets.Dropdown(
@@ -1909,13 +1910,13 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
                 [app.calc_type_dd, app.calc_type_help_btn],
                 layout=layout_fn(align_items="center", gap="4px"),
             ),
+            app._freq_preopt_cb,
             app.calc_extra_opts,
             widgets.HBox(
                 [app.preopt_preview_label, app.preopt_preview_btn],
                 layout=layout_fn(align_items="center", gap="10px"),
             ),
             app.preopt_preview_box,
-            app._freq_preopt_cb,
             widgets.HBox(
                 [app.solvent_cb, app.solvent_dd],
                 layout=layout_fn(align_items="center", gap="4px"),

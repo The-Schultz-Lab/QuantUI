@@ -462,6 +462,11 @@ def on_reorg_png_captured(app: Any, change: dict) -> None:
     if not uri:
         return
 
+    geom_tag = "geometry"
+    if "\n" in uri:
+        uri, geom_tag = uri.split("\n", 1)
+        geom_tag = (geom_tag or "geometry").strip() or "geometry"
+
     status = getattr(app, "_reorg_export_status", None)
 
     def _fail(msg: str) -> None:
@@ -496,7 +501,7 @@ def on_reorg_png_captured(app: Any, change: dict) -> None:
 
     try:
         dest = export_destination(
-            app, "reorg geometry PNG", formula, "geometry", method, basis, suffix=".png"
+            app, "reorg geometry PNG", formula, geom_tag, method, basis, suffix=".png"
         )
     except ValueError as exc:
         _fail(str(exc))

@@ -971,6 +971,8 @@ _HARTREE_TO_EV = 27.211386245988
 # Step/point/state counters inside a status message. Removed before the
 # message is used as a per-stage timing key — see _LogCapture._stage_key.
 _RE_STAGE_NUMBERS = re.compile(r"\d+(?:[./]\d+)*")
+# ASE BFGS per-step table written to the optimizer logfile.
+_RE_BFGS_STATUS = re.compile(r"^BFGS:\s+(\d+)\s+\S+\s+([-\d.]+)\s+([\d.eE+\-]+)")
 
 # ── Silent-phase heartbeat ───────────────────────────────────────────────────
 #
@@ -1043,6 +1045,10 @@ class _LogCapture:
         self._stage_started_t = self._last_write_t
         # D3: atom totals parsed from PySCF's NMR header line.
         self._nmr_atom_total: Optional[int] = None
+        # Geometry-opt live progress (set by _do_run before optimize_geometry).
+        self.opt_expected_steps: Optional[int] = None
+        self.opt_fmax_target: Optional[float] = None
+        self.opt_fmax0: Optional[float] = None
 
     # ── Per-stage timing ────────────────────────────────────────────────────
 
@@ -1161,6 +1167,40 @@ class _LogCapture:
         self._line_buf += text
         while "\n" in self._line_buf:
             line, self._line_buf = self._line_buf.split("\n", 1)
+            m = _RE_BFGS_STATUS.match(line)
+            if m and self._status is not None:
+                import math as _math
+
+                step_n = int(m.group(1)) + 1  # display 1-based
+                fmax_val = float(m.group(3))
+                if self.opt_expected_steps:
+                    step_of = f"{step_n}/~{int(self.opt_expected_steps)}"
+                    step_frac = min(step_n / float(self.opt_expected_steps), 0.9)
+                else:
+                    step_of = str(step_n)
+                    step_frac = 0.0
+                if self.opt_fmax0 is None and fmax_val > 0:
+                    self.opt_fmax0 = fmax_val
+                fmax_frac = 0.0
+                target = self.opt_fmax_target
+                if (
+                    self.opt_fmax0 is not None
+                    and target is not None
+                    and target > 0
+                    and self.opt_fmax0 > target
+                    and fmax_val > 0
+                ):
+                    denom = _math.log(self.opt_fmax0 / target)
+                    if denom > 0:
+                        fmax_frac = _math.log(self.opt_fmax0 / max(fmax_val, target)) / denom
+                self.set_progress_fraction(
+                    max(0.03, min(max(step_frac, fmax_frac), 0.99))
+                )
+                self._status.value = (
+                    f"Optimizing geometry — step {step_of} · "
+                    f"fmax {fmax_val:.4f} eV/Å"
+                )
+                continue
             m = _RE_Q_STATUS.search(line)
             if m:
                 message = m.group(1).strip()
@@ -5831,6 +5871,11 @@ class QuantUIApp:
                 _expected_steps = _calc_log.estimate_opt_steps(
                     self.method_dd.value, self.basis_dd.value
                 )
+                log.opt_expected_steps = (
+                    int(round(_expected_steps)) if _expected_steps else None
+                )
+                log.opt_fmax_target = float(self.fmax_fi.value)
+                log.opt_fmax0 = None
                 result = optimize_geometry(
                     molecule=calc_mol,
                     method=self.method_dd.value,

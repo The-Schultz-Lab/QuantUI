@@ -2580,6 +2580,32 @@ _STEPPER_BTN_STYLE = (
     "background:#f8fafc;color:#334155;cursor:pointer;font-size:13px;line-height:1.4;"
 )
 
+# Reorg geometry Save-PNG bridge: appends the active stepper slug after the URI
+# so the kernel can name the file (e.g. R_neutral vs R_hole).
+_REORG_PNG_BRIDGE_JS = """
+(function(){
+  var UID="__UID__", CLS="__CLS__", SLUGS=__SLUGS__;
+  var btn=document.getElementById("orb_png_"+UID);
+  if(!btn){ return; }
+  btn.addEventListener("click", function(){
+    var cap=window["__CAPFN__"];
+    if(!cap){ btn.textContent="\\u26a0 viewer not ready"; return; }
+    var uri=null;
+    try{ uri=cap(false); }catch(e){ btn.textContent="\\u26a0 capture failed"; return; }
+    if(!uri){ btn.textContent="\\u26a0 capture failed"; return; }
+    var box=document.querySelector("."+CLS+" textarea");
+    if(!box){ btn.textContent="\\u26a0 no inbox"; return; }
+    var idx=window["__quantuiStepCur_"+UID]||0;
+    var tag=SLUGS[idx]||"geometry";
+    box.value=uri+"\\n"+tag;
+    box.dispatchEvent(new Event("input", {bubbles:true}));
+    var old=btn.textContent;
+    btn.textContent="\\u2713 saved";
+    setTimeout(function(){ btn.textContent=old; }, 2000);
+  });
+})();
+"""
+
 # Shared single-viewer stepper logic. Drives ``viewer.setFrame()`` on a viewer
 # whose frames are ALL already loaded client-side via ``addModelsAsFrames`` — so
 # navigation never rebuilds the viewer, the camera (rotation/zoom) stays put
@@ -2599,6 +2625,7 @@ _STEPPER_JS = """
   function label(i){ __LABEL_BODY__ }
   function draw(i){
     i=Math.max(0,Math.min(N-1,i)); cur=i;
+    window["__quantuiStepCur_"+UID]=i;
     var v=vw();
     if(v){ try{ var p=v.setFrame(i);
       if(p&&p.then){ p.then(function(){v.render();}); } else { v.render(); }
@@ -2762,6 +2789,10 @@ def build_reorg_geometry_viewer_html(
         return _theme.frame_viewer_html(view_html, width=width)
     uid = m.group(1)
 
+    slugs = json.dumps(
+        [g.get("label", f"geometry_{i + 1}").split(" — ")[0] for i, g in enumerate(geometries)]
+    )
+
     if capture_class:
         capture_fn = f"__quantuiReorgCapture_{uid}"
         capture_js = (
@@ -2769,10 +2800,21 @@ def build_reorg_geometry_viewer_html(
             .replace("__CAPFN__", capture_fn)
             .replace("__BG__", json.dumps(bgcolor))
         )
+        bridge_js = (
+            _REORG_PNG_BRIDGE_JS.replace("__UID__", uid)
+            .replace("__CLS__", capture_class)
+            .replace("__SLUGS__", slugs)
+            .replace("__CAPFN__", capture_fn)
+        )
+        btn_style = _STEPPER_BTN_STYLE
         view_html = (
             view_html
             + f"<script>{capture_js}</script>"
-            + _png_capture_controls(uid, capture_class, capture_fn=capture_fn)
+            + f'<div style="margin:4px 0 2px;padding:0 8px 6px;font-size:13px;">'
+            f'<button id="orb_png_{uid}" type="button" '
+            f'title="Save this geometry view as a PNG" '
+            f'style="{btn_style}">\u2b07 Save PNG</button>'
+            f"</div><script>{bridge_js}</script>"
         )
 
     if len(geometries) < 2:

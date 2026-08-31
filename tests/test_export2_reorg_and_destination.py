@@ -206,6 +206,14 @@ class TestReorgPngCaptureBridge:
         on_reorg_png_captured(app, {})
         assert not list(tmp_path.glob("*.png"))
 
+    def test_geometry_slug_from_stepper_is_used_in_filename(self, tmp_path):
+        app = self._app(tmp_path)
+        uri = _png_uri() + "\nR_neutral"
+        on_reorg_png_captured(app, {"new": uri})
+        written = list(tmp_path.glob("*.png"))
+        assert len(written) == 1
+        assert "R_neutral" in written[0].name
+
 
 class TestReorgViewerCaptureWiring:
     """The generalized capture bridge (EXP2.2) — isosurface behaviour must be

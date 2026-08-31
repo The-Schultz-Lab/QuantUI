@@ -97,6 +97,14 @@ class TestAtomListHtml:
         assert "1" in html and "O1" in html
         assert "2" in html and "H2" in html
 
+    def test_uses_theme_tokens_not_hardcoded_light_chip(self):
+        html = atom_list_html(
+            _water(), chip_bg="var(--q-bg-panel)", chip_fg="var(--q-text-body)"
+        )
+        assert "var(--q-bg-panel)" in html
+        assert "var(--q-text-body)" in html
+        assert "#f1f5f9" not in html
+
 
 class TestFormatScanAtomSummary:
     def test_angle_notes_vertex(self):

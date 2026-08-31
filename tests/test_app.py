@@ -986,6 +986,19 @@ class TestStatusHeartbeat:
         # A plain stream has no set_status — must be a safe no-op.
         emit_status(io.StringIO(), "ignored")
 
+    def test_bfgs_line_updates_status_with_step_prior(self):
+        from quantui.app import _LogCapture
+
+        out = widgets.Output()
+        status = widgets.Label()
+        cap = _LogCapture(out, status)
+        cap.opt_expected_steps = 12
+        cap.opt_fmax_target = 0.05
+        cap.write("BFGS:   2  00:00:01  -74.123456   0.0821\n")
+        assert "step 3/~12" in status.value
+        assert "fmax" in status.value
+        assert cap._fraction is not None and cap._fraction >= 0.03
+
 
 class TestCalcTypeHelp:
     """A '?' help button next to Calc. Type opens the calc_type help topic."""

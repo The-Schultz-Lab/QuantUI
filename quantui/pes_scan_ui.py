@@ -13,6 +13,7 @@ from typing import List, Optional, Sequence, Tuple
 
 from .measurement import angle, atom_label, dihedral, distance
 from .molecule import Molecule
+from . import theme as _theme
 
 __all__ = [
     "adapt_atoms_for_scan_type_change",
@@ -48,11 +49,20 @@ def atom_dropdown_options(molecule: Optional[Molecule]) -> List[Tuple[str, int]]
     ]
 
 
-def atom_list_html(molecule: Optional[Molecule]) -> str:
+def atom_list_html(
+    molecule: Optional[Molecule],
+    *,
+    chip_bg: Optional[str] = None,
+    chip_fg: Optional[str] = None,
+    muted_fg: Optional[str] = None,
+) -> str:
     """Compact HTML reference table of numbered atoms for the PES panel."""
+    chip_bg = chip_bg or _theme.css.BG_PANEL
+    chip_fg = chip_fg or _theme.css.TEXT_BODY
+    muted_fg = muted_fg or _theme.css.TEXT_SLATE
     if molecule is None or not molecule.atoms:
         return (
-            '<span style="font-size:12px;color:#64748b">'
+            f'<span style="font-size:12px;color:{muted_fg}">'
             "Load a molecule to see atom numbers.</span>"
         )
     cells = []
@@ -60,7 +70,8 @@ def atom_list_html(molecule: Optional[Molecule]) -> str:
         lbl = atom_label(molecule, i)
         cells.append(
             f'<span style="display:inline-block;margin:0 6px 4px 0;'
-            f"padding:2px 7px;border-radius:4px;background:#f1f5f9;"
+            f"padding:2px 7px;border-radius:4px;background:{chip_bg};"
+            f"color:{chip_fg};border:1px solid {_theme.css.BORDER};"
             f'font-size:12px;font-family:monospace">'
             f"<b>{i + 1}</b>&nbsp;{html.escape(lbl)} ({html.escape(sym)})</span>"
         )
@@ -145,16 +156,21 @@ def format_current_coordinate_html(
     molecule: Optional[Molecule],
     scan_type: str,
     atom_numbers: Sequence[int],
+    *,
+    text_fg: Optional[str] = None,
+    muted_fg: Optional[str] = None,
 ) -> str:
+    text_fg = text_fg or _theme.css.TEXT_BODY
+    muted_fg = muted_fg or _theme.css.TEXT_SLATE
     cur = current_coordinate_value(molecule, scan_type, atom_numbers)
     if cur is None:
         return (
-            '<span style="font-size:12px;color:#64748b">'
+            f'<span style="font-size:12px;color:{muted_fg}">'
             "Current value: — (pick valid atoms)</span>"
         )
     val, unit = cur
     return (
-        f'<span style="font-size:12px;color:#334155">'
+        f'<span style="font-size:12px;color:{text_fg}">'
         f"<b>Current value:</b> {val:.3f} {unit}</span>"
     )
 
