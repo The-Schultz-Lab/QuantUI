@@ -1873,7 +1873,8 @@ class QuantUIApp:
 
     def display(self) -> None:
         """Inject global CSS and render the application widget."""
-        display(HTML(_APP_CSS))
+        app_css = _APP_CSS.removeprefix("<style>").removesuffix("</style>")
+        display(HTML(_theme.theme_injection_html(app_css, style_id="quantui-app-css")))
         # NOTE: 3Dmol.js is loaded offline per-view via py3Dmol's own loader
         # (``viz_assets.make_view`` passes ``js=<vendored data: URI>``), NOT a
         # one-time page bootstrap. A startup-time bootstrap ran py3Dmol's

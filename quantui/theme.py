@@ -143,6 +143,72 @@ class ThemePalette:
             out[f"--q-{key}"] = getattr(self, field)
         return out
 
+    def jupyterlab_variables(self) -> Dict[str, str]:
+        """Bridge QuantUI palette tokens onto JupyterLab/Voilà ``--jp-*`` vars.
+
+        ipywidgets tab bars, dropdowns, and inputs read JupyterLab theme
+        variables — not ``--q-*`` — so palette switches must remap both.
+        """
+        p = self
+        return {
+            "--jp-layout-color0": p.page_bg,
+            "--jp-layout-color1": p.bg_panel,
+            "--jp-layout-color2": p.border,
+            "--jp-layout-color3": p.border_strong,
+            "--jp-ui-font-color0": p.text_strong,
+            "--jp-ui-font-color1": p.text_body,
+            "--jp-ui-font-color2": p.text_muted,
+            "--jp-ui-font-color3": p.text_subtle,
+            "--jp-content-font-color0": p.text_strong,
+            "--jp-content-font-color1": p.text_body,
+            "--jp-content-font-color2": p.text_muted,
+            "--jp-content-font-color3": p.text_subtle,
+            "--jp-border-color0": p.border,
+            "--jp-border-color1": p.border,
+            "--jp-border-color2": p.border_strong,
+            "--jp-input-background": p.page_bg,
+            "--jp-input-border-color": p.border,
+            "--jp-input-active-background": p.bg_panel,
+            "--jp-input-hover-background": p.bg_panel,
+            "--jp-cell-editor-background": p.page_bg,
+            "--jp-cell-editor-active-background": p.bg_panel,
+            "--jp-toolbar-background": p.bg_panel,
+            "--jp-toolbar-active-background": p.page_bg,
+            "--jp-brand-color1": p.accent_info,
+            "--jp-brand-color2": p.accent_info,
+            "--jp-inverse-layout-color0": p.text_strong if p.is_dark else p.page_bg,
+            "--jp-inverse-layout-color1": p.text_body if p.is_dark else p.bg_panel,
+        }
+
+
+def _widget_chrome_css() -> str:
+    """CSS rules for ipywidgets/Lumino chrome (palette-agnostic — uses vars)."""
+    return (
+        "html, body, .voila-app, #voila-app-main, "
+        ".jp-OutputArea-output, .widget-html-content, .jp-RenderedHTMLCommon "
+        "{ background-color: var(--q-page-bg) !important; "
+        "color: var(--q-text-body) !important; }\n"
+        ".lm-TabBar, .p-TabBar "
+        "{ background: var(--q-bg-panel) !important; "
+        "border-color: var(--q-border) !important; }\n"
+        ".lm-TabBar-tab, .p-TabBar-tab "
+        "{ background: var(--q-bg-panel) !important; "
+        "color: var(--q-text-body) !important; "
+        "border-color: var(--q-border) !important; }\n"
+        ".lm-TabBar-tab.lm-mod-current, .p-TabBar-tab.p-mod-current "
+        "{ background: var(--q-page-bg) !important; "
+        "color: var(--q-text-strong) !important; "
+        "border-bottom: 2px solid var(--q-accent-info) !important; }\n"
+        ".lm-TabBar-content, .p-TabBar-content "
+        "{ background: var(--q-page-bg) !important; "
+        "border-color: var(--q-border) !important; }\n"
+        ".jupyter-widgets select, .jupyter-widgets input, "
+        ".jupyter-widgets textarea, .jupyter-widgets button "
+        "{ background-color: var(--q-page-bg) !important; "
+        "color: var(--q-text-body) !important; "
+        "border-color: var(--q-border) !important; }\n"
+    )
+
 
 def _light_palette() -> ThemePalette:
     return ThemePalette(
@@ -330,31 +396,37 @@ def get_palette(palette_id: str) -> ThemePalette:
 def theme_css_block(palette_id: str) -> str:
     """Inject CSS custom properties for *palette_id* (THEME.6)."""
     palette = get_palette(palette_id)
-    lines = [f"  {k}: {v};" for k, v in palette.css_variables().items()]
+    merged: Dict[str, str] = {}
+    merged.update(palette.css_variables())
+    merged.update(palette.jupyterlab_variables())
+    lines = [f"  {k}: {v};" for k, v in merged.items()]
     vars_block = "\n".join(lines)
+    chrome = _widget_chrome_css()
+    css_text = ":root {\n" f"{vars_block}\n" "}\n" f"{chrome}"
+    return theme_injection_html(css_text)
+
+
+def theme_injection_html(css_text: str, *, style_id: str = "quantui-theme-css") -> str:
+    """Return HTML that installs *css_text* on ``document.head`` (Voilà-safe).
+
+    ``<style>`` tags emitted inside widget Output areas are not always applied
+    globally under Voilà; installing (or updating) a single head ``<style>``
+    element keeps palette + JupyterLab bridge vars authoritative.
+    """
+    import json
+
+    payload = json.dumps(css_text)
+    sid = json.dumps(style_id)
     return (
-        "<style>"
-        ":root {\n"
-        f"{vars_block}\n"
-        "}\n"
-        "html, body, .jp-OutputArea-output, .widget-html-content "
-        "{ background-color: var(--q-page-bg) !important; "
-        "color: var(--q-text-body) !important; }\n"
-        ".widget-tab, .widget-tab > .lm-TabBar, .widget-tab > .p-TabBar "
-        "{ background: var(--q-bg-panel) !important; }\n"
-        ".widget-tab .lm-TabBar-tab, .widget-tab .p-TabBar-tab "
-        "{ background: var(--q-bg-panel) !important; "
-        "color: var(--q-text-body) !important; "
-        "border-color: var(--q-border) !important; }\n"
-        ".widget-tab .lm-TabBar-tab.lm-mod-current, "
-        ".widget-tab .p-TabBar-tab.p-mod-current "
-        "{ background: var(--q-page-bg) !important; "
-        "color: var(--q-text-strong) !important; "
-        "border-bottom: 2px solid var(--q-accent-info) !important; }\n"
-        ".widget-tab .lm-TabBar-content, .widget-tab .p-TabBar-content "
-        "{ background: var(--q-page-bg) !important; "
-        "border-color: var(--q-border) !important; }\n"
-        "</style>"
+        "<script>"
+        "(function(){"
+        f"var id={sid};"
+        f"var css={payload};"
+        "var el=document.getElementById(id);"
+        "if(!el){el=document.createElement('style');el.id=id;document.head.appendChild(el);}"
+        "el.textContent=css;"
+        "})();"
+        "</script>"
     )
 
 
@@ -458,4 +530,5 @@ __all__ = [
     "get_palette",
     "plotly_colors",
     "theme_css_block",
+    "theme_injection_html",
 ]
