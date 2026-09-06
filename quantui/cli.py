@@ -21,6 +21,17 @@ Currently shipped subcommands:
   ``[app]`` extra: ``pip install 'quantui[app]'``).
 * ``quantui setup [--force]`` — write ``~/.quantui/app.ipynb`` and a
   ``quantui-app`` shell shortcut under ``~/.local/bin``.
+* ``quantui submit REQUEST_JSON [REQUEST_JSON ...] [--dry-run] [--cores N]
+  [--memory-gb N] [--walltime HH:MM:SS] [--email ADDR]
+  [--mail-events EVENT,...] [--job-name NAME] [--depends-on REQUEST_ID]
+  [--partition NAME] [--no-apptainer] [--apptainer-image PATH]`` — submit
+  one or more ``CalculationRequest`` JSON files to the SLURM batch backend
+  headlessly, with no interactive app/student session involved (M-CLUSTER2
+  CL2.7). Resource sizing defaults to ``estimate_slurm_resources()`` —
+  the same estimator the interactive app uses — unless overridden. Pass
+  ``--dry-run`` to print the resolved cores/memory/walltime for each
+  request without actually submitting. Respects the same
+  ``QUANTUI_ENABLE_SLURM`` site gate as the interactive app.
 
 Adding a new subcommand:
 
@@ -39,6 +50,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Optional, Sequence, cast
 
@@ -241,6 +253,118 @@ def _cmd_setup(args: argparse.Namespace) -> int:
     return run_setup(force=args.force)
 
 
+def _cmd_submit(args: argparse.Namespace) -> int:
+    """Submit one or more CalculationRequest JSON files to SLURM (M-CLUSTER2 CL2.7).
+
+    Headless equivalent of the interactive app's Slurm batch path — no
+    student session or Voilà app involved. Before this existed, the only
+    way to run a batch of jobs centrally (e.g. an instructor running a
+    whole class's Lab 2 series) was to hand-author sbatch scripts and
+    guess at resource sizing; this wraps the exact same
+    ``SlurmBackend.dispatch()`` + ``estimate_slurm_resources()`` path the
+    app itself uses, so a batch caller gets the same resource-sizing
+    accuracy without reinventing it.
+    """
+    from quantui.backends.base import CalculationRequest
+    from quantui.backends.cluster_config import submit_cooldown_seconds
+    from quantui.backends.dispatch import is_slurm_available, slurm_unavailable_note
+    from quantui.backends.slurm_utils import estimate_slurm_resources
+    from quantui.security import SecurityError
+
+    if not args.dry_run and not is_slurm_available():
+        print(f"quantui submit: {slurm_unavailable_note()}", file=sys.stderr)
+        return 1
+
+    backend = None
+    if not args.dry_run:
+        from quantui.backends.slurm import SlurmBackend
+
+        backend = SlurmBackend(
+            partition=args.partition,
+            use_apptainer=not args.no_apptainer,
+            apptainer_image=args.apptainer_image,
+        )
+
+    mail_events = args.mail_events.split(",") if args.mail_events else None
+    exit_code = 0
+    submitted_count = 0
+
+    for request_path_str in args.request:
+        request_path = Path(request_path_str)
+        try:
+            data = json.loads(request_path.read_text())
+            request = CalculationRequest.from_dict(data)
+        except Exception as exc:  # noqa: BLE001 — surfaced to the user below
+            print(
+                f"{request_path}: could not read/parse request — {exc}",
+                file=sys.stderr,
+            )
+            exit_code = 1
+            continue
+
+        if args.dry_run:
+            estimate = estimate_slurm_resources(request)
+            note = ""
+            if estimate.get("freq_parallel_memory_multiplier", 1) > 1:
+                note = (
+                    f"  [QUANTUI_FREQ_PARALLEL active: memory_gb includes a "
+                    f"{estimate['freq_parallel_memory_multiplier']}x multiplier "
+                    "for concurrent worker processes]"
+                )
+            print(
+                f"{request_path}: {request.calc_type} "
+                f"{request.method}/{request.basis} -> "
+                f"cores={estimate['cores']} memory_gb={estimate['memory_gb']} "
+                f"walltime={estimate['walltime']}  (dry run — not submitted)"
+                f"{note}"
+            )
+            continue
+
+        # SlurmBackend enforces a post-submit cooldown (protects the
+        # interactive app from accidental rapid-fire submits). A batch of
+        # N requests submitted in one invocation would otherwise trip that
+        # cooldown between every pair and fail partway through a
+        # legitimate scripted run — sleep it out proactively instead
+        # (this is exactly CL2.7's motivating case: an instructor running
+        # a whole class's worth of jobs, e.g. Lab 2's 30, from one script).
+        if submitted_count > 0:
+            cooldown = submit_cooldown_seconds()
+            if cooldown > 0:
+                time.sleep(cooldown)
+
+        assert backend is not None  # not args.dry_run, guarded above
+        try:
+            request_id = backend.dispatch(
+                request,
+                cores=args.cores,
+                memory_gb=args.memory_gb,
+                walltime=args.walltime,
+                depends_on=args.depends_on,
+                email=args.email,
+                mail_events=mail_events,
+                job_name=args.job_name,
+            )
+        except SecurityError as exc:
+            print(f"{request_path}: rejected — {exc}", file=sys.stderr)
+            exit_code = 1
+            continue
+        except RuntimeError as exc:
+            print(f"{request_path}: submission failed — {exc}", file=sys.stderr)
+            exit_code = 1
+            continue
+
+        submitted_count += 1
+        record = backend.registry.load(request_id)
+        slurm_job_id = record.slurm_job_id if record else None
+        staging = record.staging_path if record else "?"
+        print(
+            f"{request_path}: submitted request_id={request_id} "
+            f"slurm_job_id={slurm_job_id or '?'} staging={staging}"
+        )
+
+    return exit_code
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="quantui",
@@ -336,6 +460,107 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Regenerate ~/.quantui/app.ipynb before starting.",
     )
     run_app.set_defaults(func=_cmd_run_app)
+
+    submit_parser = sub.add_parser(
+        "submit",
+        help=(
+            "Submit CalculationRequest JSON file(s) to the SLURM batch "
+            "backend headlessly (M-CLUSTER2 CL2.7) — no interactive app."
+        ),
+    )
+    submit_parser.add_argument(
+        "request",
+        nargs="+",
+        metavar="REQUEST_JSON",
+        help="Path(s) to a CalculationRequest JSON file.",
+    )
+    submit_parser.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help=(
+            "Print the resolved cores/memory/walltime estimate for each "
+            "request without submitting to SLURM."
+        ),
+    )
+    submit_parser.add_argument(
+        "--cores",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override the estimated core count (default: estimate_slurm_resources()).",
+    )
+    submit_parser.add_argument(
+        "--memory-gb",
+        dest="memory_gb",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override the estimated memory in GB.",
+    )
+    submit_parser.add_argument(
+        "--walltime",
+        type=str,
+        default=None,
+        metavar="HH:MM:SS",
+        help="Override the estimated walltime.",
+    )
+    submit_parser.add_argument(
+        "--email",
+        type=str,
+        default=None,
+        metavar="ADDR",
+        help="Email address for SLURM job notifications.",
+    )
+    submit_parser.add_argument(
+        "--mail-events",
+        dest="mail_events",
+        type=str,
+        default=None,
+        metavar="EVENT,EVENT,...",
+        help=(
+            "Comma-separated SLURM mail events (e.g. END,FAIL). "
+            "Defaults to QuantUI's standard set when --email is given."
+        ),
+    )
+    submit_parser.add_argument(
+        "--job-name",
+        dest="job_name",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="SLURM job name (default: derived from the molecule + method).",
+    )
+    submit_parser.add_argument(
+        "--depends-on",
+        dest="depends_on",
+        type=str,
+        default=None,
+        metavar="REQUEST_ID",
+        help="Make this job depend on another already-submitted request's completion.",
+    )
+    submit_parser.add_argument(
+        "--partition",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="SLURM partition (default: site-configured DEFAULT_PARTITION).",
+    )
+    submit_parser.add_argument(
+        "--no-apptainer",
+        dest="no_apptainer",
+        action="store_true",
+        help="Run the worker with the current Python instead of inside Apptainer.",
+    )
+    submit_parser.add_argument(
+        "--apptainer-image",
+        dest="apptainer_image",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Override the Apptainer image path (default: site-configured).",
+    )
+    submit_parser.set_defaults(func=_cmd_submit)
 
     return parser
 
