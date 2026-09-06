@@ -6,6 +6,17 @@ Invoked from a batch script::
     python -m quantui.backends.worker --request /path/to/staging/request.json
 
 Supports all QuantUI Calculate-tab calc types (see ``CALC_TYPES``).
+
+Checkpoint/resume (M-CLUSTER2 CL2.8): ``geometry_opt`` and ``pes_scan`` (plus
+any ``preopt_before_run`` step ahead of frequency/tddft/pes_scan) open a
+:class:`~quantui.checkpoint.Checkpoint` scoped to their own staging directory
+(``<staging_dir>/.checkpoint/``, distinct from the interactive app's
+``~/.quantui/checkpoints``) — see :func:`_begin_worker_checkpoint`. A job
+killed by OOM or TIMEOUT resumes close to where it died on the next
+resubmission instead of restarting from nothing. ``frequency``/``tddft``
+have no checkpoint hook anywhere in QuantUI (each is one atomic library call,
+not a chunked/resumable loop) — nothing here can help those beyond the
+preopt step ahead of them.
 """
 
 from __future__ import annotations
@@ -67,6 +78,49 @@ def _log_seed_context(request: CalculationRequest, staging_dir: Path) -> None:
         )
 
 
+def _tag_from_stage_label(stage_label: str) -> str:
+    """First word of *stage_label*, lowercased — e.g. "PES scan" -> "pes"."""
+    return (stage_label.split() or ["run"])[0].lower()
+
+
+def _begin_worker_checkpoint(
+    molecule,
+    *,
+    calc_type: str,
+    method: str,
+    basis: str,
+    staging_dir: Path,
+    log_stream,
+):
+    """Open a checkpoint for this job, scoped to its own staging directory
+    (M-CLUSTER2 CL2.8).
+
+    Checkpoints live at ``<staging_dir>/.checkpoint/`` — inside the job's
+    own staging area, not ``~/.quantui/checkpoints`` (the interactive
+    app's location) — so a batch job's checkpoint stays self-contained
+    next to its other artifacts and never collides with another job's.
+
+    Resumability is read from ``resumable_state()`` *before* calling
+    ``begin()`` — ``begin()`` rewrites the metadata with a fresh "running"
+    status, so reading afterwards would describe the run about to start
+    rather than the one that stopped.
+
+    Returns ``(checkpoint, resumable)``. A checkpoint is an optimisation
+    for the failure case; nothing here can prevent the calculation from
+    starting.
+    """
+    from quantui.checkpoint import CalcIdentity, Checkpoint
+
+    identity = CalcIdentity.from_molecule(
+        molecule, calc_type=calc_type, method=method, basis=basis
+    )
+    ckpt = Checkpoint(identity, root=staging_dir / ".checkpoint")
+    ckpt.attach_log(log_stream)
+    resumable = ckpt.resumable_state() is not None
+    ckpt.begin()
+    return ckpt, resumable
+
+
 def _maybe_run_preopt(
     request: CalculationRequest,
     molecule,
@@ -84,6 +138,64 @@ def _maybe_run_preopt(
     from quantui.optimizer import optimize_geometry
 
     scf_rescue = bool(options.get("scf_rescue", True))
+
+    # M-CLUSTER2 CL2.8 — a preopt's *own* starting geometry is fixed (the
+    # request's input XYZ, same every attempt), but pes_scan/frequency/
+    # tddft's checkpoint identity downstream of it requires exact-geometry
+    # match — and two independent optimizer runs of the same molecule land
+    # extremely close but are not guaranteed bit-identical (BLAS/OpenMP
+    # reduction order can differ run to run, especially across
+    # resubmissions that may land on a different node/core count). So the
+    # preopt result itself is cached once, next to the request, keyed by
+    # calc type (deliberately not shared across frequency/tddft/pes_scan
+    # even though their preopts are mathematically the same calculation —
+    # that would be the chained-pipeline design this stays scoped short
+    # of): any later attempt on the same job loads the fixed geometry
+    # instead of re-optimizing, guaranteeing the downstream calc type's own
+    # checkpoint identity is byte-identical across attempts (and skips the
+    # preopt's own cost on every resubmission besides).
+    tag = _tag_from_stage_label(stage_label)
+    saved_path = staging_dir / f"preopt_geometry_{tag}.json"
+    if saved_path.is_file():
+        try:
+            from quantui.molecule import Molecule
+
+            data = json.loads(saved_path.read_text(encoding="utf-8"))
+            reused = Molecule(
+                atoms=list(data["atoms"]),
+                coordinates=[list(c) for c in data["coordinates"]],
+                charge=int(data.get("charge", molecule.charge)),
+                multiplicity=int(data.get("multiplicity", molecule.multiplicity)),
+            )
+            _append_log(
+                staging_dir,
+                f"Reusing saved preopt geometry before {stage_label} "
+                f"({saved_path.name}) — skipping re-optimization on this attempt.",
+            )
+            return reused, None
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 — a bad save is not fatal, just re-preopt
+            _append_log(
+                staging_dir,
+                f"Could not reuse saved preopt geometry ({exc}); re-running preopt.",
+            )
+
+    ckpt, resumable = _begin_worker_checkpoint(
+        molecule,
+        calc_type=f"preopt_for_{tag}",
+        method=request.method,
+        basis=request.basis,
+        staging_dir=staging_dir,
+        log_stream=log_stream,
+    )
+    if resumable:
+        _append_log(
+            staging_dir,
+            f"[checkpoint] Resuming preopt before {stage_label} from a "
+            "previous attempt's checkpoint.",
+        )
+
     _append_log(
         staging_dir,
         f"\n── Geometry optimization (before {stage_label}) ──",
@@ -102,6 +214,8 @@ def _maybe_run_preopt(
             progress_stream=log_stream,
             status_label=f"SLURM pre-opt before {stage_label}",
             scf_rescue=scf_rescue,
+            checkpoint=ckpt,
+            resume=resumable,
         )
         conv = "converged" if pre_opt.converged else "did NOT fully converge"
         energy = (
@@ -120,6 +234,25 @@ def _maybe_run_preopt(
                 pre_opt.energies_hartree,
                 filename="preopt_trajectory.json",
             )
+        try:
+            saved_path.write_text(
+                json.dumps(
+                    {
+                        "atoms": list(pre_opt.molecule.atoms),
+                        "coordinates": [
+                            [float(c) for c in row]
+                            for row in pre_opt.molecule.coordinates
+                        ],
+                        "charge": int(pre_opt.molecule.charge),
+                        "multiplicity": int(pre_opt.molecule.multiplicity),
+                    }
+                ),
+                encoding="utf-8",
+            )
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 — a missed save just costs a re-preopt later
+            _append_log(staging_dir, f"Could not save preopt geometry: {exc}")
         return pre_opt.molecule, pre_opt
     except Exception as exc:  # noqa: BLE001 — match local _do_run best-effort pre-opt
         _append_log(
@@ -192,6 +325,27 @@ def _run_geometry_opt(
     max_steps = int(options.get("max_steps", 200))
     scf_rescue = bool(options.get("scf_rescue", True))
     _write_progress(staging_dir, "running", "Optimizing geometry", 15.0)
+
+    # M-CLUSTER2 CL2.8 — a job killed by OOM/TIMEOUT can resume close to
+    # where it died on the next resubmission instead of restarting from
+    # nothing. The request's starting geometry is fixed every attempt (the
+    # input XYZ never changes), so unlike pes_scan's own preopt this needs
+    # no idempotency wrinkle.
+    ckpt, resumable = _begin_worker_checkpoint(
+        molecule,
+        calc_type="geometry_opt",
+        method=request.method,
+        basis=request.basis,
+        staging_dir=staging_dir,
+        log_stream=log_stream,
+    )
+    if resumable:
+        _append_log(
+            staging_dir,
+            "[checkpoint] Resuming geometry optimization from a previous "
+            "attempt's checkpoint.",
+        )
+
     return optimize_geometry(
         molecule=molecule,
         method=request.method,
@@ -201,6 +355,8 @@ def _run_geometry_opt(
         progress_stream=log_stream,
         status_label="SLURM geometry optimization",
         scf_rescue=scf_rescue,
+        checkpoint=ckpt,
+        resume=resumable,
     )
 
 
@@ -293,6 +449,26 @@ def _run_pes_scan(request: CalculationRequest, staging_dir: Path, log_stream) ->
         stage_label="PES scan",
         write_preopt_trajectory=False,
     )
+
+    # M-CLUSTER2 CL2.8 — most of a pes_scan's cost is its N independent scan
+    # points; a killed run at, say, point 20 of 25 now only has 5 left to
+    # redo on resubmission, instead of all 25.
+    ckpt, resumable = _begin_worker_checkpoint(
+        molecule,
+        calc_type="pes_scan",
+        method=request.method,
+        basis=request.basis,
+        staging_dir=staging_dir,
+        log_stream=log_stream,
+    )
+    if resumable:
+        n_points = len(ckpt.completed_points())
+        _append_log(
+            staging_dir,
+            "[checkpoint] Resuming PES scan from a previous attempt's "
+            f"checkpoint ({n_points} point(s) already computed).",
+        )
+
     return run_pes_scan(
         molecule=molecule,
         method=request.method,
@@ -307,6 +483,8 @@ def _run_pes_scan(request: CalculationRequest, staging_dir: Path, log_stream) ->
         max_opt_steps=int(options.get("max_opt_steps", 100)),
         progress_stream=log_stream,
         scf_rescue=bool(options.get("scf_rescue", True)),
+        checkpoint=ckpt,
+        resume=resumable,
     )
 
 
