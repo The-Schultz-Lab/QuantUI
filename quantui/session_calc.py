@@ -55,6 +55,11 @@ class SessionResult:
         method: Calculation method used (e.g. ``'RHF'``, ``'UHF'``).
         basis: Basis set used (e.g. ``'6-31G'``, ``'STO-3G'``).
         formula: Hill-notation molecular formula of the input molecule.
+        scf_rescue_stage: Which SCF-rescue stage (if any) produced this
+            result — ``"none"`` (converged on the first try, or rescue was
+            disabled), ``"bootstrap"``, ``"level_shift"``, or ``"failed"``
+            (both stages tried, still not converged). See
+            :mod:`quantui.scf_robust`.
     """
 
     energy_hartree: float
@@ -97,6 +102,11 @@ class SessionResult:
     mo_coeff: Optional[Any] = None  # np.ndarray (n_ao, n_mo) or (2, n_ao, n_mo) UHF
     pyscf_mol_atom: Optional[Any] = None  # list of (symbol, [x,y,z]) tuples (Angstrom)
     pyscf_mol_basis: Optional[str] = None  # basis set string for cube generation
+    # SCF-rescue provenance (M-SCF-ROBUST SCFR.5) — one of
+    # quantui.scf_robust.SCF_RESCUE_{NONE,BOOTSTRAP,LEVEL_SHIFT,FAILED}. A
+    # result that silently benefited from a rescue should say so, not read
+    # like an ordinary convergence.
+    scf_rescue_stage: str = "none"
 
     @property
     def energy_ev(self) -> float:
@@ -220,6 +230,7 @@ def run_in_session(
     solvent: Optional[str] = None,
     checkpoint: Optional[Any] = None,
     warm_start: bool = True,
+    scf_rescue: bool = True,
 ) -> SessionResult:
     """
     Run a quantum chemistry calculation in the current kernel using PySCF.
@@ -255,6 +266,11 @@ def run_in_session(
             **geometry may differ**, since a density from a nearby geometry is
             a good guess (that is exactly what a geometry optimization relies
             on internally). Ignored when no such chkfile exists.
+        scf_rescue: Whether to automatically retry a non-converged SCF
+            through the shared rescue helper (M-SCF-ROBUST, see
+            :mod:`quantui.scf_robust`) — same-basis bootstrap, then a
+            level-shift fallback. Default ``True``; a batch/reproducibility
+            caller can pass ``False`` to see the plain PySCF result as-is.
 
     Returns:
         :class:`SessionResult` containing energy, HOMO-LUMO gap, convergence
@@ -294,6 +310,7 @@ def run_in_session(
             solvent=solvent,
             checkpoint=checkpoint,
             warm_start=warm_start,
+            scf_rescue=scf_rescue,
             _dft=dft,
             _gto=gto,
             _scf=scf,
@@ -386,6 +403,7 @@ def _run_session_calc_body(
     solvent: Optional[str],
     checkpoint: Optional[Any] = None,
     warm_start: bool = True,
+    scf_rescue: bool = True,
     _dft: Any,
     _gto: Any,
     _scf: Any,
@@ -545,10 +563,19 @@ def _run_session_calc_body(
     )
 
     # --- Run SCF ---
+    # Every attempt goes through run_scf_with_rescue (M-SCF-ROBUST) instead of
+    # a bare mf.kernel() — a non-converged result is automatically retried
+    # through a same-basis bootstrap, then a level-shift fallback, before
+    # being reported as-is. A calculation that converges on the first try is
+    # completely unaffected (zero extra SCF passes).
+    from .scf_robust import run_scf_with_rescue
+
     emit_status(stream, "Running SCF…")
     if _dm0 is not None:
         try:
-            energy_hartree = float(mf.kernel(dm0=_dm0))
+            energy_hartree = float(
+                run_scf_with_rescue(mf, dm0=_dm0, rescue=scf_rescue, stream=stream)
+            )
         except Exception as warm_exc:
             # A warm start is an optimisation, not a requirement (M-CHECKPOINT
             # CHK.1) — a warm-start-specific failure (a GPU-migrated mean-field
@@ -564,7 +591,9 @@ def _run_session_calc_body(
             _dm0 = None
     if _dm0 is None:
         try:
-            energy_hartree = float(mf.kernel())
+            energy_hartree = float(
+                run_scf_with_rescue(mf, rescue=scf_rescue, stream=stream)
+            )
         except Exception as exc:
             raise RuntimeError(
                 f"PySCF calculation failed for {molecule.get_formula()} "
@@ -791,4 +820,5 @@ def _run_session_calc_body(
         mo_coeff=_mo_coeff_arr,
         pyscf_mol_atom=_pyscf_mol_atom,
         pyscf_mol_basis=_pyscf_mol_basis,
+        scf_rescue_stage=getattr(mf, "scf_rescue_stage", "none"),
     )

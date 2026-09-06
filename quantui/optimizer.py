@@ -97,6 +97,7 @@ try:
             progress_stream=None,
             status_label: str = "Optimizing geometry",
             expected_steps=None,
+            scf_rescue: bool = True,
             **kwargs,
         ) -> None:
             super().__init__(**kwargs)
@@ -104,6 +105,10 @@ try:
             self.basis = basis
             self.charge = charge
             self.spin = spin
+            # M-SCF-ROBUST — whether each step's SCF goes through the shared
+            # rescue helper on non-convergence (default on; a batch caller
+            # can disable it via CalculationRequest.options).
+            self.scf_rescue = scf_rescue
             # Cooperative-cancel predicate; checked per step + wired into
             # the per-step SCF callback (the SCF runs silent here, so the
             # stream-based cancel can't see it).
@@ -217,7 +222,10 @@ try:
                 )
 
             attach_scf_cancel_callback(mf, self.cancel_check, progress_cb=_scf_progress)
-            mf.kernel()
+
+            from .scf_robust import run_scf_with_rescue
+
+            run_scf_with_rescue(mf, rescue=self.scf_rescue, stream=self.progress_stream)
 
             # Save final SCF state for orbital visualization
             self._last_mf = mf
@@ -421,6 +429,7 @@ def optimize_geometry(
     expected_steps: Optional[int] = None,
     checkpoint: Optional[Any] = None,
     resume: bool = False,
+    scf_rescue: bool = True,
 ) -> OptimizationResult:
     """
     Optimize a molecular geometry at the QM level using ASE-BFGS + PySCF.
@@ -460,6 +469,9 @@ def optimize_geometry(
             and BFGS reloads its accumulated Hessian, so the steps already
             taken are not repeated. Ignored (with a note to the progress
             stream) when the checkpoint holds nothing usable.
+        scf_rescue: Whether each step's SCF automatically retries through the
+            shared rescue helper on non-convergence (M-SCF-ROBUST, see
+            :mod:`quantui.scf_robust`). Default ``True``.
 
     Returns:
         :class:`OptimizationResult` containing the optimized molecule,
@@ -564,6 +576,7 @@ def optimize_geometry(
         progress_stream=_stream,
         status_label=status_label,
         expected_steps=expected_steps,
+        scf_rescue=scf_rescue,
     )
 
     # PySCF gradients (called by ASE-BFGS at every

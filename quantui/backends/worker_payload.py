@@ -64,6 +64,10 @@ def session_result_payload(result) -> Dict[str, Any]:
         "method": result.method,
         "basis": result.basis,
         "formula": result.formula,
+        # M-SCF-ROBUST SCFR.5 provenance — "none"/"bootstrap"/"level_shift"/
+        # "failed" (quantui.scf_robust.SCF_RESCUE_*). getattr-guarded so an
+        # older SessionResult (pre-SCFR) still serializes cleanly.
+        "scf_rescue_stage": getattr(result, "scf_rescue_stage", "none"),
     }
 
 

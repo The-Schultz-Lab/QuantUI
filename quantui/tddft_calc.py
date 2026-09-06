@@ -103,6 +103,7 @@ def run_tddft_calc(
     basis: str = "STO-3G",
     nstates: int = 10,
     progress_stream: Optional[IO[str]] = None,
+    scf_rescue: bool = True,
 ) -> TDDFTResult:
     """Run a TD-DFT excited-state calculation to obtain UV-Vis absorption data.
 
@@ -123,6 +124,9 @@ def run_tddft_calc(
         basis: Basis set name.  Default: ``'STO-3G'``.
         nstates: Number of excited states to compute.  Default: 10.
         progress_stream: Optional writable text stream for live PySCF output.
+        scf_rescue: Whether the ground-state SCF automatically retries
+            through the shared rescue helper on non-convergence
+            (M-SCF-ROBUST, see :mod:`quantui.scf_robust`). Default ``True``.
 
     Returns:
         :class:`TDDFTResult` with excitation energies and oscillator strengths.
@@ -169,6 +173,7 @@ def run_tddft_calc(
             basis=basis,
             nstates=nstates,
             progress_stream=progress_stream,
+            scf_rescue=scf_rescue,
             _dft=dft,
             _gto=gto,
             _scf=scf,
@@ -183,6 +188,7 @@ def _run_tddft_calc_body(
     basis: str,
     nstates: int,
     progress_stream: Optional[IO[str]],
+    scf_rescue: bool = True,
     _dft: Any,
     _gto: Any,
     _scf: Any,
@@ -245,8 +251,12 @@ def _run_tddft_calc_body(
     attach_scf_cancel_callback(mf, cancel_check_from_stream(stream))
 
     emit_status(stream, "Running SCF (ground state)…")
+    from .scf_robust import run_scf_with_rescue
+
     try:
-        energy_hartree = float(mf.kernel())
+        energy_hartree = float(
+            run_scf_with_rescue(mf, rescue=scf_rescue, stream=stream)
+        )
     except Exception as exc:
         raise RuntimeError(
             f"SCF failed for {molecule.get_formula()} ({method}/{basis}): {exc}"

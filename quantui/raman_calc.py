@@ -150,6 +150,7 @@ def _cpu_raman_activities_fd(
     stream: IO[str],
     status: Callable[[str], None],
     atom_str: str | None = None,
+    scf_rescue: bool = True,
 ) -> List[float]:
     """CPU Raman via pyscf-properties polarizability + geometry FD."""
     import os
@@ -185,7 +186,9 @@ def _cpu_raman_activities_fd(
         _mf_d.stdout = stream
         _mf_d, _ = _try_density_fit(_mf_d, enabled=density_fit_used)
         _mf_d, _, _ = _try_to_gpu_inner(_mf_d, "RHF")
-        _mf_d.kernel(dm0=dm0)
+        from .scf_robust import run_scf_with_rescue
+
+        run_scf_with_rescue(_mf_d, dm0=dm0, rescue=scf_rescue)
         alpha = pol_mod.polarizability(pol_mod.Polarizability(_mf_d))
         _done += 1
         status(
@@ -356,6 +359,7 @@ def compute_raman_activities(
     status: Callable[[str], None],
     hessian: Any = None,
     atom_str: str | None = None,
+    scf_rescue: bool = True,
 ) -> List[float]:
     """Compute static Raman activities (Å⁴/amu) per normal mode.
 
@@ -396,6 +400,7 @@ def compute_raman_activities(
             stream=stream,
             status=status,
             atom_str=atom_str,
+            scf_rescue=scf_rescue,
         )
     except ImportError as exc:
         logger.warning("pyscf-properties polarizability unavailable: %s", exc)

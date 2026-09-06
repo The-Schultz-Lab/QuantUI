@@ -66,6 +66,43 @@ def test_no_bare_py3dmol_view():
     )
 
 
+def test_no_bare_scf_kernel_outside_rescue_helper():
+    """Every SCF-object ``.kernel()`` call must go through the shared
+    M-SCF-ROBUST rescue helper (:func:`quantui.scf_robust.run_scf_with_rescue`)
+    instead of calling ``mf.kernel(...)`` directly — a bare kernel call has no
+    rescue for a marginal/unstable SCF (the exact failure mode that broke a
+    real class deployment; see quantui/scf_robust.py's module docstring and
+    QuantUI-development-tracking/TODO/roadmaps/52-....md).
+
+    Excludes:
+      - ``scf_robust.py`` itself (the shared helper's own kernel() calls —
+        the whole point of this module).
+      - ``config.py`` (a string TEMPLATE for a standalone script students
+        download and run outside QuantUI — the "mf.kernel()" text there,
+        including its own embedded rescue helper, is generated-script
+        content, not a live call in this process).
+    """
+    pattern = re.compile(r"\b(?:mf|_mf_d|mf_d)\.kernel\(")
+    hits = []
+    for path in SRC.rglob("*.py"):
+        if path.name in ("scf_robust.py", "config.py"):
+            continue
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            code_part = line.split("#", 1)[0]  # ignore trailing comments
+            stripped = line.strip()
+            # Skip prose lines (docstrings/comments referencing "mf.kernel()"
+            # by name) — a real call is never inside backticks or a comment.
+            if "``" in line or stripped.startswith(("#", '"', "'")):
+                continue
+            if pattern.search(code_part):
+                hits.append(f"{path.relative_to(SRC.parent)}:{i}: {line.strip()}")
+    assert not hits, (
+        "Bare SCF .kernel() call found outside the shared rescue helper — "
+        "route through quantui.scf_robust.run_scf_with_rescue instead:\n"
+        + "\n".join(hits)
+    )
+
+
 def test_no_bare_except_pass():
     hits = _grep(r"^\s*except\s*(\(\s*\))?\s*:\s*(pass\s*)?$")
     assert not hits, "Bare except/pass detected (swallows all errors):\n" + "\n".join(

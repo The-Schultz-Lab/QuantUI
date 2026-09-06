@@ -598,6 +598,40 @@ from pathlib import Path
 from pyscf import gto, scf, dft
 import numpy as np
 
+
+def _run_scf_with_rescue(mf):
+    # Standalone copy of QuantUI's shared SCF-rescue helper
+    # (quantui.scf_robust.run_scf_with_rescue) -- no QuantUI import here,
+    # this script only depends on pyscf/numpy. Retries a non-converged SCF
+    # via a same-basis bootstrap density, then a level-shift fallback,
+    # before reporting the unconverged result as-is. A calculation that
+    # converges on the first attempt is unaffected.
+    energy = mf.kernel()
+    if mf.converged:
+        return energy
+    print("SCF did not converge on first attempt -- retrying with a "
+          "same-basis HF/UHF bootstrap density.")
+    bootstrap = scf.UHF(mf.mol) if mf.mol.spin != 0 else scf.RHF(mf.mol)
+    bootstrap.verbose = 0
+    bootstrap.kernel()
+    energy = mf.kernel(dm0=bootstrap.make_rdm1())
+    if mf.converged:
+        print("Bootstrap rescue succeeded.")
+        return energy
+    print("Bootstrap alone did not converge -- retrying with "
+          "level_shift=0.3, init_guess='atom', max_cycle=100.")
+    mf.level_shift = 0.3
+    mf.init_guess = 'atom'
+    mf.max_cycle = max(mf.max_cycle, 100)
+    energy = mf.kernel()
+    if mf.converged:
+        print("Level-shift rescue succeeded.")
+    else:
+        print("WARNING: still not converged after both rescue stages. "
+              "Reporting the unconverged result as-is.")
+    return energy
+
+
 def main():
     # Define molecule
     mol = gto.Mole()
@@ -655,7 +689,7 @@ def main():
                         "running {{method}} without D3 dispersion."
                     )
 
-        energy = mf.kernel()
+        energy = _run_scf_with_rescue(mf)
 
         if mf.converged:
             print()

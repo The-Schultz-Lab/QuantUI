@@ -95,7 +95,9 @@ def run_displaced_polarizability(coords_bohr_flat) -> list[list[float]]:
         mf = scf.UHF(mol) if dm0_is_unrestricted else scf.RHF(mol)
     mf.verbose = 0
     mf, _ = _try_density_fit(mf, enabled=bool(state.get("density_fit_used")))
-    mf.kernel(dm0=dm0)
+    from .scf_robust import run_scf_with_rescue
+
+    run_scf_with_rescue(mf, dm0=dm0)
 
     pol_mod = _polarizability_module(mol, dm0_is_unrestricted)
     alpha = np.asarray(pol_mod.polarizability(pol_mod.Polarizability(mf)), dtype=float)

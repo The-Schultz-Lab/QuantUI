@@ -83,6 +83,7 @@ def _maybe_run_preopt(
 
     from quantui.optimizer import optimize_geometry
 
+    scf_rescue = bool(options.get("scf_rescue", True))
     _append_log(
         staging_dir,
         f"\n── Geometry optimization (before {stage_label}) ──",
@@ -100,6 +101,7 @@ def _maybe_run_preopt(
             basis=request.basis,
             progress_stream=log_stream,
             status_label=f"SLURM pre-opt before {stage_label}",
+            scf_rescue=scf_rescue,
         )
         conv = "converged" if pre_opt.converged else "did NOT fully converge"
         energy = (
@@ -165,6 +167,8 @@ def _run_single_point(
     from quantui.session_calc import run_in_session
 
     molecule = molecule_from_request(request)
+    options = request.options or {}
+    scf_rescue = bool(options.get("scf_rescue", True))
     _write_progress(staging_dir, "running", "Running single-point SCF", 20.0)
     return run_in_session(
         molecule=molecule,
@@ -172,6 +176,7 @@ def _run_single_point(
         basis=request.basis,
         progress_stream=log_stream,
         solvent=request.solvent,
+        scf_rescue=scf_rescue,
     )
 
 
@@ -185,6 +190,7 @@ def _run_geometry_opt(
     options = request.options or {}
     fmax = float(options.get("fmax", 0.05))
     max_steps = int(options.get("max_steps", 200))
+    scf_rescue = bool(options.get("scf_rescue", True))
     _write_progress(staging_dir, "running", "Optimizing geometry", 15.0)
     return optimize_geometry(
         molecule=molecule,
@@ -194,6 +200,7 @@ def _run_geometry_opt(
         steps=max_steps,
         progress_stream=log_stream,
         status_label="SLURM geometry optimization",
+        scf_rescue=scf_rescue,
     )
 
 
@@ -212,12 +219,15 @@ def _run_frequency(
         stage_label="frequency analysis",
         write_preopt_trajectory=True,
     )
+    options = request.options or {}
+    scf_rescue = bool(options.get("scf_rescue", True))
     _write_progress(staging_dir, "running", "Running frequency analysis", 15.0)
     result = run_freq_calc(
         molecule=molecule,
         method=request.method,
         basis=request.basis,
         progress_stream=log_stream,
+        scf_rescue=scf_rescue,
     )
     return result, molecule
 
@@ -237,6 +247,7 @@ def _run_tddft(request: CalculationRequest, staging_dir: Path, log_stream) -> An
     )
     options = request.options or {}
     nstates = int(options.get("nstates", 10))
+    scf_rescue = bool(options.get("scf_rescue", True))
     _write_progress(staging_dir, "running", "Running TD-DFT excited states", 15.0)
     return run_tddft_calc(
         molecule=molecule,
@@ -244,6 +255,7 @@ def _run_tddft(request: CalculationRequest, staging_dir: Path, log_stream) -> An
         basis=request.basis,
         nstates=nstates,
         progress_stream=log_stream,
+        scf_rescue=scf_rescue,
     )
 
 
@@ -252,12 +264,15 @@ def _run_nmr(request: CalculationRequest, staging_dir: Path, log_stream) -> Any:
 
     _log_seed_context(request, staging_dir)
     molecule = molecule_from_request(request)
+    options = request.options or {}
+    scf_rescue = bool(options.get("scf_rescue", True))
     _write_progress(staging_dir, "running", "Running NMR shielding (GIAO)", 15.0)
     return run_nmr_calc(
         molecule=molecule,
         method=request.method,
         basis=request.basis,
         progress_stream=log_stream,
+        scf_rescue=scf_rescue,
     )
 
 
@@ -291,6 +306,7 @@ def _run_pes_scan(request: CalculationRequest, staging_dir: Path, log_stream) ->
         fmax=float(options.get("fmax", 0.05)),
         max_opt_steps=int(options.get("max_opt_steps", 100)),
         progress_stream=log_stream,
+        scf_rescue=bool(options.get("scf_rescue", True)),
     )
 
 
@@ -311,6 +327,7 @@ def _run_reorganization_energy(
         steps=int(options.get("max_steps", 200)),
         progress_stream=log_stream,
         solvent=request.solvent,
+        scf_rescue=bool(options.get("scf_rescue", True)),
     )
 
 
