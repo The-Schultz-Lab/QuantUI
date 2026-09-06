@@ -366,6 +366,11 @@ def save_result(
         ),
         "mulliken_charges": _opt_float_list(getattr(result, "mulliken_charges", None)),
         "atom_symbols": _opt_str_list(getattr(result, "atom_symbols", None)),
+        # M-UX2 UXP2.10 — the actual PySCF class dispatched (RHF/UHF/RKS/
+        # UKS), so a saved/History result can also confirm which one ran.
+        # ``None`` for a calc type that doesn't set it (geometry_opt,
+        # pes_scan, reorganization_energy) or an older saved result.
+        "scf_variant": getattr(result, "scf_variant", None) or None,
         "spectra": spectra if spectra is not None else {},
     }
     _geom = geometry_payload_for_result(result, molecule=molecule)
@@ -457,6 +462,67 @@ def save_orbitals(result_dir: Path, result: object) -> None:
         (result_dir / "orbitals_meta.json").write_text(json.dumps(meta))
 
 
+def _write_molden_orbitals(
+    _molden,
+    mol,
+    dest: Path,
+    *,
+    mo_coeff,
+    mo_energy_hartree,
+    mo_occ,
+) -> None:
+    """Write the ``[Atoms]``/``[GTO]``/``[MO]`` sections for one Molden file.
+
+    M-ISSUES ISSUE.11 fix. The previous implementation called
+    ``pyscf.tools.molden.from_mo(mol, dest, mo_coeff, ene=mo_energy_hartree,
+    occ=mo_occ)`` directly — for UHF/UKS, ``mo_coeff``/``mo_energy_hartree``/
+    ``mo_occ`` are a **pair** of arrays (alpha, beta), shape ``(2, nao,
+    nmo)``, and ``from_mo``'s single-spin-channel code path (default
+    ``spin='Alpha'``) doesn't handle that shape — it raises ``IndexError``
+    deep inside ``orbital_coeff``. The caller's bare ``except Exception:
+    return None`` swallowed it, but ``from_mo`` had already opened the file
+    and written ``[Atoms]``/``[GTO]`` before reaching the part that raises,
+    so the truncated file (no ``[MO]`` section) looked like a normal, if
+    oddly short, Molden file rather than an obvious failure — 5 of 6
+    hexaaquametal(II) complexes in CHEM-3200's Lab 2 came back this way.
+
+    ``pyscf.tools.molden.from_scf(mf, path)`` (via ``dump_scf``) handles
+    RHF *and* UHF correctly, but needs the live ``mf`` object, which this
+    module never has — only the already-extracted raw arrays. This
+    replicates ``dump_scf``'s exact UHF pattern instead: open the file
+    *once*, write the header once, then call ``orbital_coeff`` once per
+    spin channel (``spin='Alpha'`` on index 0, ``spin='Beta'`` on index 1),
+    appending to the same open file handle — calling the module-level
+    ``from_mo``/``header`` entry points twice would each re-open the file
+    in ``'w'`` mode and clobber the previous write instead of appending.
+    """
+    import numpy as _np
+
+    arr = _np.asarray(mo_coeff)
+    with open(dest, "w", encoding="utf-8") as fh:
+        _molden.header(mol, fh)
+        if arr.ndim == 3:
+            # UHF/UKS/ROHF-shaped: (2, nao, nmo) — alpha then beta.
+            _molden.orbital_coeff(
+                mol,
+                fh,
+                mo_coeff[0],
+                spin="Alpha",
+                ene=mo_energy_hartree[0],
+                occ=mo_occ[0],
+            )
+            _molden.orbital_coeff(
+                mol,
+                fh,
+                mo_coeff[1],
+                spin="Beta",
+                ene=mo_energy_hartree[1],
+                occ=mo_occ[1],
+            )
+        else:
+            _molden.orbital_coeff(mol, fh, mo_coeff, ene=mo_energy_hartree, occ=mo_occ)
+
+
 def save_molden(
     result_dir: Path,
     *,
@@ -524,12 +590,13 @@ def save_molden(
     dest = result_dir / filename
     try:
         if has_mo:
-            _molden.from_mo(
+            _write_molden_orbitals(
+                _molden,
                 mol,
-                str(dest),
-                mo_coeff,
-                ene=mo_energy_hartree,
-                occ=mo_occ,
+                dest,
+                mo_coeff=mo_coeff,
+                mo_energy_hartree=mo_energy_hartree,
+                mo_occ=mo_occ,
             )
         else:
             # Structure-only header; vibration blocks appended below.

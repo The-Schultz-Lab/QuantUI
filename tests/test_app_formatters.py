@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from quantui.app_formatters import (
+    _method_basis_label,
     format_freq_result,
     format_nmr_result,
     format_opt_result,
@@ -361,3 +362,159 @@ def test_format_past_result_hf_dft_has_no_breakdown():
     html = format_past_result(data)
     assert "correlation" not in html
     assert "HF reference" not in html
+
+
+# ---------------------------------------------------------------------------
+# M-UX2 UXP2.10 — results panel labels RKS vs UKS
+# ---------------------------------------------------------------------------
+
+
+class TestMethodBasisLabelHelper:
+    def test_suffix_shown_when_variant_differs_from_method(self):
+        assert _method_basis_label("B3LYP", "def2-SVP", "UKS") == (
+            "B3LYP/def2-SVP (UKS)"
+        )
+        assert _method_basis_label("B3LYP", "def2-SVP", "RKS") == (
+            "B3LYP/def2-SVP (RKS)"
+        )
+
+    def test_no_suffix_when_variant_matches_method_case_insensitively(self):
+        assert _method_basis_label("RHF", "STO-3G", "RHF") == "RHF/STO-3G"
+        assert _method_basis_label("rhf", "STO-3G", "RHF") == "rhf/STO-3G"
+
+    def test_no_suffix_when_variant_missing(self):
+        assert _method_basis_label("B3LYP", "def2-SVP", None) == "B3LYP/def2-SVP"
+        assert _method_basis_label("B3LYP", "def2-SVP", "") == "B3LYP/def2-SVP"
+
+
+def test_format_result_labels_uks_for_open_shell_dft():
+    result = SimpleNamespace(
+        converged=True,
+        homo_lumo_gap_ev=None,
+        energy_hartree=-1600.0,
+        energy_ev=-43530.0,
+        n_iterations=30,
+        formula="Mn(H2O)6",
+        method="B3LYP",
+        basis="def2-SVP",
+        scf_variant="UKS",
+    )
+    html = format_result(result)
+    assert "B3LYP/def2-SVP (UKS)" in html
+
+
+def test_format_result_no_uks_rks_label_for_closed_shell():
+    result = SimpleNamespace(
+        converged=True,
+        homo_lumo_gap_ev=None,
+        energy_hartree=-1600.0,
+        energy_ev=-43530.0,
+        n_iterations=10,
+        formula="Zn(H2O)6",
+        method="B3LYP",
+        basis="def2-SVP",
+        scf_variant="RKS",
+    )
+    html = format_result(result)
+    assert "(RKS)" in html
+
+
+def test_format_result_no_label_when_scf_variant_absent():
+    """Older SessionResult objects (pre-UXP2.10) simply omit the suffix."""
+    result = SimpleNamespace(
+        converged=True,
+        homo_lumo_gap_ev=None,
+        energy_hartree=-76.0,
+        energy_ev=-2068.0,
+        n_iterations=10,
+        formula="H2O",
+        method="B3LYP",
+        basis="STO-3G",
+    )
+    html = format_result(result)
+    assert "(RKS)" not in html and "(UKS)" not in html
+
+
+def test_format_freq_result_labels_uks():
+    result = _FreqStub(
+        converged=True,
+        energy_hartree=-1600.0,
+        frequencies_cm1=[100.0, 200.0],
+        zpve_hartree=0.01,
+        thermo=None,
+        formula="Fe(H2O)6",
+        method="B3LYP",
+        basis="def2-SVP",
+        scf_variant="UKS",
+    )
+    html = format_freq_result(result)
+    assert "(UKS)" in html
+
+
+def test_format_tddft_result_labels_uks():
+    result = _TDDFTStub(
+        converged=True,
+        energy_hartree=-1600.0,
+        excitation_energies_ev=[3.0],
+        oscillator_strengths=[0.1],
+        formula="Co(H2O)6",
+        method="B3LYP",
+        basis="def2-SVP",
+        scf_variant="UKS",
+    )
+    html = format_tddft_result(result)
+    assert "(UKS)" in html
+
+
+def test_format_nmr_result_labels_uks():
+    result = _NMRStub(
+        converged=True,
+        atom_symbols=["C", "H", "H", "H", "H"],
+        chemical_shifts_ppm={},
+        shielding_iso_ppm=[100.0, 30.0, 30.0, 30.0, 30.0],
+        reference_compound="TMS",
+        reference_key="B3LYP/6-31G*",
+        is_fallback_reference=False,
+        formula="CH4",
+        method="B3LYP",
+        basis="6-31G*",
+        scf_variant="UKS",
+    )
+    html = format_nmr_result(result)
+    assert "(UKS)" in html
+
+
+def test_format_past_result_labels_uks():
+    data = {
+        "calc_type": "single_point",
+        "converged": True,
+        "homo_lumo_gap_ev": 5.0,
+        "energy_hartree": -1600.0,
+        "energy_ev": -43530.0,
+        "n_iterations": 40,
+        "timestamp": "2026-09-02_10-00-00-000001",
+        "formula": "Mn(H2O)6",
+        "method": "B3LYP",
+        "basis": "def2-SVP",
+        "scf_variant": "UKS",
+    }
+    html = format_past_result(data)
+    assert "(UKS)" in html
+
+
+def test_format_past_result_no_label_for_older_saved_result():
+    data = {
+        "calc_type": "single_point",
+        "converged": True,
+        "homo_lumo_gap_ev": 5.0,
+        "energy_hartree": -76.0,
+        "energy_ev": -2068.0,
+        "n_iterations": 10,
+        "timestamp": "2026-01-01_00-00-00-000001",
+        "formula": "H2O",
+        "method": "B3LYP",
+        "basis": "STO-3G",
+        # no "scf_variant" key at all — pre-UXP2.10 saved result
+    }
+    html = format_past_result(data)
+    assert "(RKS)" not in html and "(UKS)" not in html

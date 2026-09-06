@@ -67,6 +67,17 @@ class TestRunTddftCalcBasic:
         assert result.formula == "H2O"
         assert len(result.excitation_energies_ev) <= 2
 
+    @pyscf_only
+    @pytest.mark.slow
+    def test_scf_variant_reports_rks_for_closed_shell_dft(self):
+        """M-UX2 UXP2.10 — confirms the wiring, mirroring the identical
+        RHF/UHF/RKS/UKS dispatch already thoroughly tested in
+        test_session_calc.py::TestScfVariantProvenance."""
+        from quantui.tddft_calc import run_tddft_calc
+
+        result = run_tddft_calc(_water(), method="B3LYP", basis="STO-3G", nstates=2)
+        assert result.scf_variant == "RKS"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

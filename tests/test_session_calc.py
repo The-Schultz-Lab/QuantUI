@@ -340,6 +340,58 @@ class TestRunInSessionBasic:
         assert result.n_iterations > 0
 
 
+class TestScfVariantProvenance:
+    """M-UX2 UXP2.10 — results confirm which SCF variant actually ran.
+
+    The restricted/unrestricted dispatch is fully automatic from
+    multiplicity, never a user toggle — but nothing used to record which
+    one ran. A student running Lab 2's six-metal series (5/6 open-shell,
+    B3LYP) asked the instructor directly whether QuantUI even supported
+    UKS. See GOTCHAS.md.
+    """
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_rhf_reports_rhf_variant(self):
+        from quantui.session_calc import run_in_session
+
+        result = run_in_session(_h2(), method="RHF", basis="STO-3G", verbose=0)
+        assert result.scf_variant == "RHF"
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_uhf_reports_uhf_variant(self):
+        from quantui.session_calc import run_in_session
+
+        mol = Molecule(
+            ["O", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 0.96]], charge=0, multiplicity=2
+        )
+        result = run_in_session(mol, method="UHF", basis="STO-3G", verbose=0)
+        assert result.scf_variant == "UHF"
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_closed_shell_dft_reports_rks_variant(self):
+        from quantui.session_calc import run_in_session
+
+        result = run_in_session(_h2(), method="B3LYP", basis="STO-3G", verbose=0)
+        assert result.scf_variant == "RKS"
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_open_shell_dft_reports_uks_variant(self):
+        """The exact confusion the gotcha describes: B3LYP on an open-shell
+        molecule silently dispatches to UKS with no prior signal anywhere.
+        """
+        from quantui.session_calc import run_in_session
+
+        mol = Molecule(
+            ["O", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 0.96]], charge=0, multiplicity=2
+        )
+        result = run_in_session(mol, method="B3LYP", basis="STO-3G", verbose=0)
+        assert result.scf_variant == "UKS"
+
+
 class TestRunInSessionOutputStream:
     """Verify that PySCF output is routed to the progress_stream."""
 

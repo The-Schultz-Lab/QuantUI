@@ -111,6 +111,9 @@ class FreqResult:
     pyscf_mol_atom: Optional[List] = None
     pyscf_mol_basis: Optional[str] = None
     density_fit: bool = False
+    # M-UX2 UXP2.10 — the actual PySCF class dispatched for the reference
+    # SCF (e.g. "RHF", "UHF", "RKS", "UKS"); "" for an older saved result.
+    scf_variant: str = ""
 
     @property
     def energy_ev(self) -> float:
@@ -401,8 +404,10 @@ def _run_freq_calc_body(
     method_upper = method.upper()
     if method_upper == "RHF":
         mf = scf.RHF(mol)
+        scf_variant = type(mf).__name__
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
+        scf_variant = type(mf).__name__
     else:
         # Route through resolve_xc + maybe_apply_d3 so
         # methods like wB97X-D (PySCF rejects "wb97x-d") map to the
@@ -410,6 +415,8 @@ def _run_freq_calc_body(
         from .session_calc import maybe_apply_d3, resolve_xc
 
         mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
+        # M-UX2 UXP2.10 — capture before maybe_apply_d3 can wrap/rename it.
+        scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
         mf = maybe_apply_d3(mf, method, progress_stream=stream)
 
@@ -927,4 +934,5 @@ def _run_freq_calc_body(
         pyscf_mol_atom=pyscf_mol_atom,
         pyscf_mol_basis=basis,
         density_fit=_density_fit_used,
+        scf_variant=scf_variant,
     )

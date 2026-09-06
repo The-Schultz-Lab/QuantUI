@@ -48,6 +48,9 @@ class NMRResult:
     reference_key: str = ""
     is_fallback_reference: bool = False
     density_fit: bool = False
+    # M-UX2 UXP2.10 — the actual PySCF class dispatched for the SCF (e.g.
+    # "RHF", "UHF", "RKS", "UKS"); "" for an older saved result.
+    scf_variant: str = ""
 
     def h_shifts(self) -> List[Tuple[int, float]]:
         """(atom_index, δ ppm) pairs for all H atoms in molecule order."""
@@ -359,14 +362,18 @@ def _run_nmr_calc_body(
     method_upper = method.upper()
     if method_upper == "RHF":
         mf = scf.RHF(mol)
+        scf_variant = type(mf).__name__
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
+        scf_variant = type(mf).__name__
     else:
         # Route through resolve_xc + maybe_apply_d3 so
         # wB97X-D / PBE-D3 work for NMR calcs (was using raw _XC_ALIAS
         # lookup before, which would fail for wB97X-D after the alias
         # change to "wb97x" + external D3).
         mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
+        # M-UX2 UXP2.10 — capture before maybe_apply_d3 can wrap/rename it.
+        scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
         mf = maybe_apply_d3(mf, method, progress_stream=stream)
 
@@ -459,4 +466,5 @@ def _run_nmr_calc_body(
         reference_key=matched_ref_key,
         is_fallback_reference=is_fallback_ref,
         density_fit=density_fit_used,
+        scf_variant=scf_variant,
     )

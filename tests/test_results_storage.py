@@ -119,6 +119,19 @@ class TestSaveResult:
         data = json.loads((saved / "result.json").read_text())
         assert data["spectra"]["ir"]["frequencies_cm1"] == [1000.0, 2000.0]
 
+    def test_scf_variant_persisted(self, tmp_path):
+        """M-UX2 UXP2.10 — a saved result records which SCF variant ran."""
+        saved = save_result(_make_result(scf_variant="UKS"), results_dir=tmp_path)
+        data = json.loads((saved / "result.json").read_text())
+        assert data["scf_variant"] == "UKS"
+
+    def test_scf_variant_null_when_absent(self, tmp_path):
+        """A calc type that never sets scf_variant (e.g. geometry_opt)
+        serializes null, not a missing key or an empty string."""
+        saved = save_result(_make_result(), results_dir=tmp_path)
+        data = json.loads((saved / "result.json").read_text())
+        assert data["scf_variant"] is None
+
     def test_pyscf_log_written_when_provided(self, tmp_path):
         saved = save_result(
             _make_result(),

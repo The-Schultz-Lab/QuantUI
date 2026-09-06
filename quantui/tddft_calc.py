@@ -78,6 +78,10 @@ class TDDFTResult:
     oscillator_strengths: List[float] = field(default_factory=list)
     nstates: int = 10
     density_fit: bool = False
+    # M-UX2 UXP2.10 — the actual PySCF class dispatched for the
+    # ground-state SCF (e.g. "RHF", "UHF", "RKS", "UKS"); "" for an older
+    # saved result.
+    scf_variant: str = ""
 
     @property
     def energy_ev(self) -> float:
@@ -217,14 +221,18 @@ def _run_tddft_calc_body(
 
     if method_upper == "RHF":
         mf = scf.RHF(mol)
+        scf_variant = type(mf).__name__
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
+        scf_variant = type(mf).__name__
     else:
         # Route through resolve_xc + maybe_apply_d3 so
         # methods like wB97X-D (PySCF rejects "wb97x-d") map cleanly.
         from .session_calc import maybe_apply_d3, resolve_xc
 
         mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
+        # M-UX2 UXP2.10 — capture before maybe_apply_d3 can wrap/rename it.
+        scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
         mf = maybe_apply_d3(mf, method, progress_stream=progress_stream)
 
@@ -330,4 +338,5 @@ def _run_tddft_calc_body(
         oscillator_strengths=oscillator_strengths,
         nstates=nstates,
         density_fit=density_fit_used,
+        scf_variant=scf_variant,
     )

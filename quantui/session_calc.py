@@ -60,6 +60,11 @@ class SessionResult:
             disabled), ``"bootstrap"``, ``"level_shift"``, or ``"failed"``
             (both stages tried, still not converged). See
             :mod:`quantui.scf_robust`.
+        scf_variant: The actual PySCF class dispatched (``"RHF"``,
+            ``"UHF"``, ``"ROHF"``, ``"RKS"``, ``"UKS"``) — the
+            restricted/unrestricted choice is automatic from multiplicity,
+            not a user toggle, so this is how a results panel or a saved
+            result confirms which one actually ran (M-UX2 UXP2.10).
     """
 
     energy_hartree: float
@@ -107,6 +112,10 @@ class SessionResult:
     # result that silently benefited from a rescue should say so, not read
     # like an ordinary convergence.
     scf_rescue_stage: str = "none"
+    # M-UX2 UXP2.10 — the actual PySCF class dispatched (e.g. "RHF", "UHF",
+    # "ROHF", "RKS", "UKS"), captured before any density-fit/PCM/GPU wrap.
+    # "" for an older saved result that predates this field.
+    scf_variant: str = ""
 
     @property
     def energy_ev(self) -> float:
@@ -449,8 +458,10 @@ def _run_session_calc_body(
 
     if method_upper == "RHF":
         mf = scf.RHF(mol)
+        scf_variant = type(mf).__name__
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
+        scf_variant = type(mf).__name__
     elif method_upper == "MP2":
         # ``scf.RHF(mol)`` is a factory: for a closed-shell molecule
         # (mol.spin == 0) it returns a true RHF object; for an open-shell
@@ -461,6 +472,7 @@ def _run_session_calc_body(
         # standard, well-defined methods; MP2 is not restricted to
         # closed-shell input here.
         mf = scf.RHF(mol)
+        scf_variant = type(mf).__name__
     elif method_upper in ("CCSD", "CCSD(T)"):
         # Same auto-dispatch as MP2 above: scf.RHF(mol) yields RHF for
         # closed-shell input and ROHF for open-shell input, and
@@ -468,6 +480,7 @@ def _run_session_calc_body(
         # ROHF-based UCCSD. The correlation energy (and optional
         # perturbative-triples correction) is added post-SCF below.
         mf = scf.RHF(mol)
+        scf_variant = type(mf).__name__
     else:
         # DFT: resolve alias then auto-select RKS / UKS. ``resolve_xc``
         # handles the wB97X-D → wb97x + external D3 dispersion mapping
@@ -476,6 +489,16 @@ def _run_session_calc_body(
             mf = dft.RKS(mol)
         else:
             mf = dft.UKS(mol)
+        # M-UX2 UXP2.10 — capture the real dispatched class name ("RKS"/
+        # "UKS") HERE, before ``maybe_apply_d3`` can wrap/rename it (D3's
+        # wrapper class name is not guaranteed to preserve the base class's
+        # ``__name__``). The restricted/unrestricted choice is fully
+        # automatic from multiplicity — correctly so, never a user toggle —
+        # but nothing in the UI used to say which one actually ran; a
+        # student running Lab 2's six-metal series (5/6 open-shell) asked
+        # the instructor directly whether QuantUI even supported UKS. See
+        # GOTCHAS.md.
+        scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
         mf = maybe_apply_d3(mf, method, progress_stream=progress_stream)
 
@@ -821,4 +844,5 @@ def _run_session_calc_body(
         pyscf_mol_atom=_pyscf_mol_atom,
         pyscf_mol_basis=_pyscf_mol_basis,
         scf_rescue_stage=getattr(mf, "scf_rescue_stage", "none"),
+        scf_variant=scf_variant,
     )

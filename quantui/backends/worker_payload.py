@@ -64,10 +64,26 @@ def session_result_payload(result) -> Dict[str, Any]:
         "method": result.method,
         "basis": result.basis,
         "formula": result.formula,
+        # M-ISSUES ISSUE.10 — session_calc.run_in_session() computes these on
+        # every SessionResult, but this function used to drop them before
+        # they ever reached result.json: CHEM-3200's Lab 2 In-Lab Part A and
+        # Postwork Q2 need the metal's Mulliken charge and the total dipole
+        # moment from each single-point batch result, and neither was
+        # recoverable as-written. getattr-guarded so an older SessionResult
+        # (e.g. the GPU-offload path, where mf.mulliken_pop is
+        # NotImplemented and these are already None on the object itself)
+        # still serializes cleanly. See GOTCHAS.md.
+        "mulliken_charges": getattr(result, "mulliken_charges", None),
+        "dipole_moment_debye": getattr(result, "dipole_moment_debye", None),
+        "dipole_vector_debye": getattr(result, "dipole_vector_debye", None),
+        "atom_symbols": getattr(result, "atom_symbols", None),
         # M-SCF-ROBUST SCFR.5 provenance — "none"/"bootstrap"/"level_shift"/
         # "failed" (quantui.scf_robust.SCF_RESCUE_*). getattr-guarded so an
         # older SessionResult (pre-SCFR) still serializes cleanly.
         "scf_rescue_stage": getattr(result, "scf_rescue_stage", "none"),
+        # M-UX2 UXP2.10 — see the other *_result_payload functions' matching
+        # field.
+        "scf_variant": getattr(result, "scf_variant", "") or None,
     }
 
 
@@ -108,6 +124,8 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
         "method": result.method,
         "basis": result.basis,
         "formula": result.formula,
+        # M-UX2 UXP2.10 — see session_result_payload's matching field.
+        "scf_variant": getattr(result, "scf_variant", "") or None,
         "spectra": {
             "ir": {
                 "frequencies_cm1": list(result.frequencies_cm1),
@@ -137,6 +155,8 @@ def tddft_result_payload(result) -> Dict[str, Any]:
         "method": result.method,
         "basis": result.basis,
         "formula": result.formula,
+        # M-UX2 UXP2.10 — see session_result_payload's matching field.
+        "scf_variant": getattr(result, "scf_variant", "") or None,
         "spectra": {
             "uv_vis": {
                 "excitation_energies_ev": list(result.excitation_energies_ev),
@@ -157,6 +177,8 @@ def nmr_result_payload(result) -> Dict[str, Any]:
         "method": result.method,
         "basis": result.basis,
         "formula": result.formula,
+        # M-UX2 UXP2.10 — see session_result_payload's matching field.
+        "scf_variant": getattr(result, "scf_variant", "") or None,
         "spectra": {
             "nmr": {
                 "atom_symbols": list(result.atom_symbols),
