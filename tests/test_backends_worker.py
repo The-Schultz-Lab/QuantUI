@@ -50,6 +50,46 @@ class TestWorker:
         assert outcome.status == "error"
         assert outcome.error["code"] == "UNSUPPORTED_CAPABILITY"
 
+    @pytest.mark.parametrize(
+        "calc_type", ["geometry_opt", "frequency", "tddft", "nmr", "pes_scan"]
+    )
+    def test_solvent_on_unsupported_calc_type_returns_error(self, staging, calc_type):
+        """AUDIT F11 — run_freq_calc/run_tddft_calc/run_nmr_calc/run_pes_scan/
+        optimize_geometry don't accept a solvent argument at all; a
+        solvent set for one of these calc_types must fail the request
+        rather than silently run gas-phase.
+        """
+        data = json.loads((staging / "request.json").read_text())
+        data["calc_type"] = calc_type
+        data["solvent"] = "water"
+        (staging / "request.json").write_text(json.dumps(data))
+
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "error"
+        assert outcome.error["code"] == "UNSUPPORTED_CAPABILITY"
+        assert "solvent" in outcome.error["user_message"].lower()
+
+    @patch("quantui.session_calc.run_in_session")
+    def test_solvent_on_single_point_is_accepted(self, mock_run, staging):
+        """Sanity check: the calc_types that DO support solvent must not be
+        rejected by the new guard."""
+        data = json.loads((staging / "request.json").read_text())
+        data["solvent"] = "water"
+        (staging / "request.json").write_text(json.dumps(data))
+        mock_run.return_value = SimpleNamespace(
+            energy_hartree=-1.12,
+            homo_lumo_gap_ev=10.0,
+            converged=True,
+            n_iterations=5,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2",
+        )
+
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "success"
+        assert mock_run.call_args.kwargs["solvent"] == "water"
+
     @patch("quantui.session_calc.run_in_session")
     def test_single_point_success(self, mock_run, staging):
         mock_run.return_value = SimpleNamespace(

@@ -1265,6 +1265,42 @@ class TestSolventWidgets:
         assert "Ethanol" in html
         assert "PCM" in html
 
+    @pytest.mark.parametrize(
+        "calc_type", ["Frequency", "UV-Vis (TD-DFT)", "NMR Shielding", "PES Scan"]
+    )
+    def test_solvent_disabled_for_unsupported_calc_type(self, calc_type):
+        """AUDIT F11 — run_freq_calc/run_tddft_calc/run_nmr_calc/run_pes_scan
+        don't accept a solvent argument at all, so the checkbox must not be
+        left checkable (and checked) for these — that used to be a
+        silent no-op."""
+        app = QuantUIApp()
+        app.solvent_cb.value = True
+        app.calc_type_dd.value = calc_type
+        assert app.solvent_cb.value is False
+        assert app.solvent_cb.disabled is True
+        # solvent_dd follows solvent_cb via the existing observer.
+        assert app.solvent_dd.layout.display == "none"
+
+    @pytest.mark.parametrize(
+        "calc_type", ["Single Point", "Geometry Opt", "Reorganization Energy"]
+    )
+    def test_solvent_enabled_for_supported_calc_type(self, calc_type):
+        app = QuantUIApp()
+        app.calc_type_dd.value = "Frequency"  # disables it
+        app.calc_type_dd.value = calc_type  # switching back must re-enable
+        assert app.solvent_cb.disabled is False
+
+    def test_solvent_checkbox_re_enables_after_switching_back(self):
+        app = QuantUIApp()
+        app.solvent_cb.value = True
+        app.calc_type_dd.value = "PES Scan"
+        assert app.solvent_cb.disabled is True
+        app.calc_type_dd.value = "Single Point"
+        assert app.solvent_cb.disabled is False
+        # Re-enabling must not silently re-check it — the user unchecked
+        # nothing; the app did, and switching back doesn't restore intent.
+        assert app.solvent_cb.value is False
+
 
 # ---------------------------------------------------------------------------
 # M-CAL — Calibration UI widgets

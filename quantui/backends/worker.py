@@ -49,6 +49,17 @@ logger = logging.getLogger(__name__)
 
 _SUPPORTED_CALC_TYPES = frozenset(CALC_TYPES)
 
+# AUDIT F11 — the science APIs behind these calc types (run_freq_calc,
+# run_tddft_calc, run_nmr_calc, run_pes_scan, optimize_geometry) don't
+# accept a solvent argument at all, so request.solvent used to be silently
+# dropped rather than either applied or rejected. Only these two runners
+# actually thread request.solvent through to a PCM-capable API
+# (session_calc.run_in_session / reorganization_energy.run_reorganization_
+# energy, both real gas+PCM or PCM-single-point implementations — see each
+# runner below and reorganization_energy's own docstring for the
+# gas-phase-optimization + PCM-single-point approximation it documents).
+_SOLVENT_SUPPORTED_CALC_TYPES = frozenset({"single_point", "reorganization_energy"})
+
 
 def _write_progress(
     staging_dir: Path, stage: str, message: str, percent: float
@@ -620,6 +631,27 @@ def run_worker_request(request_path: Path) -> CalculationResult:
         msg = (
             f"Batch worker does not yet support calc_type={calc_type!r}. "
             f"Supported: {', '.join(sorted(_SUPPORTED_CALC_TYPES))}."
+        )
+        _append_log(staging_dir, msg)
+        return _error_result(
+            request,
+            staging_dir,
+            code="UNSUPPORTED_CAPABILITY",
+            message=msg,
+            retryable=False,
+            save_type=calc_type,
+        )
+
+    # AUDIT F11 — a solvent set for a calc_type whose science API doesn't
+    # accept one used to be silently dropped (gas-phase result, solvent
+    # label nowhere). Fail the request instead of running a calculation
+    # the user asked for solvated and got gas-phase.
+    if request.solvent and calc_type not in _SOLVENT_SUPPORTED_CALC_TYPES:
+        msg = (
+            f"solvent={request.solvent!r} was requested for "
+            f"calc_type={calc_type!r}, which does not support PCM solvation "
+            f"(only {', '.join(sorted(_SOLVENT_SUPPORTED_CALC_TYPES))} do). "
+            "Resubmit without a solvent, or use a supported calc_type."
         )
         _append_log(staging_dir, msg)
         return _error_result(
