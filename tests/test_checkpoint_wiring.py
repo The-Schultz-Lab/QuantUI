@@ -104,17 +104,62 @@ class TestCalcModuleSignatures:
         )
 
     def test_app_passes_the_checkpoint_to_every_long_calc(self):
-        """The three calc types that can be interrupted must all receive one."""
+        """The calc types that can be interrupted must all receive one."""
         import quantui.app as A
 
         src = Path(A.__file__).read_text(encoding="utf-8")
-        assert src.count("checkpoint=_ckpt") >= 3
+        assert src.count("checkpoint=_ckpt") >= 4
 
     def test_app_passes_resume_to_the_resumable_calc_types(self):
         import quantui.app as A
 
         src = Path(A.__file__).read_text(encoding="utf-8")
-        assert src.count("resume=_resume") >= 2
+        assert src.count("resume=_resume") >= 3
+
+    def test_frequency_run_receives_the_actual_checkpoint_and_resume(self):
+        """AUDIT F16 — a source-text occurrence count can pass even if
+        Frequency's own call site never grew ``checkpoint=_ckpt`` — the
+        app opened ``_ckpt``/resolved ``_resume`` but never passed either
+        into ``run_freq_calc``. Drives the real dispatch (mocking only
+        ``run_freq_calc`` itself) and inspects the actual call arguments.
+        """
+        from unittest.mock import patch
+
+        from quantui.app import QuantUIApp
+        from quantui.freq_calc import FreqResult
+        from quantui.molecule import Molecule
+
+        app = QuantUIApp()
+        app._set_molecule(
+            Molecule(
+                ["O", "H", "H"],
+                [[0.0, 0.0, 0.0], [0.757, 0.587, 0.0], [-0.757, 0.587, 0.0]],
+            )
+        )
+        app.calc_type_dd.value = "Frequency"
+        mock_result = FreqResult(
+            energy_hartree=-76.0,
+            homo_lumo_gap_ev=10.0,
+            converged=True,
+            n_iterations=8,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2O",
+            frequencies_cm1=[1600.0, 3600.0, 3800.0],
+            ir_intensities=[1.0, 2.0, 3.0],
+            raman_activities=[],
+            zpve_hartree=0.02,
+        )
+        with patch(
+            "quantui.freq_calc.run_freq_calc", return_value=mock_result
+        ) as mock_run:
+            with patch("quantui.save_result"):
+                app._do_run()
+
+        mock_run.assert_called_once()
+        _, kwargs = mock_run.call_args
+        assert kwargs.get("checkpoint") is not None
+        assert "resume" in kwargs
 
 
 # ══ Warm-start selection ═════════════════════════════════════════════════════

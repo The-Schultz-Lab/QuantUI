@@ -5966,6 +5966,15 @@ class QuantUIApp:
                     method=self.method_dd.value,
                     basis=self.basis_dd.value,
                     progress_stream=log,  # type: ignore[arg-type]
+                    # AUDIT F16 — the app opens _ckpt and resolves _resume
+                    # above (used by Geometry Opt / PES Scan / Reorganization
+                    # Energy), but never passed either into interactive
+                    # Frequency runs, so expensive IR/Raman displacement
+                    # checkpointing (which freq_calc.py supports and the
+                    # batch route already uses) could never be banked or
+                    # resumed here.
+                    checkpoint=_ckpt,
+                    resume=_resume,
                 )
                 result_html = self._format_freq_result(result)
                 _displacements_serialized = None
