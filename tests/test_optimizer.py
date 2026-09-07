@@ -401,6 +401,48 @@ class TestOptimizeGeometryEnergyAndConvergence:
         assert result.n_steps <= 1
 
 
+class TestOptimizeGeometryRejectsUnconvergedScf:
+    """AUDIT F09 — BFGS must not accept forces from an unconverged SCF."""
+
+    # Not @pyscf_only: that marker gates on ase.calculators.pyscf.PySCF,
+    # which QuantUI's own _QuantUIPySCFCalc doesn't need (AUDIT F22) — this
+    # test only needs ASE + PySCF themselves, which are both available here.
+    @pytest.mark.skipif(
+        not (ASE_AVAILABLE and _PYSCF_AVAILABLE),
+        reason="ase and pyscf not both installed (Linux/WSL only)",
+    )
+    @pytest.mark.slow
+    def test_unconverged_scf_raises_instead_of_optimizing(self, monkeypatch):
+        """Controlled reproduction: start H2 near its optimized geometry and
+        limit every real SCF to one cycle with rescue disabled (matching
+        the audit's reproduction). Before the fix, this silently reported
+        converged=True after a few steps despite every SCF evaluation being
+        unconverged; it must now raise instead.
+        """
+        import pyscf.scf as pyscf_scf
+
+        from quantui.optimizer import optimize_geometry
+
+        _original_rhf = pyscf_scf.RHF
+
+        def _one_cycle_rhf(mol):
+            mf = _original_rhf(mol)
+            mf.max_cycle = 1
+            return mf
+
+        monkeypatch.setattr(pyscf_scf, "RHF", _one_cycle_rhf)
+
+        with pytest.raises(RuntimeError, match="did not converge"):
+            optimize_geometry(
+                _h2(0.74),
+                method="RHF",
+                basis="STO-3G",
+                fmax=0.05,
+                steps=10,
+                scf_rescue=False,
+            )
+
+
 class TestOptimizeGeometryMetadataPreservation:
     """Charge and multiplicity survive through the optimization."""
 

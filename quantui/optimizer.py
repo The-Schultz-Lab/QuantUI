@@ -240,6 +240,27 @@ try:
 
             run_scf_with_rescue(mf, rescue=self.scf_rescue, stream=self.progress_stream)
 
+            # AUDIT F09 — BFGS previously accepted whatever gradient came
+            # back regardless of mf.converged, so it could satisfy its force
+            # criterion using an invalid electronic solution (verified: an
+            # H2 optimization near its minimum, with SCF limited to one
+            # cycle and rescue disabled, reported converged=True after
+            # three steps despite all four SCF evaluations being
+            # unconverged). run_scf_with_rescue has already exhausted every
+            # rescue stage by this point, so an unconverged mf here means
+            # this step's energy/forces are not physically meaningful —
+            # raise rather than hand them to ASE, which would silently bake
+            # them into the optimization trajectory (and, via BFGS's
+            # Hessian update, corrupt every subsequent step too).
+            if not bool(getattr(mf, "converged", False)):
+                raise RuntimeError(
+                    f"SCF did not converge at optimization step "
+                    f"{self._eval_count} — the resulting energy/forces are "
+                    "not physically meaningful. Try scf_rescue=True "
+                    "(default), a different starting geometry, or a "
+                    "different basis/method."
+                )
+
             # Save final SCF state for orbital visualization
             self._last_mf = mf
             self._last_atom_list = _atom_list_for_cube
