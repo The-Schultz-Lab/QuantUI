@@ -63,12 +63,22 @@ class TDDFTResult:
         energy_hartree: Ground-state SCF energy in Hartrees.
         homo_lumo_gap_ev: HOMO-LUMO gap in eV from the ground-state SCF,
             or ``None``.
-        converged: ``True`` only when BOTH the ground-state SCF converged
-            AND (if excited states were requested and the solve ran) every
-            requested TD root converged (AUDIT F08) — an SCF-only flag is
-            not overall success for a calculation whose deliverable is the
-            excited states. See ``td_converged``/``n_converged_states`` for
-            the per-root detail this folds together.
+        converged: ``True`` when the ground-state SCF converged, the TD
+            solve ran and produced states, and — whenever per-root status is
+            available — at least one requested root actually converged
+            (AUDIT F08; relaxed in code review from "every root" to "at
+            least one root", since it is routine for a Davidson solve's
+            higher/harder roots to miss the default iteration budget while
+            the lower, physically relevant ones are fine). ``False`` only
+            for a solve that raised, returned no states, or (when
+            ``td_converged`` is known) converged *none* of them — an
+            SCF-only flag is not overall success for a calculation whose
+            deliverable is the excited states. A PySCF build that doesn't
+            expose ``td.converged`` at all (``td_converged is None``) is
+            treated as "no per-root information available", not as
+            "unconverged" — it does not by itself flip this to ``False``.
+            See ``td_converged``/``n_converged_states`` for the per-root
+            detail this folds together.
         n_iterations: Number of ground-state SCF macro-iterations.
         method: DFT functional or HF method used.
         basis: Basis set.
@@ -367,16 +377,30 @@ def _run_tddft_calc_body(
             except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
                 pass
 
-    # AUDIT F08 — overall success requires every requested root to have
-    # actually converged, not just the ground-state SCF. A TD-DFT run whose
-    # entire purpose is the excited states is not "converged" if the
-    # Davidson solve raised before producing any roots, or if it returned
-    # roots that never converged.
+    # AUDIT F08 — overall success requires the TD solve to have actually
+    # produced converged roots, not just a ground-state SCF. A TD-DFT run
+    # whose entire purpose is the excited states is not "converged" if the
+    # Davidson solve raised before producing any roots, or if none of the
+    # roots it returned ever converged.
+    #
+    # Code review (2026-09): requiring *every* requested root to converge
+    # was too strict — a Davidson solve for nstates > a few routinely leaves
+    # the higher/harder roots short of the default iteration budget while
+    # the lower ones (usually what a UV-Vis analysis actually cares about)
+    # are fine, so a perfectly normal multi-state run was always flagged
+    # "treat with caution". Relaxed to "at least one requested root
+    # converged" — still catches the original bug this audit fixed (a
+    # solve where every root came back unconverged), and n_converged_states
+    # below still reports the exact per-root tally for anyone who wants it.
+    #
+    # Separately, when the installed PySCF doesn't expose ``td.converged``
+    # at all, td_converged stays None — that is "no information", not
+    # "unconverged", and must not by itself force converged=False (it used
+    # to, forcing every TD-DFT/TDHF result on such a build to be flagged).
     converged = (
         scf_converged
         and excitation_energies_ev != []
-        and td_converged is not None
-        and all(td_converged)
+        and (td_converged is None or any(td_converged))
     )
 
     return TDDFTResult(
