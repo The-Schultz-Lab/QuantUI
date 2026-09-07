@@ -153,6 +153,12 @@ def _result_extra_rows(get: Any) -> str:
 
 def format_result(r: Any) -> str:
     """Format a single-point-style result card."""
+    # AUDIT F07 — for CCSD/CCSD(T), r.converged also folds in the CC
+    # amplitude solve's own convergence, so a bare "SCF converged" label
+    # would misleadingly blame the reference SCF for a CC-only failure.
+    _conv_label = (
+        "Converged" if getattr(r, "cc_converged", None) is not None else "SCF converged"
+    )
     _conv = "Yes" if r.converged else "No (treat results with caution)"
     _cc = _converged_color(r.converged)
     _gap = f"{r.homo_lumo_gap_ev:.4f} eV" if r.homo_lumo_gap_ev is not None else "N/A"
@@ -168,7 +174,7 @@ def format_result(r: Any) -> str:
                 _theme.css.TEXT_HEADING,
             ),
             ("HOMO-LUMO gap", _gap, _theme.css.TEXT_HEADING),
-            ("SCF converged", _conv, _cc),
+            (_conv_label, _conv, _cc),
             (
                 "SCF iterations",
                 (
@@ -282,15 +288,21 @@ def format_freq_result(r: Any) -> str:
 
 def format_tddft_result(r: Any) -> str:
     """Format a TD-DFT / UV-Vis result card."""
+    # AUDIT F08 — r.converged now folds in per-root TD convergence, so the
+    # row is labeled/colored on overall status, not just the ground SCF.
     _conv = "Yes" if r.converged else "No (treat with caution)"
     _cc = _converged_color(r.converged)
+    _n_converged = getattr(r, "n_converged_states", None)
+    _states_detail = str(len(r.excitation_energies_ev))
+    if _n_converged is not None and _n_converged != len(r.excitation_energies_ev):
+        _states_detail += f" ({_n_converged} converged)"
     header_rows = (
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Ground-state energy</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF converged</td>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">States computed</td>'
-        f'<td style="color:{_theme.css.TEXT_HEADING}">{len(r.excitation_energies_ev)}</td></tr>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{_states_detail}</td></tr>'
     )
     exc_table = ""
     if r.excitation_energies_ev:

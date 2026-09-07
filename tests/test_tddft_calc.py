@@ -79,5 +79,64 @@ class TestRunTddftCalcBasic:
         assert result.scf_variant == "RKS"
 
 
+# ============================================================================
+# AUDIT F08 — per-root TD convergence must not be swallowed
+# ============================================================================
+
+
+class TestTddftConvergence:
+    @pyscf_only
+    @pytest.mark.slow
+    def test_unconverged_roots_are_not_reported_as_converged(self, monkeypatch):
+        """Controlled reproduction from the audit: restrict the real TDHF
+        Davidson solve to one iteration (only max_cycle forced; the SCF and
+        TD kernels themselves are real PySCF). A real one-iteration-limited
+        TDHF/6-31G water solve gives converged=[False, False, False] and
+        excitations 9.804744, 11.993916, 12.420652 eV — the old code
+        reported these as a converged result because it never checked
+        td.converged at all.
+        """
+        import pyscf.scf.hf as pyscf_hf
+        import pyscf.tdscf.rhf  # noqa: F401 — import side effect registers RHF.TDHF
+
+        from quantui.tddft_calc import run_tddft_calc
+
+        # mf.TDHF() is registered via pyscf.lib.class_as_method, which binds
+        # the TDHF class into RHF.TDHF as a plain function at pyscf import
+        # time — monkeypatching pyscf.tdscf.rhf.TDHF afterward has no effect
+        # on that already-captured reference, so patch RHF.TDHF itself.
+        _original_tdhf_method = pyscf_hf.RHF.TDHF
+
+        def _one_cycle_tdhf(self):
+            obj = _original_tdhf_method(self)
+            obj.max_cycle = 1
+            return obj
+
+        monkeypatch.setattr(pyscf_hf.RHF, "TDHF", _one_cycle_tdhf)
+
+        result = run_tddft_calc(_water(), method="RHF", basis="6-31G", nstates=3)
+
+        assert result.td_converged == [False, False, False]
+        assert result.n_converged_states == 0
+        assert result.converged is False
+        # The excitations are still surfaced (so the UI can show what
+        # actually came out of the solver) — just not stamped converged.
+        assert len(result.excitation_energies_ev) == 3
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_converged_roots_report_full_convergence(self):
+        """Sanity check the happy path: a normal (unpatched) TDHF solve on
+        a small system converges every requested root."""
+        from quantui.tddft_calc import run_tddft_calc
+
+        result = run_tddft_calc(_water(), method="RHF", basis="STO-3G", nstates=2)
+
+        assert result.td_converged is not None
+        assert all(result.td_converged)
+        assert result.n_converged_states == len(result.td_converged)
+        assert result.converged is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
