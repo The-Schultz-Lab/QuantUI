@@ -101,6 +101,13 @@ class SessionResult:
     # ``False`` for exact four-centre integrals (the default) and for the
     # post-HF paths, which are never fitted here.
     density_fit: bool = False
+    # Whether Grimme D3 dispersion was actually applied (AUDIT F04). ``None``
+    # when the method doesn't use D3 (e.g. RHF, or a functional whose
+    # dispersion is built in, like wB97X-D); ``True``/``False`` when it does
+    # and ``pyscf.dftd3`` was/wasn't importable. A ``False`` result is
+    # missing its dispersion correction even though ``method`` still reads
+    # e.g. "PBE-D3" — see :func:`maybe_apply_d3` and :meth:`summary`.
+    dispersion_applied: Optional[bool] = None
     solvent: Optional[str] = None
     mo_energy_hartree: Optional[Any] = None  # np.ndarray (n_mo,) or (2, n_mo) UHF
     mo_occ: Optional[Any] = None  # np.ndarray (n_mo,) or (2, n_mo) UHF
@@ -136,6 +143,11 @@ class SessionResult:
         ]
         if self.homo_lumo_gap_ev is not None:
             lines.append(f"  HOMO-LUMO gap : {self.homo_lumo_gap_ev:.4f} eV")
+        if self.dispersion_applied is False:
+            lines.append(
+                f"  ⚠️  {self.method} requires D3 dispersion, but pyscf.dftd3 "
+                "was unavailable — this result has NO dispersion correction."
+            )
         lines += [
             "=" * 60,
             (
@@ -218,18 +230,31 @@ def needs_d3(method: str) -> bool:
 def maybe_apply_d3(mf, method: str, progress_stream=None):
     """Wrap ``mf`` in ``pyscf.dftd3.dftd3(mf)`` if ``method`` requires D3.
 
-    Returns the (possibly wrapped) mf object. On ``pyscf.dftd3``
-    ImportError, returns the original ``mf`` unmodified and surfaces
-    a warning via ``progress_stream`` (if provided) so the user sees
-    that the result is missing the dispersion correction.
+    Returns ``(mf, dispersion_applied)``: the (possibly wrapped) mf object,
+    and whether the D3 wrapper was actually applied. ``dispersion_applied``
+    is ``True`` when D3 was applied, ``False`` when the method needs D3 but
+    ``pyscf.dftd3`` is unavailable (AUDIT F04 — the result is silently
+    missing its dispersion correction; callers should record this rather
+    than keep reporting the original method label as if uncorrected =
+    corrected), and ``None`` when the method doesn't use D3 at all.
+
+    On ``pyscf.dftd3`` ImportError, always logs a warning (so every call
+    site is visible in logs even without a progress stream — the optimizer
+    path used to call this with no stream and so surfaced nothing at all),
+    and additionally surfaces the warning via ``progress_stream`` when one
+    is provided.
     """
     if not needs_d3(method):
-        return mf
+        return mf, None
     try:
         from pyscf import dftd3 as _dftd3
 
-        return _dftd3.dftd3(mf)
+        return _dftd3.dftd3(mf), True
     except ImportError:
+        logger.warning(
+            "pyscf.dftd3 not available — running %s without D3 correction.",
+            method,
+        )
         if progress_stream is not None:
             try:
                 progress_stream.write(
@@ -238,7 +263,7 @@ def maybe_apply_d3(mf, method: str, progress_stream=None):
                 )
             except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
                 pass
-        return mf
+        return mf, False
 
 
 def run_in_session(
@@ -467,6 +492,7 @@ def _run_session_calc_body(
     # --- Select SCF method ---
     method_upper = method.upper()
 
+    dispersion_applied: Optional[bool] = None
     if method_upper == "RHF":
         mf = scf.RHF(mol)
         scf_variant = type(mf).__name__
@@ -511,7 +537,9 @@ def _run_session_calc_body(
         # GOTCHAS.md.
         scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
-        mf = maybe_apply_d3(mf, method, progress_stream=progress_stream)
+        mf, dispersion_applied = maybe_apply_d3(
+            mf, method, progress_stream=progress_stream
+        )
 
     # --- Density fitting (RI), opt-in (M-DF) ---
     # Applied to the freshly built SCF object, BEFORE the PCM wrap and the GPU
@@ -848,6 +876,7 @@ def _run_session_calc_body(
         gpu_used=gpu_used,
         gpu_name=gpu_name,
         density_fit=density_fit_used,
+        dispersion_applied=dispersion_applied,
         solvent=solvent,
         mo_energy_hartree=_mo_energy_ha_arr,
         mo_occ=_mo_occ_arr,

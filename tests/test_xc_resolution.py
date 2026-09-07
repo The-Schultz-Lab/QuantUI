@@ -138,22 +138,32 @@ class _FakeMf:
 
 
 class TestMaybeApplyD3:
-    def test_no_d3_method_returns_mf_unchanged(self):
+    """AUDIT F04 — maybe_apply_d3 now returns (mf, dispersion_applied) so
+    callers can record whether a D3-requiring result is actually missing
+    its dispersion correction, instead of silently keeping the original
+    method label on an uncorrected result."""
+
+    def test_no_d3_method_returns_mf_unchanged_and_none_flag(self):
         mf = _FakeMf("B3LYP")
-        result = maybe_apply_d3(mf, "B3LYP")
-        assert result is mf
+        result_mf, dispersion_applied = maybe_apply_d3(mf, "B3LYP")
+        assert result_mf is mf
+        assert dispersion_applied is None
 
-    def test_wb97x_d_returns_mf_unchanged(self):
+    def test_wb97x_d_returns_mf_unchanged_and_none_flag(self):
         # AUDIT F03: wB97X-D's dispersion is already in the XC functional —
-        # maybe_apply_d3 must be a no-op for it (never imports pyscf.dftd3).
+        # maybe_apply_d3 must be a no-op for it (never imports pyscf.dftd3),
+        # and dispersion_applied is None (not applicable), not False.
         mf = _FakeMf("wB97X-D")
-        result = maybe_apply_d3(mf, "wB97X-D")
-        assert result is mf
+        result_mf, dispersion_applied = maybe_apply_d3(mf, "wB97X-D")
+        assert result_mf is mf
+        assert dispersion_applied is None
 
-    def test_d3_method_with_missing_pyscf_returns_mf_unchanged(self, monkeypatch):
+    def test_d3_method_with_missing_pyscf_returns_mf_unchanged_and_false_flag(
+        self, monkeypatch
+    ):
         # Simulate pyscf.dftd3 being absent (typical on Windows where
         # PySCF isn't installable at all). The helper must return the
-        # original mf without raising.
+        # original mf, flagged dispersion_applied=False, without raising.
         import builtins
 
         original_import = builtins.__import__
@@ -167,8 +177,9 @@ class TestMaybeApplyD3:
 
         mf = _FakeMf("PBE-D3")
         # Without progress_stream — must not raise.
-        result = maybe_apply_d3(mf, "PBE-D3")
-        assert result is mf
+        result_mf, dispersion_applied = maybe_apply_d3(mf, "PBE-D3")
+        assert result_mf is mf
+        assert dispersion_applied is False
 
     def test_d3_warning_written_to_progress_stream(self, monkeypatch):
         import builtins
@@ -190,6 +201,29 @@ class TestMaybeApplyD3:
         assert "dftd3 not available" in out
         assert "PBE-D3" in out
 
+    def test_d3_warning_logged_even_without_progress_stream(self, monkeypatch, caplog):
+        # AUDIT F04: the optimizer path used to call maybe_apply_d3 with no
+        # progress_stream at all, so a missing pyscf.dftd3 gave NO warning
+        # anywhere. It must now always be logged, stream or not.
+        import builtins
+        import logging
+
+        original_import = builtins.__import__
+
+        def _fake_import(name, *args, **kwargs):
+            if name == "pyscf.dftd3" or name.startswith("pyscf.dftd3"):
+                raise ImportError("simulated")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _fake_import)
+
+        with caplog.at_level(logging.WARNING, logger="quantui.session_calc"):
+            maybe_apply_d3(_FakeMf("PBE-D3"), "PBE-D3")
+
+        assert any(
+            "dftd3 not available" in rec.message for rec in caplog.records
+        ), caplog.text
+
 
 # =====================================================================
 # Coverage check — every DFT entry point uses the helpers
@@ -210,7 +244,8 @@ class TestEntryPointsUseHelpers:
 
         src = inspect.getsource(session_calc)
         assert "resolve_xc(method)" in src
-        assert "maybe_apply_d3(mf, method" in src
+        assert "maybe_apply_d3(" in src
+        assert "mf, method, progress_stream=progress_stream" in src
 
     def test_freq_calc_uses_resolve_xc(self):
         from quantui import freq_calc

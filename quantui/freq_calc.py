@@ -437,7 +437,7 @@ def _run_freq_calc_body(
         # M-UX2 UXP2.10 — capture before maybe_apply_d3 can wrap/rename it.
         scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
-        mf = maybe_apply_d3(mf, method, progress_stream=stream)
+        mf, _ = maybe_apply_d3(mf, method, progress_stream=stream)
 
     # Density fitting (RI), opt-in (M-DF). Off by default. Applied to the main
     # SCF; the per-displacement inner SCFs below get the same treatment so the

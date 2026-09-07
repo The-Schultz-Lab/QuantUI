@@ -120,6 +120,10 @@ try:
             self.status_label = status_label
             self.expected_steps = expected_steps  # history-based ~N prior
             self._eval_count = 0
+            # AUDIT F04 — None (method doesn't use D3), True (applied at
+            # every step so far), or False (pyscf.dftd3 unavailable at some
+            # step — sticky once seen, since it can't un-happen mid-run).
+            self.dispersion_applied: Optional[bool] = None
 
         def calculate(
             self,
@@ -197,7 +201,16 @@ try:
 
                 mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
                 mf.xc = resolve_xc(self.method)
-                mf = maybe_apply_d3(mf, self.method)
+                # AUDIT F04 — this call used to omit progress_stream
+                # entirely, so a missing pyscf.dftd3 gave NO warning
+                # anywhere on the optimizer path (unlike every other DFT
+                # entry point). maybe_apply_d3 now also always logs, but
+                # pass the stream too so the user sees it in-app.
+                mf, _dispersion_applied = maybe_apply_d3(
+                    mf, self.method, progress_stream=self.progress_stream
+                )
+                if self.dispersion_applied is not False:
+                    self.dispersion_applied = _dispersion_applied
 
             # Density fitting (RI), opt-in (M-DF). Off by default; applies to
             # every SCF in the optimization when the user enables it.
@@ -289,6 +302,10 @@ class OptimizationResult:
     pyscf_mol_atom: Optional[Any] = None  # atom list at final geometry (Angstrom)
     pyscf_mol_basis: Optional[str] = None
     density_fit: bool = False
+    # AUDIT F04 — mirrors SessionResult.dispersion_applied: None (method
+    # doesn't use D3), True/False (does, and pyscf.dftd3 was/wasn't
+    # importable during the optimization).
+    dispersion_applied: Optional[bool] = None
     # Final-geometry Mulliken / dipole — same fields SessionResult carries so
     # the Populations Analysis panel activates after a Geometry Opt too.
     atom_symbols: Optional[List[str]] = None
@@ -868,6 +885,7 @@ def optimize_geometry(
         mulliken_charges=_opt_mulliken,
         dipole_moment_debye=_opt_dipole,
         dipole_vector_debye=_opt_dipole_vec,
+        dispersion_applied=getattr(atoms.calc, "dispersion_applied", None),
     )
 
 
