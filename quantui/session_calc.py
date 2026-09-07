@@ -155,22 +155,33 @@ class SessionResult:
 
 # Maps QuantUI display names → PySCF xc strings where they differ.
 #
-# ``wB97X-D`` is a special case: PySCF + dftd3 cannot compose
-# ``mf.xc = "wb97x-d"`` cleanly (it's on dftd3's black-list — see
-# pyscf/pyscf#2069). The workaround that matches what our UI label
-# already claims ("wB97X-D — Range-Separated Hybrid + D3 Dispersion")
-# is to use the bare ``wb97x`` functional and apply D3 via dftd3
-# externally — same pattern as PBE-D3 below. This is D3, not the
-# original Chai 2008 D2; the empirical dispersion energies differ by
-# a few percent for most systems but the functional family is the same.
+# ``wB97X-D`` is a special case, but NOT the one this table used to assume
+# (AUDIT F03). PySCF rejects ``mf.xc = "wb97x-d"`` — but not because it needs
+# an external dispersion correction composed on: PySCF's own xc_code parser
+# (``pyscf.scf.dispersion.parse_dft``) black-lists the short "wb97x-d" /
+# "wb97x_d" spellings specifically because they're ambiguous between the
+# original Chai & Head-Gordon (2008) wB97X-D functional (its own built-in
+# empirical dispersion, baked into the fit, no Grimme correction needed) and
+# a Grimme-D3-corrected bare wB97X. Aliasing to bare ``wb97x`` and applying
+# external Grimme D3 (as this table previously did) silently calculates a
+# *different* functional: wb97x has omega=0.3 range separation, wb97x-d has
+# omega=0.2 and different short-range exact exchange (confirmed via
+# ``pyscf.dft.libxc.rsh_coeff``) — not just a different dispersion model.
+#
+# The actual wB97X-D functional is available directly under its full LibXC
+# name, which PySCF's short-alias black-list does not intercept, and needs
+# no external D3 wrapper (see ``_NEEDS_D3`` below):
 _XC_ALIAS: Dict[str, str] = {
     "M06-L": "m06l",
-    "wB97X-D": "wb97x",  # bare functional; D3 applied via _NEEDS_D3
+    "wB97X-D": "hyb_gga_xc_wb97x_d",  # true Chai/Head-Gordon 2008 functional
     "CAM-B3LYP": "camb3lyp",
     "PBE-D3": "pbe",  # base functional; D3 applied separately
 }
 # Methods that require Grimme D3 dispersion correction via pyscf.dftd3.
-_NEEDS_D3: frozenset = frozenset({"PBE-D3", "wB97X-D"})
+# wB97X-D is NOT here: its dispersion is already part of the XC functional
+# itself (see _XC_ALIAS comment above) — wrapping it in pyscf.dftd3 would
+# double-count dispersion under a method that already includes its own.
+_NEEDS_D3: frozenset = frozenset({"PBE-D3"})
 
 
 def resolve_xc(method: str) -> str:

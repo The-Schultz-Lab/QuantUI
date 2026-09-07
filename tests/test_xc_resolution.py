@@ -2,11 +2,21 @@
 
 The user's tier-3 calibration output showed ``H₂O wB97X-D/6-31G*`` erroring
 at 0.01 s — PySCF rejects ``mf.xc = "wb97x-d"`` because that composite
-name is on the dftd3 black-list (pyscf/pyscf#2069). The fix:
+name is on the dftd3 black-list (pyscf/pyscf#2069). Session 55's original
+fix aliased ``wB97X-D`` to bare ``wb97x`` and applied external Grimme D3 —
+but that silently calculates a *different* functional (bare wb97x has
+range-separation omega=0.3; the real wB97X-D has omega=0.2 and different
+short-range exact exchange — AUDIT F03). The corrected fix:
 
-- Alias ``wB97X-D`` to bare ``wb97x``.
-- Add ``wB97X-D`` to ``_NEEDS_D3`` so dispersion is applied via
-  ``pyscf.dftd3``, matching the UI label that already promises D3.
+- Alias ``wB97X-D`` to its full LibXC name ``hyb_gga_xc_wb97x_d`` — the
+  actual Chai & Head-Gordon (2008) functional, whose own empirical
+  dispersion is baked into the fit. PySCF's short-alias black-list
+  (``pyscf.scf.dispersion.parse_dft``) intercepts "wb97x-d"/"wb97x_d" but
+  not the full LibXC name, so this avoids the original error without
+  substituting a different functional.
+- ``wB97X-D`` does NOT go in ``_NEEDS_D3`` — wrapping it in
+  ``pyscf.dftd3`` would double-count dispersion under a method that
+  already includes its own.
 - Extract ``resolve_xc()`` + ``maybe_apply_d3()`` so every DFT entry
   point (session_calc / freq_calc / tddft_calc / optimizer / nmr_calc /
   the script-export template) shares the same resolution logic. Before
@@ -20,6 +30,8 @@ live in the other module suites that already gate on ``_PYSCF_AVAILABLE``.
 from __future__ import annotations
 
 import inspect
+
+import pytest
 
 from quantui.session_calc import (
     _NEEDS_D3,
@@ -35,15 +47,34 @@ from quantui.session_calc import (
 
 
 class TestResolveXc:
-    def test_wb97x_d_resolves_to_bare_wb97x(self):
-        # The session-55 bug: PySCF rejects "wb97x-d". Bare wb97x is
-        # the right xc string; D3 dispersion is applied separately.
-        assert resolve_xc("wB97X-D") == "wb97x"
+    def test_wb97x_d_resolves_to_true_functional(self):
+        # AUDIT F03: PySCF rejects "wb97x-d" (short-alias black-list), but
+        # the fix must not substitute a different functional (bare wb97x)
+        # to work around that — it must resolve to the actual wB97X-D
+        # (Chai & Head-Gordon 2008) functional under its full LibXC name.
+        assert resolve_xc("wB97X-D") == "hyb_gga_xc_wb97x_d"
+        assert resolve_xc("wB97X-D") != "wb97x"
 
     def test_wb97x_d_case_insensitive(self):
         # Users sometimes type "WB97X-D" or "wb97x-d" — all should resolve.
         for spelling in ("wB97X-D", "WB97X-D", "wb97x-d", "Wb97x-D"):
-            assert resolve_xc(spelling) == "wb97x"
+            assert resolve_xc(spelling) == "hyb_gga_xc_wb97x_d"
+
+    def test_wb97x_d_is_a_distinct_functional_from_bare_wb97x(self):
+        """AUDIT F03 numeric regression: resolve_xc("wB97X-D") must resolve
+        to a functional with different range-separation parameters than
+        bare wb97x, confirmed against PySCF/LibXC directly (independent of
+        the alias table's own claims)."""
+        pytest.importorskip("pyscf.dft")
+        from pyscf.dft import libxc
+
+        resolved = resolve_xc("wB97X-D")
+        assert resolved != "wb97x"
+        wb97xd_omega = libxc.rsh_coeff(resolved)[0]
+        wb97x_omega = libxc.rsh_coeff("wb97x")[0]
+        assert wb97xd_omega == pytest.approx(0.2, abs=1e-6)
+        assert wb97x_omega == pytest.approx(0.3, abs=1e-6)
+        assert wb97xd_omega != wb97x_omega
 
     def test_pbe_d3_resolves_to_bare_pbe(self):
         # PBE-D3 is the long-standing pattern this fix mirrors.
@@ -72,19 +103,21 @@ class TestResolveXc:
 
 
 class TestNeedsD3:
-    def test_wb97x_d_needs_d3(self):
-        # The session-55 fix: wB97X-D now needs external D3.
-        assert needs_d3("wB97X-D") is True
+    def test_wb97x_d_does_not_need_external_d3(self):
+        # AUDIT F03: wB97X-D's dispersion is baked into the XC functional
+        # itself (hyb_gga_xc_wb97x_d) — wrapping it in pyscf.dftd3 would
+        # double-count dispersion, so it must NOT be in _NEEDS_D3.
+        assert needs_d3("wB97X-D") is False
 
     def test_pbe_d3_needs_d3(self):
         assert needs_d3("PBE-D3") is True
 
     def test_case_insensitive(self):
-        assert needs_d3("WB97X-D") is True
+        assert needs_d3("WB97X-D") is False
         assert needs_d3("pbe-d3") is True
 
     def test_dispersion_free_methods_dont_need_d3(self):
-        for method in ("RHF", "UHF", "B3LYP", "PBE0", "M06-2X", "HSE06"):
+        for method in ("RHF", "UHF", "B3LYP", "PBE0", "M06-2X", "HSE06", "wB97X-D"):
             assert needs_d3(method) is False
 
     def test_unknown_method_doesnt_need_d3(self):
@@ -110,6 +143,13 @@ class TestMaybeApplyD3:
         result = maybe_apply_d3(mf, "B3LYP")
         assert result is mf
 
+    def test_wb97x_d_returns_mf_unchanged(self):
+        # AUDIT F03: wB97X-D's dispersion is already in the XC functional —
+        # maybe_apply_d3 must be a no-op for it (never imports pyscf.dftd3).
+        mf = _FakeMf("wB97X-D")
+        result = maybe_apply_d3(mf, "wB97X-D")
+        assert result is mf
+
     def test_d3_method_with_missing_pyscf_returns_mf_unchanged(self, monkeypatch):
         # Simulate pyscf.dftd3 being absent (typical on Windows where
         # PySCF isn't installable at all). The helper must return the
@@ -125,9 +165,9 @@ class TestMaybeApplyD3:
 
         monkeypatch.setattr(builtins, "__import__", _fake_import)
 
-        mf = _FakeMf("wB97X-D")
+        mf = _FakeMf("PBE-D3")
         # Without progress_stream — must not raise.
-        result = maybe_apply_d3(mf, "wB97X-D")
+        result = maybe_apply_d3(mf, "PBE-D3")
         assert result is mf
 
     def test_d3_warning_written_to_progress_stream(self, monkeypatch):
@@ -144,11 +184,11 @@ class TestMaybeApplyD3:
         monkeypatch.setattr(builtins, "__import__", _fake_import)
 
         stream = io.StringIO()
-        maybe_apply_d3(_FakeMf("wB97X-D"), "wB97X-D", progress_stream=stream)
+        maybe_apply_d3(_FakeMf("PBE-D3"), "PBE-D3", progress_stream=stream)
         out = stream.getvalue()
         # User must see the missing-dispersion warning.
         assert "dftd3 not available" in out
-        assert "wB97X-D" in out
+        assert "PBE-D3" in out
 
 
 # =====================================================================
@@ -210,13 +250,20 @@ class TestEntryPointsUseHelpers:
         # inlined.
         from quantui.config import PYSCF_SCRIPT_TEMPLATE
 
-        # The literal alias for wB97X-D in the template should be the
-        # bare functional (post-session-55 fix). Doubled-brace literals
-        # in the template appear as single braces in the output.
-        assert "'wB97X-D': 'wb97x'" in PYSCF_SCRIPT_TEMPLATE
+        # The literal alias for wB97X-D in the template should be the true
+        # functional's full LibXC name (AUDIT F03 fix), not bare wb97x.
+        # Doubled-brace literals in the template appear as single braces
+        # in the output.
+        assert "'wB97X-D': 'hyb_gga_xc_wb97x_d'" in PYSCF_SCRIPT_TEMPLATE
         assert "_NEEDS_D3" in PYSCF_SCRIPT_TEMPLATE
-        # The old (broken) "wb97x-d" string must NOT appear.
+        # Neither the black-listed short alias nor the wrong-functional
+        # bare-wb97x substitution should appear.
         assert "'wB97X-D': 'wb97x-d'" not in PYSCF_SCRIPT_TEMPLATE
+        assert "'wB97X-D': 'wb97x'" not in PYSCF_SCRIPT_TEMPLATE
+        # wB97X-D must not be wrapped in external D3 (its dispersion is
+        # already built into hyb_gga_xc_wb97x_d) — only PBE-D3 remains in
+        # _NEEDS_D3. Doubled braces are this template's literal-brace escape.
+        assert "_NEEDS_D3 = {{'PBE-D3'}}" in PYSCF_SCRIPT_TEMPLATE
 
 
 # =====================================================================

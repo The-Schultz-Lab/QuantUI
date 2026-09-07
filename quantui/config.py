@@ -101,11 +101,13 @@ METHOD_INFO = {
     },
     "wB97X-D": {
         "type": "dft",
-        "label": "wB97X-D — Range-Separated Hybrid + D3 Dispersion",
+        "label": "wB97X-D — Range-Separated Hybrid + Built-in Dispersion",
         "description": (
-            "Range-separated hybrid functional with empirical D3 dispersion correction. "
-            "Excellent for non-covalent interactions, charge-transfer excitations, "
-            "and systems where long-range exchange matters."
+            "Range-separated hybrid functional (Chai & Head-Gordon, 2008) with its "
+            "own empirical dispersion correction baked into the fit — not an "
+            "externally applied Grimme D3 correction. Excellent for non-covalent "
+            "interactions, charge-transfer excitations, and systems where "
+            "long-range exchange matters."
         ),
         "use_for": "Non-covalent interactions, excited states, large organic molecules.",
     },
@@ -658,18 +660,19 @@ def main():
 
     try:
         method = '{method}'
-        # Display name → PySCF xc string + external D3 dispersion. Matches
-        # quantui/session_calc.py resolve_xc + maybe_apply_d3. Important
-        # for methods that PySCF doesn't accept directly (notably
-        # wB97X-D — on dftd3's black-list; PBE-D3 — D3 must be applied
-        # externally via pyscf.dftd3).
+        # Display name → PySCF xc string + external D3 dispersion where
+        # needed. Matches quantui/session_calc.py resolve_xc + maybe_apply_d3.
+        # wB97X-D maps to its full LibXC name (the actual Chai/Head-Gordon
+        # 2008 functional, built-in dispersion) because PySCF's short-alias
+        # parser black-lists 'wb97x-d'/'wb97x_d' as ambiguous; PBE-D3 needs
+        # Grimme D3 applied externally via pyscf.dftd3.
         _XC_ALIAS = {{
             'M06-L': 'm06l',
-            'wB97X-D': 'wb97x',
+            'wB97X-D': 'hyb_gga_xc_wb97x_d',
             'CAM-B3LYP': 'camb3lyp',
             'PBE-D3': 'pbe',
         }}
-        _NEEDS_D3 = {{'PBE-D3', 'wB97X-D'}}
+        _NEEDS_D3 = {{'PBE-D3'}}
 
         if method == 'RHF':
             mf = scf.RHF(mol)
