@@ -247,6 +247,45 @@ def run_displaced_scf(item_id: str, coords_bohr_flat) -> Any:
     return dipole
 
 
+def available_cpu_count() -> int:
+    """CPU budget for sizing the parallel IR/Raman worker pool.
+
+    AUDIT additional-concerns — the driver used to size the worker pool
+    from a bare ``os.cpu_count() or 1``, which reports the WHOLE
+    machine's core count regardless of any SLURM allocation or cgroup/
+    container CPU limit. On a 128-core host with an 8-core SLURM
+    allocation and 18 displacements, that picked 18 workers (min(64, 18))
+    x 7 threads each — wildly oversubscribing the actual allocation.
+
+    Precedence, most-authoritative first:
+
+    1. ``SLURM_CPUS_PER_TASK`` — the CPU count SLURM itself assigned to
+       this task. Authoritative even when the cluster does not enforce
+       cgroup CPU limits (many don't), which is exactly the case
+       ``os.sched_getaffinity``/``os.cpu_count()`` cannot see.
+    2. ``os.sched_getaffinity(0)`` (Linux only) — respects a cgroup or
+       container CPU limit when one IS enforced and SLURM's own env var
+       is absent (e.g. a non-SLURM containerized deployment).
+    3. ``os.cpu_count()`` — final fallback (Windows/macOS, or a
+       restricted environment without ``sched_getaffinity``).
+
+    Every path floors at 1; never raises.
+    """
+    slurm_cpus = os.environ.get("SLURM_CPUS_PER_TASK")
+    if slurm_cpus is not None:
+        try:
+            n = int(slurm_cpus)
+            if n > 0:
+                return n
+        except ValueError:
+            pass
+    try:
+        return len(os.sched_getaffinity(0))  # type: ignore[attr-defined]
+    except (AttributeError, OSError, NotImplementedError):
+        pass
+    return os.cpu_count() or 1
+
+
 def freq_parallel_opt_in() -> bool:
     """Return whether parallel IR displacements are enabled for the next run."""
     return _freq_parallel_opt_in()

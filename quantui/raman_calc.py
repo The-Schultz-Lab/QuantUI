@@ -244,7 +244,10 @@ def _cpu_raman_activities_fd(
     from quantui import freq_ir_workers as _ir_par
     from quantui import freq_raman_workers as _ram_par
 
-    _cpu_count = os.cpu_count() or 1
+    # AUDIT additional-concerns — see freq_calc.py's matching comment:
+    # available_cpu_count() honors SLURM_CPUS_PER_TASK / cgroup affinity
+    # instead of the whole machine's os.cpu_count().
+    _cpu_count = _ir_par.available_cpu_count()
     _use_parallel = _ir_par.parallel_enabled_for_run(
         cpu_count=_cpu_count,
         displacement_count=_total,
