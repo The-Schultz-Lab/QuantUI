@@ -5987,6 +5987,25 @@ class QuantUIApp:
                         ).tolist()
                     except Exception:
                         pass
+                _thermo = getattr(result, "thermo", None)
+                _thermo_serialized = (
+                    {
+                        "zpve_hartree": _thermo.zpve_hartree,
+                        "H_hartree": _thermo.H_hartree,
+                        "S_jmol": _thermo.S_jmol,
+                        "G_hartree": _thermo.G_hartree,
+                        "temperature_k": _thermo.temperature_k,
+                        # AUDIT F18 — the temperature was already tracked on
+                        # ThermoData; pressure and the model itself were not,
+                        # and neither survived a save. Both are fixed by the
+                        # harmonic-oscillator/rigid-rotor/ideal-gas model at
+                        # 1 atm used throughout freq_calc.py's thermo block.
+                        "pressure_atm": 1.0,
+                        "approximation": "ideal_gas_rigid_rotor_harmonic_oscillator",
+                    }
+                    if _thermo is not None
+                    else None
+                )
                 save_spectra = {
                     "ir": {
                         "frequencies_cm1": result.frequencies_cm1,
@@ -5994,6 +6013,9 @@ class QuantUIApp:
                         "raman_activities": result.raman_activities,
                         "zpve_hartree": result.zpve_hartree,
                         "displacements": _displacements_serialized,
+                        # AUDIT F18 — thermo (H, S, G) was computed and shown
+                        # live but never made it into the saved result.json.
+                        "thermo": _thermo_serialized,
                     },
                     "molecule": {
                         "atoms": list(calc_mol.atoms),

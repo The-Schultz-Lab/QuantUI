@@ -129,6 +129,23 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
             displacements = np.asarray(result.displacements).tolist()
         except Exception:
             displacements = None
+    _thermo = getattr(result, "thermo", None)
+    _thermo_payload = (
+        {
+            "zpve_hartree": _thermo.zpve_hartree,
+            "H_hartree": _thermo.H_hartree,
+            "S_jmol": _thermo.S_jmol,
+            "G_hartree": _thermo.G_hartree,
+            "temperature_k": _thermo.temperature_k,
+            # AUDIT F18 — pressure and the thermo model itself were never
+            # recorded anywhere; both are fixed by the harmonic-oscillator/
+            # rigid-rotor/ideal-gas model at 1 atm used in freq_calc.py.
+            "pressure_atm": 1.0,
+            "approximation": "ideal_gas_rigid_rotor_harmonic_oscillator",
+        }
+        if _thermo is not None
+        else None
+    )
     return {
         "calc_type": "frequency",
         "energy_hartree": result.energy_hartree,
@@ -149,6 +166,10 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
                 "raman_activities": list(getattr(result, "raman_activities", []) or []),
                 "zpve_hartree": result.zpve_hartree,
                 "displacements": displacements,
+                # AUDIT F18 — thermo (H, S, G) was computed by freq_calc.py
+                # but discarded here; the saved JSON had only frequencies,
+                # intensities, activities, displacements, and ZPVE.
+                "thermo": _thermo_payload,
             },
             "molecule": {
                 "atoms": list(molecule.atoms),

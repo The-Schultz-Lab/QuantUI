@@ -19,6 +19,7 @@ from quantui.backends.worker_payload import (
     session_result_payload,
     tddft_result_payload,
 )
+from quantui.freq_calc import ThermoData
 from quantui.molecule import Molecule
 
 
@@ -202,6 +203,69 @@ class TestFreqTddftNmrResultPayloadScfVariant:
         molecule = Molecule(["O", "H", "H"], [[0, 0, 0], [0.96, 0, 0], [0, 0.96, 0]])
         payload = freq_result_payload(result, molecule)
         assert payload["density_fit"] is True
+
+    def test_freq_result_payload_carries_thermo(self):
+        """AUDIT F18 — FreqResult.thermo (H, S, G, ZPVE, temperature) was
+        computed by freq_calc.py but never made it into the staging JSON;
+        the batch save had only frequencies/intensities/activities/
+        displacements/ZPVE, with thermochemistry silently discarded."""
+        result = SimpleNamespace(
+            energy_hartree=-76.0,
+            homo_lumo_gap_ev=None,
+            converged=True,
+            n_iterations=12,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2O",
+            displacements=None,
+            frequencies_cm1=[1600.0, 3700.0, 3800.0],
+            ir_intensities=[10.0, 5.0, 5.0],
+            raman_activities=[],
+            zpve_hartree=0.021,
+            thermo=ThermoData(
+                zpve_hartree=0.021,
+                H_hartree=-74.933498241,
+                S_jmol=188.538424,
+                G_hartree=-74.954908540,
+                temperature_k=298.15,
+            ),
+            scf_variant="RHF",
+            density_fit=False,
+        )
+        molecule = Molecule(["O", "H", "H"], [[0, 0, 0], [0.96, 0, 0], [0, 0.96, 0]])
+        payload = freq_result_payload(result, molecule)
+        thermo = payload["spectra"]["ir"]["thermo"]
+        assert thermo is not None
+        assert thermo["H_hartree"] == -74.933498241
+        assert thermo["S_jmol"] == 188.538424
+        assert thermo["G_hartree"] == -74.954908540
+        assert thermo["temperature_k"] == 298.15
+        assert thermo["pressure_atm"] == 1.0
+        assert thermo["approximation"] == "ideal_gas_rigid_rotor_harmonic_oscillator"
+
+    def test_freq_result_payload_thermo_none_when_missing(self):
+        """A Hessian-only run (or an older FreqResult) with no thermo object
+        must serialize a clean None, not raise."""
+        result = SimpleNamespace(
+            energy_hartree=-76.0,
+            homo_lumo_gap_ev=None,
+            converged=True,
+            n_iterations=12,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2O",
+            displacements=None,
+            frequencies_cm1=[],
+            ir_intensities=[],
+            raman_activities=[],
+            zpve_hartree=0.0,
+            thermo=None,
+            scf_variant="RHF",
+            density_fit=False,
+        )
+        molecule = Molecule(["O", "H", "H"], [[0, 0, 0], [0.96, 0, 0], [0, 0.96, 0]])
+        payload = freq_result_payload(result, molecule)
+        assert payload["spectra"]["ir"]["thermo"] is None
 
     def test_tddft_result_payload_carries_scf_variant(self):
         result = SimpleNamespace(

@@ -844,6 +844,32 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
                 f'border:1px solid {_theme.css.BORDER}" width="173" height="108" />'
             )
 
+    # AUDIT F18 — restore persisted frequency thermochemistry into the
+    # History card. Older saved results (or a Hessian-only run with no
+    # thermo block) have no "thermo" key at all; that's a silent no-op,
+    # not an error.
+    _thermo_html = ""
+    if ct == "frequency":
+        _thermo = ((data.get("spectra") or {}).get("ir") or {}).get("thermo")
+        if _thermo:
+            _kj = 2625.5  # kJ/mol per Hartree
+            _thermo_html = (
+                f'<tr><td colspan="2" style="padding:6px 0 2px 0;color:{_theme.css.TEXT_MUTED};'
+                f'font-size:12px;font-style:italic">'
+                f"&#8212; Thermochemistry at {_thermo.get('temperature_k', 298.15):.0f} K"
+                f" / {_thermo.get('pressure_atm', 1.0):.0f} atm &#8212;"
+                f"</td></tr>"
+                f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">ZPVE</td>'
+                f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo["zpve_hartree"]:.6f} Ha</td></tr>'
+                f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">H</td>'
+                f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo["H_hartree"]:.6f} Ha</td></tr>'
+                f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">S</td>'
+                f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo["S_jmol"]:.2f} J/(mol&middot;K)</td></tr>'
+                f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">G</td>'
+                f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo["G_hartree"]:.6f} Ha'
+                f" ({_thermo['G_hartree'] * _kj:.2f} kJ/mol)</td></tr>"
+            )
+
     # Reorganization-energy channels (REORG.1). This is the reported bug: the
     # card came back without the numbers the calculation exists to produce.
     # Keyed on the calc type AND the payload, so a reorg result saved before λ
@@ -865,6 +891,6 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         f'{_method_basis_label(data["method"], data["basis"], data.get("scf_variant"))}</b>'
         f'&ensp;<small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{ts}</small>'
         + _result_card_table_open()
-        + f"{_rows}{_extra}</table>{_reorg_html}"
+        + f"{_rows}{_extra}{_thermo_html}</table>{_reorg_html}"
         + _RESULT_CARD_CLOSE
     )
