@@ -91,6 +91,7 @@ def _begin_worker_checkpoint(
     basis: str,
     staging_dir: Path,
     log_stream,
+    extra: tuple = (),
 ):
     """Open a checkpoint for this job, scoped to its own staging directory
     (M-CLUSTER2 CL2.8).
@@ -112,7 +113,7 @@ def _begin_worker_checkpoint(
     from quantui.checkpoint import CalcIdentity, Checkpoint
 
     identity = CalcIdentity.from_molecule(
-        molecule, calc_type=calc_type, method=method, basis=basis
+        molecule, calc_type=calc_type, method=method, basis=basis, extra=extra
     )
     ckpt = Checkpoint(identity, root=staging_dir / ".checkpoint")
     ckpt.attach_log(log_stream)
@@ -487,6 +488,11 @@ def _run_pes_scan(request: CalculationRequest, staging_dir: Path, log_stream) ->
         basis=request.basis,
         staging_dir=staging_dir,
         log_stream=log_stream,
+        # AUDIT F10 — calc_type="pes_scan" alone can't tell a bond scan
+        # apart from an angle scan of atoms 2,3,4, so two different scan
+        # configurations of the same molecule/method/basis used to collide
+        # on the same resume_key.
+        extra=(scan_type, *(str(i) for i in atom_indices)),
     )
     if resumable:
         n_points = len(ckpt.completed_points())

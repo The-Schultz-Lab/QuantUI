@@ -136,10 +136,29 @@ class CalcIdentity:
     multiplicity: int = 1
     atom_symbols: tuple = ()
     coords: tuple = ()
+    # AUDIT F10 — calc-type-specific discriminators that don't fit the
+    # generic fields above but still make two runs genuinely different
+    # calculations. The only current use is PES scan's (scan_type,
+    # *atom_indices): "calc_type" alone was just "pes_scan" for every
+    # scan configuration, so a bond scan and an angle scan of the same
+    # starting molecule/method/basis produced the SAME resume_key —
+    # resuming one could silently reuse the other's cached points (see
+    # points.jsonl's own per-point scan_type/atom_indices check in
+    # pes_scan.py for the defense-in-depth layer under this one). Included
+    # in resume_key (an exact-match requirement) but deliberately excluded
+    # from warm_start_key: an SCF density is still a good initial guess
+    # across different scan configurations of the same system.
+    extra: tuple = ()
 
     @classmethod
     def from_molecule(
-        cls, molecule: Any, *, calc_type: str, method: str, basis: str
+        cls,
+        molecule: Any,
+        *,
+        calc_type: str,
+        method: str,
+        basis: str,
+        extra: tuple = (),
     ) -> CalcIdentity:
         """Build an identity from a :class:`~quantui.molecule.Molecule`."""
         coords = getattr(molecule, "coordinates", None)
@@ -157,6 +176,7 @@ class CalcIdentity:
             multiplicity=int(getattr(molecule, "multiplicity", 1) or 1),
             atom_symbols=tuple(str(a) for a in (getattr(molecule, "atoms", []) or [])),
             coords=coord_rows,
+            extra=tuple(str(e) for e in extra),
         )
 
     @property
@@ -190,6 +210,7 @@ class CalcIdentity:
             self.warm_start_key,
             self.calc_type,
             _coords_digest(self.coords),
+            ",".join(self.extra),
         ]
         return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
 

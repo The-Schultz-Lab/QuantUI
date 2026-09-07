@@ -2285,11 +2285,30 @@ def checkpoint_identity(app: Any) -> Any:
         molecule = getattr(app, "_molecule", None)
         if molecule is None:
             return None
+        _ct = calc_type_key(app)
+        extra: tuple = ()
+        if _ct == "pes_scan":
+            # AUDIT F10 — calc_type="pes_scan" alone doesn't distinguish a
+            # bond scan from an angle/dihedral scan, or which atoms it
+            # scans, so two different scan configurations of the same
+            # molecule/method/basis used to collide on the same
+            # resume_key.
+            try:
+                extra = (
+                    str(app._scan_type_dd.value),
+                    str(app._scan_atom1.value),
+                    str(app._scan_atom2.value),
+                    str(app._scan_atom3.value),
+                    str(app._scan_atom4.value),
+                )
+            except Exception:  # noqa: BLE001 — checkpointing is never load-bearing
+                extra = ()
         return CalcIdentity.from_molecule(
             molecule,
-            calc_type=calc_type_key(app),
+            calc_type=_ct,
             method=app.method_dd.value,
             basis=app.basis_dd.value,
+            extra=extra,
         )
     except Exception:  # noqa: BLE001 — checkpointing is never load-bearing
         return None
