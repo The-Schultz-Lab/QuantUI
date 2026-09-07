@@ -82,8 +82,19 @@ Issues = "https://github.com/The-Schultz-Lab/QuantUI/issues"
 # the terminal (``quantui log tail -n 50``, etc.). See ``quantui/cli.py``.
 quantui = "quantui.cli:main"
 
-[tool.setuptools]
-packages = ["quantui", "quantui.backends"]
+[tool.setuptools.packages.find]
+# AUDIT F20 — this used to be an explicit `packages = ["quantui",
+# "quantui.backends"]` list under [tool.setuptools]. quantui.engines is a
+# real subpackage (quantui/engines/__init__.py + base.py/pyscf_engine.py/
+# pyfock_engine.py) that was never added to that list: the built wheel
+# silently omitted it entirely (ModuleNotFoundError importing
+# quantui.engines from an installed, non-editable wheel), while every CI
+# run stayed green because CI installs editable (`pip install -e`), which
+# doesn't go through this list at all. Automatic discovery means the next
+# new subpackage ships by construction instead of needing a second edit
+# here that's easy to forget.
+include = ["quantui", "quantui.*"]
+exclude = ["tests", "tests.*"]
 
 [tool.setuptools.package-data]
 # Bundled molecule library (M-STRUCT): the indexed SQLite store + the
@@ -176,6 +187,13 @@ dev = [
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.10.0",
     "pytest-xdist>=3.0.0",  # parallel test execution (-n=auto in addopts)
+    # AUDIT F20 — the PEP 517 build frontend, used by
+    # tests/test_packaging.py to build a real wheel and inspect its
+    # contents (import/package-data smoke test against a *built* wheel,
+    # not the editable install every other test runs against — the gap
+    # that let quantui.engines silently vanish from the shipped package
+    # while CI, always editable, stayed green).
+    "build>=1.0.0",
     "mypy>=1.10,<2.4",  # pinned, not an open floor — same reasoning as
     # black/ruff below: it must agree with .pre-commit-config.yaml's rev,
     # which is what CI enforces (M-TYPECHECK TYPE.2). A newer mypy silently
