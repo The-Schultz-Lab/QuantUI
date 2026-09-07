@@ -50,14 +50,14 @@ class TestWorker:
         assert outcome.status == "error"
         assert outcome.error["code"] == "UNSUPPORTED_CAPABILITY"
 
-    @pytest.mark.parametrize(
-        "calc_type", ["geometry_opt", "frequency", "tddft", "nmr", "pes_scan"]
-    )
+    @pytest.mark.parametrize("calc_type", ["frequency", "tddft", "nmr", "pes_scan"])
     def test_solvent_on_unsupported_calc_type_returns_error(self, staging, calc_type):
-        """AUDIT F11 — run_freq_calc/run_tddft_calc/run_nmr_calc/run_pes_scan/
-        optimize_geometry don't accept a solvent argument at all; a
-        solvent set for one of these calc_types must fail the request
-        rather than silently run gas-phase.
+        """AUDIT F11 — run_freq_calc/run_tddft_calc/run_nmr_calc/run_pes_scan
+        don't accept a solvent argument at all; a solvent set for one of
+        these calc_types must fail the request rather than silently run
+        gas-phase. ("geometry_opt" is covered separately — see
+        test_solvent_on_geometry_opt_runs_required_final_single_point below
+        (code review) — it now has a real, documented approximation.)
         """
         data = json.loads((staging / "request.json").read_text())
         data["calc_type"] = calc_type
@@ -159,6 +159,101 @@ class TestWorker:
         payload = json.loads((staging / "result.json").read_text())
         assert payload["calc_type"] == "geometry_opt"
         assert (staging / "trajectory.json").exists()
+
+    @patch("quantui.session_calc.run_in_session")
+    @patch("quantui.optimizer.optimize_geometry")
+    def test_solvent_on_geometry_opt_runs_required_final_single_point(
+        self, mock_opt, mock_run, staging
+    ):
+        """Code review (audit follow-up) — app_runflow.py's UI enables the
+        solvent checkbox for Geometry Opt (with a label documenting the
+        gas-phase-optimization + solvated-final-single-point
+        approximation), so a SLURM submission with the same settings must
+        actually apply it rather than hard-rejecting the whole job."""
+        from quantui.molecule import Molecule
+
+        mol = Molecule(
+            atoms=["H", "H"],
+            coordinates=[[0, 0, 0], [0, 0, 0.74]],
+            charge=0,
+            multiplicity=1,
+        )
+        mock_opt.return_value = SimpleNamespace(
+            molecule=mol,
+            trajectory=[mol],
+            energies_hartree=[-1.10],
+            converged=True,
+            n_steps=3,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2",
+        )
+        mock_run.return_value = SimpleNamespace(
+            energy_hartree=-1.12,
+            homo_lumo_gap_ev=10.0,
+            converged=True,
+            n_iterations=5,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2",
+        )
+        data = json.loads((staging / "request.json").read_text())
+        data["calc_type"] = "geometry_opt"
+        data["solvent"] = "water"
+        data["options"] = {"fmax": 0.05, "max_steps": 50}
+        (staging / "request.json").write_text(json.dumps(data))
+
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "success"
+        assert mock_run.call_args.kwargs["solvent"] == "water"
+        # The solvated single-point energy replaces the gas-phase
+        # optimizer's last-step energy, mirroring app.py's interactive
+        # _run_required_final_single_point handling.
+        payload = json.loads((staging / "result.json").read_text())
+        assert payload["energy_hartree"] == -1.12
+
+    @patch("quantui.session_calc.run_in_session")
+    @patch("quantui.optimizer.optimize_geometry")
+    def test_solvent_on_geometry_opt_final_single_point_must_converge(
+        self, mock_opt, mock_run, staging
+    ):
+        """An unconverged required solvated single point must fail the job
+        rather than silently reporting the gas-phase optimizer's result."""
+        from quantui.molecule import Molecule
+
+        mol = Molecule(
+            atoms=["H", "H"],
+            coordinates=[[0, 0, 0], [0, 0, 0.74]],
+            charge=0,
+            multiplicity=1,
+        )
+        mock_opt.return_value = SimpleNamespace(
+            molecule=mol,
+            trajectory=[mol],
+            energies_hartree=[-1.10],
+            converged=True,
+            n_steps=3,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2",
+        )
+        mock_run.return_value = SimpleNamespace(
+            energy_hartree=-1.12,
+            homo_lumo_gap_ev=10.0,
+            converged=False,
+            n_iterations=5,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2",
+        )
+        data = json.loads((staging / "request.json").read_text())
+        data["calc_type"] = "geometry_opt"
+        data["solvent"] = "water"
+        data["options"] = {"fmax": 0.05, "max_steps": 50}
+        (staging / "request.json").write_text(json.dumps(data))
+
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "error"
 
     @patch("quantui.freq_calc.run_freq_calc")
     def test_frequency_success(self, mock_freq, staging):
