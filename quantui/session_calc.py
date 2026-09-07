@@ -91,6 +91,12 @@ class SessionResult:
     # method is ``"CCSD(T)"``. ``None`` for plain CCSD. Again, included in
     # ``energy_hartree`` when set.
     ccsd_t_correction_hartree: Optional[float] = None
+    # Whether the CCSD amplitude iterations themselves converged (AUDIT
+    # F07). ``None`` unless method is ``"CCSD"``/``"CCSD(T)"``. ``converged``
+    # above already folds this in (False whenever this is False), but a
+    # caller inspecting *why* wants this separated from the HF reference's
+    # own convergence.
+    cc_converged: Optional[bool] = None
     # GPU offload status. ``gpu_used`` is True only when the
     # SCF object was successfully migrated to gpu4pyscf for this run.
     # ``gpu_name`` carries the CUDA device name when ``gpu_used`` is True so
@@ -147,6 +153,11 @@ class SessionResult:
             lines.append(
                 f"  ⚠️  {self.method} requires D3 dispersion, but pyscf.dftd3 "
                 "was unavailable — this result has NO dispersion correction."
+            )
+        if self.cc_converged is False:
+            lines.append(
+                "  ⚠️  CCSD amplitude iterations did NOT converge — the "
+                "correlation energy above is unreliable."
             )
         lines += [
             "=" * 60,
@@ -662,25 +673,38 @@ def _run_session_calc_body(
                 f"({method}/{basis}): {exc}"
             ) from exc
 
+    # AUDIT F07 — post-HF work (MP2/CCSD/CCSD(T)) needs a converged
+    # reference; running it on an unconverged SCF's orbitals produces a
+    # correlation "correction" on top of a wrong Hamiltonian, not a small
+    # numerical difference. Checked once, right after the reference SCF,
+    # before any post-HF method is even attempted.
+    scf_converged = bool(getattr(mf, "converged", False))
+
     # --- MP2 correlation energy (post-HF) ---
     mp2_correlation_hartree: Optional[float] = None
     if method_upper == "MP2":
-        try:
-            from pyscf import mp as _mp
+        if not scf_converged:
+            emit_status(
+                stream,
+                "Skipping MP2 — reference SCF did not converge.",
+            )
+        else:
+            try:
+                from pyscf import mp as _mp
 
-            emit_status(stream, "Running MP2 correlation…")
-            _mp2 = _mp.MP2(mf)
-            # verbose=5 surfaces integral-transform / kernel milestones for
-            # the live status label during the correlation step.
-            _mp2.verbose = 5
-            _mp2.stdout = stream
-            _e_corr, _ = _mp2.kernel()
-            mp2_correlation_hartree = float(_e_corr)
-            energy_hartree += float(_e_corr)
-        except Exception as exc:
-            raise RuntimeError(
-                f"MP2 correction failed for {molecule.get_formula()}: {exc}"
-            ) from exc
+                emit_status(stream, "Running MP2 correlation…")
+                _mp2 = _mp.MP2(mf)
+                # verbose=5 surfaces integral-transform / kernel milestones for
+                # the live status label during the correlation step.
+                _mp2.verbose = 5
+                _mp2.stdout = stream
+                _e_corr, _ = _mp2.kernel()
+                mp2_correlation_hartree = float(_e_corr)
+                energy_hartree += float(_e_corr)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"MP2 correction failed for {molecule.get_formula()}: {exc}"
+                ) from exc
 
     # --- Coupled cluster correlation ---
     # CCSD adds singles + doubles excitations on top of the RHF reference;
@@ -689,37 +713,65 @@ def _run_session_calc_body(
     # show the HF reference + correlation breakdown (mirrors the MP2 path).
     ccsd_correlation_hartree: Optional[float] = None
     ccsd_t_correction_hartree: Optional[float] = None
+    # AUDIT F07 — CCSD's own amplitude convergence, tracked separately from
+    # the HF reference's. The old code accepted _ccsd_obj.kernel()'s
+    # correlation energy unconditionally and never checked
+    # _ccsd_obj.converged, so a real one-iteration-limited non-convergence
+    # (verified: energy -75.007987575 Eh, converged=False) was reported as
+    # converged=True (from the HF reference alone). CCSD(T) also used to
+    # proceed to the triples correction regardless of CCSD's convergence.
+    cc_converged: Optional[bool] = None
     if method_upper in ("CCSD", "CCSD(T)"):
-        try:
-            from pyscf import cc as _cc
-
-            emit_status(stream, "Running CCSD correlation…")
-            _ccsd_obj = _cc.CCSD(mf)
-            _ccsd_obj.verbose = 4
-            _ccsd_obj.stdout = stream
-            _e_corr_ccsd, _t1, _t2 = _ccsd_obj.kernel()
-            ccsd_correlation_hartree = float(_e_corr_ccsd)
-            energy_hartree += float(_e_corr_ccsd)
-        except Exception as exc:
-            raise RuntimeError(
-                f"CCSD correction failed for {molecule.get_formula()}: {exc}"
-            ) from exc
-        if method_upper == "CCSD(T)":
+        if not scf_converged:
+            emit_status(
+                stream,
+                "Skipping CCSD — reference SCF did not converge.",
+            )
+        else:
             try:
-                emit_status(stream, "Computing CCSD(T) triples…")
+                from pyscf import cc as _cc
+
+                emit_status(stream, "Running CCSD correlation…")
+                _ccsd_obj = _cc.CCSD(mf)
                 _ccsd_obj.verbose = 4
                 _ccsd_obj.stdout = stream
-                _e_t = _ccsd_obj.ccsd_t()
-                ccsd_t_correction_hartree = float(_e_t)
-                energy_hartree += float(_e_t)
+                _e_corr_ccsd, _t1, _t2 = _ccsd_obj.kernel()
+                cc_converged = bool(getattr(_ccsd_obj, "converged", False))
+                ccsd_correlation_hartree = float(_e_corr_ccsd)
+                energy_hartree += float(_e_corr_ccsd)
             except Exception as exc:
                 raise RuntimeError(
-                    f"CCSD(T) triples correction failed "
-                    f"for {molecule.get_formula()}: {exc}"
+                    f"CCSD correction failed for {molecule.get_formula()}: {exc}"
                 ) from exc
+            if method_upper == "CCSD(T)":
+                if not cc_converged:
+                    emit_status(
+                        stream,
+                        "Skipping CCSD(T) triples — CCSD amplitudes did "
+                        "not converge.",
+                    )
+                else:
+                    try:
+                        emit_status(stream, "Computing CCSD(T) triples…")
+                        _ccsd_obj.verbose = 4
+                        _ccsd_obj.stdout = stream
+                        _e_t = _ccsd_obj.ccsd_t()
+                        ccsd_t_correction_hartree = float(_e_t)
+                        energy_hartree += float(_e_t)
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f"CCSD(T) triples correction failed "
+                            f"for {molecule.get_formula()}: {exc}"
+                        ) from exc
 
     # --- Extract results from the mean-field object ---
-    converged = bool(getattr(mf, "converged", False))
+    # AUDIT F07 — overall convergence must reflect every stage that ran:
+    # the HF reference, and (when requested) CCSD's own amplitude solve.
+    # A method that needed CC and didn't get a converged one is not a
+    # converged result, regardless of what the HF reference alone did.
+    converged = scf_converged
+    if method_upper in ("CCSD", "CCSD(T)"):
+        converged = scf_converged and bool(cc_converged)
     n_iterations = int(getattr(mf, "cycles", -1))
 
     import numpy as _np
@@ -873,6 +925,7 @@ def _run_session_calc_body(
         mp2_correlation_hartree=mp2_correlation_hartree,
         ccsd_correlation_hartree=ccsd_correlation_hartree,
         ccsd_t_correction_hartree=ccsd_t_correction_hartree,
+        cc_converged=cc_converged,
         gpu_used=gpu_used,
         gpu_name=gpu_name,
         density_fit=density_fit_used,
