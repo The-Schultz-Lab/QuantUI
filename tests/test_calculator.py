@@ -232,6 +232,56 @@ class TestScriptGeneration:
         assert "Number of electrons: 12" not in proc.stdout
         assert (tmp_path / "results.npz").exists()
 
+    @pytest.mark.slow
+    @pytest.mark.parametrize("method", ["MP2", "CCSD", "CCSD(T)"])
+    def test_exported_post_hf_script_runs_successfully(self, tmp_path, method):
+        """AUDIT F13 regression — the exported script used to fall into the
+        DFT branch for any non-RHF/UHF method, setting
+        mf.xc = 'MP2'/'CCSD'/'CCSD(T)' and failing with
+        "LibXCFunctional: name '...' not found". Executes the real
+        generated script (subprocess, no QuantUI import) for water/STO-3G.
+        """
+        pytest.importorskip("pyscf")
+        import subprocess
+        import sys
+
+        water = Molecule(
+            ["O", "H", "H"],
+            [[0.0, 0.0, 0.0], [0.757, 0.587, 0.0], [-0.757, 0.587, 0.0]],
+        )
+        calc = PySCFCalculation(water, method=method, basis="STO-3G")
+        script_path = tmp_path / "water_post_hf.py"
+        calc.generate_calculation_script(script_path)
+
+        proc = subprocess.run(
+            [sys.executable, str(script_path)],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        # Note: PySCF's verbose=4 logging echoes the script's own source
+        # (including this docstring) into stdout, so don't substring-match
+        # error text there — exit code 0 plus the numeric checks below are
+        # the real assertion.
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "Total energy" in proc.stdout
+        assert (tmp_path / "results.npz").exists()
+
+        import numpy as np
+
+        npz = np.load(tmp_path / "results.npz", allow_pickle=True)
+        # RHF/STO-3G water energy is ~-74.963; any real correlation energy
+        # must make the total more negative than that.
+        assert float(npz["energy"]) < -74.97
+        if method == "MP2":
+            assert float(npz["mp2_correlation_hartree"]) < 0
+        else:
+            assert float(npz["ccsd_correlation_hartree"]) < 0
+            assert bool(npz["cc_converged"]) is True
+            if method == "CCSD(T)":
+                assert float(npz["ccsd_t_correction_hartree"]) < 0
+
     def test_script_creates_parent_directories(self, tmp_path):
         """Test that script creation makes parent directories."""
         script_path = tmp_path / "nested" / "dir" / "calc.py"
