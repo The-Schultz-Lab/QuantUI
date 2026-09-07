@@ -45,7 +45,7 @@ class TestRamanUnitsRegression:
 
     @pytest.mark.slow
     def test_h2_raman_activity_matches_independent_normal_mode_fd(self):
-        pyscf = pytest.importorskip("pyscf")
+        pytest.importorskip("pyscf")
         pytest.importorskip("pyscf.prop.polarizability.rhf")
         import numpy as _np
         from pyscf import gto, scf
@@ -98,9 +98,7 @@ class TestRamanUnitsRegression:
         dalpha_dq_ang = dalpha_dq_au * (_BOHR_TO_ANG**2)
 
         expected_activity = _raman_invariants(dalpha_dq_ang)
-        assert result.raman_activities[0] == pytest.approx(
-            expected_activity, rel=0.05
-        )
+        assert result.raman_activities[0] == pytest.approx(expected_activity, rel=0.05)
         # The pre-fix bug deflated this by ~45.54x — well outside any
         # plausible finite-difference discrepancy.
         assert result.raman_activities[0] > 0.2 * expected_activity
