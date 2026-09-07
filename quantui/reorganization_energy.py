@@ -31,6 +31,26 @@ The heavy lifting (SCF + gradients) is delegated to the same code paths as
 the rest of QuantUI: :func:`quantui.optimizer.optimize_geometry` for the
 relaxations and :func:`quantui.session_calc.run_in_session` for the
 single-point cross evaluations.
+
+Scope and approximations (AUDIT additional-concerns)
+-----------------------------------------------------
+The core four-point energy differences above are exact given the four
+single-point energies; the two approximations worth being explicit about
+are in how those energies are obtained:
+
+* **Ion spin state.** :func:`_ion_multiplicity` picks the minimal valid
+  multiplicity from electron-count parity (1 for even, 2 for odd) — a
+  convenient default, NOT a determination of the true ground-state spin.
+  This is fine for most organic radicals/closed-shell ions but can be
+  wrong for a transition-metal ion, where the actual ground state may be
+  higher-spin. Users wanting a specific (e.g. high-spin) ion state must
+  build that calculation manually.
+* **Solvent scope.** An optional PCM ``solvent`` (see
+  :func:`run_reorganization_energy`) applies only to the four single-point
+  energies, not to the geometry relaxations that produce ``R_neutral``/
+  ``R_ion`` — those are always gas-phase optimizations. λ therefore mixes
+  a solvent-phase energy with a gas-phase-optimized geometry, not a fully
+  solvent-consistent (geometry-and-energy) treatment.
 """
 
 from __future__ import annotations

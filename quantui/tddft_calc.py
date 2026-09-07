@@ -3,8 +3,15 @@ TD-DFT excited-state calculation using PySCF.
 
 Computes vertical excitation energies and oscillator strengths using
 time-dependent density functional theory (TD-DFT).  For Hartree-Fock
-methods (RHF/UHF), falls back to TDHF (equivalent to CIS) and notes
-this in the output.
+methods (RHF/UHF), falls back to full TDHF (the random-phase
+approximation, RPA — ``mf.TDHF()``) and notes this in the output.
+
+AUDIT additional-concerns — TDHF is NOT the same method as CIS. Full
+TDHF/RPA includes the excitation/de-excitation (A/B block) coupling that
+the Tamm-Dancoff approximation (TDA) drops; CIS is HF's TDA. This module
+calls ``mf.TDHF()`` (full RPA), so its labels say TDHF/RPA rather than
+CIS. See PySCF's own discussion of the distinction:
+https://pyscf.org/user/tddft.html
 
 Platform notes
 --------------
@@ -130,8 +137,10 @@ def run_tddft_calc(
     equations to compute the requested number of vertical excitation energies
     and their oscillator strengths.
 
-    When *method* is ``'RHF'`` or ``'UHF'``, the function uses TDHF (CIS)
-    rather than TD-DFT and writes a note to *progress_stream*.  For a proper
+    When *method* is ``'RHF'`` or ``'UHF'``, the function uses full TDHF
+    (RPA — NOT the CIS/Tamm-Dancoff approximation; see the module
+    docstring) rather than TD-DFT, and writes a note to *progress_stream*.
+    For a proper
     UV-Vis simulation, a DFT functional such as ``'B3LYP'`` or ``'PBE0'`` is
     strongly recommended.
 
@@ -260,9 +269,11 @@ def _run_tddft_calc_body(
     if using_hf and progress_stream is not None:
         try:
             progress_stream.write(
-                "\nNote: Using TDHF (CIS) for excited states — RHF/UHF was selected.\n"
-                "For a proper TD-DFT UV-Vis spectrum, use a DFT functional\n"
-                "such as B3LYP or PBE0 in the Method dropdown.\n\n"
+                "\nNote: Using TDHF/RPA for excited states — RHF/UHF was selected.\n"
+                "This is full TDHF (the random-phase approximation, with\n"
+                "excitation/de-excitation coupling), not the CIS/Tamm-Dancoff\n"
+                "approximation. For a proper TD-DFT UV-Vis spectrum, use a DFT\n"
+                "functional such as B3LYP or PBE0 in the Method dropdown.\n\n"
             )
         except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
             pass
@@ -326,7 +337,7 @@ def _run_tddft_calc_body(
     try:
         emit_status(
             stream,
-            f"Solving {'TDHF (CIS)' if using_hf else 'TD-DFT'} "
+            f"Solving {'TDHF/RPA' if using_hf else 'TD-DFT'} "
             f"excited states ({nstates})…",
         )
         td = mf.TDHF() if using_hf else mf.TDDFT()

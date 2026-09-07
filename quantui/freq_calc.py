@@ -113,7 +113,16 @@ class FreqResult:
     provide ``norm_mode``.
     """
     mo_energy_hartree: Optional[List] = None
+    """Orbital energies for the Energies panel's diagram, in Hartrees.
+
+    AUDIT additional-concerns — for an open-shell (UHF/UKS) reference,
+    this is the ALPHA-channel orbital energies only; the beta channel is
+    extracted and then discarded (``_moe[0]`` on a 2-D ``mf.mo_energy``).
+    Not a complete open-shell orbital spectrum.
+    """
     mo_occ: Optional[List] = None
+    """Orbital occupations matching ``mo_energy_hartree`` — same
+    alpha-only caveat for an open-shell reference."""
     pyscf_mol_atom: Optional[List] = None
     pyscf_mol_basis: Optional[str] = None
     density_fit: bool = False
@@ -506,6 +515,10 @@ def _run_freq_calc_body(
         _moe = mf.mo_energy
         _moo = mf.mo_occ
         if isinstance(_moe, (list, _np_mo.ndarray)) and hasattr(_moe[0], "__len__"):
+            # AUDIT additional-concerns — open-shell (UHF/UKS): mo_energy
+            # is (2, n_mo), alpha then beta. Only the alpha channel is
+            # kept for the orbital-diagram fields below; see
+            # mo_energy_hartree/mo_occ's field docstrings above.
             _moe, _moo = _moe[0], _moo[0]
         mo_energy_hartree = _np_mo.asarray(_moe, dtype=float).tolist()
         mo_occ_list = _np_mo.asarray(_moo, dtype=float).tolist()

@@ -47,7 +47,12 @@ class SessionResult:
         energy_hartree: Total SCF energy in Hartrees.
         homo_lumo_gap_ev: HOMO-LUMO gap in electronvolts, or ``None`` if the
             gap cannot be determined (e.g. open-shell UHF with complex orbital
-            occupations, or too few occupied orbitals).
+            occupations, or too few occupied orbitals). AUDIT additional-
+            concerns: for a 2-D ``mo_energy`` (UHF/UKS), this is the ALPHA-
+            channel gap only — the beta channel is not computed or reported
+            here. The result card labels this "HOMO-LUMO gap (α)" for an
+            open-shell reference; treat it as a single-channel descriptor,
+            not a complete open-shell orbital spectrum.
         converged: ``True`` if the SCF iterations reached the convergence
             threshold; ``False`` if the maximum iteration count was hit.
         n_iterations: Number of SCF macro-iterations completed.  May be
@@ -820,6 +825,15 @@ def _run_session_calc_body(
 
     mulliken_charges: Optional[List[float]] = None
     dipole_moment_debye: Optional[float] = None
+    # AUDIT additional-concerns — for MP2/CCSD/CCSD(T), ``mf`` here is
+    # still the HF reference object (the post-HF correlation energy is
+    # computed separately and added to ``energy_hartree``; no correlated
+    # density is built for these methods). Both properties below are
+    # therefore HF-reference values even when method='CCSD(T)', NOT a
+    # correlated dipole/population — the result card labels them
+    # accordingly (_result_extra_rows' "HF reference" note) rather than
+    # presenting them as an unqualified property of the requested method.
+    #
     # Audit fix (2026-07-14): both mf.mulliken_pop() and mf.dip_moment()
     # are well-defined and work correctly for a genuine UHF object (verified
     # empirically against PySCF) — the previous ``method_upper != "UHF"``

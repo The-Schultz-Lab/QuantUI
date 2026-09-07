@@ -526,7 +526,7 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
             app._tddft_seed_note,
             widgets.HTML(
                 f'<span style="color:{_theme.css.ACCENT_WARNING};font-size:12px">⚠ Requires a DFT '
-                "functional (e.g. B3LYP, PBE0). RHF/UHF will run TDHF (CIS) "
+                "functional (e.g. B3LYP, PBE0). RHF/UHF will run TDHF/RPA "
                 "instead.</span>"
             ),
         ]

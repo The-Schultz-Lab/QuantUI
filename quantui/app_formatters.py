@@ -31,6 +31,28 @@ def _method_basis_label(method: str, basis: str, scf_variant: str | None) -> str
     return label
 
 
+# Open-shell SCF variants whose orbitals split into separate alpha/beta
+# channels (UHF/UKS: two independent sets; ROHF: a single spatial-orbital
+# set but singly-occupied orbitals that still only have a well-defined
+# alpha-channel HOMO/LUMO in the usual sense).
+_OPEN_SHELL_SCF_VARIANTS = frozenset({"UHF", "UKS", "ROHF", "ROKS"})
+
+
+def _homo_lumo_gap_label(scf_variant: str | None) -> str:
+    """ "HOMO-LUMO gap", qualified "(α)" for an open-shell reference.
+
+    AUDIT additional-concerns — session_calc.py's gap extraction always
+    reads spin channel 0 (alpha) for a 2-D ``mo_energy`` array (its own
+    comment: "UHF: ... use alpha spin for the gap estimate"). The result
+    card never said so, presenting a single-channel number as if it were
+    an unqualified property — silently dropping the beta-channel gap,
+    which can differ meaningfully for an open-shell system.
+    """
+    if scf_variant and scf_variant.upper() in _OPEN_SHELL_SCF_VARIANTS:
+        return "HOMO-LUMO gap (α)"
+    return "HOMO-LUMO gap"
+
+
 def _result_card_open(*, accent: str | None = None, extra_style: str = "") -> str:
     border = accent or _theme.css.ACCENT_SUCCESS_ALT
     style = (
@@ -120,6 +142,22 @@ def _result_extra_rows(get: Any) -> str:
             "(approximate 2-electron integrals)</span></td></tr>"
         )
 
+    # AUDIT additional-concerns — session_calc.py extracts both properties
+    # from ``mf`` (the HF/DFT reference) even for MP2/CCSD/CCSD(T), which
+    # never builds a correlated density here. That is a real, potentially
+    # intentional teaching simplification (a correlated dipole/population
+    # needs a relaxed/unrelaxed density from the post-HF method itself,
+    # which this app does not compute) — but the card must say so instead
+    # of presenting an HF-level dipole/population as if it came from the
+    # requested correlated method.
+    _is_post_hf = _mp2 is not None or _ccsd is not None
+    _post_hf_note = (
+        f' <span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
+        "(HF reference — not a correlated MP2/CCSD property)</span>"
+        if _is_post_hf
+        else ""
+    )
+
     _dip = get("dipole_moment_debye")
     if _dip is not None:
         _vec = get("dipole_vector_debye")
@@ -136,7 +174,7 @@ def _result_extra_rows(get: Any) -> str:
                 f' <span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
                 "(magnitude only — μ components not saved)</span>"
             )
-        rows += _num("Dipole moment", _dip_str)
+        rows += _num("Dipole moment", _dip_str + _post_hf_note)
 
     _chg = get("mulliken_charges")
     _syms = get("atom_symbols")
@@ -146,7 +184,7 @@ def _result_extra_rows(get: Any) -> str:
             f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL};vertical-align:top">'
             f"Mulliken charges</td>"
             f'<td style="color:{_theme.css.TEXT_HEADING};font-family:monospace;font-size:12px;'
-            f'word-break:break-all">{_charge_str}</td></tr>'
+            f'word-break:break-all">{_charge_str}{_post_hf_note}</td></tr>'
         )
     return rows
 
@@ -173,7 +211,11 @@ def format_result(r: Any) -> str:
                 f"{r.energy_hartree:.8f} Ha &ensp;({r.energy_ev:.4f} eV)",
                 _theme.css.TEXT_HEADING,
             ),
-            ("HOMO-LUMO gap", _gap, _theme.css.TEXT_HEADING),
+            (
+                _homo_lumo_gap_label(getattr(r, "scf_variant", None)),
+                _gap,
+                _theme.css.TEXT_HEADING,
+            ),
             (_conv_label, _conv, _cc),
             (
                 "SCF iterations",
@@ -697,6 +739,23 @@ def reorg_channels_html(channels: list[dict]) -> str:
             f'<table style="margin-top:2px;font-size:13px;border-collapse:collapse">'
             f"{body}</table></div>"
         )
+    # AUDIT additional-concerns — "Ion state" above reports a multiplicity
+    # chosen by electron-count parity/minimal spin (see
+    # reorganization_energy._ion_multiplicity's own docstring), which is a
+    # convenient default, NOT a ground-state determination — most relevant
+    # for a transition-metal ion, where the true ground state can be
+    # higher-spin. Any PCM solvent selected applies only to the four
+    # single-point energies above, evaluated at gas-phase-optimized
+    # geometries (the relaxations themselves are not solvent-optimized).
+    # Both scope notes are stated here, once, rather than left implicit.
+    blocks.append(
+        f'<div style="margin-top:6px;font-size:11px;color:{_theme.css.TEXT_MUTED_LIGHT}">'
+        "Ion multiplicity is the minimal-spin default from electron-count "
+        "parity, not a ground-state determination (relevant for transition-"
+        "metal ions). Solvent (if selected) applies only to the single-"
+        "point energies above; geometries are optimized in the gas phase."
+        "</div>"
+    )
     return "".join(blocks)
 
 
@@ -813,7 +872,11 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
                 f"{data['energy_hartree']:.8f} Ha &ensp;({data['energy_ev']:.4f} eV)",
                 _theme.css.TEXT_HEADING,
             ),
-            ("HOMO-LUMO gap", _gap, _theme.css.TEXT_HEADING),
+            (
+                _homo_lumo_gap_label(data.get("scf_variant")),
+                _gap,
+                _theme.css.TEXT_HEADING,
+            ),
             ("SCF converged", _conv, _cc),
             (
                 "SCF iterations",
