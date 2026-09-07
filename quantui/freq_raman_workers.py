@@ -24,6 +24,7 @@ def init_raman_worker(
     dm0_is_unrestricted: bool,
     density_fit_used: bool,
     checkpoint_items_dir: str | None = None,
+    ecp: dict | None = None,
 ) -> None:
     """Worker initializer — same threading discipline as IR workers.
 
@@ -33,6 +34,10 @@ def init_raman_worker(
     polarizability is durably recorded via
     :func:`quantui.checkpoint.mark_item_done_at`. ``None`` when the run has
     no checkpoint.
+
+    ``ecp`` (AUDIT F05): the reference molecule's ``mol.ecp`` mapping — see
+    :func:`quantui.freq_ir_workers.init_worker`'s docstring. Without it, a
+    heavy-element ECP system runs all-electron in this worker instead.
     """
     import os
     import pickle
@@ -56,6 +61,7 @@ def init_raman_worker(
         dm0_is_unrestricted=bool(dm0_is_unrestricted),
         density_fit_used=bool(density_fit_used),
         checkpoint_items_dir=checkpoint_items_dir,
+        ecp=ecp or {},
     )
 
 
@@ -92,6 +98,9 @@ def run_displaced_polarizability(item_id: str, coords_bohr_flat) -> list[list[fl
     mol = gto.Mole()
     mol.atom = state["atom_str"]
     mol.basis = state["basis"]
+    # AUDIT F05 — without this, a heavy-element ECP system (e.g.
+    # NaH/LANL2DZ) silently runs all-electron here.
+    mol.ecp = state.get("ecp") or {}
     mol.charge = state["charge"]
     mol.spin = state["spin"]
     mol.verbose = 0

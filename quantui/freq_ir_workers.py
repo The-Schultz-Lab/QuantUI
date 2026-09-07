@@ -56,6 +56,7 @@ def init_worker(
     dm0_pickle_path: str,
     omp_threads: int,
     checkpoint_items_dir: str | None = None,
+    ecp: dict | None = None,
 ) -> None:
     """ProcessPoolExecutor worker initializer.
 
@@ -94,6 +95,15 @@ def init_worker(
         :func:`quantui.checkpoint.mark_item_done_at`. ``None`` when the run
         has no checkpoint (checkpointing is always optional — see
         :mod:`quantui.checkpoint`'s "never break a calculation" rule).
+    ecp:
+        The reference molecule's ``mol.ecp`` mapping (AUDIT F05) —
+        ``{element: basis}`` for elements whose basis carries an effective
+        core potential (e.g. LANL2DZ/def2 on heavy atoms), or ``{}``/``None``
+        for an all-electron basis. Without this, a worker rebuilding the
+        ``Mole`` from ``atom_str``/``basis``/``charge``/``spin`` alone would
+        silently run the ECP atoms all-electron instead — a different
+        Hamiltonian (more electrons, no core potential), not just numerical
+        noise. See :func:`quantui.inorganic_guards.ecp_for_basis`.
     """
     # Order matters: set env vars before any NumPy / PySCF import.
     threads = str(int(omp_threads))
@@ -115,6 +125,7 @@ def init_worker(
         xc=xc,
         dm0=dm0,
         checkpoint_items_dir=checkpoint_items_dir,
+        ecp=ecp or {},
     )
 
 
@@ -157,6 +168,10 @@ def run_displaced_scf(item_id: str, coords_bohr_flat) -> Any:
     mol = gto.Mole()
     mol.atom = state["atom_str"]
     mol.basis = state["basis"]
+    # AUDIT F05 — without this, a heavy-element ECP system (e.g.
+    # NaH/LANL2DZ) silently runs all-electron here: a different
+    # Hamiltonian than the reference calculation, not just numerical noise.
+    mol.ecp = state.get("ecp") or {}
     mol.charge = state["charge"]
     mol.spin = state["spin"]
     mol.verbose = 0

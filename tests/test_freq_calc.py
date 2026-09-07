@@ -380,6 +380,60 @@ class TestIrIntensityUhfClosedShellDispatch:
         finally:
             os.unlink(tmp.name)
 
+    def test_ecp_omission_gives_a_different_hamiltonian(self):
+        """AUDIT F05 regression — the worker must run the reference's ECP
+        (e.g. LANL2DZ on Na), not silently fall back to all-electron.
+
+        Without ``ecp``, NaH/LANL2DZ is an all-electron (12-electron)
+        calculation instead of the correct 2-explicit-electron ECP one —
+        a different Hamiltonian, not numerical noise. Confirms both the
+        electron-count claim directly (via the same ecp_for_basis mapping
+        the worker now receives) and that the worker's own SCF result
+        (the dipole it returns) differs materially between the two cases.
+        """
+        pytest.importorskip("pyscf")
+        import os
+        import pickle
+        import tempfile
+
+        from pyscf import gto
+
+        from quantui.freq_ir_workers import init_worker, run_displaced_scf
+        from quantui.inorganic_guards import ecp_for_basis
+
+        atom_str = "Na 0 0 0; H 0 0 2.0"
+        basis = "LANL2DZ"
+        ecp = ecp_for_basis(basis, ["Na", "H"])
+        assert ecp == {"Na": "LANL2DZ"}
+
+        mol_with_ecp = gto.M(
+            atom=atom_str, basis=basis, ecp=ecp, charge=0, spin=0, verbose=0
+        )
+        mol_without_ecp = gto.M(
+            atom=atom_str, basis=basis, ecp={}, charge=0, spin=0, verbose=0
+        )
+        assert mol_with_ecp.nelectron == 2
+        assert mol_without_ecp.nelectron == 12
+
+        coords = mol_with_ecp.atom_coords(unit="Bohr").flatten().tolist()
+
+        def _run(ecp_arg):
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl")
+            try:
+                pickle.dump(None, tmp)
+                tmp.close()
+                init_worker(atom_str, basis, 0, 0, None, tmp.name, 1, None, ecp_arg)
+                return run_displaced_scf("d000_x_+", coords)
+            finally:
+                os.unlink(tmp.name)
+
+        dip_with_ecp = _run(ecp)
+        dip_without_ecp = _run({})
+        # A 2-electron vs 12-electron calculation on the same geometry
+        # produces a substantially different dipole, not a small
+        # numerical discrepancy.
+        assert abs(dip_with_ecp[2] - dip_without_ecp[2]) > 1.0
+
     def test_worker_writes_its_own_checkpoint_record(self, tmp_path):
         """M-CHECKPOINT CHK.4.4's crash-safety claim, at the unit level: the
         worker itself durably records completion — not just the parent

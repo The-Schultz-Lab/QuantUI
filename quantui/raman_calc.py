@@ -313,6 +313,7 @@ def _cpu_raman_activities_fd(
                             dm0_is_unrestricted,
                             density_fit_used,
                             _ckpt_items_dir,
+                            mol.ecp,  # AUDIT F05
                         ),
                     ) as _pool:
                         _futs = {

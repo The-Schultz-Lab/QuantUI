@@ -794,6 +794,7 @@ def _run_freq_calc_body(
                                         _dm0_handle.name,
                                         _threads_each,
                                         _ckpt_items_dir,
+                                        mol.ecp,  # AUDIT F05
                                     ),
                                 ) as _pool:
                                     # Submit all and store futures keyed by task
