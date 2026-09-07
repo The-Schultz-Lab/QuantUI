@@ -123,12 +123,12 @@ def _patch_bootstrap_scf(monkeypatch):
     below — never by ``TestRealPySCFIntegration``, which needs the genuine
     ``pyscf.scf`` module.
     """
+    import sys
     import types
 
     fake_scf_module = types.SimpleNamespace(
         RHF=_FakeBootstrapSCF, UHF=_FakeBootstrapSCF
     )
-    monkeypatch.setitem(__import__("sys").modules, "pyscf.scf", fake_scf_module)
     # scf_robust does ``from pyscf import scf`` (attribute access on the
     # `pyscf` package), not ``import pyscf.scf`` — patch the attribute too so
     # both import styles are covered regardless of what's already cached.
@@ -136,6 +136,20 @@ def _patch_bootstrap_scf(monkeypatch):
         import pyscf
 
         monkeypatch.setattr(pyscf, "scf", fake_scf_module, raising=False)
+        monkeypatch.setitem(sys.modules, "pyscf.scf", fake_scf_module)
+    else:
+        # Real PySCF isn't installed on this platform at all (Windows CI —
+        # PySCF is Linux/macOS/WSL only, see quantui/scf_robust.py's module
+        # docstring and CLAUDE.md). ``sys.modules["pyscf"]`` was therefore
+        # never populated, so patching only ``pyscf.scf`` is not enough:
+        # ``from pyscf import scf`` first has to resolve the parent package
+        # ``pyscf`` itself, which would still raise ModuleNotFoundError.
+        # Fake out the parent package too, entirely in ``sys.modules``, so
+        # the import succeeds without ever touching a real ``pyscf`` on
+        # disk.
+        fake_pyscf_module = types.SimpleNamespace(scf=fake_scf_module)
+        monkeypatch.setitem(sys.modules, "pyscf", fake_pyscf_module)
+        monkeypatch.setitem(sys.modules, "pyscf.scf", fake_scf_module)
 
 
 @pytest.mark.usefixtures("_patch_bootstrap_scf")
