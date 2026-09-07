@@ -641,6 +641,11 @@ def main():
 {geometry}
     '''
     mol.basis = '{basis}'
+    # AUDIT F06 — the resolved ECP mapping (e.g. {{'Na': 'LANL2DZ'}} for
+    # LANL2DZ/def2 heavy elements, {{}} for an all-electron basis). Without
+    # this a heavy-element system runs all-electron here — a different
+    # Hamiltonian than the in-app calculation, not just numerical noise.
+    mol.ecp = {ecp}
     mol.charge = {charge}
     mol.spin = {spin}
     mol.verbose = 4  # Detailed output

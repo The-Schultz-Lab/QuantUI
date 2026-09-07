@@ -92,10 +92,18 @@ class PySCFCalculation:
         formula = self.molecule.get_formula()
         job_name = f"{formula}_{self.method}_{self.basis}"
 
+        # AUDIT F06 — embed the resolved ECP mapping so a heavy-element
+        # system (e.g. NaH/LANL2DZ) reproduces the in-app electron count
+        # instead of silently running all-electron with only the basis set.
+        from .inorganic_guards import ecp_for_basis
+
+        ecp = ecp_for_basis(self.basis, self.molecule.atoms)
+
         script_content = config.PYSCF_SCRIPT_TEMPLATE.format(
             job_name=job_name,
             method=self.method,
             basis=self.basis,
+            ecp=repr(ecp),
             geometry=geometry,
             charge=self.molecule.charge,
             spin=spin,

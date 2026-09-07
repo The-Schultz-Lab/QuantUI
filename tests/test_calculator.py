@@ -185,6 +185,53 @@ class TestScriptGeneration:
 
         assert "charge = 1" in script_content
 
+    def test_ecp_embedded_for_heavy_element_basis(self, tmp_path):
+        """The resolved ECP mapping must appear in the generated script for
+        a basis that carries one (LANL2DZ on Na), and be an explicit empty
+        dict for an all-electron basis — never simply absent."""
+        na_h = Molecule(["Na", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 2.0]])
+        calc = PySCFCalculation(na_h, method="RHF", basis="LANL2DZ")
+        script_content = calc.generate_calculation_script(tmp_path / "nah.py")
+        assert "mol.ecp = {'Na': 'LANL2DZ'}" in script_content
+
+        water = Molecule(
+            ["O", "H", "H"],
+            [[0.0, 0.0, 0.0], [0.757, 0.587, 0.0], [-0.757, 0.587, 0.0]],
+        )
+        calc_ae = PySCFCalculation(water, method="RHF", basis="6-31G")
+        script_ae = calc_ae.generate_calculation_script(tmp_path / "water.py")
+        assert "mol.ecp = {}" in script_ae
+
+    @pytest.mark.slow
+    def test_exported_ecp_script_reproduces_in_app_electron_count(self, tmp_path):
+        """AUDIT F06 regression — executes the exported NaH/LANL2DZ script
+        (real PySCF subprocess, no QuantUI import) and confirms it reports
+        the correct 2-explicit-electron ECP calculation, not the wrong
+        12-electron all-electron one the unfixed template produced.
+        """
+        pytest.importorskip("pyscf")
+        import subprocess
+        import sys
+
+        na_h = Molecule(["Na", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 2.0]])
+        calc = PySCFCalculation(na_h, method="RHF", basis="LANL2DZ")
+        script_path = tmp_path / "nah_rhf_lanl2dz.py"
+        calc.generate_calculation_script(script_path)
+
+        proc = subprocess.run(
+            [sys.executable, str(script_path)],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "Number of electrons: 2" in proc.stdout
+        # The unfixed template reported 12 electrons and E ~= -20.13 Ha for
+        # this system; the correct ECP calculation converges near -0.7 Ha.
+        assert "Number of electrons: 12" not in proc.stdout
+        assert (tmp_path / "results.npz").exists()
+
     def test_script_creates_parent_directories(self, tmp_path):
         """Test that script creation makes parent directories."""
         script_path = tmp_path / "nested" / "dir" / "calc.py"
