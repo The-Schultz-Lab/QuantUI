@@ -178,6 +178,31 @@ class TestRunFreqCalcThermo:
 
     @pyscf_only
     @pytest.mark.slow
+    def test_thermo_matches_independent_pyscf_reference(self):
+        """AUDIT F01 regression — S_jmol/G_hartree against an independent
+        PySCF reference (not merely S > 0 / G < H), for RHF/STO-3G water at
+        the fixed geometry in ``_water()``.
+
+        Before the F01 fix, PySCF's S_tot (returned in Eh/K) was stored
+        directly as S_jmol without converting to J/(mol*K), then divided by
+        _HARTREE_TO_JMOL a second time when forming G — deflating S_jmol by
+        ~2.6e6x and leaving G ~= H. Reference values below (S=188.538424
+        J/(mol*K), G=-74.954908540 Eh) come from calling
+        pyscf.hessian.thermo.thermo() directly on the same RHF/STO-3G water
+        SCF object/frequencies, independent of quantui.freq_calc.
+        """
+        from quantui.freq_calc import run_freq_calc
+
+        result = run_freq_calc(_water(), method="RHF", basis="STO-3G")
+        assert result.thermo is not None
+        assert result.thermo.S_jmol == pytest.approx(188.538424, abs=0.01)
+        assert result.thermo.G_hartree == pytest.approx(-74.954908540, abs=1e-6)
+        # The old bug's error was ~8e-9 Eh (S_jmol deflated to ~7.18e-5); a
+        # correct calculation differs from H by orders of magnitude more.
+        assert result.thermo.H_hartree - result.thermo.G_hartree > 1e-3
+
+    @pyscf_only
+    @pytest.mark.slow
     def test_thermo_g_less_than_h(self):
         from quantui.freq_calc import run_freq_calc
 

@@ -990,13 +990,21 @@ def _run_freq_calc_body(
                     f"Missing H or S in thermo dict (keys: {sorted(_tout.keys())})"
                 )
             _H = _tv(_H_raw)
-            _S = _tv(_S_raw)  # J/(mol·K)
+            # PySCF's thermo() returns S_tot in Eh/K, not J/(mol·K) — despite
+            # the misleading local variable name this used to carry. Convert
+            # to J/(mol·K) for storage/display, and use the Eh/K value
+            # (matching H_hartree's units) to compute G = H - T*S. The old
+            # code stored the raw Eh/K number as S_jmol, then divided by
+            # _HARTREE_TO_JMOL again when forming G — nearly canceling the
+            # entropy term's contribution to G (see AUDIT F01).
+            _S_hartree_per_k = _tv(_S_raw)
+            _S_jmol = _S_hartree_per_k * _HARTREE_TO_JMOL
             _zpve = _tv(_Z_raw) if _Z_raw is not None else zpve_hartree
-            _G = _H - 298.15 * _S / _HARTREE_TO_JMOL
+            _G = _H - 298.15 * _S_hartree_per_k
             thermo_data = ThermoData(
                 zpve_hartree=_zpve,
                 H_hartree=_H,
-                S_jmol=_S,
+                S_jmol=_S_jmol,
                 G_hartree=_G,
             )
             _status("Frequency backend complete.")
