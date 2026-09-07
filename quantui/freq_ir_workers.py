@@ -57,6 +57,8 @@ def init_worker(
     omp_threads: int,
     checkpoint_items_dir: str | None = None,
     ecp: dict | None = None,
+    density_fit: bool = False,
+    scf_rescue: bool = True,
 ) -> None:
     """ProcessPoolExecutor worker initializer.
 
@@ -104,6 +106,23 @@ def init_worker(
         silently run the ECP atoms all-electron instead — a different
         Hamiltonian (more electrons, no core potential), not just numerical
         noise. See :func:`quantui.inorganic_guards.ecp_for_basis`.
+    density_fit:
+        AUDIT F19 — whether the *reference* SCF used density fitting
+        (M-DF). The serial IR loop matches this via
+        ``try_density_fit(mf, enabled=density_fit_used)`` before every
+        displaced SCF; this worker previously had no such parameter at
+        all, so every parallel displacement ran without density fitting
+        even when the reference (and the serial fallback) used it —
+        silently changing the numerical approximation, not just its
+        speed, whenever the user opted into parallel IR on a fitted
+        calculation.
+    scf_rescue:
+        AUDIT F19 — whether :func:`quantui.scf_robust.run_scf_with_rescue`
+        may apply its convergence-rescue ladder for this run. The serial
+        loop threads the caller's ``scf_rescue`` flag through
+        (``run_scf_with_rescue(_mf_d, dm0=_dm0, rescue=scf_rescue)``); this
+        worker previously hardcoded the rescue default (``True``)
+        regardless of what the caller requested.
     """
     # Order matters: set env vars before any NumPy / PySCF import.
     threads = str(int(omp_threads))
@@ -126,6 +145,8 @@ def init_worker(
         dm0=dm0,
         checkpoint_items_dir=checkpoint_items_dir,
         ecp=ecp or {},
+        density_fit=bool(density_fit),
+        scf_rescue=bool(scf_rescue),
     )
 
 
@@ -198,9 +219,20 @@ def run_displaced_scf(item_id: str, coords_bohr_flat) -> Any:
     else:
         mf = scf.UHF(mol) if dm0_is_unrestricted else scf.RHF(mol)
     mf.verbose = 0
+    # AUDIT F19 — match the reference SCF's density-fitting choice, exactly
+    # like the serial loop's `_try_density_fit(_mf_d, enabled=_density_fit_used)`
+    # (freq_calc.py). Without this, enabling parallel IR silently ran every
+    # displaced SCF without density fitting whenever the reference was fitted
+    # — a different numerical approximation, not merely a speed difference.
+    from .density_fitting import try_density_fit
+
+    mf, _ = try_density_fit(mf, enabled=bool(state.get("density_fit", False)))
     from .scf_robust import run_scf_with_rescue
 
-    run_scf_with_rescue(mf, dm0=dm0)
+    # AUDIT F19 — honor the caller's scf_rescue choice instead of always
+    # taking run_scf_with_rescue's default (True); the serial loop already
+    # threads scf_rescue through as `rescue=scf_rescue`.
+    run_scf_with_rescue(mf, dm0=dm0, rescue=bool(state.get("scf_rescue", True)))
     dipole = np.array(mf.dip_moment(verbose=0))
 
     items_dir = state.get("checkpoint_items_dir")

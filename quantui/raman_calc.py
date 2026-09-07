@@ -314,6 +314,7 @@ def _cpu_raman_activities_fd(
                             density_fit_used,
                             _ckpt_items_dir,
                             mol.ecp,  # AUDIT F05
+                            scf_rescue,  # AUDIT F19
                         ),
                     ) as _pool:
                         _futs = {

@@ -25,6 +25,7 @@ def init_raman_worker(
     density_fit_used: bool,
     checkpoint_items_dir: str | None = None,
     ecp: dict | None = None,
+    scf_rescue: bool = True,
 ) -> None:
     """Worker initializer — same threading discipline as IR workers.
 
@@ -38,6 +39,10 @@ def init_raman_worker(
     ``ecp`` (AUDIT F05): the reference molecule's ``mol.ecp`` mapping — see
     :func:`quantui.freq_ir_workers.init_worker`'s docstring. Without it, a
     heavy-element ECP system runs all-electron in this worker instead.
+
+    ``scf_rescue`` (AUDIT F19): whether ``run_scf_with_rescue`` may apply
+    its convergence-rescue ladder. Previously hardcoded to the default
+    (``True``) regardless of the caller's ``scf_rescue`` choice.
     """
     import os
     import pickle
@@ -62,6 +67,7 @@ def init_raman_worker(
         density_fit_used=bool(density_fit_used),
         checkpoint_items_dir=checkpoint_items_dir,
         ecp=ecp or {},
+        scf_rescue=bool(scf_rescue),
     )
 
 
@@ -122,7 +128,9 @@ def run_displaced_polarizability(item_id: str, coords_bohr_flat) -> list[list[fl
     mf, _ = _try_density_fit(mf, enabled=bool(state.get("density_fit_used")))
     from .scf_robust import run_scf_with_rescue
 
-    run_scf_with_rescue(mf, dm0=dm0)
+    # AUDIT F19 — honor the caller's scf_rescue choice instead of always
+    # taking run_scf_with_rescue's default (True).
+    run_scf_with_rescue(mf, dm0=dm0, rescue=bool(state.get("scf_rescue", True)))
 
     pol_mod = _polarizability_module(mol, dm0_is_unrestricted)
     alpha = np.asarray(pol_mod.polarizability(pol_mod.Polarizability(mf)), dtype=float)

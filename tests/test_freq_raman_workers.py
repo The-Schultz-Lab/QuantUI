@@ -75,3 +75,103 @@ class TestRamanWorkerEcp:
         alpha_with_ecp = _run(ecp)
         alpha_without_ecp = _run({})
         assert abs(alpha_with_ecp[2][2] - alpha_without_ecp[2][2]) > 1.0
+
+
+class TestRamanWorkerScfRescue:
+    def test_scf_rescue_option_honored(self, monkeypatch):
+        """AUDIT F19 regression — the Raman worker always called
+        ``run_scf_with_rescue(mf, dm0=dm0)``, taking its default
+        ``rescue=True`` regardless of what the caller (raman_calc.py's
+        ``scf_rescue`` parameter) requested. Confirms the worker now
+        threads that choice through.
+        """
+        pytest.importorskip("pyscf")
+        import os
+        import pickle
+        import tempfile
+
+        from pyscf import gto
+
+        import quantui.scf_robust as scf_robust
+        from quantui.freq_raman_workers import (
+            init_raman_worker,
+            run_displaced_polarizability,
+        )
+
+        atom_str = "O 0 0 0.119; H 0 0.763 -0.477; H 0 -0.763 -0.477"
+        mol = gto.M(atom=atom_str, basis="sto-3g", spin=0, charge=0, verbose=0)
+        coords = mol.atom_coords(unit="Bohr").flatten().tolist()
+
+        seen_rescue = []
+        _orig = scf_robust.run_scf_with_rescue
+
+        def _spy(mf_arg, **kwargs):
+            seen_rescue.append(kwargs.get("rescue", True))
+            return _orig(mf_arg, **kwargs)
+
+        monkeypatch.setattr(scf_robust, "run_scf_with_rescue", _spy)
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl")
+        try:
+            pickle.dump(None, tmp)
+            tmp.close()
+            init_raman_worker(
+                atom_str,
+                "sto-3g",
+                0,
+                0,
+                None,
+                tmp.name,
+                1,
+                False,  # dm0_is_unrestricted
+                False,  # density_fit_used
+                None,  # checkpoint_items_dir
+                None,  # ecp
+                False,  # scf_rescue
+            )
+            run_displaced_polarizability("d000_x_+", coords)
+        finally:
+            os.unlink(tmp.name)
+
+        assert seen_rescue == [False]
+
+    def test_scf_rescue_defaults_true_for_an_older_caller(self, monkeypatch):
+        """Backward compatibility: a caller predating this fix (only
+        positional args through ``ecp``) must still get rescue=True,
+        matching the old always-on behavior exactly."""
+        pytest.importorskip("pyscf")
+        import os
+        import pickle
+        import tempfile
+
+        from pyscf import gto
+
+        import quantui.scf_robust as scf_robust
+        from quantui.freq_raman_workers import (
+            init_raman_worker,
+            run_displaced_polarizability,
+        )
+
+        atom_str = "O 0 0 0.119; H 0 0.763 -0.477; H 0 -0.763 -0.477"
+        mol = gto.M(atom=atom_str, basis="sto-3g", spin=0, charge=0, verbose=0)
+        coords = mol.atom_coords(unit="Bohr").flatten().tolist()
+
+        seen_rescue = []
+        _orig = scf_robust.run_scf_with_rescue
+
+        def _spy(mf_arg, **kwargs):
+            seen_rescue.append(kwargs.get("rescue", True))
+            return _orig(mf_arg, **kwargs)
+
+        monkeypatch.setattr(scf_robust, "run_scf_with_rescue", _spy)
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl")
+        try:
+            pickle.dump(None, tmp)
+            tmp.close()
+            init_raman_worker(atom_str, "sto-3g", 0, 0, None, tmp.name, 1, False, False)
+            run_displaced_polarizability("d000_x_+", coords)
+        finally:
+            os.unlink(tmp.name)
+
+        assert seen_rescue == [True]

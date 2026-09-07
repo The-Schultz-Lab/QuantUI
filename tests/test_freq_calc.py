@@ -465,6 +465,161 @@ class TestIrIntensityUhfClosedShellDispatch:
         # numerical discrepancy.
         assert abs(dip_with_ecp[2] - dip_without_ecp[2]) > 1.0
 
+    def test_density_fit_option_applied_to_displaced_scf(self, monkeypatch):
+        """AUDIT F19 regression — the worker had no density_fit parameter at
+        all; every displaced SCF ran without density fitting even when the
+        reference (and the serial fallback in freq_calc.py, which calls
+        ``_try_density_fit(_mf_d, enabled=_density_fit_used)``) used it —
+        silently changing the numerical approximation for parallel IR runs
+        on a fitted reference, not merely its speed.
+        """
+        pytest.importorskip("pyscf")
+        import os
+        import pickle
+        import tempfile
+
+        from pyscf import gto, scf
+
+        import quantui.density_fitting as density_fitting
+        from quantui.freq_ir_workers import init_worker, run_displaced_scf
+
+        atom_str = "O 0 0 0.119; H 0 0.763 -0.477; H 0 -0.763 -0.477"
+        mol = gto.M(atom=atom_str, basis="sto-3g", spin=0, charge=0, verbose=0)
+        mf = scf.RHF(mol)
+        mf.kernel()
+        dm0 = mf.make_rdm1()
+
+        seen_enabled = []
+        _orig = density_fitting.try_density_fit
+
+        def _spy(mf_arg, *, enabled=None, auxbasis=None):
+            seen_enabled.append(enabled)
+            return _orig(mf_arg, enabled=enabled, auxbasis=auxbasis)
+
+        monkeypatch.setattr(density_fitting, "try_density_fit", _spy)
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl")
+        try:
+            pickle.dump(dm0, tmp)
+            tmp.close()
+            init_worker(
+                atom_str,
+                "sto-3g",
+                0,
+                0,
+                None,
+                tmp.name,
+                1,
+                None,  # checkpoint_items_dir
+                None,  # ecp
+                True,  # density_fit
+                True,  # scf_rescue
+            )
+            coords = mol.atom_coords(unit="Bohr").flatten().tolist()
+            dip = run_displaced_scf("d000_x_+", coords)
+            assert len(dip) == 3
+        finally:
+            os.unlink(tmp.name)
+
+        assert seen_enabled == [True]
+
+    def test_density_fit_defaults_off_for_an_older_caller(self, monkeypatch):
+        """Backward compatibility: a caller that predates this fix (only
+        positional args through ``ecp``) must still get density_fit=False,
+        matching the old always-off behavior exactly."""
+        pytest.importorskip("pyscf")
+        import os
+        import pickle
+        import tempfile
+
+        from pyscf import gto, scf
+
+        import quantui.density_fitting as density_fitting
+        from quantui.freq_ir_workers import init_worker, run_displaced_scf
+
+        atom_str = "O 0 0 0.119; H 0 0.763 -0.477; H 0 -0.763 -0.477"
+        mol = gto.M(atom=atom_str, basis="sto-3g", spin=0, charge=0, verbose=0)
+        mf = scf.RHF(mol)
+        mf.kernel()
+        dm0 = mf.make_rdm1()
+
+        seen_enabled = []
+        _orig = density_fitting.try_density_fit
+
+        def _spy(mf_arg, *, enabled=None, auxbasis=None):
+            seen_enabled.append(enabled)
+            return _orig(mf_arg, enabled=enabled, auxbasis=auxbasis)
+
+        monkeypatch.setattr(density_fitting, "try_density_fit", _spy)
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl")
+        try:
+            pickle.dump(dm0, tmp)
+            tmp.close()
+            init_worker(atom_str, "sto-3g", 0, 0, None, tmp.name, 1)
+            coords = mol.atom_coords(unit="Bohr").flatten().tolist()
+            run_displaced_scf("d000_x_+", coords)
+        finally:
+            os.unlink(tmp.name)
+
+        assert seen_enabled == [False]
+
+    def test_scf_rescue_option_honored_in_displaced_scf(self, monkeypatch):
+        """AUDIT F19 regression — the worker always called
+        ``run_scf_with_rescue(mf, dm0=dm0)``, taking its default
+        ``rescue=True`` regardless of what the caller requested. The
+        serial loop threads the caller's choice through as
+        ``rescue=scf_rescue``; this confirms the worker now does too.
+        """
+        pytest.importorskip("pyscf")
+        import os
+        import pickle
+        import tempfile
+
+        from pyscf import gto, scf
+
+        import quantui.scf_robust as scf_robust
+        from quantui.freq_ir_workers import init_worker, run_displaced_scf
+
+        atom_str = "O 0 0 0.119; H 0 0.763 -0.477; H 0 -0.763 -0.477"
+        mol = gto.M(atom=atom_str, basis="sto-3g", spin=0, charge=0, verbose=0)
+        mf = scf.RHF(mol)
+        mf.kernel()
+        dm0 = mf.make_rdm1()
+
+        seen_rescue = []
+        _orig = scf_robust.run_scf_with_rescue
+
+        def _spy(mf_arg, **kwargs):
+            seen_rescue.append(kwargs.get("rescue", True))
+            return _orig(mf_arg, **kwargs)
+
+        monkeypatch.setattr(scf_robust, "run_scf_with_rescue", _spy)
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl")
+        try:
+            pickle.dump(dm0, tmp)
+            tmp.close()
+            init_worker(
+                atom_str,
+                "sto-3g",
+                0,
+                0,
+                None,
+                tmp.name,
+                1,
+                None,  # checkpoint_items_dir
+                None,  # ecp
+                False,  # density_fit
+                False,  # scf_rescue
+            )
+            coords = mol.atom_coords(unit="Bohr").flatten().tolist()
+            run_displaced_scf("d000_x_+", coords)
+        finally:
+            os.unlink(tmp.name)
+
+        assert seen_rescue == [False]
+
     def test_worker_writes_its_own_checkpoint_record(self, tmp_path):
         """M-CHECKPOINT CHK.4.4's crash-safety claim, at the unit level: the
         worker itself durably records completion — not just the parent
