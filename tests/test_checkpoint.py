@@ -475,6 +475,139 @@ class TestPoints:
         assert ckpt.completed_points()
 
 
+# ══ Named item sets (CHK.4.1) ════════════════════════════════════════════════
+#
+# The set-oriented sibling of TestPoints above: frequency's displaced-geometry
+# SCFs can complete in any order (freq_ir_workers.py's QUANTUI_FREQ_PARALLEL
+# opt-in runs them concurrently), so resume has to diff a *set* of finished
+# item ids, not trim a *prefix* the way CHK.3's scan points do.
+
+
+class TestNamedItemSets:
+    def test_round_trip(self, root):
+        ckpt = C.Checkpoint(_identity())
+        ckpt.begin()
+        ckpt.mark_item_done("freq_displacements", "d000_x_+", {"energy": -1.1})
+        ckpt.mark_item_done("freq_displacements", "d000_x_-", {"energy": -1.2})
+        assert ckpt.completed_item_ids("freq_displacements") == {"d000_x_+", "d000_x_-"}
+        items = ckpt.completed_items("freq_displacements")
+        assert items["d000_x_+"]["energy"] == -1.1
+        assert items["d000_x_-"]["energy"] == -1.2
+
+    def test_missing_set_reads_as_empty(self, root):
+        ckpt = C.Checkpoint(_identity())
+        assert ckpt.completed_item_ids("freq_displacements") == set()
+        assert ckpt.completed_items("freq_displacements") == {}
+
+    def test_mark_item_done_creates_the_directory_if_needed(self, root):
+        ckpt = C.Checkpoint(_identity())
+        ckpt.mark_item_done("freq_displacements", "d000_x_+", {"energy": -1.1})
+        assert ckpt.completed_item_ids("freq_displacements") == {"d000_x_+"}
+
+    def test_rewriting_an_item_replaces_it(self, root):
+        """A resubmitted worker recomputing the same id must not duplicate."""
+        ckpt = C.Checkpoint(_identity())
+        ckpt.begin()
+        ckpt.mark_item_done("freq_displacements", "d000_x_+", {"energy": -1.1})
+        ckpt.mark_item_done("freq_displacements", "d000_x_+", {"energy": -1.15})
+        assert ckpt.completed_item_ids("freq_displacements") == {"d000_x_+"}
+        assert ckpt.completed_items("freq_displacements")["d000_x_+"]["energy"] == -1.15
+
+    def test_no_stray_tmp_file_left_behind_after_a_write(self, root):
+        ckpt = C.Checkpoint(_identity())
+        ckpt.mark_item_done("freq_displacements", "d000_x_+", {"energy": -1.1})
+        leftovers = list(ckpt.items_dir("freq_displacements").iterdir())
+        assert leftovers == [ckpt.items_dir("freq_displacements") / "d000_x_+.json"]
+
+    def test_a_corrupt_item_file_is_excluded_from_both_ids_and_payloads(self, root):
+        """A corrupted item must never be mistaken for a completed one —
+        the resume-time question is "do we have a usable result?", not
+        "does this filename exist?". Recomputing one displacement is cheap;
+        silently assembling a Hessian from a phantom result is not."""
+        ckpt = C.Checkpoint(_identity())
+        ckpt.begin()
+        ckpt.mark_item_done("freq_displacements", "d000_x_+", {"energy": -1.1})
+        d = ckpt.items_dir("freq_displacements")
+        (d / "d001_y_-.json").write_text('{"energy": -1.', encoding="utf-8")
+        assert ckpt.completed_item_ids("freq_displacements") == {"d000_x_+"}
+        assert set(ckpt.completed_items("freq_displacements").keys()) == {"d000_x_+"}
+
+    def test_a_dot_tmp_file_never_counts_as_complete(self, root):
+        ckpt = C.Checkpoint(_identity())
+        d = ckpt.items_dir("freq_displacements")
+        d.mkdir(parents=True)
+        (d / "d000_x_+.12345.abcd1234.tmp").write_text("{}", encoding="utf-8")
+        assert ckpt.completed_item_ids("freq_displacements") == set()
+
+    def test_two_named_sets_never_collide(self, root):
+        """IR vs. Raman displacement sets under one checkpoint (CHK.4.4)."""
+        ckpt = C.Checkpoint(_identity())
+        ckpt.mark_item_done("ir_displacements", "d000_x_+", {"kind": "ir"})
+        ckpt.mark_item_done("raman_displacements", "d000_x_+", {"kind": "raman"})
+        assert ckpt.completed_items("ir_displacements")["d000_x_+"]["kind"] == "ir"
+        assert (
+            ckpt.completed_items("raman_displacements")["d000_x_+"]["kind"] == "raman"
+        )
+
+    def test_has_progress_true_once_an_item_is_marked_done(self, root):
+        ckpt = C.Checkpoint(_identity())
+        ckpt.begin()
+        assert not ckpt.has_progress()
+        ckpt.mark_item_done("freq_displacements", "d000_x_+", {"energy": -1.1})
+        assert ckpt.has_progress()
+
+    def test_concurrent_writers_never_collide_on_different_ids(self, root):
+        """Simulates freq_ir_workers.py's ProcessPoolExecutor writers: each
+        one only ever touches its own item id's filename, so nothing here
+        needs a lock. Not a true multiprocess test (that belongs in
+        CHK.4.4's integration tests) — just the filesystem-contract half."""
+        ckpt = C.Checkpoint(_identity())
+        for i in range(20):
+            ckpt.mark_item_done("freq_displacements", f"d{i:03d}_x_+", {"i": i})
+        ids = ckpt.completed_item_ids("freq_displacements")
+        assert len(ids) == 20
+        items = ckpt.completed_items("freq_displacements")
+        assert all(items[f"d{i:03d}_x_+"]["i"] == i for i in range(20))
+
+
+class TestPathOnlyItemFunctions:
+    """The cross-process sibling API (CHK.4.4): a ProcessPoolExecutor worker
+    only has a directory path (via ``initargs``), not a picklable
+    ``Checkpoint`` object — these free functions let it write/read the same
+    on-disk records ``Checkpoint.mark_item_done``/``completed_items`` do."""
+
+    def test_write_then_read_by_path_alone(self, root, tmp_path):
+        items_root = tmp_path / "items" / "freq_displacements"
+        assert C.mark_item_done_at(items_root, "d000_x_+", {"energy": -1.1}) is True
+        assert C.completed_items_at(items_root) == {"d000_x_+": {"energy": -1.1}}
+
+    def test_interoperates_with_the_checkpoint_object(self, root):
+        """A worker writing by path and the parent reading via Checkpoint
+        (or vice versa) must see the exact same records — same directory,
+        same file format, either API."""
+        ckpt = C.Checkpoint(_identity())
+        C.mark_item_done_at(
+            ckpt.items_dir("freq_displacements"), "d000_x_+", {"energy": -1.1}
+        )
+        assert ckpt.completed_items("freq_displacements") == {
+            "d000_x_+": {"energy": -1.1}
+        }
+        ckpt.mark_item_done("freq_displacements", "d000_x_-", {"energy": -1.2})
+        assert C.completed_items_at(ckpt.items_dir("freq_displacements")) == {
+            "d000_x_+": {"energy": -1.1},
+            "d000_x_-": {"energy": -1.2},
+        }
+
+    def test_missing_directory_reads_as_empty(self, tmp_path):
+        assert C.completed_items_at(tmp_path / "nope") == {}
+
+    def test_returns_false_rather_than_raising_on_an_unwritable_path(self, tmp_path):
+        # A file where a directory is expected: mkdir(parents=True) raises.
+        blocker = tmp_path / "blocker"
+        blocker.write_text("not a directory", encoding="utf-8")
+        assert C.mark_item_done_at(blocker / "sub", "d000_x_+", {}) is False
+
+
 # ══ Warm start discovery ═════════════════════════════════════════════════════
 
 
