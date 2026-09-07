@@ -228,6 +228,9 @@ def format_opt_result(r: Any) -> str:
 
 def format_freq_result(r: Any) -> str:
     """Format a frequency-analysis result card."""
+    # AUDIT F15 — r.converged now also requires the Hessian/harmonic-
+    # analysis step to have completed, not just the reference SCF, so the
+    # row is labeled/colored on overall status rather than "SCF converged".
     _conv = "Yes" if r.converged else "No (treat with caution)"
     _cc = _converged_color(r.converged)
     n_real = r.n_real_modes()
@@ -245,7 +248,7 @@ def format_freq_result(r: Any) -> str:
     _rows = (
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF energy</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF converged</td>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Real modes</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{n_real}</td></tr>'

@@ -463,12 +463,17 @@ def format_log_footer(
         zpve = getattr(result, "zpve_hartree", None)
         n_steps = getattr(result, "n_steps", None)  # OptResult
 
-        # Convergence line
+        # Convergence line. AUDIT F07/F08/F15 — .converged on several result
+        # types now folds in more than the reference SCF (CCSD's own
+        # amplitude convergence, TD-DFT's per-root convergence, the
+        # Hessian/harmonic-analysis step actually completing), so this must
+        # not claim "SCF" specifically — that would misleadingly blame the
+        # reference SCF for e.g. a Hessian failure with a converged SCF.
         if converged is not None:
             tick = "✓" if converged else "✗"
             conv_word = "converged" if converged else "did NOT converge"
             iter_str = f"  |  Iterations: {n_iter}" if n_iter is not None else ""
-            lines.append(f"  {tick} SCF {conv_word}{iter_str}")
+            lines.append(f"  {tick} Result {conv_word}{iter_str}")
         if n_steps is not None:
             lines.append(f"    Geometry optimization: {n_steps} steps")
 

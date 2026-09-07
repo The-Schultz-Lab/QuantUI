@@ -265,6 +265,37 @@ class TestRunFreqCalcPostHfGuard:
 
 
 # ============================================================================
+# AUDIT F15 — a failed Hessian must not read as a converged result
+# ============================================================================
+
+
+class TestFreqResultReflectsHessianCompletion:
+    """A ROHF reference's analytic Hessian is unavailable on this path
+    (PySCF has no ROHF Hessian implementation here); the caught exception
+    used to leave FreqResult.converged reading whatever the reference SCF
+    alone reported, with frequencies_cm1=[] — a frequency calculation with
+    no computed Hessian is not a successful frequency analysis.
+    """
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_rohf_hessian_failure_reports_unconverged(self):
+        from quantui.freq_calc import run_freq_calc
+        from quantui.molecule import Molecule
+
+        # Real OH doublet — RHF/STO-3G dispatches to ROHF for this
+        # open-shell molecule, matching the audit's exact reproduction.
+        oh = Molecule(
+            ["O", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 0.97]], charge=0, multiplicity=2
+        )
+        result = run_freq_calc(oh, method="RHF", basis="STO-3G")
+
+        assert result.scf_variant == "ROHF"
+        assert result.frequencies_cm1 == []
+        assert result.converged is False
+
+
+# ============================================================================
 # IR intensities — PySCF required
 # ============================================================================
 

@@ -72,7 +72,13 @@ class FreqResult:
     Attributes:
         energy_hartree: SCF energy at the input geometry in Hartrees.
         homo_lumo_gap_ev: HOMO-LUMO gap in eV, or ``None``.
-        converged: ``True`` if the SCF converged.
+        converged: ``True`` only when BOTH the SCF converged AND the
+            Hessian/harmonic-analysis step actually completed (AUDIT F15)
+            — e.g. a ROHF reference whose analytic Hessian PySCF doesn't
+            support on this path used to report ``converged=True`` with
+            ``frequencies_cm1=[]``, since this flag came solely from the
+            SCF. A frequency calculation with no computed Hessian is not a
+            successful frequency analysis, whatever the reference SCF did.
         n_iterations: Number of SCF macro-iterations.
         method: Calculation method (e.g. ``'RHF'``, ``'B3LYP'``).
         basis: Basis set (e.g. ``'STO-3G'``).
@@ -530,6 +536,12 @@ def _run_freq_calc_body(
     zpve_hartree: float = 0.0
     displacements: Optional[List] = None
     thermo_data: Optional[ThermoData] = None
+    # AUDIT F15 — SCF convergence and Hessian/harmonic-analysis completion
+    # are separate facts; a caught exception in the try block below (e.g.
+    # ROHF's Hessian being unavailable on this path) must not leave the
+    # overall FreqResult reading "converged" with an empty
+    # frequencies_cm1.
+    _hessian_completed = False
 
     try:
         hess_obj = mf.Hessian()
@@ -555,6 +567,11 @@ def _run_freq_calc_body(
                 frequencies_cm1.append(float(-abs(f.imag)))
             else:
                 frequencies_cm1.append(float(f.real if hasattr(f, "real") else f))
+
+        # AUDIT F15 — the Hessian was built and harmonic_analysis() ran; a
+        # real frequency result exists regardless of whether the optional
+        # IR/Raman/thermo enrichment below succeeds.
+        _hessian_completed = True
 
         # ZPVE = ½ · Σ ν_i (positive modes only), converted cm⁻¹ → Hartree
         zpve_hartree = sum(0.5 * f * _CM1_TO_HARTREE for f in frequencies_cm1 if f > 0)
@@ -1037,7 +1054,9 @@ def _run_freq_calc_body(
     return FreqResult(
         energy_hartree=energy_hartree,
         homo_lumo_gap_ev=homo_lumo_gap_ev,
-        converged=converged,
+        # AUDIT F15 — overall success requires the Hessian/harmonic-analysis
+        # step to have actually completed, not just the reference SCF.
+        converged=converged and _hessian_completed,
         n_iterations=n_iterations,
         method=method,
         basis=basis,
