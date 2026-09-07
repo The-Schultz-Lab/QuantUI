@@ -43,6 +43,24 @@ def _finalize_history_entry(saved_dir: Path) -> None:
 
 
 def _basic_result(payload: dict[str, Any], record: JobRecord) -> SimpleNamespace:
+    """Reconstruct a result-alike object from a worker's staging JSON.
+
+    AUDIT F12 — this used to reconstruct only 7 generic fields even though
+    ``session_result_payload()`` (and the other ``*_result_payload``
+    builders) already serialize Mulliken charges, dipole, atom symbols,
+    SCF variant/rescue provenance, post-HF correlation breakdown, and
+    solvent/GPU/density-fit metadata. ``save_result()`` reads every one of
+    these via ``getattr(result, ..., default)``, so silently omitting them
+    here made ``save_result`` write them as null regardless of whether the
+    JSON actually had real values — a real water round trip lost the
+    dipole, charges, atom symbols, and RHF provenance.
+
+    Every field below is read defensively (``.get`` with no required key)
+    because not every calc type's payload builder sets every field —
+    absent ones round-trip as the same ``None``/default ``save_result``
+    already treats as "not applicable for this calc type", matching its
+    own documented contract.
+    """
     return SimpleNamespace(
         energy_hartree=float(payload.get("energy_hartree", float("nan"))),
         homo_lumo_gap_ev=payload.get("homo_lumo_gap_ev"),
@@ -51,6 +69,21 @@ def _basic_result(payload: dict[str, Any], record: JobRecord) -> SimpleNamespace
         method=str(payload.get("method", record.request_obj.method)),
         basis=str(payload.get("basis", record.request_obj.basis)),
         formula=str(payload.get("formula", "?")),
+        mulliken_charges=payload.get("mulliken_charges"),
+        dipole_moment_debye=payload.get("dipole_moment_debye"),
+        dipole_vector_debye=payload.get("dipole_vector_debye"),
+        atom_symbols=payload.get("atom_symbols"),
+        scf_rescue_stage=payload.get("scf_rescue_stage", "none"),
+        scf_variant=payload.get("scf_variant") or None,
+        mp2_correlation_hartree=payload.get("mp2_correlation_hartree"),
+        ccsd_correlation_hartree=payload.get("ccsd_correlation_hartree"),
+        ccsd_t_correction_hartree=payload.get("ccsd_t_correction_hartree"),
+        cc_converged=payload.get("cc_converged"),
+        dispersion_applied=payload.get("dispersion_applied"),
+        solvent=payload.get("solvent"),
+        gpu_used=bool(payload.get("gpu_used", False)),
+        gpu_name=payload.get("gpu_name"),
+        density_fit=bool(payload.get("density_fit", False)),
     )
 
 

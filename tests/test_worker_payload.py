@@ -37,6 +37,15 @@ def _session_result(**overrides) -> SimpleNamespace:
         atom_symbols=["Mn", "O", "O", "O", "O", "O", "O"],
         scf_rescue_stage="bootstrap",
         scf_variant="UKS",
+        mp2_correlation_hartree=-0.201,
+        ccsd_correlation_hartree=-0.213,
+        ccsd_t_correction_hartree=-0.004,
+        cc_converged=True,
+        dispersion_applied=False,
+        solvent="Water",
+        gpu_used=True,
+        gpu_name="NVIDIA H200",
+        density_fit=True,
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -102,6 +111,16 @@ class TestSessionResultPayload:
         assert payload["atom_symbols"] is None
         assert payload["scf_rescue_stage"] == "none"
         assert payload["scf_variant"] is None
+        # AUDIT F12
+        assert payload["mp2_correlation_hartree"] is None
+        assert payload["ccsd_correlation_hartree"] is None
+        assert payload["ccsd_t_correction_hartree"] is None
+        assert payload["cc_converged"] is None
+        assert payload["dispersion_applied"] is None
+        assert payload["solvent"] is None
+        assert payload["gpu_used"] is False
+        assert payload["gpu_name"] is None
+        assert payload["density_fit"] is False
 
     def test_scf_rescue_stage_present(self):
         payload = session_result_payload(_session_result())
@@ -117,6 +136,21 @@ class TestSessionResultPayload:
         assert payload["energy_hartree"] == -1608.701471
         assert payload["converged"] is True
         assert payload["formula"] == "Mn(H2O)6"
+
+    def test_post_hf_and_solvent_gpu_df_fields_present(self):
+        """AUDIT F12 — these were computed onto SessionResult but never
+        serialized into staging JSON at all, distinct from (and upstream
+        of) _basic_result's own reconstruction gap in slurm_ingest.py."""
+        payload = session_result_payload(_session_result())
+        assert payload["mp2_correlation_hartree"] == -0.201
+        assert payload["ccsd_correlation_hartree"] == -0.213
+        assert payload["ccsd_t_correction_hartree"] == -0.004
+        assert payload["cc_converged"] is True
+        assert payload["dispersion_applied"] is False
+        assert payload["solvent"] == "Water"
+        assert payload["gpu_used"] is True
+        assert payload["gpu_name"] == "NVIDIA H200"
+        assert payload["density_fit"] is True
 
 
 class TestFreqTddftNmrResultPayloadScfVariant:
@@ -139,10 +173,35 @@ class TestFreqTddftNmrResultPayloadScfVariant:
             zpve_hartree=0.0,
             thermo=None,
             scf_variant="UKS",
+            density_fit=True,
         )
         molecule = Molecule(["O", "H", "H"], [[0, 0, 0], [0.96, 0, 0], [0, 0.96, 0]])
         payload = freq_result_payload(result, molecule)
         assert payload["scf_variant"] == "UKS"
+
+    def test_freq_result_payload_carries_density_fit(self):
+        """AUDIT F12 — density_fit was never serialized here at all,
+        though FreqResult carries it."""
+        result = SimpleNamespace(
+            energy_hartree=-1600.0,
+            homo_lumo_gap_ev=None,
+            converged=True,
+            n_iterations=30,
+            method="B3LYP",
+            basis="def2-SVP",
+            formula="Fe(H2O)6",
+            displacements=None,
+            frequencies_cm1=[],
+            ir_intensities=[],
+            raman_activities=[],
+            zpve_hartree=0.0,
+            thermo=None,
+            scf_variant="UKS",
+            density_fit=True,
+        )
+        molecule = Molecule(["O", "H", "H"], [[0, 0, 0], [0.96, 0, 0], [0, 0.96, 0]])
+        payload = freq_result_payload(result, molecule)
+        assert payload["density_fit"] is True
 
     def test_tddft_result_payload_carries_scf_variant(self):
         result = SimpleNamespace(
@@ -161,6 +220,25 @@ class TestFreqTddftNmrResultPayloadScfVariant:
         # tddft_calc.TDDFTResult sets scf_variant; a bare SimpleNamespace
         # without it must still serialize (None), not raise.
         assert payload["scf_variant"] is None
+        # AUDIT F12 — density_fit was never serialized here at all.
+        assert payload["density_fit"] is False
+
+    def test_tddft_result_payload_carries_density_fit(self):
+        result = SimpleNamespace(
+            energy_hartree=-1600.0,
+            homo_lumo_gap_ev=None,
+            converged=True,
+            n_iterations=20,
+            method="B3LYP",
+            basis="def2-SVP",
+            formula="Co(H2O)6",
+            excitation_energies_ev=[],
+            oscillator_strengths=[],
+            wavelengths_nm=lambda: [],
+            density_fit=True,
+        )
+        payload = tddft_result_payload(result)
+        assert payload["density_fit"] is True
 
     def test_nmr_result_payload_carries_scf_variant(self):
         result = SimpleNamespace(
@@ -175,6 +253,9 @@ class TestFreqTddftNmrResultPayloadScfVariant:
             reference_key="B3LYP/6-31G*",
             is_fallback_reference=False,
             scf_variant="RKS",
+            density_fit=True,
         )
         payload = nmr_result_payload(result)
         assert payload["scf_variant"] == "RKS"
+        # AUDIT F12 — density_fit was never serialized here at all.
+        assert payload["density_fit"] is True

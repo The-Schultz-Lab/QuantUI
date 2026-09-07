@@ -84,6 +84,20 @@ def session_result_payload(result) -> Dict[str, Any]:
         # M-UX2 UXP2.10 — see the other *_result_payload functions' matching
         # field.
         "scf_variant": getattr(result, "scf_variant", "") or None,
+        # AUDIT F12 — these were computed onto SessionResult but never
+        # reached staging JSON at all (a serialization-layer gap distinct
+        # from _basic_result's ingest-layer one): post-HF correlation
+        # breakdown, solvent/GPU/density-fit provenance, and the AUDIT
+        # F04/F07 dispersion/CC-convergence flags.
+        "mp2_correlation_hartree": getattr(result, "mp2_correlation_hartree", None),
+        "ccsd_correlation_hartree": getattr(result, "ccsd_correlation_hartree", None),
+        "ccsd_t_correction_hartree": getattr(result, "ccsd_t_correction_hartree", None),
+        "cc_converged": getattr(result, "cc_converged", None),
+        "dispersion_applied": getattr(result, "dispersion_applied", None),
+        "solvent": getattr(result, "solvent", None),
+        "gpu_used": bool(getattr(result, "gpu_used", False)),
+        "gpu_name": getattr(result, "gpu_name", None),
+        "density_fit": bool(getattr(result, "density_fit", False)),
     }
 
 
@@ -126,6 +140,8 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
         "formula": result.formula,
         # M-UX2 UXP2.10 — see session_result_payload's matching field.
         "scf_variant": getattr(result, "scf_variant", "") or None,
+        # AUDIT F12 — was never serialized, though FreqResult carries it.
+        "density_fit": bool(getattr(result, "density_fit", False)),
         "spectra": {
             "ir": {
                 "frequencies_cm1": list(result.frequencies_cm1),
@@ -157,6 +173,8 @@ def tddft_result_payload(result) -> Dict[str, Any]:
         "formula": result.formula,
         # M-UX2 UXP2.10 — see session_result_payload's matching field.
         "scf_variant": getattr(result, "scf_variant", "") or None,
+        # AUDIT F12 — was never serialized, though TDDFTResult carries it.
+        "density_fit": bool(getattr(result, "density_fit", False)),
         "spectra": {
             "uv_vis": {
                 "excitation_energies_ev": list(result.excitation_energies_ev),
@@ -179,6 +197,8 @@ def nmr_result_payload(result) -> Dict[str, Any]:
         "formula": result.formula,
         # M-UX2 UXP2.10 — see session_result_payload's matching field.
         "scf_variant": getattr(result, "scf_variant", "") or None,
+        # AUDIT F12 — was never serialized, though NMRResult carries it.
+        "density_fit": bool(getattr(result, "density_fit", False)),
         "spectra": {
             "nmr": {
                 "atom_symbols": list(result.atom_symbols),
