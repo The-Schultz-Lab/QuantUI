@@ -283,6 +283,8 @@ def run_freq_calc(
     basis: str = "STO-3G",
     progress_stream: Optional[IO[str]] = None,
     scf_rescue: bool = True,
+    checkpoint: Optional[Any] = None,
+    resume: bool = False,
 ) -> FreqResult:
     """Run SCF + analytical Hessian to obtain vibrational frequencies.
 
@@ -306,6 +308,19 @@ def run_freq_calc(
             intensities) automatically retries through the shared rescue
             helper on non-convergence (M-SCF-ROBUST, see
             :mod:`quantui.scf_robust`). Default ``True``.
+        checkpoint: Optional :class:`~quantui.checkpoint.Checkpoint`
+            (M-CHECKPOINT CHK.4). When given, each completed
+            finite-difference displacement SCF (the ``6N``-solve numerical
+            IR-intensity step) is durably recorded — see
+            :mod:`quantui.freq_displacement_ids` — so a resumed run can skip
+            displacements already banked from an earlier attempt, whether
+            the calc ran serially or through
+            :mod:`quantui.freq_ir_workers`'s parallel worker pool.
+        resume: Skip displacements already completed in *checkpoint* rather
+            than recomputing every one from scratch. Has no effect if
+            *checkpoint* is ``None`` or has no banked displacements — the
+            calc still runs, it just starts from nothing, same as if resume
+            were never requested.
 
     Returns:
         :class:`FreqResult` with frequencies, ZPVE, and SCF properties.
@@ -355,6 +370,8 @@ def run_freq_calc(
             basis=basis,
             progress_stream=progress_stream,
             scf_rescue=scf_rescue,
+            checkpoint=checkpoint,
+            resume=resume,
             _dft=dft,
             _gto=gto,
             _scf=scf,
@@ -370,6 +387,8 @@ def _run_freq_calc_body(
     basis: str,
     progress_stream: Optional[IO[str]],
     scf_rescue: bool = True,
+    checkpoint: Optional[Any] = None,
+    resume: bool = False,
     _dft: Any,
     _gto: Any,
     _scf: Any,
@@ -573,13 +592,16 @@ def _run_freq_calc_body(
 
             try:
                 from .config import BOHR_TO_ANGSTROM as _BOHR_TO_ANG
+                from .freq_displacement_ids import (
+                    displacement_id,
+                    parse_displacement_id,
+                )
 
                 _DELTA = 0.01  # Bohr
                 _KM_MOL_FAC = 42.255  # (D/Å)²/amu → km/mol
 
                 _n_ir = mol.natm
                 _ir_total_solves = _n_ir * 3 * 2
-                _ir_done_solves = 0
                 _coords0 = mol.atom_coords().copy()
                 _dpdx = _np_ir.zeros((_n_ir * 3, 3))
                 _xc = getattr(mf, "xc", None)
@@ -596,6 +618,46 @@ def _run_freq_calc_body(
                 # raised a shape-mismatch ValueError inside PySCF and
                 # silently dropped IR intensities for the whole calc (caught
                 # by the broad except below).
+
+                # --- M-CHECKPOINT CHK.4: resume already-banked displacements ---
+                # ``_dipoles`` is the single source of truth for every
+                # displacement's result, whichever path produced it (resumed
+                # from an earlier attempt, computed in this run's parallel
+                # pool, or computed in this run's serial fallback) — the
+                # final dpdx assembly below reads only from this dict, never
+                # from a path-specific variable, which is what makes the
+                # assembly step itself a proper CHK.4.5 gate: it only runs
+                # once every required id is present here, regardless of how
+                # it got there.
+                _ITEM_SET_NAME = "freq_displacements"
+                _dipoles: dict = {}
+                if checkpoint is not None and resume:
+                    for _item_id, _payload in checkpoint.completed_items(
+                        _ITEM_SET_NAME
+                    ).items():
+                        try:
+                            _key = parse_displacement_id(_item_id)
+                            _dipoles[_key] = _np_ir.asarray(
+                                _payload["dipole"], dtype=float
+                            )
+                        except (ValueError, KeyError, TypeError):
+                            # Malformed/foreign record — never trust it, just
+                            # recompute this one displacement (checkpoint.py's
+                            # "never break a calculation" rule applies here
+                            # too: a bad record costs one displacement, not
+                            # the whole resume).
+                            continue
+                _ir_done_solves = len(_dipoles)
+                if _ir_done_solves and checkpoint is not None:
+                    try:
+                        checkpoint.log_resumed(
+                            f"{_ir_done_solves}/{_ir_total_solves} finite-difference "
+                            "displacement SCFs already banked from an earlier attempt"
+                        )
+                    except (
+                        Exception
+                    ):  # noqa: BLE001 — provenance is never worth a crash
+                        pass
                 _status(
                     "Numerical IR intensities: "
                     f"{_ir_done_solves}/{_ir_total_solves} finite-difference displacement SCFs done (6 per atom) "
@@ -655,11 +717,35 @@ def _run_freq_calc_body(
                     displacement_count=_ir_total_solves,
                 )
 
+                # Checkpoint items directory as a plain string, for workers
+                # (CHK.4.4) — a ``Checkpoint`` with a live log stream attached
+                # is not something safe to pickle across the
+                # ``ProcessPoolExecutor`` process boundary, so workers get
+                # only the directory path and write via
+                # ``checkpoint.mark_item_done_at`` (see freq_ir_workers.py).
+                _ckpt_items_dir = (
+                    str(checkpoint.items_dir(_ITEM_SET_NAME))
+                    if checkpoint is not None
+                    else None
+                )
+
                 _mol_v = mol.verbose
                 mol.verbose = 0
                 _parallel_failed = False
                 try:
-                    if _use_parallel:
+                    # Build the task list once, up front, skipping anything
+                    # already in ``_dipoles`` (resumed from an earlier
+                    # attempt) — shared between the parallel and (if it
+                    # falls back) serial paths below, so neither ever
+                    # recomputes a displacement the other already has.
+                    _remaining: list[tuple[int, int, int]] = [
+                        (_I, _ax, _sign)
+                        for _I in range(_n_ir)
+                        for _ax in range(3)
+                        for _sign in (1, -1)
+                        if (_I, _ax, _sign) not in _dipoles
+                    ]
+                    if _use_parallel and _remaining:
                         try:
                             # Stash dm0 once on disk so workers can map-load it
                             # via initargs (avoids per-task pickling).
@@ -669,23 +755,19 @@ def _run_freq_calc_body(
                             import tempfile as _tempfile
 
                             _n_workers = _ir_par.pick_worker_count(
-                                _cpu_count, _ir_total_solves
+                                _cpu_count, len(_remaining)
                             )
                             _threads_each = _ir_par.threads_per_worker(
                                 _cpu_count, _n_workers
                             )
 
-                            # Build all 6N task arguments first; pickling-safe
-                            # flat lists per-displacement.
+                            # Pickling-safe flat lists per-displacement, one
+                            # task per still-required id.
                             _tasks: list[tuple[int, int, int, list[float]]] = []
-                            for _I in range(_n_ir):
-                                for _ax in range(3):
-                                    _cp = _coords0.copy()
-                                    _cp[_I, _ax] += _DELTA
-                                    _tasks.append((_I, _ax, +1, _cp.flatten().tolist()))
-                                    _cm = _coords0.copy()
-                                    _cm[_I, _ax] -= _DELTA
-                                    _tasks.append((_I, _ax, -1, _cm.flatten().tolist()))
+                            for _I, _ax, _sign in _remaining:
+                                _c = _coords0.copy()
+                                _c[_I, _ax] += _DELTA * _sign
+                                _tasks.append((_I, _ax, _sign, _c.flatten().tolist()))
 
                             _dm0_handle = _tempfile.NamedTemporaryFile(
                                 delete=False, suffix=".dm0.pkl"
@@ -711,19 +793,28 @@ def _run_freq_calc_body(
                                         _xc,
                                         _dm0_handle.name,
                                         _threads_each,
+                                        _ckpt_items_dir,
                                     ),
                                 ) as _pool:
                                     # Submit all and store futures keyed by task
                                     # index so we can assemble +/- per (I, ax).
+                                    # Each task also carries its own
+                                    # displacement id (CHK.4.2) so the worker
+                                    # can durably record it (CHK.4.4) the
+                                    # moment it finishes — before this parent
+                                    # process ever calls ``.result()``, so a
+                                    # parent crash mid-wave never loses a
+                                    # sibling that already completed.
                                     _futs = {
                                         _pool.submit(
-                                            _ir_par.run_displaced_scf, _task[3]
+                                            _ir_par.run_displaced_scf,
+                                            displacement_id(
+                                                _task[0], _task[1], _task[2]
+                                            ),
+                                            _task[3],
                                         ): _task
                                         for _task in _tasks
                                     }
-                                    # Accumulate results into a temporary map
-                                    # ``(I, ax, sign) -> dipole_array``.
-                                    _dipoles: dict = {}
                                     for _fut in _cf.as_completed(_futs):
                                         _I, _ax, _sign, _coords_done = _futs[_fut]
                                         _dipoles[(_I, _ax, _sign)] = _fut.result()
@@ -741,13 +832,6 @@ def _run_freq_calc_body(
                                     os.unlink(_dm0_handle.name)
                                 except OSError:
                                     pass
-
-                            # Assemble dpdx now that all dipoles are in hand.
-                            for _I in range(_n_ir):
-                                for _ax in range(3):
-                                    _mu_p = _dipoles[(_I, _ax, +1)]
-                                    _mu_m = _dipoles[(_I, _ax, -1)]
-                                    _dpdx[3 * _I + _ax] = (_mu_p - _mu_m) / (2 * _DELTA)
                         except Exception as _par_exc:
                             logger.warning(
                                 "Parallel IR-intensity computation failed (%s); falling back to serial.",
@@ -757,42 +841,54 @@ def _run_freq_calc_body(
                                 "Parallel IR intensities failed; falling back to serial computation."
                             )
                             _parallel_failed = True
-                            # Reset so the serial loop's progress messages
-                            # below start clean rather than continuing from
-                            # wherever the failed parallel attempt left off.
-                            _ir_done_solves = 0
+                            # Reflect whatever is actually in ``_dipoles`` —
+                            # resumed items, plus anything the parallel pool
+                            # completed (and durably banked, worker-side)
+                            # before it hit the exception — rather than
+                            # discarding that progress. The serial fallback
+                            # below skips anything already in ``_dipoles``,
+                            # so this is never recomputed.
+                            _ir_done_solves = len(_dipoles)
                     if not _use_parallel or _parallel_failed:
-                        for _I in range(_n_ir):
-                            for _ax in range(3):
-                                # +Δ displacement
-                                _cp = _coords0.copy()
-                                _cp[_I, _ax] += _DELTA
-                                mol.set_geom_(_cp, unit="Bohr")
-                                _mu_p = _displaced_scf_dipole()
-                                _ir_done_solves += 1
-                                _status(
-                                    "Numerical IR intensities: "
-                                    f"{_ir_done_solves}/{_ir_total_solves} "
-                                    "finite-difference displacement SCFs done (6 per atom) "
-                                    f"({_ir_total_solves - _ir_done_solves} "
-                                    "remaining)"
+                        for _I, _ax, _sign in _remaining:
+                            _key = (_I, _ax, _sign)
+                            if _key in _dipoles:
+                                # Already resumed, or already completed by a
+                                # parallel pool that failed only partway
+                                # through — never recompute either.
+                                continue
+                            _c = _coords0.copy()
+                            _c[_I, _ax] += _DELTA * _sign
+                            mol.set_geom_(_c, unit="Bohr")
+                            _mu = _displaced_scf_dipole()
+                            _dipoles[_key] = _mu
+                            if checkpoint is not None:
+                                checkpoint.mark_item_done(
+                                    _ITEM_SET_NAME,
+                                    displacement_id(_I, _ax, _sign),
+                                    {"dipole": _mu.tolist()},
                                 )
+                            _ir_done_solves += 1
+                            _status(
+                                "Numerical IR intensities: "
+                                f"{_ir_done_solves}/{_ir_total_solves} "
+                                "finite-difference displacement SCFs done (6 per atom) "
+                                f"({_ir_total_solves - _ir_done_solves} "
+                                "remaining)"
+                            )
 
-                                # -Δ displacement
-                                _cm = _coords0.copy()
-                                _cm[_I, _ax] -= _DELTA
-                                mol.set_geom_(_cm, unit="Bohr")
-                                _mu_m = _displaced_scf_dipole()
-                                _ir_done_solves += 1
-                                _status(
-                                    "Numerical IR intensities: "
-                                    f"{_ir_done_solves}/{_ir_total_solves} "
-                                    "finite-difference displacement SCFs done (6 per atom) "
-                                    f"({_ir_total_solves - _ir_done_solves} "
-                                    "remaining)"
-                                )
-
-                                _dpdx[3 * _I + _ax] = (_mu_p - _mu_m) / (2 * _DELTA)
+                    # --- CHK.4.5: assembly gate ---
+                    # Runs once, here, only after every required id is in
+                    # ``_dipoles`` — whichever path (resume, parallel,
+                    # serial fallback) put it there. Reading from one shared
+                    # dict rather than a path-specific variable is what
+                    # makes this a proper gate rather than three separate,
+                    # possibly-inconsistent assembly steps.
+                    for _I in range(_n_ir):
+                        for _ax in range(3):
+                            _mu_p = _dipoles[(_I, _ax, 1)]
+                            _mu_m = _dipoles[(_I, _ax, -1)]
+                            _dpdx[3 * _I + _ax] = (_mu_p - _mu_m) / (2 * _DELTA)
                 finally:
                     mol.set_geom_(_coords0, unit="Bohr")
                     mol.verbose = _mol_v
@@ -833,6 +929,8 @@ def _run_freq_calc_body(
                         hessian=h,
                         atom_str=molecule.to_pyscf_format(),
                         scf_rescue=scf_rescue,
+                        checkpoint=checkpoint,
+                        resume=resume,
                     )
                     if len(_raman) == len(frequencies_cm1):
                         raman_activities = _raman
@@ -905,6 +1003,18 @@ def _run_freq_calc_body(
         except Exception as _exc:
             logger.warning("Thermochemistry failed: %s", _exc)
             _status("Thermochemistry failed; frequency backend complete.")
+
+        # M-CHECKPOINT CHK.4 — the Hessian/frequency step (this whole outer
+        # try) succeeded, so nothing here is worth resuming from anymore.
+        # A thermochemistry failure just above does not change that: thermo
+        # is best-effort enrichment, not the core deliverable this
+        # checkpoint tracks. Left uncalled on the outer except below —
+        # a genuinely failed Hessian keeps the checkpoint resumable.
+        if checkpoint is not None:
+            try:
+                checkpoint.mark_complete()
+            except Exception:  # noqa: BLE001 — provenance is never worth a crash
+                pass
 
     except Exception as exc:
         logger.warning("Hessian/frequency computation failed: %s", exc)

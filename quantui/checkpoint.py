@@ -30,6 +30,9 @@ Layout, under ``~/.quantui/checkpoints`` (override with
         opt.traj       ASE trajectory, appended per step (CHK.2)
         opt.restart    BFGS Hessian state (CHK.2)
         points.jsonl   one line per completed scan point (CHK.3)
+        items/<name>/<item_id>.json   one file per completed named-set item
+                                      (CHK.4.1) — e.g. frequency's per-
+                                      displacement SCF results
 
 Checkpoints live outside the results directory on purpose: a result directory
 is created when a calculation *succeeds*, and the runs that most need a
@@ -51,6 +54,7 @@ import logging
 import os
 import shutil
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence
@@ -198,6 +202,67 @@ class CalcIdentity:
 # ---------------------------------------------------------------------------
 # Checkpoint
 # ---------------------------------------------------------------------------
+
+
+def mark_item_done_at(items_root: Path, item_id: str, payload: dict) -> bool:
+    """Atomically write one named-item-set record — by directory path alone.
+
+    The path-only sibling of :meth:`Checkpoint.mark_item_done`, for callers
+    that have only a directory path, not a full ``Checkpoint`` object — the
+    exact situation a ``ProcessPoolExecutor`` worker is in: it receives the
+    checkpoint's item-set directory as a plain string through ``initargs``
+    (CHK.4.4), and a ``Checkpoint`` with a live log stream attached is not
+    something safe to pickle across that process boundary.
+
+    Safe under concurrent callers writing *different* item ids: each item
+    gets its own file, written via temp-file-then-``os.replace`` (atomic on
+    POSIX), so there is nothing to lock and no shared file to race on. The
+    temp name includes the writer's pid plus a random token and is always
+    suffixed ``.tmp`` (never ``.json``), so it can never be mistaken for a
+    completed item even if two writers raced on the same id.
+
+    Returns ``True`` on success, ``False`` on any failure — the caller
+    decides what (if anything) to log; this never raises.
+    """
+    try:
+        root = Path(items_root)
+        root.mkdir(parents=True, exist_ok=True)
+        target = root / f"{item_id}.json"
+        tmp = root / f"{item_id}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, target)
+    except Exception as exc:  # noqa: BLE001 — never break the calculation
+        logger.debug(
+            "checkpoint item write failed for %s/%s: %s", items_root, item_id, exc
+        )
+        return False
+    return True
+
+
+def completed_items_at(items_root: Path) -> dict:
+    """Read every complete named-item-set record — by directory path alone.
+
+    The path-only sibling of :meth:`Checkpoint.completed_items`. Skips any
+    file that fails to parse (a corrupt item should cost re-running that one
+    item, not the whole resume) and any ``.tmp`` leftover from a writer that
+    died between the write and the rename.
+    """
+    out: dict = {}
+    try:
+        entries = list(Path(items_root).iterdir())
+    except OSError:
+        return out
+    for entry in entries:
+        if entry.suffix != ".json":
+            continue
+        try:
+            record = json.loads(entry.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            logger.debug("discarding corrupt checkpoint item %s", entry)
+            continue
+        if isinstance(record, dict):
+            out[entry.stem] = record
+    return out
 
 
 def _atomic_write_json(path: Path, payload: dict) -> None:
@@ -460,6 +525,8 @@ class Checkpoint:
                 return True
         except OSError:
             pass
+        if self._has_item_set_progress():
+            return True
         return self._has_leg_progress()
 
     def _has_leg_progress(self) -> bool:
@@ -555,6 +622,78 @@ class Checkpoint:
             if isinstance(record, dict):
                 points.append(record)
         return points
+
+    # ── Named item sets (CHK.4.1) ───────────────────────────────────────────
+    #
+    # CHK.3's ``points.jsonl`` assumes completion is a *prefix*: point 0, then
+    # 1, then 2, one writer, one file, appended in order. That breaks down for
+    # a frequency job's displaced-geometry SCFs, which `freq_ir_workers.py`
+    # can run **concurrently** across worker processes — completion order is
+    # non-deterministic, so resume has to diff a *set* of finished item ids
+    # against the full required set, not trim a prefix.
+    #
+    # The design that makes this safe under concurrent writers: one file per
+    # item, named by its id, written via temp-file + ``os.replace`` — never a
+    # shared file. Two displacements never share a filename (each is assigned
+    # to exactly one worker), so there is nothing to lock, and a worker dying
+    # mid-write never leaves a *renamed* (i.e. visible-as-done) file behind —
+    # that item simply stays "not yet complete" on the next resume. This is
+    # deliberately more general than "frequency displacements": *name* groups
+    # unrelated item sets under one checkpoint (e.g. IR vs. Raman
+    # displacements) so they can never collide with each other.
+
+    def items_dir(self, name: str) -> Path:
+        """Directory holding one named set of per-item checkpoint records."""
+        return self.dir / "items" / name
+
+    def mark_item_done(self, name: str, item_id: str, payload: dict) -> None:
+        """Atomically record one item of the named set *name* as complete.
+
+        Safe to call from any process that knows this checkpoint's root path
+        — including a ``ProcessPoolExecutor`` worker — because each item gets
+        its own file and the write is temp-file-then-rename. Delegates to
+        :func:`mark_item_done_at`, which a worker process can also call
+        directly given just the directory path (see its docstring) — a
+        ``Checkpoint`` with a live log stream attached is not something to
+        pickle across a process boundary.
+        """
+        if mark_item_done_at(self.items_dir(name), item_id, payload):
+            self._log(f"saved — {name} item {item_id}")
+
+    def completed_items(self, name: str) -> dict:
+        """Return every complete item's stored payload, keyed by item id.
+
+        Skips any file that fails to parse rather than raising — the same
+        defensive posture as :meth:`completed_points`. A corrupt single item
+        should cost re-running that one item, not the whole resume. Delegates
+        to :func:`completed_items_at`.
+        """
+        return completed_items_at(self.items_dir(name))
+
+    def completed_item_ids(self, name: str) -> set:
+        """Return the ids of every complete item in the named set *name*.
+
+        Derived from :meth:`completed_items` rather than merely "a ``.json``
+        file with this name exists" — the resume-time question is "do we
+        have a *usable* result for this item?", not "does this filename
+        exist?". A corrupted item file (e.g. a crash that landed between the
+        temp write and the rename leaving a truncated ``.json`` — which
+        should not happen given the atomic-rename contract, but "never break
+        a calculation" means not trusting that) is therefore never mistaken
+        for a completed one, and simply gets recomputed on resume.
+        """
+        return set(self.completed_items(name).keys())
+
+    def _has_item_set_progress(self) -> bool:
+        """True when any named item set (see above) has a completed item."""
+        try:
+            names = list((self.dir / "items").iterdir())
+        except OSError:
+            return False
+        for name_dir in names:
+            if name_dir.is_dir() and self.completed_items(name_dir.name):
+                return True
+        return False
 
 
 # ---------------------------------------------------------------------------

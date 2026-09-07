@@ -350,8 +350,80 @@ class TestIrIntensityUhfClosedShellDispatch:
             tmp.close()
             init_worker(atom_str, "sto-3g", 0, 0, None, tmp.name, 1)
             coords = mol.atom_coords(unit="Bohr").flatten().tolist()
-            dip = run_displaced_scf(coords)  # must not raise
+            dip = run_displaced_scf("d000_x_+", coords)  # must not raise
             assert len(dip) == 3
+        finally:
+            os.unlink(tmp.name)
+
+    def test_worker_writes_its_own_checkpoint_record(self, tmp_path):
+        """M-CHECKPOINT CHK.4.4's crash-safety claim, at the unit level: the
+        worker itself durably records completion — not just the parent
+        after collecting the Future — so a parent crash mid-wave never
+        loses a sibling that already finished. Exercised in-process here
+        (no real ProcessPoolExecutor), since ``mark_item_done_at`` only
+        needs a directory path — the same one a real spawned worker would
+        get via ``initargs``.
+        """
+        pytest.importorskip("pyscf")
+        import os
+        import pickle
+        import tempfile
+
+        from pyscf import gto, scf
+
+        from quantui.checkpoint import completed_items_at
+        from quantui.freq_ir_workers import init_worker, run_displaced_scf
+
+        atom_str = "O 0 0 0.119; H 0 0.763 -0.477; H 0 -0.763 -0.477"
+        mol = gto.M(atom=atom_str, basis="sto-3g", spin=0, charge=0, verbose=0)
+        mf = scf.RHF(mol)
+        mf.kernel()
+        dm0 = mf.make_rdm1()
+
+        items_dir = tmp_path / "items" / "freq_displacements"
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl")
+        try:
+            pickle.dump(dm0, tmp)
+            tmp.close()
+            init_worker(atom_str, "sto-3g", 0, 0, None, tmp.name, 1, str(items_dir))
+            coords = mol.atom_coords(unit="Bohr").flatten().tolist()
+            dip = run_displaced_scf("d000_x_+", coords)
+
+            recorded = completed_items_at(items_dir)
+            assert set(recorded) == {"d000_x_+"}
+            assert recorded["d000_x_+"]["dipole"] == pytest.approx(list(dip), abs=1e-9)
+        finally:
+            os.unlink(tmp.name)
+
+    def test_worker_with_no_checkpoint_dir_writes_nothing(self, tmp_path):
+        """checkpointing must stay fully optional — a worker with
+        ``checkpoint_items_dir=None`` (the default) must not create
+        anything on disk."""
+        pytest.importorskip("pyscf")
+        import os
+        import pickle
+        import tempfile
+
+        from pyscf import gto, scf
+
+        from quantui.freq_ir_workers import init_worker, run_displaced_scf
+
+        atom_str = "O 0 0 0.119; H 0 0.763 -0.477; H 0 -0.763 -0.477"
+        mol = gto.M(atom=atom_str, basis="sto-3g", spin=0, charge=0, verbose=0)
+        mf = scf.RHF(mol)
+        mf.kernel()
+        dm0 = mf.make_rdm1()
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl")
+        try:
+            pickle.dump(dm0, tmp)
+            tmp.close()
+            init_worker(
+                atom_str, "sto-3g", 0, 0, None, tmp.name, 1
+            )  # no checkpoint dir
+            coords = mol.atom_coords(unit="Bohr").flatten().tolist()
+            run_displaced_scf("d000_x_+", coords)
+            assert not (tmp_path / "items").exists()
         finally:
             os.unlink(tmp.name)
 
@@ -399,6 +471,204 @@ class TestIrIntensityUhfClosedShellDispatch:
             "IR intensities should still be populated via the serial "
             "fallback after a simulated parallel-path failure"
         )
+
+
+# ============================================================================
+# M-CHECKPOINT CHK.4 — displacement-level checkpoint/resume
+# ============================================================================
+
+
+@pyscf_only
+@pytest.mark.slow
+class TestChk4DisplacementCheckpointing:
+    """The concurrency-safe, set-based design (roadmap 34's CHK.4 section):
+    resume diffs a *set* of completed displacement ids, not a prefix.
+
+    Raman is disabled in every test here (``QUANTUI_RAMAN=0``) so the call
+    count asserted below is exactly the IR loop's — otherwise it would also
+    depend on whether pyscf-properties happens to be installed.
+    """
+
+    def _checkpoint(self, tmp_path, molecule):
+        from quantui.checkpoint import CalcIdentity, Checkpoint
+
+        identity = CalcIdentity.from_molecule(
+            molecule, calc_type="frequency", method="RHF", basis="STO-3G"
+        )
+        # Matches production: backends/worker.py's _begin_worker_checkpoint
+        # always calls .begin() before handing a checkpoint to a calc
+        # function — a checkpoint object is never "live" (has a meta.json
+        # to update) until this runs.
+        ckpt = Checkpoint(identity, root=tmp_path / "ckpt")
+        ckpt.begin()
+        return ckpt
+
+    def _count_rescue_calls(self, monkeypatch):
+        """Count real run_scf_with_rescue calls without changing behavior.
+
+        Patched at the source (quantui.scf_robust), not at
+        quantui.freq_calc — the call sites use a *local* ``from .scf_robust
+        import run_scf_with_rescue`` re-executed on every call to
+        _run_freq_calc_body, so patching the source module is what actually
+        takes effect on the next run.
+        """
+        import quantui.scf_robust as scf_robust_mod
+
+        real_rescue = scf_robust_mod.run_scf_with_rescue
+        calls: list = []
+
+        def _counting(*args, **kwargs):
+            calls.append(1)
+            return real_rescue(*args, **kwargs)
+
+        monkeypatch.setattr(scf_robust_mod, "run_scf_with_rescue", _counting)
+        return calls
+
+    def test_every_displacement_is_recorded(self, tmp_path, monkeypatch):
+        from quantui.freq_calc import run_freq_calc
+
+        monkeypatch.setenv("QUANTUI_RAMAN", "0")
+        molecule = _water()
+        ckpt = self._checkpoint(tmp_path, molecule)
+        run_freq_calc(molecule, method="RHF", basis="STO-3G", checkpoint=ckpt)
+        # 3 atoms x 3 axes x 2 signs = 18.
+        assert len(ckpt.completed_item_ids("freq_displacements")) == 18
+
+    def test_successful_run_marks_the_checkpoint_complete(self, tmp_path, monkeypatch):
+        """A successful frequency run must not linger forever in the
+        "unfinished calculations" listing — resumable_checkpoints() filters
+        on STATUS_COMPLETE, so this has to actually be set on success."""
+        from quantui.checkpoint import STATUS_COMPLETE
+        from quantui.freq_calc import run_freq_calc
+
+        monkeypatch.setenv("QUANTUI_RAMAN", "0")
+        molecule = _water()
+        ckpt = self._checkpoint(tmp_path, molecule)
+        run_freq_calc(molecule, method="RHF", basis="STO-3G", checkpoint=ckpt)
+        assert ckpt.load_state()["status"] == STATUS_COMPLETE
+        assert ckpt.resumable_state() is None
+
+    def test_fully_banked_resume_recomputes_nothing_but_the_reference_scf(
+        self, tmp_path, monkeypatch
+    ):
+        """The strong CHK.4 claim, proven by call count, not just a
+        plausible-looking answer: every displacement already banked means
+        zero new displacement SCFs on resume."""
+        from quantui.freq_calc import run_freq_calc
+
+        monkeypatch.setenv("QUANTUI_RAMAN", "0")
+        molecule = _water()
+        ckpt = self._checkpoint(tmp_path, molecule)
+
+        calls = self._count_rescue_calls(monkeypatch)
+        baseline = run_freq_calc(
+            molecule, method="RHF", basis="STO-3G", checkpoint=ckpt
+        )
+        assert len(calls) == 1 + 18  # reference SCF + all 18 displacements
+
+        calls.clear()
+        # A real resubmission calls .begin() again (backends/worker.py's
+        # _begin_worker_checkpoint runs on every attempt) — it resets status
+        # to "running" but must not touch the already-banked item files.
+        ckpt.begin()
+        resumed = run_freq_calc(
+            molecule, method="RHF", basis="STO-3G", checkpoint=ckpt, resume=True
+        )
+        assert len(calls) == 1  # only the reference SCF — zero displacement recompute
+        assert resumed.ir_intensities == pytest.approx(
+            baseline.ir_intensities, abs=1e-9
+        )
+
+    def test_partial_resume_recomputes_only_the_missing_displacements(
+        self, tmp_path, monkeypatch
+    ):
+        """A checkpoint interrupted partway through: resume must recompute
+        exactly the missing ids, reuse the rest, and land on the same
+        answer as an uninterrupted run."""
+        from quantui.freq_calc import run_freq_calc
+        from quantui.freq_displacement_ids import required_displacement_ids
+
+        monkeypatch.setenv("QUANTUI_RAMAN", "0")
+        molecule = _water()
+        ckpt = self._checkpoint(tmp_path, molecule)
+
+        baseline = run_freq_calc(
+            molecule, method="RHF", basis="STO-3G", checkpoint=ckpt
+        )
+        all_ids = required_displacement_ids(3)
+        assert ckpt.completed_item_ids("freq_displacements") == set(all_ids)
+
+        # Simulate an interrupted run: keep only the first 3 banked.
+        keep = set(all_ids[:3])
+        items_dir = ckpt.items_dir("freq_displacements")
+        for item_id in all_ids:
+            if item_id not in keep:
+                (items_dir / f"{item_id}.json").unlink()
+        assert ckpt.completed_item_ids("freq_displacements") == keep
+
+        ckpt.begin()  # a real resubmission calls .begin() again — must not erase items
+        calls = self._count_rescue_calls(monkeypatch)
+        resumed = run_freq_calc(
+            molecule, method="RHF", basis="STO-3G", checkpoint=ckpt, resume=True
+        )
+        # reference SCF + the 15 displacements that were NOT kept.
+        assert len(calls) == 1 + (len(all_ids) - len(keep))
+        assert ckpt.completed_item_ids("freq_displacements") == set(all_ids)
+        assert resumed.ir_intensities == pytest.approx(
+            baseline.ir_intensities, abs=1e-6
+        )
+
+    def test_resume_false_ignores_a_populated_checkpoint(self, tmp_path, monkeypatch):
+        """resume=False must behave like no checkpoint was ever passed for
+        *reading* progress — even though the run still writes into it, so a
+        later resume has something to build on. Mirrors optimizer.py's
+        CHK.2 convention (resume is opt-in per call, not implied by merely
+        passing a checkpoint object)."""
+        from quantui.freq_calc import run_freq_calc
+
+        monkeypatch.setenv("QUANTUI_RAMAN", "0")
+        molecule = _water()
+        ckpt = self._checkpoint(tmp_path, molecule)
+        run_freq_calc(molecule, method="RHF", basis="STO-3G", checkpoint=ckpt)
+        assert len(ckpt.completed_item_ids("freq_displacements")) == 18
+
+        ckpt.begin()
+        calls = self._count_rescue_calls(monkeypatch)
+        run_freq_calc(
+            molecule, method="RHF", basis="STO-3G", checkpoint=ckpt, resume=False
+        )
+        # Started fresh despite 18 already banked — same as the first run.
+        assert len(calls) == 1 + 18
+
+    def test_a_corrupt_banked_item_is_recomputed_not_trusted(
+        self, tmp_path, monkeypatch
+    ):
+        """checkpoint.py's "never break a calculation" rule, exercised
+        through the actual freq_calc resume path rather than checkpoint.py
+        in isolation."""
+        from quantui.freq_calc import run_freq_calc
+        from quantui.freq_displacement_ids import required_displacement_ids
+
+        monkeypatch.setenv("QUANTUI_RAMAN", "0")
+        molecule = _water()
+        ckpt = self._checkpoint(tmp_path, molecule)
+        run_freq_calc(molecule, method="RHF", basis="STO-3G", checkpoint=ckpt)
+
+        all_ids = required_displacement_ids(3)
+        items_dir = ckpt.items_dir("freq_displacements")
+        corrupt_id = all_ids[0]
+        (items_dir / f"{corrupt_id}.json").write_text("{not json", encoding="utf-8")
+        assert corrupt_id not in ckpt.completed_item_ids("freq_displacements")
+
+        ckpt.begin()
+        calls = self._count_rescue_calls(monkeypatch)
+        resumed = run_freq_calc(
+            molecule, method="RHF", basis="STO-3G", checkpoint=ckpt, resume=True
+        )
+        # reference SCF + the one corrupted (and therefore recomputed) displacement.
+        assert len(calls) == 2
+        assert resumed.ir_intensities, "must still produce a usable result"
+        assert corrupt_id in ckpt.completed_item_ids("freq_displacements")
 
 
 if __name__ == "__main__":

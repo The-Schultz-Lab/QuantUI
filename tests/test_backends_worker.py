@@ -472,3 +472,77 @@ class TestCheckpointWiring:
         assert outcome2.status == "success"
         mock_opt.assert_called_once()  # still just the one call from attempt 1
         assert "Reusing saved preopt geometry" in (staging / "live.log").read_text()
+
+    @patch("quantui.freq_calc.run_freq_calc")
+    def test_frequency_first_attempt_gets_a_fresh_checkpoint(self, mock_freq, staging):
+        """M-CHECKPOINT CHK.4 — the calc type roadmap 34's real production
+        cost data was about: a killed frequency job used to discard the
+        entire 6N-displacement Hessian on every resubmission."""
+        from quantui.checkpoint import Checkpoint
+
+        mock_freq.return_value = SimpleNamespace(
+            energy_hartree=-1.12,
+            homo_lumo_gap_ev=10.0,
+            converged=True,
+            n_iterations=5,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2",
+            frequencies_cm1=[4400.0],
+            ir_intensities=[1.0],
+            raman_activities=[0.2],
+            zpve_hartree=0.01,
+            displacements=[[[0.0, 0.0, 1.0], [0.0, 0.0, -1.0]]],
+        )
+        data = json.loads((staging / "request.json").read_text())
+        data["calc_type"] = "frequency"
+        (staging / "request.json").write_text(json.dumps(data))
+
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "success"
+        _args, kwargs = mock_freq.call_args
+        assert kwargs["resume"] is False
+        assert isinstance(kwargs["checkpoint"], Checkpoint)
+        assert (staging / ".checkpoint").is_dir()
+
+    @patch("quantui.freq_calc.run_freq_calc")
+    def test_frequency_resumes_when_a_prior_attempt_left_progress(
+        self, mock_freq, staging
+    ):
+        """A prior attempt that banked some displacements (see
+        checkpoint.py's ``items/freq_displacements/`` — CHK.4.1) before
+        getting killed must resume, not restart the whole Hessian."""
+        from quantui.checkpoint import Checkpoint
+
+        # Simulate a previous attempt that got killed mid-run: open the same
+        # checkpoint identity the worker will compute, and bank one
+        # displacement — status stays "running" (never marked complete).
+        ckpt = Checkpoint(
+            self._identity(calc_type="frequency"), root=staging / ".checkpoint"
+        )
+        ckpt.begin()
+        ckpt.mark_item_done("freq_displacements", "d000_x_+", {"dipole": [0, 0, 0]})
+
+        mock_freq.return_value = SimpleNamespace(
+            energy_hartree=-1.12,
+            homo_lumo_gap_ev=10.0,
+            converged=True,
+            n_iterations=5,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2",
+            frequencies_cm1=[4400.0],
+            ir_intensities=[1.0],
+            raman_activities=[0.2],
+            zpve_hartree=0.01,
+            displacements=[[[0.0, 0.0, 1.0], [0.0, 0.0, -1.0]]],
+        )
+        data = json.loads((staging / "request.json").read_text())
+        data["calc_type"] = "frequency"
+        (staging / "request.json").write_text(json.dumps(data))
+
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "success"
+        _args, kwargs = mock_freq.call_args
+        assert kwargs["resume"] is True
+        assert "Resuming frequency analysis" in (staging / "live.log").read_text()
