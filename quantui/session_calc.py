@@ -55,6 +55,16 @@ class SessionResult:
         method: Calculation method used (e.g. ``'RHF'``, ``'UHF'``).
         basis: Basis set used (e.g. ``'6-31G'``, ``'STO-3G'``).
         formula: Hill-notation molecular formula of the input molecule.
+        scf_rescue_stage: Which SCF-rescue stage (if any) produced this
+            result — ``"none"`` (converged on the first try, or rescue was
+            disabled), ``"bootstrap"``, ``"level_shift"``, or ``"failed"``
+            (both stages tried, still not converged). See
+            :mod:`quantui.scf_robust`.
+        scf_variant: The actual PySCF class dispatched (``"RHF"``,
+            ``"UHF"``, ``"ROHF"``, ``"RKS"``, ``"UKS"``) — the
+            restricted/unrestricted choice is automatic from multiplicity,
+            not a user toggle, so this is how a results panel or a saved
+            result confirms which one actually ran (M-UX2 UXP2.10).
     """
 
     energy_hartree: float
@@ -97,6 +107,15 @@ class SessionResult:
     mo_coeff: Optional[Any] = None  # np.ndarray (n_ao, n_mo) or (2, n_ao, n_mo) UHF
     pyscf_mol_atom: Optional[Any] = None  # list of (symbol, [x,y,z]) tuples (Angstrom)
     pyscf_mol_basis: Optional[str] = None  # basis set string for cube generation
+    # SCF-rescue provenance (M-SCF-ROBUST SCFR.5) — one of
+    # quantui.scf_robust.SCF_RESCUE_{NONE,BOOTSTRAP,LEVEL_SHIFT,FAILED}. A
+    # result that silently benefited from a rescue should say so, not read
+    # like an ordinary convergence.
+    scf_rescue_stage: str = "none"
+    # M-UX2 UXP2.10 — the actual PySCF class dispatched (e.g. "RHF", "UHF",
+    # "ROHF", "RKS", "UKS"), captured before any density-fit/PCM/GPU wrap.
+    # "" for an older saved result that predates this field.
+    scf_variant: str = ""
 
     @property
     def energy_ev(self) -> float:
@@ -220,6 +239,7 @@ def run_in_session(
     solvent: Optional[str] = None,
     checkpoint: Optional[Any] = None,
     warm_start: bool = True,
+    scf_rescue: bool = True,
 ) -> SessionResult:
     """
     Run a quantum chemistry calculation in the current kernel using PySCF.
@@ -255,6 +275,11 @@ def run_in_session(
             **geometry may differ**, since a density from a nearby geometry is
             a good guess (that is exactly what a geometry optimization relies
             on internally). Ignored when no such chkfile exists.
+        scf_rescue: Whether to automatically retry a non-converged SCF
+            through the shared rescue helper (M-SCF-ROBUST, see
+            :mod:`quantui.scf_robust`) — same-basis bootstrap, then a
+            level-shift fallback. Default ``True``; a batch/reproducibility
+            caller can pass ``False`` to see the plain PySCF result as-is.
 
     Returns:
         :class:`SessionResult` containing energy, HOMO-LUMO gap, convergence
@@ -294,6 +319,7 @@ def run_in_session(
             solvent=solvent,
             checkpoint=checkpoint,
             warm_start=warm_start,
+            scf_rescue=scf_rescue,
             _dft=dft,
             _gto=gto,
             _scf=scf,
@@ -386,6 +412,7 @@ def _run_session_calc_body(
     solvent: Optional[str],
     checkpoint: Optional[Any] = None,
     warm_start: bool = True,
+    scf_rescue: bool = True,
     _dft: Any,
     _gto: Any,
     _scf: Any,
@@ -431,8 +458,10 @@ def _run_session_calc_body(
 
     if method_upper == "RHF":
         mf = scf.RHF(mol)
+        scf_variant = type(mf).__name__
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
+        scf_variant = type(mf).__name__
     elif method_upper == "MP2":
         # ``scf.RHF(mol)`` is a factory: for a closed-shell molecule
         # (mol.spin == 0) it returns a true RHF object; for an open-shell
@@ -443,6 +472,7 @@ def _run_session_calc_body(
         # standard, well-defined methods; MP2 is not restricted to
         # closed-shell input here.
         mf = scf.RHF(mol)
+        scf_variant = type(mf).__name__
     elif method_upper in ("CCSD", "CCSD(T)"):
         # Same auto-dispatch as MP2 above: scf.RHF(mol) yields RHF for
         # closed-shell input and ROHF for open-shell input, and
@@ -450,6 +480,7 @@ def _run_session_calc_body(
         # ROHF-based UCCSD. The correlation energy (and optional
         # perturbative-triples correction) is added post-SCF below.
         mf = scf.RHF(mol)
+        scf_variant = type(mf).__name__
     else:
         # DFT: resolve alias then auto-select RKS / UKS. ``resolve_xc``
         # handles the wB97X-D → wb97x + external D3 dispersion mapping
@@ -458,6 +489,16 @@ def _run_session_calc_body(
             mf = dft.RKS(mol)
         else:
             mf = dft.UKS(mol)
+        # M-UX2 UXP2.10 — capture the real dispatched class name ("RKS"/
+        # "UKS") HERE, before ``maybe_apply_d3`` can wrap/rename it (D3's
+        # wrapper class name is not guaranteed to preserve the base class's
+        # ``__name__``). The restricted/unrestricted choice is fully
+        # automatic from multiplicity — correctly so, never a user toggle —
+        # but nothing in the UI used to say which one actually ran; a
+        # student running Lab 2's six-metal series (5/6 open-shell) asked
+        # the instructor directly whether QuantUI even supported UKS. See
+        # GOTCHAS.md.
+        scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
         mf = maybe_apply_d3(mf, method, progress_stream=progress_stream)
 
@@ -545,10 +586,19 @@ def _run_session_calc_body(
     )
 
     # --- Run SCF ---
+    # Every attempt goes through run_scf_with_rescue (M-SCF-ROBUST) instead of
+    # a bare mf.kernel() — a non-converged result is automatically retried
+    # through a same-basis bootstrap, then a level-shift fallback, before
+    # being reported as-is. A calculation that converges on the first try is
+    # completely unaffected (zero extra SCF passes).
+    from .scf_robust import run_scf_with_rescue
+
     emit_status(stream, "Running SCF…")
     if _dm0 is not None:
         try:
-            energy_hartree = float(mf.kernel(dm0=_dm0))
+            energy_hartree = float(
+                run_scf_with_rescue(mf, dm0=_dm0, rescue=scf_rescue, stream=stream)
+            )
         except Exception as warm_exc:
             # A warm start is an optimisation, not a requirement (M-CHECKPOINT
             # CHK.1) — a warm-start-specific failure (a GPU-migrated mean-field
@@ -564,7 +614,9 @@ def _run_session_calc_body(
             _dm0 = None
     if _dm0 is None:
         try:
-            energy_hartree = float(mf.kernel())
+            energy_hartree = float(
+                run_scf_with_rescue(mf, rescue=scf_rescue, stream=stream)
+            )
         except Exception as exc:
             raise RuntimeError(
                 f"PySCF calculation failed for {molecule.get_formula()} "
@@ -791,4 +843,6 @@ def _run_session_calc_body(
         mo_coeff=_mo_coeff_arr,
         pyscf_mol_atom=_pyscf_mol_atom,
         pyscf_mol_basis=_pyscf_mol_basis,
+        scf_rescue_stage=getattr(mf, "scf_rescue_stage", "none"),
+        scf_variant=scf_variant,
     )

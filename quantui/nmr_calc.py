@@ -48,6 +48,9 @@ class NMRResult:
     reference_key: str = ""
     is_fallback_reference: bool = False
     density_fit: bool = False
+    # M-UX2 UXP2.10 — the actual PySCF class dispatched for the SCF (e.g.
+    # "RHF", "UHF", "RKS", "UKS"); "" for an older saved result.
+    scf_variant: str = ""
 
     def h_shifts(self) -> List[Tuple[int, float]]:
         """(atom_index, δ ppm) pairs for all H atoms in molecule order."""
@@ -98,6 +101,7 @@ def run_nmr_calc(
     method: str = "B3LYP",
     basis: str = "6-31G*",
     progress_stream=None,
+    scf_rescue: bool = True,
 ) -> NMRResult:
     """Run NMR shielding calculation and return ¹H/¹³C chemical shifts.
 
@@ -110,6 +114,9 @@ def run_nmr_calc(
         method: SCF or DFT method. Recommended: B3LYP.
         basis: Basis set. Recommended: 6-31G* or better.
         progress_stream: Optional writable text stream for PySCF output.
+        scf_rescue: Whether the ground-state SCF automatically retries
+            through the shared rescue helper on non-convergence
+            (M-SCF-ROBUST, see :mod:`quantui.scf_robust`). Default ``True``.
 
     Returns:
         :class:`NMRResult` with per-atom shieldings and ¹H/¹³C shifts.
@@ -152,6 +159,7 @@ def run_nmr_calc(
             method=method,
             basis=basis,
             progress_stream=progress_stream,
+            scf_rescue=scf_rescue,
             _dft=dft,
             _gto=gto,
             _scf=scf,
@@ -325,6 +333,7 @@ def _run_nmr_calc_body(
     method: str,
     basis: str,
     progress_stream: Any,
+    scf_rescue: bool = True,
     _dft: Any,
     _gto: Any,
     _scf: Any,
@@ -353,14 +362,18 @@ def _run_nmr_calc_body(
     method_upper = method.upper()
     if method_upper == "RHF":
         mf = scf.RHF(mol)
+        scf_variant = type(mf).__name__
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
+        scf_variant = type(mf).__name__
     else:
         # Route through resolve_xc + maybe_apply_d3 so
         # wB97X-D / PBE-D3 work for NMR calcs (was using raw _XC_ALIAS
         # lookup before, which would fail for wB97X-D after the alias
         # change to "wb97x" + external D3).
         mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
+        # M-UX2 UXP2.10 — capture before maybe_apply_d3 can wrap/rename it.
+        scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
         mf = maybe_apply_d3(mf, method, progress_stream=stream)
 
@@ -379,8 +392,10 @@ def _run_nmr_calc_body(
     attach_scf_cancel_callback(mf, cancel_check_from_stream(stream))
 
     emit_status(stream, "Running SCF…")
+    from .scf_robust import run_scf_with_rescue
+
     try:
-        mf.kernel()
+        run_scf_with_rescue(mf, rescue=scf_rescue, stream=stream)
     except Exception as exc:
         raise RuntimeError(
             f"SCF failed for {molecule.get_formula()} ({method}/{basis}): {exc}"
@@ -451,4 +466,5 @@ def _run_nmr_calc_body(
         reference_key=matched_ref_key,
         is_fallback_reference=is_fallback_ref,
         density_fit=density_fit_used,
+        scf_variant=scf_variant,
     )

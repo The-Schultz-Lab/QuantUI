@@ -353,6 +353,7 @@ def run_reorganization_energy(
     solvent: Optional[str] = None,
     checkpoint: Optional[Any] = None,
     resume: bool = False,
+    scf_rescue: bool = True,
 ) -> ReorganizationEnergyResult:
     """Compute the 4-point Marcus reorganization energy for a molecule.
 
@@ -389,6 +390,10 @@ def run_reorganization_energy(
             already at the minimum, and — because BFGS is deterministic —
             reproduces the same geometry, so a later leg seeded from it still
             finds its own checkpoint.
+        scf_rescue: Whether every SCF here (each single point, each geometry
+            optimization step) automatically retries through the shared
+            rescue helper on non-convergence (M-SCF-ROBUST, see
+            :mod:`quantui.scf_robust`). Default ``True``.
 
     Returns:
         :class:`ReorganizationEnergyResult`.
@@ -417,6 +422,7 @@ def run_reorganization_energy(
             basis=basis,
             progress_stream=stream,  # type: ignore[arg-type]
             solvent=solvent,
+            scf_rescue=scf_rescue,
         )
         if not bool(getattr(res, "converged", False)):
             raise RuntimeError(f"Single point did not converge: {tag}")
@@ -469,6 +475,7 @@ def run_reorganization_energy(
         report_fraction=False,  # Don't let sub-opt 0→1 resets oscillate ETA
         checkpoint=neutral_leg,
         resume=resume,
+        scf_rescue=scf_rescue,
     )
     neutral_mol = neutral_opt.molecule
     n_total_steps = neutral_opt.n_steps
@@ -521,6 +528,7 @@ def run_reorganization_energy(
             report_fraction=False,  # See neutral-opt note above
             checkpoint=ion_leg,
             resume=resume,
+            scf_rescue=scf_rescue,
         )
         ion_mol = ion_opt.molecule
         n_total_steps += ion_opt.n_steps

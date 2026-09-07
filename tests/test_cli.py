@@ -597,6 +597,184 @@ class TestAppLauncher:
         assert "Render with Voilà" in err
 
 
+def _write_request_json(path, *, request_id="cli-req-1", calc_type="single_point"):
+    payload = {
+        "request_id": request_id,
+        "calc_type": calc_type,
+        "method": "RHF",
+        "basis": "STO-3G",
+        "charge": 0,
+        "multiplicity": 1,
+        "molecule": {"atoms": ["H", "H"], "coords": [[0, 0, 0], [0, 0, 0.74]]},
+    }
+    path.write_text(json.dumps(payload))
+    return path
+
+
+class TestSubmit:
+    """M-CLUSTER2 CL2.7 — ``quantui submit`` wraps SlurmBackend.dispatch()
+    headlessly, with no interactive app/student session involved.
+
+    Before this existed, the only way to run a batch centrally (e.g. an
+    instructor running a whole class's Lab 2 series) was to hand-author
+    sbatch scripts and guess at resource sizing.
+    """
+
+    @pytest.fixture
+    def isolated_slurm_env(self, tmp_path, monkeypatch):
+        """Isolated job/staging roots + the site gate + a mocked sbatch."""
+        monkeypatch.setenv("QUANTUI_ENABLE_SLURM", "1")
+        monkeypatch.setenv("QUANTUI_JOBS_DIR", str(tmp_path / "jobs"))
+        monkeypatch.setenv("QUANTUI_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setattr(
+            "quantui.backends.dispatch.is_slurm_cli_present", lambda: True
+        )
+        return tmp_path
+
+    def test_dry_run_prints_estimate_without_submitting(self, tmp_path, monkeypatch):
+        # Dry run needs neither the site gate nor a mocked sbatch — it's
+        # local computation only.
+        req = _write_request_json(tmp_path / "req.json")
+        rc, out, err = _capture(["submit", str(req), "--dry-run"])
+        assert rc == 0
+        assert "cores=" in out
+        assert "memory_gb=" in out
+        assert "walltime=" in out
+        assert "dry run" in out
+        assert "not submitted" in out
+
+    def test_site_gate_off_blocks_submission(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("QUANTUI_ENABLE_SLURM", raising=False)
+        # Isolate from whether sbatch actually happens to be on PATH here —
+        # this test is specifically about the QUANTUI_ENABLE_SLURM gate,
+        # not the sbatch-presence check.
+        monkeypatch.setattr(
+            "quantui.backends.dispatch.is_slurm_cli_present", lambda: True
+        )
+        req = _write_request_json(tmp_path / "req.json")
+        rc, out, err = _capture(["submit", str(req)])
+        assert rc == 1
+        assert "QUANTUI_ENABLE_SLURM" in err
+
+    def test_missing_request_file_reports_error_and_continues(
+        self, isolated_slurm_env, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "quantui.backends.slurm.subprocess.run",
+            lambda *a, **k: pytest.fail("sbatch should never be called"),
+        )
+        rc, out, err = _capture(["submit", str(tmp_path / "does-not-exist.json")])
+        assert rc == 1
+        assert "could not read/parse request" in err
+
+    def test_successful_submit_prints_request_id_and_slurm_job_id(
+        self, isolated_slurm_env, tmp_path, monkeypatch
+    ):
+        from unittest.mock import MagicMock
+
+        mock_run = MagicMock()
+        mock_run.return_value.stdout = "Submitted batch job 777888\n"
+        mock_run.return_value.stderr = ""
+        mock_run.return_value.returncode = 0
+        monkeypatch.setattr("quantui.backends.slurm.subprocess.run", mock_run)
+
+        req = _write_request_json(tmp_path / "req.json", request_id="cli-req-42")
+        rc, out, err = _capture(["submit", str(req)])
+        assert rc == 0
+        assert "submitted request_id=cli-req-42" in out
+        assert "slurm_job_id=777888" in out
+
+    def test_resource_overrides_are_forwarded(
+        self, isolated_slurm_env, tmp_path, monkeypatch
+    ):
+        from unittest.mock import MagicMock
+
+        mock_run = MagicMock()
+        mock_run.return_value.stdout = "Submitted batch job 111222\n"
+        mock_run.return_value.stderr = ""
+        mock_run.return_value.returncode = 0
+        monkeypatch.setattr("quantui.backends.slurm.subprocess.run", mock_run)
+
+        req = _write_request_json(tmp_path / "req.json", request_id="cli-req-override")
+        rc, out, err = _capture(
+            [
+                "submit",
+                str(req),
+                "--cores",
+                "16",
+                "--memory-gb",
+                "64",
+                "--walltime",
+                "08:00:00",
+            ]
+        )
+        assert rc == 0
+        from quantui.backends.registry import JobRegistry
+
+        registry = JobRegistry()
+        record = registry.load("cli-req-override")
+        assert record is not None
+        assert record.resources["cores"] == 16
+        assert record.resources["memory_gb"] == 64
+        assert record.resources["walltime"] == "08:00:00"
+
+    def test_multiple_requests_submit_all_and_report_per_file(
+        self, isolated_slurm_env, tmp_path, monkeypatch
+    ):
+        from unittest.mock import MagicMock
+
+        mock_run = MagicMock()
+        mock_run.return_value.stdout = "Submitted batch job 999000\n"
+        mock_run.return_value.stderr = ""
+        mock_run.return_value.returncode = 0
+        monkeypatch.setattr("quantui.backends.slurm.subprocess.run", mock_run)
+        # Zero out the cooldown rather than faking elapsed time: the CLI
+        # sleeps out SlurmBackend's own post-submit cooldown between
+        # requests, and *that* cooldown check is itself time-based, so
+        # patching time.sleep() to a no-op would make the second dispatch()
+        # call correctly reject as "still in cooldown" (no real time
+        # passed). Cooldown=0 makes both the CLI's sleep and the backend's
+        # check no-ops, cleanly.
+        monkeypatch.setattr(
+            "quantui.backends.cluster_config.submit_cooldown_seconds", lambda: 0
+        )
+
+        req1 = _write_request_json(tmp_path / "req1.json", request_id="multi-1")
+        req2 = _write_request_json(tmp_path / "req2.json", request_id="multi-2")
+        rc, out, err = _capture(["submit", str(req1), str(req2)])
+        assert rc == 0
+        assert "submitted request_id=multi-1" in out
+        assert "submitted request_id=multi-2" in out
+
+    def test_partial_failure_reports_both_and_nonzero_exit(
+        self, isolated_slurm_env, tmp_path, monkeypatch
+    ):
+        from unittest.mock import MagicMock
+
+        mock_run = MagicMock()
+        mock_run.return_value.stdout = "Submitted batch job 123456\n"
+        mock_run.return_value.stderr = ""
+        mock_run.return_value.returncode = 0
+        monkeypatch.setattr("quantui.backends.slurm.subprocess.run", mock_run)
+        monkeypatch.setattr(
+            "quantui.backends.cluster_config.submit_cooldown_seconds", lambda: 0
+        )
+
+        good = _write_request_json(tmp_path / "good.json", request_id="good-1")
+        missing = tmp_path / "missing.json"
+        rc, out, err = _capture(["submit", str(good), str(missing)])
+        assert rc == 1  # one failure taints the exit code
+        assert "submitted request_id=good-1" in out  # but the good one still ran
+        assert "could not read/parse request" in err
+
+    def test_submit_parser_registered(self):
+        parser = cli._build_parser()
+        args = parser.parse_args(["submit", "a.json", "b.json", "--dry-run"])
+        assert args.command == "submit"
+        assert args.request == ["a.json", "b.json"]
+        assert args.dry_run is True
+
+
 class TestCliAvoidsGuiStackImport:
     """M13 audit fix: ``import quantui.cli`` must not pull in ipywidgets.
 

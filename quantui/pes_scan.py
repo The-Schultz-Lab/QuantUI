@@ -228,6 +228,7 @@ def run_pes_scan(
     checkpoint: Optional[Any] = None,
     resume: bool = False,
     grid: str = "linear",
+    scf_rescue: bool = True,
 ) -> PESScanResult:
     """Run a 1D PES scan along an internal coordinate.
 
@@ -259,6 +260,9 @@ def run_pes_scan(
             only the ones still missing. Points are matched by index, and a
             stored point that failed is recomputed rather than accepted — the
             usual reason to resume a scan is that something went wrong.
+        scf_rescue: Whether each scan point's SCF automatically retries
+            through the shared rescue helper on non-convergence
+            (M-SCF-ROBUST, see :mod:`quantui.scf_robust`). Default ``True``.
 
     Returns:
         :class:`PESScanResult` with the full energy profile and geometries.
@@ -340,6 +344,7 @@ def run_pes_scan(
         basis=basis,
         charge=molecule.charge,
         spin=molecule.multiplicity - 1,
+        scf_rescue=scf_rescue,
     )
 
     _stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout

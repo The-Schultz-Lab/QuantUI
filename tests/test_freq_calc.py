@@ -149,6 +149,17 @@ class TestRunFreqCalcThermo:
 
     @pyscf_only
     @pytest.mark.slow
+    def test_scf_variant_reports_rks_for_closed_shell_dft(self):
+        """M-UX2 UXP2.10 — confirms the wiring, mirroring the identical
+        RHF/UHF/RKS/UKS dispatch already thoroughly tested in
+        test_session_calc.py::TestScfVariantProvenance."""
+        from quantui.freq_calc import run_freq_calc
+
+        result = run_freq_calc(_water(), method="B3LYP", basis="STO-3G")
+        assert result.scf_variant == "RKS"
+
+    @pyscf_only
+    @pytest.mark.slow
     def test_thermo_h_is_finite(self):
         from quantui.freq_calc import run_freq_calc
 

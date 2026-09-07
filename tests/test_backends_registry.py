@@ -112,3 +112,70 @@ class TestSlurmUtils:
         large_est = estimate_slurm_resources(large)
         assert large_est["memory_gb"] >= small_est["memory_gb"]
         assert large_est["cores"] >= small_est["cores"]
+
+
+class TestEstimateResourcesFreqParallelAwareness:
+    """M-CLUSTER2 CL2.9 — estimate_slurm_resources() must account for
+    QUANTUI_FREQ_PARALLEL: N worker processes each holding their own
+    integrals/Fock matrix, not just N threads sharing one process's
+    memory footprint. Not yet triggered on a real deployment (the env var
+    wasn't set for CHEM-3200's Lab 2 frequency jobs) — a documented latent
+    risk, not an observed failure.
+    """
+
+    def _freq_request(self, n_atoms: int = 19) -> CalculationRequest:
+        return CalculationRequest(
+            request_id="freq-req",
+            calc_type="frequency",
+            method="B3LYP",
+            basis="def2-SVP",
+            charge=2,
+            multiplicity=6,
+            molecule={
+                "atoms": ["Mn"] + ["O"] * 6 + ["H"] * (n_atoms - 7),
+                "coords": [[float(i), 0.0, 0.0] for i in range(n_atoms)],
+            },
+        )
+
+    def test_multiplier_is_1_when_env_var_unset(self, monkeypatch):
+        monkeypatch.delenv("QUANTUI_FREQ_PARALLEL", raising=False)
+        est = estimate_slurm_resources(self._freq_request())
+        assert est["freq_parallel_memory_multiplier"] == 1
+
+    def test_multiplier_is_1_for_non_frequency_calc_types(self, monkeypatch):
+        monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "1")
+        req = self._freq_request()
+        req.calc_type = "single_point"
+        est = estimate_slurm_resources(req)
+        assert est["freq_parallel_memory_multiplier"] == 1
+
+    def test_multiplier_kicks_in_when_env_var_set(self, monkeypatch):
+        from quantui.backends import cluster_config as cfg
+
+        monkeypatch.delenv("QUANTUI_FREQ_PARALLEL", raising=False)
+        baseline = estimate_slurm_resources(self._freq_request())
+
+        monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "1")
+        parallel = estimate_slurm_resources(self._freq_request())
+
+        assert parallel["freq_parallel_memory_multiplier"] > 1
+        # Same cores/walltime — only the memory estimate changes.
+        assert parallel["cores"] == baseline["cores"]
+        assert parallel["memory_gb"] > baseline["memory_gb"]
+        assert parallel["memory_gb"] == min(
+            baseline["memory_gb"] * parallel["freq_parallel_memory_multiplier"],
+            cfg.MAX_MEMORY_GB,
+        )
+
+    def test_multiplier_never_exceeds_the_site_memory_cap(self, monkeypatch):
+        from quantui.backends import cluster_config as cfg
+
+        monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "1")
+        # A large system with a big multiplier must still clamp to the cap.
+        est = estimate_slurm_resources(self._freq_request(n_atoms=60))
+        assert est["memory_gb"] <= cfg.MAX_MEMORY_GB
+
+    def test_env_var_off_value_does_not_trigger(self, monkeypatch):
+        monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "0")
+        est = estimate_slurm_resources(self._freq_request())
+        assert est["freq_parallel_memory_multiplier"] == 1

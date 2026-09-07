@@ -12,6 +12,25 @@ def _converged_color(converged: bool) -> str:
     return _theme.css.ACCENT_SUCCESS if converged else _theme.css.ACCENT_ERROR_ALT
 
 
+def _method_basis_label(method: str, basis: str, scf_variant: str | None) -> str:
+    """``"{method}/{basis}"``, with an explicit "(RKS)"/"(UKS)" suffix when
+    the dispatched SCF variant differs from the plain method name.
+
+    The restricted/unrestricted choice for a DFT functional (e.g. B3LYP) is
+    fully automatic from multiplicity — correctly so, never a user toggle —
+    but nothing in the results panel used to say which one actually ran. A
+    student running Lab 2's six-metal series (5/6 open-shell) asked the
+    instructor directly whether QuantUI even supported UKS (M-UX2 UXP2.10;
+    see GOTCHAS.md). No suffix for "RHF"/"UHF" methods, where the method
+    name already says it, or for a calc type/older saved result that never
+    set ``scf_variant``.
+    """
+    label = f"{method}/{basis}"
+    if scf_variant and scf_variant.upper() != method.upper():
+        label += f" ({scf_variant})"
+    return label
+
+
 def _result_card_open(*, accent: str | None = None, extra_style: str = "") -> str:
     border = accent or _theme.css.ACCENT_SUCCESS_ALT
     style = (
@@ -163,8 +182,8 @@ def format_result(r: Any) -> str:
     )
     _extra = _result_extra_rows(lambda k, d=None: getattr(r, k, d))
     return (
-        _result_card_open()
-        + f"<b>{r.formula} &mdash; {r.method}/{r.basis}</b>"
+        _result_card_open() + f"<b>{r.formula} &mdash; "
+        f"{_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))}</b>"
         + _result_card_table_open()
         + f"{_rows}{_extra}</table>"
         + _RESULT_CARD_CLOSE
@@ -253,8 +272,8 @@ def format_freq_result(r: Any) -> str:
             f" ({_thermo.G_hartree * _kj:.2f} kJ/mol)</td></tr>"
         )
     return (
-        _result_card_open()
-        + f"<b>Frequency Analysis &mdash; {r.formula} ({r.method}/{r.basis})</b>"
+        _result_card_open() + f"<b>Frequency Analysis &mdash; {r.formula} "
+        f"({_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))})</b>"
         + _result_card_table_open()
         + f"{_rows}{_thermo_rows}</table>"
         + _RESULT_CARD_CLOSE
@@ -305,8 +324,8 @@ def format_tddft_result(r: Any) -> str:
             + "".join(exc_rows)
         )
     return (
-        _result_card_open()
-        + f"<b>TD-DFT / UV-Vis &mdash; {r.formula} ({r.method}/{r.basis})</b>"
+        _result_card_open() + f"<b>TD-DFT / UV-Vis &mdash; {r.formula} "
+        f"({_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))})</b>"
         + _result_card_table_open()
         + f"{header_rows}{exc_table}</table>"
         + _RESULT_CARD_CLOSE
@@ -379,8 +398,8 @@ def format_nmr_result(r: Any) -> str:
         )
 
     return (
-        _result_card_open()
-        + f"<b>NMR Shielding &mdash; {r.formula} ({r.method}/{r.basis})</b>"
+        _result_card_open() + f"<b>NMR Shielding &mdash; {r.formula} "
+        f"({_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))})</b>"
         + _result_card_table_open()
         + f"{header_rows}{h_table}{c_table}{_empty}{_basis_warn}{_ref_warn}</table>"
         + _RESULT_CARD_CLOSE
@@ -817,7 +836,8 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         _result_card_open(extra_style="overflow:hidden")
         + f"{_thumb_html}"
         + f"{_ct_badge}<br>"
-        + f'<b>{data["formula"]} &mdash; {data["method"]}/{data["basis"]}</b>'
+        + f'<b>{data["formula"]} &mdash; '
+        f'{_method_basis_label(data["method"], data["basis"], data.get("scf_variant"))}</b>'
         f'&ensp;<small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{ts}</small>'
         + _result_card_table_open()
         + f"{_rows}{_extra}</table>{_reorg_html}"

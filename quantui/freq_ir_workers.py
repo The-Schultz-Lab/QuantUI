@@ -166,7 +166,9 @@ def run_displaced_scf(coords_bohr_flat) -> Any:
     else:
         mf = scf.UHF(mol) if dm0_is_unrestricted else scf.RHF(mol)
     mf.verbose = 0
-    mf.kernel(dm0=dm0)
+    from .scf_robust import run_scf_with_rescue
+
+    run_scf_with_rescue(mf, dm0=dm0)
     return np.array(mf.dip_moment(verbose=0))
 
 

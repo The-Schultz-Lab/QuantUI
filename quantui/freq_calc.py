@@ -111,6 +111,9 @@ class FreqResult:
     pyscf_mol_atom: Optional[List] = None
     pyscf_mol_basis: Optional[str] = None
     density_fit: bool = False
+    # M-UX2 UXP2.10 — the actual PySCF class dispatched for the reference
+    # SCF (e.g. "RHF", "UHF", "RKS", "UKS"); "" for an older saved result.
+    scf_variant: str = ""
 
     @property
     def energy_ev(self) -> float:
@@ -279,6 +282,7 @@ def run_freq_calc(
     method: str = "RHF",
     basis: str = "STO-3G",
     progress_stream: Optional[IO[str]] = None,
+    scf_rescue: bool = True,
 ) -> FreqResult:
     """Run SCF + analytical Hessian to obtain vibrational frequencies.
 
@@ -297,6 +301,11 @@ def run_freq_calc(
             name (e.g. ``'B3LYP'``).  Default: ``'RHF'``.
         basis: Basis set name.  Default: ``'STO-3G'``.
         progress_stream: Optional writable text stream for live PySCF output.
+        scf_rescue: Whether every SCF here (the reference geometry, plus
+            each finite-difference displacement for numerical IR
+            intensities) automatically retries through the shared rescue
+            helper on non-convergence (M-SCF-ROBUST, see
+            :mod:`quantui.scf_robust`). Default ``True``.
 
     Returns:
         :class:`FreqResult` with frequencies, ZPVE, and SCF properties.
@@ -345,6 +354,7 @@ def run_freq_calc(
             method=method,
             basis=basis,
             progress_stream=progress_stream,
+            scf_rescue=scf_rescue,
             _dft=dft,
             _gto=gto,
             _scf=scf,
@@ -359,6 +369,7 @@ def _run_freq_calc_body(
     method: str,
     basis: str,
     progress_stream: Optional[IO[str]],
+    scf_rescue: bool = True,
     _dft: Any,
     _gto: Any,
     _scf: Any,
@@ -393,8 +404,10 @@ def _run_freq_calc_body(
     method_upper = method.upper()
     if method_upper == "RHF":
         mf = scf.RHF(mol)
+        scf_variant = type(mf).__name__
     elif method_upper == "UHF":
         mf = scf.UHF(mol)
+        scf_variant = type(mf).__name__
     else:
         # Route through resolve_xc + maybe_apply_d3 so
         # methods like wB97X-D (PySCF rejects "wb97x-d") map to the
@@ -402,6 +415,8 @@ def _run_freq_calc_body(
         from .session_calc import maybe_apply_d3, resolve_xc
 
         mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
+        # M-UX2 UXP2.10 — capture before maybe_apply_d3 can wrap/rename it.
+        scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
         mf = maybe_apply_d3(mf, method, progress_stream=stream)
 
@@ -419,8 +434,12 @@ def _run_freq_calc_body(
     attach_scf_cancel_callback(mf, cancel_check_from_stream(stream))
 
     _status("Running SCF…")
+    from .scf_robust import run_scf_with_rescue
+
     try:
-        energy_hartree = float(mf.kernel())
+        energy_hartree = float(
+            run_scf_with_rescue(mf, rescue=scf_rescue, stream=stream)
+        )
     except Exception as exc:
         raise RuntimeError(
             f"SCF failed for {molecule.get_formula()} ({method}/{basis}): {exc}"
@@ -609,7 +628,7 @@ def _run_freq_calc_body(
                     # attempts ``mf.to_gpu()`` and falls back to CPU on any
                     # failure, so this is safe to call unconditionally.
                     _mf_d, _used_gpu, _gpu_name = _try_to_gpu_inner(_mf_d, "RHF")
-                    _mf_d.kernel(dm0=_dm0)
+                    run_scf_with_rescue(_mf_d, dm0=_dm0, rescue=scf_rescue)
                     # pyscf has no type stubs (ignore_missing_imports), so
                     # dip_moment()'s Any return defeats asarray's overload
                     # resolution too; dip_moment() genuinely returns an
@@ -813,6 +832,7 @@ def _run_freq_calc_body(
                         status=_status,
                         hessian=h,
                         atom_str=molecule.to_pyscf_format(),
+                        scf_rescue=scf_rescue,
                     )
                     if len(_raman) == len(frequencies_cm1):
                         raman_activities = _raman
@@ -914,4 +934,5 @@ def _run_freq_calc_body(
         pyscf_mol_atom=pyscf_mol_atom,
         pyscf_mol_basis=basis,
         density_fit=_density_fit_used,
+        scf_variant=scf_variant,
     )

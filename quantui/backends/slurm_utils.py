@@ -152,7 +152,42 @@ def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
         if idx + 1 < len(cfg.WALLTIME_OPTIONS):
             walltime = cfg.WALLTIME_OPTIONS[idx + 1]
 
-    return {"cores": cores, "memory_gb": memory_gb, "walltime": walltime}
+    # M-CLUSTER2 CL2.9 — QUANTUI_FREQ_PARALLEL awareness. The base `frequency`
+    # estimate above (calc_factor=4.0) already independently validated as
+    # correct for the *serial* IR-displacement loop (CHEM-3200 Lab 2: a real
+    # 19-atom def2-SVP UKS frequency job needed exactly the 120-128GB this
+    # estimator recommends). But that path runs ONE SCF at a time; the
+    # QUANTUI_FREQ_PARALLEL=1 opt-in (freq_ir_workers.py) instead fans the
+    # per-displacement SCFs out across N worker *processes* running
+    # concurrently, each rebuilding its own Mole and holding its own
+    # integrals/Fock matrix — memory need scales with N, not with thread
+    # count, so the serial estimate alone would silently under-provision.
+    # Not yet triggered in the CHEM-3200 case (the env var wasn't set
+    # there) — this is a documented latent risk, not (yet) an observed
+    # failure. `freq_parallel_memory_multiplier` is always present (1 when
+    # the opt-in isn't active, or for any non-frequency calc type) so a
+    # caller/log can see whether — and by how much — this fired.
+    freq_parallel_multiplier = 1
+    if request.calc_type == "frequency":
+        try:
+            from quantui.freq_ir_workers import freq_parallel_opt_in, pick_worker_count
+
+            if freq_parallel_opt_in():
+                displacement_count = max(num_atoms, 1) * 3 * 2
+                freq_parallel_multiplier = max(
+                    1, pick_worker_count(cores, displacement_count)
+                )
+        except Exception:  # noqa: BLE001 — a bad probe must not block sizing
+            freq_parallel_multiplier = 1
+        if freq_parallel_multiplier > 1:
+            memory_gb = min(memory_gb * freq_parallel_multiplier, cfg.MAX_MEMORY_GB)
+
+    return {
+        "cores": cores,
+        "memory_gb": memory_gb,
+        "walltime": walltime,
+        "freq_parallel_memory_multiplier": freq_parallel_multiplier,
+    }
 
 
 _ATOMIC_NUMBERS = {
