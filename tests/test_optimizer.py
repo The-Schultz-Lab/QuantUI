@@ -34,16 +34,17 @@ try:
 except ImportError:
     pass
 
-_ASE_PYSCF_AVAILABLE = False
-try:
-    from ase.calculators.pyscf import PySCF as _c  # noqa: F401
-
-    _ASE_PYSCF_AVAILABLE = True
-except ImportError:
-    pass
-
+# AUDIT F22 — this skip used to also require `ase.calculators.pyscf.PySCF`
+# (a module ASE itself does not ship), a check left over from an earlier
+# design. quantui.optimizer implements and uses its own ASE Calculator,
+# `_QuantUIPySCFCalc` (see optimizer.py's module docstring), and never
+# imports ase.calculators.pyscf at all. Gating on it meant every test below
+# skipped with a misleading "not installed" reason on any environment
+# where ASE and PySCF were both genuinely installed and working —
+# 16 tests, per the audit — because that unrelated module doesn't exist in
+# any released ASE version.
 pyscf_only = pytest.mark.skipif(
-    not (ASE_AVAILABLE and _PYSCF_AVAILABLE and _ASE_PYSCF_AVAILABLE),
+    not (ASE_AVAILABLE and _PYSCF_AVAILABLE),
     reason="ase>=3.22 and pyscf not both installed (Linux/WSL only)",
 )
 
@@ -593,6 +594,32 @@ class TestPublicAPI:
 
     def test_optimize_geometry_importable_from_quantui(self):
         from quantui import optimize_geometry  # noqa: F401
+
+
+class TestPyscfOnlyGateNotObsolete:
+    """AUDIT F22 regression — the gate used to also require
+    ``ase.calculators.pyscf.PySCF``, a module ASE does not ship (this repo
+    implements its own ``_QuantUIPySCFCalc`` and never imports it). That
+    made every ``@pyscf_only`` test in this file skip with a misleading
+    "not installed" reason on any environment where ASE and PySCF were
+    both genuinely installed and working — 16 tests, per the audit.
+    """
+
+    def test_gate_does_not_require_ase_calculators_pyscf(self):
+        import importlib.util
+
+        assert (
+            importlib.util.find_spec("ase.calculators.pyscf") is None
+        ), "test environment assumption changed: ase.calculators.pyscf now exists"
+        # The gate must still evaluate to "available" here, since real ASE
+        # + PySCF ARE installed in this environment (see the module-level
+        # ASE_AVAILABLE / _PYSCF_AVAILABLE probes above) — it must not
+        # depend on the module asserted absent just above.
+        assert ASE_AVAILABLE and _PYSCF_AVAILABLE
+        assert pyscf_only.args[0] is False, (
+            "pyscf_only should not skip when ASE and PySCF are both "
+            "installed, regardless of ase.calculators.pyscf"
+        )
 
 
 # ============================================================================
