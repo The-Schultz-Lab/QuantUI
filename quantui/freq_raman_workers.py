@@ -23,8 +23,17 @@ def init_raman_worker(
     omp_threads: int,
     dm0_is_unrestricted: bool,
     density_fit_used: bool,
+    checkpoint_items_dir: str | None = None,
 ) -> None:
-    """Worker initializer — same threading discipline as IR workers."""
+    """Worker initializer — same threading discipline as IR workers.
+
+    ``checkpoint_items_dir`` (M-CHECKPOINT CHK.4.4): directory path (plain
+    string — see :func:`quantui.freq_ir_workers.init_worker`'s docstring for
+    why not a ``Checkpoint`` object) where each completed displacement's
+    polarizability is durably recorded via
+    :func:`quantui.checkpoint.mark_item_done_at`. ``None`` when the run has
+    no checkpoint.
+    """
     import os
     import pickle
 
@@ -46,6 +55,7 @@ def init_raman_worker(
         dm0=dm0,
         dm0_is_unrestricted=bool(dm0_is_unrestricted),
         density_fit_used=bool(density_fit_used),
+        checkpoint_items_dir=checkpoint_items_dir,
     )
 
 
@@ -63,8 +73,14 @@ def _polarizability_module(mol: Any, dm0_is_unrestricted: bool):
     return pol_mod
 
 
-def run_displaced_polarizability(coords_bohr_flat) -> list[list[float]]:
-    """Run one SCF at a displaced geometry; return α as a nested 3×3 list."""
+def run_displaced_polarizability(item_id: str, coords_bohr_flat) -> list[list[float]]:
+    """Run one SCF at a displaced geometry; return α as a nested 3×3 list.
+
+    ``item_id`` (CHK.4.2, e.g. ``"d000_x_+"``) is used only to durably
+    record completion (CHK.4.4) when this run has a checkpoint — see
+    :func:`quantui.freq_ir_workers.run_displaced_scf`'s docstring for the
+    same pattern and its crash-safety rationale.
+    """
     import numpy as np
     from pyscf import dft, gto, scf
 
@@ -102,4 +118,16 @@ def run_displaced_polarizability(coords_bohr_flat) -> list[list[float]]:
     pol_mod = _polarizability_module(mol, dm0_is_unrestricted)
     alpha = np.asarray(pol_mod.polarizability(pol_mod.Polarizability(mf)), dtype=float)
     reshaped = alpha.reshape(3, 3)
-    return [[float(x) for x in row] for row in reshaped.tolist()]
+    nested = [[float(x) for x in row] for row in reshaped.tolist()]
+
+    items_dir = state.get("checkpoint_items_dir")
+    if items_dir:
+        from quantui.checkpoint import mark_item_done_at
+
+        # Best-effort by construction — never raises. See
+        # freq_ir_workers.run_displaced_scf for why this write happens here,
+        # inside the worker, rather than only after the parent collects the
+        # Future.
+        mark_item_done_at(items_dir, item_id, {"alpha": nested})
+
+    return nested

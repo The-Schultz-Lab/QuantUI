@@ -259,3 +259,82 @@ class TestRamanActivitiesIntegration:
         assert (
             ir_low < ram_low
         ), f"Expected bend-like mode IR ({ir_low:.2f}) < Raman ({ram_low:.2f})"
+
+
+class TestChk4RamanDisplacementCheckpointing:
+    """M-CHECKPOINT CHK.4.4 — Raman shares the exact same (atom, axis, sign)
+    displacement grid as the IR loop, so it needs its own named item set
+    ("raman_displacements") to avoid colliding with IR's
+    ("freq_displacements") — see roadmap 34's CHK.4 section."""
+
+    def _checkpoint(self, tmp_path, molecule):
+        from quantui.checkpoint import CalcIdentity, Checkpoint
+
+        identity = CalcIdentity.from_molecule(
+            molecule, calc_type="frequency", method="RHF", basis="STO-3G"
+        )
+        # Matches production: backends/worker.py's _begin_worker_checkpoint
+        # always calls .begin() before handing a checkpoint to a calc
+        # function.
+        ckpt = Checkpoint(identity, root=tmp_path / "ckpt")
+        ckpt.begin()
+        return ckpt
+
+    def _count_rescue_calls(self, monkeypatch):
+        import quantui.scf_robust as scf_robust_mod
+
+        real_rescue = scf_robust_mod.run_scf_with_rescue
+        calls: list = []
+
+        def _counting(*args, **kwargs):
+            calls.append(1)
+            return real_rescue(*args, **kwargs)
+
+        monkeypatch.setattr(scf_robust_mod, "run_scf_with_rescue", _counting)
+        return calls
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_raman_displacements_recorded_under_their_own_item_set(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("QUANTUI_RAMAN", "1")
+        from quantui.freq_calc import run_freq_calc
+
+        molecule = _water()
+        ckpt = self._checkpoint(tmp_path, molecule)
+        run_freq_calc(molecule, method="RHF", basis="STO-3G", checkpoint=ckpt)
+
+        ir_ids = ckpt.completed_item_ids("freq_displacements")
+        raman_ids = ckpt.completed_item_ids("raman_displacements")
+        assert len(ir_ids) == 18
+        assert len(raman_ids) == 18
+        # Same displacement grid, but the two sets never collide — reading
+        # one back must not be affected by the other's records.
+        assert ir_ids == raman_ids
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_fully_banked_resume_skips_all_raman_recompute(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_RAMAN", "1")
+        from quantui.freq_calc import run_freq_calc
+
+        molecule = _water()
+        ckpt = self._checkpoint(tmp_path, molecule)
+
+        calls = self._count_rescue_calls(monkeypatch)
+        baseline = run_freq_calc(
+            molecule, method="RHF", basis="STO-3G", checkpoint=ckpt
+        )
+        # reference SCF + 18 IR displacements + 18 Raman displacements.
+        assert len(calls) == 1 + 18 + 18
+
+        calls.clear()
+        ckpt.begin()  # a real resubmission calls .begin() again
+        resumed = run_freq_calc(
+            molecule, method="RHF", basis="STO-3G", checkpoint=ckpt, resume=True
+        )
+        assert len(calls) == 1  # only the reference SCF
+        assert resumed.raman_activities == pytest.approx(
+            baseline.raman_activities, abs=1e-6
+        )

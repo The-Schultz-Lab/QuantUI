@@ -378,12 +378,39 @@ def _run_frequency(
     options = request.options or {}
     scf_rescue = bool(options.get("scf_rescue", True))
     _write_progress(staging_dir, "running", "Running frequency analysis", 15.0)
+
+    # M-CHECKPOINT CHK.4 — this is the calc type the real production pain
+    # (roadmap 34's "Real-world cost data" note) was about: a killed
+    # frequency job used to discard the entire 6N-displacement Hessian
+    # computation on every resubmission, unlike geometry_opt/pes_scan
+    # (CL2.8) on the same batch path. Resume diffs a *set* of already-banked
+    # displacement ids (CHK.4.1/.2), not a prefix — see freq_calc.py and
+    # freq_ir_workers.py/freq_raman_workers.py for why that matters under
+    # the QUANTUI_FREQ_PARALLEL opt-in.
+    ckpt, resumable = _begin_worker_checkpoint(
+        molecule,
+        calc_type="frequency",
+        method=request.method,
+        basis=request.basis,
+        staging_dir=staging_dir,
+        log_stream=log_stream,
+    )
+    if resumable:
+        _append_log(
+            staging_dir,
+            "[checkpoint] Resuming frequency analysis — some "
+            "finite-difference displacement SCFs are already banked from a "
+            "previous attempt.",
+        )
+
     result = run_freq_calc(
         molecule=molecule,
         method=request.method,
         basis=request.basis,
         progress_stream=log_stream,
         scf_rescue=scf_rescue,
+        checkpoint=ckpt,
+        resume=resumable,
     )
     return result, molecule
 

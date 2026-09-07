@@ -55,6 +55,7 @@ def init_worker(
     xc: str | None,
     dm0_pickle_path: str,
     omp_threads: int,
+    checkpoint_items_dir: str | None = None,
 ) -> None:
     """ProcessPoolExecutor worker initializer.
 
@@ -85,6 +86,14 @@ def init_worker(
     omp_threads:
         BLAS thread budget for this worker. Set as ``OMP_NUM_THREADS`` /
         ``MKL_NUM_THREADS`` / ``OPENBLAS_NUM_THREADS`` / ``PYSCF_NUM_THREADS``.
+    checkpoint_items_dir:
+        M-CHECKPOINT CHK.4.4. Directory path (plain string — a
+        ``Checkpoint`` object with a live log stream is not safe to pickle
+        across this process boundary) where each completed displacement's
+        result is durably recorded via
+        :func:`quantui.checkpoint.mark_item_done_at`. ``None`` when the run
+        has no checkpoint (checkpointing is always optional — see
+        :mod:`quantui.checkpoint`'s "never break a calculation" rule).
     """
     # Order matters: set env vars before any NumPy / PySCF import.
     threads = str(int(omp_threads))
@@ -105,16 +114,20 @@ def init_worker(
         spin=int(spin),
         xc=xc,
         dm0=dm0,
+        checkpoint_items_dir=checkpoint_items_dir,
     )
 
 
-def run_displaced_scf(coords_bohr_flat) -> Any:
+def run_displaced_scf(item_id: str, coords_bohr_flat) -> Any:
     """Run one SCF at the displaced geometry; return the dipole as ndarray.
 
     Called by :class:`concurrent.futures.ProcessPoolExecutor` once per
     submitted displacement task. ``coords_bohr_flat`` is the displaced
     geometry packed as a flat Python list (``[x0, y0, z0, x1, y1, z1, ...]``)
     for cheap pickling — reshaped to ``(N_atoms, 3)`` inside the worker.
+    ``item_id`` is the displacement's stable id (CHK.4.2, e.g. ``"d000_x_+"``)
+    — used only to durably record completion (CHK.4.4) when this run has a
+    checkpoint; it plays no role in the SCF itself.
 
     Uses ``_WORKER_STATE`` populated by :func:`init_worker` for the
     invariant inputs (atom string, basis, etc.) + the shared initial-guess
@@ -130,6 +143,10 @@ def run_displaced_scf(coords_bohr_flat) -> Any:
     Any exception raised here propagates to the parent via the
     ``Future.result()`` call. The freq_calc driver catches such failures
     and falls back to the serial loop so the user's calc still completes.
+    The checkpoint write happens *before* this function returns — if this
+    worker process is killed immediately after (e.g. the whole SLURM job is
+    preempted right as this task finishes), the durable record already
+    exists regardless of whether the parent ever collects this Future.
     """
     import numpy as np
     from pyscf import dft, gto, scf
@@ -169,7 +186,18 @@ def run_displaced_scf(coords_bohr_flat) -> Any:
     from .scf_robust import run_scf_with_rescue
 
     run_scf_with_rescue(mf, dm0=dm0)
-    return np.array(mf.dip_moment(verbose=0))
+    dipole = np.array(mf.dip_moment(verbose=0))
+
+    items_dir = state.get("checkpoint_items_dir")
+    if items_dir:
+        from quantui.checkpoint import mark_item_done_at
+
+        # Best-effort by construction — mark_item_done_at never raises. A
+        # failed write here just means this displacement isn't resumable
+        # from disk; the calc itself is unaffected either way.
+        mark_item_done_at(items_dir, item_id, {"dipole": dipole.tolist()})
+
+    return dipole
 
 
 def freq_parallel_opt_in() -> bool:

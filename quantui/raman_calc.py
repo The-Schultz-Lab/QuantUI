@@ -151,20 +151,59 @@ def _cpu_raman_activities_fd(
     status: Callable[[str], None],
     atom_str: str | None = None,
     scf_rescue: bool = True,
+    checkpoint: Optional[Any] = None,
+    resume: bool = False,
 ) -> List[float]:
-    """CPU Raman via pyscf-properties polarizability + geometry FD."""
+    """CPU Raman via pyscf-properties polarizability + geometry FD.
+
+    ``checkpoint``/``resume`` (M-CHECKPOINT CHK.4.4) mirror
+    :func:`quantui.freq_calc.run_freq_calc`'s displacement checkpointing,
+    under a separate named item set (``"raman_displacements"``) so this
+    loop's per-displacement records can never collide with the IR loop's
+    ``"freq_displacements"`` set, even though both are keyed on the exact
+    same ``(atom_idx, axis, sign)`` displacements of the same molecule.
+    """
     import os
 
     pol_mod = _polarizability_module(mf, dm0_is_unrestricted)
 
     from quantui.density_fitting import try_density_fit as _try_density_fit
+    from quantui.freq_displacement_ids import (
+        displacement_id as _disp_id,
+    )
+    from quantui.freq_displacement_ids import (
+        parse_displacement_id as _parse_disp_id,
+    )
     from quantui.gpu_offload import try_to_gpu as _try_to_gpu_inner
 
+    _ITEM_SET_NAME = "raman_displacements"
     _xc = getattr(mf, "xc", None)
     _n_atoms = mol.natm
     _coords0 = mol.atom_coords().copy()
     _total = _n_atoms * 3 * 2
-    _done = 0
+
+    # --- M-CHECKPOINT CHK.4: resume already-banked displacements ---
+    # Single source of truth for every displacement's polarizability,
+    # whichever path produced it (resumed, parallel pool, serial fallback) —
+    # the assembly step below reads only from this dict, which is what
+    # makes it a proper CHK.4.5 gate.
+    _alphas: dict = {}
+    if checkpoint is not None and resume:
+        for _item_id, _payload in checkpoint.completed_items(_ITEM_SET_NAME).items():
+            try:
+                _key = _parse_disp_id(_item_id)
+                _alphas[_key] = np.asarray(_payload["alpha"], dtype=float)
+            except (ValueError, KeyError, TypeError):
+                continue
+    _done = len(_alphas)
+    if _done and checkpoint is not None:
+        try:
+            checkpoint.log_resumed(
+                f"{_done}/{_total} finite-difference polarizability "
+                "evaluations already banked from an earlier attempt"
+            )
+        except Exception:  # noqa: BLE001 — provenance is never worth a crash
+            pass
 
     status(
         "Numerical Raman activities (CPU): "
@@ -210,27 +249,33 @@ def _cpu_raman_activities_fd(
         cpu_count=_cpu_count,
         displacement_count=_total,
     )
+    _ckpt_items_dir = (
+        str(checkpoint.items_dir(_ITEM_SET_NAME)) if checkpoint is not None else None
+    )
     _parallel_failed = False
     try:
-        if _use_parallel:
+        _remaining: list[tuple[int, int, int]] = [
+            (atom_idx, ax, sign)
+            for atom_idx in range(_n_atoms)
+            for ax in range(3)
+            for sign in (1, -1)
+            if (atom_idx, ax, sign) not in _alphas
+        ]
+        if _use_parallel and _remaining:
             try:
                 import concurrent.futures as _cf
                 import multiprocessing as _mp
                 import pickle as _pickle
                 import tempfile as _tempfile
 
-                _n_workers = _ir_par.pick_worker_count(_cpu_count, _total)
+                _n_workers = _ir_par.pick_worker_count(_cpu_count, len(_remaining))
                 _threads_each = _ir_par.threads_per_worker(_cpu_count, _n_workers)
 
                 _tasks: list[tuple[int, int, int, list[float]]] = []
-                for atom_idx in range(_n_atoms):
-                    for ax in range(3):
-                        cp = _coords0.copy()
-                        cp[atom_idx, ax] += _DELTA_BOHR
-                        _tasks.append((atom_idx, ax, +1, cp.flatten().tolist()))
-                        cm = _coords0.copy()
-                        cm[atom_idx, ax] -= _DELTA_BOHR
-                        _tasks.append((atom_idx, ax, -1, cm.flatten().tolist()))
+                for atom_idx, ax, sign in _remaining:
+                    cp = _coords0.copy()
+                    cp[atom_idx, ax] += sign * _DELTA_BOHR
+                    _tasks.append((atom_idx, ax, sign, cp.flatten().tolist()))
 
                 _dm0_handle = _tempfile.NamedTemporaryFile(
                     delete=False, suffix=".dm0.pkl"
@@ -267,12 +312,14 @@ def _cpu_raman_activities_fd(
                             _threads_each,
                             dm0_is_unrestricted,
                             density_fit_used,
+                            _ckpt_items_dir,
                         ),
                     ) as _pool:
-                        _alphas: dict = {}
                         _futs = {
                             _pool.submit(
-                                _ram_par.run_displaced_polarizability, task[3]
+                                _ram_par.run_displaced_polarizability,
+                                _disp_id(task[0], task[1], task[2]),
+                                task[3],
                             ): task
                             for task in _tasks
                         }
@@ -294,12 +341,6 @@ def _cpu_raman_activities_fd(
                         os.unlink(_dm0_handle.name)
                     except OSError:
                         pass
-
-                for atom_idx in range(_n_atoms):
-                    for ax in range(3):
-                        ap = _alphas[(atom_idx, ax, +1)]
-                        am = _alphas[(atom_idx, ax, -1)]
-                        dalpha[3 * atom_idx + ax] = (ap - am) / (2.0 * _DELTA_BOHR)
             except Exception as _par_exc:
                 logger.warning(
                     "Parallel Raman computation failed (%s); falling back to serial.",
@@ -309,14 +350,29 @@ def _cpu_raman_activities_fd(
                     "Parallel Raman activities failed; falling back to serial computation."
                 )
                 _parallel_failed = True
-                _done = 0
+                # Preserve resumed + partially-completed progress rather
+                # than discarding it — mirrors freq_calc.py's IR loop.
+                _done = len(_alphas)
 
         if not _use_parallel or _parallel_failed:
-            for atom_idx in range(_n_atoms):
-                for ax in range(3):
-                    ap = _displaced_alpha(atom_idx, ax, +1)
-                    am = _displaced_alpha(atom_idx, ax, -1)
-                    dalpha[3 * atom_idx + ax] = (ap - am) / (2.0 * _DELTA_BOHR)
+            for atom_idx, ax, sign in _remaining:
+                if (atom_idx, ax, sign) in _alphas:
+                    continue  # resumed, or already done by a partial parallel attempt
+                alpha = _displaced_alpha(atom_idx, ax, sign)
+                _alphas[(atom_idx, ax, sign)] = alpha
+                if checkpoint is not None:
+                    checkpoint.mark_item_done(
+                        _ITEM_SET_NAME,
+                        _disp_id(atom_idx, ax, sign),
+                        {"alpha": alpha.tolist()},
+                    )
+
+        # --- CHK.4.5: assembly gate --- runs once, from the shared dict.
+        for atom_idx in range(_n_atoms):
+            for ax in range(3):
+                ap = _alphas[(atom_idx, ax, 1)]
+                am = _alphas[(atom_idx, ax, -1)]
+                dalpha[3 * atom_idx + ax] = (ap - am) / (2.0 * _DELTA_BOHR)
     finally:
         mol.set_geom_(_coords0, unit="Bohr")
         mol.verbose = _mol_v
@@ -360,6 +416,8 @@ def compute_raman_activities(
     hessian: Any = None,
     atom_str: str | None = None,
     scf_rescue: bool = True,
+    checkpoint: Optional[Any] = None,
+    resume: bool = False,
 ) -> List[float]:
     """Compute static Raman activities (Å⁴/amu) per normal mode.
 
@@ -401,6 +459,8 @@ def compute_raman_activities(
             status=status,
             atom_str=atom_str,
             scf_rescue=scf_rescue,
+            checkpoint=checkpoint,
+            resume=resume,
         )
     except ImportError as exc:
         logger.warning("pyscf-properties polarizability unavailable: %s", exc)
