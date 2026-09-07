@@ -177,6 +177,16 @@ def _opt_str_list(x: object) -> Optional[list]:
         return None
 
 
+def _opt_bool_list(x: object) -> Optional[list]:
+    """Coerce an optional iterable to a JSON-safe list of bools."""
+    if x is None:
+        return None
+    try:
+        return [bool(v) for v in x]  # type: ignore[union-attr, attr-defined]
+    except TypeError:
+        return None
+
+
 def _reorg_channels_payload(result) -> Optional[list]:
     """Serialise ReorgChannelResult objects, or None for other calc types.
 
@@ -352,6 +362,15 @@ def save_result(
         "ccsd_t_correction_hartree": _opt_float(
             getattr(result, "ccsd_t_correction_hartree", None)
         ),
+        # AUDIT F07/F08 (code review follow-up) — cc_converged/td_converged
+        # were only ever attributes on the in-memory result object, never
+        # persisted here, so a reloaded History card had no way to tell "no
+        # post-HF/TD-DFT correlation ran" (None) apart from "it ran and
+        # converged/didn't" (True/False) even though data["converged"]
+        # already folds one of these in. See format_past_result.
+        "cc_converged": getattr(result, "cc_converged", None),
+        "td_converged": _opt_bool_list(getattr(result, "td_converged", None)),
+        "n_converged_states": _opt_int(getattr(result, "n_converged_states", None)),
         # Persisted so the saved-result card matches the live card
         # (formatter-parity fix). Additive — absent on older results, where the
         # history card falls back exactly as before (CPU / no dipole / no

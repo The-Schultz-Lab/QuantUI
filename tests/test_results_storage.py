@@ -172,6 +172,38 @@ class TestSaveResult:
         d2 = save_result(_make_result(), results_dir=tmp_path)
         assert d1 != d2
 
+    def test_cc_converged_persisted(self, tmp_path):
+        """AUDIT F07 (code review follow-up) — cc_converged was carried on
+        SessionResult but never round-tripped to result.json, so a reloaded
+        History card had no way to tell "no post-HF ran" (None) apart from
+        "ran and didn't converge" (False), even though data["converged"]
+        already folds it in (see format_past_result)."""
+        saved = save_result(_make_result(cc_converged=False), results_dir=tmp_path)
+        data = json.loads((saved / "result.json").read_text())
+        assert data["cc_converged"] is False
+
+    def test_cc_converged_null_when_absent(self, tmp_path):
+        saved = save_result(_make_result(), results_dir=tmp_path)
+        data = json.loads((saved / "result.json").read_text())
+        assert data["cc_converged"] is None
+
+    def test_td_converged_and_n_converged_states_persisted(self, tmp_path):
+        """AUDIT F08 (code review follow-up) — same gap as cc_converged,
+        for TD-DFT's per-root convergence detail."""
+        saved = save_result(
+            _make_result(td_converged=[True, False, False], n_converged_states=1),
+            results_dir=tmp_path,
+        )
+        data = json.loads((saved / "result.json").read_text())
+        assert data["td_converged"] == [True, False, False]
+        assert data["n_converged_states"] == 1
+
+    def test_td_converged_null_when_absent(self, tmp_path):
+        saved = save_result(_make_result(), results_dir=tmp_path)
+        data = json.loads((saved / "result.json").read_text())
+        assert data["td_converged"] is None
+        assert data["n_converged_states"] is None
+
 
 class TestSaveResultJsonSafeCoercion:
     """L audit fix: save_result must coerce every numeric/boolean field to a

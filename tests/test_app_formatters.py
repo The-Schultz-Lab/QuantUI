@@ -437,6 +437,98 @@ def test_format_past_result_hf_dft_has_no_breakdown():
 
 
 # ---------------------------------------------------------------------------
+# Code review (audit follow-up) — format_past_result's convergence-row
+# label must not blame the SCF for a CC-only/TD-only/Hessian-only failure,
+# mirroring format_result/format_freq_result/format_tddft_result (AUDIT
+# F07/F08/F15).
+# ---------------------------------------------------------------------------
+
+
+def test_format_past_result_hf_dft_labels_scf_converged():
+    """A plain HF/DFT single point has nothing else folded into
+    ``converged`` — "SCF converged" is still accurate."""
+    data = {
+        "calc_type": "single_point",
+        "converged": True,
+        "homo_lumo_gap_ev": 10.0,
+        "energy_hartree": -75.0,
+        "energy_ev": -2040.0,
+        "n_iterations": 10,
+        "timestamp": "2026-05-02_12-00-00-000001",
+        "formula": "H2O",
+        "method": "RHF",
+        "basis": "STO-3G",
+    }
+    html = format_past_result(data)
+    assert "SCF converged" in html
+
+
+def test_format_past_result_ccsd_failure_does_not_blame_scf():
+    """A saved CCSD result whose reference SCF converged but whose CC
+    amplitudes did not must not render "SCF converged: No" — that
+    misleadingly implies the SCF itself failed."""
+    data = {
+        "calc_type": "single_point",
+        "converged": False,
+        "homo_lumo_gap_ev": 27.0,
+        "energy_hartree": -75.0139,
+        "energy_ev": -2041.23,
+        "n_iterations": 5,
+        "timestamp": "2026-06-10_15-48-02-285574",
+        "formula": "H2O",
+        "method": "CCSD",
+        "basis": "STO-3G",
+        "ccsd_correlation_hartree": -0.0497,
+        "cc_converged": False,
+    }
+    html = format_past_result(data)
+    assert "SCF converged" not in html
+    assert "Converged" in html
+    assert "No (treat results with caution)" in html
+
+
+def test_format_past_result_frequency_labels_converged_not_scf():
+    """AUDIT F15's folded Hessian status must not render "SCF converged"
+    even when a CC/TD sub-flag isn't present."""
+    data = {
+        "calc_type": "frequency",
+        "converged": False,
+        "homo_lumo_gap_ev": 27.0,
+        "energy_hartree": -74.9,
+        "energy_ev": -2039.0,
+        "n_iterations": 12,
+        "timestamp": "2026-06-10_15-48-02-285574",
+        "formula": "H2O",
+        "method": "RHF",
+        "basis": "STO-3G",
+        "spectra": {"ir": {"frequencies_cm1": [], "ir_intensities": []}},
+    }
+    html = format_past_result(data)
+    assert "SCF converged" not in html
+    assert "Converged" in html
+
+
+def test_format_past_result_tddft_labels_converged_not_scf():
+    """AUDIT F08's folded per-root TD status must not render "SCF
+    converged"."""
+    data = {
+        "calc_type": "tddft",
+        "converged": False,
+        "homo_lumo_gap_ev": 12.0,
+        "energy_hartree": -75.0,
+        "energy_ev": -2040.0,
+        "n_iterations": 8,
+        "timestamp": "2026-06-10_15-48-02-285574",
+        "formula": "H2O",
+        "method": "RHF",
+        "basis": "STO-3G",
+    }
+    html = format_past_result(data)
+    assert "SCF converged" not in html
+    assert "Converged" in html
+
+
+# ---------------------------------------------------------------------------
 # M-UX2 UXP2.10 — results panel labels RKS vs UKS
 # ---------------------------------------------------------------------------
 

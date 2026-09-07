@@ -856,6 +856,21 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     )
     _conv = "Yes" if data.get("converged") else "No (treat results with caution)"
     _cc = _converged_color(bool(data.get("converged")))
+    # AUDIT F07/F08/F15 (code review follow-up) — data["converged"] already
+    # folds in CC-amplitude (post-HF), TD-root (tddft), or Hessian
+    # (frequency) convergence on top of the reference SCF's own status,
+    # exactly like the live cards (format_result/format_freq_result/
+    # format_tddft_result). A bare "SCF converged" label here would blame
+    # the SCF for a CC/TD/Hessian-only failure whose reference SCF was
+    # fine — mirror each live formatter's label choice.
+    if ct == "frequency":
+        _conv_label = "Converged"
+    elif ct == "tddft":
+        _conv_label = "Converged"
+    elif data.get("cc_converged") is not None:
+        _conv_label = "Converged"
+    else:
+        _conv_label = "SCF converged"
     _gap = (
         f"{data['homo_lumo_gap_ev']:.4f} eV"
         if data.get("homo_lumo_gap_ev") is not None
@@ -877,7 +892,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
                 _gap,
                 _theme.css.TEXT_HEADING,
             ),
-            ("SCF converged", _conv, _cc),
+            (_conv_label, _conv, _cc),
             (
                 "SCF iterations",
                 (
