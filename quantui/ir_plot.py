@@ -9,6 +9,22 @@ Typical usage::
     from quantui.ir_plot import plot_ir_spectrum
     fig = plot_ir_spectrum(result.frequencies_cm1, result.ir_intensities)
     fig = plot_ir_spectrum(freqs, intensities, mode="broadened", fwhm=30.0)
+
+AUDIT additional-concerns — broadened-mode normalization
+----------------------------------------------------------
+The "broadened" Lorentzian kernel below is HEIGHT-normalized: each peak's
+value at its own center equals the supplied intensity, exactly like the
+stick plot, so switching FWHM only changes peak width, never peak height
+— the same convention used by Gaussian/ORCA-style broadened spectra and
+by :mod:`quantui.raman_plot` and the UV-Vis broadening in
+app_visualization.py. This is deliberate, NOT a bug: it is not an
+area-normalized spectral density, so the AREA under a broadened peak
+scales with FWHM (∫ γ²/((x-x0)²+γ²) dx = πγ) even though the peak height
+does not. A true physical spectral-density plot (area proportional to
+the supplied intensity, independent of the chosen FWHM) would need an
+area-normalized Lorentzian (dividing by πγ) and different y-axis units —
+intentionally out of scope here, since the height-preserving convention
+is what students and most external QM software display by default.
 """
 
 from __future__ import annotations
@@ -18,9 +34,35 @@ from typing import List, Optional
 import numpy as np
 import plotly.graph_objects as go
 
-# x-axis range is low → high wavenumber (user-facing convention in QuantUI)
-_XRANGE = [400, 4000]
-_XGRID = np.arange(400, 4001, 1.0)  # 1 cm⁻¹ resolution for broadened mode
+# x-axis range is low → high wavenumber (user-facing convention in QuantUI).
+# AUDIT additional-concerns — this used to be the FIXED plot range/grid
+# regardless of the actual data: a real water/STO-3G calculation has O-H
+# stretches at 4486.7/4788.3 cm⁻¹, which used to be clipped off the right
+# edge in stick mode (Plotly's xaxis.range) and never even entered the
+# broadened kernel (evaluated only on this fixed grid) — computed modes
+# silently invisible. ``_default_xrange``/``_grid_for_range`` below widen
+# this default window to always cover every real (positive) frequency
+# actually present, while leaving the familiar 400–4000 cm⁻¹ look
+# untouched for the common case where every mode already falls inside it.
+_DEFAULT_XRANGE = [400, 4000]
+
+
+def _default_xrange(freqs_real: tuple) -> list:
+    """[xmin, xmax] covering 400–4000 cm⁻¹ AND every real frequency present.
+
+    A fixed margin keeps a peak sitting exactly at the edge from being
+    clipped by the axis border or cut off mid-lineshape in broadened mode.
+    """
+    if not freqs_real:
+        return list(_DEFAULT_XRANGE)
+    margin = 100.0
+    lo = min(_DEFAULT_XRANGE[0], min(freqs_real) - margin)
+    hi = max(_DEFAULT_XRANGE[1], max(freqs_real) + margin)
+    return [lo, hi]
+
+
+def _grid_for_range(xrange: list) -> np.ndarray:
+    return np.arange(xrange[0], xrange[1] + 1.0, 1.0)
 
 
 def plot_ir_spectrum(
@@ -48,11 +90,13 @@ def plot_ir_spectrum(
         in a :class:`~plotly.graph_objects.FigureWidget`.
     """
     real_pairs = [(f, i) for f, i in zip(frequencies, intensities) if f > 0]
+    freqs_real_for_range = tuple(f for f, _ in real_pairs)
+    xrange = _default_xrange(freqs_real_for_range)
 
     _base_layout = dict(
         xaxis=dict(
             title="Wavenumber (cm⁻¹)",
-            range=_XRANGE,
+            range=xrange,
             showgrid=True,
             gridcolor="#e5e7eb",
         ),
@@ -78,14 +122,15 @@ def plot_ir_spectrum(
     freqs_real, ints_real = zip(*real_pairs)
 
     if mode == "broadened":
+        _xgrid = _grid_for_range(xrange)
         half_gamma = fwhm / 2.0
-        y_broad = np.zeros_like(_XGRID)
+        y_broad = np.zeros_like(_xgrid)
         for nu0, inten in zip(freqs_real, ints_real):
-            y_broad += inten * half_gamma**2 / ((_XGRID - nu0) ** 2 + half_gamma**2)
+            y_broad += inten * half_gamma**2 / ((_xgrid - nu0) ** 2 + half_gamma**2)
 
         fig.add_trace(
             go.Scatter(
-                x=_XGRID,
+                x=_xgrid,
                 y=y_broad,
                 mode="lines",
                 line=dict(color="#2563eb", width=1.5),

@@ -1046,6 +1046,10 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
             n_points = max(600, int((x_max - x_min) * 2.0))
             x_grid = _np.linspace(x_min, x_max, n_points)
             y_grid = _np.zeros_like(x_grid)
+            # AUDIT additional-concerns — same height-normalized Lorentzian
+            # convention as ir_plot.py/raman_plot.py (see ir_plot.py's
+            # module docstring): peak height = supplied oscillator
+            # strength, area scales with FWHM. Deliberate, not a bug.
             for x0, amp in zip(wl, osc):
                 y_grid += amp * (gamma**2 / ((x_grid - x0) ** 2 + gamma**2))
             fig.add_trace(

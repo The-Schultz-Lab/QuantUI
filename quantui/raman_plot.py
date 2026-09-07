@@ -8,6 +8,11 @@ Typical usage::
 
     from quantui.raman_plot import plot_raman_spectrum
     fig = plot_raman_spectrum(result.frequencies_cm1, result.raman_activities)
+
+AUDIT additional-concerns — see ir_plot.py's module docstring: the
+broadened-mode Lorentzian here is the same height-normalized convention
+(peak height = supplied activity, area scales with FWHM), deliberately,
+not a bug.
 """
 
 from __future__ import annotations
@@ -17,7 +22,7 @@ from typing import List, Optional
 import numpy as np
 import plotly.graph_objects as go
 
-from quantui.ir_plot import _XGRID, _XRANGE
+from quantui.ir_plot import _default_xrange, _grid_for_range
 
 
 def plot_raman_spectrum(
@@ -30,11 +35,16 @@ def plot_raman_spectrum(
 ) -> go.Figure:
     """Return a Plotly figure for the Raman scattering spectrum."""
     real_pairs = [(f, a) for f, a in zip(frequencies, activities) if f > 0]
+    # AUDIT additional-concerns — see ir_plot.py: the x-range must cover
+    # every real (positive) frequency present, not just the fixed
+    # 400-4000 cm⁻¹ default, or a real high-frequency mode (O-H stretches
+    # routinely sit above 4000 cm⁻¹) is silently clipped off the plot.
+    xrange = _default_xrange(tuple(f for f, _ in real_pairs))
 
     _base_layout = dict(
         xaxis=dict(
             title="Wavenumber (cm⁻¹)",
-            range=_XRANGE,
+            range=xrange,
             showgrid=True,
             gridcolor="#e5e7eb",
         ),
@@ -60,14 +70,15 @@ def plot_raman_spectrum(
     freqs_real, acts_real = zip(*real_pairs)
 
     if mode == "broadened":
+        _xgrid = _grid_for_range(xrange)
         half_gamma = fwhm / 2.0
-        y_broad = np.zeros_like(_XGRID)
+        y_broad = np.zeros_like(_xgrid)
         for nu0, act in zip(freqs_real, acts_real):
-            y_broad += act * half_gamma**2 / ((_XGRID - nu0) ** 2 + half_gamma**2)
+            y_broad += act * half_gamma**2 / ((_xgrid - nu0) ** 2 + half_gamma**2)
 
         fig.add_trace(
             go.Scatter(
-                x=_XGRID,
+                x=_xgrid,
                 y=y_broad,
                 mode="lines",
                 line=dict(color="#059669", width=1.5),

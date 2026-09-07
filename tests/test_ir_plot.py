@@ -123,6 +123,52 @@ class TestBroadenedMode:
 # ---------------------------------------------------------------------------
 
 
+class TestRangeCoversRealModes:
+    """AUDIT additional-concerns — the fixed 400-4000 cm⁻¹ default used to
+    be the ONLY range: a real water/STO-3G calculation has O-H stretches
+    at 4486.7/4788.3 cm⁻¹, silently clipped off the right edge in stick
+    mode and never entering the broadened kernel at all (evaluated only
+    on that fixed grid). The default must widen to cover every real mode.
+    """
+
+    def test_default_range_still_400_4000_when_all_modes_fit(self):
+        fig = plot_ir_spectrum(_SIMPLE_FREQS, _SIMPLE_INTS)
+        x_range = list(fig.layout.xaxis.range)
+        assert x_range[0] == 400
+        assert x_range[1] == 4000
+
+    def test_stick_range_widens_for_a_high_frequency_mode(self):
+        # Real RHF/STO-3G water O-H stretch region.
+        freqs = [1785.6, 4486.7, 4788.3]
+        ints = [65.0, 5.0, 60.0]
+        fig = plot_ir_spectrum(freqs, ints, mode="stick")
+        x_range = list(fig.layout.xaxis.range)
+        assert x_range[1] > 4788.3, "x-axis must extend past the highest real mode"
+        x_data = [x for x in fig.data[0].x if x is not None]
+        assert 4788.3 in x_data, "the high-frequency stick must actually be plotted"
+
+    def test_broadened_grid_widens_and_the_high_mode_is_broadened(self):
+        freqs = [1785.6, 4486.7, 4788.3]
+        ints = [65.0, 5.0, 60.0]
+        fig = plot_ir_spectrum(freqs, ints, mode="broadened", fwhm=20.0)
+        x = np.array(fig.data[0].x)
+        y = np.array(fig.data[0].y)
+        assert x.max() > 4788.3
+        # The broadened trace must have real signal near 4788.3, not just
+        # a flat zero baseline past the old fixed grid's 4000 cm⁻¹ edge.
+        near_peak = y[(x > 4780) & (x < 4800)]
+        assert near_peak.max() > 1.0
+
+    def test_low_frequency_mode_below_400_is_not_clipped(self):
+        freqs = [150.0, 1500.0]
+        ints = [20.0, 40.0]
+        fig = plot_ir_spectrum(freqs, ints, mode="stick")
+        x_range = list(fig.layout.xaxis.range)
+        assert x_range[0] < 150.0
+        x_data = [x for x in fig.data[0].x if x is not None]
+        assert 150.0 in x_data
+
+
 class TestEmptyInput:
     def test_empty_frequencies_no_exception(self):
         fig = plot_ir_spectrum([], [])
