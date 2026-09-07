@@ -162,6 +162,33 @@ class TestInferChargeAndSpin:
         charge, spin = infer_charge_and_spin(mol_atom, occ, basis="STO-3G")
         assert (charge, spin) == (0, 0)
 
+    def test_ecp_lookup_is_cached_per_unique_element(self, monkeypatch):
+        """Code review — the pyscf.gto import and load_ecp table lookup
+        used to run once per atom instead of once per unique element, even
+        though every atom of the same element gets the same answer."""
+        pytest.importorskip("pyscf")
+        from pyscf import gto
+
+        calls: list = []
+        _original_load_ecp = gto.basis.load_ecp
+
+        def _counting_load_ecp(basis, sym):
+            calls.append(sym)
+            return _original_load_ecp(basis, sym)
+
+        monkeypatch.setattr(gto.basis, "load_ecp", _counting_load_ecp)
+
+        occ = [2.0, 2.0, 2.0]
+        mol_atom = [
+            ("Na", [0, 0, 0]),
+            ("Na", [0, 0, 3.0]),
+            ("H", [0, 0, 6.0]),
+        ]
+        infer_charge_and_spin(mol_atom, occ, basis="LANL2DZ")
+
+        assert calls.count("Na") == 1
+        assert calls.count("H") == 1
+
     def test_none_inputs_return_zero_zero(self):
         assert infer_charge_and_spin(None, [2.0]) == (0, 0)
         assert infer_charge_and_spin([("H", [0, 0, 0])], None) == (0, 0)

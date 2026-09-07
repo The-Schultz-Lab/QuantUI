@@ -592,20 +592,33 @@ def infer_charge_and_spin(
         spin = int(np.sum(np.isclose(occ, 1.0)))
         n_electrons = float(occ.sum())
 
+    # Code review — the ``pyscf.gto`` import and the ``load_ecp`` table
+    # lookup used to run once per atom instead of once per unique element,
+    # even though every atom of the same element gets the same answer. For
+    # a large cube-export molecule (the interactive "Generate" path this
+    # feeds) that's needless repeated work: hoist the import out of the
+    # loop and cache the per-element core-electron count.
+    _ecp_core_electrons: dict = {}
+    if basis:
+        from pyscf import gto as _gto
+
+    def _core_electrons_for(sym: str) -> int:
+        if not basis:
+            return 0
+        if sym in _ecp_core_electrons:
+            return _ecp_core_electrons[sym]
+        try:
+            _ecp_data = _gto.basis.load_ecp(basis, sym)
+            core_electrons = int(_ecp_data[0]) if _ecp_data else 0
+        except Exception:
+            core_electrons = 0
+        _ecp_core_electrons[sym] = core_electrons
+        return core_electrons
+
     nuclear_charge = 0
     for sym, _pos in mol_atom:
         z = ATOMIC_NUMBERS.get(sym, 0)
-        core_electrons = 0
-        if basis:
-            try:
-                from pyscf import gto as _gto
-
-                _ecp_data = _gto.basis.load_ecp(basis, sym)
-                if _ecp_data:
-                    core_electrons = int(_ecp_data[0])
-            except Exception:
-                core_electrons = 0
-        nuclear_charge += z - core_electrons
+        nuclear_charge += z - _core_electrons_for(sym)
 
     charge = int(round(nuclear_charge - n_electrons))
     return charge, spin
