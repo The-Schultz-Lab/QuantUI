@@ -1498,6 +1498,35 @@ class TestFormatNMRResult:
         html = app._format_nmr_result(self._make_nmr(basis="6-31G*"))
         assert "qualitative" not in html
 
+    def test_fallback_reference_shows_warning(self):
+        """AUDIT F17 — a fallback substitution must be visible on the card,
+        not just silently carried on the result object."""
+        from quantui.nmr_calc import NMRResult
+
+        app = QuantUIApp()
+        result = NMRResult(
+            atom_symbols=["O", "H", "H"],
+            shielding_iso_ppm=[320.1, 28.5, 28.5],
+            chemical_shifts_ppm={1: 3.22, 2: 3.22},
+            method="CAM-B3LYP",
+            basis="6-31G*",
+            formula="H2O",
+            converged=True,
+            reference_key="B3LYP/6-31G*",
+            is_fallback_reference=True,
+        )
+        html = app._format_nmr_result(result)
+        assert "B3LYP/6-31G*" in html
+        assert "⚠" in html
+
+    def test_exact_match_reference_shows_no_warning(self):
+        result = self._make_nmr()
+        result.reference_key = "B3LYP/6-31G*"
+        result.is_fallback_reference = False
+        app = QuantUIApp()
+        html = app._format_nmr_result(result)
+        assert "⚠ No reference" not in html
+
     def test_not_converged_shows_warning(self):
         app = QuantUIApp()
         html = app._format_nmr_result(self._make_nmr(converged=False))
@@ -1518,6 +1547,41 @@ class TestFormatNMRResult:
         app = QuantUIApp()
         html = app._format_nmr_result(r)
         assert "No ¹H or ¹³C" in html
+
+
+class TestNmrSavePersistsFallbackReference:
+    """AUDIT F17 — the local NMR save path used to omit reference_key and
+    is_fallback_reference from the saved spectra, even though the backend
+    (nmr_calc.run_nmr_calc) already computes both and the batch NMR
+    serializer already includes them.
+    """
+
+    def test_local_nmr_save_includes_reference_metadata(self):
+        from quantui.nmr_calc import NMRResult
+
+        app = QuantUIApp()
+        app._set_molecule(_water())
+        app.calc_type_dd.value = "NMR Shielding"
+        mock_result = NMRResult(
+            atom_symbols=["O", "H", "H"],
+            shielding_iso_ppm=[320.1, 28.5, 28.5],
+            chemical_shifts_ppm={1: 3.22, 2: 3.22},
+            method="CAM-B3LYP",
+            basis="6-31G*",
+            formula="H2O",
+            converged=True,
+            reference_key="B3LYP/6-31G*",
+            is_fallback_reference=True,
+        )
+        with patch("quantui.nmr_calc.run_nmr_calc", return_value=mock_result):
+            with patch("quantui.save_result") as mock_save:
+                app._do_run()
+
+        mock_save.assert_called_once()
+        _, kwargs = mock_save.call_args
+        nmr_spectra = kwargs["spectra"]["nmr"]
+        assert nmr_spectra["reference_key"] == "B3LYP/6-31G*"
+        assert nmr_spectra["is_fallback_reference"] is True
 
 
 # ---------------------------------------------------------------------------

@@ -357,6 +357,16 @@ def format_nmr_result(r: Any) -> str:
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Reference</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.reference_compound} ({r.method}/{r.basis})</td></tr>'
     )
+    # AUDIT F17 — surface a fallback-reference substitution explicitly
+    # rather than letting the row above imply an exact-match reference.
+    if getattr(r, "is_fallback_reference", False):
+        _ref_key = getattr(r, "reference_key", "") or "a different level of theory"
+        header_rows += (
+            f'<tr><td colspan="2" style="padding:3px 0 0">'
+            f'<span style="color:{_theme.css.ACCENT_WARNING};font-size:12px">'
+            f"⚠ No reference at {r.method}/{r.basis} — shifts use {_ref_key} "
+            "constants instead.</span></td></tr>"
+        )
 
     def _nmr_table(label: str, shifts: list, sym: str) -> str:
         if not shifts:

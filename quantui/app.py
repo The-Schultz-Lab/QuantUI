@@ -6120,6 +6120,19 @@ class QuantUIApp:
                             str(k): v for k, v in result.chemical_shifts_ppm.items()
                         },
                         "reference_compound": result.reference_compound,
+                        # AUDIT F17 — the backend records which reference
+                        # shielding constants were actually used and
+                        # whether that was a fallback substitution (e.g.
+                        # a method/basis combo with no matching reference,
+                        # falling back to a different level of theory's
+                        # constants); the local save used to drop both,
+                        # losing that calibration provenance on replay.
+                        # The batch NMR serializer (nmr_result_payload)
+                        # already includes them.
+                        "reference_key": getattr(result, "reference_key", ""),
+                        "is_fallback_reference": getattr(
+                            result, "is_fallback_reference", False
+                        ),
                     }
                 }
                 save_type = "nmr"
