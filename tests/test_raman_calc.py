@@ -34,6 +34,78 @@ class TestRamanInvariants:
             assert _raman_invariants(da) >= 0.0
 
 
+class TestRamanUnitsRegression:
+    """AUDIT F02 — CPU Raman activities were ~45.54x too large because the
+    polarizability numerator (a0^3) was never converted to Angstrom^3, only
+    the displacement denominator (Bohr -> Angstrom) was. This reproduces the
+    audit's own method: an independent central difference of the real SCF
+    polarizability along the complete (mass-normalized) normal mode, using
+    none of raman_calc's atom-by-atom Jacobian/unit-conversion code.
+    """
+
+    @pytest.mark.slow
+    def test_h2_raman_activity_matches_independent_normal_mode_fd(self):
+        pyscf = pytest.importorskip("pyscf")
+        pytest.importorskip("pyscf.prop.polarizability.rhf")
+        import numpy as _np
+        from pyscf import gto, scf
+        from pyscf.prop.polarizability import rhf as pol_mod
+
+        from quantui.config import BOHR_TO_ANGSTROM as _BOHR_TO_ANG
+        from quantui.freq_calc import run_freq_calc
+        from quantui.molecule import Molecule
+
+        bond_length = 0.74  # Angstrom
+        h2 = Molecule(["H", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, bond_length]])
+        result = run_freq_calc(h2, method="RHF", basis="STO-3G")
+        assert result.raman_activities, "H2/RHF/STO-3G should produce a Raman activity"
+        assert result.displacements, "normal-mode displacements required for FD check"
+
+        nm_flat = _np.asarray(result.displacements[0], dtype=float).reshape(-1)
+
+        def _alpha_au(coords_bohr: _np.ndarray) -> _np.ndarray:
+            mol = gto.M(
+                atom=[
+                    ("H", tuple(coords_bohr[0])),
+                    ("H", tuple(coords_bohr[1])),
+                ],
+                basis="STO-3G",
+                unit="Bohr",
+                verbose=0,
+            )
+            mf = scf.RHF(mol)
+            mf.verbose = 0
+            mf.kernel()
+            return _np.asarray(
+                pol_mod.polarizability(pol_mod.Polarizability(mf)), dtype=float
+            )
+
+        coords0_bohr = _np.array(
+            [[0.0, 0.0, 0.0], [0.0, 0.0, bond_length / _BOHR_TO_ANG]]
+        )
+        # Scale the step so the largest per-atom Cartesian displacement is a
+        # modest 0.01 Bohr, regardless of how PySCF normalizes the mode.
+        eps = 0.01 / max(abs(nm_flat.max()), abs(nm_flat.min()), 1e-12)
+        disp_bohr = (eps * nm_flat).reshape(-1, 3)
+
+        alpha_plus = _alpha_au(coords0_bohr + disp_bohr)
+        alpha_minus = _alpha_au(coords0_bohr - disp_bohr)
+        # d(alpha[a0^3]) / d(eps) == sum_k nm_k * d(alpha[a0^3])/d(x_k[Bohr])
+        # by the chain rule — exactly the per-atom Jacobian raman_calc.py
+        # projects onto the same nm vector, just computed by directly
+        # perturbing along the mode instead of atom-by-atom.
+        dalpha_dq_au = (alpha_plus - alpha_minus) / (2.0 * eps)
+        dalpha_dq_ang = dalpha_dq_au * (_BOHR_TO_ANG**2)
+
+        expected_activity = _raman_invariants(dalpha_dq_ang)
+        assert result.raman_activities[0] == pytest.approx(
+            expected_activity, rel=0.05
+        )
+        # The pre-fix bug deflated this by ~45.54x — well outside any
+        # plausible finite-difference discrepancy.
+        assert result.raman_activities[0] > 0.2 * expected_activity
+
+
 class TestRamanEnabled:
     def test_default_enabled(self, monkeypatch):
         monkeypatch.delenv("QUANTUI_RAMAN", raising=False)

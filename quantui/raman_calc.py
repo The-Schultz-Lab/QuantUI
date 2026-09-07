@@ -377,7 +377,16 @@ def _cpu_raman_activities_fd(
         mol.set_geom_(_coords0, unit="Bohr")
         mol.verbose = _mol_v
 
-    dalpha_ang = dalpha / _BOHR_TO_ANG
+    # dalpha is d(alpha[a0^3]) / d(x[Bohr]) — polarizability in atomic units
+    # (a0^3), displacement in Bohr. Converting to d(alpha[A^3]) / d(x[A])
+    # needs the numerator rescaled by BOHR_TO_ANGSTROM**3 (a0^3 -> A^3) *and*
+    # the denominator by BOHR_TO_ANGSTROM (Bohr -> A): a net factor of
+    # BOHR_TO_ANGSTROM**2. The old code divided by a single
+    # BOHR_TO_ANGSTROM, rescaling only the denominator and leaving the
+    # numerator in a0^3 instead of A^3 — a missing BOHR_TO_ANGSTROM**3
+    # factor in the derivative, which becomes BOHR_TO_ANGSTROM**6 once
+    # squared into the Raman activity: ~45.54x too large (AUDIT F02).
+    dalpha_ang = dalpha * (_BOHR_TO_ANG**2)
     nm = np.asarray(displacements, dtype=float)
     if nm.ndim == 2:
         nm = nm.reshape(nm.shape[0], _n_atoms, 3)
