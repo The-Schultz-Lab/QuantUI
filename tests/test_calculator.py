@@ -233,6 +233,62 @@ class TestScriptGeneration:
         assert (tmp_path / "results.npz").exists()
 
     @pytest.mark.slow
+    def test_exported_npz_has_fields_the_cube_helper_needs(self, tmp_path):
+        """AUDIT additional-concerns — generate_cube_file() requires
+        'mol_atom'/'mol_basis' (raises ValueError without them: "Re-run
+        the calculation with the updated script template" — a template
+        that never actually wrote them) and reads an optional 'mo_occ' to
+        infer charge/spin. The exported script used to save only energy/
+        mo_energy/mo_coeff/converged, so a cube could never be generated
+        from a standalone-exported result.
+        """
+        pytest.importorskip("pyscf")
+        import subprocess
+        import sys
+
+        import numpy as np
+
+        water = Molecule(
+            ["O", "H", "H"],
+            [[0.0, 0.0, 0.0], [0.757, 0.587, 0.0], [-0.757, 0.587, 0.0]],
+        )
+        calc = PySCFCalculation(water, method="RHF", basis="STO-3G")
+        script_path = tmp_path / "water_rhf.py"
+        calc.generate_calculation_script(script_path)
+
+        proc = subprocess.run(
+            [sys.executable, str(script_path)],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+
+        npz = np.load(tmp_path / "results.npz", allow_pickle=True)
+        assert "mol_atom" in npz.files
+        assert "mol_basis" in npz.files
+        assert "mo_occ" in npz.files
+        assert str(npz["mol_basis"]) == "STO-3G"
+        assert "O" in str(npz["mol_atom"])
+
+        # The actual regression: generate_cube_file must not raise with
+        # this exported npz — it used to unconditionally raise ValueError
+        # ("does not contain 'mol_atom'/'mol_basis' keys") on any
+        # standalone export.
+        from quantui.orbital_visualization import generate_cube_file
+
+        cube_path = generate_cube_file(
+            tmp_path / "results.npz",
+            0,
+            tmp_path / "orbital0.cube",
+            nx=6,
+            ny=6,
+            nz=6,
+        )
+        assert cube_path.exists()
+
+    @pytest.mark.slow
     @pytest.mark.parametrize("method", ["MP2", "CCSD", "CCSD(T)"])
     def test_exported_post_hf_script_runs_successfully(self, tmp_path, method):
         """AUDIT F13 regression — the exported script used to fall into the

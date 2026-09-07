@@ -3120,6 +3120,64 @@ class TestIsosurfacePersistence:
         mock_gen.assert_called_once()
         mock_plot.assert_called_once()
 
+    def test_render_orbital_isosurface_uses_snapshotted_method_not_live_dropdown(
+        self, tmp_path
+    ):
+        """AUDIT additional-concerns — cube provenance used to read the
+        LIVE Method dropdown at Generate time, not necessarily what
+        actually produced the stored mo_coeff. Loads orbitals from a
+        result computed with method='B3LYP' (setting
+        app._last_orb_method via show_orbital_diagram), then changes the
+        dropdown to 'RHF' before generating — the cube's method label
+        must still say 'B3LYP', from the result's own immutable
+        provenance, not the now-mismatched dropdown.
+        """
+        from unittest.mock import MagicMock
+
+        import numpy as np
+
+        app = QuantUIApp()
+        app._last_result_dir = tmp_path
+
+        result = MagicMock()
+        result.formula = "H2O"
+        result.method = "B3LYP"
+        result.mo_energy_hartree = np.array([-1.5, -0.8, 0.2, 0.9])
+        result.mo_occ = np.array([2.0, 2.0, 0.0, 0.0])
+        result.mo_coeff = [[1.0, 0.0], [0.0, 1.0]]
+        result.pyscf_mol_atom = [["H", [0.0, 0.0, 0.0]]]
+        result.pyscf_mol_basis = "sto-3g"
+        app._show_orbital_diagram(result)
+        assert app._last_orb_method == "B3LYP"
+
+        # Simulate the dropdown changing after the orbitals were loaded —
+        # e.g. the user tries a different method, or a different History
+        # result populated the Results panel without touching orbitals.
+        app.method_dd.value = "RHF"
+
+        app._resolve_backend = lambda task: "plotlymol"
+        captured: dict[str, object] = {}
+
+        def _fake_generate(_atom, _basis, _coeff, _idx, out_path, **kwargs):
+            captured["method"] = kwargs.get("method")
+            out_path.write_text("cube", encoding="utf-8")
+            return out_path
+
+        with (
+            patch(
+                "quantui.orbital_visualization.generate_cube_from_arrays",
+                side_effect=_fake_generate,
+            ),
+            patch(
+                "quantui.orbital_visualization.plot_cube_isosurface",
+                return_value=MagicMock(),
+            ),
+            patch("plotly.io.to_html", return_value="<div>iso</div>"),
+        ):
+            app._render_orbital_isosurface("HOMO")
+
+        assert captured["method"] == "B3LYP"
+
     def test_render_orbital_isosurface_py3dmol_path(self, tmp_path):
         # When the backend resolves to py3Dmol, the renderer is the py3Dmol
         # cube path (not Plotly), and the cube is still saved to disk.

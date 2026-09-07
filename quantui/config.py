@@ -776,12 +776,23 @@ def main():
                 print(f"HOMO-LUMO gap: {{gap:.4f}} eV")
             print()
 
-            # Save results next to the script so the path is predictable
+            # Save results next to the script so the path is predictable.
+            # AUDIT additional-concerns — quantui.orbital_visualization.
+            # generate_cube_file() requires 'mol_atom'/'mol_basis' (raises
+            # ValueError without them: "Re-run the calculation with the
+            # updated script template") and reads an optional 'mo_occ' to
+            # infer charge/spin for charged/open-shell molecules. This
+            # template used to save neither, so a cube could never be
+            # generated from a standalone-exported result without manually
+            # re-running with a different template that doesn't exist.
             results_path = str(Path(__file__).parent / 'results.npz')
             np.savez(results_path,
                      energy=energy,
                      mo_energy=np.array(mf.mo_energy),
                      mo_coeff=np.array(mf.mo_coeff),
+                     mo_occ=np.array(mf.mo_occ),
+                     mol_atom=mol.atom,
+                     mol_basis=str(mol.basis),
                      converged=mf.converged,
                      mp2_correlation_hartree=mp2_correlation,
                      ccsd_correlation_hartree=ccsd_correlation,

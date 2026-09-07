@@ -1293,6 +1293,15 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
     app._last_orb_mo_occ = mo_occ
     app._last_orb_mol_atom = getattr(result, "pyscf_mol_atom", None)
     app._last_orb_mol_basis = getattr(result, "pyscf_mol_basis", None)
+    # AUDIT additional-concerns — snapshot the method that actually
+    # produced this mo_coeff, from the result object itself, rather than
+    # reading the live Method dropdown at cube-generation time (below).
+    # The dropdown can change (or a different History result can be
+    # loaded) between this call and Generate being pressed, at which point
+    # the dropdown no longer describes the orbitals actually being
+    # exported — the cube's own provenance comment used to silently name
+    # whatever method the dropdown showed at that later moment instead.
+    app._last_orb_method = str(getattr(result, "method", "") or "")
 
     plotly_rendered = False
     try:
@@ -1617,13 +1626,17 @@ def render_orbital_isosurface(
         _grid = ISO_RESOLUTION_PRESETS.get(
             _res_key, ISO_RESOLUTION_PRESETS[DEFAULT_ISO_RESOLUTION]
         )
-        # M-EXPORT2 EXP2.4 / M-ORBEXPORT ORBX.4: best-effort provenance, not a
-        # re-verified guarantee — the live method dropdown, not necessarily
-        # what actually produced the stored mo_coeff (e.g. after a History
-        # replay of a differently-computed result).
-        _method_for_provenance = str(
-            getattr(getattr(app, "method_dd", None), "value", "") or ""
-        )
+        # M-EXPORT2 EXP2.4 / M-ORBEXPORT ORBX.4 — AUDIT additional-concerns:
+        # this used to read the LIVE method dropdown, which is not
+        # necessarily what actually produced the stored mo_coeff (e.g.
+        # after a History replay of a differently-computed result, or if
+        # the dropdown is changed between loading the orbitals and
+        # pressing Generate). ``_last_orb_method`` is snapshotted from the
+        # result object itself at the moment its orbitals were loaded
+        # (show_orbital_diagram), so it stays correct regardless of what
+        # the dropdown shows later — immutable result provenance instead
+        # of a mutable, disconnectable UI control.
+        _method_for_provenance = str(getattr(app, "_last_orb_method", "") or "")
         generate_cube_from_arrays(
             mol_atom,
             mol_basis,
