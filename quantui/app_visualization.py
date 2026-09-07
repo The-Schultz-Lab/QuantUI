@@ -1595,8 +1595,11 @@ def render_orbital_isosurface(
 
         # Charge/spin aren't carried on the app's orbital-state attributes —
         # infer them from the MO occupations so charged/open-shell molecules
-        # (H3O+, OH-, radicals, ...) don't fail to build in PySCF.
-        _charge, _spin = infer_charge_and_spin(mol_atom, mo_occ_for_charge)
+        # (H3O+, OH-, radicals, ...) don't fail to build in PySCF. Passing
+        # mol_basis lets AUDIT F14's ECP-aware charge inference apply.
+        _charge, _spin = infer_charge_and_spin(
+            mol_atom, mo_occ_for_charge, basis=mol_basis
+        )
 
         # ORBX.2: the user-chosen cubegen grid. Read at generate time rather
         # than cached, so changing the dropdown affects the next Generate

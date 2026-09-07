@@ -543,7 +543,9 @@ def orbital_summary_html(info: OrbitalInfo) -> str:
 
 
 def infer_charge_and_spin(
-    mol_atom: Optional[list], mo_occ: Optional[np.ndarray | list]
+    mol_atom: Optional[list],
+    mo_occ: Optional[np.ndarray | list],
+    basis: Optional[str] = None,
 ) -> Tuple[int, int]:
     """Infer ``(charge, spin)`` for a ``gto.Mole`` from atoms + MO occupations.
 
@@ -556,12 +558,22 @@ def infer_charge_and_spin(
 
     This reconstructs both from data that's always available:
 
-    - ``spin`` (PySCF's ``2S = n_alpha - n_beta``) is 0 when ``mo_occ`` is
-      1-D (closed-shell RHF/RKS — including the MP2/CCSD/CCSD(T) paths, which
-      always run on an RHF reference), or ``n_alpha - n_beta`` when ``mo_occ``
-      is 2-D (UHF/UKS, shape ``(2, n_mo)``).
-    - ``charge`` is the nuclear charge (sum of atomic numbers in ``mol_atom``)
-      minus the total electron count (``sum(mo_occ)`` over all spin channels).
+    - ``spin`` (PySCF's ``2S = n_alpha - n_beta``) is ``n_alpha - n_beta``
+      when ``mo_occ`` is 2-D (UHF/UKS, shape ``(2, n_mo)``). When ``mo_occ``
+      is 1-D, it is the count of singly-occupied orbitals (AUDIT F14): a
+      1-D array is NOT necessarily closed-shell — ROHF is 1-D too (values
+      2/1/0), and by the standard ROHF convention every singly-occupied
+      orbital is alpha, so that count IS 2S directly. This is 0 for a
+      genuine closed-shell RHF/RKS/MP2/CCSD/CCSD(T) reference (no singly-
+      occupied orbitals) and correct for ROHF, without needing to know
+      which SCF variant actually produced ``mo_occ``.
+    - ``charge`` is the effective nuclear charge (sum of atomic numbers in
+      ``mol_atom``, minus each ECP's core-electron count when ``basis`` is
+      given — AUDIT F14: a bare atomic-number sum overcounts an ECP system
+      by however many core electrons the ECP replaced, since ``mo_occ``
+      only counts the explicit/valence electrons the calculation used)
+      minus the total electron count (``sum(mo_occ)`` over all spin
+      channels).
 
     Returns ``(0, 0)`` if ``mol_atom`` or ``mo_occ`` is falsy/``None`` so
     callers can pass through directly without a separate None-check.
@@ -577,10 +589,24 @@ def infer_charge_and_spin(
         spin = int(round(n_alpha - n_beta))
         n_electrons = n_alpha + n_beta
     else:
-        spin = 0
+        spin = int(np.sum(np.isclose(occ, 1.0)))
         n_electrons = float(occ.sum())
 
-    nuclear_charge = sum(ATOMIC_NUMBERS.get(sym, 0) for sym, _ in mol_atom)
+    nuclear_charge = 0
+    for sym, _pos in mol_atom:
+        z = ATOMIC_NUMBERS.get(sym, 0)
+        core_electrons = 0
+        if basis:
+            try:
+                from pyscf import gto as _gto
+
+                _ecp_data = _gto.basis.load_ecp(basis, sym)
+                if _ecp_data:
+                    core_electrons = int(_ecp_data[0])
+            except Exception:
+                core_electrons = 0
+        nuclear_charge += z - core_electrons
+
     charge = int(round(nuclear_charge - n_electrons))
     return charge, spin
 
@@ -720,7 +746,7 @@ def generate_cube_file(
             for tok in atom_str.replace(";", "\n").splitlines()
             if tok.strip()
         ]
-        charge, spin = infer_charge_and_spin(parsed_atoms, mo_occ)
+        charge, spin = infer_charge_and_spin(parsed_atoms, mo_occ, basis=basis_str)
 
     mol = gto.M(
         atom=atom_str, basis=basis_str, unit="Angstrom", charge=charge, spin=spin
