@@ -29,7 +29,7 @@ is what students and most external QM software display by default.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, cast
 
 import numpy as np
 import plotly.graph_objects as go
@@ -62,7 +62,13 @@ def _default_xrange(freqs_real: tuple) -> List[float]:
 
 
 def _grid_for_range(xrange: List[float]) -> np.ndarray:
-    return np.arange(xrange[0], xrange[1] + 1.0, 1.0)
+    # numpy's stubs (as pinned: mypy~=1.10.0) resolve this call to `Any`
+    # rather than `ndarray[Any, dtype[Any]]` for non-literal float bounds
+    # — pyscf has no type stubs (ignore_missing_imports) for the same
+    # underlying reason elsewhere in this codebase, and the fix there is
+    # the same: an explicit cast documents the real, known return type
+    # instead of silencing the check.
+    return cast(np.ndarray, np.arange(xrange[0], xrange[1] + 1.0, 1.0))
 
 
 def plot_ir_spectrum(
