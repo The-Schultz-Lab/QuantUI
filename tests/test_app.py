@@ -1265,6 +1265,42 @@ class TestSolventWidgets:
         assert "Ethanol" in html
         assert "PCM" in html
 
+    @pytest.mark.parametrize(
+        "calc_type", ["Frequency", "UV-Vis (TD-DFT)", "NMR Shielding", "PES Scan"]
+    )
+    def test_solvent_disabled_for_unsupported_calc_type(self, calc_type):
+        """AUDIT F11 — run_freq_calc/run_tddft_calc/run_nmr_calc/run_pes_scan
+        don't accept a solvent argument at all, so the checkbox must not be
+        left checkable (and checked) for these — that used to be a
+        silent no-op."""
+        app = QuantUIApp()
+        app.solvent_cb.value = True
+        app.calc_type_dd.value = calc_type
+        assert app.solvent_cb.value is False
+        assert app.solvent_cb.disabled is True
+        # solvent_dd follows solvent_cb via the existing observer.
+        assert app.solvent_dd.layout.display == "none"
+
+    @pytest.mark.parametrize(
+        "calc_type", ["Single Point", "Geometry Opt", "Reorganization Energy"]
+    )
+    def test_solvent_enabled_for_supported_calc_type(self, calc_type):
+        app = QuantUIApp()
+        app.calc_type_dd.value = "Frequency"  # disables it
+        app.calc_type_dd.value = calc_type  # switching back must re-enable
+        assert app.solvent_cb.disabled is False
+
+    def test_solvent_checkbox_re_enables_after_switching_back(self):
+        app = QuantUIApp()
+        app.solvent_cb.value = True
+        app.calc_type_dd.value = "PES Scan"
+        assert app.solvent_cb.disabled is True
+        app.calc_type_dd.value = "Single Point"
+        assert app.solvent_cb.disabled is False
+        # Re-enabling must not silently re-check it — the user unchecked
+        # nothing; the app did, and switching back doesn't restore intent.
+        assert app.solvent_cb.value is False
+
 
 # ---------------------------------------------------------------------------
 # M-CAL — Calibration UI widgets
@@ -1462,6 +1498,35 @@ class TestFormatNMRResult:
         html = app._format_nmr_result(self._make_nmr(basis="6-31G*"))
         assert "qualitative" not in html
 
+    def test_fallback_reference_shows_warning(self):
+        """AUDIT F17 — a fallback substitution must be visible on the card,
+        not just silently carried on the result object."""
+        from quantui.nmr_calc import NMRResult
+
+        app = QuantUIApp()
+        result = NMRResult(
+            atom_symbols=["O", "H", "H"],
+            shielding_iso_ppm=[320.1, 28.5, 28.5],
+            chemical_shifts_ppm={1: 3.22, 2: 3.22},
+            method="CAM-B3LYP",
+            basis="6-31G*",
+            formula="H2O",
+            converged=True,
+            reference_key="B3LYP/6-31G*",
+            is_fallback_reference=True,
+        )
+        html = app._format_nmr_result(result)
+        assert "B3LYP/6-31G*" in html
+        assert "⚠" in html
+
+    def test_exact_match_reference_shows_no_warning(self):
+        result = self._make_nmr()
+        result.reference_key = "B3LYP/6-31G*"
+        result.is_fallback_reference = False
+        app = QuantUIApp()
+        html = app._format_nmr_result(result)
+        assert "⚠ No reference" not in html
+
     def test_not_converged_shows_warning(self):
         app = QuantUIApp()
         html = app._format_nmr_result(self._make_nmr(converged=False))
@@ -1482,6 +1547,41 @@ class TestFormatNMRResult:
         app = QuantUIApp()
         html = app._format_nmr_result(r)
         assert "No ¹H or ¹³C" in html
+
+
+class TestNmrSavePersistsFallbackReference:
+    """AUDIT F17 — the local NMR save path used to omit reference_key and
+    is_fallback_reference from the saved spectra, even though the backend
+    (nmr_calc.run_nmr_calc) already computes both and the batch NMR
+    serializer already includes them.
+    """
+
+    def test_local_nmr_save_includes_reference_metadata(self):
+        from quantui.nmr_calc import NMRResult
+
+        app = QuantUIApp()
+        app._set_molecule(_water())
+        app.calc_type_dd.value = "NMR Shielding"
+        mock_result = NMRResult(
+            atom_symbols=["O", "H", "H"],
+            shielding_iso_ppm=[320.1, 28.5, 28.5],
+            chemical_shifts_ppm={1: 3.22, 2: 3.22},
+            method="CAM-B3LYP",
+            basis="6-31G*",
+            formula="H2O",
+            converged=True,
+            reference_key="B3LYP/6-31G*",
+            is_fallback_reference=True,
+        )
+        with patch("quantui.nmr_calc.run_nmr_calc", return_value=mock_result):
+            with patch("quantui.save_result") as mock_save:
+                app._do_run()
+
+        mock_save.assert_called_once()
+        _, kwargs = mock_save.call_args
+        nmr_spectra = kwargs["spectra"]["nmr"]
+        assert nmr_spectra["reference_key"] == "B3LYP/6-31G*"
+        assert nmr_spectra["is_fallback_reference"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -3019,6 +3119,64 @@ class TestIsosurfacePersistence:
         assert saved_path.exists()
         mock_gen.assert_called_once()
         mock_plot.assert_called_once()
+
+    def test_render_orbital_isosurface_uses_snapshotted_method_not_live_dropdown(
+        self, tmp_path
+    ):
+        """AUDIT additional-concerns — cube provenance used to read the
+        LIVE Method dropdown at Generate time, not necessarily what
+        actually produced the stored mo_coeff. Loads orbitals from a
+        result computed with method='B3LYP' (setting
+        app._last_orb_method via show_orbital_diagram), then changes the
+        dropdown to 'RHF' before generating — the cube's method label
+        must still say 'B3LYP', from the result's own immutable
+        provenance, not the now-mismatched dropdown.
+        """
+        from unittest.mock import MagicMock
+
+        import numpy as np
+
+        app = QuantUIApp()
+        app._last_result_dir = tmp_path
+
+        result = MagicMock()
+        result.formula = "H2O"
+        result.method = "B3LYP"
+        result.mo_energy_hartree = np.array([-1.5, -0.8, 0.2, 0.9])
+        result.mo_occ = np.array([2.0, 2.0, 0.0, 0.0])
+        result.mo_coeff = [[1.0, 0.0], [0.0, 1.0]]
+        result.pyscf_mol_atom = [["H", [0.0, 0.0, 0.0]]]
+        result.pyscf_mol_basis = "sto-3g"
+        app._show_orbital_diagram(result)
+        assert app._last_orb_method == "B3LYP"
+
+        # Simulate the dropdown changing after the orbitals were loaded —
+        # e.g. the user tries a different method, or a different History
+        # result populated the Results panel without touching orbitals.
+        app.method_dd.value = "RHF"
+
+        app._resolve_backend = lambda task: "plotlymol"
+        captured: dict[str, object] = {}
+
+        def _fake_generate(_atom, _basis, _coeff, _idx, out_path, **kwargs):
+            captured["method"] = kwargs.get("method")
+            out_path.write_text("cube", encoding="utf-8")
+            return out_path
+
+        with (
+            patch(
+                "quantui.orbital_visualization.generate_cube_from_arrays",
+                side_effect=_fake_generate,
+            ),
+            patch(
+                "quantui.orbital_visualization.plot_cube_isosurface",
+                return_value=MagicMock(),
+            ),
+            patch("plotly.io.to_html", return_value="<div>iso</div>"),
+        ):
+            app._render_orbital_isosurface("HOMO")
+
+        assert captured["method"] == "B3LYP"
 
     def test_render_orbital_isosurface_py3dmol_path(self, tmp_path):
         # When the backend resolves to py3Dmol, the renderer is the py3Dmol

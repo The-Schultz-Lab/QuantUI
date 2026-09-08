@@ -13,6 +13,7 @@ import pytest
 
 from quantui.orbital_visualization import (
     HARTREE_TO_EV,
+    infer_charge_and_spin,
     load_orbital_info,
     orbital_info_from_arrays,
     orbital_summary_html,
@@ -99,8 +100,71 @@ def minimal_cube_file(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# OrbitalInfo construction
+# infer_charge_and_spin — AUDIT F14
 # ---------------------------------------------------------------------------
+
+
+class TestInferChargeAndSpin:
+    """AUDIT F14 — a 1-D occupation array is not necessarily closed-shell
+    (ROHF is 1-D too), and a bare atomic-number sum overcounts an ECP
+    system's charge by the core electrons the ECP replaced.
+    """
+
+    def test_closed_shell_rhf_gives_zero_spin(self):
+        # Water RHF: 5 doubly-occupied MOs, no singly-occupied ones.
+        occ = [2.0, 2.0, 2.0, 2.0, 2.0]
+        mol_atom = [("O", [0, 0, 0]), ("H", [0, 0, 1]), ("H", [0, 1, 0])]
+        assert infer_charge_and_spin(mol_atom, occ) == (0, 0)
+
+    def test_rohf_open_shell_1d_occupation_gives_nonzero_spin(self):
+        """The audit's exact reproduction: real OH doublet occupations
+        [2,2,2,2,1,0] used to infer (charge, spin)=(0,0) — impossible for
+        9 electrons — because a 1-D array was assumed closed-shell. Must
+        now infer spin=1 (doublet) from the one singly-occupied orbital.
+        """
+        occ = [2.0, 2.0, 2.0, 2.0, 1.0, 0.0]
+        mol_atom = [("O", [0, 0, 0]), ("H", [0, 0, 1])]
+        assert infer_charge_and_spin(mol_atom, occ) == (0, 1)
+
+    def test_uhf_2d_occupation_still_works(self):
+        """The 2-D (UHF/UKS) path is unaffected by this fix."""
+        occ = np.array([[1.0, 1.0, 1.0], [1.0, 1.0, 0.0]])
+        mol_atom = [("O", [0, 0, 0]), ("H", [0, 0, 1])]
+        charge, spin = infer_charge_and_spin(mol_atom, occ)
+        assert spin == 1
+        assert charge == 8 + 1 - 5  # nuclear charge minus 5 electrons
+
+    def test_ecp_system_without_basis_overcounts_charge(self):
+        """Without a basis to resolve the ECP, charge inference falls back
+        to the pre-fix all-electron behavior — documented, not silently
+        "fixed" by a guess it has no data to make."""
+        occ = [2.0]  # 2 explicit (valence) electrons
+        mol_atom = [("Na", [0, 0, 0]), ("H", [0, 0, 2.0])]
+        charge, _spin = infer_charge_and_spin(mol_atom, occ)
+        assert charge == 10  # 11 (Na) + 1 (H) - 2 electrons, all-electron count
+
+    def test_ecp_system_with_basis_infers_correct_neutral_charge(self):
+        """The audit's exact reproduction: NaH/LANL2DZ used to infer +10
+        instead of neutral, because 10 Na core electrons replaced by the
+        ECP were never subtracted from the atomic-number sum.
+        """
+        pytest.importorskip("pyscf")
+        occ = [2.0]  # 2 explicit electrons (correct for NaH/LANL2DZ)
+        mol_atom = [("Na", [0, 0, 0]), ("H", [0, 0, 2.0])]
+        charge, spin = infer_charge_and_spin(mol_atom, occ, basis="LANL2DZ")
+        assert charge == 0
+        assert spin == 0
+
+    def test_all_electron_basis_unaffected_by_ecp_lookup(self):
+        pytest.importorskip("pyscf")
+        occ = [2.0, 2.0, 2.0, 2.0, 2.0]
+        mol_atom = [("O", [0, 0, 0]), ("H", [0, 0, 1]), ("H", [0, 1, 0])]
+        charge, spin = infer_charge_and_spin(mol_atom, occ, basis="STO-3G")
+        assert (charge, spin) == (0, 0)
+
+    def test_none_inputs_return_zero_zero(self):
+        assert infer_charge_and_spin(None, [2.0]) == (0, 0)
+        assert infer_charge_and_spin([("H", [0, 0, 0])], None) == (0, 0)
 
 
 class TestLoadOrbitalInfo:

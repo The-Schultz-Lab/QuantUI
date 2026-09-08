@@ -404,9 +404,54 @@ def on_basis_fix(app: Any, btn: Any = None) -> None:
         pass
 
 
+# AUDIT F11 — run_freq_calc, run_tddft_calc, run_nmr_calc, and run_pes_scan
+# don't accept a solvent argument at all, so checking "Implicit solvent
+# (PCM)" for Frequency/UV-Vis/NMR Shielding/PES Scan used to be a complete
+# no-op: the backend received molecule/method/basis/progress_stream and
+# silently ran gas-phase while the UI kept showing the box checked.
+#
+# "Single Point" has full PCM support (session_calc.run_in_session).
+# "Geometry Opt" and "Reorganization Energy" get a real, but partial,
+# solvent treatment: the geometry optimization itself runs gas-phase, then
+# a single point WITH solvent is computed at the final geometry and its
+# energy/orbitals replace the last trajectory frame's — a real published
+# approximation, not silently ignored, but not a solvated optimization
+# either (see _run_required_final_single_point in app.py and
+# reorganization_energy.py's own docstring).
+_SOLVENT_SUPPORTED_CALC_TYPES = frozenset(
+    {"Single Point", "Geometry Opt", "Reorganization Energy"}
+)
+
+
+def _update_solvent_control_for_calc_type(app: Any, ct: str) -> None:
+    """Disable the solvent checkbox for calc types that would silently
+    ignore it, so a checked box can never mean "no effect" (AUDIT F11)."""
+    try:
+        cb = app.solvent_cb
+    except AttributeError:
+        return
+    if ct in _SOLVENT_SUPPORTED_CALC_TYPES:
+        cb.disabled = False
+        if ct in ("Geometry Opt", "Reorganization Energy"):
+            # AUDIT F11 — label the approximation explicitly rather than
+            # letting a checked box imply a fully solvated optimization.
+            cb.description = (
+                "Implicit solvent (PCM) — gas-phase optimization, "
+                "solvated final single point"
+            )
+        else:
+            cb.description = "Implicit solvent (PCM)"
+    else:
+        cb.value = False  # also hides solvent_dd via on_solvent_cb_changed
+        cb.disabled = True
+        cb.description = f"Implicit solvent (PCM) — not supported for {ct}"
+
+
 def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     """Update extra options panel based on selected calculation type."""
     ct = change["new"]
+
+    _update_solvent_control_for_calc_type(app, ct)
 
     from quantui.freq_calc import is_freq_mode_seed
 
@@ -481,7 +526,7 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
             app._tddft_seed_note,
             widgets.HTML(
                 f'<span style="color:{_theme.css.ACCENT_WARNING};font-size:12px">⚠ Requires a DFT '
-                "functional (e.g. B3LYP, PBE0). RHF/UHF will run TDHF (CIS) "
+                "functional (e.g. B3LYP, PBE0). RHF/UHF will run TDHF/RPA "
                 "instead.</span>"
             ),
         ]
@@ -2285,11 +2330,30 @@ def checkpoint_identity(app: Any) -> Any:
         molecule = getattr(app, "_molecule", None)
         if molecule is None:
             return None
+        _ct = calc_type_key(app)
+        extra: tuple = ()
+        if _ct == "pes_scan":
+            # AUDIT F10 — calc_type="pes_scan" alone doesn't distinguish a
+            # bond scan from an angle/dihedral scan, or which atoms it
+            # scans, so two different scan configurations of the same
+            # molecule/method/basis used to collide on the same
+            # resume_key.
+            try:
+                extra = (
+                    str(app._scan_type_dd.value),
+                    str(app._scan_atom1.value),
+                    str(app._scan_atom2.value),
+                    str(app._scan_atom3.value),
+                    str(app._scan_atom4.value),
+                )
+            except Exception:  # noqa: BLE001 — checkpointing is never load-bearing
+                extra = ()
         return CalcIdentity.from_molecule(
             molecule,
-            calc_type=calc_type_key(app),
+            calc_type=_ct,
             method=app.method_dd.value,
             basis=app.basis_dd.value,
+            extra=extra,
         )
     except Exception:  # noqa: BLE001 — checkpointing is never load-bearing
         return None

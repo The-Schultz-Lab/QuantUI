@@ -84,6 +84,20 @@ def session_result_payload(result) -> Dict[str, Any]:
         # M-UX2 UXP2.10 — see the other *_result_payload functions' matching
         # field.
         "scf_variant": getattr(result, "scf_variant", "") or None,
+        # AUDIT F12 — these were computed onto SessionResult but never
+        # reached staging JSON at all (a serialization-layer gap distinct
+        # from _basic_result's ingest-layer one): post-HF correlation
+        # breakdown, solvent/GPU/density-fit provenance, and the AUDIT
+        # F04/F07 dispersion/CC-convergence flags.
+        "mp2_correlation_hartree": getattr(result, "mp2_correlation_hartree", None),
+        "ccsd_correlation_hartree": getattr(result, "ccsd_correlation_hartree", None),
+        "ccsd_t_correction_hartree": getattr(result, "ccsd_t_correction_hartree", None),
+        "cc_converged": getattr(result, "cc_converged", None),
+        "dispersion_applied": getattr(result, "dispersion_applied", None),
+        "solvent": getattr(result, "solvent", None),
+        "gpu_used": bool(getattr(result, "gpu_used", False)),
+        "gpu_name": getattr(result, "gpu_name", None),
+        "density_fit": bool(getattr(result, "density_fit", False)),
     }
 
 
@@ -115,6 +129,23 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
             displacements = np.asarray(result.displacements).tolist()
         except Exception:
             displacements = None
+    _thermo = getattr(result, "thermo", None)
+    _thermo_payload = (
+        {
+            "zpve_hartree": _thermo.zpve_hartree,
+            "H_hartree": _thermo.H_hartree,
+            "S_jmol": _thermo.S_jmol,
+            "G_hartree": _thermo.G_hartree,
+            "temperature_k": _thermo.temperature_k,
+            # AUDIT F18 — pressure and the thermo model itself were never
+            # recorded anywhere; both are fixed by the harmonic-oscillator/
+            # rigid-rotor/ideal-gas model at 1 atm used in freq_calc.py.
+            "pressure_atm": 1.0,
+            "approximation": "ideal_gas_rigid_rotor_harmonic_oscillator",
+        }
+        if _thermo is not None
+        else None
+    )
     return {
         "calc_type": "frequency",
         "energy_hartree": result.energy_hartree,
@@ -126,6 +157,8 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
         "formula": result.formula,
         # M-UX2 UXP2.10 — see session_result_payload's matching field.
         "scf_variant": getattr(result, "scf_variant", "") or None,
+        # AUDIT F12 — was never serialized, though FreqResult carries it.
+        "density_fit": bool(getattr(result, "density_fit", False)),
         "spectra": {
             "ir": {
                 "frequencies_cm1": list(result.frequencies_cm1),
@@ -133,6 +166,10 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
                 "raman_activities": list(getattr(result, "raman_activities", []) or []),
                 "zpve_hartree": result.zpve_hartree,
                 "displacements": displacements,
+                # AUDIT F18 — thermo (H, S, G) was computed by freq_calc.py
+                # but discarded here; the saved JSON had only frequencies,
+                # intensities, activities, displacements, and ZPVE.
+                "thermo": _thermo_payload,
             },
             "molecule": {
                 "atoms": list(molecule.atoms),
@@ -157,6 +194,8 @@ def tddft_result_payload(result) -> Dict[str, Any]:
         "formula": result.formula,
         # M-UX2 UXP2.10 — see session_result_payload's matching field.
         "scf_variant": getattr(result, "scf_variant", "") or None,
+        # AUDIT F12 — was never serialized, though TDDFTResult carries it.
+        "density_fit": bool(getattr(result, "density_fit", False)),
         "spectra": {
             "uv_vis": {
                 "excitation_energies_ev": list(result.excitation_energies_ev),
@@ -179,6 +218,8 @@ def nmr_result_payload(result) -> Dict[str, Any]:
         "formula": result.formula,
         # M-UX2 UXP2.10 — see session_result_payload's matching field.
         "scf_variant": getattr(result, "scf_variant", "") or None,
+        # AUDIT F12 — was never serialized, though NMRResult carries it.
+        "density_fit": bool(getattr(result, "density_fit", False)),
         "spectra": {
             "nmr": {
                 "atom_symbols": list(result.atom_symbols),

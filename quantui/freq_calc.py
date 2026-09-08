@@ -72,7 +72,13 @@ class FreqResult:
     Attributes:
         energy_hartree: SCF energy at the input geometry in Hartrees.
         homo_lumo_gap_ev: HOMO-LUMO gap in eV, or ``None``.
-        converged: ``True`` if the SCF converged.
+        converged: ``True`` only when BOTH the SCF converged AND the
+            Hessian/harmonic-analysis step actually completed (AUDIT F15)
+            — e.g. a ROHF reference whose analytic Hessian PySCF doesn't
+            support on this path used to report ``converged=True`` with
+            ``frequencies_cm1=[]``, since this flag came solely from the
+            SCF. A frequency calculation with no computed Hessian is not a
+            successful frequency analysis, whatever the reference SCF did.
         n_iterations: Number of SCF macro-iterations.
         method: Calculation method (e.g. ``'RHF'``, ``'B3LYP'``).
         basis: Basis set (e.g. ``'STO-3G'``).
@@ -107,7 +113,16 @@ class FreqResult:
     provide ``norm_mode``.
     """
     mo_energy_hartree: Optional[List] = None
+    """Orbital energies for the Energies panel's diagram, in Hartrees.
+
+    AUDIT additional-concerns — for an open-shell (UHF/UKS) reference,
+    this is the ALPHA-channel orbital energies only; the beta channel is
+    extracted and then discarded (``_moe[0]`` on a 2-D ``mf.mo_energy``).
+    Not a complete open-shell orbital spectrum.
+    """
     mo_occ: Optional[List] = None
+    """Orbital occupations matching ``mo_energy_hartree`` — same
+    alpha-only caveat for an open-shell reference."""
     pyscf_mol_atom: Optional[List] = None
     pyscf_mol_basis: Optional[str] = None
     density_fit: bool = False
@@ -437,7 +452,7 @@ def _run_freq_calc_body(
         # M-UX2 UXP2.10 — capture before maybe_apply_d3 can wrap/rename it.
         scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
-        mf = maybe_apply_d3(mf, method, progress_stream=stream)
+        mf, _ = maybe_apply_d3(mf, method, progress_stream=stream)
 
     # Density fitting (RI), opt-in (M-DF). Off by default. Applied to the main
     # SCF; the per-displacement inner SCFs below get the same treatment so the
@@ -500,6 +515,10 @@ def _run_freq_calc_body(
         _moe = mf.mo_energy
         _moo = mf.mo_occ
         if isinstance(_moe, (list, _np_mo.ndarray)) and hasattr(_moe[0], "__len__"):
+            # AUDIT additional-concerns — open-shell (UHF/UKS): mo_energy
+            # is (2, n_mo), alpha then beta. Only the alpha channel is
+            # kept for the orbital-diagram fields below; see
+            # mo_energy_hartree/mo_occ's field docstrings above.
             _moe, _moo = _moe[0], _moo[0]
         mo_energy_hartree = _np_mo.asarray(_moe, dtype=float).tolist()
         mo_occ_list = _np_mo.asarray(_moo, dtype=float).tolist()
@@ -530,6 +549,12 @@ def _run_freq_calc_body(
     zpve_hartree: float = 0.0
     displacements: Optional[List] = None
     thermo_data: Optional[ThermoData] = None
+    # AUDIT F15 — SCF convergence and Hessian/harmonic-analysis completion
+    # are separate facts; a caught exception in the try block below (e.g.
+    # ROHF's Hessian being unavailable on this path) must not leave the
+    # overall FreqResult reading "converged" with an empty
+    # frequencies_cm1.
+    _hessian_completed = False
 
     try:
         hess_obj = mf.Hessian()
@@ -555,6 +580,11 @@ def _run_freq_calc_body(
                 frequencies_cm1.append(float(-abs(f.imag)))
             else:
                 frequencies_cm1.append(float(f.real if hasattr(f, "real") else f))
+
+        # AUDIT F15 — the Hessian was built and harmonic_analysis() ran; a
+        # real frequency result exists regardless of whether the optional
+        # IR/Raman/thermo enrichment below succeeds.
+        _hessian_completed = True
 
         # ZPVE = ½ · Σ ν_i (positive modes only), converted cm⁻¹ → Hartree
         zpve_hartree = sum(0.5 * f * _CM1_TO_HARTREE for f in frequencies_cm1 if f > 0)
@@ -711,7 +741,12 @@ def _run_freq_calc_body(
                 # can pin the contract.
                 from quantui import freq_ir_workers as _ir_par
 
-                _cpu_count = os.cpu_count() or 1
+                # AUDIT additional-concerns — available_cpu_count() honors
+                # SLURM_CPUS_PER_TASK / cgroup affinity instead of the raw
+                # os.cpu_count() (whole-machine core count), so this run
+                # doesn't oversubscribe a SLURM allocation smaller than the
+                # host it landed on.
+                _cpu_count = _ir_par.available_cpu_count()
                 _use_parallel = _ir_par.parallel_enabled_for_run(
                     cpu_count=_cpu_count,
                     displacement_count=_ir_total_solves,
@@ -794,6 +829,9 @@ def _run_freq_calc_body(
                                         _dm0_handle.name,
                                         _threads_each,
                                         _ckpt_items_dir,
+                                        mol.ecp,  # AUDIT F05
+                                        _density_fit_used,  # AUDIT F19
+                                        scf_rescue,  # AUDIT F19
                                     ),
                                 ) as _pool:
                                     # Submit all and store futures keyed by task
@@ -990,13 +1028,21 @@ def _run_freq_calc_body(
                     f"Missing H or S in thermo dict (keys: {sorted(_tout.keys())})"
                 )
             _H = _tv(_H_raw)
-            _S = _tv(_S_raw)  # J/(mol·K)
+            # PySCF's thermo() returns S_tot in Eh/K, not J/(mol·K) — despite
+            # the misleading local variable name this used to carry. Convert
+            # to J/(mol·K) for storage/display, and use the Eh/K value
+            # (matching H_hartree's units) to compute G = H - T*S. The old
+            # code stored the raw Eh/K number as S_jmol, then divided by
+            # _HARTREE_TO_JMOL again when forming G — nearly canceling the
+            # entropy term's contribution to G (see AUDIT F01).
+            _S_hartree_per_k = _tv(_S_raw)
+            _S_jmol = _S_hartree_per_k * _HARTREE_TO_JMOL
             _zpve = _tv(_Z_raw) if _Z_raw is not None else zpve_hartree
-            _G = _H - 298.15 * _S / _HARTREE_TO_JMOL
+            _G = _H - 298.15 * _S_hartree_per_k
             thermo_data = ThermoData(
                 zpve_hartree=_zpve,
                 H_hartree=_H,
-                S_jmol=_S,
+                S_jmol=_S_jmol,
                 G_hartree=_G,
             )
             _status("Frequency backend complete.")
@@ -1028,7 +1074,9 @@ def _run_freq_calc_body(
     return FreqResult(
         energy_hartree=energy_hartree,
         homo_lumo_gap_ev=homo_lumo_gap_ev,
-        converged=converged,
+        # AUDIT F15 — overall success requires the Hessian/harmonic-analysis
+        # step to have actually completed, not just the reference SCF.
+        converged=converged and _hessian_completed,
         n_iterations=n_iterations,
         method=method,
         basis=basis,

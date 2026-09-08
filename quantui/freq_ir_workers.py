@@ -56,6 +56,9 @@ def init_worker(
     dm0_pickle_path: str,
     omp_threads: int,
     checkpoint_items_dir: str | None = None,
+    ecp: dict | None = None,
+    density_fit: bool = False,
+    scf_rescue: bool = True,
 ) -> None:
     """ProcessPoolExecutor worker initializer.
 
@@ -94,6 +97,32 @@ def init_worker(
         :func:`quantui.checkpoint.mark_item_done_at`. ``None`` when the run
         has no checkpoint (checkpointing is always optional — see
         :mod:`quantui.checkpoint`'s "never break a calculation" rule).
+    ecp:
+        The reference molecule's ``mol.ecp`` mapping (AUDIT F05) —
+        ``{element: basis}`` for elements whose basis carries an effective
+        core potential (e.g. LANL2DZ/def2 on heavy atoms), or ``{}``/``None``
+        for an all-electron basis. Without this, a worker rebuilding the
+        ``Mole`` from ``atom_str``/``basis``/``charge``/``spin`` alone would
+        silently run the ECP atoms all-electron instead — a different
+        Hamiltonian (more electrons, no core potential), not just numerical
+        noise. See :func:`quantui.inorganic_guards.ecp_for_basis`.
+    density_fit:
+        AUDIT F19 — whether the *reference* SCF used density fitting
+        (M-DF). The serial IR loop matches this via
+        ``try_density_fit(mf, enabled=density_fit_used)`` before every
+        displaced SCF; this worker previously had no such parameter at
+        all, so every parallel displacement ran without density fitting
+        even when the reference (and the serial fallback) used it —
+        silently changing the numerical approximation, not just its
+        speed, whenever the user opted into parallel IR on a fitted
+        calculation.
+    scf_rescue:
+        AUDIT F19 — whether :func:`quantui.scf_robust.run_scf_with_rescue`
+        may apply its convergence-rescue ladder for this run. The serial
+        loop threads the caller's ``scf_rescue`` flag through
+        (``run_scf_with_rescue(_mf_d, dm0=_dm0, rescue=scf_rescue)``); this
+        worker previously hardcoded the rescue default (``True``)
+        regardless of what the caller requested.
     """
     # Order matters: set env vars before any NumPy / PySCF import.
     threads = str(int(omp_threads))
@@ -115,6 +144,9 @@ def init_worker(
         xc=xc,
         dm0=dm0,
         checkpoint_items_dir=checkpoint_items_dir,
+        ecp=ecp or {},
+        density_fit=bool(density_fit),
+        scf_rescue=bool(scf_rescue),
     )
 
 
@@ -157,6 +189,10 @@ def run_displaced_scf(item_id: str, coords_bohr_flat) -> Any:
     mol = gto.Mole()
     mol.atom = state["atom_str"]
     mol.basis = state["basis"]
+    # AUDIT F05 — without this, a heavy-element ECP system (e.g.
+    # NaH/LANL2DZ) silently runs all-electron here: a different
+    # Hamiltonian than the reference calculation, not just numerical noise.
+    mol.ecp = state.get("ecp") or {}
     mol.charge = state["charge"]
     mol.spin = state["spin"]
     mol.verbose = 0
@@ -183,9 +219,20 @@ def run_displaced_scf(item_id: str, coords_bohr_flat) -> Any:
     else:
         mf = scf.UHF(mol) if dm0_is_unrestricted else scf.RHF(mol)
     mf.verbose = 0
+    # AUDIT F19 — match the reference SCF's density-fitting choice, exactly
+    # like the serial loop's `_try_density_fit(_mf_d, enabled=_density_fit_used)`
+    # (freq_calc.py). Without this, enabling parallel IR silently ran every
+    # displaced SCF without density fitting whenever the reference was fitted
+    # — a different numerical approximation, not merely a speed difference.
+    from .density_fitting import try_density_fit
+
+    mf, _ = try_density_fit(mf, enabled=bool(state.get("density_fit", False)))
     from .scf_robust import run_scf_with_rescue
 
-    run_scf_with_rescue(mf, dm0=dm0)
+    # AUDIT F19 — honor the caller's scf_rescue choice instead of always
+    # taking run_scf_with_rescue's default (True); the serial loop already
+    # threads scf_rescue through as `rescue=scf_rescue`.
+    run_scf_with_rescue(mf, dm0=dm0, rescue=bool(state.get("scf_rescue", True)))
     dipole = np.array(mf.dip_moment(verbose=0))
 
     items_dir = state.get("checkpoint_items_dir")
@@ -198,6 +245,45 @@ def run_displaced_scf(item_id: str, coords_bohr_flat) -> Any:
         mark_item_done_at(items_dir, item_id, {"dipole": dipole.tolist()})
 
     return dipole
+
+
+def available_cpu_count() -> int:
+    """CPU budget for sizing the parallel IR/Raman worker pool.
+
+    AUDIT additional-concerns — the driver used to size the worker pool
+    from a bare ``os.cpu_count() or 1``, which reports the WHOLE
+    machine's core count regardless of any SLURM allocation or cgroup/
+    container CPU limit. On a 128-core host with an 8-core SLURM
+    allocation and 18 displacements, that picked 18 workers (min(64, 18))
+    x 7 threads each — wildly oversubscribing the actual allocation.
+
+    Precedence, most-authoritative first:
+
+    1. ``SLURM_CPUS_PER_TASK`` — the CPU count SLURM itself assigned to
+       this task. Authoritative even when the cluster does not enforce
+       cgroup CPU limits (many don't), which is exactly the case
+       ``os.sched_getaffinity``/``os.cpu_count()`` cannot see.
+    2. ``os.sched_getaffinity(0)`` (Linux only) — respects a cgroup or
+       container CPU limit when one IS enforced and SLURM's own env var
+       is absent (e.g. a non-SLURM containerized deployment).
+    3. ``os.cpu_count()`` — final fallback (Windows/macOS, or a
+       restricted environment without ``sched_getaffinity``).
+
+    Every path floors at 1; never raises.
+    """
+    slurm_cpus = os.environ.get("SLURM_CPUS_PER_TASK")
+    if slurm_cpus is not None:
+        try:
+            n = int(slurm_cpus)
+            if n > 0:
+                return n
+        except ValueError:
+            pass
+    try:
+        return len(os.sched_getaffinity(0))  # type: ignore[attr-defined]
+    except (AttributeError, OSError, NotImplementedError):
+        pass
+    return os.cpu_count() or 1
 
 
 def freq_parallel_opt_in() -> bool:

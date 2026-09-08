@@ -31,6 +31,28 @@ def _method_basis_label(method: str, basis: str, scf_variant: str | None) -> str
     return label
 
 
+# Open-shell SCF variants whose orbitals split into separate alpha/beta
+# channels (UHF/UKS: two independent sets; ROHF: a single spatial-orbital
+# set but singly-occupied orbitals that still only have a well-defined
+# alpha-channel HOMO/LUMO in the usual sense).
+_OPEN_SHELL_SCF_VARIANTS = frozenset({"UHF", "UKS", "ROHF", "ROKS"})
+
+
+def _homo_lumo_gap_label(scf_variant: str | None) -> str:
+    """ "HOMO-LUMO gap", qualified "(α)" for an open-shell reference.
+
+    AUDIT additional-concerns — session_calc.py's gap extraction always
+    reads spin channel 0 (alpha) for a 2-D ``mo_energy`` array (its own
+    comment: "UHF: ... use alpha spin for the gap estimate"). The result
+    card never said so, presenting a single-channel number as if it were
+    an unqualified property — silently dropping the beta-channel gap,
+    which can differ meaningfully for an open-shell system.
+    """
+    if scf_variant and scf_variant.upper() in _OPEN_SHELL_SCF_VARIANTS:
+        return "HOMO-LUMO gap (α)"
+    return "HOMO-LUMO gap"
+
+
 def _result_card_open(*, accent: str | None = None, extra_style: str = "") -> str:
     border = accent or _theme.css.ACCENT_SUCCESS_ALT
     style = (
@@ -120,6 +142,22 @@ def _result_extra_rows(get: Any) -> str:
             "(approximate 2-electron integrals)</span></td></tr>"
         )
 
+    # AUDIT additional-concerns — session_calc.py extracts both properties
+    # from ``mf`` (the HF/DFT reference) even for MP2/CCSD/CCSD(T), which
+    # never builds a correlated density here. That is a real, potentially
+    # intentional teaching simplification (a correlated dipole/population
+    # needs a relaxed/unrelaxed density from the post-HF method itself,
+    # which this app does not compute) — but the card must say so instead
+    # of presenting an HF-level dipole/population as if it came from the
+    # requested correlated method.
+    _is_post_hf = _mp2 is not None or _ccsd is not None
+    _post_hf_note = (
+        f' <span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
+        "(HF reference — not a correlated MP2/CCSD property)</span>"
+        if _is_post_hf
+        else ""
+    )
+
     _dip = get("dipole_moment_debye")
     if _dip is not None:
         _vec = get("dipole_vector_debye")
@@ -136,7 +174,7 @@ def _result_extra_rows(get: Any) -> str:
                 f' <span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
                 "(magnitude only — μ components not saved)</span>"
             )
-        rows += _num("Dipole moment", _dip_str)
+        rows += _num("Dipole moment", _dip_str + _post_hf_note)
 
     _chg = get("mulliken_charges")
     _syms = get("atom_symbols")
@@ -146,13 +184,19 @@ def _result_extra_rows(get: Any) -> str:
             f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL};vertical-align:top">'
             f"Mulliken charges</td>"
             f'<td style="color:{_theme.css.TEXT_HEADING};font-family:monospace;font-size:12px;'
-            f'word-break:break-all">{_charge_str}</td></tr>'
+            f'word-break:break-all">{_charge_str}{_post_hf_note}</td></tr>'
         )
     return rows
 
 
 def format_result(r: Any) -> str:
     """Format a single-point-style result card."""
+    # AUDIT F07 — for CCSD/CCSD(T), r.converged also folds in the CC
+    # amplitude solve's own convergence, so a bare "SCF converged" label
+    # would misleadingly blame the reference SCF for a CC-only failure.
+    _conv_label = (
+        "Converged" if getattr(r, "cc_converged", None) is not None else "SCF converged"
+    )
     _conv = "Yes" if r.converged else "No (treat results with caution)"
     _cc = _converged_color(r.converged)
     _gap = f"{r.homo_lumo_gap_ev:.4f} eV" if r.homo_lumo_gap_ev is not None else "N/A"
@@ -167,8 +211,12 @@ def format_result(r: Any) -> str:
                 f"{r.energy_hartree:.8f} Ha &ensp;({r.energy_ev:.4f} eV)",
                 _theme.css.TEXT_HEADING,
             ),
-            ("HOMO-LUMO gap", _gap, _theme.css.TEXT_HEADING),
-            ("SCF converged", _conv, _cc),
+            (
+                _homo_lumo_gap_label(getattr(r, "scf_variant", None)),
+                _gap,
+                _theme.css.TEXT_HEADING,
+            ),
+            (_conv_label, _conv, _cc),
             (
                 "SCF iterations",
                 (
@@ -222,6 +270,9 @@ def format_opt_result(r: Any) -> str:
 
 def format_freq_result(r: Any) -> str:
     """Format a frequency-analysis result card."""
+    # AUDIT F15 — r.converged now also requires the Hessian/harmonic-
+    # analysis step to have completed, not just the reference SCF, so the
+    # row is labeled/colored on overall status rather than "SCF converged".
     _conv = "Yes" if r.converged else "No (treat with caution)"
     _cc = _converged_color(r.converged)
     n_real = r.n_real_modes()
@@ -239,7 +290,7 @@ def format_freq_result(r: Any) -> str:
     _rows = (
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF energy</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF converged</td>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Real modes</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{n_real}</td></tr>'
@@ -282,15 +333,21 @@ def format_freq_result(r: Any) -> str:
 
 def format_tddft_result(r: Any) -> str:
     """Format a TD-DFT / UV-Vis result card."""
+    # AUDIT F08 — r.converged now folds in per-root TD convergence, so the
+    # row is labeled/colored on overall status, not just the ground SCF.
     _conv = "Yes" if r.converged else "No (treat with caution)"
     _cc = _converged_color(r.converged)
+    _n_converged = getattr(r, "n_converged_states", None)
+    _states_detail = str(len(r.excitation_energies_ev))
+    if _n_converged is not None and _n_converged != len(r.excitation_energies_ev):
+        _states_detail += f" ({_n_converged} converged)"
     header_rows = (
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Ground-state energy</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF converged</td>'
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">States computed</td>'
-        f'<td style="color:{_theme.css.TEXT_HEADING}">{len(r.excitation_energies_ev)}</td></tr>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{_states_detail}</td></tr>'
     )
     exc_table = ""
     if r.excitation_energies_ev:
@@ -342,6 +399,16 @@ def format_nmr_result(r: Any) -> str:
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Reference</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.reference_compound} ({r.method}/{r.basis})</td></tr>'
     )
+    # AUDIT F17 — surface a fallback-reference substitution explicitly
+    # rather than letting the row above imply an exact-match reference.
+    if getattr(r, "is_fallback_reference", False):
+        _ref_key = getattr(r, "reference_key", "") or "a different level of theory"
+        header_rows += (
+            f'<tr><td colspan="2" style="padding:3px 0 0">'
+            f'<span style="color:{_theme.css.ACCENT_WARNING};font-size:12px">'
+            f"⚠ No reference at {r.method}/{r.basis} — shifts use {_ref_key} "
+            "constants instead.</span></td></tr>"
+        )
 
     def _nmr_table(label: str, shifts: list, sym: str) -> str:
         if not shifts:
@@ -672,6 +739,23 @@ def reorg_channels_html(channels: list[dict]) -> str:
             f'<table style="margin-top:2px;font-size:13px;border-collapse:collapse">'
             f"{body}</table></div>"
         )
+    # AUDIT additional-concerns — "Ion state" above reports a multiplicity
+    # chosen by electron-count parity/minimal spin (see
+    # reorganization_energy._ion_multiplicity's own docstring), which is a
+    # convenient default, NOT a ground-state determination — most relevant
+    # for a transition-metal ion, where the true ground state can be
+    # higher-spin. Any PCM solvent selected applies only to the four
+    # single-point energies above, evaluated at gas-phase-optimized
+    # geometries (the relaxations themselves are not solvent-optimized).
+    # Both scope notes are stated here, once, rather than left implicit.
+    blocks.append(
+        f'<div style="margin-top:6px;font-size:11px;color:{_theme.css.TEXT_MUTED_LIGHT}">'
+        "Ion multiplicity is the minimal-spin default from electron-count "
+        "parity, not a ground-state determination (relevant for transition-"
+        "metal ions). Solvent (if selected) applies only to the single-"
+        "point energies above; geometries are optimized in the gas phase."
+        "</div>"
+    )
     return "".join(blocks)
 
 
@@ -788,7 +872,11 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
                 f"{data['energy_hartree']:.8f} Ha &ensp;({data['energy_ev']:.4f} eV)",
                 _theme.css.TEXT_HEADING,
             ),
-            ("HOMO-LUMO gap", _gap, _theme.css.TEXT_HEADING),
+            (
+                _homo_lumo_gap_label(data.get("scf_variant")),
+                _gap,
+                _theme.css.TEXT_HEADING,
+            ),
             ("SCF converged", _conv, _cc),
             (
                 "SCF iterations",
@@ -819,6 +907,32 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
                 f'border:1px solid {_theme.css.BORDER}" width="173" height="108" />'
             )
 
+    # AUDIT F18 — restore persisted frequency thermochemistry into the
+    # History card. Older saved results (or a Hessian-only run with no
+    # thermo block) have no "thermo" key at all; that's a silent no-op,
+    # not an error.
+    _thermo_html = ""
+    if ct == "frequency":
+        _thermo = ((data.get("spectra") or {}).get("ir") or {}).get("thermo")
+        if _thermo:
+            _kj = 2625.5  # kJ/mol per Hartree
+            _thermo_html = (
+                f'<tr><td colspan="2" style="padding:6px 0 2px 0;color:{_theme.css.TEXT_MUTED};'
+                f'font-size:12px;font-style:italic">'
+                f"&#8212; Thermochemistry at {_thermo.get('temperature_k', 298.15):.0f} K"
+                f" / {_thermo.get('pressure_atm', 1.0):.0f} atm &#8212;"
+                f"</td></tr>"
+                f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">ZPVE</td>'
+                f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo["zpve_hartree"]:.6f} Ha</td></tr>'
+                f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">H</td>'
+                f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo["H_hartree"]:.6f} Ha</td></tr>'
+                f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">S</td>'
+                f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo["S_jmol"]:.2f} J/(mol&middot;K)</td></tr>'
+                f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">G</td>'
+                f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo["G_hartree"]:.6f} Ha'
+                f" ({_thermo['G_hartree'] * _kj:.2f} kJ/mol)</td></tr>"
+            )
+
     # Reorganization-energy channels (REORG.1). This is the reported bug: the
     # card came back without the numbers the calculation exists to produce.
     # Keyed on the calc type AND the payload, so a reorg result saved before λ
@@ -840,6 +954,6 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         f'{_method_basis_label(data["method"], data["basis"], data.get("scf_variant"))}</b>'
         f'&ensp;<small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{ts}</small>'
         + _result_card_table_open()
-        + f"{_rows}{_extra}</table>{_reorg_html}"
+        + f"{_rows}{_extra}{_thermo_html}</table>{_reorg_html}"
         + _RESULT_CARD_CLOSE
     )

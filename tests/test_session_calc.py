@@ -595,6 +595,66 @@ class TestM8CcsdComputeWater:
         assert result.ccsd_t_correction_hartree is not None
         assert result.ccsd_t_correction_hartree < 0
 
+    @pyscf_only
+    def test_ccsd_nonconvergence_is_not_reported_as_converged(self, monkeypatch):
+        """AUDIT F07 regression — controlled reproduction: restrict the
+        real CCSD solver to one iteration (a real, unpatched PySCF kernel;
+        only the iteration limit is forced). Before the fix, the returned
+        correlation energy was accepted unconditionally and
+        result.converged came solely from the HF reference, so this
+        reported converged=True despite _ccsd_obj.converged being False.
+        """
+        import pyscf.cc as pyscf_cc
+
+        from quantui.session_calc import run_in_session
+
+        _original_ccsd = pyscf_cc.CCSD
+
+        def _one_cycle_ccsd(mf):
+            obj = _original_ccsd(mf)
+            obj.max_cycle = 1
+            return obj
+
+        monkeypatch.setattr(pyscf_cc, "CCSD", _one_cycle_ccsd)
+
+        result = run_in_session(molecule=_water(), method="CCSD", basis="STO-3G")
+
+        assert result.cc_converged is False
+        assert result.converged is False
+        # The correlation energy is still surfaced (so the UI can show what
+        # happened) — just not stamped as a converged result.
+        assert result.ccsd_correlation_hartree is not None
+
+    @pyscf_only
+    def test_ccsd_skipped_when_reference_scf_unconverged(self, monkeypatch):
+        """AUDIT F07 — post-HF work must not launch on an unconverged SCF.
+
+        Runs the real SCF (so ``mf`` has genuine, valid orbitals), then
+        flips ``mf.converged`` to simulate a reference reported as
+        unconverged — session_calc.py reads exactly that attribute to
+        decide whether to launch CCSD, so this exercises the actual gate
+        without needing to engineer real SCF non-convergence.
+        """
+        import quantui.scf_robust as scf_robust
+        from quantui.session_calc import run_in_session
+
+        _real_run_scf_with_rescue = scf_robust.run_scf_with_rescue
+
+        def _fake_run_scf_with_rescue(mf, *args, **kwargs):
+            energy = _real_run_scf_with_rescue(mf, *args, **kwargs)
+            mf.converged = False
+            return energy
+
+        monkeypatch.setattr(
+            scf_robust, "run_scf_with_rescue", _fake_run_scf_with_rescue
+        )
+
+        result = run_in_session(molecule=_water(), method="CCSD", basis="STO-3G")
+
+        assert result.converged is False
+        assert result.cc_converged is None
+        assert result.ccsd_correlation_hartree is None
+
 
 # ============================================================================
 # Run directly

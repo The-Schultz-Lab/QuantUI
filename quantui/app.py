@@ -5966,6 +5966,15 @@ class QuantUIApp:
                     method=self.method_dd.value,
                     basis=self.basis_dd.value,
                     progress_stream=log,  # type: ignore[arg-type]
+                    # AUDIT F16 — the app opens _ckpt and resolves _resume
+                    # above (used by Geometry Opt / PES Scan / Reorganization
+                    # Energy), but never passed either into interactive
+                    # Frequency runs, so expensive IR/Raman displacement
+                    # checkpointing (which freq_calc.py supports and the
+                    # batch route already uses) could never be banked or
+                    # resumed here.
+                    checkpoint=_ckpt,
+                    resume=_resume,
                 )
                 result_html = self._format_freq_result(result)
                 _displacements_serialized = None
@@ -5978,6 +5987,25 @@ class QuantUIApp:
                         ).tolist()
                     except Exception:
                         pass
+                _thermo = getattr(result, "thermo", None)
+                _thermo_serialized = (
+                    {
+                        "zpve_hartree": _thermo.zpve_hartree,
+                        "H_hartree": _thermo.H_hartree,
+                        "S_jmol": _thermo.S_jmol,
+                        "G_hartree": _thermo.G_hartree,
+                        "temperature_k": _thermo.temperature_k,
+                        # AUDIT F18 — the temperature was already tracked on
+                        # ThermoData; pressure and the model itself were not,
+                        # and neither survived a save. Both are fixed by the
+                        # harmonic-oscillator/rigid-rotor/ideal-gas model at
+                        # 1 atm used throughout freq_calc.py's thermo block.
+                        "pressure_atm": 1.0,
+                        "approximation": "ideal_gas_rigid_rotor_harmonic_oscillator",
+                    }
+                    if _thermo is not None
+                    else None
+                )
                 save_spectra = {
                     "ir": {
                         "frequencies_cm1": result.frequencies_cm1,
@@ -5985,6 +6013,9 @@ class QuantUIApp:
                         "raman_activities": result.raman_activities,
                         "zpve_hartree": result.zpve_hartree,
                         "displacements": _displacements_serialized,
+                        # AUDIT F18 — thermo (H, S, G) was computed and shown
+                        # live but never made it into the saved result.json.
+                        "thermo": _thermo_serialized,
                     },
                     "molecule": {
                         "atoms": list(calc_mol.atoms),
@@ -6111,6 +6142,19 @@ class QuantUIApp:
                             str(k): v for k, v in result.chemical_shifts_ppm.items()
                         },
                         "reference_compound": result.reference_compound,
+                        # AUDIT F17 — the backend records which reference
+                        # shielding constants were actually used and
+                        # whether that was a fallback substitution (e.g.
+                        # a method/basis combo with no matching reference,
+                        # falling back to a different level of theory's
+                        # constants); the local save used to drop both,
+                        # losing that calibration provenance on replay.
+                        # The batch NMR serializer (nmr_result_payload)
+                        # already includes them.
+                        "reference_key": getattr(result, "reference_key", ""),
+                        "is_fallback_reference": getattr(
+                            result, "is_fallback_reference", False
+                        ),
                     }
                 }
                 save_type = "nmr"

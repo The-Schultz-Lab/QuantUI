@@ -375,7 +375,7 @@ def _run_nmr_calc_body(
         # M-UX2 UXP2.10 — capture before maybe_apply_d3 can wrap/rename it.
         scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
-        mf = maybe_apply_d3(mf, method, progress_stream=stream)
+        mf, _ = maybe_apply_d3(mf, method, progress_stream=stream)
 
     # Density fitting (RI), opt-in (M-DF). Off by default. See DF.5: DF shifts
     # absolute shieldings, but chemical shifts are differences so the error

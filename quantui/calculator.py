@@ -92,10 +92,39 @@ class PySCFCalculation:
         formula = self.molecule.get_formula()
         job_name = f"{formula}_{self.method}_{self.basis}"
 
+        # AUDIT F06 — embed the resolved ECP mapping so a heavy-element
+        # system (e.g. NaH/LANL2DZ) reproduces the in-app electron count
+        # instead of silently running all-electron with only the basis set.
+        #
+        # ecp_for_basis() imports pyscf (to call gto.basis.load_ecp()), but
+        # generating this script is a platform-independent, PySCF-free
+        # operation by design (the module docstring: "students can
+        # download and run independently" — e.g. Windows without PySCF
+        # generating a script meant to run on a Linux/WSL machine or
+        # cluster). Windows CI caught this: a bare pyscf import here broke
+        # script generation itself wherever PySCF isn't installed, not
+        # just execution. Fall back to {} (this platform's own pre-F06
+        # behavior — never worse than before the fix) when PySCF is
+        # unavailable locally; any machine with PySCF still gets the
+        # correct ECP mapping.
+        try:
+            from .inorganic_guards import ecp_for_basis
+
+            ecp = ecp_for_basis(self.basis, self.molecule.atoms)
+        except ImportError:
+            logger.warning(
+                "PySCF not installed on this machine; exported script's "
+                "ECP mapping defaults to {} (all-electron). Heavy-element "
+                "systems (e.g. LANL2DZ/def2 on Na and heavier) may need "
+                "mol.ecp set manually before running the script."
+            )
+            ecp = {}
+
         script_content = config.PYSCF_SCRIPT_TEMPLATE.format(
             job_name=job_name,
             method=self.method,
             basis=self.basis,
+            ecp=repr(ecp),
             geometry=geometry,
             charge=self.molecule.charge,
             spin=spin,

@@ -346,6 +346,78 @@ def test_format_past_result_renders_mp2_breakdown():
     assert "MP2 correlation" in html
 
 
+def test_format_past_result_restores_frequency_thermo():
+    """AUDIT F18 — persisted thermochemistry must be restored into the
+    History card, not just silently saved and never shown again."""
+    data = {
+        "calc_type": "frequency",
+        "converged": True,
+        "homo_lumo_gap_ev": 27.0,
+        "energy_hartree": -74.933498241,
+        "energy_ev": -2039.29,
+        "n_iterations": 12,
+        "timestamp": "2026-06-10_15-48-02-285574",
+        "formula": "H2O",
+        "method": "RHF",
+        "basis": "STO-3G",
+        "spectra": {
+            "ir": {
+                "frequencies_cm1": [1600.0, 3700.0, 3800.0],
+                "ir_intensities": [10.0, 5.0, 5.0],
+                "raman_activities": [],
+                "zpve_hartree": 0.021,
+                "thermo": {
+                    "zpve_hartree": 0.021,
+                    "H_hartree": -74.933498241,
+                    "S_jmol": 188.538424,
+                    "G_hartree": -74.954908540,
+                    "temperature_k": 298.15,
+                    "pressure_atm": 1.0,
+                    "approximation": "ideal_gas_rigid_rotor_harmonic_oscillator",
+                },
+            },
+            "molecule": {
+                "atoms": ["O", "H", "H"],
+                "coords": [[0, 0, 0], [0.96, 0, 0], [0, 0.96, 0]],
+                "charge": 0,
+                "multiplicity": 1,
+            },
+        },
+    }
+    html = format_past_result(data)
+    assert "Thermochemistry at 298 K" in html
+    assert "-74.933498 Ha" in html  # H
+    assert "188.54 J" in html  # S
+    assert "-74.954909 Ha" in html  # G
+
+
+def test_format_past_result_frequency_without_thermo_omits_section():
+    """A saved result predating this fix (or a thermo-less run) has no
+    'thermo' key at all — that must be a silent no-op, not an error."""
+    data = {
+        "calc_type": "frequency",
+        "converged": True,
+        "homo_lumo_gap_ev": 27.0,
+        "energy_hartree": -74.9,
+        "energy_ev": -2039.0,
+        "n_iterations": 12,
+        "timestamp": "2026-06-10_15-48-02-285574",
+        "formula": "H2O",
+        "method": "RHF",
+        "basis": "STO-3G",
+        "spectra": {
+            "ir": {
+                "frequencies_cm1": [],
+                "ir_intensities": [],
+                "raman_activities": [],
+                "zpve_hartree": 0.0,
+            },
+        },
+    }
+    html = format_past_result(data)
+    assert "Thermochemistry" not in html
+
+
 def test_format_past_result_hf_dft_has_no_breakdown():
     data = {
         "calc_type": "single_point",

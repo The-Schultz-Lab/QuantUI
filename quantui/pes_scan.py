@@ -26,7 +26,7 @@ import logging
 import math
 import sys
 from dataclasses import dataclass
-from typing import IO, Any, Dict, List, Optional
+from typing import IO, Any, Dict, List, Optional, Sequence
 
 from .ase_bridge import ASE_AVAILABLE, atoms_to_molecule, molecule_to_atoms
 from .molecule import Molecule
@@ -175,6 +175,8 @@ def _reuse_scan_point(
     value: float,
     atoms: Any,
     molecule: Molecule,
+    scan_type: str,
+    atom_indices: Sequence[int],
 ) -> Optional[tuple]:
     """Return ``(energy_hartree, molecule)`` for a reusable point, else ``None``.
 
@@ -186,11 +188,29 @@ def _reuse_scan_point(
     Returns ``None`` for anything questionable (no record, a coordinate value
     that no longer matches, malformed geometry). Recomputing a point is cheap
     next to trusting a mismatched one.
+
+    AUDIT F10: a cached point's ``value`` alone does not identify WHICH
+    coordinate it was computed for — a banked O-H bond-scan point at 1.0 A
+    and a fresh H-H bond scan targeting 1.0 A compared equal on ``value``
+    alone, so the O-H point was reused and returned as if it were the H-H
+    point (its real geometry, e.g. an O-H distance of 1.0 A, has whatever
+    H-H distance that geometry happens to have — not 1.0 A). Now the
+    record's own ``scan_type``/``atom_indices`` must match the current
+    scan's, AND the coordinate actually measured from the restored geometry
+    (not just the record's self-reported ``value``) must match the target
+    — catching a stale/mismatched record even if ``scan_type``/
+    ``atom_indices`` were themselves corrupted or from an older checkpoint
+    schema that didn't record them at all.
     """
     if not record:
         return None
     try:
         if abs(float(record["value"]) - float(value)) > 1e-9:
+            return None
+        if str(record.get("scan_type", scan_type)) != str(scan_type):
+            return None
+        _rec_indices = record.get("atom_indices")
+        if _rec_indices is not None and list(_rec_indices) != list(atom_indices):
             return None
         energy_ha = float(record["energy_hartree"])
         symbols = [str(a) for a in record["atoms"]]
@@ -210,6 +230,32 @@ def _reuse_scan_point(
         atoms.set_positions(coords)
     except Exception:  # noqa: BLE001 — a stale live geometry is not fatal
         logger.debug("could not restore ASE positions for a reused scan point")
+        return None
+
+    # Cross-check: measure the actual coordinate from the restored geometry
+    # itself, independent of anything the record claims about itself.
+    try:
+        i1, i2 = atom_indices[0], atom_indices[1]
+        if scan_type == "bond":
+            _actual = float(atoms.get_distance(i1, i2))
+            _diff = abs(_actual - float(value))
+            _tol = 1e-3
+        else:
+            if scan_type == "angle":
+                _actual = float(atoms.get_angle(i1, i2, atom_indices[2]))
+            else:  # dihedral
+                _actual = float(
+                    atoms.get_dihedral(i1, i2, atom_indices[2], atom_indices[3])
+                )
+            # Angles/dihedrals wrap at 360 degrees (e.g. -170 and 190 are the
+            # same angle) — compare via the shortest angular distance.
+            _diff = abs((_actual - float(value) + 180.0) % 360.0 - 180.0)
+            _tol = 1e-2
+        if _diff > _tol:
+            return None
+    except Exception:  # noqa: BLE001 — malformed geometry: don't trust it
+        return None
+
     return energy_ha, point_molecule
 
 
@@ -420,7 +466,14 @@ def run_pes_scan(
         # (points already done / total) for the self-correcting time estimate.
         from .log_utils import emit_progress, emit_status
 
-        _reused = _reuse_scan_point(_cached_points.get(step_num), val, atoms, molecule)
+        _reused = _reuse_scan_point(
+            _cached_points.get(step_num),
+            val,
+            atoms,
+            molecule,
+            scan_type,
+            atom_indices,
+        )
         if _reused is not None:
             _energy_ha, _mol_at_point = _reused
             energies_hartree.append(_energy_ha)
@@ -517,6 +570,12 @@ def run_pes_scan(
                     {
                         "index": step_num,
                         "value": float(val),
+                        # AUDIT F10 — identifies WHICH coordinate this point
+                        # belongs to, so a later scan of a different bond/
+                        # angle/dihedral (or different atoms) can't have a
+                        # coincidentally-matching "value" reuse this point.
+                        "scan_type": scan_type,
+                        "atom_indices": list(atom_indices),
                         "energy_hartree": float(e_ha),
                         "ok": bool(ok),
                         "atoms": list(mol_at_point.atoms),

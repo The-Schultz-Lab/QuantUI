@@ -1046,6 +1046,10 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
             n_points = max(600, int((x_max - x_min) * 2.0))
             x_grid = _np.linspace(x_min, x_max, n_points)
             y_grid = _np.zeros_like(x_grid)
+            # AUDIT additional-concerns — same height-normalized Lorentzian
+            # convention as ir_plot.py/raman_plot.py (see ir_plot.py's
+            # module docstring): peak height = supplied oscillator
+            # strength, area scales with FWHM. Deliberate, not a bug.
             for x0, amp in zip(wl, osc):
                 y_grid += amp * (gamma**2 / ((x_grid - x0) ** 2 + gamma**2))
             fig.add_trace(
@@ -1293,6 +1297,15 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
     app._last_orb_mo_occ = mo_occ
     app._last_orb_mol_atom = getattr(result, "pyscf_mol_atom", None)
     app._last_orb_mol_basis = getattr(result, "pyscf_mol_basis", None)
+    # AUDIT additional-concerns — snapshot the method that actually
+    # produced this mo_coeff, from the result object itself, rather than
+    # reading the live Method dropdown at cube-generation time (below).
+    # The dropdown can change (or a different History result can be
+    # loaded) between this call and Generate being pressed, at which point
+    # the dropdown no longer describes the orbitals actually being
+    # exported — the cube's own provenance comment used to silently name
+    # whatever method the dropdown showed at that later moment instead.
+    app._last_orb_method = str(getattr(result, "method", "") or "")
 
     plotly_rendered = False
     try:
@@ -1595,8 +1608,11 @@ def render_orbital_isosurface(
 
         # Charge/spin aren't carried on the app's orbital-state attributes —
         # infer them from the MO occupations so charged/open-shell molecules
-        # (H3O+, OH-, radicals, ...) don't fail to build in PySCF.
-        _charge, _spin = infer_charge_and_spin(mol_atom, mo_occ_for_charge)
+        # (H3O+, OH-, radicals, ...) don't fail to build in PySCF. Passing
+        # mol_basis lets AUDIT F14's ECP-aware charge inference apply.
+        _charge, _spin = infer_charge_and_spin(
+            mol_atom, mo_occ_for_charge, basis=mol_basis
+        )
 
         # ORBX.2: the user-chosen cubegen grid. Read at generate time rather
         # than cached, so changing the dropdown affects the next Generate
@@ -1614,13 +1630,17 @@ def render_orbital_isosurface(
         _grid = ISO_RESOLUTION_PRESETS.get(
             _res_key, ISO_RESOLUTION_PRESETS[DEFAULT_ISO_RESOLUTION]
         )
-        # M-EXPORT2 EXP2.4 / M-ORBEXPORT ORBX.4: best-effort provenance, not a
-        # re-verified guarantee — the live method dropdown, not necessarily
-        # what actually produced the stored mo_coeff (e.g. after a History
-        # replay of a differently-computed result).
-        _method_for_provenance = str(
-            getattr(getattr(app, "method_dd", None), "value", "") or ""
-        )
+        # M-EXPORT2 EXP2.4 / M-ORBEXPORT ORBX.4 — AUDIT additional-concerns:
+        # this used to read the LIVE method dropdown, which is not
+        # necessarily what actually produced the stored mo_coeff (e.g.
+        # after a History replay of a differently-computed result, or if
+        # the dropdown is changed between loading the orbitals and
+        # pressing Generate). ``_last_orb_method`` is snapshotted from the
+        # result object itself at the moment its orbitals were loaded
+        # (show_orbital_diagram), so it stays correct regardless of what
+        # the dropdown shows later — immutable result provenance instead
+        # of a mutable, disconnectable UI control.
+        _method_for_provenance = str(getattr(app, "_last_orb_method", "") or "")
         generate_cube_from_arrays(
             mol_atom,
             mol_basis,

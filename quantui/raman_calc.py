@@ -244,7 +244,10 @@ def _cpu_raman_activities_fd(
     from quantui import freq_ir_workers as _ir_par
     from quantui import freq_raman_workers as _ram_par
 
-    _cpu_count = os.cpu_count() or 1
+    # AUDIT additional-concerns — see freq_calc.py's matching comment:
+    # available_cpu_count() honors SLURM_CPUS_PER_TASK / cgroup affinity
+    # instead of the whole machine's os.cpu_count().
+    _cpu_count = _ir_par.available_cpu_count()
     _use_parallel = _ir_par.parallel_enabled_for_run(
         cpu_count=_cpu_count,
         displacement_count=_total,
@@ -313,6 +316,8 @@ def _cpu_raman_activities_fd(
                             dm0_is_unrestricted,
                             density_fit_used,
                             _ckpt_items_dir,
+                            mol.ecp,  # AUDIT F05
+                            scf_rescue,  # AUDIT F19
                         ),
                     ) as _pool:
                         _futs = {
@@ -377,7 +382,16 @@ def _cpu_raman_activities_fd(
         mol.set_geom_(_coords0, unit="Bohr")
         mol.verbose = _mol_v
 
-    dalpha_ang = dalpha / _BOHR_TO_ANG
+    # dalpha is d(alpha[a0^3]) / d(x[Bohr]) — polarizability in atomic units
+    # (a0^3), displacement in Bohr. Converting to d(alpha[A^3]) / d(x[A])
+    # needs the numerator rescaled by BOHR_TO_ANGSTROM**3 (a0^3 -> A^3) *and*
+    # the denominator by BOHR_TO_ANGSTROM (Bohr -> A): a net factor of
+    # BOHR_TO_ANGSTROM**2. The old code divided by a single
+    # BOHR_TO_ANGSTROM, rescaling only the denominator and leaving the
+    # numerator in a0^3 instead of A^3 — a missing BOHR_TO_ANGSTROM**3
+    # factor in the derivative, which becomes BOHR_TO_ANGSTROM**6 once
+    # squared into the Raman activity: ~45.54x too large (AUDIT F02).
+    dalpha_ang = dalpha * (_BOHR_TO_ANG**2)
     nm = np.asarray(displacements, dtype=float)
     if nm.ndim == 2:
         nm = nm.reshape(nm.shape[0], _n_atoms, 3)

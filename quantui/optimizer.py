@@ -120,6 +120,10 @@ try:
             self.status_label = status_label
             self.expected_steps = expected_steps  # history-based ~N prior
             self._eval_count = 0
+            # AUDIT F04 — None (method doesn't use D3), True (applied at
+            # every step so far), or False (pyscf.dftd3 unavailable at some
+            # step — sticky once seen, since it can't un-happen mid-run).
+            self.dispersion_applied: Optional[bool] = None
 
         def calculate(
             self,
@@ -197,7 +201,16 @@ try:
 
                 mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
                 mf.xc = resolve_xc(self.method)
-                mf = maybe_apply_d3(mf, self.method)
+                # AUDIT F04 — this call used to omit progress_stream
+                # entirely, so a missing pyscf.dftd3 gave NO warning
+                # anywhere on the optimizer path (unlike every other DFT
+                # entry point). maybe_apply_d3 now also always logs, but
+                # pass the stream too so the user sees it in-app.
+                mf, _dispersion_applied = maybe_apply_d3(
+                    mf, self.method, progress_stream=self.progress_stream
+                )
+                if self.dispersion_applied is not False:
+                    self.dispersion_applied = _dispersion_applied
 
             # Density fitting (RI), opt-in (M-DF). Off by default; applies to
             # every SCF in the optimization when the user enables it.
@@ -226,6 +239,27 @@ try:
             from .scf_robust import run_scf_with_rescue
 
             run_scf_with_rescue(mf, rescue=self.scf_rescue, stream=self.progress_stream)
+
+            # AUDIT F09 — BFGS previously accepted whatever gradient came
+            # back regardless of mf.converged, so it could satisfy its force
+            # criterion using an invalid electronic solution (verified: an
+            # H2 optimization near its minimum, with SCF limited to one
+            # cycle and rescue disabled, reported converged=True after
+            # three steps despite all four SCF evaluations being
+            # unconverged). run_scf_with_rescue has already exhausted every
+            # rescue stage by this point, so an unconverged mf here means
+            # this step's energy/forces are not physically meaningful —
+            # raise rather than hand them to ASE, which would silently bake
+            # them into the optimization trajectory (and, via BFGS's
+            # Hessian update, corrupt every subsequent step too).
+            if not bool(getattr(mf, "converged", False)):
+                raise RuntimeError(
+                    f"SCF did not converge at optimization step "
+                    f"{self._eval_count} — the resulting energy/forces are "
+                    "not physically meaningful. Try scf_rescue=True "
+                    "(default), a different starting geometry, or a "
+                    "different basis/method."
+                )
 
             # Save final SCF state for orbital visualization
             self._last_mf = mf
@@ -289,6 +323,10 @@ class OptimizationResult:
     pyscf_mol_atom: Optional[Any] = None  # atom list at final geometry (Angstrom)
     pyscf_mol_basis: Optional[str] = None
     density_fit: bool = False
+    # AUDIT F04 — mirrors SessionResult.dispersion_applied: None (method
+    # doesn't use D3), True/False (does, and pyscf.dftd3 was/wasn't
+    # importable during the optimization).
+    dispersion_applied: Optional[bool] = None
     # Final-geometry Mulliken / dipole — same fields SessionResult carries so
     # the Populations Analysis panel activates after a Geometry Opt too.
     atom_symbols: Optional[List[str]] = None
@@ -868,6 +906,7 @@ def optimize_geometry(
         mulliken_charges=_opt_mulliken,
         dipole_moment_debye=_opt_dipole,
         dipole_vector_debye=_opt_dipole_vec,
+        dispersion_applied=getattr(atoms.calc, "dispersion_applied", None),
     )
 
 

@@ -402,6 +402,108 @@ _pyscf_available = pytest.mark.skipif(
 
 @_pyscf_available
 @pytest.mark.slow
+class TestRunPesScanRejectsUnconvergedScf:
+    """AUDIT F09 — a diatomic bond scan point hard-codes ``ok = True``
+    (there's no relaxable DOF, so *geometric* convergence is trivial), but
+    that must not paper over the *electronic* SCF failing at that point.
+    """
+
+    @pytest.mark.slow
+    def test_unconverged_scf_marks_scan_point_as_failed(self, monkeypatch):
+        """Controlled reproduction, mirroring the optimizer's own F09 test:
+        force every SCF to one cycle with rescue disabled. Before the
+        optimizer-level F09 fix, this diatomic scan point's ``ok`` was
+        hard-set True regardless, so the failure was invisible.
+        """
+        pytest.importorskip("pyscf")
+        import pyscf.scf as pyscf_scf
+
+        from quantui.pes_scan import run_pes_scan
+
+        _original_rhf = pyscf_scf.RHF
+
+        def _one_cycle_rhf(mol):
+            mf = _original_rhf(mol)
+            mf.max_cycle = 1
+            return mf
+
+        monkeypatch.setattr(pyscf_scf, "RHF", _one_cycle_rhf)
+
+        result = run_pes_scan(
+            _h2(),
+            method="RHF",
+            basis="STO-3G",
+            scan_type="bond",
+            atom_indices=[0, 1],
+            start=0.6,
+            stop=1.4,
+            steps=3,
+            scf_rescue=False,
+        )
+
+        assert result.converged_all is False
+        import math
+
+        assert all(math.isnan(e) for e in result.energies_hartree)
+
+
+class TestRunPesScanCheckpointCoordinateIdentity:
+    """AUDIT F10 — a cached checkpoint point must not be reused for a
+    different scan configuration just because its scalar "value" happens
+    to match the current target.
+    """
+
+    @pytest.mark.slow
+    def test_mismatched_scan_type_point_is_not_reused(self):
+        """Reproduces the audit's scenario: a banked point recorded under
+        a different scan_type at the same target value must be recomputed
+        for real, not silently returned as-is.
+        """
+        pytest.importorskip("pyscf")
+        from quantui.checkpoint import CalcIdentity, Checkpoint
+        from quantui.pes_scan import run_pes_scan
+
+        identity = CalcIdentity.from_molecule(
+            _h2(), calc_type="pes_scan", method="RHF", basis="STO-3G"
+        )
+        ckpt = Checkpoint(identity)
+        ckpt.begin()
+        # A bogus point banked under a different scan_type, at the exact
+        # value the H-H bond scan's first grid point will target, with an
+        # energy nowhere near a real RHF/STO-3G H2 energy — if this were
+        # wrongly reused, the returned energy would be this exact value.
+        ckpt.append_point(
+            {
+                "index": 1,
+                "value": 0.6,
+                "scan_type": "angle",
+                "atom_indices": [0, 1, 0],
+                "energy_hartree": -999.0,
+                "ok": True,
+                "atoms": ["H", "H"],
+                "coordinates": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.6]],
+            }
+        )
+
+        result = run_pes_scan(
+            _h2(),
+            method="RHF",
+            basis="STO-3G",
+            scan_type="bond",
+            atom_indices=[0, 1],
+            start=0.6,
+            stop=1.4,
+            steps=3,
+            checkpoint=ckpt,
+            resume=True,
+        )
+
+        assert result.energies_hartree[0] != pytest.approx(-999.0)
+        assert result.energies_hartree[0] < -0.5  # a real RHF/STO-3G H2 energy
+
+
+@_pyscf_available
+@pytest.mark.slow
 class TestRunPesScanIntegration:
     def test_h2_bond_scan_returns_result(self):
         from quantui.pes_scan import run_pes_scan

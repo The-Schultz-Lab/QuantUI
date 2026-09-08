@@ -30,6 +30,56 @@ class TestSlurmIngest:
         assert data["calc_type"] == "single_point"
         assert (saved / "pyscf.log").read_text() == "log line\n"
 
+    def test_ingest_single_point_preserves_enriched_fields(self, tmp_path, monkeypatch):
+        """AUDIT F12 regression — a real water single-point round trip
+        (matching the audit's own reproduction) must not lose Mulliken
+        charges, dipole, atom symbols, SCF provenance, solvent/GPU/DF
+        metadata, or post-HF correlation fields between the worker's
+        staging JSON and the saved History result.json.
+        """
+        patch_results_root(tmp_path, monkeypatch)
+        payload = {
+            "calc_type": "single_point",
+            "energy_hartree": -76.023190,
+            "homo_lumo_gap_ev": 10.0,
+            "converged": True,
+            "n_iterations": 6,
+            "method": "RHF",
+            "basis": "STO-3G",
+            "formula": "H2O",
+            "mulliken_charges": [-0.365510, 0.182755, 0.182755],
+            "dipole_moment_debye": 1.725515,
+            "dipole_vector_debye": [0.0, 1.725515, 0.0],
+            "atom_symbols": ["O", "H", "H"],
+            "scf_rescue_stage": "bootstrap",
+            "scf_variant": "RHF",
+            "mp2_correlation_hartree": -0.201,
+            "ccsd_correlation_hartree": -0.213,
+            "ccsd_t_correction_hartree": -0.004,
+            "cc_converged": True,
+            "dispersion_applied": False,
+            "solvent": "Water",
+            "gpu_used": True,
+            "gpu_name": "NVIDIA H200",
+            "density_fit": True,
+        }
+        record, _staging = make_staging_record(tmp_path, payload)
+        saved = ingest_staging_success(record)
+        data = json.loads((saved / "result.json").read_text())
+
+        assert data["mulliken_charges"] == [-0.365510, 0.182755, 0.182755]
+        assert data["dipole_moment_debye"] == 1.725515
+        assert data["dipole_vector_debye"] == [0.0, 1.725515, 0.0]
+        assert data["atom_symbols"] == ["O", "H", "H"]
+        assert data["scf_variant"] == "RHF"
+        assert data["mp2_correlation_hartree"] == -0.201
+        assert data["ccsd_correlation_hartree"] == -0.213
+        assert data["ccsd_t_correction_hartree"] == -0.004
+        assert data["solvent"] == "Water"
+        assert data["gpu_used"] is True
+        assert data["gpu_name"] == "NVIDIA H200"
+        assert data["density_fit"] is True
+
     def test_ingest_geometry_opt_copies_trajectory(self, tmp_path, monkeypatch):
         patch_results_root(tmp_path, monkeypatch)
         traj = {

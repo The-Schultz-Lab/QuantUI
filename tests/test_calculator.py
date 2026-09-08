@@ -185,6 +185,200 @@ class TestScriptGeneration:
 
         assert "charge = 1" in script_content
 
+    def test_ecp_embedded_for_heavy_element_basis(self, tmp_path):
+        """The resolved ECP mapping must appear in the generated script for
+        a basis that carries one (LANL2DZ on Na), and be an explicit empty
+        dict for an all-electron basis — never simply absent.
+
+        Requires PySCF (ecp_for_basis() looks up LANL2DZ's ECP table via
+        pyscf.gto.basis.load_ecp) — unlike script *generation* itself,
+        which must keep working without it (see
+        test_script_generation_works_without_pyscf_installed above); on a
+        machine without PySCF the mapping correctly degrades to {}, which
+        this test cannot verify one way or the other.
+        """
+        pytest.importorskip("pyscf")
+        na_h = Molecule(["Na", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 2.0]])
+        calc = PySCFCalculation(na_h, method="RHF", basis="LANL2DZ")
+        script_content = calc.generate_calculation_script(tmp_path / "nah.py")
+        assert "mol.ecp = {'Na': 'LANL2DZ'}" in script_content
+
+        water = Molecule(
+            ["O", "H", "H"],
+            [[0.0, 0.0, 0.0], [0.757, 0.587, 0.0], [-0.757, 0.587, 0.0]],
+        )
+        calc_ae = PySCFCalculation(water, method="RHF", basis="6-31G")
+        script_ae = calc_ae.generate_calculation_script(tmp_path / "water.py")
+        assert "mol.ecp = {}" in script_ae
+
+    def test_script_generation_works_without_pyscf_installed(
+        self, tmp_path, monkeypatch
+    ):
+        """CI regression — AUDIT F06's ecp_for_basis() imports pyscf, but
+        generate_calculation_script() must keep working on a machine that
+        doesn't have PySCF installed at all (e.g. Windows, no WSL): the
+        module's own docstring says the exported script is meant to be
+        downloaded and run independently, possibly on a different machine
+        than the one that generated it. This broke Windows CI outright
+        (ModuleNotFoundError at *generation* time, not just execution)
+        until this fallback was added — reproduced here by making the
+        import raise ImportError regardless of platform.
+        """
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _no_pyscf(name, *args, **kwargs):
+            if name == "pyscf" or name.startswith("pyscf."):
+                raise ImportError("simulated: PySCF not installed")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _no_pyscf)
+
+        na_h = Molecule(["Na", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 2.0]])
+        calc = PySCFCalculation(na_h, method="RHF", basis="LANL2DZ")
+        script_content = calc.generate_calculation_script(tmp_path / "nah.py")
+        # Degrades to the pre-AUDIT-F06 (all-electron) mapping on this
+        # platform only — script generation itself must not raise.
+        assert "mol.ecp = {}" in script_content
+        assert (tmp_path / "nah.py").exists()
+
+    @pytest.mark.slow
+    def test_exported_ecp_script_reproduces_in_app_electron_count(self, tmp_path):
+        """AUDIT F06 regression — executes the exported NaH/LANL2DZ script
+        (real PySCF subprocess, no QuantUI import) and confirms it reports
+        the correct 2-explicit-electron ECP calculation, not the wrong
+        12-electron all-electron one the unfixed template produced.
+        """
+        pytest.importorskip("pyscf")
+        import subprocess
+        import sys
+
+        na_h = Molecule(["Na", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 2.0]])
+        calc = PySCFCalculation(na_h, method="RHF", basis="LANL2DZ")
+        script_path = tmp_path / "nah_rhf_lanl2dz.py"
+        calc.generate_calculation_script(script_path)
+
+        proc = subprocess.run(
+            [sys.executable, str(script_path)],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "Number of electrons: 2" in proc.stdout
+        # The unfixed template reported 12 electrons and E ~= -20.13 Ha for
+        # this system; the correct ECP calculation converges near -0.7 Ha.
+        assert "Number of electrons: 12" not in proc.stdout
+        assert (tmp_path / "results.npz").exists()
+
+    @pytest.mark.slow
+    def test_exported_npz_has_fields_the_cube_helper_needs(self, tmp_path):
+        """AUDIT additional-concerns — generate_cube_file() requires
+        'mol_atom'/'mol_basis' (raises ValueError without them: "Re-run
+        the calculation with the updated script template" — a template
+        that never actually wrote them) and reads an optional 'mo_occ' to
+        infer charge/spin. The exported script used to save only energy/
+        mo_energy/mo_coeff/converged, so a cube could never be generated
+        from a standalone-exported result.
+        """
+        pytest.importorskip("pyscf")
+        import subprocess
+        import sys
+
+        import numpy as np
+
+        water = Molecule(
+            ["O", "H", "H"],
+            [[0.0, 0.0, 0.0], [0.757, 0.587, 0.0], [-0.757, 0.587, 0.0]],
+        )
+        calc = PySCFCalculation(water, method="RHF", basis="STO-3G")
+        script_path = tmp_path / "water_rhf.py"
+        calc.generate_calculation_script(script_path)
+
+        proc = subprocess.run(
+            [sys.executable, str(script_path)],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+
+        npz = np.load(tmp_path / "results.npz", allow_pickle=True)
+        assert "mol_atom" in npz.files
+        assert "mol_basis" in npz.files
+        assert "mo_occ" in npz.files
+        assert str(npz["mol_basis"]) == "STO-3G"
+        assert "O" in str(npz["mol_atom"])
+
+        # The actual regression: generate_cube_file must not raise with
+        # this exported npz — it used to unconditionally raise ValueError
+        # ("does not contain 'mol_atom'/'mol_basis' keys") on any
+        # standalone export.
+        from quantui.orbital_visualization import generate_cube_file
+
+        cube_path = generate_cube_file(
+            tmp_path / "results.npz",
+            0,
+            tmp_path / "orbital0.cube",
+            nx=6,
+            ny=6,
+            nz=6,
+        )
+        assert cube_path.exists()
+
+    @pytest.mark.slow
+    @pytest.mark.parametrize("method", ["MP2", "CCSD", "CCSD(T)"])
+    def test_exported_post_hf_script_runs_successfully(self, tmp_path, method):
+        """AUDIT F13 regression — the exported script used to fall into the
+        DFT branch for any non-RHF/UHF method, setting
+        mf.xc = 'MP2'/'CCSD'/'CCSD(T)' and failing with
+        "LibXCFunctional: name '...' not found". Executes the real
+        generated script (subprocess, no QuantUI import) for water/STO-3G.
+        """
+        pytest.importorskip("pyscf")
+        import subprocess
+        import sys
+
+        water = Molecule(
+            ["O", "H", "H"],
+            [[0.0, 0.0, 0.0], [0.757, 0.587, 0.0], [-0.757, 0.587, 0.0]],
+        )
+        calc = PySCFCalculation(water, method=method, basis="STO-3G")
+        script_path = tmp_path / "water_post_hf.py"
+        calc.generate_calculation_script(script_path)
+
+        proc = subprocess.run(
+            [sys.executable, str(script_path)],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        # Note: PySCF's verbose=4 logging echoes the script's own source
+        # (including this docstring) into stdout, so don't substring-match
+        # error text there — exit code 0 plus the numeric checks below are
+        # the real assertion.
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "Total energy" in proc.stdout
+        assert (tmp_path / "results.npz").exists()
+
+        import numpy as np
+
+        npz = np.load(tmp_path / "results.npz", allow_pickle=True)
+        # RHF/STO-3G water energy is ~-74.963; any real correlation energy
+        # must make the total more negative than that.
+        assert float(npz["energy"]) < -74.97
+        if method == "MP2":
+            assert float(npz["mp2_correlation_hartree"]) < 0
+        else:
+            assert float(npz["ccsd_correlation_hartree"]) < 0
+            assert bool(npz["cc_converged"]) is True
+            if method == "CCSD(T)":
+                assert float(npz["ccsd_t_correction_hartree"]) < 0
+
     def test_script_creates_parent_directories(self, tmp_path):
         """Test that script creation makes parent directories."""
         script_path = tmp_path / "nested" / "dir" / "calc.py"

@@ -178,6 +178,31 @@ class TestRunFreqCalcThermo:
 
     @pyscf_only
     @pytest.mark.slow
+    def test_thermo_matches_independent_pyscf_reference(self):
+        """AUDIT F01 regression — S_jmol/G_hartree against an independent
+        PySCF reference (not merely S > 0 / G < H), for RHF/STO-3G water at
+        the fixed geometry in ``_water()``.
+
+        Before the F01 fix, PySCF's S_tot (returned in Eh/K) was stored
+        directly as S_jmol without converting to J/(mol*K), then divided by
+        _HARTREE_TO_JMOL a second time when forming G — deflating S_jmol by
+        ~2.6e6x and leaving G ~= H. Reference values below (S=188.538424
+        J/(mol*K), G=-74.954908540 Eh) come from calling
+        pyscf.hessian.thermo.thermo() directly on the same RHF/STO-3G water
+        SCF object/frequencies, independent of quantui.freq_calc.
+        """
+        from quantui.freq_calc import run_freq_calc
+
+        result = run_freq_calc(_water(), method="RHF", basis="STO-3G")
+        assert result.thermo is not None
+        assert result.thermo.S_jmol == pytest.approx(188.538424, abs=0.01)
+        assert result.thermo.G_hartree == pytest.approx(-74.954908540, abs=1e-6)
+        # The old bug's error was ~8e-9 Eh (S_jmol deflated to ~7.18e-5); a
+        # correct calculation differs from H by orders of magnitude more.
+        assert result.thermo.H_hartree - result.thermo.G_hartree > 1e-3
+
+    @pyscf_only
+    @pytest.mark.slow
     def test_thermo_g_less_than_h(self):
         from quantui.freq_calc import run_freq_calc
 
@@ -237,6 +262,37 @@ class TestRunFreqCalcPostHfGuard:
 
         with pytest.raises(ValueError, match="post-HF"):
             run_freq_calc(_water(), method=method, basis="STO-3G")
+
+
+# ============================================================================
+# AUDIT F15 — a failed Hessian must not read as a converged result
+# ============================================================================
+
+
+class TestFreqResultReflectsHessianCompletion:
+    """A ROHF reference's analytic Hessian is unavailable on this path
+    (PySCF has no ROHF Hessian implementation here); the caught exception
+    used to leave FreqResult.converged reading whatever the reference SCF
+    alone reported, with frequencies_cm1=[] — a frequency calculation with
+    no computed Hessian is not a successful frequency analysis.
+    """
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_rohf_hessian_failure_reports_unconverged(self):
+        from quantui.freq_calc import run_freq_calc
+        from quantui.molecule import Molecule
+
+        # Real OH doublet — RHF/STO-3G dispatches to ROHF for this
+        # open-shell molecule, matching the audit's exact reproduction.
+        oh = Molecule(
+            ["O", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 0.97]], charge=0, multiplicity=2
+        )
+        result = run_freq_calc(oh, method="RHF", basis="STO-3G")
+
+        assert result.scf_variant == "ROHF"
+        assert result.frequencies_cm1 == []
+        assert result.converged is False
 
 
 # ============================================================================
@@ -354,6 +410,215 @@ class TestIrIntensityUhfClosedShellDispatch:
             assert len(dip) == 3
         finally:
             os.unlink(tmp.name)
+
+    def test_ecp_omission_gives_a_different_hamiltonian(self):
+        """AUDIT F05 regression — the worker must run the reference's ECP
+        (e.g. LANL2DZ on Na), not silently fall back to all-electron.
+
+        Without ``ecp``, NaH/LANL2DZ is an all-electron (12-electron)
+        calculation instead of the correct 2-explicit-electron ECP one —
+        a different Hamiltonian, not numerical noise. Confirms both the
+        electron-count claim directly (via the same ecp_for_basis mapping
+        the worker now receives) and that the worker's own SCF result
+        (the dipole it returns) differs materially between the two cases.
+        """
+        pytest.importorskip("pyscf")
+        import os
+        import pickle
+        import tempfile
+
+        from pyscf import gto
+
+        from quantui.freq_ir_workers import init_worker, run_displaced_scf
+        from quantui.inorganic_guards import ecp_for_basis
+
+        atom_str = "Na 0 0 0; H 0 0 2.0"
+        basis = "LANL2DZ"
+        ecp = ecp_for_basis(basis, ["Na", "H"])
+        assert ecp == {"Na": "LANL2DZ"}
+
+        mol_with_ecp = gto.M(
+            atom=atom_str, basis=basis, ecp=ecp, charge=0, spin=0, verbose=0
+        )
+        mol_without_ecp = gto.M(
+            atom=atom_str, basis=basis, ecp={}, charge=0, spin=0, verbose=0
+        )
+        assert mol_with_ecp.nelectron == 2
+        assert mol_without_ecp.nelectron == 12
+
+        coords = mol_with_ecp.atom_coords(unit="Bohr").flatten().tolist()
+
+        def _run(ecp_arg):
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl")
+            try:
+                pickle.dump(None, tmp)
+                tmp.close()
+                init_worker(atom_str, basis, 0, 0, None, tmp.name, 1, None, ecp_arg)
+                return run_displaced_scf("d000_x_+", coords)
+            finally:
+                os.unlink(tmp.name)
+
+        dip_with_ecp = _run(ecp)
+        dip_without_ecp = _run({})
+        # A 2-electron vs 12-electron calculation on the same geometry
+        # produces a substantially different dipole, not a small
+        # numerical discrepancy.
+        assert abs(dip_with_ecp[2] - dip_without_ecp[2]) > 1.0
+
+    def test_density_fit_option_applied_to_displaced_scf(self, monkeypatch):
+        """AUDIT F19 regression — the worker had no density_fit parameter at
+        all; every displaced SCF ran without density fitting even when the
+        reference (and the serial fallback in freq_calc.py, which calls
+        ``_try_density_fit(_mf_d, enabled=_density_fit_used)``) used it —
+        silently changing the numerical approximation for parallel IR runs
+        on a fitted reference, not merely its speed.
+        """
+        pytest.importorskip("pyscf")
+        import os
+        import pickle
+        import tempfile
+
+        from pyscf import gto, scf
+
+        import quantui.density_fitting as density_fitting
+        from quantui.freq_ir_workers import init_worker, run_displaced_scf
+
+        atom_str = "O 0 0 0.119; H 0 0.763 -0.477; H 0 -0.763 -0.477"
+        mol = gto.M(atom=atom_str, basis="sto-3g", spin=0, charge=0, verbose=0)
+        mf = scf.RHF(mol)
+        mf.kernel()
+        dm0 = mf.make_rdm1()
+
+        seen_enabled = []
+        _orig = density_fitting.try_density_fit
+
+        def _spy(mf_arg, *, enabled=None, auxbasis=None):
+            seen_enabled.append(enabled)
+            return _orig(mf_arg, enabled=enabled, auxbasis=auxbasis)
+
+        monkeypatch.setattr(density_fitting, "try_density_fit", _spy)
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl")
+        try:
+            pickle.dump(dm0, tmp)
+            tmp.close()
+            init_worker(
+                atom_str,
+                "sto-3g",
+                0,
+                0,
+                None,
+                tmp.name,
+                1,
+                None,  # checkpoint_items_dir
+                None,  # ecp
+                True,  # density_fit
+                True,  # scf_rescue
+            )
+            coords = mol.atom_coords(unit="Bohr").flatten().tolist()
+            dip = run_displaced_scf("d000_x_+", coords)
+            assert len(dip) == 3
+        finally:
+            os.unlink(tmp.name)
+
+        assert seen_enabled == [True]
+
+    def test_density_fit_defaults_off_for_an_older_caller(self, monkeypatch):
+        """Backward compatibility: a caller that predates this fix (only
+        positional args through ``ecp``) must still get density_fit=False,
+        matching the old always-off behavior exactly."""
+        pytest.importorskip("pyscf")
+        import os
+        import pickle
+        import tempfile
+
+        from pyscf import gto, scf
+
+        import quantui.density_fitting as density_fitting
+        from quantui.freq_ir_workers import init_worker, run_displaced_scf
+
+        atom_str = "O 0 0 0.119; H 0 0.763 -0.477; H 0 -0.763 -0.477"
+        mol = gto.M(atom=atom_str, basis="sto-3g", spin=0, charge=0, verbose=0)
+        mf = scf.RHF(mol)
+        mf.kernel()
+        dm0 = mf.make_rdm1()
+
+        seen_enabled = []
+        _orig = density_fitting.try_density_fit
+
+        def _spy(mf_arg, *, enabled=None, auxbasis=None):
+            seen_enabled.append(enabled)
+            return _orig(mf_arg, enabled=enabled, auxbasis=auxbasis)
+
+        monkeypatch.setattr(density_fitting, "try_density_fit", _spy)
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl")
+        try:
+            pickle.dump(dm0, tmp)
+            tmp.close()
+            init_worker(atom_str, "sto-3g", 0, 0, None, tmp.name, 1)
+            coords = mol.atom_coords(unit="Bohr").flatten().tolist()
+            run_displaced_scf("d000_x_+", coords)
+        finally:
+            os.unlink(tmp.name)
+
+        assert seen_enabled == [False]
+
+    def test_scf_rescue_option_honored_in_displaced_scf(self, monkeypatch):
+        """AUDIT F19 regression — the worker always called
+        ``run_scf_with_rescue(mf, dm0=dm0)``, taking its default
+        ``rescue=True`` regardless of what the caller requested. The
+        serial loop threads the caller's choice through as
+        ``rescue=scf_rescue``; this confirms the worker now does too.
+        """
+        pytest.importorskip("pyscf")
+        import os
+        import pickle
+        import tempfile
+
+        from pyscf import gto, scf
+
+        import quantui.scf_robust as scf_robust
+        from quantui.freq_ir_workers import init_worker, run_displaced_scf
+
+        atom_str = "O 0 0 0.119; H 0 0.763 -0.477; H 0 -0.763 -0.477"
+        mol = gto.M(atom=atom_str, basis="sto-3g", spin=0, charge=0, verbose=0)
+        mf = scf.RHF(mol)
+        mf.kernel()
+        dm0 = mf.make_rdm1()
+
+        seen_rescue = []
+        _orig = scf_robust.run_scf_with_rescue
+
+        def _spy(mf_arg, **kwargs):
+            seen_rescue.append(kwargs.get("rescue", True))
+            return _orig(mf_arg, **kwargs)
+
+        monkeypatch.setattr(scf_robust, "run_scf_with_rescue", _spy)
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl")
+        try:
+            pickle.dump(dm0, tmp)
+            tmp.close()
+            init_worker(
+                atom_str,
+                "sto-3g",
+                0,
+                0,
+                None,
+                tmp.name,
+                1,
+                None,  # checkpoint_items_dir
+                None,  # ecp
+                False,  # density_fit
+                False,  # scf_rescue
+            )
+            coords = mol.atom_coords(unit="Bohr").flatten().tolist()
+            run_displaced_scf("d000_x_+", coords)
+        finally:
+            os.unlink(tmp.name)
+
+        assert seen_rescue == [False]
 
     def test_worker_writes_its_own_checkpoint_record(self, tmp_path):
         """M-CHECKPOINT CHK.4.4's crash-safety claim, at the unit level: the

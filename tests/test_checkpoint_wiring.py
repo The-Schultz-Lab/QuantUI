@@ -104,17 +104,62 @@ class TestCalcModuleSignatures:
         )
 
     def test_app_passes_the_checkpoint_to_every_long_calc(self):
-        """The three calc types that can be interrupted must all receive one."""
+        """The calc types that can be interrupted must all receive one."""
         import quantui.app as A
 
         src = Path(A.__file__).read_text(encoding="utf-8")
-        assert src.count("checkpoint=_ckpt") >= 3
+        assert src.count("checkpoint=_ckpt") >= 4
 
     def test_app_passes_resume_to_the_resumable_calc_types(self):
         import quantui.app as A
 
         src = Path(A.__file__).read_text(encoding="utf-8")
-        assert src.count("resume=_resume") >= 2
+        assert src.count("resume=_resume") >= 3
+
+    def test_frequency_run_receives_the_actual_checkpoint_and_resume(self):
+        """AUDIT F16 — a source-text occurrence count can pass even if
+        Frequency's own call site never grew ``checkpoint=_ckpt`` — the
+        app opened ``_ckpt``/resolved ``_resume`` but never passed either
+        into ``run_freq_calc``. Drives the real dispatch (mocking only
+        ``run_freq_calc`` itself) and inspects the actual call arguments.
+        """
+        from unittest.mock import patch
+
+        from quantui.app import QuantUIApp
+        from quantui.freq_calc import FreqResult
+        from quantui.molecule import Molecule
+
+        app = QuantUIApp()
+        app._set_molecule(
+            Molecule(
+                ["O", "H", "H"],
+                [[0.0, 0.0, 0.0], [0.757, 0.587, 0.0], [-0.757, 0.587, 0.0]],
+            )
+        )
+        app.calc_type_dd.value = "Frequency"
+        mock_result = FreqResult(
+            energy_hartree=-76.0,
+            homo_lumo_gap_ev=10.0,
+            converged=True,
+            n_iterations=8,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2O",
+            frequencies_cm1=[1600.0, 3600.0, 3800.0],
+            ir_intensities=[1.0, 2.0, 3.0],
+            raman_activities=[],
+            zpve_hartree=0.02,
+        )
+        with patch(
+            "quantui.freq_calc.run_freq_calc", return_value=mock_result
+        ) as mock_run:
+            with patch("quantui.save_result"):
+                app._do_run()
+
+        mock_run.assert_called_once()
+        _, kwargs = mock_run.call_args
+        assert kwargs.get("checkpoint") is not None
+        assert "resume" in kwargs
 
 
 # ══ Warm-start selection ═════════════════════════════════════════════════════
@@ -222,16 +267,70 @@ class TestPrepareScfCheckpoint:
 
 class TestReuseScanPoint:
     class _FakeAtoms:
+        """Minimal ASE-Atoms-alike: implements exactly what
+        _reuse_scan_point needs, including the real geometry measurements
+        (AUDIT F10's cross-check) computed from whatever positions were
+        last set — not hardcoded, so a mismatched geometry is actually
+        caught rather than trivially passing.
+        """
+
         def __init__(self):
             self.positions = None
 
         def set_positions(self, coords):
             self.positions = coords
 
+        def _vec(self, i, j):
+            a, b = self.positions[i], self.positions[j]
+            return [b[k] - a[k] for k in range(3)]
+
+        def get_distance(self, i1, i2):
+            import math
+
+            v = self._vec(i1, i2)
+            return math.sqrt(sum(c * c for c in v))
+
+        def get_angle(self, i1, i2, i3):
+            import math
+
+            v1 = self._vec(i2, i1)
+            v2 = self._vec(i2, i3)
+            dot = sum(a * b for a, b in zip(v1, v2))
+            n1 = math.sqrt(sum(c * c for c in v1))
+            n2 = math.sqrt(sum(c * c for c in v2))
+            return math.degrees(math.acos(max(-1.0, min(1.0, dot / (n1 * n2)))))
+
+        def get_dihedral(self, i1, i2, i3, i4):
+            import math
+
+            p = self.positions
+            b1 = [p[i2][k] - p[i1][k] for k in range(3)]
+            b2 = [p[i3][k] - p[i2][k] for k in range(3)]
+            b3 = [p[i4][k] - p[i3][k] for k in range(3)]
+
+            def cross(a, b):
+                return [
+                    a[1] * b[2] - a[2] * b[1],
+                    a[2] * b[0] - a[0] * b[2],
+                    a[0] * b[1] - a[1] * b[0],
+                ]
+
+            def norm(v):
+                return math.sqrt(sum(c * c for c in v))
+
+            n1 = cross(b1, b2)
+            n2 = cross(b2, b3)
+            m1 = cross(n1, [c / norm(b2) for c in b2])
+            x = sum(a * b for a, b in zip(n1, n2))
+            y = sum(a * b for a, b in zip(m1, n2))
+            return math.degrees(math.atan2(y, x)) % 360.0
+
     def _record(self, **overrides):
         base = {
             "index": 1,
             "value": 1.25,
+            "scan_type": "bond",
+            "atom_indices": [0, 1],
             "energy_hartree": -1.5,
             "ok": True,
             "atoms": ["H", "H"],
@@ -240,9 +339,11 @@ class TestReuseScanPoint:
         base.update(overrides)
         return base
 
-    def _call(self, record, value=1.25):
+    def _call(self, record, value=1.25, scan_type="bond", atom_indices=(0, 1)):
         atoms = self._FakeAtoms()
-        result = pes_scan._reuse_scan_point(record, value, atoms, _FakeMolecule())
+        result = pes_scan._reuse_scan_point(
+            record, value, atoms, _FakeMolecule(), scan_type, atom_indices
+        )
         return result, atoms
 
     def test_reuses_a_matching_point(self):
@@ -281,9 +382,63 @@ class TestReuseScanPoint:
     def test_carries_charge_and_multiplicity_from_the_live_molecule(self):
         atoms = self._FakeAtoms()
         molecule = _FakeMolecule(charge=-1, multiplicity=2)
-        result = pes_scan._reuse_scan_point(self._record(), 1.25, atoms, molecule)
+        result = pes_scan._reuse_scan_point(
+            self._record(), 1.25, atoms, molecule, "bond", (0, 1)
+        )
         assert result[1].charge == -1
         assert result[1].multiplicity == 2
+
+    # ── AUDIT F10 — coordinate identity, not just the scalar value ──────────
+
+    def test_rejects_a_different_scan_type_even_with_matching_value(self):
+        """The audit's exact scenario: a banked bond-scan point at 1.0 A
+        must not be reused for an angle scan whose target also happens to
+        be 1.0 (degrees, but the record's "value" field carries no unit)."""
+        record = self._record(value=1.0, scan_type="bond")
+        result, _ = self._call(record, value=1.0, scan_type="angle")
+        assert result is None
+
+    def test_rejects_different_atom_indices_even_with_matching_scan_type(self):
+        """A bond scan of atoms (0,1) must not be reused for a bond scan of
+        atoms (0,2) — same scan_type, different coordinate."""
+        record = self._record(atom_indices=[0, 1])
+        result, _ = self._call(record, atom_indices=(0, 2))
+        assert result is None
+
+    def test_rejects_a_stored_geometry_whose_actual_coordinate_disagrees(self):
+        """Defense in depth: even if scan_type/atom_indices both match, the
+        stored geometry's OWN bond length must actually equal the target —
+        a record whose self-reported "value" doesn't match its real
+        coordinates (e.g. from a bug, or hand-edited checkpoint) must not
+        be trusted just because the label says so."""
+        # atoms 0,1 are really 2.0 A apart, but the record claims 1.0 A.
+        record = self._record(value=1.0, coordinates=[[0.0, 0.0, 0.0], [0.0, 0.0, 2.0]])
+        result, _ = self._call(record, value=1.0)
+        assert result is None
+
+    def test_angle_scan_reuse_still_works(self):
+        """Sanity check that the new cross-check doesn't break a genuine
+        angle-scan reuse."""
+        # H-O-H at 104.5 degrees, O at origin.
+        import math
+
+        theta = math.radians(104.5)
+        coords = [
+            [math.sin(theta / 2), math.cos(theta / 2), 0.0],
+            [0.0, 0.0, 0.0],
+            [-math.sin(theta / 2), math.cos(theta / 2), 0.0],
+        ]
+        record = self._record(
+            value=104.5,
+            scan_type="angle",
+            atom_indices=[0, 1, 2],
+            atoms=["H", "O", "H"],
+            coordinates=coords,
+        )
+        result, _ = self._call(
+            record, value=104.5, scan_type="angle", atom_indices=(0, 1, 2)
+        )
+        assert result is not None
 
 
 # ══ Resume offer ═════════════════════════════════════════════════════════════

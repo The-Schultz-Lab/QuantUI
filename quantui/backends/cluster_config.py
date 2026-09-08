@@ -139,8 +139,8 @@ SLURM_SCRIPT_TEMPLATE = """#!/bin/bash
 #SBATCH --ntasks={cores}
 #SBATCH --mem={memory}G
 #SBATCH --time={walltime}
-#SBATCH --output={output_file}
-#SBATCH --error={error_file}{optional_directives}
+#SBATCH --output="{output_file}"
+#SBATCH --error="{error_file}"{optional_directives}
 
 set -euo pipefail
 

@@ -3,8 +3,15 @@ TD-DFT excited-state calculation using PySCF.
 
 Computes vertical excitation energies and oscillator strengths using
 time-dependent density functional theory (TD-DFT).  For Hartree-Fock
-methods (RHF/UHF), falls back to TDHF (equivalent to CIS) and notes
-this in the output.
+methods (RHF/UHF), falls back to full TDHF (the random-phase
+approximation, RPA — ``mf.TDHF()``) and notes this in the output.
+
+AUDIT additional-concerns — TDHF is NOT the same method as CIS. Full
+TDHF/RPA includes the excitation/de-excitation (A/B block) coupling that
+the Tamm-Dancoff approximation (TDA) drops; CIS is HF's TDA. This module
+calls ``mf.TDHF()`` (full RPA), so its labels say TDHF/RPA rather than
+CIS. See PySCF's own discussion of the distinction:
+https://pyscf.org/user/tddft.html
 
 Platform notes
 --------------
@@ -56,7 +63,12 @@ class TDDFTResult:
         energy_hartree: Ground-state SCF energy in Hartrees.
         homo_lumo_gap_ev: HOMO-LUMO gap in eV from the ground-state SCF,
             or ``None``.
-        converged: ``True`` if the ground-state SCF converged.
+        converged: ``True`` only when BOTH the ground-state SCF converged
+            AND (if excited states were requested and the solve ran) every
+            requested TD root converged (AUDIT F08) — an SCF-only flag is
+            not overall success for a calculation whose deliverable is the
+            excited states. See ``td_converged``/``n_converged_states`` for
+            the per-root detail this folds together.
         n_iterations: Number of ground-state SCF macro-iterations.
         method: DFT functional or HF method used.
         basis: Basis set.
@@ -78,6 +90,16 @@ class TDDFTResult:
     oscillator_strengths: List[float] = field(default_factory=list)
     nstates: int = 10
     density_fit: bool = False
+    # AUDIT F08 — per-root Davidson convergence from the TD solver itself,
+    # distinct from the ground-state SCF's own converged flag above. None
+    # if the TD solve never ran (e.g. it raised before td.kernel()
+    # completed) or the installed PySCF doesn't expose td.converged.
+    td_converged: Optional[List[bool]] = None
+    # Count of roots whose td_converged flag is True — distinguishes
+    # "requested" (nstates), "returned" (len(excitation_energies_ev)), and
+    # "converged" root counts, since a Davidson solve can return energies
+    # for roots it never actually converged.
+    n_converged_states: Optional[int] = None
     # M-UX2 UXP2.10 — the actual PySCF class dispatched for the
     # ground-state SCF (e.g. "RHF", "UHF", "RKS", "UKS"); "" for an older
     # saved result.
@@ -115,8 +137,10 @@ def run_tddft_calc(
     equations to compute the requested number of vertical excitation energies
     and their oscillator strengths.
 
-    When *method* is ``'RHF'`` or ``'UHF'``, the function uses TDHF (CIS)
-    rather than TD-DFT and writes a note to *progress_stream*.  For a proper
+    When *method* is ``'RHF'`` or ``'UHF'``, the function uses full TDHF
+    (RPA — NOT the CIS/Tamm-Dancoff approximation; see the module
+    docstring) rather than TD-DFT, and writes a note to *progress_stream*.
+    For a proper
     UV-Vis simulation, a DFT functional such as ``'B3LYP'`` or ``'PBE0'`` is
     strongly recommended.
 
@@ -234,7 +258,7 @@ def _run_tddft_calc_body(
         # M-UX2 UXP2.10 — capture before maybe_apply_d3 can wrap/rename it.
         scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
-        mf = maybe_apply_d3(mf, method, progress_stream=progress_stream)
+        mf, _ = maybe_apply_d3(mf, method, progress_stream=progress_stream)
 
     # Density fitting (RI), opt-in (M-DF). Off by default. TD-DFT is where the
     # measured win is largest (~1.6x on aspirin), so this is the primary target.
@@ -245,9 +269,11 @@ def _run_tddft_calc_body(
     if using_hf and progress_stream is not None:
         try:
             progress_stream.write(
-                "\nNote: Using TDHF (CIS) for excited states — RHF/UHF was selected.\n"
-                "For a proper TD-DFT UV-Vis spectrum, use a DFT functional\n"
-                "such as B3LYP or PBE0 in the Method dropdown.\n\n"
+                "\nNote: Using TDHF/RPA for excited states — RHF/UHF was selected.\n"
+                "This is full TDHF (the random-phase approximation, with\n"
+                "excitation/de-excitation coupling), not the CIS/Tamm-Dancoff\n"
+                "approximation. For a proper TD-DFT UV-Vis spectrum, use a DFT\n"
+                "functional such as B3LYP or PBE0 in the Method dropdown.\n\n"
             )
         except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
             pass
@@ -297,11 +323,21 @@ def _run_tddft_calc_body(
     # ── TD-DFT / TDHF ────────────────────────────────────────────────────────
     excitation_energies_ev: List[float] = []
     oscillator_strengths: List[float] = []
+    # AUDIT F08 — td.kernel() copies energies/oscillator strengths without
+    # checking td.converged (a per-root array from the Davidson solve). A
+    # real one-iteration-limited TDHF/6-31G water solve had
+    # converged=[False, False, False] yet reported success with three
+    # excitations. scf_converged is this function's SCF-only flag (the old
+    # sole source of `converged` below); td_converged/n_converged_states
+    # carry the TD solve's own per-root status.
+    scf_converged = converged
+    td_converged: Optional[List[bool]] = None
+    n_converged_states: Optional[int] = None
 
     try:
         emit_status(
             stream,
-            f"Solving {'TDHF (CIS)' if using_hf else 'TD-DFT'} "
+            f"Solving {'TDHF/RPA' if using_hf else 'TD-DFT'} "
             f"excited states ({nstates})…",
         )
         td = mf.TDHF() if using_hf else mf.TDDFT()
@@ -318,6 +354,11 @@ def _run_tddft_calc_body(
         osc = td.oscillator_strength()
         oscillator_strengths = [float(f) for f in osc]
 
+        _raw_td_converged = getattr(td, "converged", None)
+        if _raw_td_converged is not None:
+            td_converged = [bool(c) for c in _raw_td_converged]
+            n_converged_states = sum(td_converged)
+
     except Exception as exc:
         logger.warning("TD-DFT/TDHF calculation failed: %s", exc)
         if progress_stream is not None:
@@ -325,6 +366,18 @@ def _run_tddft_calc_body(
                 progress_stream.write(f"\n⚠ TD-DFT failed: {exc}\n")
             except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
                 pass
+
+    # AUDIT F08 — overall success requires every requested root to have
+    # actually converged, not just the ground-state SCF. A TD-DFT run whose
+    # entire purpose is the excited states is not "converged" if the
+    # Davidson solve raised before producing any roots, or if it returned
+    # roots that never converged.
+    converged = (
+        scf_converged
+        and excitation_energies_ev != []
+        and td_converged is not None
+        and all(td_converged)
+    )
 
     return TDDFTResult(
         energy_hartree=energy_hartree,
@@ -339,4 +392,6 @@ def _run_tddft_calc_body(
         nstates=nstates,
         density_fit=density_fit_used,
         scf_variant=scf_variant,
+        td_converged=td_converged,
+        n_converged_states=n_converged_states,
     )

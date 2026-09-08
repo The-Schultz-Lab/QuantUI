@@ -47,7 +47,12 @@ class SessionResult:
         energy_hartree: Total SCF energy in Hartrees.
         homo_lumo_gap_ev: HOMO-LUMO gap in electronvolts, or ``None`` if the
             gap cannot be determined (e.g. open-shell UHF with complex orbital
-            occupations, or too few occupied orbitals).
+            occupations, or too few occupied orbitals). AUDIT additional-
+            concerns: for a 2-D ``mo_energy`` (UHF/UKS), this is the ALPHA-
+            channel gap only — the beta channel is not computed or reported
+            here. The result card labels this "HOMO-LUMO gap (α)" for an
+            open-shell reference; treat it as a single-channel descriptor,
+            not a complete open-shell orbital spectrum.
         converged: ``True`` if the SCF iterations reached the convergence
             threshold; ``False`` if the maximum iteration count was hit.
         n_iterations: Number of SCF macro-iterations completed.  May be
@@ -91,6 +96,12 @@ class SessionResult:
     # method is ``"CCSD(T)"``. ``None`` for plain CCSD. Again, included in
     # ``energy_hartree`` when set.
     ccsd_t_correction_hartree: Optional[float] = None
+    # Whether the CCSD amplitude iterations themselves converged (AUDIT
+    # F07). ``None`` unless method is ``"CCSD"``/``"CCSD(T)"``. ``converged``
+    # above already folds this in (False whenever this is False), but a
+    # caller inspecting *why* wants this separated from the HF reference's
+    # own convergence.
+    cc_converged: Optional[bool] = None
     # GPU offload status. ``gpu_used`` is True only when the
     # SCF object was successfully migrated to gpu4pyscf for this run.
     # ``gpu_name`` carries the CUDA device name when ``gpu_used`` is True so
@@ -101,6 +112,13 @@ class SessionResult:
     # ``False`` for exact four-centre integrals (the default) and for the
     # post-HF paths, which are never fitted here.
     density_fit: bool = False
+    # Whether Grimme D3 dispersion was actually applied (AUDIT F04). ``None``
+    # when the method doesn't use D3 (e.g. RHF, or a functional whose
+    # dispersion is built in, like wB97X-D); ``True``/``False`` when it does
+    # and ``pyscf.dftd3`` was/wasn't importable. A ``False`` result is
+    # missing its dispersion correction even though ``method`` still reads
+    # e.g. "PBE-D3" — see :func:`maybe_apply_d3` and :meth:`summary`.
+    dispersion_applied: Optional[bool] = None
     solvent: Optional[str] = None
     mo_energy_hartree: Optional[Any] = None  # np.ndarray (n_mo,) or (2, n_mo) UHF
     mo_occ: Optional[Any] = None  # np.ndarray (n_mo,) or (2, n_mo) UHF
@@ -136,6 +154,16 @@ class SessionResult:
         ]
         if self.homo_lumo_gap_ev is not None:
             lines.append(f"  HOMO-LUMO gap : {self.homo_lumo_gap_ev:.4f} eV")
+        if self.dispersion_applied is False:
+            lines.append(
+                f"  ⚠️  {self.method} requires D3 dispersion, but pyscf.dftd3 "
+                "was unavailable — this result has NO dispersion correction."
+            )
+        if self.cc_converged is False:
+            lines.append(
+                "  ⚠️  CCSD amplitude iterations did NOT converge — the "
+                "correlation energy above is unreliable."
+            )
         lines += [
             "=" * 60,
             (
@@ -155,22 +183,33 @@ class SessionResult:
 
 # Maps QuantUI display names → PySCF xc strings where they differ.
 #
-# ``wB97X-D`` is a special case: PySCF + dftd3 cannot compose
-# ``mf.xc = "wb97x-d"`` cleanly (it's on dftd3's black-list — see
-# pyscf/pyscf#2069). The workaround that matches what our UI label
-# already claims ("wB97X-D — Range-Separated Hybrid + D3 Dispersion")
-# is to use the bare ``wb97x`` functional and apply D3 via dftd3
-# externally — same pattern as PBE-D3 below. This is D3, not the
-# original Chai 2008 D2; the empirical dispersion energies differ by
-# a few percent for most systems but the functional family is the same.
+# ``wB97X-D`` is a special case, but NOT the one this table used to assume
+# (AUDIT F03). PySCF rejects ``mf.xc = "wb97x-d"`` — but not because it needs
+# an external dispersion correction composed on: PySCF's own xc_code parser
+# (``pyscf.scf.dispersion.parse_dft``) black-lists the short "wb97x-d" /
+# "wb97x_d" spellings specifically because they're ambiguous between the
+# original Chai & Head-Gordon (2008) wB97X-D functional (its own built-in
+# empirical dispersion, baked into the fit, no Grimme correction needed) and
+# a Grimme-D3-corrected bare wB97X. Aliasing to bare ``wb97x`` and applying
+# external Grimme D3 (as this table previously did) silently calculates a
+# *different* functional: wb97x has omega=0.3 range separation, wb97x-d has
+# omega=0.2 and different short-range exact exchange (confirmed via
+# ``pyscf.dft.libxc.rsh_coeff``) — not just a different dispersion model.
+#
+# The actual wB97X-D functional is available directly under its full LibXC
+# name, which PySCF's short-alias black-list does not intercept, and needs
+# no external D3 wrapper (see ``_NEEDS_D3`` below):
 _XC_ALIAS: Dict[str, str] = {
     "M06-L": "m06l",
-    "wB97X-D": "wb97x",  # bare functional; D3 applied via _NEEDS_D3
+    "wB97X-D": "hyb_gga_xc_wb97x_d",  # true Chai/Head-Gordon 2008 functional
     "CAM-B3LYP": "camb3lyp",
     "PBE-D3": "pbe",  # base functional; D3 applied separately
 }
 # Methods that require Grimme D3 dispersion correction via pyscf.dftd3.
-_NEEDS_D3: frozenset = frozenset({"PBE-D3", "wB97X-D"})
+# wB97X-D is NOT here: its dispersion is already part of the XC functional
+# itself (see _XC_ALIAS comment above) — wrapping it in pyscf.dftd3 would
+# double-count dispersion under a method that already includes its own.
+_NEEDS_D3: frozenset = frozenset({"PBE-D3"})
 
 
 def resolve_xc(method: str) -> str:
@@ -207,18 +246,31 @@ def needs_d3(method: str) -> bool:
 def maybe_apply_d3(mf, method: str, progress_stream=None):
     """Wrap ``mf`` in ``pyscf.dftd3.dftd3(mf)`` if ``method`` requires D3.
 
-    Returns the (possibly wrapped) mf object. On ``pyscf.dftd3``
-    ImportError, returns the original ``mf`` unmodified and surfaces
-    a warning via ``progress_stream`` (if provided) so the user sees
-    that the result is missing the dispersion correction.
+    Returns ``(mf, dispersion_applied)``: the (possibly wrapped) mf object,
+    and whether the D3 wrapper was actually applied. ``dispersion_applied``
+    is ``True`` when D3 was applied, ``False`` when the method needs D3 but
+    ``pyscf.dftd3`` is unavailable (AUDIT F04 — the result is silently
+    missing its dispersion correction; callers should record this rather
+    than keep reporting the original method label as if uncorrected =
+    corrected), and ``None`` when the method doesn't use D3 at all.
+
+    On ``pyscf.dftd3`` ImportError, always logs a warning (so every call
+    site is visible in logs even without a progress stream — the optimizer
+    path used to call this with no stream and so surfaced nothing at all),
+    and additionally surfaces the warning via ``progress_stream`` when one
+    is provided.
     """
     if not needs_d3(method):
-        return mf
+        return mf, None
     try:
         from pyscf import dftd3 as _dftd3
 
-        return _dftd3.dftd3(mf)
+        return _dftd3.dftd3(mf), True
     except ImportError:
+        logger.warning(
+            "pyscf.dftd3 not available — running %s without D3 correction.",
+            method,
+        )
         if progress_stream is not None:
             try:
                 progress_stream.write(
@@ -227,7 +279,7 @@ def maybe_apply_d3(mf, method: str, progress_stream=None):
                 )
             except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
                 pass
-        return mf
+        return mf, False
 
 
 def run_in_session(
@@ -456,6 +508,7 @@ def _run_session_calc_body(
     # --- Select SCF method ---
     method_upper = method.upper()
 
+    dispersion_applied: Optional[bool] = None
     if method_upper == "RHF":
         mf = scf.RHF(mol)
         scf_variant = type(mf).__name__
@@ -500,7 +553,9 @@ def _run_session_calc_body(
         # GOTCHAS.md.
         scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
-        mf = maybe_apply_d3(mf, method, progress_stream=progress_stream)
+        mf, dispersion_applied = maybe_apply_d3(
+            mf, method, progress_stream=progress_stream
+        )
 
     # --- Density fitting (RI), opt-in (M-DF) ---
     # Applied to the freshly built SCF object, BEFORE the PCM wrap and the GPU
@@ -623,25 +678,38 @@ def _run_session_calc_body(
                 f"({method}/{basis}): {exc}"
             ) from exc
 
+    # AUDIT F07 — post-HF work (MP2/CCSD/CCSD(T)) needs a converged
+    # reference; running it on an unconverged SCF's orbitals produces a
+    # correlation "correction" on top of a wrong Hamiltonian, not a small
+    # numerical difference. Checked once, right after the reference SCF,
+    # before any post-HF method is even attempted.
+    scf_converged = bool(getattr(mf, "converged", False))
+
     # --- MP2 correlation energy (post-HF) ---
     mp2_correlation_hartree: Optional[float] = None
     if method_upper == "MP2":
-        try:
-            from pyscf import mp as _mp
+        if not scf_converged:
+            emit_status(
+                stream,
+                "Skipping MP2 — reference SCF did not converge.",
+            )
+        else:
+            try:
+                from pyscf import mp as _mp
 
-            emit_status(stream, "Running MP2 correlation…")
-            _mp2 = _mp.MP2(mf)
-            # verbose=5 surfaces integral-transform / kernel milestones for
-            # the live status label during the correlation step.
-            _mp2.verbose = 5
-            _mp2.stdout = stream
-            _e_corr, _ = _mp2.kernel()
-            mp2_correlation_hartree = float(_e_corr)
-            energy_hartree += float(_e_corr)
-        except Exception as exc:
-            raise RuntimeError(
-                f"MP2 correction failed for {molecule.get_formula()}: {exc}"
-            ) from exc
+                emit_status(stream, "Running MP2 correlation…")
+                _mp2 = _mp.MP2(mf)
+                # verbose=5 surfaces integral-transform / kernel milestones for
+                # the live status label during the correlation step.
+                _mp2.verbose = 5
+                _mp2.stdout = stream
+                _e_corr, _ = _mp2.kernel()
+                mp2_correlation_hartree = float(_e_corr)
+                energy_hartree += float(_e_corr)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"MP2 correction failed for {molecule.get_formula()}: {exc}"
+                ) from exc
 
     # --- Coupled cluster correlation ---
     # CCSD adds singles + doubles excitations on top of the RHF reference;
@@ -650,37 +718,65 @@ def _run_session_calc_body(
     # show the HF reference + correlation breakdown (mirrors the MP2 path).
     ccsd_correlation_hartree: Optional[float] = None
     ccsd_t_correction_hartree: Optional[float] = None
+    # AUDIT F07 — CCSD's own amplitude convergence, tracked separately from
+    # the HF reference's. The old code accepted _ccsd_obj.kernel()'s
+    # correlation energy unconditionally and never checked
+    # _ccsd_obj.converged, so a real one-iteration-limited non-convergence
+    # (verified: energy -75.007987575 Eh, converged=False) was reported as
+    # converged=True (from the HF reference alone). CCSD(T) also used to
+    # proceed to the triples correction regardless of CCSD's convergence.
+    cc_converged: Optional[bool] = None
     if method_upper in ("CCSD", "CCSD(T)"):
-        try:
-            from pyscf import cc as _cc
-
-            emit_status(stream, "Running CCSD correlation…")
-            _ccsd_obj = _cc.CCSD(mf)
-            _ccsd_obj.verbose = 4
-            _ccsd_obj.stdout = stream
-            _e_corr_ccsd, _t1, _t2 = _ccsd_obj.kernel()
-            ccsd_correlation_hartree = float(_e_corr_ccsd)
-            energy_hartree += float(_e_corr_ccsd)
-        except Exception as exc:
-            raise RuntimeError(
-                f"CCSD correction failed for {molecule.get_formula()}: {exc}"
-            ) from exc
-        if method_upper == "CCSD(T)":
+        if not scf_converged:
+            emit_status(
+                stream,
+                "Skipping CCSD — reference SCF did not converge.",
+            )
+        else:
             try:
-                emit_status(stream, "Computing CCSD(T) triples…")
+                from pyscf import cc as _cc
+
+                emit_status(stream, "Running CCSD correlation…")
+                _ccsd_obj = _cc.CCSD(mf)
                 _ccsd_obj.verbose = 4
                 _ccsd_obj.stdout = stream
-                _e_t = _ccsd_obj.ccsd_t()
-                ccsd_t_correction_hartree = float(_e_t)
-                energy_hartree += float(_e_t)
+                _e_corr_ccsd, _t1, _t2 = _ccsd_obj.kernel()
+                cc_converged = bool(getattr(_ccsd_obj, "converged", False))
+                ccsd_correlation_hartree = float(_e_corr_ccsd)
+                energy_hartree += float(_e_corr_ccsd)
             except Exception as exc:
                 raise RuntimeError(
-                    f"CCSD(T) triples correction failed "
-                    f"for {molecule.get_formula()}: {exc}"
+                    f"CCSD correction failed for {molecule.get_formula()}: {exc}"
                 ) from exc
+            if method_upper == "CCSD(T)":
+                if not cc_converged:
+                    emit_status(
+                        stream,
+                        "Skipping CCSD(T) triples — CCSD amplitudes did "
+                        "not converge.",
+                    )
+                else:
+                    try:
+                        emit_status(stream, "Computing CCSD(T) triples…")
+                        _ccsd_obj.verbose = 4
+                        _ccsd_obj.stdout = stream
+                        _e_t = _ccsd_obj.ccsd_t()
+                        ccsd_t_correction_hartree = float(_e_t)
+                        energy_hartree += float(_e_t)
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f"CCSD(T) triples correction failed "
+                            f"for {molecule.get_formula()}: {exc}"
+                        ) from exc
 
     # --- Extract results from the mean-field object ---
-    converged = bool(getattr(mf, "converged", False))
+    # AUDIT F07 — overall convergence must reflect every stage that ran:
+    # the HF reference, and (when requested) CCSD's own amplitude solve.
+    # A method that needed CC and didn't get a converged one is not a
+    # converged result, regardless of what the HF reference alone did.
+    converged = scf_converged
+    if method_upper in ("CCSD", "CCSD(T)"):
+        converged = scf_converged and bool(cc_converged)
     n_iterations = int(getattr(mf, "cycles", -1))
 
     import numpy as _np
@@ -729,6 +825,15 @@ def _run_session_calc_body(
 
     mulliken_charges: Optional[List[float]] = None
     dipole_moment_debye: Optional[float] = None
+    # AUDIT additional-concerns — for MP2/CCSD/CCSD(T), ``mf`` here is
+    # still the HF reference object (the post-HF correlation energy is
+    # computed separately and added to ``energy_hartree``; no correlated
+    # density is built for these methods). Both properties below are
+    # therefore HF-reference values even when method='CCSD(T)', NOT a
+    # correlated dipole/population — the result card labels them
+    # accordingly (_result_extra_rows' "HF reference" note) rather than
+    # presenting them as an unqualified property of the requested method.
+    #
     # Audit fix (2026-07-14): both mf.mulliken_pop() and mf.dip_moment()
     # are well-defined and work correctly for a genuine UHF object (verified
     # empirically against PySCF) — the previous ``method_upper != "UHF"``
@@ -834,9 +939,11 @@ def _run_session_calc_body(
         mp2_correlation_hartree=mp2_correlation_hartree,
         ccsd_correlation_hartree=ccsd_correlation_hartree,
         ccsd_t_correction_hartree=ccsd_t_correction_hartree,
+        cc_converged=cc_converged,
         gpu_used=gpu_used,
         gpu_name=gpu_name,
         density_fit=density_fit_used,
+        dispersion_applied=dispersion_applied,
         solvent=solvent,
         mo_energy_hartree=_mo_energy_ha_arr,
         mo_occ=_mo_occ_arr,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shlex
 import subprocess
 import sys
 import time
@@ -169,13 +170,23 @@ class SlurmBackend:
         return request.request_id
 
     def _worker_command(self, request_path: Path, staging_dir: Path) -> str:
-        py = sys.executable
-        inner = f"{py} -m quantui.backends.worker --request {request_path}"
+        # AUDIT F21 — every path here is inserted into shell text (this
+        # string is embedded verbatim into the generated sbatch script),
+        # not passed as an argv list, so an unquoted path containing a
+        # space (or any other shell metacharacter) splits into multiple
+        # arguments. E.g. unquoted "/tmp/audit folder/request.json" became
+        # "--request /tmp/audit" plus a stray "folder/request.json"
+        # argument. shlex.quote makes every one of these shell-safe
+        # regardless of what it contains.
+        py = shlex.quote(sys.executable)
+        request_arg = shlex.quote(str(request_path))
+        inner = f"{py} -m quantui.backends.worker --request {request_arg}"
         if self.use_apptainer:
-            image = self.apptainer_image
+            image = shlex.quote(self.apptainer_image)
+            staging_arg = shlex.quote(str(staging_dir))
             return (
-                f'apptainer exec --nv --bind "$HOME:$HOME" --pwd "{staging_dir}" '
-                f'"{image}" {inner}'
+                f'apptainer exec --nv --bind "$HOME:$HOME" --pwd {staging_arg} '
+                f"{image} {inner}"
             )
         return inner
 

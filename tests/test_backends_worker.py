@@ -50,6 +50,46 @@ class TestWorker:
         assert outcome.status == "error"
         assert outcome.error["code"] == "UNSUPPORTED_CAPABILITY"
 
+    @pytest.mark.parametrize(
+        "calc_type", ["geometry_opt", "frequency", "tddft", "nmr", "pes_scan"]
+    )
+    def test_solvent_on_unsupported_calc_type_returns_error(self, staging, calc_type):
+        """AUDIT F11 — run_freq_calc/run_tddft_calc/run_nmr_calc/run_pes_scan/
+        optimize_geometry don't accept a solvent argument at all; a
+        solvent set for one of these calc_types must fail the request
+        rather than silently run gas-phase.
+        """
+        data = json.loads((staging / "request.json").read_text())
+        data["calc_type"] = calc_type
+        data["solvent"] = "water"
+        (staging / "request.json").write_text(json.dumps(data))
+
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "error"
+        assert outcome.error["code"] == "UNSUPPORTED_CAPABILITY"
+        assert "solvent" in outcome.error["user_message"].lower()
+
+    @patch("quantui.session_calc.run_in_session")
+    def test_solvent_on_single_point_is_accepted(self, mock_run, staging):
+        """Sanity check: the calc_types that DO support solvent must not be
+        rejected by the new guard."""
+        data = json.loads((staging / "request.json").read_text())
+        data["solvent"] = "water"
+        (staging / "request.json").write_text(json.dumps(data))
+        mock_run.return_value = SimpleNamespace(
+            energy_hartree=-1.12,
+            homo_lumo_gap_ev=10.0,
+            converged=True,
+            n_iterations=5,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2",
+        )
+
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "success"
+        assert mock_run.call_args.kwargs["solvent"] == "water"
+
     @patch("quantui.session_calc.run_in_session")
     def test_single_point_success(self, mock_run, staging):
         mock_run.return_value = SimpleNamespace(
@@ -228,7 +268,7 @@ class TestCheckpointWiring:
     most for a killed run at, say, point 20 of 25.
     """
 
-    def _identity(self, *, calc_type: str):
+    def _identity(self, *, calc_type: str, extra: tuple = ()):
         from quantui.checkpoint import CalcIdentity
         from quantui.molecule import Molecule
 
@@ -239,7 +279,7 @@ class TestCheckpointWiring:
             multiplicity=1,
         )
         return CalcIdentity.from_molecule(
-            mol, calc_type=calc_type, method="RHF", basis="STO-3G"
+            mol, calc_type=calc_type, method="RHF", basis="STO-3G", extra=extra
         )
 
     @patch("quantui.optimizer.optimize_geometry")
@@ -368,7 +408,11 @@ class TestCheckpointWiring:
     ):
         import json as _json
 
-        ckpt = self._identity(calc_type="pes_scan")
+        # AUDIT F10 — the request sets no scan_type/atom_indices options, so
+        # _run_pes_scan defaults to scan_type="bond", atom_indices=[0, 1];
+        # the checkpoint identity here must match that exactly, since
+        # resume_key now includes them.
+        ckpt = self._identity(calc_type="pes_scan", extra=("bond", "0", "1"))
         from quantui.checkpoint import Checkpoint
 
         real_ckpt = Checkpoint(ckpt, root=staging / ".checkpoint")

@@ -3,6 +3,7 @@ Tests for SlurmBackend submit/poll/cancel using mock SLURM scripts.
 """
 
 import json
+import shlex
 import subprocess
 import sys
 import time
@@ -163,6 +164,119 @@ class TestSlurmBackendSubmit:
         since = slurm_backend.registry.seconds_since_last_slurm_submit()
         assert since is not None
         assert since < 5
+
+
+class TestSlurmBackendWorkerCommandQuoting:
+    """AUDIT F21 — the generated worker command is embedded as shell text
+    in the sbatch script (not passed as an argv list), so an unquoted path
+    containing a space splits into multiple shell arguments. The audit's
+    own reproduction: ``/tmp/audit folder/request.json`` became
+    ``--request /tmp/audit`` plus a stray ``folder/request.json`` token.
+    """
+
+    def test_request_path_with_space_stays_one_argument(self, slurm_backend):
+        request_path = Path("/tmp/audit folder/request.json")
+        staging_dir = Path("/tmp/audit folder/staging")
+        cmd = slurm_backend._worker_command(request_path, staging_dir)
+        tokens = shlex.split(cmd)
+        assert tokens[-2] == "--request"
+        assert tokens[-1] == str(request_path)
+        assert (
+            len(tokens) == tokens.index("--request") + 2
+        ), f"request path split into extra shell tokens: {tokens}"
+
+    def test_apptainer_branch_quotes_staging_and_request_paths(self, tmp_path):
+        registry = JobRegistry(
+            jobs_root=tmp_path / "jobs", staging_root=tmp_path / "staging"
+        )
+        backend = SlurmBackend(
+            registry=registry,
+            partition="test",
+            use_apptainer=True,
+            apptainer_image="/opt/images/quantui image.sif",
+        )
+        request_path = Path("/tmp/audit folder/request.json")
+        staging_dir = Path("/tmp/audit folder/staging")
+        cmd = backend._worker_command(request_path, staging_dir)
+        tokens = shlex.split(cmd)
+        assert str(staging_dir) in tokens
+        assert "/opt/images/quantui image.sif" in tokens
+        assert tokens[-1] == str(request_path)
+
+    def test_dispatch_with_space_in_staging_path_produces_parseable_script(
+        self, mock_slurm_env, tmp_path
+    ):
+        """End-to-end: a staging root containing a space must still produce
+        a submit.slurm whose worker-command line survives a real shell
+        tokenization pass with the request path intact as one argument."""
+        spaced_root = tmp_path / "audit folder"
+        registry = JobRegistry(
+            jobs_root=spaced_root / "jobs",
+            staging_root=spaced_root / "staging",
+        )
+        backend = SlurmBackend(registry=registry, partition="test", use_apptainer=False)
+
+        with patch(
+            "quantui.backends.slurm.subprocess.run",
+            **{
+                "return_value.stdout": "Submitted batch job 777888\n",
+                "return_value.stderr": "",
+                "return_value.returncode": 0,
+            },
+        ):
+            rid = backend.dispatch(_request("spaced001"))
+
+        record = backend.registry.load(rid)
+        slurm_text = (record.staging_path / "submit.slurm").read_text()
+        worker_line = next(
+            line
+            for line in slurm_text.splitlines()
+            if "quantui.backends.worker" in line
+        )
+        tokens = shlex.split(worker_line)
+        request_arg = tokens[tokens.index("--request") + 1]
+        assert request_arg == str(record.staging_path / "request.json")
+        assert Path(request_arg).exists()
+
+    def test_output_and_error_directives_are_quoted_for_spaced_paths(
+        self, mock_slurm_env, tmp_path
+    ):
+        """SBATCH directive lines are also parsed word-by-word by sbatch;
+        an unquoted --output/--error path with a space in it is the same
+        class of bug as the worker command, just one line up."""
+        spaced_root = tmp_path / "audit folder"
+        registry = JobRegistry(
+            jobs_root=spaced_root / "jobs",
+            staging_root=spaced_root / "staging",
+        )
+        backend = SlurmBackend(registry=registry, partition="test", use_apptainer=False)
+
+        with patch(
+            "quantui.backends.slurm.subprocess.run",
+            **{
+                "return_value.stdout": "Submitted batch job 777999\n",
+                "return_value.stderr": "",
+                "return_value.returncode": 0,
+            },
+        ):
+            rid = backend.dispatch(_request("spaced002"))
+
+        record = backend.registry.load(rid)
+        slurm_text = (record.staging_path / "submit.slurm").read_text()
+        output_line = next(
+            line
+            for line in slurm_text.splitlines()
+            if line.startswith("#SBATCH --output=")
+        )
+        error_line = next(
+            line
+            for line in slurm_text.splitlines()
+            if line.startswith("#SBATCH --error=")
+        )
+        assert (
+            output_line == f'#SBATCH --output="{record.staging_path / "slurm-%j.out"}"'
+        )
+        assert error_line == f'#SBATCH --error="{record.staging_path / "slurm-%j.err"}"'
 
 
 class TestSlurmBackendReconcile:

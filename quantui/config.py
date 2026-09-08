@@ -101,11 +101,13 @@ METHOD_INFO = {
     },
     "wB97X-D": {
         "type": "dft",
-        "label": "wB97X-D — Range-Separated Hybrid + D3 Dispersion",
+        "label": "wB97X-D — Range-Separated Hybrid + Built-in Dispersion",
         "description": (
-            "Range-separated hybrid functional with empirical D3 dispersion correction. "
-            "Excellent for non-covalent interactions, charge-transfer excitations, "
-            "and systems where long-range exchange matters."
+            "Range-separated hybrid functional (Chai & Head-Gordon, 2008) with its "
+            "own empirical dispersion correction baked into the fit — not an "
+            "externally applied Grimme D3 correction. Excellent for non-covalent "
+            "interactions, charge-transfer excitations, and systems where "
+            "long-range exchange matters."
         ),
         "use_for": "Non-covalent interactions, excited states, large organic molecules.",
     },
@@ -639,6 +641,11 @@ def main():
 {geometry}
     '''
     mol.basis = '{basis}'
+    # AUDIT F06 — the resolved ECP mapping (e.g. {{'Na': 'LANL2DZ'}} for
+    # LANL2DZ/def2 heavy elements, {{}} for an all-electron basis). Without
+    # this a heavy-element system runs all-electron here — a different
+    # Hamiltonian than the in-app calculation, not just numerical noise.
+    mol.ecp = {ecp}
     mol.charge = {charge}
     mol.spin = {spin}
     mol.verbose = 4  # Detailed output
@@ -658,23 +665,33 @@ def main():
 
     try:
         method = '{method}'
-        # Display name → PySCF xc string + external D3 dispersion. Matches
-        # quantui/session_calc.py resolve_xc + maybe_apply_d3. Important
-        # for methods that PySCF doesn't accept directly (notably
-        # wB97X-D — on dftd3's black-list; PBE-D3 — D3 must be applied
-        # externally via pyscf.dftd3).
+        # Display name → PySCF xc string + external D3 dispersion where
+        # needed. Matches quantui/session_calc.py resolve_xc + maybe_apply_d3.
+        # wB97X-D maps to its full LibXC name (the actual Chai/Head-Gordon
+        # 2008 functional, built-in dispersion) because PySCF's short-alias
+        # parser black-lists 'wb97x-d'/'wb97x_d' as ambiguous; PBE-D3 needs
+        # Grimme D3 applied externally via pyscf.dftd3.
         _XC_ALIAS = {{
             'M06-L': 'm06l',
-            'wB97X-D': 'wb97x',
+            'wB97X-D': 'hyb_gga_xc_wb97x_d',
             'CAM-B3LYP': 'camb3lyp',
             'PBE-D3': 'pbe',
         }}
-        _NEEDS_D3 = {{'PBE-D3', 'wB97X-D'}}
+        _NEEDS_D3 = {{'PBE-D3'}}
 
         if method == 'RHF':
             mf = scf.RHF(mol)
         elif method == 'UHF':
             mf = scf.UHF(mol)
+        elif method in ('MP2', 'CCSD', 'CCSD(T)'):
+            # AUDIT F13 — post-HF methods used to fall into the DFT branch
+            # below, setting mf.xc = 'MP2'/'CCSD'/'CCSD(T)' directly and
+            # failing with "LibXCFunctional: name '...' not found". The
+            # reference is scf.RHF(mol) regardless of spin — a factory
+            # that dispatches to true RHF for closed-shell (mol.spin == 0)
+            # and to ROHF for open-shell — matching
+            # quantui/session_calc.py's post-HF reference dispatch exactly.
+            mf = scf.RHF(mol)
         else:
             # DFT: auto-select RKS/UKS based on spin
             mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
@@ -691,13 +708,66 @@ def main():
 
         energy = _run_scf_with_rescue(mf)
 
-        if mf.converged:
+        # AUDIT F13 — MP2/CCSD/CCSD(T) correlation, mirroring
+        # quantui/session_calc.py including its AUDIT F07 convergence
+        # gating: post-HF work only runs on a converged reference, and
+        # CCSD(T) triples only run if the CCSD amplitudes themselves
+        # converged, rather than reporting a correlation "correction" on
+        # top of a wrong or unconverged Hamiltonian.
+        mp2_correlation = None
+        ccsd_correlation = None
+        ccsd_t_correction = None
+        cc_converged = None
+        if method == 'MP2':
+            if mf.converged:
+                from pyscf import mp as _mp
+                _mp2 = _mp.MP2(mf)
+                _e_corr, _ = _mp2.kernel()
+                mp2_correlation = _e_corr
+                energy += _e_corr
+            else:
+                print("Skipping MP2 -- reference SCF did not converge.")
+        elif method in ('CCSD', 'CCSD(T)'):
+            if mf.converged:
+                from pyscf import cc as _cc
+                _ccsd = _cc.CCSD(mf)
+                _e_corr_ccsd, _, _ = _ccsd.kernel()
+                cc_converged = bool(_ccsd.converged)
+                ccsd_correlation = _e_corr_ccsd
+                energy += _e_corr_ccsd
+                if method == 'CCSD(T)':
+                    if cc_converged:
+                        _e_t = _ccsd.ccsd_t()
+                        ccsd_t_correction = _e_t
+                        energy += _e_t
+                    else:
+                        print(
+                            "Skipping CCSD(T) triples -- CCSD amplitudes "
+                            "did not converge."
+                        )
+            else:
+                print("Skipping CCSD -- reference SCF did not converge.")
+
+        # Overall success requires the reference SCF, and (when a coupled-
+        # cluster method was requested) CCSD's own amplitude convergence.
+        _overall_converged = mf.converged and (cc_converged is not False)
+
+        if _overall_converged:
             print()
             print("=" * 60)
             print("Calculation Results")
             print("=" * 60)
             print(f"SCF converged: Yes")
             print(f"Total energy: {{energy:.8f}} Ha")
+            if mp2_correlation is not None:
+                print(f"  HF reference     : {{energy - mp2_correlation:.8f}} Ha")
+                print(f"  MP2 correlation  : {{mp2_correlation:.8f}} Ha")
+            if ccsd_correlation is not None:
+                _hf_e = energy - ccsd_correlation - (ccsd_t_correction or 0.0)
+                print(f"  HF reference       : {{_hf_e:.8f}} Ha")
+                print(f"  CCSD correlation   : {{ccsd_correlation:.8f}} Ha")
+                if ccsd_t_correction is not None:
+                    print(f"  (T) triples        : {{ccsd_t_correction:.8f}} Ha")
             mo_e = mf.mo_energy if not isinstance(mf.mo_energy, list) else mf.mo_energy[0]
             mo_o = mf.mo_occ   if not isinstance(mf.mo_occ,    list) else mf.mo_occ[0]
             n_occ = int((mo_o > 0).sum())
@@ -706,19 +776,37 @@ def main():
                 print(f"HOMO-LUMO gap: {{gap:.4f}} eV")
             print()
 
-            # Save results next to the script so the path is predictable
+            # Save results next to the script so the path is predictable.
+            # AUDIT additional-concerns — quantui.orbital_visualization.
+            # generate_cube_file() requires 'mol_atom'/'mol_basis' (raises
+            # ValueError without them: "Re-run the calculation with the
+            # updated script template") and reads an optional 'mo_occ' to
+            # infer charge/spin for charged/open-shell molecules. This
+            # template used to save neither, so a cube could never be
+            # generated from a standalone-exported result without manually
+            # re-running with a different template that doesn't exist.
             results_path = str(Path(__file__).parent / 'results.npz')
             np.savez(results_path,
                      energy=energy,
                      mo_energy=np.array(mf.mo_energy),
                      mo_coeff=np.array(mf.mo_coeff),
-                     converged=mf.converged)
+                     mo_occ=np.array(mf.mo_occ),
+                     mol_atom=mol.atom,
+                     mol_basis=str(mol.basis),
+                     converged=mf.converged,
+                     mp2_correlation_hartree=mp2_correlation,
+                     ccsd_correlation_hartree=ccsd_correlation,
+                     ccsd_t_correction_hartree=ccsd_t_correction,
+                     cc_converged=cc_converged)
             print(f"Results saved to {{results_path}}")
             print("=" * 60)
 
             sys.exit(0)
         else:
-            print("ERROR: SCF did not converge!")
+            if not mf.converged:
+                print("ERROR: SCF did not converge!")
+            else:
+                print("ERROR: CCSD did not converge!")
             sys.exit(1)
 
     except Exception as e:

@@ -17,6 +17,7 @@ import pytest
 
 from quantui.freq_ir_workers import (
     _truthy,
+    available_cpu_count,
     freq_parallel_env_configured,
     freq_parallel_opt_in,
     parallel_enabled_for_run,
@@ -85,6 +86,41 @@ class TestParallelEnabledGate:
         settings.save()
         monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "0")
         assert parallel_enabled_for_run(cpu_count=16, displacement_count=60) is False
+
+
+class TestAvailableCpuCount:
+    """AUDIT additional-concerns — worker sizing must respect a SLURM
+    allocation/cgroup limit, not just report the whole host's core count.
+    """
+
+    def test_slurm_cpus_per_task_takes_precedence(self, monkeypatch):
+        monkeypatch.setenv("SLURM_CPUS_PER_TASK", "8")
+        assert available_cpu_count() == 8
+
+    def test_ignores_invalid_slurm_value(self, monkeypatch):
+        monkeypatch.setenv("SLURM_CPUS_PER_TASK", "not-a-number")
+        # Falls through to sched_getaffinity/cpu_count — just must not raise
+        # and must return a positive int.
+        assert available_cpu_count() >= 1
+
+    def test_ignores_non_positive_slurm_value(self, monkeypatch):
+        monkeypatch.setenv("SLURM_CPUS_PER_TASK", "0")
+        assert available_cpu_count() >= 1
+
+    def test_falls_back_to_affinity_or_cpu_count_without_slurm(self, monkeypatch):
+        import os
+
+        monkeypatch.delenv("SLURM_CPUS_PER_TASK", raising=False)
+        result = available_cpu_count()
+        try:
+            expected = len(os.sched_getaffinity(0))
+        except (AttributeError, OSError, NotImplementedError):
+            expected = os.cpu_count() or 1
+        assert result == expected
+
+    def test_never_returns_less_than_one(self, monkeypatch):
+        monkeypatch.delenv("SLURM_CPUS_PER_TASK", raising=False)
+        assert available_cpu_count() >= 1
 
 
 class TestPickWorkerCount:
