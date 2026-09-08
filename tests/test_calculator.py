@@ -188,7 +188,16 @@ class TestScriptGeneration:
     def test_ecp_embedded_for_heavy_element_basis(self, tmp_path):
         """The resolved ECP mapping must appear in the generated script for
         a basis that carries one (LANL2DZ on Na), and be an explicit empty
-        dict for an all-electron basis — never simply absent."""
+        dict for an all-electron basis — never simply absent.
+
+        Requires PySCF (ecp_for_basis() looks up LANL2DZ's ECP table via
+        pyscf.gto.basis.load_ecp) — unlike script *generation* itself,
+        which must keep working without it (see
+        test_script_generation_works_without_pyscf_installed above); on a
+        machine without PySCF the mapping correctly degrades to {}, which
+        this test cannot verify one way or the other.
+        """
+        pytest.importorskip("pyscf")
         na_h = Molecule(["Na", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 2.0]])
         calc = PySCFCalculation(na_h, method="RHF", basis="LANL2DZ")
         script_content = calc.generate_calculation_script(tmp_path / "nah.py")
