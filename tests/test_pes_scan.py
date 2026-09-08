@@ -502,6 +502,8 @@ class TestRunPesScanCheckpointCoordinateIdentity:
         assert result.energies_hartree[0] < -0.5  # a real RHF/STO-3G H2 energy
 
 
+@_pyscf_available
+@pytest.mark.slow
 class TestRunPesScanIntegration:
     def test_h2_bond_scan_returns_result(self):
         from quantui.pes_scan import run_pes_scan

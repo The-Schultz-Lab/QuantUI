@@ -47,21 +47,21 @@ import plotly.graph_objects as go
 _DEFAULT_XRANGE = [400, 4000]
 
 
-def _default_xrange(freqs_real: tuple) -> list:
+def _default_xrange(freqs_real: tuple) -> List[float]:
     """[xmin, xmax] covering 400–4000 cm⁻¹ AND every real frequency present.
 
     A fixed margin keeps a peak sitting exactly at the edge from being
     clipped by the axis border or cut off mid-lineshape in broadened mode.
     """
     if not freqs_real:
-        return list(_DEFAULT_XRANGE)
+        return [float(_DEFAULT_XRANGE[0]), float(_DEFAULT_XRANGE[1])]
     margin = 100.0
     lo = min(_DEFAULT_XRANGE[0], min(freqs_real) - margin)
     hi = max(_DEFAULT_XRANGE[1], max(freqs_real) + margin)
-    return [lo, hi]
+    return [float(lo), float(hi)]
 
 
-def _grid_for_range(xrange: list) -> np.ndarray:
+def _grid_for_range(xrange: List[float]) -> np.ndarray:
     return np.arange(xrange[0], xrange[1] + 1.0, 1.0)
 
 

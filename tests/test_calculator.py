@@ -202,6 +202,38 @@ class TestScriptGeneration:
         script_ae = calc_ae.generate_calculation_script(tmp_path / "water.py")
         assert "mol.ecp = {}" in script_ae
 
+    def test_script_generation_works_without_pyscf_installed(
+        self, tmp_path, monkeypatch
+    ):
+        """CI regression — AUDIT F06's ecp_for_basis() imports pyscf, but
+        generate_calculation_script() must keep working on a machine that
+        doesn't have PySCF installed at all (e.g. Windows, no WSL): the
+        module's own docstring says the exported script is meant to be
+        downloaded and run independently, possibly on a different machine
+        than the one that generated it. This broke Windows CI outright
+        (ModuleNotFoundError at *generation* time, not just execution)
+        until this fallback was added — reproduced here by making the
+        import raise ImportError regardless of platform.
+        """
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _no_pyscf(name, *args, **kwargs):
+            if name == "pyscf" or name.startswith("pyscf."):
+                raise ImportError("simulated: PySCF not installed")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _no_pyscf)
+
+        na_h = Molecule(["Na", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 2.0]])
+        calc = PySCFCalculation(na_h, method="RHF", basis="LANL2DZ")
+        script_content = calc.generate_calculation_script(tmp_path / "nah.py")
+        # Degrades to the pre-AUDIT-F06 (all-electron) mapping on this
+        # platform only — script generation itself must not raise.
+        assert "mol.ecp = {}" in script_content
+        assert (tmp_path / "nah.py").exists()
+
     @pytest.mark.slow
     def test_exported_ecp_script_reproduces_in_app_electron_count(self, tmp_path):
         """AUDIT F06 regression — executes the exported NaH/LANL2DZ script
