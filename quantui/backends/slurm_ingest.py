@@ -79,6 +79,8 @@ def _basic_result(payload: dict[str, Any], record: JobRecord) -> SimpleNamespace
         ccsd_correlation_hartree=payload.get("ccsd_correlation_hartree"),
         ccsd_t_correction_hartree=payload.get("ccsd_t_correction_hartree"),
         cc_converged=payload.get("cc_converged"),
+        td_converged=payload.get("td_converged"),
+        n_converged_states=payload.get("n_converged_states"),
         dispersion_applied=payload.get("dispersion_applied"),
         solvent=payload.get("solvent"),
         gpu_used=bool(payload.get("gpu_used", False)),

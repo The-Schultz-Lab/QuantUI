@@ -196,6 +196,17 @@ def tddft_result_payload(result) -> Dict[str, Any]:
         "scf_variant": getattr(result, "scf_variant", "") or None,
         # AUDIT F12 — was never serialized, though TDDFTResult carries it.
         "density_fit": bool(getattr(result, "density_fit", False)),
+        # AUDIT F08 (code review follow-up) — per-root convergence detail
+        # never left the worker process; a SLURM-submitted TDDFT run's
+        # History card could show only the folded "converged" bool, never
+        # the per-root tally format_tddft_result shows for an interactive
+        # run.
+        "td_converged": (
+            [bool(c) for c in result.td_converged]
+            if getattr(result, "td_converged", None) is not None
+            else None
+        ),
+        "n_converged_states": getattr(result, "n_converged_states", None),
         "spectra": {
             "uv_vis": {
                 "excitation_energies_ev": list(result.excitation_energies_ev),

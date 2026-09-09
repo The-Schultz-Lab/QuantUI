@@ -49,16 +49,23 @@ logger = logging.getLogger(__name__)
 
 _SUPPORTED_CALC_TYPES = frozenset(CALC_TYPES)
 
-# AUDIT F11 — the science APIs behind these calc types (run_freq_calc,
-# run_tddft_calc, run_nmr_calc, run_pes_scan, optimize_geometry) don't
-# accept a solvent argument at all, so request.solvent used to be silently
-# dropped rather than either applied or rejected. Only these two runners
-# actually thread request.solvent through to a PCM-capable API
-# (session_calc.run_in_session / reorganization_energy.run_reorganization_
-# energy, both real gas+PCM or PCM-single-point implementations — see each
-# runner below and reorganization_energy's own docstring for the
-# gas-phase-optimization + PCM-single-point approximation it documents).
-_SOLVENT_SUPPORTED_CALC_TYPES = frozenset({"single_point", "reorganization_energy"})
+# AUDIT F11 (additional concern, code review) — the science APIs behind
+# most of these calc types (run_freq_calc, run_tddft_calc, run_nmr_calc,
+# run_pes_scan, optimize_geometry) don't accept a solvent argument at all,
+# so request.solvent used to be silently dropped rather than either applied
+# or rejected. These three runners actually thread request.solvent through
+# to a PCM-capable API: session_calc.run_in_session for "single_point";
+# reorganization_energy.run_reorganization_energy for
+# "reorganization_energy" (its own docstring documents the gas-phase-
+# optimization + PCM-single-point approximation); and _run_geometry_opt for
+# "geometry_opt", which mirrors the interactive app's approximation —
+# optimize gas-phase, then run a required solvated single point on the
+# final geometry (see app.py's _run_required_final_single_point) — so the
+# app_runflow.py UI, which enables the solvent checkbox for these same
+# three calc types, is never lying about what a submitted job will do.
+_SOLVENT_SUPPORTED_CALC_TYPES = frozenset(
+    {"single_point", "geometry_opt", "reorganization_energy"}
+)
 
 
 def _write_progress(
@@ -358,7 +365,7 @@ def _run_geometry_opt(
             "attempt's checkpoint.",
         )
 
-    return optimize_geometry(
+    result = optimize_geometry(
         molecule=molecule,
         method=request.method,
         basis=request.basis,
@@ -370,6 +377,56 @@ def _run_geometry_opt(
         checkpoint=ckpt,
         resume=resumable,
     )
+
+    # AUDIT F11 (additional concern) — mirror app.py's interactive
+    # "Geometry Opt" + solvent handling: optimize_geometry has no solvent
+    # argument, so a solvated result here means gas-phase optimization
+    # followed by a required PCM single point on the final geometry, whose
+    # energy/convergence replace the optimizer's last-step values. Without
+    # this, request.solvent for geometry_opt would either be rejected
+    # outright (AUDIT F11) or, if permitted, silently ignored.
+    if request.solvent:
+        _write_progress(
+            staging_dir, "running", "Running required solvated single point", 90.0
+        )
+        _append_log(
+            staging_dir,
+            "\n-- Required single-point (after geometry optimisation) "
+            "on optimized geometry --------------------------------",
+        )
+        from quantui.session_calc import run_in_session
+
+        sp_result = run_in_session(
+            molecule=result.molecule,
+            method=request.method,
+            basis=request.basis,
+            progress_stream=log_stream,
+            solvent=request.solvent,
+            scf_rescue=scf_rescue,
+        )
+        if not bool(getattr(sp_result, "converged", False)):
+            raise RuntimeError(
+                "Required post-optimization single-point did not converge."
+            )
+        _append_log(
+            staging_dir,
+            "Required single-point converged on optimized geometry.",
+        )
+        # ``energy_hartree`` is a read-only property derived from
+        # ``energies_hartree[-1]`` (there is no ``homo_lumo_gap_ev`` field on
+        # ``OptimizationResult`` either) — updating the last trajectory
+        # energy is how app.py's interactive path folds the solvated result
+        # in too, so both surfaces agree on what "the" final energy is.
+        sp_energy = getattr(sp_result, "energy_hartree", None)
+        if (
+            isinstance(getattr(result, "energies_hartree", None), list)
+            and result.energies_hartree
+            and isinstance(sp_energy, (int, float))
+        ):
+            result.energies_hartree[-1] = float(sp_energy)
+        result.converged = bool(result.converged) and bool(sp_result.converged)
+
+    return result
 
 
 def _run_frequency(
