@@ -598,7 +598,7 @@ def infer_charge_and_spin(
     # a large cube-export molecule (the interactive "Generate" path this
     # feeds) that's needless repeated work: hoist the import out of the
     # loop and cache the per-element core-electron count.
-    _ecp_core_electrons: dict = {}
+    _ecp_core_electrons: dict[str, int] = {}
     if basis:
         from pyscf import gto as _gto
 
