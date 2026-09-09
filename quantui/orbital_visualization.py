@@ -599,11 +599,23 @@ def infer_charge_and_spin(
     # feeds) that's needless repeated work: hoist the import out of the
     # loop and cache the per-element core-electron count.
     _ecp_core_electrons: dict[str, int] = {}
+    _gto: Any = None
     if basis:
-        from pyscf import gto as _gto
+        try:
+            import pyscf.gto as _gto_mod
+
+            _gto = _gto_mod
+        except Exception:
+            # Match the pre-refactor behavior: any failure to even import
+            # pyscf.gto (not just a load_ecp lookup failure) falls back to
+            # the all-electron count rather than raising out of this
+            # function — infer_charge_and_spin has no PySCF hard dependency
+            # otherwise, and a caller (e.g. cube-export's Generate path)
+            # must not crash just because ECP data couldn't be resolved.
+            _gto = None
 
     def _core_electrons_for(sym: str) -> int:
-        if not basis:
+        if not basis or _gto is None:
             return 0
         if sym in _ecp_core_electrons:
             return _ecp_core_electrons[sym]
