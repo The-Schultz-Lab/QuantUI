@@ -291,6 +291,7 @@ def format_log_header(
     calc_id: Optional[str] = None,
     starting_energy: Optional[float] = None,
     density_fit: bool = False,
+    engine: str = "PySCF",
 ) -> str:
     """Return a formatted header string to prepend to calculation log output.
 
@@ -342,8 +343,7 @@ def format_log_header(
         _row("Host", sysinfo.get("hostname", "unknown")),
         _row(
             "Python",
-            f"{sysinfo.get('python', '?')}   |   "
-            f"PySCF: {sysinfo.get('pyscf', '?')}",
+            f"{sysinfo.get('python', '?')}   |   Engine: {engine}",
         ),
         _row("Device", device),
         _row(

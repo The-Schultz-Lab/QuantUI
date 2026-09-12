@@ -346,6 +346,7 @@ def save_result(
         "formula": getattr(result, "formula", "?"),
         "method": getattr(result, "method", "?"),
         "basis": getattr(result, "basis", "?"),
+        "engine_id": getattr(result, "engine_id", "pyscf"),
         "energy_hartree": _e_ha,
         "energy_ev": _e_ev,
         "homo_lumo_gap_ev": _opt_float(getattr(result, "homo_lumo_gap_ev", None)),

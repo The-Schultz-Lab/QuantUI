@@ -6,8 +6,8 @@ See ``QuantUI-development-tracking/TODO/QUANTUM-ENGINE-CONTRACT.md``.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from dataclasses import dataclass, field, fields
+from typing import IO, Any, Dict, List, Optional, Protocol, runtime_checkable
 
 CALC_TYPES = (
     "single_point",
@@ -33,9 +33,25 @@ class EngineRequest:
     molecule: Dict[str, Any]
     options: Dict[str, Any] = field(default_factory=dict)
     solvent: Optional[str] = None
+    progress_stream: Optional[IO[str]] = field(default=None, repr=False, compare=False)
+    checkpoint: Optional[Any] = field(default=None, repr=False, compare=False)
+    warm_start: bool = True
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        # Streams and checkpoint objects belong to the in-process execution
+        # context and are deliberately excluded from the portable envelope.
+        return {
+            "request_id": self.request_id,
+            "calc_type": self.calc_type,
+            "method": self.method,
+            "basis": self.basis,
+            "charge": self.charge,
+            "multiplicity": self.multiplicity,
+            "molecule": self.molecule,
+            "options": self.options,
+            "solvent": self.solvent,
+            "warm_start": self.warm_start,
+        }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> EngineRequest:
@@ -49,6 +65,7 @@ class EngineRequest:
             molecule=dict(data["molecule"]),
             options=dict(data.get("options") or {}),
             solvent=data.get("solvent"),
+            warm_start=bool(data.get("warm_start", True)),
         )
 
 
@@ -68,9 +85,42 @@ class EngineResult:
     homo_lumo_gap_ev: Optional[float] = None
     warnings: List[str] = field(default_factory=list)
     error: Optional[Dict[str, Any]] = None
+    native_result: Optional[Any] = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        # Avoid dataclasses.asdict(): it deep-copies native_result before it can
+        # be removed, which is expensive for PySCF arrays and may fail for live
+        # third-party objects.
+        return {
+            item.name: getattr(self, item.name)
+            for item in fields(self)
+            if item.name != "native_result"
+        }
+
+    def to_session_result(self) -> Any:
+        """Return the rich QuantUI result used by the current app surface."""
+        if self.native_result is not None:
+            return self.native_result
+        if self.status != "success" or self.energy_hartree is None:
+            message = (self.error or {}).get(
+                "user_message", "Engine calculation failed."
+            )
+            raise EngineError(str(message), user_message=str(message))
+
+        from quantui.session_calc import SessionResult
+
+        return SessionResult(
+            energy_hartree=self.energy_hartree,
+            homo_lumo_gap_ev=self.homo_lumo_gap_ev,
+            converged=self.converged,
+            n_iterations=self.n_iterations,
+            method=self.method,
+            basis=self.basis,
+            formula=self.formula,
+            density_fit=self.engine_id == "pyfock",
+            scf_variant="RKS" if self.engine_id == "pyfock" else "",
+            engine_id=self.engine_id,
+        )
 
 
 @dataclass(frozen=True)
@@ -128,9 +178,11 @@ class UnsupportedCapabilityError(EngineError):
 
 @runtime_checkable
 class QuantumEngine(Protocol):
-    """Engine adapter interface — PYF.1 registry only; dispatch lands in PYF.3."""
+    """Engine adapter interface."""
 
     @property
     def engine_id(self) -> str: ...
 
     def capabilities(self) -> EngineCapabilities: ...
+
+    def run(self, request: EngineRequest) -> EngineResult: ...

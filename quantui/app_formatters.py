@@ -96,6 +96,9 @@ def _result_extra_rows(get: Any) -> str:
     rows = ""
     energy = get("energy_hartree", 0.0)
 
+    _engine_id = str(get("engine_id", "pyscf") or "pyscf")
+    rows += _num("Quantum engine", "PyFock" if _engine_id == "pyfock" else "PySCF")
+
     # Post-HF correlation breakdown — energy_hartree already includes every
     # contribution, so the HF reference is the total minus those.
     _mp2 = get("mp2_correlation_hartree")

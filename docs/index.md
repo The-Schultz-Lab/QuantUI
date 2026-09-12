@@ -12,7 +12,7 @@ hide:
       <div class="hero__text">
         <div class="hero__eyebrow">
           <a class="pill" href="https://pypi.org/project/quantui/" target="_blank" rel="noopener">pip install quantui</a>
-          <span class="pill">Open-source PySCF frontend</span>
+          <span class="pill">Open-source PySCF + PyFock frontend</span>
           <span class="pill pill--teal">No cluster required</span>
           <span class="pill pill--teal">Runs offline</span>
           <span class="pill pill--teal">GPU-ready</span>
@@ -20,6 +20,7 @@ hide:
         <h1 class="hero__title">Free, open, and<br>interactive quantum chemistry</h1>
         <p class="hero__subtitle">
           QuantUI puts <a class="hero__link" href="https://pyscf.org" target="_blank" rel="noopener">PySCF</a>
+          and a guarded native-Windows <a class="hero__link" href="https://github.com/manassharma07/PyFock" target="_blank" rel="noopener">PyFock</a> subset
           behind an interactive Jupyter/Voil&agrave; UI. Run DFT, MP2, CCSD,
           CCSD(T), TD-DFT, NMR, geometry optimization, frequencies, and
           PES scans &mdash; visualize structures, orbitals, IR and UV-Vis
@@ -37,7 +38,7 @@ hide:
           <span class="hero__sep">&middot;</span>
           <span class="hero__stat">MIT License</span>
           <span class="hero__sep">&middot;</span>
-          <span class="hero__stat">Linux &middot; macOS &middot; WSL</span>
+          <span class="hero__stat">Linux &middot; macOS &middot; WSL &middot; Windows</span>
         </div>
       </div>
       <div class="hero__visual" aria-hidden="true">
