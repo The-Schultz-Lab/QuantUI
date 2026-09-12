@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- **PyFock Phase-1 backend (M-PYFOCK PYF.2–PYF.6)** — normalized engine
+  dispatch, native-Windows PBE/def2 single points for neutral closed-shell
+  molecules, capability-driven calculation menus, engine provenance in logs
+  and saved results, a pinned `pyfock` install extra, and a real Windows water
+  parity gate against PySCF. Unsupported hybrids, ions, open-shell systems,
+  solvent, checkpoints, GPU, and orbital analysis are rejected before compute.
+
 ## [0.8.2] - 2026-08-30
 
 ### Added

@@ -1,12 +1,4 @@
-"""
-Quantum chemistry engine registry (PySCF, PyFock, …).
-
-Implements the v0.1 contract in ``QuantUI-development-tracking``:
-``TODO/QUANTUM-ENGINE-CONTRACT.md``.
-
-PYF.1: lazy probes + ``resolve_engine`` / ``list_engines`` only. The app still
-calls ``session_calc`` directly until PYF.3 wires dispatch through this registry.
-"""
+"""Quantum chemistry engine registry and normalized dispatch seam."""
 
 from __future__ import annotations
 
@@ -97,6 +89,43 @@ def resolve_engine(preferred: EnginePreference | None = None) -> QuantumEngine:
     return by_id[choice]
 
 
+def run_calc(
+    request: EngineRequest,
+    preferred: EnginePreference | None = None,
+) -> EngineResult:
+    """Resolve an engine, validate its handshake, and run one request."""
+    engine = resolve_engine(preferred)
+    caps = engine.capabilities()
+    if request.calc_type not in caps.supported_calc_types:
+        raise UnsupportedCapabilityError(
+            f"{caps.display_name} does not support {request.calc_type!r}.",
+            user_message=(
+                f"{caps.display_name} does not support this calculation type. "
+                "Choose a supported type or select another engine."
+            ),
+        )
+    if request.method.upper() not in {m.upper() for m in caps.supported_methods}:
+        raise UnsupportedCapabilityError(
+            f"{caps.display_name} does not support method {request.method!r}.",
+            user_message=(
+                f"{request.method} is not available with {caps.display_name}. "
+                "Choose one of the methods shown in the engine-gated menu."
+            ),
+        )
+    if (
+        caps.supported_basis_sets is not None
+        and request.basis not in caps.supported_basis_sets
+    ):
+        raise UnsupportedCapabilityError(
+            f"{caps.display_name} does not support basis {request.basis!r}.",
+            user_message=(
+                f"{request.basis} is not available with {caps.display_name}. "
+                "Choose one of the basis sets shown in the engine-gated menu."
+            ),
+        )
+    return engine.run(request)
+
+
 __all__ = [
     "CALC_TYPES",
     "DEFAULT_ENGINE_PREFERENCE",
@@ -117,4 +146,5 @@ __all__ = [
     "is_pyscf_available",
     "list_engines",
     "resolve_engine",
+    "run_calc",
 ]

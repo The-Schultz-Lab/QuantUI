@@ -530,12 +530,17 @@ class TestDoRunDispatch:
         mock_result.formula = "H2O"
         mock_result.method = "RHF"
         mock_result.basis = "STO-3G"
+        mock_engine_result = MagicMock()
+        mock_engine_result.to_session_result.return_value = mock_result
         with patch(
-            "quantui.run_in_session", return_value=mock_result, create=True
+            "quantui.engines.run_calc", return_value=mock_engine_result
         ) as mock_run:
             with patch("quantui.save_result"):
                 app._do_run()
         mock_run.assert_called_once()
+        request = mock_run.call_args.args[0]
+        assert request.calc_type == "single_point"
+        assert request.molecule["atoms"] == ["O", "H", "H"]
 
     def test_geo_opt_dispatch(self, app_with_molecule):
         app = app_with_molecule
@@ -600,6 +605,41 @@ class TestAvailabilityFlags:
 
         app = QuantUIApp()
         assert app._preopt_available == _PREOPT_AVAILABLE
+
+
+class TestQuantumEngineGating:
+    def test_pyfock_limits_setup_to_validated_phase1_subset(self):
+        from quantui.engines import PyfockEngine
+
+        app = QuantUIApp()
+        app._user_settings.compute.quantum_engine = "pyfock"
+        with patch("quantui.engines.resolve_engine", return_value=PyfockEngine()):
+            app._apply_quantum_engine_capabilities()
+
+        assert tuple(app.calc_type_dd.options) == ("Single Point",)
+        assert tuple(app.method_dd.options) == ("PBE",)
+        assert tuple(app.basis_dd.options) == ("def2-SVP", "def2-TZVP")
+        assert app.solvent_cb.disabled is True
+        assert app.density_fit_enabled_cb.disabled is True
+        assert app.execution_backend_dd.disabled is True
+        assert "PyFock" in app.engine_capability_html.value
+
+    def test_pyscf_restores_full_setup(self):
+        from quantui.engines import PyfockEngine, PyscfEngine
+
+        app = QuantUIApp()
+        app._user_settings.compute.quantum_engine = "pyfock"
+        with patch("quantui.engines.resolve_engine", return_value=PyfockEngine()):
+            app._apply_quantum_engine_capabilities()
+        app._user_settings.compute.quantum_engine = "pyscf"
+        with patch("quantui.engines.resolve_engine", return_value=PyscfEngine()):
+            app._apply_quantum_engine_capabilities()
+
+        assert "Geometry Opt" in app.calc_type_dd.options
+        assert "B3LYP" in app.method_dd.options
+        assert "6-31G" in app.basis_dd.options
+        assert app.density_fit_enabled_cb.disabled is False
+        assert app.execution_backend_dd.disabled is False
 
 
 # ---------------------------------------------------------------------------

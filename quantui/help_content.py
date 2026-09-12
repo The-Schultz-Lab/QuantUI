@@ -43,13 +43,29 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "<li>Optionally compare results in <b>Compare</b>, or use "
             "<b>History</b> to reload a previous run</li>"
             "</ol>"
-            "<p><b>Platform note:</b> PySCF calculations require Linux, macOS, "
-            "or WSL. On Windows, run the pre-built container: "
-            "<code>apptainer run quantui.sif</code></p>"
+            "<p><b>Platform note:</b> PySCF's full feature set requires Linux, "
+            "macOS, or WSL. Native Windows can use the optional PyFock Phase-1 "
+            "subset for neutral closed-shell PBE single points.</p>"
             "<p>Each dropdown in the Calculate tab has a <b>?</b> button for "
             "context-sensitive help on that specific option.</p>"
             "<p>While a calculation runs, see <i>Live run progress</i> in the "
             "Help browser for what the status line and log messages mean.</p>"
+        ),
+    },
+    "quantum_engine": {
+        "title": "Which quantum engine am I using?",
+        "body": (
+            "<p>Open <b>System Settings → Quantum engine</b>. "
+            "<b>Automatic</b> prefers PySCF when it is installed and otherwise "
+            "uses PyFock, which is useful on native Windows.</p>"
+            "<p><b>PySCF</b> is QuantUI's canonical engine and provides the full "
+            "calculation, solvent, checkpoint, GPU, and analysis feature set.</p>"
+            "<p><b>PyFock Phase 1</b> is deliberately narrower: neutral, "
+            "closed-shell PBE single points with def2-SVP or def2-TZVP. Density "
+            "fitting is always on. Unsupported methods and controls disappear "
+            "from the setup menus instead of failing deep inside a calculation.</p>"
+            "<p>The selected engine is recorded in the live log, result card, "
+            "and saved <code>result.json</code>.</p>"
         ),
     },
     "run_progress": {

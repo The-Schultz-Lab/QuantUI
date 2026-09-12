@@ -134,6 +134,9 @@ class SessionResult:
     # "ROHF", "RKS", "UKS"), captured before any density-fit/PCM/GPU wrap.
     # "" for an older saved result that predates this field.
     scf_variant: str = ""
+    # Quantum-engine provenance. Older saved results default to PySCF because
+    # it was QuantUI's sole engine before M-PYFOCK.
+    engine_id: str = "pyscf"
 
     @property
     def energy_ev(self) -> float:
@@ -147,6 +150,7 @@ class SessionResult:
             "Calculation Results",
             "=" * 60,
             f"  Molecule      : {self.formula}",
+            f"  Engine        : {self.engine_id}",
             f"  Method/Basis  : {self.method}/{self.basis}",
             f"  SCF converged : {'Yes' if self.converged else '❌ NO — treat results with caution'}",
             f"  Iterations    : {self.n_iterations}",

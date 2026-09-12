@@ -115,6 +115,7 @@ def build_status_panel(
     get_session_resources_fn: Any,
     load_last_calibration_label_fn: Any,
     pyscf_available: bool,
+    pyfock_available: bool,
     ase_available: bool,
     pubchem_available: bool,
     visualization_available: bool,
@@ -126,6 +127,7 @@ def build_status_panel(
     freq_parallel_env_locked: bool = False,
     execution_backend: str = "local",
     slurm_available: bool = False,
+    quantum_engine: str = "auto",
 ) -> None:
     """Build the Status tab panel."""
     cores, mem_gb = get_session_resources_fn()
@@ -200,6 +202,13 @@ def build_status_panel(
                     "" if pyscf_available else "&mdash; Linux / macOS / WSL required",
                 ),
             ),
+            (
+                "PyFock (Windows SP)",
+                _ok(
+                    pyfock_available,
+                    "&mdash; Phase-1 PBE" if pyfock_available else "&mdash; optional",
+                ),
+            ),
             ("ASE (structure I/O, opt.)", _ok(ase_available)),
             ("PubChem search", _ok(pubchem_available)),
             ("3D viewer (py3Dmol)", _ok(visualization_available)),
@@ -257,6 +266,34 @@ def build_status_panel(
         "(persists across launches)</span></div>"
         "</div>"
     )
+    engine_options = [
+        ("Automatic (PySCF preferred)", "auto"),
+        (
+            "PySCF — full feature set" if pyscf_available else "PySCF — not installed",
+            "pyscf",
+        ),
+        (
+            (
+                "PyFock — PBE single points"
+                if pyfock_available
+                else "PyFock — not installed"
+            ),
+            "pyfock",
+        ),
+    ]
+    engine_label = widgets.HTML(
+        f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:8px;'
+        'margin-bottom:0px">Quantum engine '
+        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
+        "(persists across launches; menus follow engine capabilities)</span></div>"
+    )
+    app.quantum_engine_dd = widgets.Dropdown(
+        options=engine_options,
+        value=quantum_engine,
+        description="",
+        layout=layout_fn(width="360px"),
+    )
+    app.quantum_engine_note = widgets.HTML(value="")
     # Vibrational animation framerate (persists across launches).
     app.vib_framerate_si = widgets.IntSlider(
         value=vib_framerate_fps,
@@ -380,6 +417,9 @@ def build_status_panel(
     settings_box = widgets.VBox(
         [
             settings_html,
+            engine_label,
+            app.quantum_engine_dd,
+            app.quantum_engine_note,
             app.viz_default_backend_dd,
             vib_fps_label,
             app.vib_framerate_si,
@@ -1879,9 +1919,11 @@ def build_molecule_section(
 
 def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
     """Build the calculation setup panel."""
+    app.engine_capability_html = widgets.HTML(value="")
     app.calc_setup_panel = widgets.VBox(
         [
             widgets.HTML('<h3 style="margin:14px 0 6px">Calculation Setup</h3>'),
+            app.engine_capability_html,
             widgets.HBox(
                 [
                     widgets.VBox(
@@ -1940,14 +1982,15 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
 
 def build_run_section(app: Any, *, layout_fn: Any) -> None:
     """Build the run panel shown in the Calculate tab."""
+    app._engine_run_intro = widgets.HTML(
+        f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:0 0 8px">'
+        "The selected quantum engine runs in this kernel. Output appears live "
+        "below.</p>"
+    )
     app.run_panel = widgets.VBox(
         [
-            widgets.HTML(
-                '<h3 style="margin:14px 0 6px">Run Calculation</h3>'
-                f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:0 0 8px">PySCF runs in this '
-                "kernel. Output appears live below. Large molecules or high-accuracy basis "
-                "sets may take several minutes on a laptop.</p>"
-            ),
+            widgets.HTML('<h3 style="margin:14px 0 6px">Run Calculation</h3>'),
+            app._engine_run_intro,
             app.perf_estimate_html,
             app._resume_notice_html,
             app._resume_cb,

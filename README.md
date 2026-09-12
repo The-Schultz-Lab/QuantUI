@@ -7,7 +7,8 @@
 [![Python](https://img.shields.io/badge/python-3.9%20|%203.10%20|%203.11-blue)](https://www.python.org)
 
 A powerful open-source frontend for DFT and post-HF quantum chemistry.
-QuantUI puts [PySCF](https://pyscf.org) behind an interactive Jupyter/Voilà
+QuantUI puts [PySCF](https://pyscf.org) and a guarded
+[PyFock](https://github.com/manassharma07/PyFock) subset behind an interactive Jupyter/Voilà
 UI so you can build molecules, run calculations locally, and visualize the
 results — no cluster account, no SLURM, no queueing.
 
@@ -71,7 +72,9 @@ Real output from QuantUI, straight from the app:
   your default-backend preference between sessions
 - **In-session calculations** — RHF, UHF, 9 DFT functionals, MP2, CCSD,
   CCSD(T), NMR shielding, TD-DFT UV-Vis, and 1D PES scans via PySCF, running
-  in your Python kernel (no batch submission)
+  in your Python kernel. Optional PyFock 0.1.x adds native-Windows PBE
+  single points for neutral, closed-shell molecules with def2-SVP/def2-TZVP;
+  engine capabilities automatically gate the setup menus
 - **Implicit solvent** — PCM solvation (Water, Ethanol, THF, DMSO,
   Acetonitrile) via a single checkbox
 - **Rich results** — total energy, HOMO-LUMO gap, Mulliken charges, dipole
@@ -104,10 +107,12 @@ Real output from QuantUI, straight from the app:
 - **Plot export** — save IR, UV-Vis, PES, and orbital diagrams as standalone
   HTML
 - **Optional GPU acceleration** — when [gpu4pyscf](https://github.com/pyscf/gpu4pyscf)
-  and a CUDA-capable NVIDIA GPU are present, SCF calculations auto-offload
+  and a CUDA-capable NVIDIA GPU are present, single-point SCF calculations auto-offload
   via `mf.to_gpu()` (RHF / UHF / RKS / UKS supported; CCSD(T) stays on CPU).
   The Status tab + every result card show which compute device was used.
   Set `QUANTUI_DISABLE_GPU=1` to force CPU even when the GPU is available.
+  Geometry-optimization SCF steps are currently CPU-only; that limitation was
+  reproduced on real GPU hardware and remains an open optimizer-path fix.
 - **Timing calibration** — one-click benchmark suite populates the time
   estimator with real machine data so predictions are accurate from the first run
 - **Voilà app mode** — serve the notebook as a polished widget-only UI (no
@@ -122,11 +127,26 @@ Real output from QuantUI, straight from the app:
 | --- | --- | --- |
 | Linux / macOS | Full | PySCF installs natively |
 | WSL (Windows) | Full | Use an Ubuntu WSL environment |
-| Windows (native) | Partial | All UI and visualization features work; PySCF calculations require the Apptainer container |
+| Windows (native) | Partial | PyFock runs guarded PBE single points; use WSL/Apptainer for the full PySCF feature set |
 
-### Windows users: Apptainer container
+### Windows users: native PyFock or the full container
 
-PySCF does not install on Windows natively. The
+For native Windows, install the PyFock subset:
+
+```powershell
+py -3.11 -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install "quantui[pyfock,ase,app]"
+```
+
+In **System Settings → Quantum engine**, select PyFock (or leave Automatic
+selected when PySCF is absent). Phase 1 intentionally supports only neutral,
+closed-shell PBE single points with def2-SVP or def2-TZVP. Density fitting is
+always enabled. Hybrids, charged/open-shell systems, geometry optimization,
+solvent, checkpoint warm starts, GPU, Mulliken/dipole analysis, and orbital
+export remain PySCF-only.
+
+PySCF does not install on Windows natively. For the complete feature set, the
 [`apptainer/quantui.def`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/apptainer/quantui.def) container bundles
 the complete environment and runs anywhere Apptainer/Singularity is available.
 See [`apptainer/README.md`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/apptainer/README.md) for build and run instructions.
@@ -150,6 +170,12 @@ pip install -e ".[pyscf,ase,app]"
 
 ```bash
 python -m pip install quantui[pyscf,ase,app]
+```
+
+For the limited native-Windows engine instead:
+
+```bash
+python -m pip install quantui[pyfock,ase,app]
 ```
 
 ### Option C — Apptainer container (Windows / reproducible deployment)

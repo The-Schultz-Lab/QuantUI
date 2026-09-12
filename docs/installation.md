@@ -27,14 +27,25 @@ pip install "quantui[pyscf,ase,app]"
 
 ## Windows
 
-PySCF does not install natively on Windows. See [Platform Support](platforms.md) for
-WSL and Apptainer container paths.
+For native Windows and the guarded PyFock single-point subset, use Python 3.11:
+
+```powershell
+py -3.11 -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install "quantui[pyfock,ase,app]"
+```
+
+Automatic engine selection uses PyFock when PySCF is absent. Phase 1 supports
+neutral, closed-shell PBE/def2-SVP or PBE/def2-TZVP single points. For all
+other methods and workflows, use WSL or the Apptainer container described in
+[Platform Support](platforms.md).
 
 ## Optional extras
 
 | Extra | What it adds |
 | --- | --- |
-| `pyscf` | PySCF quantum-chemistry backend (required for calculations) |
+| `pyscf` | Canonical PySCF backend (full calculation and analysis feature set) |
+| `pyfock` | PyFock Phase-1 backend (native-Windows PBE single points) |
 | `ase` | ASE bridge for trajectory export and structure I/O |
 | `app` | Voilà, JupyterLab, and notebook launcher dependencies |
 | `xtb` | GFN-FF metal pre-optimization via xtb |

@@ -21,8 +21,9 @@ from quantui.engines import (
     is_pyscf_available,
     list_engines,
     resolve_engine,
+    run_calc,
 )
-from quantui.engines.base import EngineCapabilities
+from quantui.engines.base import EngineCapabilities, EngineRequest, EngineResult
 from quantui.user_settings import UserSettings
 
 
@@ -52,8 +53,8 @@ class TestPyfockCapabilities:
         caps = PyfockEngine().capabilities()
         assert caps.engine_id == "pyfock"
         assert caps.supported_calc_types == ("single_point",)
-        assert caps.supported_methods == ("PBE", "B3LYP", "PBE0")
-        assert caps.supported_basis_sets == ("def2-SVP", "def2-TZVP", "LANL2DZ")
+        assert caps.supported_methods == ("PBE",)
+        assert caps.supported_basis_sets == ("def2-SVP", "def2-TZVP")
         assert caps.recommended_auxbasis == "def2-universal-jfit"
         assert caps.supports_post_hf is False
 
@@ -120,7 +121,10 @@ class TestRegistryProbes:
         assert exc.value.code == "ENGINE_UNAVAILABLE"
 
     def test_resolve_unavailable_preference_raises(self):
-        with patch("quantui.engines.build_pyscf_engine", return_value=PyscfEngine()):
+        with (
+            patch("quantui.engines.build_pyscf_engine", return_value=PyscfEngine()),
+            patch("quantui.engines.build_pyfock_engine", return_value=None),
+        ):
             with pytest.raises(EngineUnavailableError):
                 resolve_engine("pyfock")
 
@@ -173,3 +177,53 @@ class TestEngineCapabilitiesFrozen:
         )
         with pytest.raises(AttributeError):
             caps.engine_id = "other"  # type: ignore[misc]
+
+
+class TestDispatch:
+    def test_run_calc_calls_resolved_engine(self):
+        request = EngineRequest(
+            request_id="req-1",
+            calc_type="single_point",
+            method="PBE",
+            basis="def2-SVP",
+            charge=0,
+            multiplicity=1,
+            molecule={"atoms": ["He"], "coordinates": [[0.0, 0.0, 0.0]]},
+        )
+        expected = EngineResult(
+            request_id="req-1",
+            engine_id="pyfock",
+            status="success",
+            converged=True,
+            energy_hartree=-2.0,
+            method="PBE",
+            basis="def2-SVP",
+            formula="He",
+        )
+        engine = PyfockEngine()
+        with (
+            patch("quantui.engines.resolve_engine", return_value=engine),
+            patch.object(engine, "run", return_value=expected) as mocked_run,
+        ):
+            actual = run_calc(request, "pyfock")
+        assert actual is expected
+        mocked_run.assert_called_once_with(request)
+
+    def test_request_portable_dict_excludes_runtime_objects(self):
+        stream = object()
+        checkpoint = object()
+        request = EngineRequest(
+            request_id="req-1",
+            calc_type="single_point",
+            method="PBE",
+            basis="def2-SVP",
+            charge=0,
+            multiplicity=1,
+            molecule={"atoms": ["He"], "coordinates": [[0.0, 0.0, 0.0]]},
+            progress_stream=stream,  # type: ignore[arg-type]
+            checkpoint=checkpoint,
+        )
+        payload = request.to_dict()
+        assert "progress_stream" not in payload
+        assert "checkpoint" not in payload
+        assert EngineRequest.from_dict(payload).warm_start is True

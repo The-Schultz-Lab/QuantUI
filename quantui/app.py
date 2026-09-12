@@ -586,6 +586,8 @@ from quantui.config import (
     SUPPORTED_BASIS_SETS,
     SUPPORTED_METHODS,
 )
+from quantui.engines import is_pyfock_available as _is_pyfock_available
+from quantui.engines import is_pyscf_available as _is_pyscf_available
 from quantui.freq_ir_workers import (
     freq_parallel_env_configured,
     freq_parallel_opt_in,
@@ -692,12 +694,8 @@ _STRUCT_SOURCE_PREFIX = {
     "library-offline-fallback": "Library (offline)",
 }
 
-try:
-    from quantui.session_calc import SessionResult, run_in_session  # noqa: F401
-
-    _PYSCF_AVAILABLE = True
-except (ImportError, AttributeError):
-    _PYSCF_AVAILABLE = False
+_PYSCF_AVAILABLE = _is_pyscf_available()
+_PYFOCK_AVAILABLE = _is_pyfock_available()
 
 try:
     # Availability probe only — the classical pre-opt is invoked via the
@@ -1442,6 +1440,10 @@ class QuantUIApp:
         density_fit_enabled_cb: Any
         freq_parallel_enabled_cb: Any
         execution_backend_dd: Any
+        quantum_engine_dd: Any
+        quantum_engine_note: Any
+        engine_capability_html: Any
+        _engine_run_intro: Any
         help_content_html: Any
         help_tab_panel: Any
         help_topic_dd: Any
@@ -1851,6 +1853,7 @@ class QuantUIApp:
         # Observers are NOT yet wired so widget assignments don't trigger
         # render side-effects — this is pure initial-state alignment.
         self._initialize_viz_state_from_preference()
+        self._apply_quantum_engine_capabilities()
 
         self._wire_callbacks()
         self._assemble_tabs()
@@ -2103,6 +2106,7 @@ class QuantUIApp:
             get_session_resources_fn=get_session_resources,
             load_last_calibration_label_fn=_load_last_calibration_label,
             pyscf_available=_PYSCF_AVAILABLE,
+            pyfock_available=_PYFOCK_AVAILABLE,
             ase_available=ASE_AVAILABLE,
             pubchem_available=PUBCHEM_AVAILABLE,
             visualization_available=VISUALIZATION_AVAILABLE,
@@ -2118,6 +2122,7 @@ class QuantUIApp:
             freq_parallel_env_locked=freq_parallel_env_configured(),
             execution_backend=self._user_settings.compute.execution_backend,
             slurm_available=is_slurm_available(),
+            quantum_engine=self._user_settings.compute.quantum_engine,
         )
 
     # ── Welcome header ────────────────────────────────────────────────────
@@ -2530,6 +2535,9 @@ class QuantUIApp:
         )
         self.execution_backend_dd.observe(
             self._safe_cb(self._on_execution_backend_changed), names="value"
+        )
+        self.quantum_engine_dd.observe(
+            self._safe_cb(self._on_quantum_engine_changed), names="value"
         )
         # 3D viewer style and lighting controls
         if VISUALIZATION_AVAILABLE:
@@ -3968,6 +3976,120 @@ class QuantUIApp:
         except OSError:
             pass
         self._sync_root_tab_layout()
+
+    def _on_quantum_engine_changed(self, change) -> None:
+        """Persist the engine choice and immediately gate unsupported controls."""
+        new_value = str(change["new"])
+        if new_value != self._user_settings.compute.quantum_engine:
+            self._user_settings.compute.quantum_engine = new_value
+            self._user_settings.save()
+        self._apply_quantum_engine_capabilities()
+        try:
+            _calc_log.log_event("quantum_engine_changed", f"engine={new_value}")
+        except OSError:
+            pass
+
+    def _apply_quantum_engine_capabilities(self) -> None:
+        """Make the calculation setup reflect the resolved engine handshake."""
+        from quantui.engines import (
+            EnginePreference,
+            EngineUnavailableError,
+            resolve_engine,
+        )
+
+        calc_type_labels = {
+            "single_point": "Single Point",
+            "geometry_opt": "Geometry Opt",
+            "frequency": "Frequency",
+            "tddft": "UV-Vis (TD-DFT)",
+            "nmr": "NMR Shielding",
+            "pes_scan": "PES Scan",
+            "reorganization_energy": "Reorganization Energy",
+        }
+        preference = cast(EnginePreference, self._user_settings.compute.quantum_engine)
+        try:
+            engine = resolve_engine(preference)
+            caps = engine.capabilities()
+        except EngineUnavailableError as exc:
+            message = exc.user_message
+            self.quantum_engine_note.value = (
+                f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
+                f"{message}</span>"
+            )
+            self.engine_capability_html.value = self.quantum_engine_note.value
+            self.run_btn.disabled = True
+            return
+
+        calc_options = [
+            calc_type_labels[key]
+            for key in caps.supported_calc_types
+            if key in calc_type_labels
+        ]
+        current_calc = self.calc_type_dd.value
+        self.calc_type_dd.options = calc_options
+        if current_calc in calc_options:
+            self.calc_type_dd.value = current_calc
+        elif calc_options:
+            self.calc_type_dd.value = calc_options[0]
+
+        method_options = [m for m in SUPPORTED_METHODS if m in caps.supported_methods]
+        current_method = self.method_dd.value
+        self.method_dd.options = method_options
+        self.method_dd.value = (
+            current_method if current_method in method_options else method_options[0]
+        )
+
+        supported_bases = caps.supported_basis_sets or tuple(SUPPORTED_BASIS_SETS)
+        basis_options = [b for b in SUPPORTED_BASIS_SETS if b in supported_bases]
+        current_basis = self.basis_dd.value
+        self.basis_dd.options = basis_options
+        self.basis_dd.value = (
+            current_basis if current_basis in basis_options else basis_options[0]
+        )
+
+        explicit = preference != "auto"
+        resolved_note = f"{caps.display_name} {caps.version}".strip()
+        if not explicit:
+            resolved_note = f"Automatic resolved to {resolved_note}"
+        note = caps.platform_notes
+        self.quantum_engine_note.value = (
+            f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
+            f"{resolved_note}. {note}</div>"
+        )
+        self.engine_capability_html.value = (
+            f'<div style="background:{_theme.css.SURFACE_MUTED_BG};border-left:3px solid '
+            f'{_theme.css.ACCENT_INFO};padding:7px 10px;margin:2px 0 8px;font-size:12px">'
+            f"<b>Engine: {caps.display_name}</b> — {note}</div>"
+        )
+        self._engine_run_intro.value = (
+            f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:0 0 8px">'
+            f"{caps.display_name} runs in this kernel. Output appears live below. "
+            "Large molecules or high-accuracy basis sets may take several minutes.</p>"
+        )
+
+        is_pyfock = caps.engine_id == "pyfock"
+        self.gpu_enabled_cb.disabled = not caps.supports_gpu
+        self.density_fit_enabled_cb.disabled = is_pyfock
+        self.execution_backend_dd.disabled = is_pyfock
+        if is_pyfock:
+            if self.execution_backend_dd.value != "local":
+                self.execution_backend_dd.value = "local"
+            self.solvent_cb.value = False
+            self.solvent_cb.disabled = True
+            self.solvent_cb.description = (
+                "Implicit solvent — unavailable in PyFock Phase 1"
+            )
+            self._freq_preopt_cb.value = False
+            self._freq_preopt_cb.disabled = True
+            self._freq_preopt_cb.layout.display = "none"
+        else:
+            self.density_fit_enabled_cb.disabled = False
+            self.execution_backend_dd.disabled = False
+            self._freq_preopt_cb.disabled = False
+            self._on_calc_type_changed({"new": self.calc_type_dd.value})
+
+        if not self._calc_running and self._molecule is not None:
+            self.run_btn.disabled = False
 
     def _on_vib_framerate_changed(self, change) -> None:
         """Persist the vibrational-animation framerate and re-render the
@@ -6237,7 +6359,7 @@ class QuantUIApp:
                 save_type = "reorganization_energy"
             else:  # Single Point
                 self.run_status.value = "Calculating..."
-                from quantui import run_in_session
+                from quantui.engines import EnginePreference, EngineRequest, run_calc
 
                 # MP2 heavy-atom warning
                 if self.method_dd.value.upper() == "MP2":
@@ -6253,14 +6375,29 @@ class QuantUIApp:
                         )
 
                 _solvent = self.solvent_dd.value if self.solvent_cb.value else None
-                result = run_in_session(
-                    molecule=calc_mol,
-                    method=self.method_dd.value,
-                    basis=self.basis_dd.value,
-                    progress_stream=log,  # type: ignore[arg-type]
-                    solvent=_solvent,
-                    checkpoint=_ckpt,
+                engine_result = run_calc(
+                    EngineRequest(
+                        request_id=_uuid.uuid4().hex,
+                        calc_type="single_point",
+                        method=self.method_dd.value,
+                        basis=self.basis_dd.value,
+                        charge=int(calc_mol.charge),
+                        multiplicity=int(calc_mol.multiplicity),
+                        molecule={
+                            "atoms": list(calc_mol.atoms),
+                            "coordinates": [list(c) for c in calc_mol.coordinates],
+                        },
+                        options={"verbose": 4, "scf_rescue": True},
+                        progress_stream=log,  # type: ignore[arg-type]
+                        solvent=_solvent,
+                        checkpoint=_ckpt,
+                    ),
+                    preferred=cast(
+                        EnginePreference,
+                        self._user_settings.compute.quantum_engine,
+                    ),
                 )
+                result = engine_result.to_session_result()
                 result_html = self._format_result(result)
                 save_spectra, save_type = {}, "single_point"
 

@@ -30,8 +30,9 @@ classifiers = [
     # PyPI shows the licence from this classifier in the sidebar; the
     # [project] license table alone is not enough for the old-style display.
     "License :: OSI Approved :: MIT License",
-    # PySCF is Linux/macOS only, so Windows users need the container. Saying so
-    # in metadata means `pip` users see it before they hit an install failure.
+    # The complete PySCF feature set is Linux/macOS only. Native Windows has a
+    # smaller optional PyFock backend, documented in README; add a Windows
+    # classifier after its dedicated real-calculation CI gate is green.
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
     "Environment :: Web Environment",
@@ -123,6 +124,17 @@ pyscf = [
     # installers too, not just for our dependency bot.
     "pyscf>=2.13.0,<3",
     "pyscf-properties",
+]
+
+# Native-Windows-capable pure-Python DFT backend (M-PYFOCK). PyFock 0.1.7
+# imports SciPy but does not declare it in its own wheel metadata, so QuantUI's
+# extra supplies and caps that runtime dependency explicitly.
+pyfock = [
+    "pyfock>=0.1.7,<0.2",
+    "scipy>=1.10,<2",
+    # 0.68.0rc1 can be selected by PyFock's permissive floor and brought a
+    # prerelease llvmlite that crashed at import on Linux/Python 3.12.
+    "numba>=0.57,<0.68",
 ]
 
 # ASE: structure I/O, extended molecule library, geometry optimisation
@@ -274,6 +286,7 @@ strict_equality = true
 [[tool.mypy.overrides]]
 module = [
     "pyscf.*",
+    "pyfock.*",
     "py3Dmol.*",
     "IPython.*",
     "ipywidgets.*",
@@ -312,6 +325,7 @@ markers = [
     "unit: marks tests as unit tests",
     "network: marks tests that require network connectivity",
     "notebook: marks notebook smoke tests",
+    "pyfock: marks real PyFock integration/parity tests (opt in with QUANTUI_RUN_PYFOCK_INTEGRATION=1)",
 ]
 
 [tool.coverage.run]

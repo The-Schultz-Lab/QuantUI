@@ -70,8 +70,19 @@ def _write_run_header(app: Any) -> None:
             _df_on = bool(
                 app._user_settings.compute.density_fit
             ) and app.method_dd.value.upper() not in ("MP2", "CCSD", "CCSD(T)")
+            if app._user_settings.compute.quantum_engine == "pyfock":
+                _df_on = True
         except Exception:
             _df_on = False
+        try:
+            from quantui.engines import resolve_engine
+
+            _engine_caps = resolve_engine(
+                app._user_settings.compute.quantum_engine
+            ).capabilities()
+            _engine_name = f"{_engine_caps.display_name} {_engine_caps.version}".strip()
+        except Exception:
+            _engine_name = "PySCF"
         banner = format_log_header(
             formula=mol.get_formula(),
             method=app.method_dd.value,
@@ -82,6 +93,7 @@ def _write_run_header(app: Any) -> None:
             solvent=_solvent,
             output_dir=_out_dir,
             density_fit=_df_on,
+            engine=_engine_name,
         )
     except Exception:
         # Fallback: a minimal one-liner still beats a blank window.
