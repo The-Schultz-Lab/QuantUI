@@ -6,6 +6,7 @@ import io
 import os
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 
 from quantui.engines import EngineRequest, PyfockEngine, UnsupportedCapabilityError
@@ -36,6 +37,10 @@ class _FakeMol:
     def __init__(self, *, atoms, charge):
         self.atoms = atoms
         self.charge = charge
+        self.Zcharges = [8, 1, 1]
+
+    def get_dipole_moment(self, dipole_matrix, density):
+        return np.array([0.0, 0.0, 0.5])
 
 
 class _FakeBasis:
@@ -49,6 +54,7 @@ class _FakeBasis:
     def __init__(self, mol, assignment):
         self.mol = mol
         self.assignment = assignment
+        self.bfs_atoms = [0, 1, 2]
 
 
 class _FakeDFT:
@@ -64,24 +70,41 @@ class _FakeDFT:
         self.niter = 7
         self.mo_energies = [-0.8, -0.4, 0.1]
         self.mo_occupations = [2.0, 2.0, 0.0]
+        self.mo_coefficients = [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
         self.max_itr = None
         self.sao = False
 
     def scf(self):
         print("fake PyFock SCF output")
-        return -76.123456, object()
+        return -76.123456, np.diag([2.0, 1.0, 1.0])
 
 
 class TestPyfockAdapter:
+    def test_capabilities_include_phase2_analysis_and_geometry(self):
+        caps = PyfockEngine().capabilities()
+        assert caps.supported_calc_types == ("single_point", "geometry_opt")
+        assert caps.supports_orbital_export is True
+
     def test_water_result_and_stdout_capture(self):
         stream = io.StringIO()
         request = _request(
             progress_stream=stream,
             options={"ncores": 4, "max_iterations": 30, "conv_crit": 1e-8},
         )
-        with patch(
-            "quantui.engines.pyfock_engine._load_pyfock_api",
-            return_value=(_FakeMol, _FakeBasis, _FakeDFT),
+        with (
+            patch(
+                "quantui.engines.pyfock_engine._load_pyfock_api",
+                return_value=(_FakeMol, _FakeBasis, _FakeDFT),
+            ),
+            patch("pyfock.Integrals.overlap_mat_symm", return_value=np.eye(3)),
+            patch(
+                "pyfock.Integrals.dipole_moment_mat_symm",
+                return_value=np.zeros((3, 3, 3)),
+            ),
         ):
             result = PyfockEngine().run(request)
 
@@ -93,6 +116,12 @@ class TestPyfockAdapter:
         assert result.native_result.engine_id == "pyfock"
         assert result.native_result.density_fit is True
         assert result.native_result.scf_variant == "RKS"
+        assert result.native_result.mo_energy_hartree.tolist() == [-0.8, -0.4, 0.1]
+        assert result.native_result.mo_coeff.shape == (3, 3)
+        assert result.native_result.mulliken_charges == pytest.approx([6.0, 0.0, 0.0])
+        assert result.native_result.dipole_moment_debye == pytest.approx(
+            0.5 * 2.541746473
+        )
         assert _FakeDFT.last.sao is True
         assert "fake PyFock SCF output" in stream.getvalue()
         assert "density fitting: on" in stream.getvalue()
@@ -100,7 +129,7 @@ class TestPyfockAdapter:
     @pytest.mark.parametrize(
         ("field", "value", "message"),
         [
-            ("calc_type", "geometry_opt", "Single Point"),
+            ("calc_type", "frequency", "Single Point and Geometry Opt"),
             ("method", "B3LYP", "PBE only"),
             ("basis", "LANL2DZ", "def2-SVP"),
             ("charge", 1, "neutral molecules"),
@@ -125,6 +154,27 @@ class TestPyfockAdapter:
             result = PyfockEngine().run(_request())
         assert result.status == "error"
         assert result.error["code"] == "PYFOCK_CALCULATION_FAILED"
+
+    def test_geometry_optimization_dispatches_through_shared_optimizer(self):
+        native = type(
+            "Native",
+            (),
+            {
+                "converged": True,
+                "energy_hartree": -1.1,
+                "n_steps": 3,
+                "method": "PBE",
+                "basis": "def2-SVP",
+                "formula": "H2O",
+            },
+        )()
+        with patch("quantui.optimizer.optimize_geometry", return_value=native) as opt:
+            result = PyfockEngine().run(_request(calc_type="geometry_opt"))
+
+        assert result.native_result is native
+        assert result.engine_id == "pyfock"
+        assert result.n_iterations == 3
+        assert opt.call_args.kwargs["engine_id"] == "pyfock"
 
 
 @pytest.mark.pyfock

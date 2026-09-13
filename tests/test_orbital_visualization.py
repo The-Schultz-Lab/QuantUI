@@ -7,6 +7,7 @@ Cube-file functions are tested with a synthetic minimal cube string.
 """
 
 import textwrap
+import types
 
 import numpy as np
 import pytest
@@ -592,6 +593,64 @@ class TestGenerateCubeFromArrays:
             spin=1,
         )
         assert result.exists()
+
+
+class TestGeneratePyFockCubeFromArrays:
+    def test_transforms_spherical_coefficients_for_native_writer(
+        self, tmp_path, monkeypatch
+    ):
+        from quantui.orbital_visualization import generate_pyfock_cube_from_arrays
+
+        captured = {}
+
+        class FakeMol:
+            def __init__(self, *, atoms, charge):
+                captured["atoms"] = atoms
+                captured["charge"] = charge
+
+        class FakeBasis:
+            @classmethod
+            def load(cls, *, mol, basis_name):
+                return basis_name
+
+            def __init__(self, mol, assignment):
+                self.assignment = assignment
+
+            def cart2sph_basis(self):
+                return np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+
+        def fake_writer(mol, basis, vector, path, **kwargs):
+            captured["vector"] = np.asarray(vector)
+            captured["kwargs"] = kwargs
+            path_obj = tmp_path / "orbital.cube"
+            assert str(path_obj) == path
+            path_obj.write_text("comment 1\ncomment 2\n")
+
+        monkeypatch.setitem(
+            __import__("sys").modules,
+            "pyfock",
+            types.SimpleNamespace(Mol=FakeMol, Basis=FakeBasis),
+        )
+        monkeypatch.setitem(
+            __import__("sys").modules,
+            "pyfock.Utils",
+            types.SimpleNamespace(write_orbital_cube=fake_writer),
+        )
+        output = tmp_path / "orbital.cube"
+        result = generate_pyfock_cube_from_arrays(
+            [["H", [0.0, 0.0, 0.0]]],
+            "def2-SVP",
+            np.array([[2.0], [3.0]]),
+            0,
+            output,
+            nx=8,
+            ny=9,
+            nz=10,
+        )
+
+        assert result == output
+        np.testing.assert_allclose(captured["vector"], [2.0, 3.0, 0.0])
+        assert captured["kwargs"] == {"nx": 8, "ny": 9, "nz": 10, "ncores": 1}
 
 
 # ---------------------------------------------------------------------------

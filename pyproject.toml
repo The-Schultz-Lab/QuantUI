@@ -131,6 +131,9 @@ pyscf = [
 # extra supplies and caps that runtime dependency explicitly.
 pyfock = [
     "pyfock>=0.1.7,<0.2",
+    # PyFock's ASE calculator is the geometry-optimization path used by
+    # QuantUI; include ASE here so the documented backend extra is complete.
+    "ase>=3.22.0,<4",
     "scipy>=1.10,<2",
     # 0.68.0rc1 can be selected by PyFock's permissive floor and brought a
     # prerelease llvmlite that crashed at import on Linux/Python 3.12.

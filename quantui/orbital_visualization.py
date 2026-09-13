@@ -8,11 +8,10 @@ Two capabilities, each with progressively heavier dependencies:
    colour-coded by occupation.  Input is a NumPy array of MO energies
    (from ``results.npz`` or a live ``SessionResult``).
 
-2. **Cube-file isosurface** (plotly + PySCF ``cubegen``) — Linux only.
+2. **Cube-file isosurface** (plotly + engine-native cube generation).
    Generates a volumetric cube file for a selected MO, then renders an
-   isosurface in 3-D using ``plotly.graph_objects.Isosurface``.  This
-   requires PySCF at *generation* time; the viewer works on any platform
-   once the cube data is saved.
+   isosurface in 3-D using ``plotly.graph_objects.Isosurface``. PySCF and
+   PyFock results each use their own basis evaluator.
 """
 
 from __future__ import annotations
@@ -907,6 +906,83 @@ def generate_cube_from_arrays(
         method=method,
     )
     logger.info("Wrote cube file: %s", output_path)
+    return output_path
+
+
+def generate_pyfock_cube_from_arrays(
+    mol_atom: list,
+    mol_basis: str,
+    mo_coeff: np.ndarray,
+    orbital_index: int,
+    output_path: Path,
+    *,
+    nx: int = 60,
+    ny: int = 60,
+    nz: int = 60,
+    margin: float = 5.0,
+    charge: int = 0,
+    spin: int = 0,
+    method: str = "",
+    ncores: int = 1,
+) -> Path:
+    """Generate a selected orbital cube with PyFock's native basis evaluator."""
+    if spin != 0:
+        raise ValueError(
+            "PyFock orbital cubes currently require a closed-shell result."
+        )
+    try:
+        from pyfock import Basis, Mol
+        from pyfock.Utils import write_orbital_cube
+    except (ImportError, OSError) as exc:
+        raise ImportError(
+            "PyFock is required to generate a cube for this result.\n"
+            "  pip install 'quantui[pyfock]'"
+        ) from exc
+
+    atoms = [
+        [str(symbol), float(coords[0]), float(coords[1]), float(coords[2])]
+        for symbol, coords in mol_atom
+    ]
+    mol = Mol(atoms=atoms, charge=charge)
+    basis = Basis(mol, {"all": Basis.load(mol=mol, basis_name=mol_basis)})
+    coeff = np.asarray(mo_coeff, dtype=float)
+    if coeff.ndim == 3:
+        coeff = coeff[0]
+    if orbital_index < 0 or orbital_index >= coeff.shape[1]:
+        raise IndexError(f"Orbital index {orbital_index} is out of range.")
+
+    vector = coeff[:, orbital_index]
+    cart_to_sph = np.asarray(basis.cart2sph_basis(), dtype=float)
+    if vector.shape[0] == cart_to_sph.shape[0]:
+        vector = cart_to_sph.T @ vector
+    elif vector.shape[0] != cart_to_sph.shape[1]:
+        raise ValueError(
+            "PyFock MO coefficient count does not match the selected basis."
+        )
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    write_orbital_cube(
+        mol,
+        basis,
+        vector,
+        str(output_path),
+        nx=nx,
+        ny=ny,
+        nz=nz,
+        ncores=max(1, int(ncores)),
+    )
+    _write_cube_provenance(
+        output_path,
+        basis=mol_basis,
+        nx=nx,
+        ny=ny,
+        nz=nz,
+        charge=charge,
+        spin=spin,
+        method=method,
+    )
+    logger.info("Wrote PyFock cube file: %s", output_path)
     return output_path
 
 

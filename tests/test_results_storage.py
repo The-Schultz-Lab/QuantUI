@@ -347,11 +347,13 @@ class TestSaveOrbitals:
             mo_coeff=None,
             pyscf_mol_atom=[("O", [0.0, 0.0, 0.0])],
             pyscf_mol_basis="sto-3g",
+            engine_id="pyfock",
         )
         save_orbitals(tmp_path, result)
         assert (tmp_path / "orbitals_meta.json").exists()
         meta = json.loads((tmp_path / "orbitals_meta.json").read_text())
         assert meta["mol_basis"] == "sto-3g"
+        assert meta["engine_id"] == "pyfock"
 
 
 class TestLoadOrbitals:
@@ -363,11 +365,13 @@ class TestLoadOrbitals:
             mo_coeff=None,
             pyscf_mol_atom=[("O", [0.0, 0.0, 0.0])],
             pyscf_mol_basis="sto-3g",
+            engine_id="pyfock",
         )
         save_orbitals(tmp_path, result)
         loaded = load_orbitals(tmp_path)
         np.testing.assert_array_almost_equal(loaded.mo_energy_hartree, mo_e)
         assert loaded.pyscf_mol_basis == "sto-3g"
+        assert loaded.engine_id == "pyfock"
 
     def test_raises_file_not_found_when_missing(self, tmp_path):
         with pytest.raises(FileNotFoundError):

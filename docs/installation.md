@@ -27,7 +27,7 @@ pip install "quantui[pyscf,ase,app]"
 
 ## Windows
 
-For native Windows and the guarded PyFock single-point subset, use Python 3.11:
+For native Windows and the guarded PyFock subset, use Python 3.11:
 
 ```powershell
 py -3.11 -m venv .venv
@@ -35,8 +35,9 @@ py -3.11 -m venv .venv
 python -m pip install "quantui[pyfock,ase,app]"
 ```
 
-Automatic engine selection uses PyFock when PySCF is absent. Phase 1 supports
-neutral, closed-shell PBE/def2-SVP or PBE/def2-TZVP single points. For all
+Automatic engine selection uses PyFock when PySCF is absent. The validated
+subset supports neutral, closed-shell PBE/def2-SVP or PBE/def2-TZVP single
+points and geometry optimizations. For all
 other methods and workflows, use WSL or the Apptainer container described in
 [Platform Support](platforms.md).
 
@@ -45,7 +46,7 @@ other methods and workflows, use WSL or the Apptainer container described in
 | Extra | What it adds |
 | --- | --- |
 | `pyscf` | Canonical PySCF backend (full calculation and analysis feature set) |
-| `pyfock` | PyFock Phase-1 backend (native-Windows PBE single points) |
+| `pyfock` | PyFock backend (native-Windows PBE single points and geometry optimization) |
 | `ase` | ASE bridge for trajectory export and structure I/O |
 | `app` | Voilà, JupyterLab, and notebook launcher dependencies |
 | `xtb` | GFN-FF metal pre-optimization via xtb |

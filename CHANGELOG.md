@@ -9,6 +9,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **PyFock geometry and analysis phase** — native-Windows PBE/def2 geometry
+  optimization now uses PyFock's ASE calculator with analytical density-fitted
+  gradients. Single-point and final optimized-geometry results retain orbital
+  arrays, Mulliken charges, dipoles, and engine-native cube generation.
+
 - **PyFock Phase-1 backend (M-PYFOCK PYF.2–PYF.6)** — normalized engine
   dispatch, native-Windows PBE/def2 single points for neutral closed-shell
   molecules, capability-driven calculation menus, engine provenance in logs

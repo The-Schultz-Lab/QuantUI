@@ -72,7 +72,7 @@ jobs:
         # Single line: PowerShell does not support backslash line continuation.
         run: pytest -m "not network" --ignore=tests/test_session_calc.py --ignore=tests/test_optimizer.py --ignore=tests/test_preopt.py --no-cov --no-header -q
 
-  # ── Windows: real PyFock Phase-1 calculation ───────────────────────────────
+  # ── Windows: real PyFock calculation ───────────────────────────────────────
   test-windows-pyfock:
     name: PyFock integration (windows-latest, Python 3.11)
     runs-on: windows-latest

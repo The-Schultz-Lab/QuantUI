@@ -234,6 +234,7 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     app._last_orb_mo_coeff = None
     app._last_orb_mo_occ = None
     app._last_orb_method = None
+    app._last_orb_engine_id = "pyscf"
     # Mulliken state consumed by the Populations panel — reset so a context
     # without charges cannot leak the prior calc's chart into this one.
     app._last_mulliken_symbols = None

@@ -1,5 +1,5 @@
 """
-QM geometry optimization using ASE-BFGS + PySCF gradients.
+QM geometry optimization using ASE-BFGS + quantum-engine gradients.
 
 Performs a full quantum mechanical geometry optimization by coupling the
 ASE BFGS optimizer with a thin PySCF wrapper calculator.  Atoms are
@@ -12,8 +12,8 @@ visualization of the relaxation path in the notebook.
 
 Platform notes
 --------------
-Requires PySCF — **Linux / macOS / WSL only**.  ASE >= 3.22 required.
-This module imports PySCF lazily so it can be imported safely on Windows.
+Requires ASE >= 3.22 and either PySCF or PyFock. Both engines are imported
+lazily so this module remains safe to import on native Windows.
 
 Implementation note
 -------------------
@@ -333,6 +333,7 @@ class OptimizationResult:
     mulliken_charges: Optional[List[float]] = None
     dipole_moment_debye: Optional[float] = None
     dipole_vector_debye: Optional[List[float]] = None
+    engine_id: str = "pyscf"
 
     @property
     def energy_hartree(self) -> float:
@@ -468,9 +469,11 @@ def optimize_geometry(
     checkpoint: Optional[Any] = None,
     resume: bool = False,
     scf_rescue: bool = True,
+    engine_id: str = "pyscf",
+    ncores: int = 1,
 ) -> OptimizationResult:
     """
-    Optimize a molecular geometry at the QM level using ASE-BFGS + PySCF.
+    Optimize a molecular geometry at the QM level using ASE-BFGS.
 
     Runs a BFGS quasi-Newton geometry optimization.  At each step the
     PySCF mean-field calculator provides the energy and analytical
@@ -527,7 +530,7 @@ def optimize_geometry(
         (step number and maximum force) to *progress_stream*.
     """
     # --- Dependency checks ---
-    if not ASE_AVAILABLE or _QuantUIPySCFCalc is None:
+    if not ASE_AVAILABLE:
         raise ImportError(
             "ASE is not installed — cannot run geometry optimization.\n"
             "  pip install 'ase>=3.22.0'\n"
@@ -551,14 +554,29 @@ def optimize_geometry(
             "on the optimized geometry."
         )
 
-    try:
-        import pyscf as _pyscf  # noqa: F401 — presence check
-    except ImportError as exc:
-        raise ImportError(
-            "PySCF is not installed — cannot run geometry optimization.\n"
-            "  conda install -c conda-forge pyscf\n"
-            "Note: PySCF is Linux / macOS / WSL only."
-        ) from exc
+    if engine_id not in {"pyscf", "pyfock"}:
+        raise ValueError(
+            f"Unknown quantum engine for geometry optimization: {engine_id}"
+        )
+    if engine_id == "pyscf":
+        if _QuantUIPySCFCalc is None:
+            raise ImportError("ASE calculator support is unavailable.")
+        try:
+            import pyscf as _pyscf  # noqa: F401 — presence check
+        except ImportError as exc:
+            raise ImportError(
+                "PySCF is not installed — cannot run geometry optimization.\n"
+                "  conda install -c conda-forge pyscf\n"
+                "Note: PySCF is Linux / macOS / WSL only."
+            ) from exc
+    else:
+        try:
+            from pyfock import PyFockCalculator as _PyFockCalculator
+        except (ImportError, OSError) as exc:
+            raise ImportError(
+                "PyFock is not installed — cannot run this geometry optimization.\n"
+                "  pip install 'quantui[pyfock]'"
+            ) from exc
 
     try:
         from ase.optimize import BFGS  # type: ignore[import]
@@ -605,17 +623,44 @@ def optimize_geometry(
     start_molecule = _resume_from if _resume_from is not None else molecule
 
     atoms = molecule_to_atoms(start_molecule)
-    atoms.calc = _QuantUIPySCFCalc(
-        method=method,
-        basis=basis,
-        charge=molecule.charge,
-        spin=molecule.multiplicity - 1,
-        cancel_check=_cancel_check,
-        progress_stream=_stream,
-        status_label=status_label,
-        expected_steps=expected_steps,
-        scf_rescue=scf_rescue,
-    )
+    if engine_id == "pyscf":
+        atoms.calc = _QuantUIPySCFCalc(
+            method=method,
+            basis=basis,
+            charge=molecule.charge,
+            spin=molecule.multiplicity - 1,
+            cancel_check=_cancel_check,
+            progress_stream=_stream,
+            status_label=status_label,
+            expected_steps=expected_steps,
+            scf_rescue=scf_rescue,
+        )
+    else:
+        _pyfock_tmp = tempfile.TemporaryDirectory(prefix="quantui-pyfock-opt-")
+        atoms.calc = _PyFockCalculator(
+            basis=basis,
+            auxbasis="def2-universal-jfit",
+            charge=molecule.charge,
+            directory=_pyfock_tmp.name,
+            convergence_check="error",
+            force_mode="analytical",
+            xc=method,
+            isDF=True,
+            sao=True,
+            conv_crit=1.0e-7,
+            max_itr=50,
+            ncores=max(1, int(ncores)),
+            use_gpu=False,
+        )
+        # Keep the directory alive for every BFGS force evaluation and expose
+        # the same metadata hooks consumed by the shared result builder.
+        atoms.calc._quantui_tmpdir = _pyfock_tmp
+        atoms.calc._density_fit_used = True
+        atoms.calc.dispersion_applied = None
+        _write_stream(
+            _stream,
+            "\nPyFock geometry optimization: analytical density-fitted gradients.\n",
+        )
 
     # PySCF gradients (called by ASE-BFGS at every
     # step) emit fd-2 stderr from libcint / BLAS. Wrap the full BFGS run
@@ -907,6 +952,7 @@ def optimize_geometry(
         dipole_moment_debye=_opt_dipole,
         dipole_vector_debye=_opt_dipole_vec,
         dispersion_applied=getattr(atoms.calc, "dispersion_applied", None),
+        engine_id=engine_id,
     )
 
 
