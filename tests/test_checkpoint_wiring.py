@@ -123,7 +123,7 @@ class TestCalcModuleSignatures:
         into ``run_freq_calc``. Drives the real dispatch (mocking only
         ``run_freq_calc`` itself) and inspects the actual call arguments.
         """
-        from unittest.mock import patch
+        from unittest.mock import MagicMock, patch
 
         from quantui.app import QuantUIApp
         from quantui.freq_calc import FreqResult
@@ -136,6 +136,11 @@ class TestCalcModuleSignatures:
                 [[0.0, 0.0, 0.0], [0.757, 0.587, 0.0], [-0.757, 0.587, 0.0]],
             )
         )
+        # Engine capability gating may hide Frequency in environments where
+        # only the PyFock subset is installed; this test targets the app's
+        # dispatch wiring, so expose the option explicitly for the fixture.
+        if "Frequency" not in app.calc_type_dd.options:
+            app.calc_type_dd.options = tuple(app.calc_type_dd.options) + ("Frequency",)
         app.calc_type_dd.value = "Frequency"
         mock_result = FreqResult(
             energy_hartree=-76.0,
@@ -150,15 +155,19 @@ class TestCalcModuleSignatures:
             raman_activities=[],
             zpve_hartree=0.02,
         )
-        with patch(
-            "quantui.freq_calc.run_freq_calc", return_value=mock_result
-        ) as mock_run:
+        fake_checkpoint = MagicMock()
+        with (
+            patch.object(app, "_begin_run_checkpoint", return_value=fake_checkpoint),
+            patch(
+                "quantui.freq_calc.run_freq_calc", return_value=mock_result
+            ) as mock_run,
+        ):
             with patch("quantui.save_result"):
                 app._do_run()
 
         mock_run.assert_called_once()
         _, kwargs = mock_run.call_args
-        assert kwargs.get("checkpoint") is not None
+        assert kwargs.get("checkpoint") is fake_checkpoint
         assert "resume" in kwargs
 
 
