@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import io
 import os
+import sys
+from types import ModuleType
 from unittest.mock import patch
 
 import numpy as np
@@ -95,16 +97,23 @@ class TestPyfockAdapter:
             progress_stream=stream,
             options={"ncores": 4, "max_iterations": 30, "conv_crit": 1e-8},
         )
+        fake_pyfock = ModuleType("pyfock")
+        fake_pyfock.Integrals = type(
+            "FakeIntegrals",
+            (),
+            {
+                "overlap_mat_symm": staticmethod(lambda basis: np.eye(3)),
+                "dipole_moment_mat_symm": staticmethod(
+                    lambda basis: np.zeros((3, 3, 3))
+                ),
+            },
+        )
         with (
             patch(
                 "quantui.engines.pyfock_engine._load_pyfock_api",
                 return_value=(_FakeMol, _FakeBasis, _FakeDFT),
             ),
-            patch("pyfock.Integrals.overlap_mat_symm", return_value=np.eye(3)),
-            patch(
-                "pyfock.Integrals.dipole_moment_mat_symm",
-                return_value=np.zeros((3, 3, 3)),
-            ),
+            patch.dict(sys.modules, {"pyfock": fake_pyfock}),
         ):
             result = PyfockEngine().run(request)
 
