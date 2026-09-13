@@ -52,7 +52,7 @@ class TestPyfockCapabilities:
     def test_handshake_is_phase1_subset(self):
         caps = PyfockEngine().capabilities()
         assert caps.engine_id == "pyfock"
-        assert caps.supported_calc_types == ("single_point",)
+        assert caps.supported_calc_types == ("single_point", "geometry_opt")
         assert caps.supported_methods == ("PBE",)
         assert caps.supported_basis_sets == ("def2-SVP", "def2-TZVP")
         assert caps.recommended_auxbasis == "def2-universal-jfit"

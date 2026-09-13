@@ -7,13 +7,13 @@ PyFock subset or move to WSL/Apptainer for the full feature set.
 | --- | --- | --- |
 | **Linux / macOS** | :material-check-circle:{ .green } Full | PySCF installs natively via conda or pip |
 | **WSL (Windows)** | :material-check-circle:{ .green } Full | Ubuntu WSL environment — follows the Linux path exactly |
-| **Windows native** | :material-alert-circle:{ .yellow } Partial | PyFock: neutral closed-shell PBE/def2 single points; WSL/Apptainer: full PySCF feature set |
+| **Windows native** | :material-alert-circle:{ .yellow } Partial | PyFock: neutral closed-shell PBE/def2 single points and geometry optimizations; WSL/Apptainer: full PySCF feature set |
 
 !!! info "Windows users"
     Install `quantui[pyfock,ase,app]` under Python 3.11 for native PBE single
-    points. QuantUI's engine picker hides unsupported controls. For hybrids,
-    ions, radicals, optimizations, spectra, solvent, checkpointing, GPU, and
-    orbital analysis, use [WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install)
+    points and geometry optimizations. QuantUI's engine picker hides unsupported
+    controls. For hybrids, ions, radicals, spectra, solvent, checkpointing, and
+    GPU, use [WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install)
     with Ubuntu or the
     [Apptainer container](https://github.com/The-Schultz-Lab/QuantUI/blob/main/apptainer/README.md)
     which bundles the complete environment in a single file.

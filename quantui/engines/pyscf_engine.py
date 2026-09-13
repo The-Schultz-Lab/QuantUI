@@ -68,7 +68,9 @@ class PyscfEngine:
         )
 
     def run(self, request: EngineRequest) -> EngineResult:
-        """Adapt the existing, feature-complete PySCF single-point path."""
+        """Adapt the established PySCF paths to the shared engine contract."""
+        if request.calc_type == "geometry_opt":
+            return self._run_geometry_opt(request)
         if request.calc_type != "single_point":
             raise UnsupportedCapabilityError(
                 f"Shared engine dispatch does not yet own {request.calc_type!r}.",
@@ -110,6 +112,42 @@ class PyscfEngine:
             basis=native.basis,
             formula=native.formula,
             homo_lumo_gap_ev=native.homo_lumo_gap_ev,
+            native_result=native,
+        )
+
+    def _run_geometry_opt(self, request: EngineRequest) -> EngineResult:
+        from quantui.molecule import Molecule
+        from quantui.optimizer import optimize_geometry
+
+        molecule = Molecule(
+            atoms=list(request.molecule["atoms"]),
+            coordinates=[list(c) for c in request.molecule["coordinates"]],
+            charge=request.charge,
+            multiplicity=request.multiplicity,
+        )
+        native = optimize_geometry(
+            molecule=molecule,
+            method=request.method,
+            basis=request.basis,
+            fmax=float(request.options.get("fmax", 0.05)),
+            steps=int(request.options.get("steps", 200)),
+            progress_stream=request.progress_stream,
+            expected_steps=request.options.get("expected_steps"),
+            checkpoint=request.checkpoint,
+            resume=bool(request.options.get("resume", False)),
+            scf_rescue=bool(request.options.get("scf_rescue", True)),
+            engine_id=self.engine_id,
+        )
+        return EngineResult(
+            request_id=request.request_id,
+            engine_id=self.engine_id,
+            status="success",
+            converged=native.converged,
+            energy_hartree=native.energy_hartree,
+            n_iterations=native.n_steps,
+            method=native.method,
+            basis=native.basis,
+            formula=native.formula,
             native_result=native,
         )
 

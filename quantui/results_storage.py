@@ -478,6 +478,7 @@ def save_orbitals(result_dir: Path, result: object) -> None:
         meta["mol_atom"] = [[sym, list(coords)] for sym, coords in mol_atom]
     if mol_basis is not None:
         meta["mol_basis"] = mol_basis
+    meta["engine_id"] = str(getattr(result, "engine_id", "pyscf") or "pyscf")
     if meta:
         (result_dir / "orbitals_meta.json").write_text(json.dumps(meta))
 
@@ -919,12 +920,14 @@ def load_orbitals(result_dir: Path):
         pyscf_mol_atom=None,
         pyscf_mol_basis=None,
         formula="",
+        engine_id="pyscf",
     )
     meta_path = result_dir / "orbitals_meta.json"
     if meta_path.exists():
         meta = json.loads(meta_path.read_text())
         stub.pyscf_mol_atom = meta.get("mol_atom")
         stub.pyscf_mol_basis = meta.get("mol_basis")
+        stub.engine_id = str(meta.get("engine_id", "pyscf") or "pyscf")
     return stub
 
 

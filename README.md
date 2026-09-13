@@ -73,7 +73,8 @@ Real output from QuantUI, straight from the app:
 - **In-session calculations** — RHF, UHF, 9 DFT functionals, MP2, CCSD,
   CCSD(T), NMR shielding, TD-DFT UV-Vis, and 1D PES scans via PySCF, running
   in your Python kernel. Optional PyFock 0.1.x adds native-Windows PBE
-  single points for neutral, closed-shell molecules with def2-SVP/def2-TZVP;
+  single points and geometry optimizations for neutral, closed-shell molecules
+  with def2-SVP/def2-TZVP, including orbital and population analysis;
   engine capabilities automatically gate the setup menus
 - **Implicit solvent** — PCM solvation (Water, Ethanol, THF, DMSO,
   Acetonitrile) via a single checkbox
@@ -127,7 +128,7 @@ Real output from QuantUI, straight from the app:
 | --- | --- | --- |
 | Linux / macOS | Full | PySCF installs natively |
 | WSL (Windows) | Full | Use an Ubuntu WSL environment |
-| Windows (native) | Partial | PyFock runs guarded PBE single points; use WSL/Apptainer for the full PySCF feature set |
+| Windows (native) | Partial | PyFock runs guarded PBE single points and geometry optimizations; use WSL/Apptainer for the full PySCF feature set |
 
 ### Windows users: native PyFock or the full container
 
@@ -140,11 +141,12 @@ python -m pip install "quantui[pyfock,ase,app]"
 ```
 
 In **System Settings → Quantum engine**, select PyFock (or leave Automatic
-selected when PySCF is absent). Phase 1 intentionally supports only neutral,
-closed-shell PBE single points with def2-SVP or def2-TZVP. Density fitting is
-always enabled. Hybrids, charged/open-shell systems, geometry optimization,
-solvent, checkpoint warm starts, GPU, Mulliken/dipole analysis, and orbital
-export remain PySCF-only.
+selected when PySCF is absent). The validated subset supports neutral,
+closed-shell PBE single points and geometry optimizations with def2-SVP or
+def2-TZVP. Density fitting is always enabled, analytical gradients drive
+optimization, and orbital, Mulliken, dipole, and cube analysis are retained.
+Hybrids, charged/open-shell systems, solvent, checkpoint warm starts, and GPU
+remain PySCF-only.
 
 PySCF does not install on Windows natively. For the complete feature set, the
 [`apptainer/quantui.def`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/apptainer/quantui.def) container bundles

@@ -1297,6 +1297,7 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
     app._last_orb_mo_occ = mo_occ
     app._last_orb_mol_atom = getattr(result, "pyscf_mol_atom", None)
     app._last_orb_mol_basis = getattr(result, "pyscf_mol_basis", None)
+    app._last_orb_engine_id = str(getattr(result, "engine_id", "pyscf") or "pyscf")
     # AUDIT additional-concerns — snapshot the method that actually
     # produced this mo_coeff, from the result object itself, rather than
     # reading the live Method dropdown at cube-generation time (below).
@@ -1580,6 +1581,7 @@ def render_orbital_isosurface(
 
         from quantui.orbital_visualization import (
             generate_cube_from_arrays,
+            generate_pyfock_cube_from_arrays,
             infer_charge_and_spin,
             plot_cube_isosurface,
             render_orbital_isosurface_py3dmol,
@@ -1641,7 +1643,12 @@ def render_orbital_isosurface(
         # the dropdown shows later — immutable result provenance instead
         # of a mutable, disconnectable UI control.
         _method_for_provenance = str(getattr(app, "_last_orb_method", "") or "")
-        generate_cube_from_arrays(
+        _cube_generator = (
+            generate_pyfock_cube_from_arrays
+            if getattr(app, "_last_orb_engine_id", "pyscf") == "pyfock"
+            else generate_cube_from_arrays
+        )
+        _cube_generator(
             mol_atom,
             mol_basis,
             mo_coeff,

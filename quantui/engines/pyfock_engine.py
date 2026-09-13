@@ -1,11 +1,11 @@
-"""PyFock adapter for the guarded Phase-1 single-point DFT subset."""
+"""PyFock adapter for the guarded neutral, closed-shell DFT subset."""
 
 from __future__ import annotations
 
 import importlib.util
 import sys
 from contextlib import redirect_stderr, redirect_stdout
-from typing import Optional
+from typing import Any, Optional
 
 from .base import (
     EngineCapabilities,
@@ -44,7 +44,7 @@ def _pyfock_version() -> str:
 
 
 class PyfockEngine:
-    """Pure-Python DFT engine for native Windows and teaching single points."""
+    """Pure-Python DFT engine for native Windows and teaching workflows."""
 
     @property
     def engine_id(self) -> str:
@@ -54,17 +54,18 @@ class PyfockEngine:
         return EngineCapabilities(
             engine_id="pyfock",
             display_name="PyFock",
-            supported_calc_types=("single_point",),
+            supported_calc_types=("single_point", "geometry_opt"),
             supported_methods=_PYFOCK_METHODS,
             supported_basis_sets=_PYFOCK_BASES,
             supports_solvent=False,
             supports_checkpoint_warm_start=False,
             supports_gpu=False,
             supports_post_hf=False,
-            supports_orbital_export=False,
+            supports_orbital_export=True,
             platform_notes=(
-                "Phase-1 neutral, closed-shell PBE single points. Density fitting "
-                "is always on; hybrids, solvent, checkpoints, and GPU are gated off. "
+                "Neutral, closed-shell PBE single points and geometry optimizations. "
+                "Density fitting and analytical gradients are used; hybrids, "
+                "solvent, checkpoints, and GPU are gated off. "
                 "Install with pip install quantui[pyfock]."
             ),
             recommended_auxbasis=_AUX_BASIS,
@@ -72,8 +73,13 @@ class PyfockEngine:
         )
 
     def run(self, request: EngineRequest) -> EngineResult:
-        """Run one neutral, closed-shell PBE single point through PyFock."""
+        """Run one validated PyFock calculation."""
         self._validate_request(request)
+        if request.calc_type == "geometry_opt":
+            return self._run_geometry_opt(request)
+        return self._run_single_point(request)
+
+    def _run_single_point(self, request: EngineRequest) -> EngineResult:
         stream = request.progress_stream or sys.stdout
 
         atoms, coordinates = _molecule_arrays(request.molecule)
@@ -94,7 +100,7 @@ class PyfockEngine:
                             "quantui[pyfock] extra and restart the kernel."
                         ),
                     ) from exc
-                print("\n-- PyFock Phase-1 single point -----------------------------")
+                print("\n-- PyFock single point -------------------------------------")
                 print(
                     f"Engine: PyFock {_pyfock_version() or 'unknown'} | "
                     f"{request.method}/{request.basis} | density fitting: on"
@@ -126,7 +132,7 @@ class PyfockEngine:
                 # functions). PyFock defaults to Cartesian 6d/10f, which shifts
                 # even the water reference outside the milestone parity bound.
                 dft.sao = True
-                energy, _density = dft.scf()
+                energy, density = dft.scf()
         except EngineUnavailableError:
             raise
         except Exception as exc:  # noqa: BLE001 — normalize third-party failures
@@ -153,10 +159,7 @@ class PyfockEngine:
             getattr(dft, "mo_energies", None),
             getattr(dft, "mo_occupations", None),
         )
-        warnings = [
-            "PyFock Phase 1 uses density fitting with def2-universal-jfit.",
-            "Orbital export and Mulliken/dipole analysis are not available yet.",
-        ]
+        warnings = ["PyFock uses density fitting with def2-universal-jfit."]
         if not bool(getattr(dft, "converged", False)):
             warnings.append("PyFock reached its iteration limit without convergence.")
 
@@ -173,21 +176,60 @@ class PyfockEngine:
             homo_lumo_gap_ev=gap_ev,
             warnings=warnings,
         )
-        result.native_result = result.to_session_result()
+        native = result.to_session_result()
+        _attach_analysis(native, mol, basis, dft, density, atoms, coordinates, warnings)
+        result.native_result = native
         return result
+
+    def _run_geometry_opt(self, request: EngineRequest) -> EngineResult:
+        from quantui.molecule import Molecule
+        from quantui.optimizer import optimize_geometry
+
+        atoms, coordinates = _molecule_arrays(request.molecule)
+        molecule = Molecule(
+            atoms=list(atoms),
+            coordinates=[list(c) for c in coordinates],
+            charge=request.charge,
+            multiplicity=request.multiplicity,
+        )
+        native = optimize_geometry(
+            molecule=molecule,
+            method=request.method,
+            basis=request.basis,
+            fmax=_positive_float(request.options.get("fmax"), default=0.05),
+            steps=_positive_int(request.options.get("steps"), default=200),
+            progress_stream=request.progress_stream,
+            expected_steps=request.options.get("expected_steps"),
+            engine_id=self.engine_id,
+            ncores=_positive_int(request.options.get("ncores"), default=1),
+        )
+        return EngineResult(
+            request_id=request.request_id,
+            engine_id=self.engine_id,
+            status="success",
+            converged=native.converged,
+            energy_hartree=native.energy_hartree,
+            n_iterations=native.n_steps,
+            method=native.method,
+            basis=native.basis,
+            formula=native.formula,
+            native_result=native,
+        )
 
     def _validate_request(self, request: EngineRequest) -> None:
         caps = self.capabilities()
         if request.calc_type not in caps.supported_calc_types:
             raise UnsupportedCapabilityError(
-                f"PyFock does not support {request.calc_type!r} in Phase 1.",
-                user_message="PyFock Phase 1 supports Single Point calculations only.",
+                f"PyFock does not support {request.calc_type!r}.",
+                user_message=(
+                    "PyFock supports Single Point and Geometry Opt calculations."
+                ),
             )
         if request.method.upper() not in caps.supported_methods:
             raise UnsupportedCapabilityError(
                 f"PyFock method {request.method!r} is not validated.",
                 user_message=(
-                    "PyFock Phase 1 currently supports PBE only. Hybrid "
+                    "PyFock currently supports PBE only. Hybrid "
                     "functionals require exact exchange that upstream PyFock "
                     "does not yet provide."
                 ),
@@ -195,30 +237,28 @@ class PyfockEngine:
         if request.basis not in (caps.supported_basis_sets or ()):
             raise UnsupportedCapabilityError(
                 f"PyFock basis {request.basis!r} is not validated.",
-                user_message=(
-                    "PyFock Phase 1 currently supports def2-SVP and def2-TZVP."
-                ),
+                user_message=("PyFock currently supports def2-SVP and def2-TZVP."),
             )
         if request.charge != 0:
             raise UnsupportedCapabilityError(
-                "PyFock charged molecules are not enabled in Phase 1.",
+                "PyFock charged molecules are not enabled.",
                 user_message=(
-                    "PyFock Phase 1 is limited to neutral molecules while its "
+                    "PyFock is limited to neutral molecules while its "
                     "charge convention is validated. Select PySCF for ions."
                 ),
             )
         if request.multiplicity != 1:
             raise UnsupportedCapabilityError(
-                "PyFock open-shell calculations are not enabled in Phase 1.",
+                "PyFock open-shell calculations are not enabled.",
                 user_message=(
-                    "PyFock Phase 1 is limited to closed-shell singlets. "
+                    "PyFock is limited to closed-shell singlets. "
                     "Select PySCF for radicals or other spin states."
                 ),
             )
         if request.solvent:
             raise UnsupportedCapabilityError(
-                "PyFock solvent models are not enabled in Phase 1.",
-                user_message="Implicit solvent is not available with PyFock Phase 1.",
+                "PyFock solvent models are not enabled.",
+                user_message="Implicit solvent is not available with PyFock.",
             )
         _molecule_arrays(request.molecule)
 
@@ -227,6 +267,58 @@ def _load_pyfock_api():
     from pyfock import DFT, Basis, Mol
 
     return Mol, Basis, DFT
+
+
+def _attach_analysis(
+    result: Any,
+    mol: Any,
+    basis: Any,
+    dft: Any,
+    density: Any,
+    atoms: list[str],
+    coordinates: list[list[float]],
+    warnings: list[str],
+) -> None:
+    """Attach portable orbital, Mulliken, and dipole fields when available."""
+    try:
+        import numpy as np
+
+        result.mo_energy_hartree = np.asarray(dft.mo_energies, dtype=float)
+        result.mo_occ = np.asarray(dft.mo_occupations, dtype=float)
+        result.mo_coeff = np.asarray(dft.mo_coefficients, dtype=float)
+        result.pyscf_mol_atom = [
+            (symbol, [float(x), float(y), float(z)])
+            for symbol, (x, y, z) in zip(atoms, coordinates)
+        ]
+        result.pyscf_mol_basis = result.basis
+    except Exception as exc:  # noqa: BLE001 - analysis is additive
+        warnings.append(f"PyFock orbital extraction was unavailable: {exc}")
+
+    try:
+        import numpy as np
+        from pyfock import Integrals
+
+        dmat = np.asarray(density, dtype=float)
+        overlap = np.asarray(Integrals.overlap_mat_symm(basis), dtype=float)
+        populations = np.diag(dmat @ overlap)
+        gross = np.zeros(len(atoms), dtype=float)
+        for ao_index, atom_index in enumerate(basis.bfs_atoms):
+            gross[int(atom_index)] += populations[ao_index]
+        result.atom_symbols = list(atoms)
+        result.mulliken_charges = [
+            float(charge - population)
+            for charge, population in zip(mol.Zcharges, gross)
+        ]
+
+        dipole_matrix = Integrals.dipole_moment_mat_symm(basis)
+        dipole_debye = (
+            np.asarray(mol.get_dipole_moment(dipole_matrix, dmat), dtype=float)
+            * 2.541746473
+        )
+        result.dipole_vector_debye = [float(v) for v in dipole_debye]
+        result.dipole_moment_debye = float(np.linalg.norm(dipole_debye))
+    except Exception as exc:  # noqa: BLE001 - analysis is additive
+        warnings.append(f"PyFock population analysis was unavailable: {exc}")
 
 
 def _molecule_arrays(molecule: dict):

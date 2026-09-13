@@ -568,16 +568,19 @@ class TestDoRunDispatch:
         mock_sp.mo_coeff = [[0.0]]
         mock_sp.pyscf_mol_atom = [("O", [0.0, 0.0, 0.0])]
         mock_sp.pyscf_mol_basis = "STO-3G"
+        mock_opt_engine = MagicMock()
+        mock_opt_engine.to_session_result.return_value = mock_result
+        mock_sp_engine = MagicMock()
+        mock_sp_engine.to_session_result.return_value = mock_sp
         with patch(
-            "quantui.optimize_geometry", return_value=mock_result, create=True
-        ) as mock_opt:
-            with patch(
-                "quantui.run_in_session", return_value=mock_sp, create=True
-            ) as mock_sp_run:
-                with patch("quantui.save_result"):
-                    app._do_run()
-        mock_opt.assert_called_once()
-        mock_sp_run.assert_called_once()
+            "quantui.engines.run_calc",
+            side_effect=[mock_opt_engine, mock_sp_engine],
+        ) as mock_run:
+            with patch("quantui.save_result"):
+                app._do_run()
+        assert mock_run.call_count == 2
+        assert mock_run.call_args_list[0].args[0].calc_type == "geometry_opt"
+        assert mock_run.call_args_list[1].args[0].calc_type == "single_point"
 
     def test_pyscf_unavailable_shows_error(self, app_with_molecule):
         app = app_with_molecule
@@ -608,7 +611,7 @@ class TestAvailabilityFlags:
 
 
 class TestQuantumEngineGating:
-    def test_pyfock_limits_setup_to_validated_phase1_subset(self):
+    def test_pyfock_limits_setup_to_validated_subset(self):
         from quantui.engines import PyfockEngine
 
         app = QuantUIApp()
@@ -616,7 +619,7 @@ class TestQuantumEngineGating:
         with patch("quantui.engines.resolve_engine", return_value=PyfockEngine()):
             app._apply_quantum_engine_capabilities()
 
-        assert tuple(app.calc_type_dd.options) == ("Single Point",)
+        assert tuple(app.calc_type_dd.options) == ("Single Point", "Geometry Opt")
         assert tuple(app.method_dd.options) == ("PBE",)
         assert tuple(app.basis_dd.options) == ("def2-SVP", "def2-TZVP")
         assert app.solvent_cb.disabled is True
@@ -3114,6 +3117,43 @@ class TestShowOrbitalDiagram:
 
 
 class TestIsosurfacePersistence:
+    def test_pyfock_result_uses_native_cube_generator(self, tmp_path):
+        app = QuantUIApp()
+        app._last_result_dir = tmp_path
+        app._last_orb_info = MagicMock()
+        app._last_orb_info.n_occupied = 1
+        app._last_orb_info.mo_energies_ev = [-10.0, 2.0]
+        app._last_orb_info.formula = "H2"
+        app._last_orb_mo_coeff = [[1.0, 0.0], [0.0, 1.0]]
+        app._last_orb_mo_occ = [2.0, 0.0]
+        app._last_orb_mol_atom = [["H", [0.0, 0.0, 0.0]]]
+        app._last_orb_mol_basis = "def2-SVP"
+        app._last_orb_engine_id = "pyfock"
+        app._resolve_backend = lambda task: "plotlymol"
+
+        def _fake_generate(_atom, _basis, _coeff, _idx, out_path, **_kwargs):
+            out_path.write_text("cube", encoding="utf-8")
+            return out_path
+
+        with (
+            patch(
+                "quantui.orbital_visualization.generate_pyfock_cube_from_arrays",
+                side_effect=_fake_generate,
+            ) as pyfock_gen,
+            patch(
+                "quantui.orbital_visualization.generate_cube_from_arrays"
+            ) as pyscf_gen,
+            patch(
+                "quantui.orbital_visualization.plot_cube_isosurface",
+                return_value=MagicMock(),
+            ),
+            patch("plotly.io.to_html", return_value="<div>iso</div>"),
+        ):
+            app._render_orbital_isosurface("HOMO")
+
+        pyfock_gen.assert_called_once()
+        pyscf_gen.assert_not_called()
+
     def test_render_orbital_isosurface_saves_cube_to_disk(self, tmp_path):
         app = QuantUIApp()
         app._last_result_dir = tmp_path
