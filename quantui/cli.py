@@ -9,9 +9,9 @@ Currently shipped subcommands:
 * ``quantui log tail [-n N]`` — print the last N event-log entries
   (default 20). Reads ``~/.quantui/logs/event_log.jsonl`` honoring the
   ``QUANTUI_LOG_DIR`` env override.
-* ``quantui gpu check`` — run QuantUI's GPU-offload detection and print
-  ``(available, device-name)``. Exit code 0 when GPU is usable, 1 when
-  not — handy for one-line CI / shell-script gating.
+* ``quantui gpu check [--engine pyscf|pyfock]`` — run one engine's GPU
+  detection and print ``(available, device-name)``. Exit code 0 when GPU is
+  usable, 1 when not — handy for one-line CI / shell-script gating.
 * ``quantui analytics build [-o PATH] [--open]`` — build a self-contained
   HTML analytics dashboard from ``perf_log.jsonl``. Default output:
   ``~/.quantui/dashboard.html``. Pass ``--open`` to automatically open
@@ -106,19 +106,36 @@ def _cmd_gpu_check(args: argparse.Namespace) -> int:
     Returns exit code 0 when GPU offload is available, 1 when it's not —
     so ``if quantui gpu check; then ...; fi`` works in shell scripts.
     """
-    from quantui.gpu_offload import is_gpu_available, is_low_fp64_device, probe_gpu
+    engine = getattr(args, "engine", "pyscf")
+    if engine == "pyfock":
+        from quantui.pyfock_gpu import (
+            clear_pyfock_gpu_probe_cache,
+            probe_pyfock_gpu,
+        )
 
-    # The detection probe is cached; clear so each CLI invocation is
-    # fresh (the user may have just installed gpu4pyscf and wants to
-    # confirm without restarting their shell).
-    # cache_clear is forwarded from _probe_gpu's lru_cache onto this function
-    # at definition time (gpu_offload.py); mypy can't see a monkey-patched
-    # attribute across the module boundary.
-    is_gpu_available.cache_clear()  # type: ignore[attr-defined]
-    available, name, reason = probe_gpu()
+        clear_pyfock_gpu_probe_cache()
+        available, name, reason = probe_pyfock_gpu()
+        label = "PyFock GPU"
+        low_fp64 = False
+    else:
+        from quantui.gpu_offload import (
+            is_gpu_available,
+            is_low_fp64_device,
+            probe_gpu,
+        )
+
+        # The detection probe is cached; clear so each CLI invocation is
+        # fresh (the user may have just installed gpu4pyscf and wants to
+        # confirm without restarting their shell).
+        # cache_clear is forwarded from _probe_gpu's lru_cache onto this
+        # function at definition time; mypy can't see that attribute.
+        is_gpu_available.cache_clear()  # type: ignore[attr-defined]
+        available, name, reason = probe_gpu()
+        label = "GPU offload"
+        low_fp64 = is_low_fp64_device(name)
     if available:
-        print(f"GPU offload available: {name}")
-        if is_low_fp64_device(name):
+        print(f"{label} available: {name}")
+        if low_fp64:
             # Available is not the same as worth using: PySCF is FP64
             # throughout, and consumer cards gate double precision to a small
             # fraction of single. Say so here rather than let the user discover
@@ -391,7 +408,13 @@ def _build_parser() -> argparse.ArgumentParser:
     gpu_sub = gpu_parser.add_subparsers(dest="gpu_command", required=True)
     gpu_check = gpu_sub.add_parser(
         "check",
-        help="Run QuantUI's GPU-offload detection probe.",
+        help="Run a GPU detection probe.",
+    )
+    gpu_check.add_argument(
+        "--engine",
+        choices=("pyscf", "pyfock"),
+        default="pyscf",
+        help="Engine-specific GPU path to probe (default: pyscf).",
     )
     gpu_check.set_defaults(func=_cmd_gpu_check)
 

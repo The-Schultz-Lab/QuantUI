@@ -116,6 +116,8 @@ def optimization_result_payload(result, *, trajectory_file: str) -> Dict[str, An
         "method": result.method,
         "basis": result.basis,
         "formula": result.formula,
+        "gpu_used": bool(getattr(result, "gpu_used", False)),
+        "gpu_name": getattr(result, "gpu_name", None),
         "trajectory_file": trajectory_file,
     }
 

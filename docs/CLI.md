@@ -177,7 +177,8 @@ quantui log tail -n 200 | grep -i error | tail -5
 Probe whether QuantUI's GPU offload path is functional in the current
 environment. This is the canonical one-liner for verifying that
 `gpu4pyscf` + `cupy` are installed correctly and that
-`is_gpu_available()` will return `True` when the app runs.
+`is_gpu_available()` will return `True` when the PySCF app path runs. Use
+`--engine pyfock` to probe PyFock's independent CuPy path.
 
 ### Flags
 
@@ -188,6 +189,9 @@ None.
 ```bash
 # Is GPU offload working right now?
 quantui gpu check
+
+# Check the separate PyFock/CuPy path
+quantui gpu check --engine pyfock
 
 # Use in a shell condition
 if quantui gpu check; then

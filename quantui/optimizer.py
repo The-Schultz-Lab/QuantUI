@@ -98,6 +98,7 @@ try:
             status_label: str = "Optimizing geometry",
             expected_steps=None,
             scf_rescue: bool = True,
+            use_gpu: Optional[bool] = None,
             **kwargs,
         ) -> None:
             super().__init__(**kwargs)
@@ -109,6 +110,11 @@ try:
             # rescue helper on non-convergence (default on; a batch caller
             # can disable it via CalculationRequest.options).
             self.scf_rescue = scf_rescue
+            # ``None`` follows the shared GPU preference; ``False`` is a
+            # per-calculation opt-out used by portable engine requests.
+            self.use_gpu = use_gpu
+            self.gpu_used = False
+            self.gpu_name: Optional[str] = None
             # Cooperative-cancel predicate; checked per step + wired into
             # the per-step SCF callback (the SCF runs silent here, so the
             # stream-based cancel can't see it).
@@ -218,6 +224,23 @@ try:
 
             mf, self._density_fit_used = _try_density_fit(mf)
 
+            # This is deliberately inside ``calculate``: ASE rebuilds the
+            # PySCF object for every geometry, so offload must be requested for
+            # every force evaluation rather than only for the first step.
+            if self.use_gpu is not False:
+                from .gpu_offload import try_to_gpu
+
+                mf, _gpu_used, _gpu_name = try_to_gpu(mf, method_upper)
+                if _gpu_used:
+                    self.gpu_used = True
+                    self.gpu_name = _gpu_name
+                    try:
+                        self.progress_stream.write(
+                            f"\n🚀  GPU offload active — running on {_gpu_name}\n"
+                        )
+                    except Exception:  # noqa: BLE001 — stream is user-owned
+                        pass
+
             mf.verbose = 0
             mf.stdout = _sink
 
@@ -323,6 +346,11 @@ class OptimizationResult:
     pyscf_mol_atom: Optional[Any] = None  # atom list at final geometry (Angstrom)
     pyscf_mol_basis: Optional[str] = None
     density_fit: bool = False
+    # GPU provenance for the final optimization.  For PySCF this is true when
+    # at least one SCF/gradient evaluation was migrated successfully; for
+    # PyFock it records the guarded CuPy request used by its calculator.
+    gpu_used: bool = False
+    gpu_name: Optional[str] = None
     # AUDIT F04 — mirrors SessionResult.dispersion_applied: None (method
     # doesn't use D3), True/False (does, and pyscf.dftd3 was/wasn't
     # importable during the optimization).
@@ -471,6 +499,7 @@ def optimize_geometry(
     scf_rescue: bool = True,
     engine_id: str = "pyscf",
     ncores: int = 1,
+    use_gpu: Optional[bool] = None,
 ) -> OptimizationResult:
     """
     Optimize a molecular geometry at the QM level using ASE-BFGS.
@@ -513,6 +542,11 @@ def optimize_geometry(
         scf_rescue: Whether each step's SCF automatically retries through the
             shared rescue helper on non-convergence (M-SCF-ROBUST, see
             :mod:`quantui.scf_robust`). Default ``True``.
+        use_gpu: Per-calculation GPU preference. ``False`` disables GPU
+            migration; ``None`` follows the persistent QuantUI setting and
+            runtime probe. For PyFock geometry optimization, GPU execution
+            uses numerical forces because PyFock 0.1.7's analytical gradient
+            implementation is CPU-only.
 
     Returns:
         :class:`OptimizationResult` containing the optimized molecule,
@@ -634,8 +668,15 @@ def optimize_geometry(
             status_label=status_label,
             expected_steps=expected_steps,
             scf_rescue=scf_rescue,
+            use_gpu=use_gpu,
         )
     else:
+        from .pyfock_gpu import resolve_pyfock_gpu
+
+        _pyfock_use_gpu, _pyfock_gpu_name, _pyfock_gpu_reason = resolve_pyfock_gpu(
+            use_gpu
+        )
+        _pyfock_force_mode = "numerical" if _pyfock_use_gpu else "analytical"
         _pyfock_tmp = tempfile.TemporaryDirectory(prefix="quantui-pyfock-opt-")
         atoms.calc = _PyFockCalculator(
             basis=basis,
@@ -643,24 +684,43 @@ def optimize_geometry(
             charge=molecule.charge,
             directory=_pyfock_tmp.name,
             convergence_check="error",
-            force_mode="analytical",
+            force_mode=_pyfock_force_mode,
             xc=method,
             isDF=True,
             sao=True,
             conv_crit=1.0e-7,
             max_itr=50,
             ncores=max(1, int(ncores)),
-            use_gpu=False,
+            use_gpu=_pyfock_use_gpu,
         )
         # Keep the directory alive for every BFGS force evaluation and expose
         # the same metadata hooks consumed by the shared result builder.
         atoms.calc._quantui_tmpdir = _pyfock_tmp
         atoms.calc._density_fit_used = True
+        atoms.calc._gpu_used = _pyfock_use_gpu
+        atoms.calc._gpu_name = _pyfock_gpu_name if _pyfock_use_gpu else None
+        atoms.calc.gpu_used = _pyfock_use_gpu
+        atoms.calc.gpu_name = _pyfock_gpu_name if _pyfock_use_gpu else None
         atoms.calc.dispersion_applied = None
-        _write_stream(
-            _stream,
-            "\nPyFock geometry optimization: analytical density-fitted gradients.\n",
-        )
+        if _pyfock_use_gpu:
+            _write_stream(
+                _stream,
+                f"\n🚀  PyFock GPU acceleration active — running on "
+                f"{_pyfock_gpu_name}. GPU force evaluation uses numerical "
+                "gradients because PyFock analytical GPU gradients are not "
+                "available in the installed release.\n",
+            )
+        else:
+            _write_stream(
+                _stream,
+                "\nPyFock geometry optimization: analytical density-fitted gradients.\n",
+            )
+            if _pyfock_gpu_reason and use_gpu is not False:
+                _write_stream(
+                    _stream,
+                    f"\n⚠  PyFock GPU unavailable — using CPU analytical gradients: "
+                    f"{_pyfock_gpu_reason}\n",
+                )
 
     # PySCF gradients (called by ASE-BFGS at every
     # step) emit fd-2 stderr from libcint / BLAS. Wrap the full BFGS run
@@ -826,6 +886,8 @@ def optimize_geometry(
     _opt_dipole: Optional[float] = None
     _opt_dipole_vec: Optional[List[float]] = None
     _opt_density_fit = bool(getattr(atoms.calc, "_density_fit_used", False))
+    _opt_gpu_used = bool(getattr(atoms.calc, "gpu_used", False))
+    _opt_gpu_name = getattr(atoms.calc, "gpu_name", None)
     try:
         import numpy as _np_mo
 
@@ -947,6 +1009,8 @@ def optimize_geometry(
         pyscf_mol_atom=_opt_mol_atom,
         pyscf_mol_basis=_opt_mol_basis,
         density_fit=_opt_density_fit,
+        gpu_used=_opt_gpu_used,
+        gpu_name=_opt_gpu_name,
         atom_symbols=_opt_atom_symbols,
         mulliken_charges=_opt_mulliken,
         dipole_moment_debye=_opt_dipole,

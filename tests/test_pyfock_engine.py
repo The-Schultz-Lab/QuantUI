@@ -68,6 +68,7 @@ class _FakeDFT:
         self.basis = basis
         self.auxbasis = auxbasis
         self.kwargs = kwargs
+        self.use_gpu = bool(kwargs.get("use_gpu", False))
         self.converged = True
         self.niter = 7
         self.mo_energies = [-0.8, -0.4, 0.1]
@@ -90,6 +91,7 @@ class TestPyfockAdapter:
         caps = PyfockEngine().capabilities()
         assert caps.supported_calc_types == ("single_point", "geometry_opt")
         assert caps.supports_orbital_export is True
+        assert caps.supports_gpu is True
 
     def test_water_result_and_stdout_capture(self):
         stream = io.StringIO()
@@ -113,6 +115,10 @@ class TestPyfockAdapter:
                 "quantui.engines.pyfock_engine._load_pyfock_api",
                 return_value=(_FakeMol, _FakeBasis, _FakeDFT),
             ),
+            patch(
+                "quantui.engines.pyfock_engine.resolve_pyfock_gpu",
+                return_value=(True, "Fake PyFock GPU", ""),
+            ),
             patch.dict(sys.modules, {"pyfock": fake_pyfock}),
         ):
             result = PyfockEngine().run(request)
@@ -132,6 +138,11 @@ class TestPyfockAdapter:
             0.5 * 2.541746473
         )
         assert _FakeDFT.last.sao is True
+        assert _FakeDFT.last.kwargs["use_gpu"] is True
+        assert result.gpu_used is True
+        assert result.gpu_name == "Fake PyFock GPU"
+        assert result.native_result.gpu_used is True
+        assert result.native_result.gpu_name == "Fake PyFock GPU"
         assert "fake PyFock SCF output" in stream.getvalue()
         assert "density fitting: on" in stream.getvalue()
 
