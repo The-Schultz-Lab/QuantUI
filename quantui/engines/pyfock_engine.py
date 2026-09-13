@@ -301,7 +301,7 @@ def _attach_analysis(
         dmat = np.asarray(density, dtype=float)
         overlap = np.asarray(Integrals.overlap_mat_symm(basis), dtype=float)
         populations = np.diag(dmat @ overlap)
-        gross = np.zeros(len(atoms), dtype=float)
+        gross: Any = np.zeros(len(atoms), dtype=float)
         for ao_index, atom_index in enumerate(basis.bfs_atoms):
             gross[int(atom_index)] += populations[ao_index]
         result.atom_symbols = list(atoms)

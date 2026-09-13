@@ -1643,7 +1643,9 @@ def render_orbital_isosurface(
         # the dropdown shows later — immutable result provenance instead
         # of a mutable, disconnectable UI control.
         _method_for_provenance = str(getattr(app, "_last_orb_method", "") or "")
-        _cube_generator = (
+        # The PySCF and PyFock generators have intentionally different
+        # optional keyword sets; both accept this shared call shape.
+        _cube_generator: Any = (
             generate_pyfock_cube_from_arrays
             if getattr(app, "_last_orb_engine_id", "pyscf") == "pyfock"
             else generate_cube_from_arrays
