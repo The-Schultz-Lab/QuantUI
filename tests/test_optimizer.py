@@ -18,6 +18,7 @@ With both ase and pyscf installed in your conda environment:
 """
 
 import io
+from unittest.mock import patch
 
 import pytest
 
@@ -356,6 +357,28 @@ class TestOptimizeGeometryBasic:
         )
         assert result.method == "RHF"
         assert result.basis == "STO-3G"
+
+    @pyscf_only
+    @pytest.mark.slow
+    def test_geometry_optimizer_records_gpu_migration(self):
+        """The optimizer must use the same migration seam as single points."""
+        from quantui.optimizer import optimize_geometry
+
+        with patch(
+            "quantui.gpu_offload.try_to_gpu",
+            side_effect=lambda mf, _method: (mf, True, "Test GPU"),
+        ) as migrate:
+            result = optimize_geometry(
+                _h2(0.60),
+                method="RHF",
+                basis="STO-3G",
+                fmax=1e-6,
+                steps=1,
+            )
+
+        assert migrate.call_count >= 1
+        assert result.gpu_used is True
+        assert result.gpu_name == "Test GPU"
 
 
 class TestOptimizeGeometryEnergyAndConvergence:

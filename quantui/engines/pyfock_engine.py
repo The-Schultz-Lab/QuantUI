@@ -7,6 +7,7 @@ import sys
 from contextlib import redirect_stderr, redirect_stdout
 from typing import Any, Optional
 
+from ..pyfock_gpu import resolve_pyfock_gpu
 from .base import (
     EngineCapabilities,
     EngineRequest,
@@ -59,14 +60,15 @@ class PyfockEngine:
             supported_basis_sets=_PYFOCK_BASES,
             supports_solvent=False,
             supports_checkpoint_warm_start=False,
-            supports_gpu=False,
+            supports_gpu=True,
             supports_post_hf=False,
             supports_orbital_export=True,
             platform_notes=(
                 "Neutral, closed-shell PBE single points and geometry optimizations. "
                 "Density fitting and analytical gradients are used; hybrids, "
-                "solvent, checkpoints, and GPU are gated off. "
-                "Install with pip install quantui[pyfock]."
+                "solvent, and checkpoints are gated off. Optional PyFock GPU "
+                "acceleration uses CuPy; install with "
+                "pip install 'quantui[pyfock,pyfock-gpu-cuda12x]'."
             ),
             recommended_auxbasis=_AUX_BASIS,
             version=_pyfock_version(),
@@ -87,6 +89,9 @@ class PyfockEngine:
             [symbol, float(x), float(y), float(z)]
             for symbol, (x, y, z) in zip(atoms, coordinates)
         ]
+        _use_gpu, _gpu_name, _gpu_reason = resolve_pyfock_gpu(
+            request.options.get("use_gpu")
+        )
 
         try:
             with redirect_stdout(stream), redirect_stderr(stream):
@@ -105,6 +110,10 @@ class PyfockEngine:
                     f"Engine: PyFock {_pyfock_version() or 'unknown'} | "
                     f"{request.method}/{request.basis} | density fitting: on"
                 )
+                if _use_gpu:
+                    print(f"GPU acceleration: active ({_gpu_name}) — CuPy/Numba path")
+                elif request.options.get("use_gpu") is not False and _gpu_reason:
+                    print(f"GPU acceleration: unavailable — {_gpu_reason}")
                 mol = Mol(atoms=pyfock_atoms, charge=0)
                 basis = Basis(
                     mol,
@@ -123,7 +132,7 @@ class PyfockEngine:
                         request.options.get("conv_crit"), default=1.0e-7
                     ),
                     ncores=_positive_int(request.options.get("ncores"), default=1),
-                    use_gpu=False,
+                    use_gpu=_use_gpu,
                 )
                 dft.max_itr = _positive_int(
                     request.options.get("max_iterations"), default=50
@@ -159,7 +168,16 @@ class PyfockEngine:
             getattr(dft, "mo_energies", None),
             getattr(dft, "mo_occupations", None),
         )
+        _gpu_used = bool(getattr(dft, "use_gpu", False))
+        if not _gpu_used:
+            _gpu_name = None
         warnings = ["PyFock uses density fitting with def2-universal-jfit."]
+        if (
+            not _gpu_used
+            and request.options.get("use_gpu") is not False
+            and _gpu_reason
+        ):
+            warnings.append(f"PyFock GPU unavailable; CPU fallback: {_gpu_reason}")
         if not bool(getattr(dft, "converged", False)):
             warnings.append("PyFock reached its iteration limit without convergence.")
 
@@ -175,6 +193,8 @@ class PyfockEngine:
             formula=_formula(atoms),
             homo_lumo_gap_ev=gap_ev,
             warnings=warnings,
+            gpu_used=_gpu_used,
+            gpu_name=_gpu_name,
         )
         native = result.to_session_result()
         _attach_analysis(native, mol, basis, dft, density, atoms, coordinates, warnings)
@@ -202,6 +222,7 @@ class PyfockEngine:
             expected_steps=request.options.get("expected_steps"),
             engine_id=self.engine_id,
             ncores=_positive_int(request.options.get("ncores"), default=1),
+            use_gpu=request.options.get("use_gpu"),
         )
         return EngineResult(
             request_id=request.request_id,
@@ -213,6 +234,8 @@ class PyfockEngine:
             method=native.method,
             basis=native.basis,
             formula=native.formula,
+            gpu_used=getattr(native, "gpu_used", False),
+            gpu_name=getattr(native, "gpu_name", None),
             native_result=native,
         )
 

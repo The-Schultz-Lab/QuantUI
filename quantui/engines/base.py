@@ -1,7 +1,8 @@
 """
 Quantum-engine contract types (v0.1).
 
-See ``QuantUI-development-tracking/TODO/QUANTUM-ENGINE-CONTRACT.md``.
+The engine contract is maintained alongside the project's development
+documentation.
 """
 
 from __future__ import annotations
@@ -85,6 +86,8 @@ class EngineResult:
     homo_lumo_gap_ev: Optional[float] = None
     warnings: List[str] = field(default_factory=list)
     error: Optional[Dict[str, Any]] = None
+    gpu_used: bool = False
+    gpu_name: Optional[str] = None
     native_result: Optional[Any] = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -118,6 +121,8 @@ class EngineResult:
             basis=self.basis,
             formula=self.formula,
             density_fit=self.engine_id == "pyfock",
+            gpu_used=self.gpu_used,
+            gpu_name=self.gpu_name,
             scf_variant="RKS" if self.engine_id == "pyfock" else "",
             engine_id=self.engine_id,
         )

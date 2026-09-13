@@ -230,6 +230,20 @@ class TestGpuCheck:
         assert "consumer" in err
         assert "SLOWER" in err
 
+    def test_pyfock_engine_probe_is_separate(self, monkeypatch, isolated_log_dir):
+        import quantui.pyfock_gpu as _pfg
+
+        monkeypatch.setattr(
+            _pfg,
+            "probe_pyfock_gpu",
+            lambda: (True, "NVIDIA H200", ""),
+        )
+        rc, out, err = _capture(["gpu", "check", "--engine", "pyfock"])
+        assert rc == 0
+        assert "PyFock GPU available" in out
+        assert "NVIDIA H200" in out
+        assert err == ""
+
 
 class TestAnalyticsBuild:
     """`quantui analytics build` — wraps analytics.build_dashboard."""

@@ -112,6 +112,8 @@ class PyscfEngine:
             basis=native.basis,
             formula=native.formula,
             homo_lumo_gap_ev=native.homo_lumo_gap_ev,
+            gpu_used=native.gpu_used,
+            gpu_name=native.gpu_name,
             native_result=native,
         )
 
@@ -137,6 +139,7 @@ class PyscfEngine:
             resume=bool(request.options.get("resume", False)),
             scf_rescue=bool(request.options.get("scf_rescue", True)),
             engine_id=self.engine_id,
+            use_gpu=request.options.get("use_gpu"),
         )
         return EngineResult(
             request_id=request.request_id,
@@ -148,6 +151,8 @@ class PyscfEngine:
             method=native.method,
             basis=native.basis,
             formula=native.formula,
+            gpu_used=getattr(native, "gpu_used", False),
+            gpu_name=getattr(native, "gpu_name", None),
             native_result=native,
         )
 

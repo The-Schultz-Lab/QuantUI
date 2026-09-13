@@ -5812,7 +5812,11 @@ class QuantUIApp:
                         "atoms": list(target_mol.atoms),
                         "coordinates": [list(c) for c in target_mol.coordinates],
                     },
-                    options={"verbose": 4, "scf_rescue": True},
+                    options={
+                        "verbose": 4,
+                        "scf_rescue": True,
+                        "use_gpu": bool(self._user_settings.compute.gpu_enabled),
+                    },
                     progress_stream=log,  # type: ignore[arg-type]
                     solvent=_solvent,
                 ),
@@ -6007,6 +6011,7 @@ class QuantUIApp:
                             ),
                             "resume": _resume,
                             "scf_rescue": True,
+                            "use_gpu": bool(self._user_settings.compute.gpu_enabled),
                         },
                         progress_stream=log,  # type: ignore[arg-type]
                         checkpoint=_ckpt,
@@ -6430,7 +6435,11 @@ class QuantUIApp:
                             "atoms": list(calc_mol.atoms),
                             "coordinates": [list(c) for c in calc_mol.coordinates],
                         },
-                        options={"verbose": 4, "scf_rescue": True},
+                        options={
+                            "verbose": 4,
+                            "scf_rescue": True,
+                            "use_gpu": bool(self._user_settings.compute.gpu_enabled),
+                        },
                         progress_stream=log,  # type: ignore[arg-type]
                         solvent=_solvent,
                         checkpoint=_ckpt,

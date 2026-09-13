@@ -145,8 +145,10 @@ selected when PySCF is absent). The validated subset supports neutral,
 closed-shell PBE single points and geometry optimizations with def2-SVP or
 def2-TZVP. Density fitting is always enabled, analytical gradients drive
 optimization, and orbital, Mulliken, dipole, and cube analysis are retained.
-Hybrids, charged/open-shell systems, solvent, checkpoint warm starts, and GPU
-remain PySCF-only.
+Hybrids, charged/open-shell systems, solvent, and checkpoint warm starts remain
+PySCF-only. Optional PyFock GPU acceleration is available separately through
+CuPy; geometry optimization uses numerical forces on GPU because PyFock 0.1.7
+does not yet provide analytical GPU gradients.
 
 PySCF does not install on Windows natively. For the complete feature set, the
 [`apptainer/quantui.def`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/apptainer/quantui.def) container bundles
@@ -239,6 +241,27 @@ and result cards will display the compute device.
 
 Whenever gpu4pyscf can't offload a particular call, QuantUI falls back
 to CPU automatically and the result card reflects which device ran.
+
+### Optional: PyFock GPU acceleration
+
+PyFock uses its own CuPy/Numba CUDA implementation; it does not use
+`gpu4pyscf`. Install the PyFock engine and the CUDA-suffixed CuPy extra that
+matches the NVIDIA driver reported by `nvidia-smi`:
+
+```bash
+# CUDA 13.x driver
+pip install "quantui[pyfock,pyfock-gpu-cuda13x]"
+
+# CUDA 12.x driver
+pip install "quantui[pyfock,pyfock-gpu-cuda12x]"
+```
+
+PyFock GPU use is guarded independently: QuantUI requires CuPy to import and
+report a CUDA device, and still honors the Settings GPU toggle and
+`QUANTUI_DISABLE_GPU=1`. If the probe fails, PyFock falls back to CPU and
+reports the reason. GPU single points use PyFock's GPU SCF/integral/XC path;
+GPU geometry optimizations use numerical finite-difference forces because the
+installed PyFock release's analytical gradient implementation is CPU-only.
 
 ### Optional: GFN-FF metal pre-optimization (xtb)
 

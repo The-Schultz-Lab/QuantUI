@@ -190,6 +190,16 @@ gpu-cuda13x = [
     "cutensor-cu13",
 ]
 
+# PyFock GPU acceleration is a separate CuPy-only path.  Do not install or
+# probe gpu4pyscf for a PyFock calculation: the two engines have independent
+# CUDA implementations and capability gates.
+pyfock-gpu-cuda12x = [
+    "cupy-cuda12x",
+]
+pyfock-gpu-cuda13x = [
+    "cupy-cuda13x",
+]
+
 # Notebook smoke-test dependencies
 notebook = [
     "nbmake>=1.4.0",
@@ -329,6 +339,8 @@ markers = [
     "network: marks tests that require network connectivity",
     "notebook: marks notebook smoke tests",
     "pyfock: marks real PyFock integration/parity tests (opt in with QUANTUI_RUN_PYFOCK_INTEGRATION=1)",
+    "gpu_integration: marks real NVIDIA GPU integration tests (opt in with QUANTUI_RUN_GPU_INTEGRATION=1)",
+    "pyfock_gpu: marks real PyFock CuPy GPU tests (opt in with QUANTUI_RUN_PYFOCK_GPU_INTEGRATION=1)",
 ]
 
 [tool.coverage.run]
