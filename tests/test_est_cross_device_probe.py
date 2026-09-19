@@ -230,19 +230,37 @@ class TestWorkerEnvVarToggle:
         log_path = tmp_path / "cal.log"
         log_path.write_text("")
 
-        _calibration_worker(
-            ["H", "H"],
-            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]],
-            0,
-            1,
-            "RHF",
-            "STO-3G",
-            "single_point",
-            str(log_path),
-            q,
-            "test-cal-id",
-            True,  # force_cpu
-        )
+        try:
+            _calibration_worker(
+                ["H", "H"],
+                [[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]],
+                0,
+                1,
+                "RHF",
+                "STO-3G",
+                "single_point",
+                str(log_path),
+                q,
+                "test-cal-id",
+                True,  # force_cpu
+            )
+        finally:
+            # The worker sets this directly on the real os.environ (by
+            # design — it must be visible to a freshly-imported gpu_offload
+            # module), not through monkeypatch, so nothing auto-reverts it
+            # for the rest of this xdist worker's test session. Without this
+            # cleanup, later tests in the same worker (e.g.
+            # tests/test_pyfock_gpu.py's cupy-probe tests) inherit a
+            # permanently "disabled" GPU env and fail nondeterministically
+            # depending on test distribution.
+            #
+            # Plain os.environ.pop, not monkeypatch.delenv: the var already
+            # exists at this point (the worker just set it), so a second
+            # monkeypatch.delenv call here would record ITS pre-call value
+            # ("1") as what to restore at test teardown — reintroducing the
+            # exact leak this is meant to fix.
+            os.environ.pop("QUANTUI_DISABLE_GPU", None)
+
         assert captured_env.get("QUANTUI_DISABLE_GPU") == "1"
 
     def test_force_cpu_false_does_not_touch_env(self, monkeypatch, tmp_path):
