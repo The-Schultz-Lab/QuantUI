@@ -23,6 +23,10 @@ def _fake_cupy(count=1, name=b"NVIDIA H200"):
 
 
 def test_probe_accepts_cupy_device_without_gpu4pyscf(monkeypatch):
+    # Other suites (e.g. test_est_cross_device_probe.py) exercise a worker
+    # path that sets this directly on the real os.environ; guard against
+    # inheriting that state from an earlier test in the same xdist worker.
+    monkeypatch.delenv("QUANTUI_DISABLE_GPU", raising=False)
     monkeypatch.setitem(sys.modules, "cupy", _fake_cupy())
     clear_pyfock_gpu_probe_cache()
 
@@ -30,6 +34,7 @@ def test_probe_accepts_cupy_device_without_gpu4pyscf(monkeypatch):
 
 
 def test_probe_rejects_no_cuda_device(monkeypatch):
+    monkeypatch.delenv("QUANTUI_DISABLE_GPU", raising=False)
     monkeypatch.setitem(sys.modules, "cupy", _fake_cupy(count=0))
     clear_pyfock_gpu_probe_cache()
 
