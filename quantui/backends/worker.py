@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -282,6 +283,30 @@ def _maybe_run_preopt(
         return molecule, None
 
 
+def _update_tracked_record(request: CalculationRequest, status: str, **kwargs) -> None:
+    """Update the registry record, but only for the SLURM job it tracks.
+
+    A hand-run ``sbatch submit.slurm`` (M-JOBDIRS) runs under a SLURM job id
+    the record has never seen; letting it flip the record's status would
+    make the app ingest or report the wrong attempt. Those attempts are
+    picked up from disk instead. Outside SLURM (no ``SLURM_JOB_ID``) or
+    before the record has a job id, the update goes through as before.
+    """
+    registry = JobRegistry()
+    current_job = os.environ.get("SLURM_JOB_ID")
+    if current_job:
+        record = registry.load(request.request_id)
+        if record is not None and record.slurm_job_id not in (None, current_job):
+            logger.info(
+                "SLURM job %s is not the tracked attempt (%s); "
+                "leaving the registry record unchanged.",
+                current_job,
+                record.slurm_job_id,
+            )
+            return
+    registry.update_status(request.request_id, status, **kwargs)
+
+
 def _error_result(
     request: CalculationRequest,
     staging_dir: Path,
@@ -298,8 +323,7 @@ def _error_result(
         "technical_message": message,
         "retryable": retryable,
     }
-    registry = JobRegistry()
-    registry.update_status(request.request_id, "error", error=err)
+    _update_tracked_record(request, "error", error=err)
     _write_progress(staging_dir, "error", message, 100.0)
     return CalculationResult(
         request_id=request.request_id,
@@ -674,11 +698,17 @@ def _build_payload(
     raise ValueError(f"unsupported calc_type {calc_type!r}")
 
 
-def run_worker_request(request_path: Path) -> CalculationResult:
+def run_worker_request(
+    request_path: Path, attempt_dir: Path | None = None
+) -> CalculationResult:
+    """Run one batch request.
+
+    Outputs go to *attempt_dir* (M-JOBDIRS: one dir per run of
+    ``submit.slurm``), or, for legacy staging dirs, next to ``request.json``.
+    """
     data = json.loads(request_path.read_text(encoding="utf-8"))
     request = CalculationRequest.from_dict(data)
-    staging_dir = request_path.parent
-    registry = JobRegistry()
+    staging_dir = attempt_dir if attempt_dir is not None else request_path.parent
     calc_type = request.calc_type
 
     _append_log(staging_dir, f"Worker starting for {request.request_id} ({calc_type})")
@@ -753,7 +783,7 @@ def run_worker_request(request_path: Path) -> CalculationResult:
     payload = _build_payload(calc_type, outcome, staging_dir, request)
     write_worker_result(staging_dir, payload)
 
-    registry.update_status(request.request_id, "success", result_dir=str(staging_dir))
+    _update_tracked_record(request, "success", result_dir=str(staging_dir))
     _write_progress(staging_dir, "finalizing", "Calculation complete", 100.0)
 
     warnings: list[str] = []
@@ -785,10 +815,20 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="Path to request.json inside the job staging directory",
     )
+    parser.add_argument(
+        "--attempt-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Directory for this attempt's outputs (created by submit.slurm). "
+            "Defaults to the directory holding request.json."
+        ),
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    outcome = run_worker_request(args.request.expanduser().resolve())
+    attempt_dir = args.attempt_dir.expanduser().resolve() if args.attempt_dir else None
+    outcome = run_worker_request(args.request.expanduser().resolve(), attempt_dir)
     return 0 if outcome.status == "success" else 1
 
 

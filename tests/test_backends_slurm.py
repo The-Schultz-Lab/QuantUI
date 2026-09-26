@@ -97,9 +97,10 @@ class TestSlurmBackendSubmit:
         assert record is not None
         assert record.slurm_job_id == "555666"
         assert record.status == "submitted"
-        assert (record.staging_path / "request.json").exists()
-        assert (record.staging_path / "submit.slurm").exists()
-        slurm_text = (record.staging_path / "submit.slurm").read_text()
+        assert record.job_path is not None
+        assert (record.job_path / "request.json").exists()
+        assert (record.job_path / "submit.slurm").exists()
+        slurm_text = (record.job_path / "submit.slurm").read_text()
         assert "#SBATCH" in slurm_text
         assert "quantui.backends.worker" in slurm_text
 
@@ -176,14 +177,16 @@ class TestSlurmBackendWorkerCommandQuoting:
 
     def test_request_path_with_space_stays_one_argument(self, slurm_backend):
         request_path = Path("/tmp/audit folder/request.json")
-        staging_dir = Path("/tmp/audit folder/staging")
-        cmd = slurm_backend._worker_command(request_path, staging_dir)
+        job_dir = Path("/tmp/audit folder/job")
+        cmd = slurm_backend._worker_command(request_path, job_dir)
         tokens = shlex.split(cmd)
-        assert tokens[-2] == "--request"
-        assert tokens[-1] == str(request_path)
-        assert (
-            len(tokens) == tokens.index("--request") + 2
-        ), f"request path split into extra shell tokens: {tokens}"
+        idx = tokens.index("--request")
+        assert tokens[idx + 1] == str(request_path)
+        # The attempt dir is a shell variable expanded at run time (M-JOBDIRS).
+        assert tokens[idx + 2 :] == [
+            "--attempt-dir",
+            "$ATTEMPT_DIR",
+        ], f"request path split into extra shell tokens: {tokens}"
 
     def test_apptainer_branch_quotes_staging_and_request_paths(self, tmp_path):
         registry = JobRegistry(
@@ -196,12 +199,14 @@ class TestSlurmBackendWorkerCommandQuoting:
             apptainer_image="/opt/images/quantui image.sif",
         )
         request_path = Path("/tmp/audit folder/request.json")
-        staging_dir = Path("/tmp/audit folder/staging")
-        cmd = backend._worker_command(request_path, staging_dir)
+        job_dir = Path("/tmp/audit folder/job")
+        cmd = backend._worker_command(request_path, job_dir)
         tokens = shlex.split(cmd)
-        assert str(staging_dir) in tokens
+        # A job dir outside $HOME is bound into the container as one token.
+        assert f"{job_dir}:{job_dir}" in tokens
+        assert tokens[tokens.index("--pwd") + 1] == "$ATTEMPT_DIR"
         assert "/opt/images/quantui image.sif" in tokens
-        assert tokens[-1] == str(request_path)
+        assert tokens[tokens.index("--request") + 1] == str(request_path)
 
     def test_dispatch_with_space_in_staging_path_produces_parseable_script(
         self, mock_slurm_env, tmp_path

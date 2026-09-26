@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -130,6 +131,40 @@ APPTAINER_BATCH_IMAGE = os.environ.get(
     os.path.expanduser("~/quantui-gpu.sif"),
 )
 
+# Shell block that gives every run of submit.slurm its own attempt dir
+# (M-JOBDIRS). Numbering is max(existing NN) + 1 under a lock, and ``mkdir``
+# without ``-p`` makes the script fail rather than write into an existing
+# directory — an earlier attempt's files are never overwritten, whether the
+# job came from QuantUI's Resubmit or a hand-run ``sbatch submit.slurm``.
+# ``$JOB_DIR`` is set by the line build_attempt_setup() prepends.
+_ATTEMPT_SETUP_BODY = r"""exec 9>"$JOB_DIR/.attempt.lock"
+if command -v flock >/dev/null 2>&1; then flock 9; fi
+attempt_n=0
+for d in "$JOB_DIR"/attempt-*; do
+  [ -d "$d" ] || continue
+  k="${d##*/attempt-}"
+  k="${k%%_*}"
+  case "$k" in
+    ''|*[!0-9]*) continue ;;
+  esac
+  k=$((10#$k))
+  if [ "$k" -gt "$attempt_n" ]; then attempt_n=$k; fi
+done
+attempt_n=$((attempt_n + 1))
+ATTEMPT_DIR="$JOB_DIR/$(printf 'attempt-%02d_job%s' "$attempt_n" "${SLURM_JOB_ID:-manual$$}")"
+mkdir "$ATTEMPT_DIR"
+exec 9>&-
+ln -sfn "${ATTEMPT_DIR##*/}" "$JOB_DIR/latest" 2>/dev/null || true
+cd "$ATTEMPT_DIR"
+echo "Attempt directory: $ATTEMPT_DIR"
+"""
+
+
+def build_attempt_setup(job_dir: str) -> str:
+    """Return the attempt-dir shell block for a job dir (shell-quoted)."""
+    return f"\nJOB_DIR={shlex.quote(job_dir)}\n{_ATTEMPT_SETUP_BODY}"
+
+
 # SLURM batch script template. ``{worker_command}`` is the full command line
 # run inside the allocation (Apptainer-wrapped when configured).
 SLURM_SCRIPT_TEMPLATE = """#!/bin/bash
@@ -150,7 +185,7 @@ echo "SLURM job ID: ${{SLURM_JOB_ID:-<none>}}"
 echo "Working directory: $(pwd)"
 
 export OMP_NUM_THREADS="${{SLURM_CPUS_PER_TASK:-{cores}}}"
-
+{attempt_setup}
 {worker_command}
 
 echo "Job completed at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"

@@ -21,6 +21,51 @@ class SlurmJobAccounting:
     elapsed: str = ""
 
 
+# Short calc-type tags for job dir names (M-JOBDIRS JD.2).
+_CALC_TYPE_TAGS = {
+    "single_point": "sp",
+    "geometry_opt": "opt",
+    "frequency": "freq",
+    "tddft": "tddft",
+    "nmr": "nmr",
+    "pes_scan": "scan",
+    "reorganization_energy": "reorg",
+}
+
+_JOB_NAME_MAX_LEN = 80
+# SLURM itself accepts longer names, but squeue's default format column is
+# narrow; the job dir keeps the full name.
+SLURM_JOB_NAME_MAX_LEN = 40
+
+
+def sanitize_job_name(name: str) -> str:
+    """Make *name* safe as a job dir name and SLURM ``--job-name``.
+
+    Characters other than letters, digits, ``-`` and ``_`` become ``_``;
+    leading/trailing separators are stripped. Returns ``""`` when nothing
+    usable is left.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", name.strip())
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_-")
+    return cleaned[:_JOB_NAME_MAX_LEN].rstrip("_-")
+
+
+def default_job_name(request: CalculationRequest) -> str:
+    """``<label>_<calc tag>_<method>_<basis>``, e.g. ``H2O_opt_B3LYP_def2-SVP``.
+
+    Uses the same unsafe-character rule as History result dirs
+    (``results_storage._safe_name``: ``*`` → ``x``), so ``6-31G*`` stays
+    distinguishable from ``6-31G``.
+    """
+    from quantui.results_storage import _safe_name
+
+    label = str(request.molecule.get("label") or "quantui")
+    tag = _CALC_TYPE_TAGS.get(request.calc_type, request.calc_type)
+    parts = [label, tag, request.method, request.basis]
+    name = "_".join(_safe_name(str(p)) for p in parts if p)
+    return sanitize_job_name(name) or "quantui"
+
+
 def format_walltime(hours: float) -> str:
     total_seconds = int(hours * 3600)
     h = total_seconds // 3600
