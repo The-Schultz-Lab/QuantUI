@@ -552,7 +552,10 @@ def _build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         metavar="NAME",
-        help="SLURM job name (default: derived from the molecule + method).",
+        help=(
+            "Name for the job folder and SLURM job (default: "
+            "<formula>_<calc>_<method>_<basis>)."
+        ),
     )
     submit_parser.add_argument(
         "--depends-on",
