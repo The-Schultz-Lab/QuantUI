@@ -9,6 +9,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **SLURM job folders with per-attempt subfolders (M-JOBDIRS)** — each cluster
+  job gets a readable folder (`<formula>_<calc>_<method>_<basis>`, or the
+  optional **Job name** on the Calculate tab) that doubles as the SLURM job
+  name. Every run of its `submit.slurm` creates a new `attempt-NN_job<id>/`
+  subfolder, so **Resubmit** (new, Cluster Jobs tab) and a hand-run
+  `sbatch submit.slurm` never overwrite an earlier attempt. The job root is
+  configurable in **System Settings** (or `QUANTUI_STAGING_DIR`), for
+  clusters with small home quotas.
+- **SLURM results marked in History** — entries show
+  `🖥 SLURM <job id>·a<attempt>` and the result card has a "Ran on" row with
+  the job folder. Hand-run attempts are added to History on the next Cluster
+  Jobs refresh; failed attempts stay in the job folder only.
 - **PyFock geometry and analysis phase** — native-Windows PBE/def2 geometry
   optimization now uses PyFock's ASE calculator with analytical density-fitted
   gradients. Single-point and final optimized-geometry results retain orbital
@@ -20,6 +32,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   and saved results, a pinned `pyfock` install extra, and a real Windows water
   parity gate against PySCF. Unsupported hybrids, ions, open-shell systems,
   solvent, checkpoints, GPU, and orbital analysis are rejected before compute.
+
+### Fixed
+
+- Reconnecting to a finished SLURM job no longer saves a second copy of its
+  result to History.
+- Removed the unused `QUANTUI_RESULTS_DIR` export from generated SLURM
+  scripts (it only created an empty `results/` folder per job).
 
 ## [0.8.2] - 2026-08-30
 
