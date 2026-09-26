@@ -421,3 +421,96 @@ def test_submit_script_rerun_by_hand_keeps_both_attempts(tmp_path, monkeypatch):
     assert (job / "attempt-01_job41" / "live.log").read_text() == first_log
     # The hand-run job (42) is not the tracked one (41): record untouched by it.
     assert backend.registry.load(rid).slurm_job_id == "41"
+
+
+# ---------------------------------------------------------------------------
+# History provenance (JD.5 / JD.6)
+# ---------------------------------------------------------------------------
+
+
+class TestHistoryProvenance:
+    @pytest.mark.parametrize(
+        "calc_type", ["single_point", "frequency", "reorganization_energy"]
+    )
+    def test_legacy_record_ingest_is_tagged_slurm(
+        self, tmp_path, monkeypatch, calc_type
+    ):
+        """All three save_result paths carry the provenance extras."""
+        from quantui.backends.slurm_ingest import ingest_staging_success
+        from tests.slurm_ingest_helpers import (
+            make_staging_record,
+            patch_results_root,
+            sample_payload,
+        )
+
+        patch_results_root(tmp_path, monkeypatch)
+        record, _staging = make_staging_record(
+            tmp_path, sample_payload(calc_type), calc_type=calc_type
+        )
+        record.slurm_job_id = "4242"
+        saved = ingest_staging_success(record)
+        data = json.loads((saved / "result.json").read_text())
+        assert data["execution_backend"] == "slurm"
+        assert data["slurm"]["job_id"] == "4242"
+        assert data["slurm"]["attempt"] is None
+        assert data["slurm"]["request_id"] == record.request_id
+
+    def test_attempt_dir_ingest_records_attempt_and_its_job_id(
+        self, tmp_path, monkeypatch, registry
+    ):
+        from quantui.backends.slurm_ingest import ingest_staging_success
+        from tests.slurm_ingest_helpers import patch_results_root, sample_payload
+
+        patch_results_root(tmp_path, monkeypatch)
+        rec = registry.create(_request(), "cluster_slurm", job_name="run")
+        rec = registry.start_attempt(rec.request_id, "100")
+        # A hand-run second attempt the record does not track.
+        attempt = Path(rec.job_dir) / "attempt-02_job555"
+        attempt.mkdir()
+        (attempt / "result.json").write_text(json.dumps(sample_payload("single_point")))
+        saved = ingest_staging_success(rec, attempt_dir=attempt)
+        info = json.loads((saved / "result.json").read_text())["slurm"]
+        assert info["job_id"] == "555"
+        assert info["attempt"] == 2
+        assert info["attempt_dir"] == str(attempt)
+        assert info["job_dir"] == rec.job_dir
+
+    def test_history_marker_and_card_row(self):
+        from quantui.app_formatters import format_past_result, slurm_history_marker
+
+        data = {
+            "calc_type": "single_point",
+            "formula": "H2",
+            "method": "RHF",
+            "basis": "STO-3G",
+            "energy_hartree": -1.1,
+            "energy_ev": -30.0,
+            "converged": True,
+            "execution_backend": "slurm",
+            "slurm": {
+                "job_id": "812345",
+                "attempt": 2,
+                "job_dir": "/scratch/u/run",
+                "attempt_dir": "/scratch/u/run/attempt-02_job812345",
+            },
+        }
+        assert slurm_history_marker(data) == "🖥 SLURM 812345·a2 "
+        card = format_past_result(data)
+        assert "Ran on" in card
+        assert "job 812345 &middot; attempt 2" in card
+        assert "/scratch/u/run/attempt-02_job812345" in card
+
+    def test_local_result_has_no_marker_or_row(self):
+        from quantui.app_formatters import format_past_result, slurm_history_marker
+
+        data = {
+            "calc_type": "single_point",
+            "formula": "H2",
+            "method": "RHF",
+            "basis": "STO-3G",
+            "energy_hartree": -1.1,
+            "energy_ev": -30.0,
+            "converged": True,
+        }
+        assert slurm_history_marker(data) == ""
+        assert "Ran on" not in format_past_result(data)
