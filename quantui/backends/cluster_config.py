@@ -150,8 +150,6 @@ echo "SLURM job ID: ${{SLURM_JOB_ID:-<none>}}"
 echo "Working directory: $(pwd)"
 
 export OMP_NUM_THREADS="${{SLURM_CPUS_PER_TASK:-{cores}}}"
-export QUANTUI_RESULTS_DIR="{results_dir}"
-mkdir -p "$QUANTUI_RESULTS_DIR"
 
 {worker_command}
 
