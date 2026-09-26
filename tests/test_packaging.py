@@ -18,6 +18,7 @@ of only in an installed deployment.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -28,11 +29,38 @@ import pytest
 REPO_ROOT = Path(__file__).parent.parent
 
 
+# Build droppings and VCS data that a private source copy must not carry
+# over: a stale build/ or *.egg-info could leak old files into the wheel.
+_COPY_IGNORE = shutil.ignore_patterns(
+    ".git",
+    "build",
+    "dist",
+    "*.egg-info",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "*.sif",
+    ".plans",  # local symlink to the planning repo (CLAUDE.md)
+)
+
+
 def _build_wheel(tmp_path: Path) -> Path:
-    """Build the project wheel into ``tmp_path`` and return its path."""
+    """Build the project wheel into ``tmp_path`` and return its path.
+
+    setuptools stages every build in ``build/`` and ``*.egg-info`` inside the
+    source tree, so parallel builds from the same checkout (pytest-xdist runs
+    these tests on several workers) delete each other's staging directory
+    mid-build ("No such file or directory: 'build/bdist.<plat>/wheel'").
+    Building from a private copy of the tree gives each test its own. The
+    copy keeps ``tests/``, so the "tests are not shipped" check still has
+    something to exclude.
+    """
+    src = tmp_path / "src"
+    shutil.copytree(REPO_ROOT, src, ignore=_COPY_IGNORE, symlinks=True)
     subprocess.run(
         [sys.executable, "-m", "build", "--wheel", "--outdir", str(tmp_path)],
-        cwd=REPO_ROOT,
+        cwd=src,
         check=True,
         capture_output=True,
         text=True,
