@@ -5,6 +5,7 @@ Serialize batch-worker results to staging JSON for SLURM ingest.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict
 
@@ -306,8 +307,12 @@ def reorg_result_payload(result) -> Dict[str, Any]:
 
 
 def write_worker_result(staging_dir: Path, payload: Dict[str, Any]) -> Path:
+    # Atomic: a finished result.json marks a successful attempt, and the app
+    # may scan for it while the worker is writing (M-JOBDIRS JD.11).
     result_path = staging_dir / "result.json"
-    result_path.write_text(json.dumps(payload, indent=2))
+    tmp_path = staging_dir / "result.json.tmp"
+    tmp_path.write_text(json.dumps(payload, indent=2))
+    os.replace(tmp_path, result_path)
     return result_path
 
 
