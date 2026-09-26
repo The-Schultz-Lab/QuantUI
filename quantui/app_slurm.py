@@ -493,6 +493,54 @@ def on_slurm_jobs_cancel_clicked(app: Any, _btn: Any = None) -> None:
         )
 
 
+def resubmit_slurm_job(app: Any, request_id: str) -> tuple[bool, str]:
+    """Resubmit a finished job as a new attempt in its job dir (M-JOBDIRS JD.4).
+
+    Returns ``(ok, user message)``. On success the Calculate tab starts
+    monitoring the new attempt.
+    """
+    if getattr(app, "_calc_running", False):
+        return False, (
+            "A calculation is already running or being monitored. "
+            "Wait for it to finish before resubmitting."
+        )
+    ensure_job_registry(app)
+    backend = slurm_backend_for_app(app)
+    try:
+        new_job_id = backend.resubmit(request_id)
+    except (ValueError, SecurityError) as exc:
+        return False, str(exc)
+    except RuntimeError as exc:
+        return False, f"Resubmit failed: {exc}"
+    record = app._job_registry.load(request_id)
+    folder = (record.job_dir if record else None) or "?"
+    return True, (
+        f"Resubmitted as SLURM job {new_job_id}. Its attempt folder appears "
+        f"in {folder} when the job starts; earlier attempts are kept."
+    )
+
+
+def on_slurm_jobs_resubmit_clicked(app: Any, _btn: Any = None) -> None:
+    select = getattr(app, "_slurm_jobs_select", None)
+    request_id = select.value if select is not None else None
+    if not request_id:
+        return
+    ok, message = resubmit_slurm_job(app, request_id)
+    refresh_slurm_jobs_tab(app)
+    _update_slurm_jobs_tab_title(app)
+    status = getattr(app, "_slurm_jobs_status_html", None)
+    if status is not None:
+        color = _theme.css.TEXT_STRONG if ok else _theme.css.ACCENT_ERROR
+        status.value = (
+            f'<span style="color:{color};font-size:12px">{html.escape(message)}</span>'
+        )
+    if ok:
+        attach_slurm_job(app, request_id)
+        go_to = getattr(app, "_go_to_calculate_tab", None)
+        if callable(go_to):
+            go_to()
+
+
 def on_slurm_jobs_remove_clicked(app: Any, _btn: Any = None) -> None:
     select = getattr(app, "_slurm_jobs_select", None)
     request_id = select.value if select is not None else None

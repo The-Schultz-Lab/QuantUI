@@ -3456,6 +3456,15 @@ def build_slurm_jobs_tab(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="120px"),
         tooltip="Cancel the selected active cluster job",
     )
+    app._slurm_jobs_resubmit_btn = widgets.Button(
+        description="Resubmit",
+        icon="redo",
+        layout=layout_fn(width="120px"),
+        tooltip=(
+            "Run a finished or failed job again in the same job folder, as a "
+            "new attempt. Earlier attempts' files are kept."
+        ),
+    )
     app._slurm_jobs_remove_btn = widgets.Button(
         description="Remove",
         icon="trash",
@@ -3465,7 +3474,7 @@ def build_slurm_jobs_tab(app: Any, *, layout_fn: Any) -> None:
     app._slurm_jobs_status_html = widgets.HTML(
         value=(
             f'<span style="font-size:12px;color:{_theme.css.TEXT_SUBTLE}">'
-            "Select a job and use View progress or Cancel.</span>"
+            "Select a job and use View progress, Cancel, or Resubmit.</span>"
         )
     )
 
@@ -3485,6 +3494,7 @@ def build_slurm_jobs_tab(app: Any, *, layout_fn: Any) -> None:
                 [
                     app._slurm_jobs_view_btn,
                     app._slurm_jobs_cancel_btn,
+                    app._slurm_jobs_resubmit_btn,
                     app._slurm_jobs_remove_btn,
                 ],
                 layout=layout_fn(gap="8px", margin="6px 0"),

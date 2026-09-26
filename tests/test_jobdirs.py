@@ -650,3 +650,58 @@ class _Sink:
 
     def append_display_data(self, _obj):
         pass
+
+
+# ---------------------------------------------------------------------------
+# Resubmit button (JD.4 UI)
+# ---------------------------------------------------------------------------
+
+
+class TestResubmitButton:
+    @pytest.fixture
+    def app(self, backend, monkeypatch):
+        monkeypatch.setattr(
+            "quantui.backends.slurm.check_submit_cooldown", lambda _s: None
+        )
+        monkeypatch.setattr(
+            "quantui.app_slurm.slurm_backend_for_app", lambda _app: backend
+        )
+        monkeypatch.setattr("quantui.app_slurm.is_slurm_available", lambda: False)
+        with _sbatch_returning("100"):
+            rid = backend.dispatch(_request())
+        backend.registry.update_status(rid, "error")
+        app = _jobs_tab_app(backend.registry, _calc_running=False)
+        app._slurm_jobs_select.value = rid
+        return app, rid
+
+    def test_resubmit_starts_monitoring_new_attempt(self, app, backend):
+        from quantui.app_slurm import on_slurm_jobs_resubmit_clicked
+
+        app_ns, rid = app
+        with (
+            _sbatch_returning("200"),
+            patch("quantui.app_slurm.attach_slurm_job") as attach,
+        ):
+            on_slurm_jobs_resubmit_clicked(app_ns)
+        attach.assert_called_once_with(app_ns, rid)
+        assert "Resubmitted as SLURM job 200" in app_ns._slurm_jobs_status_html.value
+        assert backend.registry.load(rid).slurm_job_id == "200"
+
+    def test_resubmit_blocked_while_running(self, app, backend):
+        from quantui.app_slurm import resubmit_slurm_job
+
+        app_ns, rid = app
+        app_ns._calc_running = True
+        ok, message = resubmit_slurm_job(app_ns, rid)
+        assert not ok
+        assert "already running" in message
+        assert backend.registry.load(rid).slurm_job_id == "100"
+
+    def test_resubmit_legacy_record_explains(self, app, backend):
+        from quantui.app_slurm import resubmit_slurm_job
+
+        app_ns, _rid = app
+        backend.registry.create(_request("legacy"), "cluster_slurm", status="error")
+        ok, message = resubmit_slurm_job(app_ns, "legacy")
+        assert not ok
+        assert "before per-job folders" in message

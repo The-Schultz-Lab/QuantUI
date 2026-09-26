@@ -416,6 +416,9 @@ from quantui.app_slurm import (
     on_slurm_jobs_remove_clicked as _slurm_on_jobs_remove_clicked,
 )
 from quantui.app_slurm import (
+    on_slurm_jobs_resubmit_clicked as _slurm_on_jobs_resubmit_clicked,
+)
+from quantui.app_slurm import (
     on_slurm_jobs_view_clicked as _slurm_on_jobs_view_clicked,
 )
 from quantui.app_slurm import (
@@ -1491,6 +1494,7 @@ class QuantUIApp:
         _slurm_jobs_view_btn: Any
         _slurm_jobs_cancel_btn: Any
         _slurm_jobs_remove_btn: Any
+        _slurm_jobs_resubmit_btn: Any
         _slurm_jobs_status_html: Any
         slurm_jobs_tab_panel: Any
         _slurm_jobs_tab_index: int | None
@@ -2649,6 +2653,9 @@ class QuantUIApp:
         )
         self._slurm_jobs_remove_btn.on_click(
             self._safe_cb(lambda _btn: _slurm_on_jobs_remove_clicked(self, _btn))
+        )
+        self._slurm_jobs_resubmit_btn.on_click(
+            self._safe_cb(lambda _btn: _slurm_on_jobs_resubmit_clicked(self, _btn))
         )
         self.cancel_btn.on_click(self._safe_cb(self._on_cancel))
         self.basis_fix_btn.on_click(self._safe_cb(self._on_basis_fix))
