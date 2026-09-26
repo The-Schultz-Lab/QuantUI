@@ -29,7 +29,13 @@ python -m pip install --upgrade --ignore-installed setuptools wheel || true
 # Editable install with the same extras CI uses. Editable + plain `install`
 # (not `ci`-style clean installs) so the resolved deps are cached in the
 # container image for later sessions.
-pip install -e ".[pyscf,ase,dev,xtb]"
+#
+# `python -m pip`, not bare `pip`: in the cloud image `pip` is /usr/bin/pip
+# (the distro Python) while `python` is /usr/local/bin/python. The setuptools
+# upgrade above targets `python`, so a bare `pip` install used the distro
+# setuptools and failed to build pyscf-properties, which left the session
+# with nothing installed.
+python -m pip install -e ".[pyscf,ase,dev,xtb]"
 
 echo "QuantUI cloud env ready: package + [pyscf,ase,dev,xtb] installed." >&2
 

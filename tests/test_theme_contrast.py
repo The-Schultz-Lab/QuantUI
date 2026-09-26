@@ -86,6 +86,9 @@ class TestPaletteRegistry:
         palette = theme.get_palette(palette_id)
         assert colours["plot_bgcolor"] == palette.bg_panel
         assert colours["paper_bgcolor"] == palette.page_bg
+        # Axis/zero lines follow the palette too (M-THEME), not the
+        # plotly_white template's pale default.
+        assert colours["axis_line_color"] == palette.border_strong
 
 
 class TestBordersMeetContrastBar:
