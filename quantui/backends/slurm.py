@@ -212,7 +212,6 @@ class SlurmBackend:
 
         optional = "\n" + "\n".join(extra) if extra else ""
         worker_command = self._worker_command(request_path, staging_dir)
-        results_dir = staging_dir / "results"
         content = cfg.SLURM_SCRIPT_TEMPLATE.format(
             job_name=job_name,
             partition=self.partition,
@@ -222,7 +221,6 @@ class SlurmBackend:
             output_file=str(staging_dir / "slurm-%j.out"),
             error_file=str(staging_dir / "slurm-%j.err"),
             optional_directives=optional,
-            results_dir=str(results_dir),
             worker_command=worker_command,
         )
         output_path.write_text(content)
