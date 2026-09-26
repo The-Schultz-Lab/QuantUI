@@ -118,11 +118,32 @@ def default_jobs_root() -> Path:
     return Path.home() / ".quantui" / "jobs"
 
 
+DEFAULT_STAGING_ROOT = Path("~") / ".quantui" / "staging"
+
+
+def staging_root_env_configured() -> bool:
+    """True when ``QUANTUI_STAGING_DIR`` pins the job root (UI shows it locked)."""
+    return bool(os.environ.get("QUANTUI_STAGING_DIR"))
+
+
 def default_staging_root() -> Path:
+    """Root for SLURM job folders.
+
+    Precedence: ``QUANTUI_STAGING_DIR`` > the ``compute.slurm_job_root``
+    user setting (M-JOBDIRS JD.1) > ``~/.quantui/staging``.
+    """
     override = os.environ.get("QUANTUI_STAGING_DIR")
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".quantui" / "staging"
+    try:
+        from quantui.user_settings import UserSettings
+
+        configured = UserSettings.load().compute.slurm_job_root
+    except Exception:  # noqa: BLE001 — a broken settings file must not block jobs
+        configured = ""
+    if configured:
+        return Path(configured).expanduser()
+    return DEFAULT_STAGING_ROOT.expanduser()
 
 
 # Apptainer image for batch workers (NCShare-oriented default path).
