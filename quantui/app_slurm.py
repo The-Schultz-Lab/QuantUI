@@ -170,8 +170,11 @@ def submit_slurm_run(app: Any) -> None:
     app.run_btn.disabled = True
     app.run_status.value = "Submitting to SLURM…"
 
+    name_widget = getattr(app, "_slurm_job_name_txt", None)
+    job_name = (str(name_widget.value).strip() or None) if name_widget else None
+
     try:
-        request_id = backend.dispatch(request)
+        request_id = backend.dispatch(request, job_name=job_name)
     except SecurityError as exc:
         _reset_run_ui_after_submit_failure(app)
         app.run_status.value = str(exc)
@@ -185,6 +188,10 @@ def submit_slurm_run(app: Any) -> None:
         _append_run_html(app, format_error_html(str(exc)))
         return
 
+    if name_widget is not None:
+        # A name belongs to one job; clear it so the next submit does not
+        # silently reuse it (it would get a _2 suffix).
+        name_widget.value = ""
     refresh_slurm_jobs_tab(app)
     _update_slurm_jobs_tab_title(app)
 

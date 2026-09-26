@@ -780,3 +780,39 @@ class TestJobRoot:
         on_slurm_job_root_changed(app, "relative/jobs")
         assert "full path" in app.slurm_job_root_note.value
         assert UserSettings.load().compute.slurm_job_root == before
+
+
+# ---------------------------------------------------------------------------
+# Job name field on the Calculate tab (JD.2 UI)
+# ---------------------------------------------------------------------------
+
+
+@patch("quantui.app_slurm.threading.Thread")
+@patch("quantui.app_slurm.is_slurm_available", return_value=True)
+def test_submit_passes_job_name_and_clears_field(_avail, _thread, backend, monkeypatch):
+    from types import SimpleNamespace
+
+    from quantui.app_slurm import submit_slurm_run
+
+    monkeypatch.setattr("quantui.app_slurm.slurm_backend_for_app", lambda _app: backend)
+    monkeypatch.setattr(
+        "quantui.app_slurm.build_calculation_request", lambda _app: _request("ui1")
+    )
+    monkeypatch.setattr("quantui.app_slurm.calc_type_key_from_app", lambda _app: "sp")
+    monkeypatch.setattr("quantui.app_slurm._SUPPORTED_SLURM_CALC_TYPES", {"sp"})
+    monkeypatch.setattr("quantui.app_slurm.slurm_submit_block_reason", lambda _a: None)
+    app = _jobs_tab_app(
+        backend.registry,
+        _slurm_job_name_txt=SimpleNamespace(value="  water scan #1 "),
+        _calc_running=False,
+        run_status=_Value(),
+        run_output=_Sink(),
+        run_btn=SimpleNamespace(disabled=False),
+        cancel_btn=SimpleNamespace(disabled=True),
+        log_clear_btn=SimpleNamespace(disabled=False),
+    )
+    with _sbatch_returning("321"):
+        submit_slurm_run(app)
+    rec = backend.registry.load("ui1")
+    assert Path(rec.job_dir).name == "water_scan_1"
+    assert app._slurm_job_name_txt.value == ""
