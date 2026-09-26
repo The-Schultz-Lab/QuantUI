@@ -115,6 +115,12 @@ class ComputeSettings:
     # (cluster). SLURM is only offered in the UI when ``sbatch`` is available.
     execution_backend: str = "local"
 
+    # Where SLURM job folders are created (M-JOBDIRS JD.1). Empty means the
+    # default ``~/.quantui/staging``; clusters with small home quotas should
+    # point this at scratch or a project directory. ``QUANTUI_STAGING_DIR``
+    # in the environment overrides it when set.
+    slurm_job_root: str = ""
+
     # Which quantum chemistry library evaluates integrals and runs SCF.
     # ``auto`` keeps PySCF when both engines are installed; native Windows with
     # only PyFock selects PyFock. UI wiring lands in PYF.4 — PYF.1 persists only.
@@ -288,6 +294,16 @@ class UserSettings:
                     "Invalid compute.execution_backend %r; using %r",
                     candidate_backend,
                     compute.execution_backend,
+                )
+        if "slurm_job_root" in compute_section:
+            candidate_root = compute_section["slurm_job_root"]
+            if isinstance(candidate_root, str):
+                compute.slurm_job_root = candidate_root.strip()
+            else:
+                _LOG.warning(
+                    "Invalid compute.slurm_job_root %r; using %r",
+                    candidate_root,
+                    compute.slurm_job_root,
                 )
         if "quantum_engine" in compute_section:
             candidate_engine = compute_section["quantum_engine"]

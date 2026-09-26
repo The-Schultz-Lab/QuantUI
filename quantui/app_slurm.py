@@ -756,6 +756,46 @@ def on_slurm_reconnect_clicked(app: Any, _btn: Any = None) -> None:
         attach_slurm_job(app, request_id)
 
 
+def on_slurm_job_root_changed(app: Any, value: str) -> None:
+    """Validate and persist the SLURM job folder root (M-JOBDIRS JD.1).
+
+    Blank restores the default. A new root applies to new submissions;
+    existing jobs keep their absolute folder paths in the registry.
+    """
+    note = getattr(app, "slurm_job_root_note", None)
+
+    def _say(message: str, *, error: bool = False) -> None:
+        if note is None:
+            return
+        color = _theme.css.ACCENT_ERROR if error else _theme.css.TEXT_SUBTLE
+        note.value = (
+            f'<div style="font-size:11px;color:{color};margin:2px 0 0 0">'
+            f"{html.escape(message)}</div>"
+        )
+
+    if _cluster_cfg.staging_root_env_configured():
+        return
+    raw = (value or "").strip()
+    if raw:
+        root = Path(raw).expanduser()
+        if not root.is_absolute():
+            _say("Use a full path (for example /work/<you>/quantui-jobs).", error=True)
+            return
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            _say(f"Cannot use that folder: {exc}", error=True)
+            return
+    if raw == app._user_settings.compute.slurm_job_root:
+        return
+    app._user_settings.compute.slurm_job_root = raw
+    app._user_settings.save()
+    # Rebuild the registry on next use so new jobs land under the new root.
+    app._job_registry = None
+    where = raw or str(_cluster_cfg.DEFAULT_STAGING_ROOT)
+    _say(f"New cluster jobs will be created in {where}.")
+
+
 def use_slurm_execution(app: Any) -> bool:
     pref = getattr(app._user_settings.compute, "execution_backend", "local")
     return pref == "slurm" and is_slurm_available()

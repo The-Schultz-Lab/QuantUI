@@ -407,6 +407,9 @@ from quantui.app_runflow import (
     update_scan_widgets as _run_update_scan_widgets,
 )
 from quantui.app_slurm import (
+    on_slurm_job_root_changed as _slurm_on_job_root_changed,
+)
+from quantui.app_slurm import (
     on_slurm_jobs_cancel_clicked as _slurm_on_jobs_cancel_clicked,
 )
 from quantui.app_slurm import (
@@ -571,6 +574,7 @@ from quantui.app_xyz_input import (
 from quantui.app_xyz_input import (
     on_xyz_fill_table as _xyz_on_fill_table,
 )
+from quantui.backends import cluster_config as _cluster_cfg
 from quantui.backends.dispatch import is_slurm_available
 from quantui.cancellation import CalcCancelled as _CalcCancelled
 
@@ -1443,6 +1447,8 @@ class QuantUIApp:
         density_fit_enabled_cb: Any
         freq_parallel_enabled_cb: Any
         execution_backend_dd: Any
+        slurm_job_root_txt: Any
+        slurm_job_root_note: Any
         quantum_engine_dd: Any
         quantum_engine_note: Any
         engine_capability_html: Any
@@ -2128,6 +2134,9 @@ class QuantUIApp:
             execution_backend=self._user_settings.compute.execution_backend,
             slurm_available=is_slurm_available(),
             quantum_engine=self._user_settings.compute.quantum_engine,
+            slurm_job_root=self._user_settings.compute.slurm_job_root,
+            slurm_job_root_env_locked=_cluster_cfg.staging_root_env_configured(),
+            slurm_job_root_effective=str(_cluster_cfg.default_staging_root()),
         )
 
     # ── Welcome header ────────────────────────────────────────────────────
@@ -2540,6 +2549,12 @@ class QuantUIApp:
         )
         self.execution_backend_dd.observe(
             self._safe_cb(self._on_execution_backend_changed), names="value"
+        )
+        self.slurm_job_root_txt.observe(
+            self._safe_cb(
+                lambda change: _slurm_on_job_root_changed(self, change["new"])
+            ),
+            names="value",
         )
         self.quantum_engine_dd.observe(
             self._safe_cb(self._on_quantum_engine_changed), names="value"

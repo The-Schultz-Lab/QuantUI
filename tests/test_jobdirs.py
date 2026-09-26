@@ -705,3 +705,78 @@ class TestResubmitButton:
         ok, message = resubmit_slurm_job(app_ns, "legacy")
         assert not ok
         assert "before per-job folders" in message
+
+
+# ---------------------------------------------------------------------------
+# Configurable job root (JD.1)
+# ---------------------------------------------------------------------------
+
+
+class TestJobRoot:
+    @pytest.fixture(autouse=True)
+    def _private_settings(self, tmp_path, monkeypatch):
+        # Keep writes out of the suite-wide settings file other tests read.
+        monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(tmp_path / "settings.json"))
+
+    def test_precedence_env_then_setting_then_default(self, tmp_path, monkeypatch):
+        from quantui.user_settings import UserSettings
+
+        monkeypatch.delenv("QUANTUI_STAGING_DIR", raising=False)
+        settings = UserSettings.load()
+        settings.compute.slurm_job_root = ""
+        settings.save()
+        assert cfg.default_staging_root() == cfg.DEFAULT_STAGING_ROOT.expanduser()
+
+        settings.compute.slurm_job_root = str(tmp_path / "scratch")
+        settings.save()
+        assert cfg.default_staging_root() == tmp_path / "scratch"
+
+        monkeypatch.setenv("QUANTUI_STAGING_DIR", str(tmp_path / "env"))
+        assert cfg.default_staging_root() == tmp_path / "env"
+        assert cfg.staging_root_env_configured()
+
+    def test_setting_round_trips(self):
+        from quantui.user_settings import UserSettings
+
+        data = UserSettings().to_dict()
+        data["compute"]["slurm_job_root"] = "  /work/me/jobs "
+        assert UserSettings._from_dict(data).compute.slurm_job_root == "/work/me/jobs"
+        data["compute"]["slurm_job_root"] = 5
+        assert UserSettings._from_dict(data).compute.slurm_job_root == ""
+
+    def _app(self):
+        from types import SimpleNamespace
+
+        from quantui.user_settings import UserSettings
+
+        return SimpleNamespace(
+            _user_settings=UserSettings.load(),
+            slurm_job_root_note=SimpleNamespace(value=""),
+            _job_registry=object(),
+        )
+
+    def test_handler_saves_absolute_path_and_resets_registry(
+        self, tmp_path, monkeypatch
+    ):
+        from quantui.app_slurm import on_slurm_job_root_changed
+        from quantui.user_settings import UserSettings
+
+        monkeypatch.delenv("QUANTUI_STAGING_DIR", raising=False)
+        app = self._app()
+        target = tmp_path / "new root"
+        on_slurm_job_root_changed(app, str(target))
+        assert target.is_dir()
+        assert UserSettings.load().compute.slurm_job_root == str(target)
+        assert app._job_registry is None
+        assert "New cluster jobs will be created" in app.slurm_job_root_note.value
+
+    def test_handler_rejects_relative_path(self, monkeypatch):
+        from quantui.app_slurm import on_slurm_job_root_changed
+        from quantui.user_settings import UserSettings
+
+        monkeypatch.delenv("QUANTUI_STAGING_DIR", raising=False)
+        before = UserSettings.load().compute.slurm_job_root
+        app = self._app()
+        on_slurm_job_root_changed(app, "relative/jobs")
+        assert "full path" in app.slurm_job_root_note.value
+        assert UserSettings.load().compute.slurm_job_root == before

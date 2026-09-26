@@ -128,6 +128,9 @@ def build_status_panel(
     execution_backend: str = "local",
     slurm_available: bool = False,
     quantum_engine: str = "auto",
+    slurm_job_root: str = "",
+    slurm_job_root_env_locked: bool = False,
+    slurm_job_root_effective: str = "",
 ) -> None:
     """Build the Status tab panel."""
     cores, mem_gb = get_session_resources_fn()
@@ -407,6 +410,44 @@ def build_status_panel(
             "Use the Cluster Jobs tab to monitor and cancel runs.</div>"
         )
 
+    # SLURM job folder root (M-JOBDIRS JD.1). Built unconditionally so the
+    # app can wire it; only shown when SLURM is available.
+    app.slurm_job_root_txt = widgets.Text(
+        value=slurm_job_root_effective if slurm_job_root_env_locked else slurm_job_root,
+        placeholder="~/.quantui/staging (default)",
+        continuous_update=False,
+        disabled=slurm_job_root_env_locked,
+        layout=layout_fn(width="420px"),
+    )
+    if slurm_job_root_env_locked:
+        _root_note_text = (
+            "Set by <code>QUANTUI_STAGING_DIR</code> in the container or "
+            "session environment."
+        )
+    else:
+        _root_note_text = (
+            "Each cluster job gets its own folder here, with one subfolder per "
+            "attempt. Leave blank for the default; on clusters with a small "
+            "home quota, use a scratch or project folder. Applies to new "
+            "submissions."
+        )
+    app.slurm_job_root_note = widgets.HTML(
+        f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
+        f"{_root_note_text}</div>"
+    )
+    slurm_root_rows: list[Any] = []
+    if slurm_available:
+        slurm_root_rows = [
+            widgets.HTML(
+                f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};'
+                'margin-top:12px;margin-bottom:0px">SLURM job folder '
+                f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
+                "(persists across launches)</span></div>"
+            ),
+            app.slurm_job_root_txt,
+            app.slurm_job_root_note,
+        ]
+
     fp_settings_rows: list[Any] = [
         fp_toggle_label,
         app.freq_parallel_enabled_cb,
@@ -431,6 +472,7 @@ def build_status_panel(
             exec_backend_label,
             app.execution_backend_dd,
             exec_backend_note,
+            *slurm_root_rows,
         ],
         layout=layout_fn(margin="0 0 8px 0"),
     )
