@@ -283,6 +283,31 @@ def _maybe_run_preopt(
         return molecule, None
 
 
+# Files people copy out of a job folder get the job name as their stem
+# (M-JOBDIRS JD.7): fixed name -> suffix appended to the job name. Files the
+# app reads back (result.json, orbitals.npz, progress.json, live.log) keep
+# fixed names. Ingest maps these back via result.json["artifact_names"].
+_DESCRIPTIVE_ARTIFACTS = {
+    "result.molden": ".molden",
+    "trajectory.xyz": "_trajectory.xyz",
+}
+
+
+def _apply_descriptive_names(staging_dir: Path, stem: str) -> dict[str, str]:
+    """Rename shareable artifacts to ``<job name><suffix>``; return the map."""
+    renamed: dict[str, str] = {}
+    for fixed, suffix in _DESCRIPTIVE_ARTIFACTS.items():
+        src = staging_dir / fixed
+        if not src.exists():
+            continue
+        dest = staging_dir / f"{stem}{suffix}"
+        if dest.exists():
+            continue
+        src.rename(dest)
+        renamed[fixed] = dest.name
+    return renamed
+
+
 def _update_tracked_record(request: CalculationRequest, status: str, **kwargs) -> None:
     """Update the registry record, but only for the SLURM job it tracks.
 
@@ -781,6 +806,11 @@ def run_worker_request(
 
     elapsed = time.perf_counter() - t0
     payload = _build_payload(calc_type, outcome, staging_dir, request)
+    if attempt_dir is not None:
+        # Before result.json: its presence is what marks the attempt done.
+        names = _apply_descriptive_names(staging_dir, request_path.parent.name)
+        if names:
+            payload["artifact_names"] = names
     write_worker_result(staging_dir, payload)
 
     _update_tracked_record(request, "success", result_dir=str(staging_dir))

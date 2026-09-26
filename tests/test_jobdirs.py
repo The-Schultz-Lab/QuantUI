@@ -816,3 +816,57 @@ def test_submit_passes_job_name_and_clears_field(_avail, _thread, backend, monke
     rec = backend.registry.load("ui1")
     assert Path(rec.job_dir).name == "water_scan_1"
     assert app._slurm_job_name_txt.value == ""
+
+
+# ---------------------------------------------------------------------------
+# Descriptive names for shareable files (JD.7)
+# ---------------------------------------------------------------------------
+
+
+class TestDescriptiveNames:
+    def test_worker_renames_shareable_files(self, tmp_path):
+        from quantui.backends.worker import _apply_descriptive_names
+
+        (tmp_path / "result.molden").write_text("m")
+        (tmp_path / "trajectory.xyz").write_text("x")
+        (tmp_path / "orbitals.npz").write_text("o")
+        names = _apply_descriptive_names(tmp_path, "H2_opt_B3LYP_def2-SVP")
+        assert names == {
+            "result.molden": "H2_opt_B3LYP_def2-SVP.molden",
+            "trajectory.xyz": "H2_opt_B3LYP_def2-SVP_trajectory.xyz",
+        }
+        assert (tmp_path / "H2_opt_B3LYP_def2-SVP.molden").read_text() == "m"
+        assert (tmp_path / "orbitals.npz").exists()  # read back by the app
+
+    def test_ingest_restores_fixed_names_in_history(
+        self, tmp_path, monkeypatch, registry
+    ):
+        from quantui.backends.slurm_ingest import ingest_staging_success
+        from tests.slurm_ingest_helpers import patch_results_root, sample_payload
+
+        patch_results_root(tmp_path, monkeypatch)
+        rec = registry.create(_request(), "cluster_slurm", job_name="run")
+        attempt = Path(rec.job_dir) / "attempt-01_job1"
+        attempt.mkdir()
+        (attempt / "run.molden").write_text("[Molden Format]\n")
+        payload = sample_payload("single_point")
+        payload["artifact_names"] = {"result.molden": "run.molden"}
+        (attempt / "result.json").write_text(json.dumps(payload))
+        saved = ingest_staging_success(rec, attempt_dir=attempt)
+        assert (saved / "result.molden").read_text() == "[Molden Format]\n"
+        assert (attempt / "run.molden").exists()  # the job folder copy stays
+
+    def test_legacy_worker_run_keeps_fixed_names(self, tmp_path, monkeypatch):
+        """No --attempt-dir (legacy staging) → no renaming, as before."""
+        from quantui.backends.worker import run_worker_request
+
+        monkeypatch.setenv("QUANTUI_JOBS_DIR", str(tmp_path / "jobs"))
+        monkeypatch.setenv("QUANTUI_STAGING_DIR", str(tmp_path / "staging"))
+        staging = tmp_path / "staging" / "leg"
+        staging.mkdir(parents=True)
+        (staging / "request.json").write_text(
+            json.dumps(_request("leg", calc_type="nope").to_dict())
+        )
+        (staging / "result.molden").write_text("m")
+        run_worker_request(staging / "request.json")
+        assert (staging / "result.molden").exists()

@@ -48,9 +48,15 @@ def slurm_provenance(record: JobRecord, staging: Path) -> dict[str, Any]:
     }
 
 
-def _copy_staging_sidecars(staging: Path, saved_dir: Path) -> None:
+def _copy_staging_sidecars(
+    staging: Path, saved_dir: Path, payload: dict[str, Any] | None = None
+) -> None:
+    # Attempt dirs may hold shareable files under descriptive names
+    # (result.json["artifact_names"], M-JOBDIRS JD.7); History keeps the
+    # fixed names its loaders expect.
+    renamed = (payload or {}).get("artifact_names") or {}
     for name in _STAGING_SIDECAR_FILES:
-        src = staging / name
+        src = staging / renamed.get(name, name)
         if src.exists():
             shutil.copy2(src, saved_dir / name)
 
@@ -141,7 +147,7 @@ def _ingest_frequency(
     ir = spectra.get("ir") or {}
     freqs = ir.get("frequencies_cm1")
     displacements = ir.get("displacements")
-    _copy_staging_sidecars(staging, saved_dir)
+    _copy_staging_sidecars(staging, saved_dir, payload)
     if not (saved_dir / "result.molden").exists() and freqs and displacements:
         mol_block = spectra.get("molecule") or {}
         atoms = mol_block.get("atoms") or []
@@ -225,7 +231,7 @@ def _ingest_with_sidecars(
     if calc_type := payload.get("calc_type"):
         if calc_type in ("geometry_opt", "pes_scan"):
             _copy_trajectory(staging, saved_dir, payload)
-    _copy_staging_sidecars(staging, saved_dir)
+    _copy_staging_sidecars(staging, saved_dir, payload)
     _finalize_history_entry(saved_dir)
     return saved_dir
 
