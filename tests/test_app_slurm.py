@@ -252,7 +252,7 @@ class TestSlurmSubmitGuards:
         self, mock_backend_for_app, mock_build_request, _mock_slurm, tmp_path
     ):
         backend = SimpleNamespace(
-            dispatch=lambda _req: (_ for _ in ()).throw(
+            dispatch=lambda _req, **_kw: (_ for _ in ()).throw(
                 SecurityError("Concurrent job limit reached (2/2).")
             )
         )

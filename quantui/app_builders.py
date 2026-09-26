@@ -1527,6 +1527,31 @@ def build_shared_widgets(
     # native phase (first gradient / Hessian) visibly advances.
     app._run_elapsed_lbl = widgets.HTML(value="")
 
+    # Optional job folder / SLURM job name (M-JOBDIRS JD.2). Shown only in
+    # SLURM mode; blank uses <formula>_<calc>_<method>_<basis>.
+    app._slurm_job_name_txt = widgets.Text(
+        value="",
+        placeholder="default: <formula>_<calc>_<method>_<basis>",
+        description="Job name:",
+        style={"description_width": "80px"},
+        layout=layout_fn(width="460px"),
+        tooltip=(
+            "Names this job's folder and its SLURM job. A name already in use "
+            "gets _2, _3, ... appended."
+        ),
+    )
+    app._slurm_job_name_row = widgets.VBox(
+        [
+            app._slurm_job_name_txt,
+            widgets.HTML(
+                f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};'
+                'margin:0 0 6px 84px">Optional. Letters, digits, - and _ are kept; '
+                "other characters become _.</div>"
+            ),
+        ],
+        layout=layout_fn(display="none"),
+    )
+
     app._slurm_job_banner = widgets.HTML(value="", layout=layout_fn(display="none"))
     app._slurm_reconnect_btn = widgets.Button(
         description="View SLURM progress",
@@ -2036,6 +2061,7 @@ def build_run_section(app: Any, *, layout_fn: Any) -> None:
             app.perf_estimate_html,
             app._resume_notice_html,
             app._resume_cb,
+            app._slurm_job_name_row,
             app._slurm_job_banner,
             widgets.HBox(
                 [app._slurm_reconnect_btn],

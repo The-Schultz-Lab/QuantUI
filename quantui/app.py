@@ -1448,6 +1448,8 @@ class QuantUIApp:
         freq_parallel_enabled_cb: Any
         execution_backend_dd: Any
         slurm_job_root_txt: Any
+        _slurm_job_name_txt: Any
+        _slurm_job_name_row: Any
         slurm_job_root_note: Any
         quantum_engine_dd: Any
         quantum_engine_note: Any
@@ -2476,6 +2478,9 @@ class QuantUIApp:
 
         self._slurm_jobs_tab_index = (
             order.index("slurm_jobs") if "slurm_jobs" in order else None
+        )
+        self._slurm_job_name_row.layout.display = (
+            "flex" if "slurm_jobs" in order else "none"
         )
         self._root_tab_order_cache = list(order)
 
