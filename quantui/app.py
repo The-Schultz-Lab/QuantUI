@@ -3564,8 +3564,16 @@ class QuantUIApp:
             plot_bgcolor="rgba(0,0,0,0)",
             paper_bgcolor="rgba(0,0,0,0)",
             font=dict(color=tc["font_color"]),
-            xaxis=dict(gridcolor=tc["grid_color"]),
-            yaxis=dict(gridcolor=tc["grid_color"]),
+            xaxis=dict(
+                gridcolor=tc["grid_color"],
+                linecolor=tc["axis_line_color"],
+                zerolinecolor=tc["axis_line_color"],
+            ),
+            yaxis=dict(
+                gridcolor=tc["grid_color"],
+                linecolor=tc["axis_line_color"],
+                zerolinecolor=tc["axis_line_color"],
+            ),
         )
 
     def _set_html_output(self, out: widgets.Output, html: str) -> None:

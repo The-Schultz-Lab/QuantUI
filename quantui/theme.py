@@ -646,6 +646,10 @@ def plotly_colors(palette_id: str) -> dict:
         "paper_bgcolor": palette.page_bg,
         "font_color": palette.text_strong,
         "grid_color": palette.border,
+        # Axis and zero lines: one step stronger than the grid, so they stay
+        # visible on dark palettes (the plotly_white default is a pale
+        # blue-gray meant for white backgrounds).
+        "axis_line_color": palette.border_strong,
         "scene_bgcolor": "#000000" if palette.is_dark else "#ffffff",
     }
 
