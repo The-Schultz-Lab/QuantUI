@@ -2667,6 +2667,7 @@ def refresh_results_browser(app: Any) -> None:
         from quantui import list_results, load_result
     except ImportError:
         return
+    from quantui.app_formatters import slurm_history_marker
     from quantui.app_history import (
         apply_history_filter,
         entry_date,
@@ -2696,12 +2697,14 @@ def refresh_results_browser(app: Any) -> None:
             # comes from result.json's ``calibration_run_id`` extras field
             # written by the worker.
             calib_marker = "🔧 " if data.get("calibration_run_id") else ""
+            # SLURM batch results carry job id + attempt (M-JOBDIRS JD.6).
+            slurm_marker = slurm_history_marker(data)
             formula = data.get("formula", "?")
             method = data.get("method", "?")
             basis = data.get("basis", "?")
             label = (
                 f"{ts}  ·  [{calc_badge}]  "
-                f"{calib_marker}{formula}  "
+                f"{calib_marker}{slurm_marker}{formula}  "
                 f"{method}/{basis}"
             )
             entries.append(

@@ -11,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from .registry import JobRecord
+from .registry import JobRecord, parse_attempt_dir_name
 from .worker_payload import molecule_from_dict
 
 # Sidecar files the batch worker may write for Analysis replay parity.
@@ -23,6 +23,29 @@ _STAGING_SIDECAR_FILES = (
     "trajectory.traj",
     "preopt_trajectory.json",
 )
+
+
+def slurm_provenance(record: JobRecord, staging: Path) -> dict[str, Any]:
+    """``result.json`` extras that mark a History entry as a SLURM run.
+
+    M-JOBDIRS JD.5: stored under ``execution_backend`` / ``slurm`` so the
+    History list and card can tell SLURM results from local ones. Additive —
+    local results and results ingested before this simply lack the keys.
+    For a job-dir record, *staging* is the attempt dir and its name gives the
+    attempt number and the SLURM job id that produced it (which, for a
+    hand-run ``sbatch``, differs from the record's tracked job).
+    """
+    parsed = parse_attempt_dir_name(staging.name) if record.job_dir else None
+    return {
+        "execution_backend": "slurm",
+        "slurm": {
+            "job_id": parsed[1] if parsed else record.slurm_job_id,
+            "attempt": parsed[0] if parsed else None,
+            "job_dir": record.job_dir or record.staging_dir,
+            "attempt_dir": str(staging) if parsed else None,
+            "request_id": record.request_id,
+        },
+    }
 
 
 def _copy_staging_sidecars(staging: Path, saved_dir: Path) -> None:
@@ -97,7 +120,11 @@ def _copy_trajectory(staging: Path, saved_dir: Path, payload: dict[str, Any]) ->
 
 
 def _ingest_frequency(
-    staging: Path, payload: dict[str, Any], record: JobRecord, log_text: str
+    staging: Path,
+    payload: dict[str, Any],
+    record: JobRecord,
+    log_text: str,
+    extras: dict[str, Any],
 ) -> Path:
     from quantui import save_result
     from quantui.results_storage import save_molden
@@ -109,6 +136,7 @@ def _ingest_frequency(
         pyscf_log=log_text,
         calc_type="frequency",
         spectra=spectra,
+        extras=extras,
     )
     ir = spectra.get("ir") or {}
     freqs = ir.get("frequencies_cm1")
@@ -135,7 +163,10 @@ def _ingest_frequency(
 
 
 def _ingest_reorganization_energy(
-    payload: dict[str, Any], record: JobRecord, log_text: str
+    payload: dict[str, Any],
+    record: JobRecord,
+    log_text: str,
+    extras: dict[str, Any],
 ) -> Path:
     from quantui import save_result
 
@@ -180,6 +211,7 @@ def _ingest_reorganization_energy(
         pyscf_log=log_text,
         calc_type="reorganization_energy",
         spectra=payload.get("spectra") or {},
+        extras=extras,
     )
     _finalize_history_entry(saved_dir)
     return saved_dir
@@ -198,9 +230,16 @@ def _ingest_with_sidecars(
     return saved_dir
 
 
-def ingest_staging_success(record: JobRecord, log_text: str = "") -> Path:
-    """Read ``result.json`` from staging and save under ``results/``."""
-    staging = record.staging_path
+def ingest_staging_success(
+    record: JobRecord, log_text: str = "", *, attempt_dir: Path | None = None
+) -> Path:
+    """Read ``result.json`` from staging and save under ``results/``.
+
+    *attempt_dir* selects a specific attempt (used for hand-run attempts the
+    record does not track); by default the record's tracked staging path.
+    """
+    staging = attempt_dir if attempt_dir is not None else record.staging_path
+    extras = slurm_provenance(record, staging)
     result_path = staging / "result.json"
     if not result_path.exists():
         raise FileNotFoundError(f"Missing staging result: {result_path}")
@@ -211,10 +250,10 @@ def ingest_staging_success(record: JobRecord, log_text: str = "") -> Path:
     from quantui import save_result
 
     if calc_type == "frequency":
-        return _ingest_frequency(staging, payload, record, log_text)
+        return _ingest_frequency(staging, payload, record, log_text, extras)
 
     if calc_type == "reorganization_energy":
-        return _ingest_reorganization_energy(payload, record, log_text)
+        return _ingest_reorganization_energy(payload, record, log_text, extras)
 
     result = _basic_result(payload, record)
     spectra = payload.get("spectra")
@@ -223,6 +262,7 @@ def ingest_staging_success(record: JobRecord, log_text: str = "") -> Path:
         pyscf_log=log_text,
         calc_type=calc_type,
         spectra=spectra if spectra is not None else {},
+        extras=extras,
     )
 
     return _ingest_with_sidecars(staging, saved_dir, payload)

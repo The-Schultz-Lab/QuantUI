@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 from pathlib import Path
 from typing import Any, Optional
 
@@ -815,6 +816,49 @@ def format_reorg_result(r: Any) -> str:
     )
 
 
+def slurm_history_marker(data: dict[str, Any]) -> str:
+    """Short History-list marker for a SLURM result, e.g. ``🖥 SLURM 812345·a2 ``.
+
+    Empty for local results and for results saved before SLURM provenance
+    was recorded (M-JOBDIRS JD.6).
+    """
+    if data.get("execution_backend") != "slurm":
+        return ""
+    info = data.get("slurm") or {}
+    job_id = info.get("job_id")
+    attempt = info.get("attempt")
+    text = "🖥 SLURM"
+    if job_id:
+        text += f" {job_id}"
+        if attempt:
+            text += f"·a{attempt}"
+    return text + " "
+
+
+def _slurm_provenance_row(data: dict[str, Any]) -> str:
+    """History-card row naming the SLURM job, attempt and job folder."""
+    if data.get("execution_backend") != "slurm":
+        return ""
+    info = data.get("slurm") or {}
+    parts = ["SLURM batch"]
+    if info.get("job_id"):
+        parts.append(f"job {html.escape(str(info['job_id']))}")
+    if info.get("attempt"):
+        parts.append(f"attempt {int(info['attempt'])}")
+    value = " &middot; ".join(parts)
+    folder = info.get("attempt_dir") or info.get("job_dir")
+    if folder:
+        value += (
+            f'<br><span style="font-family:monospace;font-size:12px;'
+            f'color:{_theme.css.TEXT_MUTED_LIGHT}">{html.escape(str(folder))}</span>'
+        )
+    return (
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL};'
+        f'vertical-align:top">Ran on</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{value}</td></tr>'
+    )
+
+
 def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) -> str:
     """Format a saved result.json payload as an HTML result card."""
     import base64 as _b64
@@ -912,6 +956,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     # Shared 'extra' rows (correlation breakdown / solvent / device / dipole /
     # Mulliken) — same builder as the live card so the two never drift.
     _extra = _result_extra_rows(lambda k, d=None: data.get(k, d))
+    _extra += _slurm_provenance_row(data)
 
     # Embed thumbnail if saved
     _thumb_html = ""
