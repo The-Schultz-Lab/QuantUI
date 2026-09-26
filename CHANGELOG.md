@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-26
+
 ### Added
 
 - **SLURM job folders with per-attempt subfolders (M-JOBDIRS)** — each cluster
@@ -21,24 +23,75 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   `🖥 SLURM <job id>·a<attempt>` and the result card has a "Ran on" row with
   the job folder. Hand-run attempts are added to History on the next Cluster
   Jobs refresh; failed attempts stay in the job folder only.
-- **PyFock geometry and analysis phase** — native-Windows PBE/def2 geometry
-  optimization now uses PyFock's ASE calculator with analytical density-fitted
-  gradients. Single-point and final optimized-geometry results retain orbital
-  arrays, Mulliken charges, dipoles, and engine-native cube generation.
+- **GPU offload for geometry optimization** — gpu4pyscf offload now reaches
+  every SCF/gradient step of a geometry optimization, not just single points.
+  A separate, guarded CuPy GPU path for PyFock, GPU provenance
+  (`gpu_used` / `gpu_name`) on optimization results, and
+  `quantui gpu check --engine pyfock`.
+- **PyFock backend (M-PYFOCK)** — Phase 1: normalized engine dispatch,
+  native-Windows PBE/def2 single points for neutral closed-shell molecules,
+  capability-driven calculation menus, engine provenance in logs and saved
+  results, a pinned `pyfock` install extra, and a Windows water parity gate
+  against PySCF; unsupported hybrids, ions, open-shell systems, solvent,
+  checkpoints and orbital analysis are rejected before compute. Phase 2:
+  geometry optimization via PyFock's ASE calculator with analytical
+  density-fitted gradients; results keep orbital arrays, Mulliken charges,
+  dipoles, and engine-native cube generation.
+- **`quantui submit` CLI** — submit request JSON files to SLURM from a script
+  (with `--job-name`, `--dry-run`, resource and mail options); resource
+  estimates account for parallel IR/Raman workers.
+- **Checkpoint/resume for batch and Frequency runs** — the SLURM batch worker
+  resumes Geometry Optimization, PES Scan and Frequency runs from their
+  checkpoints; Frequency (interactive and batch) banks each finished
+  displacement so a restart skips completed ones.
+- **SCF rescue for hard open-shell cases (M-SCF-ROBUST)** — one shared
+  convergence-rescue helper at every SCF call site, with provenance lines in
+  the log.
+- **RKS/UKS/RHF/UHF label** on every result card, live and saved.
 
-- **PyFock Phase-1 backend (M-PYFOCK PYF.2–PYF.6)** — normalized engine
-  dispatch, native-Windows PBE/def2 single points for neutral closed-shell
-  molecules, capability-driven calculation menus, engine provenance in logs
-  and saved results, a pinned `pyfock` install extra, and a real Windows water
-  parity gate against PySCF. Unsupported hybrids, ions, open-shell systems,
-  solvent, checkpoints, GPU, and orbital analysis are rejected before compute.
+### Changed
+
+- **SLURM output layout** — new submissions use the job-folder layout above
+  instead of `~/.quantui/staging/<request_id>/`. Jobs submitted earlier keep
+  their old folders and still list, reconnect and ingest.
+- **Unconverged results are no longer reported as converged** — CCSD/CCSD(T)
+  amplitudes, TD-DFT roots, frequency Hessians, and optimizer gradients from an
+  unconverged SCF are now flagged instead of shown as a clean result. Saved
+  cards name the step that failed rather than blaming the SCF.
+- **Parallel IR/Raman worker pools** are sized from the SLURM/cgroup
+  allocation, not the node's full CPU count.
 
 ### Fixed
 
-- Reconnecting to a finished SLURM job no longer saves a second copy of its
-  result to History.
-- Removed the unused `QUANTUI_RESULTS_DIR` export from generated SLURM
-  scripts (it only created an empty `results/` folder per job).
+- **Thermochemistry** — entropy units no longer corrupt the Gibbs free energy;
+  thermochemistry is saved and shown again when a frequency result is
+  reopened from History.
+- **Raman activities** — added the missing a₀³→Å³ polarizability conversion.
+- **Functionals** — ωB97X-D resolves to the real functional (not `wb97x`+D3),
+  and the D3 dispersion status is shown instead of silently dropped.
+- **ECP systems** — ECPs are passed to parallel IR/Raman workers and embedded
+  in exported scripts; charge/spin inference handles ROHF and ECP systems.
+- **Exported scripts** for MP2/CCSD/CCSD(T) now run the requested method
+  instead of a DFT branch.
+- **Solvation** — PCM requested for a calc type that cannot use it is
+  rejected instead of silently ignored; solvated Geometry Optimization works
+  in the SLURM batch worker.
+- **SLURM ingest** keeps computed properties and provenance (dipole, charges,
+  SCF variant, solvent, GPU); reconnecting to a finished SLURM job no longer
+  saves a second copy of its result to History.
+- **SLURM scripts** quote paths containing spaces, and no longer export an
+  unused `QUANTUI_RESULTS_DIR`.
+- **Checkpoints** — PES Scan checkpoint identity is coordinate-aware, and the
+  interactive Frequency run uses its own checkpoint.
+- **NMR** fallback-reference metadata is saved and shown.
+- **Parallel IR/Raman workers** honor density fitting and SCF rescue.
+- **Batch results** carry Mulliken charges and dipoles; UHF Molden export is
+  complete.
+- **Spectra** — the x-range covers every real mode; exported NPZ files carry
+  the fields the cube helper needs, and cube provenance can't be overwritten.
+- **Packaging** — the built wheel ships `quantui.engines`.
+- **Theme** — Plotly axis and zero lines follow the active palette instead of
+  staying pale blue-gray on dark themes.
 
 ## [0.8.2] - 2026-08-30
 
@@ -881,7 +934,12 @@ Initial public scaffolding of the QuantUI package: `quantui` package with
 `calculator.py`, basic notebook launcher, Apptainer container definition,
 MIT license, and project metadata.
 
-[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.8.2...v0.9.0
+[0.8.2]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.8.1...v0.8.2
+[0.8.1]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.5.1...v0.5.2
