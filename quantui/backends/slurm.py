@@ -32,11 +32,14 @@ from .cluster_security import (
 from .registry import JobRegistry
 from .slurm_errors import format_error_for_student
 from .slurm_utils import (
+    SLURM_JOB_NAME_MAX_LEN,
     SlurmJobAccounting,
+    default_job_name,
     estimate_slurm_resources,
     parse_sacct_accounting,
     parse_sacct_states,
     parse_slurm_job_id,
+    sanitize_job_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -118,27 +121,27 @@ class SlurmBackend:
         if email is not None:
             resolved_events = validate_mail_events(mail_events)
 
+        # M-JOBDIRS: the job dir name doubles as the SLURM job name, so
+        # squeue output matches the directory on disk.
+        name = sanitize_job_name(job_name or "") or default_job_name(request)
         record = self.registry.create(
             request,
             self.backend_id,
             resources=resources,
             status="queued",
+            job_name=name,
         )
-        staging = record.staging_path
-        request_path = staging / "request.json"
+        job_dir = record.job_path
+        assert job_dir is not None  # create(job_name=...) always sets it
+        request_path = job_dir / "request.json"
         request_path.write_text(json.dumps(request.to_dict(), indent=2))
 
-        label = (
-            job_name or f"{request.molecule.get('label', 'quantui')}_{request.method}"
-        )
-        label = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)[:40]
-
-        slurm_script = staging / "submit.slurm"
+        slurm_script = job_dir / "submit.slurm"
         self._write_slurm_script(
             slurm_script,
-            job_name=label,
+            job_name=job_dir.name[:SLURM_JOB_NAME_MAX_LEN],
             request_path=request_path,
-            staging_dir=staging,
+            job_dir=job_dir,
             resources=resources,
             depends_on=depends_on,
             email=email,
@@ -161,15 +164,52 @@ class SlurmBackend:
             )
             raise
 
-        self.registry.update_status(
-            request.request_id,
-            "submitted",
-            slurm_job_id=slurm_job_id,
-        )
+        self.registry.start_attempt(request.request_id, slurm_job_id, source="submit")
         self.registry.record_slurm_submit()
         return request.request_id
 
-    def _worker_command(self, request_path: Path, staging_dir: Path) -> str:
+    def resubmit(self, request_id: str) -> str:
+        """Run a finished job's ``submit.slurm`` again as a new attempt.
+
+        The new attempt gets its own ``attempt-NN_job<id>/`` dir inside the
+        same job dir (earlier attempts are untouched), and the record switches
+        to tracking the new SLURM job. Returns the new SLURM job id.
+
+        Raises ``ValueError`` when the job cannot be resubmitted (unknown,
+        still active, or a legacy record without a job dir) and
+        ``RuntimeError`` when ``sbatch`` fails.
+        """
+        record = self.registry.load(request_id)
+        if record is None:
+            raise ValueError(f"Job {request_id} is not in your registry.")
+        if record.status.lower() in _ACTIVE_RECORD:
+            raise ValueError(
+                f"Job {request_id} is still active ({record.status}). "
+                "Wait for it to finish or cancel it first."
+            )
+        job_dir = record.job_path
+        script = job_dir / "submit.slurm" if job_dir is not None else None
+        if script is None or not script.exists():
+            raise ValueError(
+                "This job was submitted before per-job folders existed, so it "
+                "cannot be resubmitted in place. Submit it again from the "
+                "Calculate tab."
+            )
+
+        active_slurm = sum(
+            1
+            for active in self.registry.list_active()
+            if active.backend_id == self.backend_id
+        )
+        check_concurrent_job_limit(active_slurm)
+        check_submit_cooldown(self.registry.seconds_since_last_slurm_submit())
+
+        slurm_job_id = self._submit_to_slurm(script)
+        self.registry.start_attempt(request_id, slurm_job_id, source="resubmit")
+        self.registry.record_slurm_submit()
+        return slurm_job_id
+
+    def _worker_command(self, request_path: Path, job_dir: Path) -> str:
         # AUDIT F21 — every path here is inserted into shell text (this
         # string is embedded verbatim into the generated sbatch script),
         # not passed as an argv list, so an unquoted path containing a
@@ -178,16 +218,25 @@ class SlurmBackend:
         # "--request /tmp/audit" plus a stray "folder/request.json"
         # argument. shlex.quote makes every one of these shell-safe
         # regardless of what it contains.
+        #
+        # "$ATTEMPT_DIR" is the one deliberate exception: it is a shell
+        # variable set by the attempt-setup block at run time, so it is
+        # double-quoted (expanded by the shell, never word-split) instead.
         py = shlex.quote(sys.executable)
         request_arg = shlex.quote(str(request_path))
-        inner = f"{py} -m quantui.backends.worker --request {request_arg}"
+        inner = (
+            f"{py} -m quantui.backends.worker --request {request_arg} "
+            '--attempt-dir "$ATTEMPT_DIR"'
+        )
         if self.use_apptainer:
             image = shlex.quote(self.apptainer_image)
-            staging_arg = shlex.quote(str(staging_dir))
-            return (
-                f'apptainer exec --nv --bind "$HOME:$HOME" --pwd {staging_arg} '
-                f"{image} {inner}"
-            )
+            binds = '--bind "$HOME:$HOME"'
+            # A job root outside $HOME (e.g. scratch) must be bound too, or
+            # the container cannot see request.json or the attempt dir.
+            if not _is_within(job_dir, Path.home()):
+                job_arg = shlex.quote(str(job_dir))
+                binds += f" --bind {job_arg}:{job_arg}"
+            return f'apptainer exec --nv {binds} --pwd "$ATTEMPT_DIR" {image} {inner}'
         return inner
 
     def _write_slurm_script(
@@ -196,7 +245,7 @@ class SlurmBackend:
         *,
         job_name: str,
         request_path: Path,
-        staging_dir: Path,
+        job_dir: Path,
         resources: Dict[str, int | str],
         depends_on: str | None,
         email: str | None,
@@ -211,16 +260,20 @@ class SlurmBackend:
             extra.append(f"#SBATCH --mail-type={events_str}")
 
         optional = "\n" + "\n".join(extra) if extra else ""
-        worker_command = self._worker_command(request_path, staging_dir)
+        worker_command = self._worker_command(request_path, job_dir)
         content = cfg.SLURM_SCRIPT_TEMPLATE.format(
             job_name=job_name,
             partition=self.partition,
             cores=resources["cores"],
             memory=resources["memory_gb"],
             walltime=resources["walltime"],
-            output_file=str(staging_dir / "slurm-%j.out"),
-            error_file=str(staging_dir / "slurm-%j.err"),
+            # SLURM opens these before the script runs and will not create
+            # a missing directory, so they live in the job dir (already
+            # unique per job via %j), not in the attempt dir.
+            output_file=str(job_dir / "slurm-%j.out"),
+            error_file=str(job_dir / "slurm-%j.err"),
             optional_directives=optional,
+            attempt_setup=cfg.build_attempt_setup(str(job_dir)),
             worker_command=worker_command,
         )
         output_path.write_text(content)
@@ -624,6 +677,14 @@ class SlurmBackend:
                 "retryable": True,
             },
         )
+
+
+def _is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+    except (ValueError, OSError):
+        return False
+    return True
 
 
 def _map_slurm_status(slurm_status: str) -> str:

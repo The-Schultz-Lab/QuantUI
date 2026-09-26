@@ -194,7 +194,7 @@ def submit_slurm_run(app: Any) -> None:
     _append_run_stdout(
         app,
         f"\n📤 Submitted batch job {slurm_id} (request {request_id})\n"
-        f"Staging directory: {record.staging_dir if record else '?'}\n",
+        f"Job directory: {(record.job_dir or record.staging_dir) if record else '?'}\n",
     )
     threading.Thread(
         target=_monitor_slurm_job,

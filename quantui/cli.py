@@ -373,7 +373,7 @@ def _cmd_submit(args: argparse.Namespace) -> int:
         submitted_count += 1
         record = backend.registry.load(request_id)
         slurm_job_id = record.slurm_job_id if record else None
-        staging = record.staging_path if record else "?"
+        staging = (record.job_dir or record.staging_dir) if record else "?"
         print(
             f"{request_path}: submitted request_id={request_id} "
             f"slurm_job_id={slurm_job_id or '?'} staging={staging}"
