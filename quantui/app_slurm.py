@@ -13,6 +13,7 @@ import json
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from IPython.display import HTML
@@ -298,6 +299,36 @@ def _slurm_job_error_cell(record: JobRecord) -> str:
     return f"{html.escape(code)}: {html.escape(message)}"
 
 
+def ingest_new_slurm_attempts(app: Any) -> list[Path]:
+    """Save finished, not-yet-ingested attempts to History (M-JOBDIRS JD.11).
+
+    Picks up hand-run ``sbatch submit.slurm`` attempts (which the app never
+    monitored) and tracked successes nobody reconnected to. The attempt the
+    app is monitoring right now is left to the monitor, and a tracked
+    attempt whose job is still active is skipped.
+    """
+    from quantui.backends.slurm_ingest import ingest_attempt, uningested_attempts
+
+    registry = ensure_job_registry(app)
+    monitored = getattr(app, "_slurm_active_request_id", None)
+    saved: list[Path] = []
+    for record in list_slurm_jobs(app):
+        for attempt in uningested_attempts(record):
+            tracked = attempt == record.staging_path
+            if tracked and (
+                record.request_id == monitored
+                or record.status.lower() in _ACTIVE_SLURM_STATUSES
+            ):
+                continue
+            try:
+                saved.append(ingest_attempt(registry, record, attempt))
+            except Exception:  # noqa: BLE001 — one bad attempt must not block others
+                logger.exception("Failed to ingest SLURM attempt %s", attempt)
+                continue
+            record = registry.load(record.request_id) or record
+    return saved
+
+
 def refresh_slurm_jobs_tab(app: Any) -> None:
     """Re-render the Cluster Jobs tab from the on-disk registry."""
     summary = getattr(app, "_slurm_jobs_summary_html", None)
@@ -313,6 +344,21 @@ def refresh_slurm_jobs_tab(app: Any) -> None:
             backend.refresh_registry_statuses()
         except Exception:  # noqa: BLE001 — UI refresh must not crash the app
             logger.exception("Failed to refresh SLURM registry statuses")
+
+    new_saved = ingest_new_slurm_attempts(app)
+    if new_saved:
+        from quantui.app_runflow import refresh_results_browser
+
+        try:
+            refresh_results_browser(app)
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to refresh History after SLURM ingest")
+        status = getattr(app, "_slurm_jobs_status_html", None)
+        if status is not None:
+            status.value = (
+                f'<span style="color:{_theme.css.TEXT_STRONG};font-size:12px">'
+                f"Saved {len(new_saved)} finished cluster run(s) to History.</span>"
+            )
 
     records = list_slurm_jobs(app)
     active = active_slurm_job_count(app)
@@ -555,31 +601,31 @@ def _ingest_terminal_job(app: Any, record: Any) -> None:
 
 
 def _ingest_success(app: Any, record: Any) -> None:
+    # Reload: the record passed in may predate an ingest done elsewhere
+    # (a Cluster Jobs refresh, or an earlier reconnect).
+    record = app._job_registry.load(record.request_id) or record
     staging = record.staging_path
     result_path = staging / "result.json"
-    log_path = record.live_log_path
     if not result_path.exists():
         app.run_status.value = "SLURM job finished but result.json is missing."
         return
 
     payload = json.loads(result_path.read_text(encoding="utf-8"))
-    log_text = (
-        log_path.read_text(encoding="utf-8", errors="replace")
-        if log_path.exists()
-        else ""
-    )
 
     try:
         from quantui.app_runflow import refresh_results_browser
         from quantui.backends.slurm_ingest import (
+            already_ingested,
             completion_summary_html,
-            ingest_staging_success,
+            ingest_attempt,
         )
 
-        saved_dir = ingest_staging_success(record, log_text)
-        app._job_registry.update_status(
-            record.request_id, "success", result_dir=str(saved_dir)
-        )
+        if already_ingested(record, staging) and record.result_dir:
+            # Never save the same run to History twice (e.g. View progress
+            # on a finished job, or a refresh that already picked it up).
+            saved_dir = Path(record.result_dir)
+        else:
+            saved_dir = ingest_attempt(app._job_registry, record)
         app._last_result_dir = saved_dir
         refresh_results_browser(app)
         calc_type = payload.get("calc_type", record.calc_type)

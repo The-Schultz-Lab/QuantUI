@@ -514,3 +514,139 @@ class TestHistoryProvenance:
         }
         assert slurm_history_marker(data) == ""
         assert "Ran on" not in format_past_result(data)
+
+
+# ---------------------------------------------------------------------------
+# Hand-run attempts reach History; nothing is ingested twice (JD.11)
+# ---------------------------------------------------------------------------
+
+
+def _finished_attempt(job_dir: Path, name: str) -> Path:
+    from tests.slurm_ingest_helpers import sample_payload
+
+    attempt = job_dir / name
+    attempt.mkdir()
+    (attempt / "result.json").write_text(json.dumps(sample_payload("single_point")))
+    (attempt / "live.log").write_text(f"log of {name}\n")
+    return attempt
+
+
+def _jobs_tab_app(registry, **overrides):
+    from types import SimpleNamespace
+
+    fields = dict(
+        _job_registry=registry,
+        _slurm_jobs_summary_html=SimpleNamespace(value=""),
+        _slurm_jobs_table_html=SimpleNamespace(value=""),
+        _slurm_jobs_select=SimpleNamespace(options=[], value="", disabled=True),
+        _slurm_jobs_status_html=SimpleNamespace(value=""),
+        _slurm_active_request_id=None,
+    )
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
+
+
+class TestHandRunAttempts:
+    @pytest.fixture
+    def job(self, tmp_path, monkeypatch, registry):
+        from tests.slurm_ingest_helpers import patch_results_root
+
+        results = patch_results_root(tmp_path, monkeypatch)
+        rec = registry.create(_request(), "cluster_slurm", job_name="run")
+        registry.start_attempt(rec.request_id, "100")
+        registry.update_status(rec.request_id, "error")
+        return registry, rec.request_id, Path(rec.job_dir), results
+
+    def test_uningested_attempts_lists_only_finished_new_ones(self, job):
+        from quantui.backends.slurm_ingest import uningested_attempts
+
+        registry, rid, job_dir, _ = job
+        (job_dir / "attempt-01_job100").mkdir()  # failed: no result.json
+        done = _finished_attempt(job_dir, "attempt-02_job555")
+        assert uningested_attempts(registry.load(rid)) == [done]
+
+    def test_ingest_attempt_marks_ingested_without_retargeting_record(self, job):
+        from quantui.backends.slurm_ingest import ingest_attempt, uningested_attempts
+
+        registry, rid, job_dir, results = job
+        done = _finished_attempt(job_dir, "attempt-02_job555")
+        saved = ingest_attempt(registry, registry.load(rid), done)
+        assert (saved / "pyscf.log").read_text() == "log of attempt-02_job555\n"
+        rec = registry.load(rid)
+        assert rec.ingested_attempts == ["attempt-02_job555"]
+        assert rec.result_dir is None  # hand-run attempt: record not retargeted
+        assert uningested_attempts(rec) == []
+        assert len(list(results.iterdir())) == 1
+
+    @patch("quantui.app_slurm.is_slurm_available", return_value=False)
+    def test_refresh_ingests_hand_run_attempt_once(self, _avail, job):
+        from quantui.app_slurm import refresh_slurm_jobs_tab
+
+        registry, _rid, job_dir, results = job
+        _finished_attempt(job_dir, "attempt-02_job555")
+        app = _jobs_tab_app(registry)
+        with patch("quantui.app_runflow.refresh_results_browser") as refresh:
+            refresh_slurm_jobs_tab(app)
+            refresh_slurm_jobs_tab(app)
+        assert refresh.call_count == 1
+        assert "Saved 1 finished cluster run" in app._slurm_jobs_status_html.value
+        [entry] = list(results.iterdir())
+        info = json.loads((entry / "result.json").read_text())["slurm"]
+        assert (info["job_id"], info["attempt"]) == ("555", 2)
+
+    @patch("quantui.app_slurm.is_slurm_available", return_value=False)
+    def test_refresh_leaves_monitored_attempt_to_the_monitor(self, _avail, job):
+        from quantui.app_slurm import ingest_new_slurm_attempts
+
+        registry, rid, job_dir, results = job
+        registry.update_status(rid, "success")
+        _finished_attempt(job_dir, "attempt-01_job100")  # the tracked job
+        app = _jobs_tab_app(registry, _slurm_active_request_id=rid)
+        assert ingest_new_slurm_attempts(app) == []
+        app._slurm_active_request_id = None
+        assert len(ingest_new_slurm_attempts(app)) == 1
+
+    def test_view_on_finished_job_does_not_duplicate_history(self, job):
+        """Reconnecting to an ingested job shows it, but saves nothing new."""
+        from quantui.app_slurm import _ingest_success
+
+        registry, rid, job_dir, results = job
+        registry.update_status(rid, "success")
+        _finished_attempt(job_dir, "attempt-01_job100")
+        app = _jobs_tab_app(
+            registry,
+            run_status=_Value(),
+            run_output=_Sink(),
+            result_output=_Sink(),
+        )
+        with patch("quantui.app_runflow.refresh_results_browser"):
+            _ingest_success(app, registry.load(rid))
+            _ingest_success(app, registry.load(rid))
+        assert len(list(results.iterdir())) == 1
+        rec = registry.load(rid)
+        assert rec.result_dir == str(next(results.iterdir()))
+
+    def test_legacy_record_already_ingested_is_detected(self, tmp_path, registry):
+        from quantui.backends.slurm_ingest import already_ingested
+
+        rec = registry.create(_request("leg"), "cluster_slurm")
+        staging = rec.staging_path
+        rec.result_dir = str(staging)  # worker's value: not yet ingested
+        assert already_ingested(rec, staging) is False
+        saved = tmp_path / "results" / "x"
+        saved.mkdir(parents=True)
+        (saved / "result.json").write_text("{}")
+        rec.result_dir = str(saved)  # app's value after ingest
+        assert already_ingested(rec, staging) is True
+
+
+class _Value:
+    value = ""
+
+
+class _Sink:
+    def append_stdout(self, _text):
+        pass
+
+    def append_display_data(self, _obj):
+        pass

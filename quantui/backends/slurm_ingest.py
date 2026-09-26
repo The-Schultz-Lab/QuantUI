@@ -11,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from .registry import JobRecord, parse_attempt_dir_name
+from .registry import JobRecord, JobRegistry, parse_attempt_dir_name
 from .worker_payload import molecule_from_dict
 
 # Sidecar files the batch worker may write for Analysis replay parity.
@@ -266,6 +266,66 @@ def ingest_staging_success(
     )
 
     return _ingest_with_sidecars(staging, saved_dir, payload)
+
+
+def already_ingested(record: JobRecord, staging: Path) -> bool:
+    """True when the run in *staging* has already been saved to History.
+
+    Job-dir records list ingested attempt dirs by name. Legacy records
+    predate that list; for them, a ``result_dir`` that points at an existing
+    History entry (the worker sets it to the staging dir; the app replaces
+    it with the saved dir after ingest) means the tracked run was ingested.
+    """
+    if staging.name in record.ingested_attempts:
+        return True
+    if record.job_dir is None and record.result_dir:
+        saved = Path(record.result_dir)
+        return saved != staging and (saved / "result.json").exists()
+    return False
+
+
+def uningested_attempts(record: JobRecord) -> list[Path]:
+    """Finished attempt dirs of a job-dir record not yet saved to History.
+
+    ``result.json`` is written only when a run succeeds, so its presence
+    marks a finished, successful attempt (M-JOBDIRS: successes only).
+    Includes hand-run ``sbatch submit.slurm`` attempts the record never
+    tracked (JD.11). Legacy records return ``[]``: their single run is
+    ingested by the monitor / reconnect path, as before.
+    """
+    if record.job_dir is None:
+        return []
+    return [
+        d
+        for d in record.attempt_dirs()
+        if (d / "result.json").exists() and not already_ingested(record, d)
+    ]
+
+
+def ingest_attempt(
+    registry: JobRegistry, record: JobRecord, attempt_dir: Path | None = None
+) -> Path:
+    """Save one attempt to History and record it as ingested.
+
+    *attempt_dir* defaults to the record's tracked staging path. The
+    record's ``result_dir`` is updated only for the tracked attempt, so it
+    keeps pointing at the History entry of the run the record reports on.
+    """
+    staging = attempt_dir if attempt_dir is not None else record.staging_path
+    log_path = staging / "live.log"
+    log_text = (
+        log_path.read_text(encoding="utf-8", errors="replace")
+        if log_path.exists()
+        else ""
+    )
+    saved_dir = ingest_staging_success(record, log_text, attempt_dir=staging)
+    tracked = staging == record.staging_path
+    registry.mark_ingested(
+        record.request_id,
+        staging.name,
+        result_dir=str(saved_dir) if tracked else None,
+    )
+    return saved_dir
 
 
 def completion_summary_html(saved_dir: Path, payload: dict[str, Any]) -> str:
