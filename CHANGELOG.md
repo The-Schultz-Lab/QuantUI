@@ -7,6 +7,25 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- **Viewer mode (`quantui view [FOLDER]`)** — a lightweight QuantUI with only
+  the History and Analysis tabs, pointed at a results folder, needing no quantum
+  engine. `QuantUIApp(viewer=True, results_dir=...)` adds a results-folder bar
+  above the tabs; `quantui view` starts Voilà on a free `127.0.0.1` port and
+  opens the browser. Packaging for two delivery routes lives in
+  `packaging/viewer/` (unsigned conda-constructor desktop installers and a
+  Voici/Pyodide browser build), built by the new `viewer-builds` workflow.
+
+### Fixed
+
+- History → "View Results" / "View Analysis" navigated by fixed tab index, so
+  with the Cluster Jobs tab visible they landed one tab early. They now look
+  the tab up by name.
+- Background renders (vibrational animation, isosurface, export) and the
+  activity-light timer fall back to running inline when threads are
+  unavailable instead of leaving the panel stuck.
+
 ## [0.9.0] - 2026-09-26
 
 ### Added

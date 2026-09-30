@@ -322,9 +322,15 @@ def on_past_dd_changed(app: Any, change: dict[str, Any], *, layout_fn: Any) -> N
                     app._history_load_analysis(rd, source_btns=(br, ba))
                 )
             )
+            # Viewer mode has no Results tab — Analysis is the only destination.
+            nav_btns = (
+                [btn_analysis]
+                if getattr(app, "_viewer_mode", False)
+                else [btn_results, btn_analysis]
+            )
             display(
                 widgets.HBox(
-                    [btn_results, btn_analysis],
+                    nav_btns,
                     layout=layout_fn(gap="8px", margin="6px 0 0"),
                 )
             )
@@ -539,7 +545,7 @@ def history_load_results(
             with timer.stage("apply_analysis_context"):
                 app._apply_analysis_context(ctx)
         with timer.stage("nav_tab"):
-            app.root_tab.selected_index = 1
+            app.root_tab.selected_index = app._tab_index("results")
     except Exception:
         status = "error"
         raise
@@ -606,7 +612,7 @@ def history_load_analysis(
                 app._apply_analysis_context(ctx)
 
         with timer.stage("nav_tab"):
-            app.root_tab.selected_index = 2
+            app.root_tab.selected_index = app._tab_index("analysis")
     except Exception:
         status = "error"
         raise

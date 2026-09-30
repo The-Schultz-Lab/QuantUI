@@ -23,6 +23,7 @@ from typing import List, Optional
 
 DEFAULT_APP_PORT = 8867
 APP_NOTEBOOK_NAME = "app.ipynb"
+VIEWER_NOTEBOOK_NAME = "viewer.ipynb"
 HOME_LAUNCHER_NOTEBOOK_NAME = "QuantUI.ipynb"
 LAUNCHER_SCRIPT_NAME = "quantui-app"
 
@@ -69,6 +70,18 @@ def quantui_home() -> Path:
     if override:
         return Path(override).expanduser()
     return Path.home() / ".quantui"
+
+
+def _viewer_notebook() -> dict:
+    """The app notebook with the display cell switched to viewer mode."""
+    nb = json.loads(json.dumps(_APP_NOTEBOOK))
+    nb["cells"][0]["source"] = ["# QuantUI Viewer\n"]
+    nb["cells"][1]["source"] = [
+        "from quantui.app import QuantUIApp\n",
+        "\n",
+        "QuantUIApp(viewer=True).display()\n",
+    ]
+    return nb
 
 
 def app_notebook_path() -> Path:
@@ -150,6 +163,15 @@ def ensure_app_notebook(*, force: bool = False) -> Path:
         json.dumps(_APP_NOTEBOOK, indent=1) + "\n",
         encoding="utf-8",
     )
+    return path
+
+
+def ensure_viewer_notebook() -> Path:
+    """Write ``~/.quantui/viewer.ipynb`` (always refreshed — it is generated)."""
+    home = quantui_home()
+    home.mkdir(parents=True, exist_ok=True)
+    path = home / VIEWER_NOTEBOOK_NAME
+    path.write_text(json.dumps(_viewer_notebook(), indent=1) + "\n", encoding="utf-8")
     return path
 
 
@@ -275,6 +297,84 @@ def run_voila_app(
     time.sleep(4)
     _open_url_best_effort(url)
     print("Press Ctrl-C to stop.")
+    try:
+        return proc.wait()
+    except KeyboardInterrupt:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        return 130
+
+
+def find_free_port() -> int:
+    """Return a free localhost TCP port (so the viewer never collides with a
+    running QuantUI on 8867 or a second viewer)."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _wait_for_port(port: int, proc: subprocess.Popen, timeout_s: float) -> bool:
+    """Poll until Voilà accepts connections on *port* (or the process dies)."""
+    import socket
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            return False
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                return True
+        except OSError:
+            time.sleep(0.25)
+    return False
+
+
+def run_viewer_app(
+    results_dir: Optional[Path] = None,
+    *,
+    port: Optional[int] = None,
+    open_browser: bool = True,
+) -> int:
+    """Start the History + Analysis viewer on *results_dir* (lightweight mode).
+
+    Needs only the ``[app]`` extra — no quantum engine. The folder reaches the
+    kernel through ``QUANTUI_RESULTS_DIR`` (Voilà kernels inherit the server's
+    environment); with no folder the viewer opens on the user's home directory
+    and the in-app folder bar picks the real one.
+    """
+    voila = voila_executable()
+    if voila is None:
+        print(voila_missing_message(), file=sys.stderr)
+        return 1
+
+    env = dict(os.environ)
+    if results_dir is not None:
+        folder = Path(results_dir).expanduser().resolve()
+        if not folder.is_dir():
+            print(f"Not a folder: {folder}", file=sys.stderr)
+            return 1
+        env["QUANTUI_RESULTS_DIR"] = str(folder)
+    elif not env.get("QUANTUI_RESULTS_DIR"):
+        env["QUANTUI_RESULTS_DIR"] = str(Path.home())
+
+    port = port or find_free_port()
+    notebook = ensure_viewer_notebook()
+    argv = build_voila_argv(notebook, port=port, no_browser=True)
+    argv[0] = voila
+    argv.append("--Voila.ip=127.0.0.1")
+
+    url = f"http://127.0.0.1:{port}"
+    print(f"Starting QuantUI Viewer at {url}")
+    print(f"Results folder: {env['QUANTUI_RESULTS_DIR']}")
+    proc = subprocess.Popen(argv, env=env)
+    if open_browser and _wait_for_port(port, proc, timeout_s=60):
+        _open_url_best_effort(url)
+    print("Use the Exit button in the app (or Ctrl-C here) to stop.")
     try:
         return proc.wait()
     except KeyboardInterrupt:
