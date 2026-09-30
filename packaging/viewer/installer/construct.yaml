@@ -26,6 +26,7 @@ specs:
   - requests
 extra_files:
   - quantui-{{ environ["QUANTUI_VERSION"] }}-py3-none-any.whl
+  - create_shortcuts.ps1  # [win]
 post_install: post_install.sh  # [unix]
 post_install: post_install.bat  # [win]
 installer_type: sh  # [linux]

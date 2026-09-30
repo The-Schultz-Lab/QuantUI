@@ -97,6 +97,7 @@ jobs:
           & C:\qv\Scripts\quantui.exe view --help
           & C:\qv\python.exe -c "from quantui.app import QuantUIApp; QuantUIApp(viewer=True); print('viewer ok')"
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-Content C:\qv\post_install.log -ErrorAction SilentlyContinue
           if (-not (Test-Path ([Environment]::GetFolderPath('Programs') + '\QuantUI Viewer.lnk'))) { throw 'Start-menu shortcut missing' }
 
       - uses: actions/upload-artifact@v7
@@ -121,7 +122,7 @@ jobs:
       - name: Generate demo results (needs PySCF)
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[pyscf]"
+          pip install -e ".[pyscf,ase]"
           python packaging/viewer/browser/make_samples.py samples
       - name: Build static site
         run: packaging/viewer/browser/build.sh dist/quantui-*.whl samples site

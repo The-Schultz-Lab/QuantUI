@@ -97,6 +97,11 @@ def build_viewer_folder_bar(app: Any, *, layout_fn: Any) -> None:
         # No local server to stop — Exit would only kill the browser kernel.
         app._exit_btn.layout.display = "none"
     children.append(app._viewer_status_html)
+    # The header advertises a System Settings tab the viewer does not have.
+    app._welcome_html.value = app._welcome_html.value.replace(
+        "<b>System Settings</b> tab for environment + calibration",
+        "<b>Viewer</b> &mdash; browse saved results",
+    )
     app._viewer_folder_bar = widgets.HBox(
         children,
         layout=layout_fn(align_items="center", gap="8px", margin="0 0 8px"),

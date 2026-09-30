@@ -59,6 +59,7 @@ class TestViewerApp:
         titles = [app.root_tab.get_title(i) for i in range(len(app.root_tab.children))]
         assert titles == ["History", "Analysis"]
         assert app._tab_index("analysis") == 1
+        assert "System Settings" not in app._welcome_html.value
 
     def test_full_app_unchanged(self, results_env, monkeypatch):
         monkeypatch.setenv(RESULTS_DIR_ENV, str(results_env))
