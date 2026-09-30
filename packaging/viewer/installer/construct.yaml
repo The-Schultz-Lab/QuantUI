@@ -1,0 +1,37 @@
+# QuantUI Viewer desktop installer (conda constructor) — History + Analysis
+# only, no quantum engine. Built by .github/workflows/viewer-builds.yml:
+#
+#   QUANTUI_VERSION=0.9.0 constructor packaging/viewer/installer --output-dir out
+#
+# The QuantUI wheel (copied in next to this file by the workflow) is installed
+# by post_install.* — QuantUI is not on conda-forge. Installers are UNSIGNED
+# (no signing fee): see packaging/viewer/README.md for the one-time
+# SmartScreen / Gatekeeper steps.
+name: QuantUI-Viewer
+version: {{ environ["QUANTUI_VERSION"] }}
+company: The Schultz Lab
+license_file: LICENSE
+channels:
+  - conda-forge
+specs:
+  - python 3.11.*
+  - pip
+  - voila >=0.5,<0.6
+  - ipykernel
+  - ipywidgets >=8,<9
+  - numpy
+  - matplotlib-base
+  - plotly
+  - py3dmol
+  - requests
+extra_files:
+  - quantui-{{ environ["QUANTUI_VERSION"] }}-py3-none-any.whl
+post_install: post_install.sh  # [unix]
+post_install: post_install.bat  # [win]
+installer_type: sh  # [linux]
+installer_type: pkg  # [osx]
+installer_type: exe  # [win]
+# Per-user install; never touch the user's shell, PATH or registry Python.
+register_python: false
+initialize_conda: false
+initialize_by_default: false
