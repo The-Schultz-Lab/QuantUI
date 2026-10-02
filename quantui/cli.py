@@ -37,8 +37,9 @@ Currently shipped subcommands:
   ``--prepare-only`` writes the job folder without calling ``sbatch`` and
   prints its ``submit.slurm`` path (no site gate needed).
 * ``quantui install-launcher [DIR] [--image PATH] [--force]`` — write the
-  host-side ``quantui-batch`` launcher (default ``~/bin``), which prepares
-  jobs inside the image and submits them with the host's ``sbatch``.
+  host-side ``quantui-batch`` launcher (default ``~/bin``; one shared install
+  serves every user), which writes job folders and submits them from the
+  login node without starting the image there.
 
 Adding a new subcommand:
 
@@ -292,9 +293,9 @@ def _cmd_submit(args: argparse.Namespace) -> int:
     ``--prepare-only`` writes each job dir (``request.json`` +
     ``submit.slurm``) without calling ``sbatch``, and prints one
     ``submit.slurm`` path per line on stdout (everything else goes to
-    stderr). That is the mode the ``quantui-batch`` launcher uses: QuantUI
-    lives inside the Apptainer image, ``sbatch`` lives on the host, so the
-    launcher prepares inside the image and submits outside it.
+    stderr), for callers that run ``sbatch`` themselves. (The login-node
+    ``quantui-batch`` launcher does the same job without QuantUI; see
+    ``quantui/batch_launcher.py``.)
     """
     from quantui.backends.batch_input import (
         BatchInputError,
@@ -641,8 +642,8 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Write each job folder (request.json + submit.slurm) but do not "
-            "call sbatch; print one submit.slurm path per line. Used by the "
-            "quantui-batch launcher, which submits from the host."
+            "call sbatch; print one submit.slurm path per line, for callers "
+            "that submit themselves."
         ),
     )
     input_group = submit_parser.add_argument_group(
@@ -732,8 +733,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "install-launcher",
         help=(
             "Write the quantui-batch launcher, which submits QuantUI jobs from "
-            "a cluster login node. Run it inside the image: apptainer exec "
-            "IMAGE quantui install-launcher"
+            "a cluster login node without starting the image there. Run it "
+            "inside the image it should submit to (from an allocation): "
+            "apptainer exec IMAGE quantui install-launcher DIR"
         ),
     )
     launcher_parser.add_argument(

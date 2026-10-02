@@ -9,13 +9,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
-- **Submit from a terminal with `quantui-batch`** — a small host-side
-  launcher for cluster login nodes, where QuantUI lives inside the Apptainer
-  image and `sbatch` lives outside it. Install it from the image with
-  `apptainer exec IMAGE quantui install-launcher` (writes `~/bin/quantui-batch`,
-  standard-library Python 3.6+, matched to that image). Then
-  `quantui-batch submit mol.xyz --calc frequency --method B3LYP --basis def2-SVP`
-  prepares the job folder inside the image and submits it from the host;
+- **Submit from a login node with `quantui-batch`** — a standard-library
+  Python 3.6+ launcher for SSH users. It never starts the image or imports
+  QuantUI on the login node: it writes the same job folder as
+  `SlurmBackend.prepare()` (constants copied from QuantUI at install time,
+  logic held equal by tests) and calls `sbatch`; the calculation runs in the
+  image on a compute node. Install once per image, e.g.
+  `apptainer exec IMAGE quantui install-launcher /shared/bin`.
+  `quantui-batch submit mol.xyz --calc frequency --method B3LYP --basis def2-SVP`;
   `status`, `log`, `rerun` (e.g. `--mem=64G` after running out of memory),
   `cancel`, `estimate` and `path` follow it. At most
   `QUANTUI_MAX_CONCURRENT_JOBS` (default 2) QuantUI jobs may be queued or
@@ -27,6 +28,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - **`quantui submit --prepare-only`** writes the job folder (`request.json` +
   `submit.slurm`) without calling `sbatch` and prints the script path. Its
   registry record has the new non-active status `prepared`.
+
+### Fixed
+
+- **SLURM memory estimate for transition-metal complexes** —
+  `estimate_slurm_resources()` used a short element table without Mn, Co,
+  Ni, Mo and most other metals, so a metal counted as 0 electrons and the
+  memory estimate came out low. It now uses the full table.
 
 ### Changed
 

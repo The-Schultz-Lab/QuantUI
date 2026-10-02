@@ -155,10 +155,11 @@ class SlurmBackend:
     ) -> JobRecord:
         """Write a job dir with ``request.json`` + ``submit.slurm``; do not submit.
 
-        For callers that run ``sbatch`` themselves, outside this process: the
-        ``quantui-batch`` launcher prepares jobs inside the Apptainer image
-        (where QuantUI lives but ``sbatch`` does not) and submits from the
-        host. The record gets status ``prepared``, which is not an active
+        For callers that run ``sbatch`` themselves, outside this process
+        (``quantui submit --prepare-only``). The login-node ``quantui-batch``
+        launcher writes the same folder and record without importing QuantUI;
+        keep the two in step (tests/test_batch_submit.py checks it). The
+        record gets status ``prepared``, which is not an active
         status, so it never counts toward the concurrent-job limit and its
         hand-run attempts are ingested into History like any other.
         Resources are validated exactly as in :meth:`dispatch`; the

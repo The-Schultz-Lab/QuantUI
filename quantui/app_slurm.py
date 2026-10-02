@@ -120,9 +120,9 @@ def ensure_job_registry(app: Any) -> JobRegistry:
 def ingest_finished_jobs_on_startup(app: Any) -> list[Path]:
     """Save finished batch attempts to History when the app starts.
 
-    Runs whether or not SLURM is available *here*: jobs prepared by the
-    ``quantui-batch`` launcher are submitted from a login node, while the app
-    usually runs in an OnDemand session where ``sbatch`` is absent and the
+    Runs whether or not SLURM is available *here*: ``quantui-batch`` jobs are
+    submitted over SSH from a login node, while the app usually runs in an
+    OnDemand session where ``sbatch`` is absent and the
     Cluster Jobs tab (the only other ingest trigger) never refreshes. Skipped
     when no job registry exists yet, so the app does not create
     ``~/.quantui/jobs`` for users who have never run a batch job.

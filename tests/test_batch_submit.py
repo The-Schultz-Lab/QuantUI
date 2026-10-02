@@ -2,11 +2,12 @@
 Terminal batch submission: ``.xyz`` input, ``quantui submit --prepare-only``,
 ``quantui install-launcher``, and the host-side ``quantui-batch`` launcher.
 
-The launcher tests run the real installed script end to end against fake
-``apptainer``/``sbatch``/``squeue``/``sacct``/``srun`` commands on ``PATH``.
-The fake ``apptainer exec IMAGE quantui ...`` runs this checkout's CLI with the
-test interpreter, so the prepare step is the real one. Nothing here touches a
-real cluster; on-cluster behaviour still needs the NCShare check list.
+The launcher runs on the login node with only the standard library, so it
+re-implements QuantUI's prepare step; ``TestLauncherMatchesQuantUI`` holds that
+port equal to QuantUI's own output. The end-to-end tests run the installed
+script against fake ``sbatch``/``squeue``/``sacct``/``scancel`` on ``PATH``
+(and a fake ``apptainer`` it must never call). Nothing here touches a real
+cluster; on-cluster behaviour still needs the NCShare check list.
 """
 
 import io
@@ -337,6 +338,18 @@ class TestSubmitPrepareOnly:
 # ---------------------------------------------------------------------------
 
 
+def _launcher_text(**kw):
+    from importlib import resources
+
+    return (
+        resources.files("quantui")
+        .joinpath("data")
+        .joinpath("launcher")
+        .joinpath("quantui_batch.py")
+        .read_text(encoding="utf-8")
+    )
+
+
 class TestInstallLauncher:
     def test_needs_an_image(self, tmp_path, monkeypatch):
         monkeypatch.delenv("APPTAINER_CONTAINER", raising=False)
@@ -345,20 +358,27 @@ class TestInstallLauncher:
         assert rc == 1
         assert "inside the QuantUI image" in err
 
-    def test_uses_running_image_and_fills_defaults(self, roots, tmp_path, monkeypatch):
+    def test_bakes_image_python_version_and_quantui_constants(
+        self, roots, tmp_path, monkeypatch
+    ):
         from quantui import __version__
+        from quantui.batch_launcher import site_constants
 
         monkeypatch.setenv("APPTAINER_CONTAINER", "/opt/images/quantui.sif")
         rc, out, _err = _capture(["install-launcher", str(tmp_path / "bin")])
         assert rc == 0
         launcher = tmp_path / "bin" / "quantui-batch"
         text = launcher.read_text()
-        assert 'DEFAULT_IMAGE = "/opt/images/quantui.sif"' in text
-        assert f'DEFAULT_STAGING = "{roots / "staging"}"' in text
-        assert f'INSTALLED_FROM = "{__version__}"' in text
         assert "@QUANTUI_" not in text
+        assert 'DEFAULT_IMAGE = "/opt/images/quantui.sif"' in text
+        assert f'IMAGE_PYTHON = "{sys.executable}"' in text
+        assert f'INSTALLED_FROM = "{__version__}"' in text
         assert os.access(launcher, os.X_OK) or sys.platform == "win32"
         assert "quantui-batch help" in out
+        # Job folders are per user at run time, never the installer's.
+        assert str(roots / "staging") not in text
+        mod = _import_launcher(launcher)
+        assert mod.SITE == json.loads(json.dumps(site_constants()))
 
     def test_refuses_to_overwrite_without_force(self, roots, tmp_path):
         dest = tmp_path / "bin"
@@ -373,21 +393,321 @@ class TestInstallLauncher:
 
     def test_launcher_template_is_python36_syntax(self):
         import ast
-        from importlib import resources
 
-        src = (
-            resources.files("quantui")
-            .joinpath("data")
-            .joinpath("launcher")
-            .joinpath("quantui_batch.py")
-            .read_text(encoding="utf-8")
-        )
-        # The launcher runs on the cluster host's own python3, not the image's.
-        ast.parse(src, feature_version=(3, 6))
+        # The launcher runs on the login node's own python3, not the image's.
+        ast.parse(_launcher_text(), feature_version=(3, 6))
+
+    def test_launcher_never_imports_quantui_or_starts_the_image(self):
+        text = _launcher_text()
+        assert "import quantui" not in text and "from quantui" not in text
+        # "apptainer" appears only inside the generated worker command.
+        calls = [ln for ln in text.splitlines() if '"apptainer"' in ln]
+        assert calls == []
 
 
 # ---------------------------------------------------------------------------
-# quantui-batch, end to end against fake Slurm/Apptainer commands
+# The launcher's port of the prepare step == QuantUI's own
+# ---------------------------------------------------------------------------
+
+
+def _import_launcher(path):
+    import importlib.machinery
+    import importlib.util
+
+    # The installed launcher has no .py suffix, so name the loader explicitly.
+    loader = importlib.machinery.SourceFileLoader("quantui_batch_under_test", str(path))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.fixture
+def launcher(tmp_path, roots):
+    """The rendered launcher, imported as a module (no subprocess)."""
+    from quantui.batch_launcher import render_launcher
+
+    image = tmp_path / "quantui.sif"
+    image.write_text("fake image")
+    path = tmp_path / "quantui_batch_rendered.py"
+    path.write_text(render_launcher(str(image), sys.executable, "test"))
+    mod = _import_launcher(path)
+    mod.TEST_IMAGE = str(image)
+    return mod
+
+
+def _args(launcher, argv):
+    return launcher.submit_parser("t").parse_args(argv)
+
+
+_TM_XYZ = """7
+MnO6 fragment
+Mn  0.000  0.000  0.000
+O   2.180  0.000  0.000
+O  -2.180  0.000  0.000
+O   0.000  2.180  0.000
+O   0.000 -2.180  0.000
+O   0.000  0.000  2.180
+O   0.000  0.000 -2.180
+"""
+
+
+def _molecule(n_carbons):
+    atoms = ["Mo", "O", "O"] + ["C"] * n_carbons + ["H"] * (2 * n_carbons)
+    coords = [[float(i), 0.0, 0.0] for i in range(len(atoms))]
+    return {"atoms": atoms, "coords": coords, "charge": 0, "multiplicity": 1}
+
+
+class TestLauncherMatchesQuantUI:
+    @pytest.mark.parametrize("freq_parallel", ["1", "0"])
+    def test_resource_estimate(self, tmp_path, roots, monkeypatch, freq_parallel):
+        from quantui.backends.base import CalculationRequest
+        from quantui.backends.slurm_utils import estimate_slurm_resources
+        from quantui.batch_launcher import render_launcher
+
+        monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", freq_parallel)
+        path = tmp_path / f"l{freq_parallel}.py"
+        path.write_text(render_launcher("/x.sif", sys.executable, "t"))
+        mod = _import_launcher(path)
+        assert mod.SITE["freq_parallel"] is (freq_parallel == "1")
+
+        checked = 0
+        for n_carbons in (0, 2, 5, 10):
+            for calc in mod.SITE["calc_types"]:
+                for method in ("RHF", "UHF", "B3LYP", "MP2"):
+                    for basis in ("STO-3G", "def2-SVP", "cc-pVTZ", "6-31G*"):
+                        for mult in (1, 3):
+                            mol = _molecule(n_carbons)
+                            mol["multiplicity"] = mult
+                            req = {
+                                "request_id": "r",
+                                "calc_type": calc,
+                                "method": method,
+                                "basis": basis,
+                                "charge": 0,
+                                "multiplicity": mult,
+                                "molecule": mol,
+                            }
+                            expected = estimate_slurm_resources(
+                                CalculationRequest.from_dict(req)
+                            )
+                            assert mod.estimate(req) == expected, req
+                            checked += 1
+        assert checked == 4 * 7 * 4 * 4 * 2  # every combination compared
+
+    def test_estimate_counts_transition_metal_electrons(self, launcher):
+        # The old QuantUI table had no Mn/Mo, so these counted as 0 electrons.
+        with_mo = launcher.estimate(
+            {
+                "calc_type": "single_point",
+                "method": "RHF",
+                "basis": "STO-3G",
+                "molecule": {"atoms": ["Mo"] + ["H"] * 2, "charge": 0},
+            }
+        )
+        with_h = launcher.estimate(
+            {
+                "calc_type": "single_point",
+                "method": "RHF",
+                "basis": "STO-3G",
+                "molecule": {"atoms": ["H"] * 3, "charge": 0},
+            }
+        )
+        assert with_mo["memory_gb"] > with_h["memory_gb"]
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            WATER_XYZ,
+            "O 0 0 0\nH 0 0 1\nH 0 1 0\n",
+            "3\n\nO 0 0 0\nH 0 0 1\nH 0 1 0\n",
+            "3\n# title as comment\nO 0 0 0  # inline\nH 0 0 1 ! bang\nH 0 1 0\n",
+            "# leading comment\n2\nH2\nH 0 0 0\nH 0 0 0.74\n",
+            "5\nwrong count\nH 0 0 0\nH 0 0 0.74\n",
+            _TM_XYZ,
+            "2\nbad\nXx 0 0 0\nH 0 0 1\n",
+            "2\nbad\nh 0 0 0\nH 0 0 1\n",
+            "2\nbad\nH 0 0 zero\nH 0 0 1\n",
+            "2\nbad\nH 0 0\nH 0 0 1\n",
+            "",
+            "# only a comment\n",
+        ],
+    )
+    def test_xyz_parsing(self, launcher, text):
+        from quantui.molecule import parse_xyz_input
+
+        try:
+            expected = parse_xyz_input(text)
+        except ValueError:
+            with pytest.raises(launcher.InputError):
+                launcher.parse_xyz(text)
+            return
+        atoms, coords, _warnings = launcher.parse_xyz(text)
+        assert (atoms, coords) == (list(expected[0]), [list(c) for c in expected[1]])
+
+    def test_charge_multiplicity_check(self, launcher):
+        from quantui.inorganic_guards import check_charge_multiplicity
+        from quantui.xyz_input import electron_count
+
+        for atoms in (["O", "H", "H"], ["Mn"] + ["O"] * 6, ["N"], ["Fe", "Cl"]):
+            for charge in (-1, 0, 1, 2, 3):
+                for mult in range(0, 8):
+                    ours = launcher.charge_mult_problem(atoms, charge, mult)
+                    theirs = check_charge_multiplicity(
+                        electron_count(atoms, charge), mult
+                    )
+                    assert (ours is None) == (theirs is None), (atoms, charge, mult)
+
+    def test_xyz_request_matches_batch_input(self, launcher, water):
+        argv = [
+            str(water),
+            "--calc",
+            "frequency",
+            "--method",
+            "B3LYP",
+            "--basis",
+            "def2-SVP",
+            "--preopt",
+            "--solvent",
+            "Water",
+        ]
+        ours, _ = launcher.build_request(water, _args(launcher, argv), {"nstates": 5})
+        theirs, _ = request_from_xyz(
+            water,
+            calc_type="frequency",
+            method="B3LYP",
+            basis="def2-SVP",
+            preopt=True,
+            solvent="Water",
+            options={"nstates": 5},
+        )
+        theirs = theirs.to_dict()
+        assert ours["request_id"].split("-")[0] == theirs["request_id"].split("-")[0]
+        ours.pop("request_id"), theirs.pop("request_id")
+        assert ours == theirs
+
+    @pytest.mark.parametrize("basis", ["def2-SVP", "6-31G*", "6-31G(d,p)"])
+    def test_default_job_name(self, launcher, water, basis):
+        from quantui.backends.base import CalculationRequest
+        from quantui.backends.slurm_utils import default_job_name
+
+        req, _ = launcher.build_request(
+            water,
+            _args(
+                launcher,
+                [
+                    str(water),
+                    "--calc",
+                    "geometry_opt",
+                    "--method",
+                    "B3LYP",
+                    "--basis",
+                    basis,
+                ],
+            ),
+            {},
+        )
+        assert launcher.default_job_name(req) == default_job_name(
+            CalculationRequest.from_dict(req)
+        )
+        assert launcher.default_job_name(req).startswith("water_opt_B3LYP_")
+
+    @pytest.mark.parametrize("email", [None, "me@example.edu"])
+    def test_job_folder_script_and_record(self, launcher, roots, water, email):
+        from quantui.backends.base import CalculationRequest
+        from quantui.backends.registry import JobRecord
+        from quantui.backends.slurm import SlurmBackend
+
+        req, _ = launcher.build_request(
+            water, _args(launcher, [str(water), "--calc", "frequency"]), {}
+        )
+        res = launcher.resolve_resources(req, _args(launcher, [str(water)]))
+        ours = launcher.prepare_job(req, res, "jobA", email, launcher.TEST_IMAGE)
+        # Read our record now: QuantUI's prepare() below reuses the request id.
+        mine = json.loads((roots / "jobs" / (req["request_id"] + ".json")).read_text())
+
+        backend = SlurmBackend(
+            registry=JobRegistry(), apptainer_image=launcher.TEST_IMAGE
+        )
+        record = backend.prepare(
+            CalculationRequest.from_dict(req), job_name="jobB", email=email
+        )
+        theirs = Path(record.job_dir) / "submit.slurm"
+
+        a, b = ours.parent, theirs.parent
+        assert ours.read_text().replace(str(a), "DIR").replace("jobA", "NAME") == (
+            theirs.read_text().replace(str(b), "DIR").replace("jobB", "NAME")
+        )
+        assert json.loads((a / "request.json").read_text()) == json.loads(
+            (b / "request.json").read_text()
+        )
+        loaded = JobRecord.from_dict(mine)
+        assert set(mine) == set(loaded.to_dict())
+        assert (loaded.status, loaded.job_dir, loaded.resources) == (
+            "prepared",
+            str(a),
+            res,
+        )
+
+    def test_overrides_are_validated_like_quantui(self, launcher, water):
+        args = _args(
+            launcher,
+            [
+                str(water),
+                "--calc",
+                "single_point",
+                "--memory-gb",
+                "100000",
+                "--walltime",
+                "03:00:00",
+            ],
+        )
+        req, _ = launcher.build_request(water, args, {})
+        with pytest.raises(launcher.InputError, match="memory_gb=100000"):
+            launcher.resolve_resources(req, args)
+
+    def test_launcher_job_reaches_history(
+        self, launcher, roots, water, tmp_path, monkeypatch
+    ):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from quantui.app_slurm import ingest_finished_jobs_on_startup
+        from tests.slurm_ingest_helpers import patch_results_root, sample_payload
+
+        results = patch_results_root(tmp_path, monkeypatch)
+        req, _ = launcher.build_request(
+            water, _args(launcher, [str(water), "--calc", "single_point"]), {}
+        )
+        res = launcher.resolve_resources(req, _args(launcher, [str(water)]))
+        script = launcher.prepare_job(req, res, None, None, launcher.TEST_IMAGE)
+        attempt = script.parent / "attempt-01_job4242"
+        attempt.mkdir()
+        (attempt / "result.json").write_text(json.dumps(sample_payload("single_point")))
+        app = SimpleNamespace(
+            _job_registry=JobRegistry(), _slurm_active_request_id=None
+        )
+        with (
+            patch("quantui.app_slurm.is_slurm_available", return_value=False),
+            patch("quantui.app_runflow.refresh_results_browser"),
+        ):
+            assert len(ingest_finished_jobs_on_startup(app)) == 1
+        assert len(list(results.iterdir())) == 1
+
+    def test_job_root_follows_env_then_user_setting(
+        self, launcher, tmp_path, monkeypatch
+    ):
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps({"compute": {"slurm_job_root": "/scratch/me"}}))
+        monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(settings))
+        monkeypatch.delenv("QUANTUI_STAGING_DIR", raising=False)
+        assert launcher.staging_root() == Path("/scratch/me")
+        monkeypatch.setenv("QUANTUI_STAGING_DIR", str(tmp_path / "env"))
+        assert launcher.staging_root() == tmp_path / "env"
+
+
+# ---------------------------------------------------------------------------
+# quantui-batch, end to end on a fake login node
 # ---------------------------------------------------------------------------
 
 
@@ -398,7 +718,10 @@ def _write_exe(path: Path, body: str) -> None:
 
 @pytest.fixture
 def cluster(tmp_path):
-    """Fake cluster: bin dir of mock commands + env + helpers."""
+    """Fake login node: mock Slurm commands on PATH, a launcher, a home dir.
+
+    ``apptainer`` is also on PATH, as a trap: the launcher must never run it.
+    """
     mock = tmp_path / "mock"
     bindir = mock / "bin"
     bindir.mkdir(parents=True)
@@ -407,41 +730,9 @@ def cluster(tmp_path):
     image = tmp_path / "quantui.sif"
     image.write_text("fake image")
     py = sys.executable
-    repo = str(Path(__file__).resolve().parents[1])
 
     _write_exe(
-        bindir / "apptainer",
-        f"""#!{py}
-import os, sys
-args = sys.argv[1:]
-assert args[0] == "exec", args
-args = args[1:]
-while args and args[0].startswith("--"):
-    flag = args.pop(0)
-    if flag in ("--bind", "--pwd"):
-        args.pop(0)
-image, cmd = args[0], args[1:]
-with open(os.path.join({str(mock)!r}, "apptainer.log"), "a") as fh:
-    fh.write(image + "\\n")
-with open(os.path.join({str(mock)!r}, "apptainer_env.log"), "a") as fh:
-    fh.write("OPENBLAS_NUM_THREADS=" + os.environ.get("OPENBLAS_NUM_THREADS", "") + "\\n")
-assert cmd[0] == "quantui", cmd
-os.execv({py!r}, [{py!r}, "-m", "quantui.cli"] + cmd[1:])
-""",
-    )
-    _write_exe(
-        bindir / "srun",
-        f"""#!{py}
-import os, sys
-args = sys.argv[1:]
-with open(os.path.join({str(mock)!r}, "srun.log"), "a") as fh:
-    fh.write(" ".join(args) + "\\n")
-with open(os.path.join({str(mock)!r}, "srun_env.log"), "a") as fh:
-    fh.write("SLURM_JOB_ID=" + os.environ.get("SLURM_JOB_ID", "") + "\\n")
-while args[0].startswith("--"):
-    args.pop(0)
-os.execvp(args[0], args)
-""",
+        bindir / "apptainer", f'#!/bin/bash\necho "$*" >> {mock}/apptainer.log\n'
     )
     _write_exe(
         bindir / "sbatch",
@@ -464,14 +755,17 @@ echo "$n"
     env.update(
         HOME=str(home),
         PATH=f"{bindir}{os.pathsep}{env.get('PATH', '')}",
-        PYTHONPATH=repo + os.pathsep + env.get("PYTHONPATH", ""),
-        QUANTUI_JOBS_DIR=str(tmp_path / "jobs"),
-        QUANTUI_STAGING_DIR=str(home / ".quantui" / "staging"),
         QUANTUI_LOG_DIR=str(tmp_path / "logs"),
     )
-    env.pop("QUANTUI_ENABLE_SLURM", None)
-    env.pop("QUANTUI_BATCH_IMAGE", None)
-    env.pop("QUANTUI_MAX_CONCURRENT_JOBS", None)
+    for var in (
+        "QUANTUI_ENABLE_SLURM",
+        "QUANTUI_BATCH_IMAGE",
+        "QUANTUI_JOBS_DIR",
+        "QUANTUI_STAGING_DIR",
+        "QUANTUI_MAX_CONCURRENT_JOBS",
+        "QUANTUI_SETTINGS_PATH",
+    ):
+        env.pop(var, None)
 
     install = subprocess.run(
         [
@@ -479,7 +773,7 @@ echo "$n"
             "-m",
             "quantui.cli",
             "install-launcher",
-            str(home / "bin"),
+            str(tmp_path / "shared-bin"),
             "--image",
             str(image),
         ],
@@ -489,17 +783,18 @@ echo "$n"
         cwd=str(home),
     )
     assert install.returncode == 0, install.stderr
-    launcher = home / "bin" / "quantui-batch"
+    launcher_path = tmp_path / "shared-bin" / "quantui-batch"
     (home / "water.xyz").write_text(WATER_XYZ)
 
     class Cluster:
         staging = home / ".quantui" / "staging"
+        jobs = home / ".quantui" / "jobs"
 
         def run(self, *args, extra_env=None):
             e = dict(env)
             e.update(extra_env or {})
             return subprocess.run(
-                [py, str(launcher), *args],
+                [py, str(launcher_path), *args],
                 env=e,
                 capture_output=True,
                 text=True,
@@ -537,23 +832,21 @@ echo "$n"
 
 @needs_posix
 class TestLauncherEndToEnd:
-    def test_submit_prepares_in_image_and_sbatches_on_host(self, cluster):
-        r = cluster.submit_water("--job-name", "h2o")
+    def test_submit_writes_job_and_sbatches_without_the_image(self, cluster):
+        r = cluster.submit_water()
         assert r.returncode == 0, r.stderr
-        assert "submitted h2o  (Slurm job 1001)" in r.stdout
-        job_dir = cluster.staging / "h2o"
-        assert (job_dir / "submit.slurm").is_file()
+        name = "water_sp_RHF_STO-3G"
+        assert f"submitted {name}  (Slurm job 1001;" in r.stdout
+        job_dir = cluster.staging / name
         assert (job_dir / ".quantui-batch-jobs").read_text().startswith("1001\t")
-        assert (
-            cluster.log("sbatch.log").strip()
-            == f"--parsable {job_dir / 'submit.slurm'}"
-        )
-        # The worker inside the job uses the same image the launcher prepared with.
-        assert str(cluster.image) in (job_dir / "submit.slurm").read_text()
-        assert cluster.log("apptainer.log").strip() == str(cluster.image)
+        script = job_dir / "submit.slurm"
+        assert cluster.log("sbatch.log").strip() == f"--parsable {script}"
+        assert str(cluster.image) in script.read_text()
+        [record] = list(cluster.jobs.glob("*.json"))
+        assert json.loads(record.read_text())["job_dir"] == str(job_dir)
+        assert cluster.log("apptainer.log") == ""  # never on the login node
 
     def test_sbatch_does_not_inherit_the_callers_job_variables(self, cluster):
-        # An OnDemand Shell session is itself a Slurm job.
         r = cluster.submit_water(
             extra_env={
                 "SLURM_CPUS_PER_TASK": "2",
@@ -564,6 +857,13 @@ class TestLauncherEndToEnd:
         assert r.returncode == 0, r.stderr
         # SBATCH_* are the user's own sbatch defaults and pass through.
         assert cluster.log("sbatch_env.log") == "SBATCH_X=1\n"
+
+    def test_estimate_submits_nothing(self, cluster):
+        r = cluster.run("estimate", "water.xyz", "--calc", "frequency")
+        assert r.returncode == 0, r.stderr
+        assert "cores" in r.stdout and "nothing submitted" in r.stdout
+        assert cluster.log("sbatch.log") == ""
+        assert not cluster.staging.exists()
 
     def test_status_follows_a_job_from_queue_to_done(self, cluster):
         assert cluster.submit_water("--job-name", "h2o").returncode == 0
@@ -610,9 +910,8 @@ class TestLauncherEndToEnd:
         assert r.returncode == 0, r.stderr
         assert "Slurm job 1002" in r.stdout
         script = cluster.staging / "big" / "submit.slurm"
-        assert (
-            cluster.log("sbatch.log").splitlines()[-1]
-            == f"--parsable --mem=64G {script}"
+        assert cluster.log("sbatch.log").splitlines()[-1] == (
+            f"--parsable --mem=64G {script}"
         )
         ids = (cluster.staging / "big" / ".quantui-batch-jobs").read_text().split()
         assert ids[0] == "1001" and "1002" in ids
@@ -636,34 +935,16 @@ class TestLauncherEndToEnd:
         assert r.returncode == 1
         assert "limit 2" in r.stderr
         assert cluster.log("sbatch.log") == ""
-        assert cluster.log("apptainer.log") == ""  # refused before preparing
 
         r = cluster.submit_water(extra_env={"QUANTUI_MAX_CONCURRENT_JOBS": "5"})
         assert r.returncode == 0, r.stderr
 
     def test_bad_spin_never_reaches_sbatch(self, cluster):
         r = cluster.submit_water("--mult", "2")
-        assert r.returncode != 0
+        assert r.returncode == 1
         assert "do not fit" in r.stderr
         assert cluster.log("sbatch.log") == ""
-
-    def test_prepare_runs_through_srun_when_asked(self, cluster):
-        r = cluster.submit_water(
-            extra_env={"QUANTUI_BATCH_PREPARE": "srun", "SLURM_JOB_ID": "77"}
-        )
-        assert r.returncode == 0, r.stderr
-        assert "--time=00:05:00" in cluster.log("srun.log")
-        # srun must make its own allocation, not a step in the caller's job.
-        assert "SLURM_JOB_ID=77" not in cluster.log("srun_env.log")
-
-    def test_prepare_step_runs_single_threaded(self, cluster):
-        assert cluster.submit_water().returncode == 0
-        assert "OPENBLAS_NUM_THREADS=1" in cluster.log("apptainer_env.log")
-
-    def test_failed_prepare_explains_the_fallback(self, cluster):
-        r = cluster.run("submit", "missing.xyz", "--calc", "single_point")
-        assert r.returncode == 1
-        assert "QUANTUI_BATCH_PREPARE=srun" in r.stderr
+        assert not cluster.staging.exists()
 
     def test_log_cancel_and_path(self, cluster):
         assert cluster.submit_water("--job-name", "h2o").returncode == 0
@@ -685,6 +966,7 @@ class TestLauncherEndToEnd:
         r = cluster.run("help")
         assert r.returncode == 0
         assert str(cluster.image) in r.stdout
+        assert str(cluster.staging) in r.stdout  # this user's, not the installer's
 
 
 # ---------------------------------------------------------------------------

@@ -2,25 +2,34 @@
 Install the host-side ``quantui-batch`` launcher (``quantui install-launcher``).
 
 On a cluster, QuantUI lives inside an Apptainer image and ``sbatch`` lives on
-the host, so neither side can submit a job alone. The launcher is a small
-standard-library Python script that runs on the host: it calls
-``quantui submit --prepare-only`` inside the image to write the job folder,
-then ``sbatch`` outside it. It ships inside the package
-(``quantui/data/launcher/quantui_batch.py``) so the launcher a user installs
-always matches the image they install it from; nobody has to clone a repo.
+the host. Students submit over SSH from the login node, where starting the
+image and importing QuantUI's scientific stack is slow, counts as computing
+on a shared machine, and has failed (numpy against the per-user thread
+limit). So the launcher never touches the image: it is a standard-library
+Python script that writes the same job folder ``SlurmBackend.prepare()``
+writes, then calls ``sbatch``. The calculation runs in the image on a
+compute node.
 
-Run inside the image, so the launcher records which image to use::
+Everything the launcher must agree with QuantUI on (element table, method
+list, limits, estimate factors, the batch-script template, the image's own
+Python) is copied in here, at install time, from the QuantUI doing the
+installing; the small amount of logic is a port that
+``tests/test_batch_submit.py`` keeps equal to QuantUI's. Install it once per
+image, from inside that image, so the two always match::
 
-    apptainer exec /path/to/quantui.sif quantui install-launcher   # -> ~/bin
+    # instructor, once per image, from an allocation (not the login node):
+    apptainer exec /opt/apps/containers/users/quantui.sif \\
+        quantui install-launcher /opt/apps/containers/users/bin
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from importlib import resources
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 LAUNCHER_NAME = "quantui-batch"
 
@@ -34,8 +43,44 @@ def running_image() -> Optional[str]:
     return None
 
 
-def render_launcher(image: str, staging_root: str, version: str) -> str:
-    """The launcher script text with its install-time defaults filled in."""
+def site_constants() -> Dict[str, Any]:
+    """The QuantUI values the launcher's port of the prepare step relies on."""
+    from quantui import config
+    from quantui.backends import cluster_config as cfg
+    from quantui.backends import slurm_utils
+    from quantui.backends.base import CALC_TYPES
+    from quantui.backends.batch_input import PREOPT_CALC_TYPES
+    from quantui.freq_ir_workers import freq_parallel_opt_in
+
+    return {
+        "atomic_numbers": dict(config.ATOMIC_NUMBERS),
+        "supported_methods": list(config.SUPPORTED_METHODS),
+        "default_method": config.DEFAULT_METHOD,
+        "default_basis": config.DEFAULT_BASIS,
+        "calc_types": list(CALC_TYPES),
+        "preopt_calc_types": sorted(PREOPT_CALC_TYPES),
+        "calc_tags": dict(slurm_utils._CALC_TYPE_TAGS),
+        "basis_factors": dict(slurm_utils.BASIS_FACTORS),
+        "calc_factors": dict(slurm_utils.CALC_FACTORS),
+        "job_name_max_len": slurm_utils._JOB_NAME_MAX_LEN,
+        "slurm_job_name_max_len": slurm_utils.SLURM_JOB_NAME_MAX_LEN,
+        "min_cores": cfg.MIN_CORES,
+        "max_cores": cfg.MAX_CORES,
+        "min_memory_gb": cfg.MIN_MEMORY_GB,
+        "max_memory_gb": cfg.MAX_MEMORY_GB,
+        "walltime_options": list(cfg.WALLTIME_OPTIONS),
+        "default_partition": cfg.DEFAULT_PARTITION,
+        "default_mail_events": list(cfg.DEFAULT_MAIL_EVENTS),
+        "script_template": cfg.SLURM_SCRIPT_TEMPLATE,
+        "attempt_setup_body": cfg._ATTEMPT_SETUP_BODY,
+        # The image's environment decides this for jobs run in it (the CPU
+        # image sets QUANTUI_FREQ_PARALLEL=1), and the estimate must match.
+        "freq_parallel": bool(freq_parallel_opt_in()),
+    }
+
+
+def render_launcher(image: str, image_python: str, version: str) -> str:
+    """The launcher script text with its install-time values filled in."""
     template = (
         resources.files("quantui")
         .joinpath("data")
@@ -43,10 +88,12 @@ def render_launcher(image: str, staging_root: str, version: str) -> str:
         .joinpath("quantui_batch.py")
         .read_text(encoding="utf-8")
     )
+    site = json.dumps(site_constants(), sort_keys=True)
     return (
         template.replace("@QUANTUI_IMAGE@", image)
-        .replace("@QUANTUI_STAGING_DIR@", staging_root)
+        .replace("@QUANTUI_IMAGE_PYTHON@", image_python)
         .replace("@QUANTUI_VERSION@", version)
+        .replace('"@QUANTUI_SITE@"', repr(site))
     )
 
 
@@ -55,7 +102,6 @@ def install_launcher(
 ) -> int:
     """Write ``dest_dir/quantui-batch``; return a CLI exit code."""
     from quantui import __version__
-    from quantui.backends.cluster_config import default_staging_root
 
     image = image or running_image()
     if not image:
@@ -79,13 +125,15 @@ def install_launcher(
         return 1
 
     dest_dir.mkdir(parents=True, exist_ok=True)
-    staging = str(default_staging_root())
-    target.write_text(render_launcher(image, staging, __version__), encoding="utf-8")
+    target.write_text(
+        render_launcher(image, sys.executable, __version__), encoding="utf-8"
+    )
     target.chmod(0o755)
 
     print(f"Wrote {target}")
-    print(f"  image:       {image}")
-    print(f"  job folders: {staging}")
+    print(f"  image:            {image}")
+    print(f"  python in image:  {sys.executable}")
+    print("  job folders:      each user's own ~/.quantui/staging (or their setting)")
     on_path = str(dest_dir.resolve()) in {
         str(Path(p).expanduser().resolve())
         for p in os.environ.get("PATH", "").split(os.pathsep)
@@ -93,9 +141,9 @@ def install_launcher(
     }
     if not on_path:
         print(
-            f"\n{dest_dir} is not on your PATH. Add it once with:\n"
+            f"\nUsers add {dest_dir} to their PATH once with:\n"
             f"  echo 'export PATH=\"{dest_dir}:$PATH\"' >> ~/.bashrc && "
             "source ~/.bashrc"
         )
-    print(f"\nThen try:  {LAUNCHER_NAME} help")
+    print(f"\nThen, on the login node:  {LAUNCHER_NAME} help")
     return 0

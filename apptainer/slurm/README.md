@@ -13,27 +13,35 @@ QuantUI generates per-job scripts automatically when students submit from the UI
 
 ## Submitting from a terminal (`quantui-batch`)
 
-On a cluster, QuantUI lives inside the Apptainer image and `sbatch` lives on
-the host. The `quantui-batch` launcher bridges the two: it runs
-`quantui submit --prepare-only` inside the image to write the job folder
-(same layout, same resource estimate as the app), then submits
-`submit.slurm` with the host's `sbatch`. (`quantui-batch.sbatch` above is an
-unrelated hand-edited reference template.)
+Students and research users submit over SSH from the login node. The login
+node is for job submission, not computing, so `quantui-batch` never starts
+the image there and never imports QuantUI: it is a standard-library Python
+3.6+ script that writes the same job folder `SlurmBackend.prepare()` writes
+(`request.json`, `submit.slurm`, and the job record the app reads), then
+calls `sbatch`. The calculation runs inside the image on a compute node.
+(`quantui-batch.sbatch` above is an unrelated hand-edited reference template.)
 
-Install it once per user, from the image you want jobs to run in:
+The values the launcher has to agree with QuantUI on (element table, method
+list, limits, estimate factors, the batch-script template, the image's own
+`python`) are copied in from QuantUI at install time. The small amount of logic
+it reimplements (XYZ parsing, the charge/multiplicity check, the resource
+estimate, job naming, the script) is held equal to QuantUI's by
+`tests/test_batch_submit.py`. So **install it from the image it will submit
+to, and reinstall whenever that image is replaced.** One shared install
+serves every user; job folders are each user's own.
 
 ```bash
-apptainer exec /path/to/quantui.sif quantui install-launcher   # writes ~/bin/quantui-batch
+# operator, once per image, from an allocation (importing QuantUI on the login node is slow and can fail):
+apptainer exec /opt/apps/containers/users/quantui.sif \
+    quantui install-launcher /opt/apps/containers/users/bin --force
 ```
 
-The launcher is standard-library Python 3.6+ and remembers that image and the
-job root. Reinstall (`--force`) after the image moves or the job root changes;
-`QUANTUI_BATCH_IMAGE` / `QUANTUI_STAGING_DIR` override both at run time.
+Users add that folder to `PATH` once, then on the login node:
 
 ```bash
 quantui-batch submit water.xyz --calc frequency --method B3LYP --basis def2-SVP --preopt
 quantui-batch estimate water.xyz --calc frequency      # cores / memory / time, submits nothing
-quantui-batch status                                   # recent jobs: PENDING, RUNNING 40%, DONE, OUT_OF_MEMORY ...
+quantui-batch status                                   # PENDING, RUNNING 40%, DONE, OUT_OF_MEMORY ...
 quantui-batch log <job> -f                             # follow live.log of the latest attempt
 quantui-batch rerun <job> --mem=64G --time=24:00:00    # new attempt; sbatch options override the script
 quantui-batch cancel <job>
@@ -43,21 +51,21 @@ quantui-batch cancel <job>
   `--charge`, `--mult`, `--solvent`, `--preopt`, `--option KEY=VALUE`) or
   request JSON. A charge/multiplicity that cannot fit the electron count is
   refused before anything is queued.
+- Job folders go to the user's job root: `QUANTUI_STAGING_DIR`, else
+  **System Settings → SLURM job folder** (`compute.slurm_job_root` in
+  `~/.quantui/settings.json`), else `~/.quantui/staging`.
 - At most `QUANTUI_MAX_CONCURRENT_JOBS` (default 2) QuantUI jobs per user may
   be queued or running, counted from `squeue` (jobs whose script is under the
   job root). Raise it for heavy users.
-- The prepare step runs with one BLAS/OpenMP thread (a login node's per-user
-  thread limit has broken numpy imports inside the image before). If
-  `apptainer` is not on `PATH` (or with `QUANTUI_BATCH_PREPARE=srun`), it runs
-  through a 1-CPU, 2 GB, 5-minute `srun` on `QUANTUI_SLURM_PARTITION`
-  (default `common`) instead.
-- Submitting from inside a job (an OnDemand Shell session is one) is safe:
-  the launcher drops the caller's `SLURM_*` variables before `sbatch`/`srun`,
-  so e.g. the shell's `SLURM_CPUS_PER_TASK` never reaches the new job.
+- `QUANTUI_BATCH_IMAGE` points the launcher at another image of the same
+  kind (e.g. `/data/schultzlab/apptainers/quantui.sif`); for a different kind
+  (the GPU image has a different `python`), install a launcher from it.
+- The launcher drops the caller's `SLURM_*` before `sbatch`, so submitting
+  from inside an allocation never leaks e.g. `SLURM_CPUS_PER_TASK` into the
+  new job (the generated script sets `--ntasks`, not `--cpus-per-task`).
 - Finished attempts appear in the app's **History** the next time the app
   starts (no Cluster Jobs tab or `QUANTUI_ENABLE_SLURM` needed).
-- CPU image only for now: the generated script requests no GPU (`--gres`), so
-  a GPU image run this way computes on CPU.
+- CPU image only for now: the generated script requests no GPU (`--gres`).
 
 ## Job folders
 

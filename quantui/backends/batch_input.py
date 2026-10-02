@@ -46,9 +46,13 @@ def parse_option_pairs(pairs: Optional[Sequence[str]]) -> Dict[str, Any]:
     return options
 
 
+def _file_label(path: Path) -> str:
+    """The file's stem, made safe for ids and folder names."""
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", path.stem).strip("_.-") or "molecule"
+
+
 def _request_id_for(path: Path) -> str:
-    stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", path.stem).strip("_.-") or "molecule"
-    return f"{stem[:40]}-{uuid.uuid4().hex[:8]}"
+    return f"{_file_label(path)[:40]}-{uuid.uuid4().hex[:8]}"
 
 
 def request_from_xyz(
@@ -126,6 +130,8 @@ def request_from_xyz(
         molecule={
             "atoms": list(mol.atoms),
             "coords": [[float(c) for c in row] for row in mol.coordinates],
+            # Names the job folder (default_job_name), e.g. water_opt_B3LYP_def2-SVP.
+            "label": _file_label(path),
             "charge": charge,
             "multiplicity": multiplicity,
         },
