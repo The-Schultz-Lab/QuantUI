@@ -29,7 +29,7 @@ from .cluster_security import (
     validate_mail_events,
     validate_resources,
 )
-from .registry import JobRegistry
+from .registry import JobRecord, JobRegistry
 from .slurm_errors import format_error_for_student
 from .slurm_utils import (
     SLURM_JOB_NAME_MAX_LEN,
@@ -100,9 +100,6 @@ class SlurmBackend:
         mail_events: list[str] | None = None,
         job_name: str | None = None,
     ) -> str:
-        if not request.request_id:
-            request.request_id = uuid.uuid4().hex[:12]
-
         active_slurm = sum(
             1
             for record in self.registry.list_active()
@@ -110,43 +107,20 @@ class SlurmBackend:
         )
         check_concurrent_job_limit(active_slurm)
         check_submit_cooldown(self.registry.seconds_since_last_slurm_submit())
-        estimates = estimate_slurm_resources(request)
-        cores = cores or estimates["cores"]
-        memory_gb = memory_gb or estimates["memory_gb"]
-        walltime = walltime or estimates["walltime"]
-        resources = validate_resources(cores, memory_gb, walltime)
-
-        email = validate_email(email)
-        resolved_events: list[str] = []
-        if email is not None:
-            resolved_events = validate_mail_events(mail_events)
-
-        # M-JOBDIRS: the job dir name doubles as the SLURM job name, so
-        # squeue output matches the directory on disk.
-        name = sanitize_job_name(job_name or "") or default_job_name(request)
-        record = self.registry.create(
+        record = self._create_job(
             request,
-            self.backend_id,
-            resources=resources,
             status="queued",
-            job_name=name,
-        )
-        job_dir = record.job_path
-        assert job_dir is not None  # create(job_name=...) always sets it
-        request_path = job_dir / "request.json"
-        request_path.write_text(json.dumps(request.to_dict(), indent=2))
-
-        slurm_script = job_dir / "submit.slurm"
-        self._write_slurm_script(
-            slurm_script,
-            job_name=job_dir.name[:SLURM_JOB_NAME_MAX_LEN],
-            request_path=request_path,
-            job_dir=job_dir,
-            resources=resources,
+            cores=cores,
+            memory_gb=memory_gb,
+            walltime=walltime,
             depends_on=depends_on,
             email=email,
-            mail_events=resolved_events,
+            mail_events=mail_events,
+            job_name=job_name,
         )
+        job_dir = record.job_path
+        assert job_dir is not None  # _create_job always makes a job dir
+        slurm_script = job_dir / "submit.slurm"
 
         try:
             slurm_job_id = self._submit_to_slurm(slurm_script)
@@ -167,6 +141,96 @@ class SlurmBackend:
         self.registry.start_attempt(request.request_id, slurm_job_id, source="submit")
         self.registry.record_slurm_submit()
         return request.request_id
+
+    def prepare(
+        self,
+        request: CalculationRequest,
+        *,
+        cores: int | None = None,
+        memory_gb: int | None = None,
+        walltime: str | None = None,
+        email: str | None = None,
+        mail_events: list[str] | None = None,
+        job_name: str | None = None,
+    ) -> JobRecord:
+        """Write a job dir with ``request.json`` + ``submit.slurm``; do not submit.
+
+        For callers that run ``sbatch`` themselves, outside this process: the
+        ``quantui-batch`` launcher prepares jobs inside the Apptainer image
+        (where QuantUI lives but ``sbatch`` does not) and submits from the
+        host. The record gets status ``prepared``, which is not an active
+        status, so it never counts toward the concurrent-job limit and its
+        hand-run attempts are ingested into History like any other.
+        Resources are validated exactly as in :meth:`dispatch`; the
+        concurrent-job limit and cooldown are left to the caller, which is
+        the one that can see the real queue.
+        """
+        return self._create_job(
+            request,
+            status="prepared",
+            cores=cores,
+            memory_gb=memory_gb,
+            walltime=walltime,
+            depends_on=None,
+            email=email,
+            mail_events=mail_events,
+            job_name=job_name,
+        )
+
+    def _create_job(
+        self,
+        request: CalculationRequest,
+        *,
+        status: str,
+        cores: int | None,
+        memory_gb: int | None,
+        walltime: str | None,
+        depends_on: str | None,
+        email: str | None,
+        mail_events: list[str] | None,
+        job_name: str | None,
+    ) -> JobRecord:
+        """Validate, register, and write the job dir (shared by dispatch/prepare)."""
+        if not request.request_id:
+            request.request_id = uuid.uuid4().hex[:12]
+
+        estimates = estimate_slurm_resources(request)
+        cores = cores or estimates["cores"]
+        memory_gb = memory_gb or estimates["memory_gb"]
+        walltime = walltime or estimates["walltime"]
+        resources = validate_resources(cores, memory_gb, walltime)
+
+        email = validate_email(email)
+        resolved_events: list[str] = []
+        if email is not None:
+            resolved_events = validate_mail_events(mail_events)
+
+        # M-JOBDIRS: the job dir name doubles as the SLURM job name, so
+        # squeue output matches the directory on disk.
+        name = sanitize_job_name(job_name or "") or default_job_name(request)
+        record = self.registry.create(
+            request,
+            self.backend_id,
+            resources=resources,
+            status=status,
+            job_name=name,
+        )
+        job_dir = record.job_path
+        assert job_dir is not None  # create(job_name=...) always sets it
+        request_path = job_dir / "request.json"
+        request_path.write_text(json.dumps(request.to_dict(), indent=2))
+
+        self._write_slurm_script(
+            job_dir / "submit.slurm",
+            job_name=job_dir.name[:SLURM_JOB_NAME_MAX_LEN],
+            request_path=request_path,
+            job_dir=job_dir,
+            resources=resources,
+            depends_on=depends_on,
+            email=email,
+            mail_events=resolved_events,
+        )
+        return record
 
     def resubmit(self, request_id: str) -> str:
         """Run a finished job's ``submit.slurm`` again as a new attempt.

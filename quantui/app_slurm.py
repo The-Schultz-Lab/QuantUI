@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 _POLL_INTERVAL_S = 2.0
 _SUPPORTED_SLURM_CALC_TYPES = frozenset(CALC_TYPES)
 _ACTIVE_SLURM_STATUSES = frozenset({"queued", "pending", "running", "submitted"})
-_DISMISSABLE_SLURM_STATUSES = frozenset({"success", "error", "cancelled"})
+_DISMISSABLE_SLURM_STATUSES = frozenset({"success", "error", "cancelled", "prepared"})
 
 
 def max_concurrent_slurm_jobs() -> int:
@@ -117,8 +117,36 @@ def ensure_job_registry(app: Any) -> JobRegistry:
     return registry
 
 
+def ingest_finished_jobs_on_startup(app: Any) -> list[Path]:
+    """Save finished batch attempts to History when the app starts.
+
+    Runs whether or not SLURM is available *here*: jobs prepared by the
+    ``quantui-batch`` launcher are submitted from a login node, while the app
+    usually runs in an OnDemand session where ``sbatch`` is absent and the
+    Cluster Jobs tab (the only other ingest trigger) never refreshes. Skipped
+    when no job registry exists yet, so the app does not create
+    ``~/.quantui/jobs`` for users who have never run a batch job.
+    """
+    if not _cluster_cfg.default_jobs_root().expanduser().is_dir():
+        return []
+    try:
+        saved = ingest_new_slurm_attempts(app)
+    except Exception:  # noqa: BLE001 — startup must not fail over a job folder
+        logger.exception("Failed to ingest finished SLURM attempts at startup")
+        return []
+    if saved:
+        from quantui.app_runflow import refresh_results_browser
+
+        try:
+            refresh_results_browser(app)
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to refresh History after SLURM ingest")
+    return saved
+
+
 def startup_slurm_check(app: Any) -> None:
     """On app load, surface any in-flight SLURM jobs from the registry."""
+    ingest_finished_jobs_on_startup(app)
     if not is_slurm_available():
         return
     ensure_job_registry(app)

@@ -7,6 +7,33 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- **Submit from a terminal with `quantui-batch`** — a small host-side
+  launcher for cluster login nodes, where QuantUI lives inside the Apptainer
+  image and `sbatch` lives outside it. Install it from the image with
+  `apptainer exec IMAGE quantui install-launcher` (writes `~/bin/quantui-batch`,
+  standard-library Python 3.6+, matched to that image). Then
+  `quantui-batch submit mol.xyz --calc frequency --method B3LYP --basis def2-SVP`
+  prepares the job folder inside the image and submits it from the host;
+  `status`, `log`, `rerun` (e.g. `--mem=64G` after running out of memory),
+  `cancel`, `estimate` and `path` follow it. At most
+  `QUANTUI_MAX_CONCURRENT_JOBS` (default 2) QuantUI jobs may be queued or
+  running per user, counted from the real queue.
+- **`quantui submit` accepts `.xyz` files** with `--calc`, `--method`,
+  `--basis`, `--charge`, `--mult`, `--solvent`, `--preopt` and repeatable
+  `--option KEY=VALUE`; an impossible charge/multiplicity is refused before
+  anything is queued. The same flags override a request JSON's values.
+- **`quantui submit --prepare-only`** writes the job folder (`request.json` +
+  `submit.slurm`) without calling `sbatch` and prints the script path. Its
+  registry record has the new non-active status `prepared`.
+
+### Changed
+
+- **Finished batch attempts reach History when the app starts**, even where
+  SLURM is unavailable (e.g. an OnDemand session), so jobs submitted from a
+  terminal show up without opening the Cluster Jobs tab.
+
 ## [0.9.0] - 2026-09-26
 
 ### Added
