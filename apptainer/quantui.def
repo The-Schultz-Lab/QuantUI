@@ -130,16 +130,22 @@ FROM: condaforge/miniforge3:26.1.1-3
     voila \
     ase \
     py3dmol \
-    requests \
-    pyscf-dispersion
+    requests
 
   echo "Installing QuantUI..."
   cd /opt/quantui
-  pip install --no-cache-dir -e .
+  # The [pyscf] extra, not a bare `-e .`: it carries pyscf-properties (NMR,
+  # analytical Raman) and pyscf-dispersion (PBE-D3), which this image used to
+  # miss. PySCF itself is already satisfied by the conda package above, so pip
+  # leaves it alone. Naming the extra keeps this list from going stale
+  # (ISSUE.18).
+  pip install --no-cache-dir -e ".[pyscf]"
 
   echo "Verifying installation..."
   python -c "import quantui; print('QuantUI OK')"
   python -c "import pyscf; print('PySCF OK')"
+  python -c "import pyscf.prop.nmr; print('pyscf-properties OK')"
+  python -c "import pyscf.dispersion; print('pyscf-dispersion OK')"
   python -c "import rdkit; print('RDKit OK')"
   python -c "import py3Dmol; print('py3Dmol OK')"
   # Offline 3D: the vendored 3Dmol.js must be bundled and make_view must emit a
