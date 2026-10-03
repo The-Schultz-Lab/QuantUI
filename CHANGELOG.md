@@ -60,6 +60,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - **`quantui submit --depends-on`** accepts a request id or a SLURM job id
   and resolves it; it used to write the request id into
   `--dependency=afterok:` and validate nothing.
+- **"Geometry optimization before the calculation" on SLURM** — Single
+  Point and NMR batch jobs ignored the checkbox (the local run honoured it).
+- **Mode-displaced Frequency seeds are re-optimized** — picking "displace
+  along mode" as the Frequency seed disabled the pre-optimization, so the
+  frequencies were computed at a geometry that is not a stationary point.
+  The checkbox is now ticked for that seed (left on, user can untick).
 - **CPU image: NMR and analytical Raman** — the image installed QuantUI
   without the `[pyscf]` extra, so `pyscf-properties` was missing. It now
   installs the extra, and the build fails if `pyscf.prop.nmr` or
