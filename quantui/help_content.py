@@ -477,6 +477,32 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "this rather than showing a number.</p>"
         ),
     },
+    "surfaces": {
+        "title": "Orbital, density and ESP surfaces",
+        "body": (
+            "<p>The <b>Isosurface</b> panel draws four kinds of surface from a "
+            "Single Point or Geometry Optimization result (no new calculation):</p>"
+            "<ul>"
+            "<li><b>Molecular orbital</b> — the two phases of one orbital. "
+            "Unrestricted (UHF/UKS) results have separate <b>α</b> and <b>β</b> "
+            "orbitals; pick the spin above the orbital buttons.</li>"
+            "<li><b>Electron density</b> ρ(r). At the default isovalue of "
+            "0.002 e/bohr³ the surface is roughly the molecule's van der Waals "
+            "envelope; the readout says what share of the electrons it encloses.</li>"
+            "<li><b>Spin density</b> ρ<sub>α</sub> − ρ<sub>β</sub> for radicals: "
+            "where the unpaired electron lives. Zero for closed-shell molecules.</li>"
+            "<li><b>ESP map</b> — the electrostatic potential painted on the "
+            "density surface. <span style='color:#c00'>Red</span> is negative "
+            "(electron-rich: lone pairs, π clouds, anions — where an electrophile "
+            "or H-bond donor is attracted); <span style='color:#00c'>blue</span> "
+            "is positive (electron-poor: acidic H, cations). The colour range "
+            "(± a.u.) is set from this molecule; use the same range to compare "
+            "two molecules fairly.</li>"
+            "</ul>"
+            "<p>Post-HF results (MP2/CCSD) use the Hartree–Fock reference "
+            "orbitals, so their densities are HF densities.</p>"
+        ),
+    },
     "symmetry": {
         "title": "Point groups and orbital symmetry labels",
         "body": (

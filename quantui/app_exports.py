@@ -878,7 +878,16 @@ def on_iso_export_cube(app: Any, btn: Any) -> None:
             '<span style="color:#b22">Cube export failed (see log).</span>'
         )
         return
-    app._iso_export_status.value = f'<span style="color:#2a7">Saved: {dest.name}</span>'
+    saved = [dest.name]
+    # An ESP map is two cubes: the density surface and the potential.
+    esp = getattr(app, "_last_esp_cube_path", None)
+    if isinstance(esp, Path) and esp.exists():
+        esp_dest = export_cube(esp, result_dir, orbital_label=f"{label}_potential")
+        if esp_dest is not None:
+            saved.append(esp_dest.name)
+    app._iso_export_status.value = (
+        f'<span style="color:#2a7">Saved: {", ".join(saved)}</span>'
+    )
 
 
 def on_export_bundle(app: Any, btn: Any) -> None:

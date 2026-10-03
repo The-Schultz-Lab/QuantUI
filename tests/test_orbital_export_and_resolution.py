@@ -741,7 +741,10 @@ class TestSurfaceFinish:
         # calls (see _ISO_VIEWER_JS) — a fix that only touched one would
         # render half the orbital solid and half wireframe.
         html = render_orbital_isosurface_py3dmol(cube_file, wireframe=True)
-        assert html.count("wireframe: state.wf") == 2
+        # The viewer JS serves every surface kind (orbital: 2 lobes; density
+        # and ESP: 1 each, M-SURFACES); every surface call carries the flag.
+        assert html.count("wireframe: state.wf") == html.count("vw.addVolumetricData(")
+        assert 'var MODE="orbital"' in html
 
     def test_wireframe_is_a_live_update_option_not_a_rebuild_only_one(self):
         # Same shape as isovalue/opacity: changeable via

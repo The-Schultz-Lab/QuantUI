@@ -461,6 +461,9 @@ from quantui.app_visualization import (
     on_iso_generate as _viz_on_iso_generate,
 )
 from quantui.app_visualization import (
+    on_iso_surface_changed as _viz_on_iso_surface_changed,
+)
+from quantui.app_visualization import (
     on_nmr_nucleus_changed as _viz_on_nmr_nucleus_changed,
 )
 from quantui.app_visualization import (
@@ -1571,6 +1574,10 @@ class QuantUIApp:
         _iso_colors_dd: Any
         _iso_export_cube_btn: Any
         _iso_isovalue_slider: Any
+        _iso_surface_dd: Any
+        _iso_esp_range_slider: Any
+        _iso_esp_legend: Any
+        _orb_spin_toggle: Any
         _iso_opacity_slider: Any
         _iso_wireframe_cb: Any
         _iso_resolution_dd: Any
@@ -2911,10 +2918,15 @@ class QuantUIApp:
             self._iso_opacity_slider,
             self._iso_wireframe_cb,
             self._iso_colors_dd,
+            self._iso_esp_range_slider,
             # NOT _iso_png_transparent: it is an export-only option, applied at
             # capture time. Observing it here would change the live viewer.
         ):
             _w.observe(self._safe_cb(self._on_iso_appearance_changed), names="value")
+        # M-SURFACES: surface type switches which controls apply.
+        self._iso_surface_dd.observe(
+            self._safe_cb(self._on_iso_surface_changed), names="value"
+        )
         self._export_bundle_btn.on_click(self._on_export_bundle)
 
     # ── Files tab ────────────────────────────────────────────────────────
@@ -4561,6 +4573,9 @@ class QuantUIApp:
 
     def _on_iso_appearance_changed(self, change) -> None:
         _viz_on_iso_appearance_changed(self, change)
+
+    def _on_iso_surface_changed(self, change) -> None:
+        _viz_on_iso_surface_changed(self, change)
 
     def _on_orb_png_captured(self, change) -> None:
         _exp_on_orb_png_captured(self, change)

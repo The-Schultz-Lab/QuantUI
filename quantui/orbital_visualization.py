@@ -674,6 +674,7 @@ def _write_cube_provenance(
     charge: int,
     spin: int,
     method: str = "",
+    quantity: str = "orbital",
 ) -> None:
     """Overwrite a freshly written cube file's two free-text comment lines
     with QuantUI provenance (M-EXPORT2 EXP2.4 / M-ORBEXPORT ORBX.4).
@@ -689,9 +690,9 @@ def _write_cube_provenance(
     once the file has been handed to Avogadro / VMD / Multiwfn or emailed on.
     """
     line1 = (
-        f"QuantUI orbital cube — {method}/{basis}"
+        f"QuantUI {quantity} cube — {method}/{basis}"
         if method
-        else f"QuantUI orbital cube — basis {basis}"
+        else f"QuantUI {quantity} cube — basis {basis}"
     )
     label = _resolution_label(nx, ny, nz)
     line2 = f"grid {nx}x{ny}x{nz} ({label}); charge={charge} spin={spin}"
@@ -923,6 +924,155 @@ def generate_cube_from_arrays(
     return output_path
 
 
+# Surfaces other than single orbitals (M-SURFACES SURF.2/3). Default
+# isovalues in atomic units: 0.002 e/bohr^3 is the classic "molecular
+# surface" used for ESP maps (roughly the van der Waals envelope).
+SURFACE_KINDS = ("orbital", "density", "spin", "esp")
+DEFAULT_SURFACE_ISOVALUE = {
+    "orbital": 0.02,
+    "density": 0.002,
+    "spin": 0.002,
+    "esp": 0.002,
+}
+
+
+def density_matrices(mo_coeff: Any, mo_occ: Any) -> Tuple[np.ndarray, np.ndarray]:
+    """Alpha and beta AO density matrices from orbitals and occupations.
+
+    Handles restricted closed-shell (occupations 2/0), restricted open-shell
+    (2/1/0: singly occupied orbitals are alpha) and unrestricted results
+    (``(2, n_ao, n_mo)`` coefficients with ``(2, n_mo)`` occupations).
+    """
+    coeff = np.asarray(mo_coeff, dtype=float)
+    occ = np.asarray(mo_occ, dtype=float)
+    if coeff.ndim == 3:
+        if occ.ndim != 2:
+            raise ValueError("unrestricted orbitals need per-spin occupations")
+        dm_a = (coeff[0] * occ[0]) @ coeff[0].T
+        dm_b = (coeff[1] * occ[1]) @ coeff[1].T
+        return dm_a, dm_b
+    if occ.ndim != 1:
+        raise ValueError("restricted orbitals need one occupation per orbital")
+    occ_a = (occ > 0.5).astype(float)
+    occ_b = (occ > 1.5).astype(float)
+    return (coeff * occ_a) @ coeff.T, (coeff * occ_b) @ coeff.T
+
+
+def esp_surface_range(
+    density: np.ndarray, potential: np.ndarray, isovalue: float
+) -> Optional[float]:
+    """Symmetric colour range (a.u.) for an ESP map on the ρ = *isovalue* surface.
+
+    The 95th percentile of |V| over grid points whose density is close to
+    the isovalue, so one extreme point (near a nucleus poking through a
+    coarse grid) cannot wash the map out. ``None`` if no point qualifies.
+    """
+    rho = np.asarray(density, dtype=float).ravel()
+    pot = np.asarray(potential, dtype=float).ravel()
+    near = (rho > 0.7 * isovalue) & (rho < 1.4 * isovalue)
+    if not near.any():
+        return None
+    value = float(np.percentile(np.abs(pot[near]), 95))
+    return value if value > 0 else None
+
+
+def generate_surface_cubes(
+    kind: str,
+    mol_atom: list,
+    mol_basis: str,
+    mo_coeff: Any,
+    mo_occ: Any,
+    output_path: Path,
+    *,
+    esp_output_path: Optional[Path] = None,
+    nx: int = 60,
+    ny: int = 60,
+    nz: int = 60,
+    margin: float = 5.0,
+    charge: int = 0,
+    spin: int = 0,
+    method: str = "",
+) -> dict:
+    """Write the cube(s) for a density-type surface (M-SURFACES SURF.2/3).
+
+    *kind* is ``"density"`` (total electron density), ``"spin"`` (alpha minus
+    beta; positive = excess alpha) or ``"esp"`` (total density, plus the
+    molecular electrostatic potential on the same grid at
+    *esp_output_path*, to colour the density surface).
+
+    Returns ``{"cube": Path, "esp_cube": Path | None, "esp_range": float | None}``.
+    ``esp_range`` is a suggested symmetric colour range in a.u.
+
+    ECPs are attached for heavy-element bases: the potential's nuclear term
+    uses the ECP-reduced core charges, as the SCF did.
+    """
+    if kind not in ("density", "spin", "esp"):
+        raise ValueError(f"unknown surface kind {kind!r}")
+    try:
+        from pyscf import gto
+        from pyscf.tools import cubegen
+    except ImportError as exc:
+        raise ImportError(
+            "PySCF is required for cube file generation (Linux/WSL only).\n"
+            "  conda install -c conda-forge pyscf"
+        ) from exc
+    from quantui.inorganic_guards import ecp_for_basis
+
+    mol = gto.M(
+        atom=mol_atom,
+        basis=mol_basis,
+        ecp=ecp_for_basis(mol_basis, [str(a[0]) for a in mol_atom]),
+        unit="Angstrom",
+        charge=charge,
+        spin=spin,
+    )
+    dm_a, dm_b = density_matrices(mo_coeff, mo_occ)
+    dm = dm_a - dm_b if kind == "spin" else dm_a + dm_b
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    grid = dict(nx=nx, ny=ny, nz=nz, margin=margin)
+    rho = cubegen.density(mol, str(output_path), dm, **grid)
+    _write_cube_provenance(
+        output_path,
+        basis=mol_basis,
+        nx=nx,
+        ny=ny,
+        nz=nz,
+        charge=charge,
+        spin=spin,
+        method=method,
+        quantity="spin density" if kind == "spin" else "electron density",
+    )
+    result: dict = {"cube": output_path, "esp_cube": None, "esp_range": None}
+    if kind == "esp":
+        esp_path = (
+            Path(esp_output_path)
+            if esp_output_path is not None
+            else output_path.with_name(output_path.stem + "_esp.cube")
+        )
+        # Same Cube construction arguments, so the same grid: the viewer
+        # samples the potential at the density surface's vertices.
+        pot = cubegen.mep(mol, str(esp_path), dm, **grid)
+        _write_cube_provenance(
+            esp_path,
+            basis=mol_basis,
+            nx=nx,
+            ny=ny,
+            nz=nz,
+            charge=charge,
+            spin=spin,
+            method=method,
+            quantity="electrostatic potential",
+        )
+        result["esp_cube"] = esp_path
+        result["esp_range"] = esp_surface_range(
+            rho, pot, DEFAULT_SURFACE_ISOVALUE["esp"]
+        )
+    logger.info("Wrote %s cube: %s", kind, output_path)
+    return result
+
+
 def generate_pyfock_cube_from_arrays(
     mol_atom: list,
     mol_basis: str,
@@ -1116,6 +1266,25 @@ def parse_cube_file(cube_path: Path) -> dict:
     }
 
 
+def enclosed_electron_fraction(cube_path: Path, isovalue: float) -> Optional[float]:
+    """Fraction of the electrons inside the ρ >= *isovalue* surface.
+
+    The density counterpart of :func:`enclosed_density_fraction`: the cube
+    already holds ρ, so the enclosed share is a straight ratio of sums.
+    """
+    try:
+        cube = parse_cube_file(Path(cube_path))
+        rho = np.asarray(cube["data"], dtype=float)
+        total = float(rho[rho > 0].sum())
+        if total <= 0.0:
+            return None
+        inside = float(rho[rho >= float(isovalue)].sum())
+        return max(0.0, min(1.0, inside / total))
+    except Exception as exc:  # noqa: BLE001 — a readout must never break a render
+        logger.debug("enclosed_electron_fraction failed: %s", exc)
+        return None
+
+
 def enclosed_density_fraction(cube_path: Path, isovalue: float) -> Optional[float]:
     """Fraction of the orbital's probability density inside |psi| >= *isovalue*.
 
@@ -1239,7 +1408,12 @@ _ISO_VIEWER_JS = """
 (function(){
   var UID="__UID__", DATA=__DATA__, FMT=__FMT__;
   var WITH_SURFACES=__WITH_SURFACES__, SCENE=__SCENE__;
-  var state={iso:__ISO__, op:__OP__, pos:__POS__, neg:__NEG__, bg:__BG__, wf:__WF__};
+  // MODE: "orbital" / "spin" draw +iso and -iso lobes; "density" draws one
+  // surface; "esp" draws the density surface coloured by VOL (the potential
+  // on the same grid), red = negative to blue = positive over +-range.
+  var MODE=__MODE__, VOL=__VOL__, volObj=null;
+  var state={iso:__ISO__, op:__OP__, pos:__POS__, neg:__NEG__, bg:__BG__, wf:__WF__,
+             range:__RANGE__};
   function v(){ return window["viewer_"+UID]; }
 
   // ⚠️ Isosurfaces are SHAPES, not surfaces. viewer.addVolumetricData() routes
@@ -1259,6 +1433,21 @@ _ISO_VIEWER_JS = """
       try{ vw.removeShape(shapes[i]); }catch(e){}
     }
     shapes=[];
+    if(MODE==="esp"){
+      // Parse the potential once; adjustVolumeStyle keeps a VolumeData as is.
+      if(!volObj){ volObj=new $3Dmol.VolumeData(VOL,"cube"); }
+      shapes.push(vw.addVolumetricData(DATA,"cube",
+        {isoval: state.iso, opacity: state.op, smoothness: 5, wireframe: state.wf,
+         voldata: volObj,
+         volscheme: {gradient: "rwb", min: -state.range, max: state.range}}));
+      return;
+    }
+    if(MODE==="density"){
+      shapes.push(vw.addVolumetricData(DATA,"cube",
+        {isoval: state.iso, color: state.pos, opacity: state.op, smoothness: 5,
+         wireframe: state.wf}));
+      return;
+    }
     // smoothness = Laplacian smoothing passes 3Dmol.js runs on the raw
     // marching-cubes mesh. Default (1) leaves visible triangle facets on the
     // lobes; the roughness is the mesh, not the grid, so more cubegen points
@@ -1315,6 +1504,7 @@ _ISO_VIEWER_JS = """
     // isosurface shape, so a toggle rebuilds it like every other appearance
     // change here.
     if(opts.wf!==undefined && opts.wf!==state.wf){ state.wf=opts.wf; geom=true; }
+    if(opts.range!==undefined && opts.range!==state.range){ state.range=opts.range; geom=true; }
     if(opts.bg!==undefined){ state.bg=opts.bg; vw.setBackgroundColor(state.bg); }
     if(geom){
       var cam=null;
@@ -1421,6 +1611,73 @@ def render_orbital_isosurface_py3dmol(
     )
 
 
+def render_surface_py3dmol(
+    cube_path: Path,
+    *,
+    mode: str,
+    esp_cube_path: Optional[Path] = None,
+    esp_range: float = 0.05,
+    isovalue: float = 0.002,
+    opacity: float = 0.85,
+    wireframe: bool = False,
+    width: int = 760,
+    height: int = 620,
+    color_scheme: str = DEFAULT_ORBITAL_COLORS,
+    bgcolor: str = "white",
+    style: str = "stick",
+    capture_class: str = "",
+) -> str:
+    """Density-type surface viewer (M-SURFACES): same viewer and live
+    controls as :func:`render_orbital_isosurface_py3dmol`.
+
+    *mode* ``"density"`` draws one surface; ``"spin"`` draws positive
+    (excess alpha) and negative (excess beta) lobes in the scheme's two
+    colours; ``"esp"`` colours the density surface by the potential in
+    *esp_cube_path*, red (negative, electron-rich) through white to blue
+    (positive, electron-poor) over ±*esp_range* a.u.
+    """
+    cube_text = Path(cube_path).read_text()
+    vol_text = (
+        Path(esp_cube_path).read_text()
+        if mode == "esp" and esp_cube_path is not None
+        else None
+    )
+    return _build_iso_viewer(
+        cube_text,
+        data_format="cube",
+        scene_key=_scene_key(cube_text),
+        with_surfaces=True,
+        isovalue=isovalue,
+        opacity=opacity,
+        wireframe=wireframe,
+        width=width,
+        height=height,
+        color_scheme=color_scheme,
+        bgcolor=bgcolor,
+        style=style,
+        capture_class=capture_class,
+        mode="orbital" if mode == "spin" else mode,
+        voldata_text=vol_text,
+        vol_range=esp_range,
+    )
+
+
+def esp_legend_html(esp_range: float) -> str:
+    """Colour bar for an ESP map: red (−range) → white → blue (+range)."""
+    kcal = esp_range * 627.5095
+    return (
+        '<div style="display:flex;align-items:center;gap:8px;font-size:12px;'
+        'margin:4px 0">'
+        f"<span>−{esp_range:.3f} a.u.<br><small>(−{kcal:.0f} kcal/mol)</small></span>"
+        '<span style="display:inline-block;width:220px;height:14px;'
+        "border:1px solid #999;border-radius:3px;"
+        'background:linear-gradient(to right,#ff0000,#ffffff,#0000ff)"></span>'
+        f"<span>+{esp_range:.3f} a.u.<br><small>(+{kcal:.0f} kcal/mol)</small></span>"
+        '<span style="color:#666">red: electron-rich (attracts a + charge) · '
+        "blue: electron-poor</span></div>"
+    )
+
+
 def _scene_key(cube_text: str) -> str:
     """Identity of the molecule in a cube, used to decide whether a saved
     camera still applies. The atom block only — a different orbital of the same
@@ -1495,6 +1752,9 @@ def _build_iso_viewer(
     bgcolor: str = "white",
     style: str = "stick",
     capture_class: str = "",
+    mode: str = "orbital",
+    voldata_text: Optional[str] = None,
+    vol_range: float = 0.05,
 ) -> str:
     import json
 
@@ -1524,6 +1784,9 @@ def _build_iso_viewer(
         .replace("__NEG__", json.dumps(neg_color))
         .replace("__BG__", json.dumps(bgcolor))
         .replace("__STYLE__", style)
+        .replace("__MODE__", json.dumps(mode))
+        .replace("__VOL__", json.dumps(voldata_text))
+        .replace("__RANGE__", repr(float(vol_range)))
     )
     busy = (
         f'<div id="orb_busy_{uid}" style="display:none;position:absolute;'
