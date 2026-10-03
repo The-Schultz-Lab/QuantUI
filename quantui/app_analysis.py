@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html as _html_mod
 import types as _types_mod
+from pathlib import Path
 from typing import Any, Optional
 
 import ipywidgets as widgets
@@ -659,8 +660,31 @@ def pop_vibrational(app: Any, ctx: Any) -> bool:
             frequencies_cm1=freqs,
             ir_intensities=ints,
             displacements=disps,
+            raman_activities=ir.get("raman_activities") or [],
         )
-    return bool(app._show_vib_animation(freq_stub, mol))
+    shown = bool(app._show_vib_animation(freq_stub, mol))
+    if shown:
+        _show_thermochemistry(app, ctx, freq_stub, mol)
+    return shown
+
+
+def _show_thermochemistry(app: Any, ctx: Any, freq_stub: Any, mol: Any) -> None:
+    """Thermochemistry box: needs the SCF energy, live or from result.json."""
+    from quantui.app_visualization import show_thermo_box
+
+    energy = getattr(ctx.live_result, "energy_hartree", None)
+    if energy is None and ctx.result_dir is not None:
+        try:
+            import json as _json
+
+            data = _json.loads((Path(ctx.result_dir) / "result.json").read_text())
+            energy = data.get("energy_hartree")
+        except Exception:  # noqa: BLE001 — the box just stays hidden
+            energy = None
+    try:
+        show_thermo_box(app, mol, energy, getattr(freq_stub, "frequencies_cm1", None))
+    except Exception:  # noqa: BLE001 — informational panel
+        pass
 
 
 def pop_ir_spectrum(app: Any, ctx: Any) -> bool:

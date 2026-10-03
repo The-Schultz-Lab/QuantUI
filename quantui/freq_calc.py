@@ -31,6 +31,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import IO, Any, List, Optional, cast
 
 from .molecule import Molecule
@@ -52,10 +53,12 @@ _HARTREE_TO_JMOL: float = 2625499.6  # J/mol per Hartree (NIST 2018 CODATA)
 
 @dataclass
 class ThermoData:
-    """Thermochemical data from the harmonic approximation at 298.15 K / 1 atm.
+    """Thermochemistry: ideal gas, rigid rotor, harmonic oscillator.
 
-    All energies are in Hartrees; entropy is in J/(mol·K).
-    H and G include the SCF electronic energy.
+    All energies are in Hartrees; entropy and heat capacities in J/(mol·K).
+    U (``E_thermal_hartree``), H and G include the SCF electronic energy.
+    Defaults to 298.15 K / 1 atm; :func:`compute_thermochemistry` recomputes
+    at any temperature and pressure from stored frequencies.
     """
 
     zpve_hartree: float
@@ -63,6 +66,136 @@ class ThermoData:
     S_jmol: float
     G_hartree: float
     temperature_k: float = 298.15
+    pressure_atm: float = 1.0
+    E_thermal_hartree: Optional[float] = None
+    Cv_jmolk: Optional[float] = None
+    Cp_jmolk: Optional[float] = None
+    # Rotational symmetry number used for S_rot (2 for water, 3 for NH3).
+    symmetry_number: Optional[int] = None
+
+
+def _cm1_to_thermo_au(frequencies_cm1: Any) -> Any:
+    """Wavenumbers → the frequency unit ``pyscf.hessian.thermo`` expects.
+
+    PySCF's ``harmonic_analysis`` ``freq_au`` is an angular frequency in
+    sqrt(Eh / (amu bohr^2)), which ``thermo`` turns into Hz with
+    ``au2hz``. It is NOT an energy in Hartree: multiplying cm^-1 by the
+    cm^-1→Hartree factor is off by orders of magnitude.
+    """
+    import numpy as np
+    from pyscf.data import nist
+
+    au2hz = (nist.HARTREE2J / (nist.ATOMIC_MASS * nist.BOHR_SI**2)) ** 0.5 / (2 * np.pi)
+    c_cm_per_s = nist.LIGHT_SPEED_SI * 100.0
+    return np.asarray(frequencies_cm1, dtype=float) * c_cm_per_s / au2hz
+
+
+def _thermo_value(v: Any) -> float:
+    """PySCF 2.x returns (value, unit) tuples; older versions plain floats."""
+    if isinstance(v, (tuple, list)):
+        return float(v[0])
+    if hasattr(v, "item"):
+        return float(v.item())
+    return float(v)
+
+
+def _run_thermo(
+    pyscf_thermo: Any,
+    model: Any,
+    freq_au: Any,
+    temperature_k: float,
+    pressure_atm: float,
+    *,
+    fallback_zpve: float = 0.0,
+) -> ThermoData:
+    """PySCF ``hessian.thermo.thermo`` → :class:`ThermoData`.
+
+    The rotational symmetry number comes from PySCF's own point-group
+    detection, run here at QuantUI's 0.01 Å tolerance: at PySCF's strict
+    default an optimized water or NH3 gets sigma = 1 instead of 2 or 3,
+    overstating the rotational entropy by R ln sigma.
+    """
+    from .symmetry import detection_tolerance
+
+    pressure_pa = float(pressure_atm) * 101325.0
+    with detection_tolerance():
+        try:
+            tout = pyscf_thermo.thermo(model, freq_au, temperature_k, pressure_pa)
+        except TypeError:  # very old PySCF: no pressure argument
+            tout = pyscf_thermo.thermo(model, freq_au, temperature_k)
+
+    def _first(*keys: str) -> Any:
+        for k in keys:
+            if tout.get(k) is not None:
+                return tout[k]
+        return None
+
+    # PySCF 2.x (>=2.6) uses "H_tot"/"S_tot"; earlier versions used "H"/"S".
+    h_raw = _first("H_tot", "H", "Htot", "H_0K")
+    s_raw = _first("S_tot", "S", "Stot")
+    z_raw = _first("ZPE", "zpve", "ZPE_vib")
+    if h_raw is None or s_raw is None:
+        raise KeyError(f"Missing H or S in thermo dict (keys: {sorted(tout.keys())})")
+    h = _thermo_value(h_raw)
+    # PySCF's thermo() returns S_tot (and Cv/Cp) in Eh/K, not J/(mol·K).
+    # Convert for storage/display; G = H - T*S uses the Eh/K value
+    # (AUDIT F01).
+    s_eh = _thermo_value(s_raw)
+
+    def _jmolk(*keys: str) -> Optional[float]:
+        raw = _first(*keys)
+        return None if raw is None else _thermo_value(raw) * _HARTREE_TO_JMOL
+
+    u_raw = _first("E_tot")
+    sigma_raw = _first("sym_number")
+    return ThermoData(
+        zpve_hartree=_thermo_value(z_raw) if z_raw is not None else fallback_zpve,
+        H_hartree=h,
+        S_jmol=s_eh * _HARTREE_TO_JMOL,
+        G_hartree=h - float(temperature_k) * s_eh,
+        temperature_k=float(temperature_k),
+        pressure_atm=float(pressure_atm),
+        E_thermal_hartree=_thermo_value(u_raw) if u_raw is not None else None,
+        Cv_jmolk=_jmolk("Cv_tot"),
+        Cp_jmolk=_jmolk("Cp_tot"),
+        symmetry_number=(
+            int(round(_thermo_value(sigma_raw))) if sigma_raw is not None else None
+        ),
+    )
+
+
+def compute_thermochemistry(
+    atoms: List[str],
+    coordinates: List[List[float]],
+    *,
+    energy_hartree: float,
+    frequencies_cm1: List[float],
+    charge: int = 0,
+    multiplicity: int = 1,
+    temperature_k: float = 298.15,
+    pressure_atm: float = 1.0,
+) -> ThermoData:
+    """Thermochemistry at any temperature and pressure from stored results.
+
+    Needs only the geometry (Å), the SCF energy and the harmonic
+    frequencies — no new SCF or Hessian — so the UI can recompute it as the
+    user changes T or P. Imaginary modes (negative entries) are left out of
+    the vibrational partition function, as in the original calculation.
+    """
+    from pyscf import gto
+    from pyscf.hessian import thermo as pyscf_thermo
+
+    if temperature_k <= 0 or pressure_atm <= 0:
+        raise ValueError("temperature and pressure must be positive")
+    atom_spec = [(a, list(map(float, c))) for a, c in zip(atoms, coordinates)]
+    spin = int(multiplicity) - 1
+    try:
+        mol = gto.M(atom=atom_spec, basis="sto-3g", charge=charge, spin=spin, verbose=0)
+    except Exception:  # noqa: BLE001 — elements beyond STO-3G: no basis needed
+        mol = gto.M(atom=atom_spec, basis={}, charge=charge, spin=spin, verbose=0)
+    freq_au = _cm1_to_thermo_au(frequencies_cm1)
+    model = SimpleNamespace(mol=mol, e_tot=float(energy_hartree))
+    return _run_thermo(pyscf_thermo, model, freq_au, temperature_k, pressure_atm)
 
 
 @dataclass
@@ -1019,7 +1152,7 @@ def _run_freq_calc_body(
 
             _freq_au = freq_info.get("freq_au")
             if _freq_au is None:
-                _freq_au = _np.array(frequencies_cm1) * _CM1_TO_HARTREE
+                _freq_au = _cm1_to_thermo_au(frequencies_cm1)
             else:
                 # PySCF may return complex freq_au for imaginary modes; take real parts.
                 _freq_au = _np.array(
@@ -1027,56 +1160,8 @@ def _run_freq_calc_body(
                     dtype=float,
                 )
 
-            # PySCF 2.x thermo() may or may not accept the pressure argument.
-            try:
-                _tout = pyscf_thermo.thermo(mf, _freq_au, 298.15, 101325)
-            except TypeError:
-                _tout = pyscf_thermo.thermo(mf, _freq_au, 298.15)
-
-            # PySCF 2.x returns (value, unit_string) tuples; earlier versions
-            # return plain floats.  _tv() extracts the numeric value either way.
-            def _tv(v):
-                if isinstance(v, (tuple, list)):
-                    return float(v[0])
-                if hasattr(v, "item"):
-                    return float(v.item())
-                return float(v)
-
-            # PySCF 2.x (>=2.6) uses "H_tot"/"S_tot"; earlier versions used "H"/"S".
-            _H_raw, _S_raw, _Z_raw = None, None, None
-            for _k in ("H_tot", "H", "Htot", "H_0K"):
-                if _tout.get(_k) is not None:
-                    _H_raw = _tout[_k]
-                    break
-            for _k in ("S_tot", "S", "Stot"):
-                if _tout.get(_k) is not None:
-                    _S_raw = _tout[_k]
-                    break
-            for _k in ("ZPE", "zpve", "ZPE_vib"):
-                if _tout.get(_k) is not None:
-                    _Z_raw = _tout[_k]
-                    break
-            if _H_raw is None or _S_raw is None:
-                raise KeyError(
-                    f"Missing H or S in thermo dict (keys: {sorted(_tout.keys())})"
-                )
-            _H = _tv(_H_raw)
-            # PySCF's thermo() returns S_tot in Eh/K, not J/(mol·K) — despite
-            # the misleading local variable name this used to carry. Convert
-            # to J/(mol·K) for storage/display, and use the Eh/K value
-            # (matching H_hartree's units) to compute G = H - T*S. The old
-            # code stored the raw Eh/K number as S_jmol, then divided by
-            # _HARTREE_TO_JMOL again when forming G — nearly canceling the
-            # entropy term's contribution to G (see AUDIT F01).
-            _S_hartree_per_k = _tv(_S_raw)
-            _S_jmol = _S_hartree_per_k * _HARTREE_TO_JMOL
-            _zpve = _tv(_Z_raw) if _Z_raw is not None else zpve_hartree
-            _G = _H - 298.15 * _S_hartree_per_k
-            thermo_data = ThermoData(
-                zpve_hartree=_zpve,
-                H_hartree=_H,
-                S_jmol=_S_jmol,
-                G_hartree=_G,
+            thermo_data = _run_thermo(
+                pyscf_thermo, mf, _freq_au, 298.15, 1.0, fallback_zpve=zpve_hartree
             )
             _status("Frequency backend complete.")
         except Exception as _exc:

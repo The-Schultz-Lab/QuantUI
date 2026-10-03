@@ -380,7 +380,8 @@ def format_freq_result(r: Any) -> str:
         _thermo_rows = (
             f'<tr><td colspan="2" style="padding:6px 0 2px 0;color:{_theme.css.TEXT_MUTED};'
             f'font-size:12px;font-style:italic">'
-            f"&#8212; Thermochemistry at {_thermo.temperature_k:.0f} K / 1 atm &#8212;"
+            f"&#8212; Thermochemistry at {_thermo.temperature_k:.0f} K / "
+            f"{getattr(_thermo, 'pressure_atm', 1.0):g} atm &#8212;"
             f"</td></tr>"
             f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">H (298 K)</td>'
             f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo.H_hartree:.6f} Ha</td></tr>'

@@ -476,6 +476,9 @@ from quantui.app_visualization import (
     on_raman_mode_changed as _viz_on_raman_mode_changed,
 )
 from quantui.app_visualization import (
+    on_thermo_inputs_changed as _viz_on_thermo_inputs_changed,
+)
+from quantui.app_visualization import (
     on_traj_expand as _viz_on_traj_expand,
 )
 from quantui.app_visualization import (
@@ -486,6 +489,12 @@ from quantui.app_visualization import (
 )
 from quantui.app_visualization import (
     on_uv_range_changed as _viz_on_uv_range_changed,
+)
+from quantui.app_visualization import (
+    on_vib_amplitude_changed as _viz_on_vib_amplitude_changed,
+)
+from quantui.app_visualization import (
+    on_vib_arrows_changed as _viz_on_vib_arrows_changed,
 )
 from quantui.app_visualization import (
     on_vib_mode_changed as _viz_on_vib_mode_changed,
@@ -1575,6 +1584,13 @@ class QuantUIApp:
         _iso_export_cube_btn: Any
         _iso_isovalue_slider: Any
         _iso_surface_dd: Any
+        _vib_amp_slider: Any
+        _vib_arrows_cb: Any
+        _vib_mode_table: Any
+        _thermo_T: Any
+        _thermo_P: Any
+        _thermo_html: Any
+        _thermo_box: Any
         _iso_esp_range_slider: Any
         _iso_esp_legend: Any
         _orb_spin_toggle: Any
@@ -2923,6 +2939,20 @@ class QuantUIApp:
             # capture time. Observing it here would change the live viewer.
         ):
             _w.observe(self._safe_cb(self._on_iso_appearance_changed), names="value")
+        # Vibration amplitude / arrows / thermochemistry T-P (live updates).
+        self._vib_amp_slider.observe(
+            self._safe_cb(lambda c: _viz_on_vib_amplitude_changed(self, c)),
+            names="value",
+        )
+        self._vib_arrows_cb.observe(
+            self._safe_cb(lambda c: _viz_on_vib_arrows_changed(self, c)),
+            names="value",
+        )
+        for _w in (self._thermo_T, self._thermo_P):
+            _w.observe(
+                self._safe_cb(lambda c: _viz_on_thermo_inputs_changed(self, c)),
+                names="value",
+            )
         # M-SURFACES: surface type switches which controls apply.
         self._iso_surface_dd.observe(
             self._safe_cb(self._on_iso_surface_changed), names="value"
@@ -6244,12 +6274,18 @@ class QuantUIApp:
                         "S_jmol": _thermo.S_jmol,
                         "G_hartree": _thermo.G_hartree,
                         "temperature_k": _thermo.temperature_k,
+                        "E_thermal_hartree": getattr(
+                            _thermo, "E_thermal_hartree", None
+                        ),
+                        "Cv_jmolk": getattr(_thermo, "Cv_jmolk", None),
+                        "Cp_jmolk": getattr(_thermo, "Cp_jmolk", None),
+                        "symmetry_number": getattr(_thermo, "symmetry_number", None),
                         # AUDIT F18 — the temperature was already tracked on
                         # ThermoData; pressure and the model itself were not,
                         # and neither survived a save. Both are fixed by the
                         # harmonic-oscillator/rigid-rotor/ideal-gas model at
                         # 1 atm used throughout freq_calc.py's thermo block.
-                        "pressure_atm": 1.0,
+                        "pressure_atm": getattr(_thermo, "pressure_atm", 1.0),
                         "approximation": "ideal_gas_rigid_rotor_harmonic_oscillator",
                     }
                     if _thermo is not None
