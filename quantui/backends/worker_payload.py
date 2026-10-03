@@ -96,6 +96,7 @@ def session_result_payload(result) -> Dict[str, Any]:
         "cc_converged": getattr(result, "cc_converged", None),
         "dispersion_applied": getattr(result, "dispersion_applied", None),
         "solvent": getattr(result, "solvent", None),
+        "spin_square": getattr(result, "spin_square", None),
         "gpu_used": bool(getattr(result, "gpu_used", False)),
         "gpu_name": getattr(result, "gpu_name", None),
         "density_fit": bool(getattr(result, "density_fit", False)),
@@ -279,6 +280,8 @@ def pes_scan_result_payload(result, *, trajectory_file: str) -> Dict[str, Any]:
 
 
 def reorg_result_payload(result) -> Dict[str, Any]:
+    from quantui.reorganization_energy import s2_fields
+
     neutral = molecule_to_dict(result.molecule)
     channels = []
     for ch in result.channels:
@@ -294,6 +297,7 @@ def reorg_result_payload(result) -> Dict[str, Any]:
             "lambda2_hartree": ch.lambda2_hartree,
             "lambda_hartree": ch.lambda_hartree,
             "converged": ch.converged,
+            **s2_fields(ch),
         }
         if ch.ion_molecule is not None:
             entry["ion_geometry"] = molecule_to_dict(ch.ion_molecule)

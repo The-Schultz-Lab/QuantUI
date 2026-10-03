@@ -76,6 +76,23 @@ def _result_card_table_open() -> str:
     )
 
 
+def _s2_html(s2: Any, multiplicity: Any) -> str:
+    """'0.7533 (ideal 0.7500)' plus a warning when spin-contaminated (ISSUE.12)."""
+    from quantui.reorganization_energy import ideal_s2, spin_contaminated
+
+    text = f"{float(s2):.4f}"
+    if not multiplicity:
+        return text
+    mult = int(multiplicity)
+    text += f" (ideal {ideal_s2(mult):.4f})"
+    if spin_contaminated(s2, mult):
+        text += (
+            f' <span style="color:{_theme.css.ACCENT_WARNING}">'
+            "⚠ spin contaminated: energies may be unreliable</span>"
+        )
+    return text
+
+
 def _result_extra_rows(get: Any) -> str:
     """Build the shared 'extra' result-card rows from an accessor.
 
@@ -117,6 +134,11 @@ def _result_extra_rows(get: Any) -> str:
     _solvent = get("solvent")
     if _solvent is not None:
         rows += _num("Solvent (PCM)", str(_solvent))
+
+    _s2 = get("spin_square")
+    if _s2 is not None:
+        _mult = get("multiplicity") or (get("geometry") or {}).get("multiplicity")
+        rows += _num("⟨S²⟩", _s2_html(_s2, _mult))
 
     _pg = _point_group_html(get)
     if _pg:
@@ -805,6 +827,15 @@ def reorg_channels_html(channels: list[dict]) -> str:
         # Geometry relaxation (REORG.4): what λ physically measures. Only
         # present once the ion geometry is saved, so older results simply omit
         # these rows rather than showing blanks.
+        # ⟨S²⟩ per open-shell point (ISSUE.12); absent on older saves.
+        from quantui.reorganization_energy import s2_points
+
+        _neutral_mult = (ch.get("neutral_geometry") or {}).get("multiplicity", 1)
+        for key, label, mult in s2_points(
+            ch.get("ion_multiplicity") or 1, _neutral_mult
+        ):
+            if ch.get(key) is not None:
+                rows.append((f"⟨S²⟩ {label}", _s2_html(ch[key], mult)))
         relax = ch.get("relaxation")
         if relax:
             rows.append(("Geometry RMSD", f"{relax['rmsd']:.4f} Å"))

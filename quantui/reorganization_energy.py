@@ -57,7 +57,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from typing import IO, Any, List, Optional
+from typing import IO, Any, List, Optional, Tuple
 
 from .molecule import Molecule
 from .optimizer import DEFAULT_FMAX, DEFAULT_OPT_STEPS, optimize_geometry
@@ -90,6 +90,10 @@ class ReorgChannelResult:
         lambda2_hartree: Neutral relaxation energy λ₂ (Ha).
         lambda_hartree: Total reorganization energy λ = λ₁ + λ₂ (Ha).
         converged: True if every SCF/opt feeding this channel converged.
+        s2_*: ⟨S²⟩ at the same four points as the ``e_*`` energies
+            (ISSUE.12); ``None`` for a closed-shell point. Compare with
+            :func:`ideal_s2` to spot a spin-contaminated SCF, which gives a
+            wrong energy and so a wrong λ.
     """
 
     kind: str
@@ -109,6 +113,12 @@ class ReorgChannelResult:
     # and without R_ion there is nothing to compare R_neutral against.
     # Optional so results loaded from a pre-REORG.2 save still construct.
     ion_molecule: Optional[Molecule] = None
+    # ISSUE.12 — ⟨S²⟩ per point, None when closed shell (or a pre-ISSUE.12
+    # save). Same naming as the e_* energies they belong to.
+    s2_neutral_at_neutral: Optional[float] = None
+    s2_ion_at_ion: Optional[float] = None
+    s2_ion_at_neutral: Optional[float] = None
+    s2_neutral_at_ion: Optional[float] = None
 
     @property
     def lambda_ev(self) -> float:
@@ -287,6 +297,7 @@ class ReorganizationEnergyResult:
                         "lambda_ev": ch.lambda_ev,
                         "lambda_kcal": ch.lambda_kcal,
                         "converged": ch.converged,
+                        **s2_fields(ch),
                     }
                     for ch in self.channels
                 ],
@@ -316,6 +327,16 @@ class ReorganizationEnergyResult:
                 f"     λ₁ (ion relax) = {ch.lambda1_hartree * HARTREE_TO_EV:.4f} eV,"
                 f"  λ₂ (neutral relax) = {ch.lambda2_hartree * HARTREE_TO_EV:.4f} eV"
             )
+            for key, label, mult in s2_points(
+                ch.ion_multiplicity, self.neutral_multiplicity
+            ):
+                s2 = getattr(ch, key, None)
+                if s2 is None:
+                    continue
+                flag = "  ⚠ spin contaminated" if spin_contaminated(s2, mult) else ""
+                lines.append(
+                    f"     ⟨S²⟩ {label} = {s2:.4f} (ideal {ideal_s2(mult):.4f}){flag}"
+                )
         lines.append("=" * 60)
         return "\n".join(lines)
 
@@ -323,6 +344,59 @@ class ReorganizationEnergyResult:
 # ============================================================================
 # Helpers
 # ============================================================================
+
+#: Keys of the ⟨S²⟩ fields on :class:`ReorgChannelResult` (ISSUE.12).
+S2_KEYS = (
+    "s2_neutral_at_neutral",
+    "s2_ion_at_ion",
+    "s2_ion_at_neutral",
+    "s2_neutral_at_ion",
+)
+
+#: Relative deviation of ⟨S²⟩ from S(S+1) treated as significant spin
+#: contamination. 10 % is the usual rule of thumb (doublet: above 0.825).
+#: Display only — the raw values are stored for consumers with their own cut.
+SPIN_CONTAMINATION_TOLERANCE = 0.10
+
+
+def ideal_s2(multiplicity: int) -> float:
+    """Exact ⟨S²⟩ = S(S+1) for a pure spin state of *multiplicity*."""
+    s = (int(multiplicity) - 1) / 2.0
+    return s * (s + 1.0)
+
+
+def spin_contaminated(s2: Optional[float], multiplicity: int) -> bool:
+    """True when ⟨S²⟩ is off S(S+1) by more than the tolerance.
+
+    Relative for S > 0; for a singlet (ideal 0) the same number is used as an
+    absolute limit, since any ⟨S²⟩ there means a broken-symmetry solution.
+    """
+    if s2 is None:
+        return False
+    ideal = ideal_s2(multiplicity)
+    limit = SPIN_CONTAMINATION_TOLERANCE * (ideal if ideal > 0 else 1.0)
+    return abs(float(s2) - ideal) > limit
+
+
+def s2_fields(ch: Any) -> dict:
+    """The four ⟨S²⟩ fields of a channel as a JSON-safe dict."""
+    out = {}
+    for key in S2_KEYS:
+        val = getattr(ch, key, None)
+        out[key] = None if val is None else float(val)
+    return out
+
+
+def s2_points(ion_multiplicity: int, neutral_multiplicity: int) -> list:
+    """(key, label, multiplicity) for each ⟨S²⟩ point of a channel."""
+    ion_mult = int(ion_multiplicity or 1)
+    neutral_multiplicity = int(neutral_multiplicity or 1)
+    return [
+        ("s2_neutral_at_neutral", "neutral @ R_neutral", neutral_multiplicity),
+        ("s2_ion_at_ion", "ion @ R_ion", ion_mult),
+        ("s2_ion_at_neutral", "ion @ R_neutral", ion_mult),
+        ("s2_neutral_at_ion", "neutral @ R_ion", neutral_multiplicity),
+    ]
 
 
 def _promote_method(method: str, multiplicity: int) -> str:
@@ -433,8 +507,10 @@ def run_reorganization_energy(
     base_mult = molecule.multiplicity
     neutral_method = _promote_method(method, base_mult)
 
-    def _single_point(mol: Molecule, mth: str, tag: str) -> float:
-        """Run a single point and return its energy, asserting convergence."""
+    def _single_point(
+        mol: Molecule, mth: str, tag: str
+    ) -> Tuple[float, Optional[float]]:
+        """Run a single point; return (energy, ⟨S²⟩ or None), asserting convergence."""
         _emit(stream, f"\n── Single point: {tag} ──────────────────────────\n")
         res = run_in_session(
             molecule=mol,
@@ -446,7 +522,17 @@ def run_reorganization_energy(
         )
         if not bool(getattr(res, "converged", False)):
             raise RuntimeError(f"Single point did not converge: {tag}")
-        return float(res.energy_hartree)
+        s2 = getattr(res, "spin_square", None)
+        if s2 is not None:
+            s2 = float(s2)
+            ideal = ideal_s2(mol.multiplicity)
+            warn = (
+                "  ⚠ spin contamination: this energy (and λ) may be unreliable"
+                if spin_contaminated(s2, mol.multiplicity)
+                else ""
+            )
+            _emit(stream, f"  ⟨S²⟩ = {s2:.4f} (ideal {ideal:.4f}){warn}\n")
+        return float(res.energy_hartree), s2
 
     def _leg_checkpoint(
         tag: str, *, charge: int, multiplicity: int, coords: Any
@@ -502,7 +588,7 @@ def run_reorganization_energy(
     all_converged = bool(neutral_opt.converged)
 
     # E_neutral(R_neutral) — shared "point 1" across both channels.
-    e_neutral_at_neutral = _single_point(
+    e_neutral_at_neutral, s2_neutral_at_neutral = _single_point(
         neutral_mol, neutral_method, "E_neutral(R_neutral)"
     )
 
@@ -555,8 +641,10 @@ def run_reorganization_energy(
         all_converged = all_converged and bool(ion_opt.converged)
 
         # The four energies (two already share R_neutral / R_ion optimizations).
-        e_ion_at_ion = _single_point(ion_mol, ion_method, f"E_{kind}(R_{kind})")
-        e_ion_at_neutral = _single_point(
+        e_ion_at_ion, s2_ion_at_ion = _single_point(
+            ion_mol, ion_method, f"E_{kind}(R_{kind})"
+        )
+        e_ion_at_neutral, s2_ion_at_neutral = _single_point(
             Molecule(
                 atoms=list(molecule.atoms),
                 coordinates=[list(c) for c in neutral_mol.coordinates],
@@ -566,7 +654,7 @@ def run_reorganization_energy(
             ion_method,
             f"E_{kind}(R_neutral)",
         )
-        e_neutral_at_ion = _single_point(
+        e_neutral_at_ion, s2_neutral_at_ion = _single_point(
             Molecule(
                 atoms=list(molecule.atoms),
                 coordinates=[list(c) for c in ion_mol.coordinates],
@@ -595,6 +683,10 @@ def run_reorganization_energy(
                 lambda_hartree=lambda_total,
                 converged=bool(ion_opt.converged),
                 ion_molecule=ion_mol,
+                s2_neutral_at_neutral=s2_neutral_at_neutral,
+                s2_ion_at_ion=s2_ion_at_ion,
+                s2_ion_at_neutral=s2_ion_at_neutral,
+                s2_neutral_at_ion=s2_neutral_at_ion,
             )
         )
         _emit(
