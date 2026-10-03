@@ -45,7 +45,7 @@ import logging
 import math
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any, List, Optional
 
@@ -373,6 +373,8 @@ class OptimizationResult:
     dispersion_applied: Optional[bool] = None
     # PCM solvent the optimization ran in (every step), or None for gas phase.
     solvent: Optional[str] = None
+    # 0-based indices held fixed (ASE FixAtoms); empty when none were.
+    frozen_atoms: List[int] = field(default_factory=list)
     # Final-geometry Mulliken / dipole — same fields SessionResult carries so
     # the Populations Analysis panel activates after a Geometry Opt too.
     atom_symbols: Optional[List[str]] = None
@@ -519,6 +521,7 @@ def optimize_geometry(
     ncores: int = 1,
     use_gpu: Optional[bool] = None,
     solvent: Optional[str] = None,
+    frozen_atoms: Optional[List[int]] = None,
 ) -> OptimizationResult:
     """
     Optimize a molecular geometry at the QM level using ASE-BFGS.
@@ -569,6 +572,9 @@ def optimize_geometry(
         solvent: PCM solvent name (``config.SOLVENT_OPTIONS``) applied to
             every step's SCF and gradient, or ``None`` for gas phase.
             PySCF engine only.
+        frozen_atoms: 0-based indices of atoms held fixed during the
+            optimization (ASE ``FixAtoms``), e.g. to optimize only part of a
+            structure. ``None``/empty optimizes every atom.
 
     Returns:
         :class:`OptimizationResult` containing the optimized molecule,
@@ -679,6 +685,26 @@ def optimize_geometry(
     start_molecule = _resume_from if _resume_from is not None else molecule
 
     atoms = molecule_to_atoms(start_molecule)
+    _frozen = sorted({int(i) for i in (frozen_atoms or [])})
+    if _frozen:
+        if _frozen[0] < 0 or _frozen[-1] >= len(atoms):
+            raise ValueError(
+                f"Frozen atom {_frozen[-1] + 1} does not exist "
+                f"(this structure has {len(atoms)} atoms)."
+            )
+        if len(_frozen) >= len(atoms):
+            raise ValueError("Every atom is frozen; there is nothing to optimize.")
+        from ase.constraints import FixAtoms
+
+        atoms.set_constraint(FixAtoms(indices=_frozen))
+        try:
+            _stream.write(
+                "\nFrozen atoms (held fixed): "
+                + ", ".join(str(i + 1) for i in _frozen)
+                + "\n"
+            )
+        except Exception:  # noqa: BLE001 — informational
+            pass
     if engine_id == "pyscf":
         atoms.calc = _QuantUIPySCFCalc(
             method=method,
@@ -1042,6 +1068,7 @@ def optimize_geometry(
         dipole_vector_debye=_opt_dipole_vec,
         dispersion_applied=getattr(atoms.calc, "dispersion_applied", None),
         solvent=getattr(atoms.calc, "solvent_applied", None),
+        frozen_atoms=_frozen,
         engine_id=engine_id,
     )
 

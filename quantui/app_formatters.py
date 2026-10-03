@@ -273,6 +273,7 @@ def format_opt_result(r: Any) -> str:
         + _result_card_table_open()
         + f"{_rows}"
         + _solvent_row(getattr(r, "solvent", None), "optimized in solvent")
+        + _frozen_row(getattr(r, "frozen_atoms", None))
         + _point_group_row(_opt_point_group_html(r))
         + "</table>"
         + _RESULT_CARD_CLOSE
@@ -300,6 +301,18 @@ def _point_group_html(get: Any) -> str:
         return pg.summary_html() if pg is not None else ""
     except Exception:  # noqa: BLE001 — informational row only
         return ""
+
+
+def _frozen_row(frozen: Any) -> str:
+    if not frozen:
+        return ""
+    nums = ", ".join(str(int(i) + 1) for i in frozen)
+    return (
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Frozen atoms</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{nums}'
+        f'<span style="color:{_theme.css.TEXT_MUTED}"> &mdash; held fixed '
+        "(constrained optimization)</span></td></tr>"
+    )
 
 
 def _opt_point_group_html(r: Any) -> str:

@@ -448,6 +448,24 @@ _SOLVENT_LABELS = {
 }
 
 
+def frozen_atom_indices(app: Any) -> list:
+    """0-based frozen-atom indices from the Freeze atoms field ([] if empty).
+
+    Raises ValueError with a readable message for a malformed list or an
+    atom number beyond the loaded molecule.
+    """
+    text = str(getattr(getattr(app, "frozen_atoms_txt", None), "value", "") or "")
+    if not text.strip():
+        return []
+    from quantui.structure_edit import parse_atom_list
+
+    mol = getattr(app, "_molecule", None)
+    try:
+        return parse_atom_list(text, len(mol.atoms) if mol is not None else None)
+    except ValueError as exc:
+        raise ValueError(f"Freeze atoms: {exc}") from exc
+
+
 def _update_solvent_control_for_calc_type(app: Any, ct: str) -> None:
     """Disable the solvent checkbox for calc types that would silently
     ignore it, so a checked box can never mean "no effect" (AUDIT F11)."""
@@ -517,6 +535,7 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
                 [app.fmax_fi, app.max_steps_si],
                 layout=layout_fn(gap="8px"),
             ),
+            app.frozen_atoms_txt,
             widgets.HBox(
                 [app._geo_seed_dd, app._geo_seed_refresh_btn],
                 layout=layout_fn(align_items="center", gap="6px", width="100%"),
@@ -2367,6 +2386,15 @@ def checkpoint_identity(app: Any) -> Any:
                 )
             except Exception:  # noqa: BLE001 — checkpointing is never load-bearing
                 extra = ()
+        # Frozen atoms change the optimization path, so a constrained run
+        # must not resume an unconstrained one (or another constraint set).
+        if _ct == "geometry_opt":
+            try:
+                _frozen = frozen_atom_indices(app)
+            except ValueError:
+                _frozen = []
+            if _frozen:
+                extra = extra + ("frozen=" + ",".join(map(str, _frozen)),)
         # A solvated run must never resume a gas-phase checkpoint (or the
         # reverse): optimization steps and IR displacements depend on it.
         try:

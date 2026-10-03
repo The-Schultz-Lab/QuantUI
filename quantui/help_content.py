@@ -477,6 +477,31 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "this rather than showing a number.</p>"
         ),
     },
+    "editing": {
+        "title": "Editing a structure",
+        "body": (
+            "<p>Open <b>Edit Structure</b> under the molecule viewer on the "
+            "Calculate tab. Atom numbers appear in the viewer; click atoms "
+            "(py3Dmol) or type their numbers.</p>"
+            "<ul>"
+            "<li><b>2 atoms</b> → set a bond length; <b>3</b> → an angle (at "
+            "the middle atom); <b>4</b> → a dihedral (about the middle bond). "
+            "The current value is filled in for you. The group attached to the "
+            "<i>last</i> picked atom moves rigidly; inside a ring only that "
+            "atom moves.</li>"
+            "<li><b>Delete</b>, <b>Add H</b> (one hydrogen, pointing away from "
+            "existing bonds) and <b>Change element</b> act on every picked atom.</li>"
+            "<li><b>Freeze for opt</b> adds the picks to Geometry Opt's "
+            "<i>Freeze atoms</i> list: those atoms stay put while the rest "
+            "optimizes (a constrained optimization).</li>"
+            "<li><b>Undo</b> steps back through your edits.</li>"
+            "</ul>"
+            "<p>Edits keep charge and multiplicity; adding or deleting atoms "
+            "usually changes them, so check Calculation Setup. An edited "
+            "structure is a starting guess: optimize it before trusting "
+            "energies.</p>"
+        ),
+    },
     "surfaces": {
         "title": "Orbital, density and ESP surfaces",
         "body": (

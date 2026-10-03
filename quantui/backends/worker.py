@@ -393,6 +393,8 @@ def _run_geometry_opt(
     fmax = float(options.get("fmax", 0.05))
     max_steps = int(options.get("max_steps", 200))
     scf_rescue = bool(options.get("scf_rescue", True))
+    # 0-based indices held fixed (INT.8); same option name as the app sends.
+    frozen = [int(i) for i in (options.get("frozen_atoms") or [])]
     _write_progress(staging_dir, "running", "Optimizing geometry", 15.0)
 
     # M-CLUSTER2 CL2.8 — a job killed by OOM/TIMEOUT can resume close to
@@ -427,6 +429,7 @@ def _run_geometry_opt(
         checkpoint=ckpt,
         resume=resumable,
         solvent=request.solvent,
+        frozen_atoms=frozen,
     )
 
     # Mirror app.py's interactive "Geometry Opt" + solvent handling: the

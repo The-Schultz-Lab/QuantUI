@@ -257,6 +257,9 @@ from quantui.app_runflow import (
     do_calibration as _run_do_calibration,
 )
 from quantui.app_runflow import (
+    frozen_atom_indices as _run_frozen_atoms,
+)
+from quantui.app_runflow import (
     on_accumulate as _run_on_accumulate,
 )
 from quantui.app_runflow import (
@@ -1458,6 +1461,15 @@ class QuantUIApp:
         _files_download_html: Any
         _download_html: Any
         structure_upload: Any
+        frozen_atoms_txt: Any
+        _edit_accordion: Any
+        _edit_atoms_txt: Any
+        _edit_value: Any
+        _edit_msg: Any
+        _edit_pick_inbox: Any
+        _edit_undo_stack: Any
+        _edit_element_txt: Any
+        _edit_current_html: Any
         upload_msg: Any
         _files_path_html: Any
         _files_preview_output: Any
@@ -2616,6 +2628,9 @@ class QuantUIApp:
         )
         self.lib_results_dd.observe(self._safe_cb(self._on_lib_select), names="value")
         self.xyz_btn.on_click(self._on_load_xyz)
+        from quantui.app_structure_edit import wire_edit_widgets
+
+        wire_edit_widgets(self)
         self.structure_upload.observe(
             self._safe_cb(lambda c: _xyz_on_structure_upload(self, c)), names="value"
         )
@@ -3734,7 +3749,13 @@ class QuantUIApp:
         if self._molecule is None or _render_molecule_html is None:
             return
         backend_to_use = backend if backend is not None else self._viz_backend
-        show_atom_indices = self.calc_type_dd.value == "PES Scan"
+        from quantui.app_structure_edit import (
+            editing_active,
+            finalize_edit_calc_html,
+        )
+
+        _editing = editing_active(self)
+        show_atom_indices = _editing or self.calc_type_dd.value == "PES Scan"
         html = _render_molecule_html(
             self._molecule,
             backend=backend_to_use,
@@ -3744,7 +3765,9 @@ class QuantUIApp:
             capture_class=_MOL_CALC_PNG_INBOX_CLASS,
             show_atom_indices=show_atom_indices,
         )
-        if show_atom_indices and str(backend_to_use) == "py3dmol":
+        if _editing:
+            html = finalize_edit_calc_html(self, html, backend_to_use)
+        elif show_atom_indices and str(backend_to_use) == "py3dmol":
             from quantui.app_pes_pick import finalize_pes_calc_html
 
             html = finalize_pes_calc_html(self, html, backend_to_use)
@@ -6169,6 +6192,7 @@ class QuantUIApp:
                             "resume": _resume,
                             "scf_rescue": True,
                             "use_gpu": bool(self._user_settings.compute.gpu_enabled),
+                            "frozen_atoms": _run_frozen_atoms(self),
                         },
                         progress_stream=log,  # type: ignore[arg-type]
                         checkpoint=_ckpt,

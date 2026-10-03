@@ -1233,6 +1233,19 @@ def build_shared_widgets(
         style={"description_width": "100px"},
         layout=layout_fn(width="200px"),
     )
+    # Atoms held fixed during a Geometry Opt (INT.8): 1-based, ranges ok.
+    app.frozen_atoms_txt = widgets.Text(
+        value="",
+        placeholder="e.g. 1, 2, 5-7",
+        description="Freeze atoms:",
+        tooltip=(
+            "Atom numbers kept fixed while the rest of the structure is "
+            "optimized (constrained optimization). Leave empty to optimize "
+            "every atom. The Edit Structure panel can fill this from picks."
+        ),
+        style={"description_width": "100px"},
+        layout=layout_fn(width="330px"),
+    )
     app.nstates_si = widgets.BoundedIntText(
         value=10,
         min=1,
@@ -2003,6 +2016,12 @@ def build_molecule_section(
         mol_container_children.append(app.viz_backend_toggle)
     if visualization_available:
         mol_container_children.append(app.viz_controls_box)
+    # Edit Structure (M-INTERACT INT.8): works on typed atom numbers even
+    # without a viewer; clicking atoms needs py3Dmol.
+    from quantui.app_structure_edit import build_edit_widgets
+
+    build_edit_widgets(app, layout_fn=layout_fn)
+    mol_container_children.append(app._edit_accordion)
     app.mol_input_container = widgets.VBox(
         mol_container_children,
         layout=layout_fn(margin="0 0 4px 0"),
