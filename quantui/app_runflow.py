@@ -580,8 +580,16 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
             ),
         ]
     elif ct == "Reorganization Energy":
+        # The neutral and ion legs are real geometry optimizations and the run
+        # uses these two fields, so they are shown here too (ISSUE.19 #4: they
+        # were read while hidden, carrying over whatever was last set on
+        # Geometry Opt / PES Scan).
         app.calc_extra_opts.children = [
             app._reorg_mode_dd,
+            widgets.HBox(
+                [app.fmax_fi, app.max_steps_si],
+                layout=layout_fn(gap="8px"),
+            ),
             app._reorg_note,
         ]
     elif ct == "PES Scan":

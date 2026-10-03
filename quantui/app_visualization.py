@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import threading
 import time
@@ -851,24 +852,48 @@ def show_raman_spectrum(app: Any, freq_result: Any) -> bool:
         return False
 
     app._raman_activities_real = bool(acts)
-    if not acts:
-        acts = [1.0] * len(freqs)
-    app._raman_accordion.set_title(
-        0,
-        (
-            "Raman Spectrum"
-            if app._raman_activities_real
-            else "Raman Spectrum (positions only — activities unavailable)"
-        ),
-    )
-
     app._last_raman_freqs = freqs
     app._last_raman_acts = acts
+    if not acts:
+        # ISSUE.19 #5 — this used to plot every mode at the same height,
+        # which reads as a real spectrum in class. Say why there is none.
+        app._raman_accordion.set_title(0, "Raman Spectrum (not computed)")
+        app._raman_mode_toggle.layout.display = "none"
+        app._raman_fwhm_slider.layout.display = "none"
+        app._last_raman_fig = None
+        app._set_html_output(
+            app._raman_fig,
+            raman_unavailable_html(getattr(freq_result, "solvent", None)),
+        )
+        return True
 
+    app._raman_accordion.set_title(0, "Raman Spectrum")
+    app._raman_mode_toggle.layout.display = ""
     app._update_raman_figure("Stick", 20.0)
     app._queue_main_thread_callback(app._wire_raman_controls)
 
     return True
+
+
+def raman_unavailable_html(solvent: Any = None) -> str:
+    """Why a Frequency result has no Raman activities."""
+    if solvent:
+        why = (
+            f"This frequency calculation used implicit solvent ({html.escape(str(solvent))}), "
+            "and Raman activities are only computed in the gas phase."
+        )
+    else:
+        why = (
+            "Raman activities need the <code>pyscf-properties</code> package, "
+            "which was not available where this calculation ran (or the "
+            "polarizability step failed; see the log)."
+        )
+    return (
+        f'<div style="padding:10px;color:{_theme.css.TEXT_SECONDARY};font-size:13px">'
+        f"<b>No Raman spectrum for this result.</b> {why} The vibrational "
+        "frequencies are in the IR panel and the mode table; peak heights "
+        "there are IR intensities, not Raman activities.</div>"
+    )
 
 
 def wire_raman_controls(app: Any) -> None:
@@ -904,6 +929,8 @@ def on_raman_fwhm_changed(app: Any, change: dict[str, Any]) -> None:
 
 def update_raman_figure(app: Any, mode: str, fwhm: float) -> None:
     """Re-render Raman spectrum chart for mode and FWHM settings."""
+    if not getattr(app, "_last_raman_acts", None):
+        return  # no activities: the panel holds raman_unavailable_html
     try:
         import plotly.io as _pio
 

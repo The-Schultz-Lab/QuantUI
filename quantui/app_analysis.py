@@ -712,9 +712,18 @@ def pop_raman_spectrum(app: Any, ctx: Any) -> bool:
         freqs = ir.get("frequencies_cm1")
         if not freqs:
             return False
+        solvent = None
+        if ctx.result_dir is not None:
+            try:
+                from quantui import load_result
+
+                solvent = load_result(ctx.result_dir).get("solvent")
+            except Exception:  # noqa: BLE001 — only used for the explanation
+                solvent = None
         freq_stub = _types_mod.SimpleNamespace(
             frequencies_cm1=freqs,
             raman_activities=ir.get("raman_activities") or [],
+            solvent=solvent,
         )
     return bool(app._show_raman_spectrum(freq_stub))
 
