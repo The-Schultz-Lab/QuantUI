@@ -8,7 +8,7 @@ Invoked from a batch script::
 Supports all QuantUI Calculate-tab calc types (see ``CALC_TYPES``).
 
 Checkpoint/resume (M-CLUSTER2 CL2.8): ``geometry_opt`` and ``pes_scan`` (plus
-any ``preopt_before_run`` step ahead of frequency/tddft/pes_scan) open a
+any ``preopt_before_run`` step ahead of another calc type) open a
 :class:`~quantui.checkpoint.Checkpoint` scoped to their own staging directory
 (``<staging_dir>/.checkpoint/``, distinct from the interactive app's
 ``~/.quantui/checkpoints``) — see :func:`_begin_worker_checkpoint`. A job
@@ -150,7 +150,10 @@ def _maybe_run_preopt(
     stage_label: str,
     write_preopt_trajectory: bool,
 ):
-    """Optional DFT geometry optimization before frequency / TD-DFT (mirrors ``app._do_run``)."""
+    """Optional DFT geometry optimization before the calculation (mirrors ``app._do_run``).
+
+    Used by single point, NMR, frequency, TD-DFT and PES scan.
+    """
     options = request.options or {}
     if not options.get("preopt_before_run"):
         return molecule, None
@@ -369,6 +372,16 @@ def _run_single_point(
     from quantui.session_calc import run_in_session
 
     molecule = molecule_from_request(request)
+    # ISSUE.19 #3 — honour "geometry optimization before the calculation",
+    # as the local run does.
+    molecule, _pre_opt = _maybe_run_preopt(
+        request,
+        molecule,
+        staging_dir,
+        log_stream,
+        stage_label="single point",
+        write_preopt_trajectory=False,
+    )
     options = request.options or {}
     scf_rescue = bool(options.get("scf_rescue", True))
     _write_progress(staging_dir, "running", "Running single-point SCF", 20.0)
@@ -569,6 +582,14 @@ def _run_nmr(request: CalculationRequest, staging_dir: Path, log_stream) -> Any:
 
     _log_seed_context(request, staging_dir)
     molecule = molecule_from_request(request)
+    molecule, _pre_opt = _maybe_run_preopt(
+        request,
+        molecule,
+        staging_dir,
+        log_stream,
+        stage_label="NMR shielding",
+        write_preopt_trajectory=False,
+    )
     options = request.options or {}
     scf_rescue = bool(options.get("scf_rescue", True))
     _write_progress(staging_dir, "running", "Running NMR shielding (GIAO)", 15.0)

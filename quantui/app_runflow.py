@@ -519,11 +519,7 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
         # is empty, and switching either -> Single Point and back left the
         # checkbox permanently disabled with no way to clear it (pre-existing
         # bug, fixed here as a side effect of the consolidation).
-        if app._seed_dd.value:
-            app._freq_preopt_cb.value = False
-            app._freq_preopt_cb.disabled = True
-        else:
-            app._freq_preopt_cb.disabled = False
+        _gate_preopt_for_seed(app, app._seed_dd.value or "")
     else:
         app._freq_preopt_cb.layout.display = ""
         app._freq_preopt_cb.disabled = False
@@ -1311,6 +1307,29 @@ def refresh_seed_options(app: Any) -> None:
     _refresh_seed_options(app, app._seed_dd, include_freq_seeds=include_freq_seeds)
 
 
+def _gate_preopt_for_seed(app: Any, path_str: str) -> None:
+    """Frequency / UV-Vis: set the pre-opt checkbox from the selected seed.
+
+    - An optimized seed (a Geometry Opt result) is already at a minimum, so
+      re-optimizing first is redundant: untick and disable.
+    - A mode-displaced Frequency seed is deliberately *off* the minimum (the
+      point is to step away from a saddle point), and frequencies there mean
+      nothing until it is re-optimized: tick it and leave it enabled
+      (ISSUE.19 #8 — this path used to disable it).
+    - No seed: enable.
+    """
+    from quantui.freq_calc import is_freq_mode_seed
+
+    if path_str and is_freq_mode_seed(path_str):
+        app._freq_preopt_cb.disabled = False
+        app._freq_preopt_cb.value = True
+    elif path_str:
+        app._freq_preopt_cb.value = False
+        app._freq_preopt_cb.disabled = True
+    else:
+        app._freq_preopt_cb.disabled = False
+
+
 def on_seed_changed(app: Any, change: Any) -> None:
     """Update the seed note; gate the pre-opt checkbox where a seed makes it
     redundant.
@@ -1319,9 +1338,9 @@ def on_seed_changed(app: Any, change: Any) -> None:
     handlers — the dropdown is now one shared widget, so one
     handler suffices, made calc-type-aware where the three used to differ:
 
-    - **Frequency / UV-Vis (TD-DFT):** a selected seed is already an optimised
-      geometry, so re-optimising first would be redundant — disable
-      ``_freq_preopt_cb`` while one is selected.
+    - **Frequency / UV-Vis (TD-DFT):** see :func:`_gate_preopt_for_seed` —
+      an optimised seed disables ``_freq_preopt_cb``; a mode-displaced
+      Frequency seed ticks it, since that geometry must be re-optimised.
     - **Geometry Opt (and everything else):** leave that checkbox alone. For
       Geometry Opt specifically, "optimise before the calculation" is
       meaningless — the optimisation *is* the calculation — and for other
@@ -1334,11 +1353,7 @@ def on_seed_changed(app: Any, change: Any) -> None:
     ct = app.calc_type_dd.value
     path_str = change["new"]
     if ct in ("Frequency", "UV-Vis (TD-DFT)"):
-        if path_str:
-            app._freq_preopt_cb.value = False
-            app._freq_preopt_cb.disabled = True
-        else:
-            app._freq_preopt_cb.disabled = False
+        _gate_preopt_for_seed(app, path_str)
     if ct == "Frequency":
         _update_freq_perturb_seed_ui(app, path_str)
     if path_str:
@@ -1348,7 +1363,9 @@ def on_seed_changed(app: Any, change: Any) -> None:
             app._seed_note.value = (
                 f'<span style="font-size:12px;color:{_theme.css.ACCENT_SUCCESS}">'
                 "✓ The run will start from the selected Frequency geometry "
-                "displaced along the chosen normal mode."
+                "displaced along the chosen normal mode. The displaced "
+                "geometry is not a minimum, so it is re-optimized first "
+                "(geometry optimization before the calculation is on)."
                 "</span>"
             )
         else:
