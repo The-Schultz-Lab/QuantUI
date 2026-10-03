@@ -124,6 +124,9 @@ pyscf = [
     # installers too, not just for our dependency bot.
     "pyscf>=2.13.0,<3",
     "pyscf-properties",
+    # Grimme D3/D4 for PBE-D3 via PySCF's built-in mf.disp (energies,
+    # gradients and Hessians). Without it PBE-D3 runs as plain PBE.
+    "pyscf-dispersion>=1.0",
 ]
 
 # Native-Windows-capable pure-Python DFT backend (M-PYFOCK). PyFock 0.1.7

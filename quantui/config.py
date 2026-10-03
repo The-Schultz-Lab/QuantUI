@@ -669,8 +669,8 @@ def main():
         # needed. Matches quantui/session_calc.py resolve_xc + maybe_apply_d3.
         # wB97X-D maps to its full LibXC name (the actual Chai/Head-Gordon
         # 2008 functional, built-in dispersion) because PySCF's short-alias
-        # parser black-lists 'wb97x-d'/'wb97x_d' as ambiguous; PBE-D3 needs
-        # Grimme D3 applied externally via pyscf.dftd3.
+        # parser black-lists 'wb97x-d'/'wb97x_d' as ambiguous; PBE-D3 adds
+        # zero-damping Grimme D3 through mf.disp (needs pyscf-dispersion).
         _XC_ALIAS = {{
             'M06-L': 'm06l',
             'wB97X-D': 'hyb_gga_xc_wb97x_d',
@@ -698,11 +698,11 @@ def main():
             mf.xc = _XC_ALIAS.get(method, method)
             if method in _NEEDS_D3:
                 try:
-                    from pyscf import dftd3 as _dftd3
-                    mf = _dftd3.dftd3(mf)
+                    import pyscf.dispersion  # noqa: F401
+                    mf.disp = 'd3zero'
                 except ImportError:
                     print(
-                        "WARNING: pyscf.dftd3 not available; "
+                        "WARNING: pyscf-dispersion not installed; "
                         "running {{method}} without D3 dispersion."
                     )
 

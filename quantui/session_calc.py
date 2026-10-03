@@ -160,8 +160,9 @@ class SessionResult:
             lines.append(f"  HOMO-LUMO gap : {self.homo_lumo_gap_ev:.4f} eV")
         if self.dispersion_applied is False:
             lines.append(
-                f"  ⚠️  {self.method} requires D3 dispersion, but pyscf.dftd3 "
-                "was unavailable — this result has NO dispersion correction."
+                f"  ⚠️  {self.method} requires D3 dispersion, but no D3 backend "
+                "(pyscf-dispersion) was installed — this result has NO "
+                "dispersion correction."
             )
         if self.cc_converged is False:
             lines.append(
@@ -209,11 +210,13 @@ _XC_ALIAS: Dict[str, str] = {
     "CAM-B3LYP": "camb3lyp",
     "PBE-D3": "pbe",  # base functional; D3 applied separately
 }
-# Methods that require Grimme D3 dispersion correction via pyscf.dftd3.
-# wB97X-D is NOT here: its dispersion is already part of the XC functional
-# itself (see _XC_ALIAS comment above) — wrapping it in pyscf.dftd3 would
-# double-count dispersion under a method that already includes its own.
-_NEEDS_D3: frozenset = frozenset({"PBE-D3"})
+# Methods that require Grimme D3 dispersion correction, mapped to PySCF's
+# ``mf.disp`` version string. "-D3" means zero damping (Grimme 2010; Gaussian
+# EmpiricalDispersion=GD3), not Becke-Johnson. wB97X-D is NOT here: its
+# dispersion is already part of the XC functional itself (see _XC_ALIAS
+# comment above) — adding D3 would double-count it.
+_D3_VERSION: Dict[str, str] = {"PBE-D3": "d3zero"}
+_NEEDS_D3: frozenset = frozenset(_D3_VERSION)
 
 
 def resolve_xc(method: str) -> str:
@@ -247,43 +250,71 @@ def needs_d3(method: str) -> bool:
     return _key in _NEEDS_D3
 
 
+def _d3_version(method: str) -> str:
+    method_upper = method.upper()
+    _key = next((k for k in _D3_VERSION if k.upper() == method_upper), method)
+    return _D3_VERSION[_key]
+
+
+def _d3_backend() -> Optional[str]:
+    """Which D3 implementation is importable: ``"dispersion"``, ``"dftd3"`` or None."""
+    try:
+        import pyscf.dispersion  # noqa: F401
+    except ImportError:
+        pass
+    else:
+        return "dispersion"
+    try:
+        import pyscf.dftd3  # noqa: F401
+    except ImportError:
+        return None
+    return "dftd3"
+
+
 def maybe_apply_d3(mf, method: str, progress_stream=None):
-    """Wrap ``mf`` in ``pyscf.dftd3.dftd3(mf)`` if ``method`` requires D3.
+    """Add Grimme D3 dispersion to ``mf`` if ``method`` requires it.
 
-    Returns ``(mf, dispersion_applied)``: the (possibly wrapped) mf object,
-    and whether the D3 wrapper was actually applied. ``dispersion_applied``
-    is ``True`` when D3 was applied, ``False`` when the method needs D3 but
-    ``pyscf.dftd3`` is unavailable (AUDIT F04 — the result is silently
-    missing its dispersion correction; callers should record this rather
-    than keep reporting the original method label as if uncorrected =
-    corrected), and ``None`` when the method doesn't use D3 at all.
+    Uses PySCF's built-in dispersion (``mf.disp``, backed by the
+    ``pyscf-dispersion`` package), which also enters analytic gradients and
+    Hessians, so optimizations and frequencies see it too. Falls back to
+    the legacy ``pyscf.dftd3`` wrapper when only that extension is present.
 
-    On ``pyscf.dftd3`` ImportError, always logs a warning (so every call
-    site is visible in logs even without a progress stream — the optimizer
-    path used to call this with no stream and so surfaced nothing at all),
-    and additionally surfaces the warning via ``progress_stream`` when one
-    is provided.
+    Returns ``(mf, dispersion_applied)``: the (possibly modified) mf object,
+    and whether D3 was actually applied. ``dispersion_applied`` is ``True``
+    when D3 was applied, ``False`` when the method needs D3 but no D3
+    backend is installed (AUDIT F04 — the result is missing its dispersion
+    correction; callers should record this rather than keep reporting the
+    original method label as if uncorrected = corrected), and ``None`` when
+    the method doesn't use D3 at all.
+
+    When no backend is available, always logs a warning (so every call site
+    is visible in logs even without a progress stream), and additionally
+    surfaces the warning via ``progress_stream`` when one is provided.
     """
     if not needs_d3(method):
         return mf, None
-    try:
+    backend = _d3_backend()
+    if backend == "dispersion":
+        mf.disp = _d3_version(method)
+        return mf, True
+    if backend == "dftd3":
         from pyscf import dftd3 as _dftd3
 
         return _dftd3.dftd3(mf), True
-    except ImportError:
-        logger.warning(
-            "pyscf.dftd3 not available — running %s without D3 correction.",
-            method,
-        )
-        if progress_stream is not None:
-            try:
-                progress_stream.write(
-                    f"\n⚠  pyscf.dftd3 not available — running {method} "
-                    "without D3 correction.\n"
-                )
-            except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
-                pass
-        return mf, False
+    logger.warning(
+        "No D3 backend (pyscf-dispersion) installed — running %s without "
+        "D3 correction.",
+        method,
+    )
+    if progress_stream is not None:
+        try:
+            progress_stream.write(
+                f"\n⚠  No D3 backend (pyscf-dispersion) installed — running "
+                f"{method} without D3 correction.\n"
+            )
+        except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
+            pass
+    return mf, False
 
 
 def run_in_session(

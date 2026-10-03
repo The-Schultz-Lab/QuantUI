@@ -158,71 +158,86 @@ class TestMaybeApplyD3:
         assert result_mf is mf
         assert dispersion_applied is None
 
-    def test_d3_method_with_missing_pyscf_returns_mf_unchanged_and_false_flag(
+    def test_d3_method_without_backend_returns_mf_unchanged_and_false_flag(
         self, monkeypatch
     ):
-        # Simulate pyscf.dftd3 being absent (typical on Windows where
-        # PySCF isn't installable at all). The helper must return the
+        # No D3 backend installed (pyscf-dispersion missing, as on Windows
+        # where PySCF isn't installable at all). The helper must return the
         # original mf, flagged dispersion_applied=False, without raising.
-        import builtins
-
-        original_import = builtins.__import__
-
-        def _fake_import(name, *args, **kwargs):
-            if name == "pyscf.dftd3" or name.startswith("pyscf.dftd3"):
-                raise ImportError("simulated")
-            return original_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", _fake_import)
-
+        monkeypatch.setattr("quantui.session_calc._d3_backend", lambda: None)
         mf = _FakeMf("PBE-D3")
-        # Without progress_stream — must not raise.
         result_mf, dispersion_applied = maybe_apply_d3(mf, "PBE-D3")
         assert result_mf is mf
         assert dispersion_applied is False
+        assert not hasattr(mf, "disp")
 
     def test_d3_warning_written_to_progress_stream(self, monkeypatch):
-        import builtins
         import io
 
-        original_import = builtins.__import__
-
-        def _fake_import(name, *args, **kwargs):
-            if name == "pyscf.dftd3" or name.startswith("pyscf.dftd3"):
-                raise ImportError("simulated")
-            return original_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", _fake_import)
-
+        monkeypatch.setattr("quantui.session_calc._d3_backend", lambda: None)
         stream = io.StringIO()
         maybe_apply_d3(_FakeMf("PBE-D3"), "PBE-D3", progress_stream=stream)
         out = stream.getvalue()
         # User must see the missing-dispersion warning.
-        assert "dftd3 not available" in out
+        assert "without D3 correction" in out
         assert "PBE-D3" in out
 
     def test_d3_warning_logged_even_without_progress_stream(self, monkeypatch, caplog):
         # AUDIT F04: the optimizer path used to call maybe_apply_d3 with no
-        # progress_stream at all, so a missing pyscf.dftd3 gave NO warning
+        # progress_stream at all, so a missing D3 backend gave NO warning
         # anywhere. It must now always be logged, stream or not.
-        import builtins
         import logging
 
-        original_import = builtins.__import__
-
-        def _fake_import(name, *args, **kwargs):
-            if name == "pyscf.dftd3" or name.startswith("pyscf.dftd3"):
-                raise ImportError("simulated")
-            return original_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", _fake_import)
-
+        monkeypatch.setattr("quantui.session_calc._d3_backend", lambda: None)
         with caplog.at_level(logging.WARNING, logger="quantui.session_calc"):
             maybe_apply_d3(_FakeMf("PBE-D3"), "PBE-D3")
 
         assert any(
-            "dftd3 not available" in rec.message for rec in caplog.records
+            "without D3 correction" in rec.message for rec in caplog.records
         ), caplog.text
+
+    def test_pyscf_dispersion_backend_sets_zero_damping_d3(self, monkeypatch):
+        # "-D3" is Grimme's zero-damping D3 (Gaussian GD3), set through
+        # PySCF's built-in mf.disp so gradients and Hessians include it.
+        monkeypatch.setattr("quantui.session_calc._d3_backend", lambda: "dispersion")
+        mf = _FakeMf("PBE-D3")
+        result_mf, dispersion_applied = maybe_apply_d3(mf, "pbe-d3")
+        assert result_mf is mf
+        assert dispersion_applied is True
+        assert mf.disp == "d3zero"
+
+
+@pytest.mark.slow
+class TestD3RealPySCF:
+    """PBE-D3 actually lowers the energy by the D3 term (pyscf-dispersion)."""
+
+    def test_pbe_d3_energy_includes_dispersion(self):
+        pytest.importorskip("pyscf")
+        pytest.importorskip("pyscf.dispersion")
+        from pyscf import dft, gto
+        from pyscf.scf import dispersion
+
+        mol = gto.M(
+            atom="O 0 0 0; H 0 0.757 0.587; H 0 -0.757 0.587;"
+            "O 0 0 2.9; H 0 0.757 3.487; H 0 -0.757 3.487",
+            basis="sto-3g",
+            verbose=0,
+        )
+        plain = dft.RKS(mol)
+        plain.xc = "pbe"
+        e_plain = plain.kernel()
+
+        mf = dft.RKS(mol)
+        mf.xc = resolve_xc("PBE-D3")
+        mf, applied = maybe_apply_d3(mf, "PBE-D3")
+        e_d3 = mf.kernel()
+
+        assert applied is True
+        e_disp = dispersion.get_dispersion(mf)
+        assert e_disp < 0
+        assert e_d3 == pytest.approx(e_plain + e_disp, abs=1e-7)
+        # Dispersion reaches the analytic gradient too (geometry opt path).
+        assert mf.nuc_grad_method().kernel().shape == (6, 3)
 
 
 # =====================================================================
