@@ -724,6 +724,13 @@ def _build_payload(
         )
         return freq_result_payload(result, molecule)
     if calc_type == "tddft":
+        write_analysis_artifacts(
+            staging_dir,
+            calc_type,
+            outcome,
+            charge=request.charge,
+            multiplicity=request.multiplicity,
+        )
         return tddft_result_payload(outcome)
     if calc_type == "nmr":
         return nmr_result_payload(outcome)

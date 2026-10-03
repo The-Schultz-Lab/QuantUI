@@ -387,6 +387,124 @@ def apply_pcm(mf, solvent: Optional[str], progress_stream=None):
     return mf, name
 
 
+def _host_array(arr: Any) -> Any:
+    """``arr`` as a NumPy array, copying from the GPU first for CuPy arrays.
+
+    ``numpy.asarray(cupy_array)`` raises (NumPy refuses implicit device→host
+    transfers), so CuPy's ``.get()`` is used when present. ``None`` passes
+    through.
+    """
+    import numpy as _np
+
+    if arr is None:
+        return None
+    get = getattr(arr, "get", None)
+    if callable(get) and type(arr).__module__.startswith("cupy"):
+        return _np.asarray(get())
+    return _np.asarray(arr)
+
+
+def ground_state_analysis(
+    mf: Any,
+    molecule: Molecule,
+    basis: str,
+    *,
+    label: str = "",
+    gpu_used: bool = False,
+) -> Dict[str, Any]:
+    """Mulliken charges, dipole, ⟨S²⟩ and MO arrays of a converged SCF.
+
+    Shared by Single Point, Frequency and TD-DFT (ISSUE.19 #6) so every
+    result with a ground-state SCF can fill the Populations and Isosurface
+    panels. Each piece is best-effort and ``None`` on failure.
+
+    - For MP2/CCSD/CCSD(T), *mf* is the HF reference: charges and dipole are
+      HF-reference values (the result card labels them so).
+    - gpu4pyscf has no population analysis on the GPU object, so Mulliken
+      falls back to ``mf.to_cpu()``; the same for ``spin_square``.
+    - Mulliken and dipole are well defined for UHF/UKS (audit fix
+      2026-07-14).
+    - MO arrays are kept whole: ``(2, n)`` / ``(2, nao, nmo)`` for an
+      unrestricted reference.
+    - ⟨S²⟩ (ISSUE.12) only for open-shell or unrestricted references.
+    - ``pyscf_mol_atom`` is built from the molecule in Å; PySCF's own
+      ``mol._atom`` is in Bohr.
+    """
+    import numpy as _np
+
+    out: Dict[str, Any] = {
+        "atom_symbols": list(molecule.atoms),
+        "mulliken_charges": None,
+        "dipole_moment_debye": None,
+        "dipole_vector_debye": None,
+        "spin_square": None,
+        "mo_energy_hartree": None,
+        "mo_occ": None,
+        "mo_coeff": None,
+        "pyscf_mol_atom": None,
+        "pyscf_mol_basis": None,
+    }
+
+    def _cpu(name: str) -> Any:
+        if not callable(getattr(mf, name, None)) and callable(
+            getattr(mf, "to_cpu", None)
+        ):
+            return mf.to_cpu()
+        return mf
+
+    try:
+        _, chg = _cpu("mulliken_pop").mulliken_pop(verbose=0)
+        out["mulliken_charges"] = [float(c) for c in _host_array(chg)]
+    except Exception as exc:
+        logger.debug("Mulliken population extraction failed: %s", exc)
+    try:
+        dip = _host_array(mf.dip_moment(verbose=0))
+        vec = [float(x) for x in dip.reshape(-1)[:3]]
+        if len(vec) == 3:
+            out["dipole_vector_debye"] = vec
+            out["dipole_moment_debye"] = float(_np.linalg.norm(vec))
+    except Exception as exc:
+        logger.debug("Dipole moment extraction failed: %s", exc)
+
+    try:
+        out["mo_energy_hartree"] = _host_array(mf.mo_energy)
+        out["mo_occ"] = _host_array(mf.mo_occ)
+        out["mo_coeff"] = _host_array(mf.mo_coeff)
+        out["pyscf_mol_atom"] = [
+            (atom, list(map(float, coords)))
+            for atom, coords in zip(molecule.atoms, molecule.coordinates)
+        ]
+        out["pyscf_mol_basis"] = basis
+    except Exception as exc:
+        # mo_coeff=None makes save_orbitals a no-op and empties the Energies
+        # and Isosurface panels on History replay; make that visible.
+        logger.warning(
+            "MO array extraction failed for %s (%s): %s",
+            molecule.get_formula(),
+            label,
+            exc,
+        )
+        try:
+            from . import calc_log as _clog
+
+            _clog.log_event(
+                "mo_array_extract_failed",
+                f"{label} on {molecule.get_formula()}",
+                error=str(exc)[:300],
+                gpu_used=gpu_used,
+            )
+        except Exception:  # noqa: BLE001 — telemetry self-guard
+            pass
+
+    unrestricted = out["mo_occ"] is not None and _np.ndim(out["mo_occ"]) == 2
+    if molecule.multiplicity > 1 or unrestricted:
+        try:
+            out["spin_square"] = float(_cpu("spin_square").spin_square()[0])
+        except Exception as exc:
+            logger.debug("<S^2> extraction failed (non-fatal): %s", exc)
+    return out
+
+
 def run_in_session(
     molecule: Molecule,
     method: str = "RHF",
@@ -909,111 +1027,20 @@ def _run_session_calc_body(
     except Exception as exc:
         logger.debug("HOMO-LUMO gap extraction failed (non-fatal): %s", exc)
 
-    mulliken_charges: Optional[List[float]] = None
-    dipole_moment_debye: Optional[float] = None
-    # AUDIT additional-concerns — for MP2/CCSD/CCSD(T), ``mf`` here is
-    # still the HF reference object (the post-HF correlation energy is
-    # computed separately and added to ``energy_hartree``; no correlated
-    # density is built for these methods). Both properties below are
-    # therefore HF-reference values even when method='CCSD(T)', NOT a
-    # correlated dipole/population — the result card labels them
-    # accordingly (_result_extra_rows' "HF reference" note) rather than
-    # presenting them as an unqualified property of the requested method.
-    #
-    # Audit fix (2026-07-14): both mf.mulliken_pop() and mf.dip_moment()
-    # are well-defined and work correctly for a genuine UHF object (verified
-    # empirically against PySCF) — the previous ``method_upper != "UHF"``
-    # guard around this whole block was an unnecessary restriction that
-    # left the result card blank for both properties on every UHF run,
-    # while UKS (open-shell DFT) went through the identical extraction
-    # successfully.
-    dipole_vector_debye: Optional[List[float]] = None
-    try:
-        # gpu4pyscf doesn't implement population analysis on the GPU object
-        # (``mf.mulliken_pop`` is NotImplemented), so on a GPU-offloaded run
-        # fall back to the host (CPU) object via ``to_cpu()``. ``chg`` is
-        # then host NumPy; _to_numpy_array also covers the CuPy case.
-        mf_pop = mf
-        if not callable(getattr(mf, "mulliken_pop", None)) and callable(
-            getattr(mf, "to_cpu", None)
-        ):
-            mf_pop = mf.to_cpu()
-        _, chg = mf_pop.mulliken_pop(verbose=0)
-        mulliken_charges = [float(c) for c in _to_numpy_array(chg)]
-    except Exception as exc:
-        logger.debug("Mulliken population extraction failed: %s", exc)
-    try:
-        dip = _to_numpy_array(mf.dip_moment(verbose=0))
-        dip_list = [float(x) for x in dip.reshape(-1)[:3]]
-        if len(dip_list) == 3:
-            dipole_vector_debye = dip_list
-            dipole_moment_debye = float(_np.linalg.norm(dip_list))
-    except Exception as exc:
-        logger.debug("Dipole moment extraction failed: %s", exc)
-
-    # ⟨S²⟩ (ISSUE.12): open-shell references only. An unrestricted SCF can
-    # mix in higher spin states, which shifts its energy; without the value
-    # in the result a contaminated SCF cannot be spotted afterwards. For
-    # post-HF methods this is the HF reference's ⟨S²⟩.
-    spin_square: Optional[float] = None
-    if molecule.multiplicity > 1 or str(scf_variant).upper().startswith("U"):
-        try:
-            mf_s2 = mf
-            if not callable(getattr(mf, "spin_square", None)) and callable(
-                getattr(mf, "to_cpu", None)
-            ):
-                mf_s2 = mf.to_cpu()
-            spin_square = float(mf_s2.spin_square()[0])
-        except Exception as exc:
-            logger.debug("<S^2> extraction failed (non-fatal): %s", exc)
-
-    # MO arrays for orbital visualization (non-fatal if extraction fails).
-    # Uses the same ``_to_numpy_array`` CuPy→host helper defined above
-    # (GPU-offload note, fix 2026-05-25):
-    # when gpu4pyscf migrated ``mf`` to the GPU, ``mf.mo_energy`` / ``mo_coeff``
-    # / ``mo_occ`` are CuPy arrays. ``numpy.array(cupy_array)`` raises (numpy
-    # refuses implicit device transfers), which silently shipped a
-    # ``SessionResult`` with all MO fields ``None`` → ``save_orbitals`` no-op
-    # and "Not available" in the Energies + Isosurface panels on replay.
-    _mo_energy_ha_arr: Optional[Any] = None
-    _mo_occ_arr: Optional[Any] = None
-    _mo_coeff_arr: Optional[Any] = None
-    _pyscf_mol_atom: Optional[Any] = None
-    _pyscf_mol_basis: Optional[str] = None
-
-    try:
-        _mo_energy_ha_arr = _to_numpy_array(mf.mo_energy)
-        _mo_occ_arr = _to_numpy_array(mf.mo_occ)
-        _mo_coeff_arr = _to_numpy_array(mf.mo_coeff)
-        _pyscf_mol_atom = [
-            (atom, list(map(float, coords)))
-            for atom, coords in zip(molecule.atoms, molecule.coordinates)
-        ]
-        _pyscf_mol_basis = basis
-    except Exception as exc:
-        # A silent failure here ships a
-        # SessionResult with mo_coeff=None, which makes save_orbitals
-        # no-op and breaks Energies + Isosurface panels on history
-        # replay. Surface to the event log so a future regression is
-        # visible in `quantui log tail` immediately.
-        logger.warning(
-            "MO array extraction failed for %s (%s/%s): %s",
-            molecule.get_formula(),
-            method,
-            basis,
-            exc,
-        )
-        try:
-            from . import calc_log as _clog
-
-            _clog.log_event(
-                "mo_array_extract_failed",
-                f"{method}/{basis} on {molecule.get_formula()}",
-                error=str(exc)[:300],
-                gpu_used=gpu_used,
-            )
-        except Exception:  # noqa: BLE001 — telemetry self-guard
-            pass
+    # Populations, dipole, ⟨S²⟩ and MO arrays — shared with Frequency and
+    # TD-DFT (ISSUE.19 #6); see ground_state_analysis.
+    _gs = ground_state_analysis(
+        mf, molecule, basis, label=f"{method}/{basis}", gpu_used=gpu_used
+    )
+    mulliken_charges = _gs["mulliken_charges"]
+    dipole_moment_debye = _gs["dipole_moment_debye"]
+    dipole_vector_debye = _gs["dipole_vector_debye"]
+    spin_square = _gs["spin_square"]
+    _mo_energy_ha_arr = _gs["mo_energy_hartree"]
+    _mo_occ_arr = _gs["mo_occ"]
+    _mo_coeff_arr = _gs["mo_coeff"]
+    _pyscf_mol_atom = _gs["pyscf_mol_atom"]
+    _pyscf_mol_basis = _gs["pyscf_mol_basis"]
 
     formula = molecule.get_formula()
     logger.info(

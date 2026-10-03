@@ -117,6 +117,18 @@ class TDDFTResult:
     # PCM solvent (None = gas phase). Ground state: equilibrium PCM with the
     # static dielectric. Excitations: non-equilibrium (optical dielectric).
     solvent: Optional[str] = None
+    # Ground-state analysis of the reference SCF (ISSUE.19 #6), so TD-DFT
+    # results fill the Energies, Isosurface and Populations panels too.
+    mo_energy_hartree: Optional[Any] = None
+    mo_occ: Optional[Any] = None
+    mo_coeff: Optional[Any] = None
+    pyscf_mol_atom: Optional[List] = None
+    pyscf_mol_basis: Optional[str] = None
+    atom_symbols: Optional[List[str]] = None
+    mulliken_charges: Optional[List[float]] = None
+    dipole_moment_debye: Optional[float] = None
+    dipole_vector_debye: Optional[List[float]] = None
+    spin_square: Optional[float] = None
 
     @property
     def energy_ev(self) -> float:
@@ -379,6 +391,11 @@ def _run_tddft_calc_body(
     except Exception as exc:
         logger.debug("HOMO-LUMO gap extraction failed in TD-DFT calc: %s", exc)
 
+    # ── Ground-state analysis (ISSUE.19 #6) ─────────────────────────────────
+    from .session_calc import ground_state_analysis
+
+    _gs = ground_state_analysis(mf, molecule, basis, label=f"{method}/{basis} TD")
+
     # ── TD-DFT / TDHF ────────────────────────────────────────────────────────
     excitation_energies_ev: List[float] = []
     oscillator_strengths: List[float] = []
@@ -470,4 +487,14 @@ def _run_tddft_calc_body(
         solvent=pcm_solvent,
         td_converged=td_converged,
         n_converged_states=n_converged_states,
+        mo_energy_hartree=_gs["mo_energy_hartree"],
+        mo_occ=_gs["mo_occ"],
+        mo_coeff=_gs["mo_coeff"],
+        pyscf_mol_atom=_gs["pyscf_mol_atom"],
+        pyscf_mol_basis=_gs["pyscf_mol_basis"],
+        atom_symbols=_gs["atom_symbols"],
+        mulliken_charges=_gs["mulliken_charges"],
+        dipole_moment_debye=_gs["dipole_moment_debye"],
+        dipole_vector_debye=_gs["dipole_vector_debye"],
+        spin_square=_gs["spin_square"],
     )

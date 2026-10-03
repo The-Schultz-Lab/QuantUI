@@ -2307,13 +2307,21 @@ class QuantUIApp:
 
     _PANEL_META: ClassVar[list] = [
         ("Energies", "_orb_accordion", "Single Point / Geometry Opt"),
-        ("Populations", "_mulliken_accordion", "Single Point / Geometry Opt"),
+        (
+            "Populations",
+            "_mulliken_accordion",
+            "Single Point / Geometry Opt / Frequency / UV-Vis",
+        ),
         ("Trajectory", "traj_accordion", "Geometry Opt / PES Scan / Frequency pre-opt"),
         ("Vibrational", "vib_accordion", "Frequency"),
         ("IR Spectrum", "_ir_accordion", "Frequency"),
         ("Raman Spectrum", "_raman_accordion", "Frequency"),
         ("PES Scan", "_pes_scan_accordion", "PES Scan"),
-        ("Isosurface", "_iso_accordion", "Single Point (Linux/WSL only)"),
+        (
+            "Isosurface",
+            "_iso_accordion",
+            "Single Point / Geometry Opt / Frequency / UV-Vis (Linux/WSL only)",
+        ),
         ("Geometries", "_reorg_geom_accordion", "Reorganization Energy"),
         ("UV-Vis", "_tddft_accordion", "UV-Vis (TD-DFT)"),
         ("NMR", "_nmr_accordion", "NMR Shielding"),
@@ -2358,10 +2366,18 @@ class QuantUIApp:
             ("IR Spectrum", "_pop_ir_spectrum", True),
             ("Raman Spectrum", "_pop_raman_spectrum", False),
             ("Trajectory", "_pop_preopt_trajectory", False),
+            # Energies loads the orbital state Isosurface checks, so it stays
+            # ahead of it (see geometry_opt). ISSUE.19 #6 added the last two.
             ("Energies", "_pop_energies", True),
+            ("Isosurface", "_pop_isosurface", False),
+            ("Populations", "_pop_mulliken", False),
         ],
         "tddft": [
             ("UV-Vis", "_pop_uv_vis", True),
+            # Ground-state analysis of the reference SCF (ISSUE.19 #6).
+            ("Energies", "_pop_energies", False),
+            ("Isosurface", "_pop_isosurface", False),
+            ("Populations", "_pop_mulliken", False),
         ],
         "nmr": [
             ("NMR", "_pop_nmr_shielding", True),
@@ -6823,7 +6839,12 @@ class QuantUIApp:
                             filename="preopt_trajectory.json",
                         )
                 # Persist MO data for orbital diagram + isosurface replay.
-                if ct in ("Single Point", "Geometry Opt", "Frequency"):
+                if ct in (
+                    "Single Point",
+                    "Geometry Opt",
+                    "Frequency",
+                    "UV-Vis (TD-DFT)",
+                ):
                     save_orbitals(_saved_dir, result)
                 # Write a Molden-format companion
                 # file so users can open results in Avogadro / IQmol /

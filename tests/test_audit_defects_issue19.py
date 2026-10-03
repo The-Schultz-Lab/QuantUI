@@ -310,3 +310,95 @@ class TestFragmentNoteOnEveryLoad:
 
         msg = describe_disconnection(self.DIMER.atoms, self.DIMER.coordinates)
         assert "resolved to 2 separate fragments (2×H2O)" in msg
+
+
+WATER = Molecule(
+    ["O", "H", "H"], [[0, 0, 0.117], [0, 0.757, -0.469], [0, -0.757, -0.469]]
+)
+
+
+@pytest.fixture(scope="module")
+def water_freq():
+    pytest.importorskip("pyscf")
+    import io
+
+    from quantui.freq_calc import run_freq_calc
+
+    return run_freq_calc(WATER, "RHF", "STO-3G", progress_stream=io.StringIO())
+
+
+@pytest.fixture(scope="module")
+def water_tddft():
+    pytest.importorskip("pyscf")
+    import io
+
+    from quantui.tddft_calc import run_tddft_calc
+
+    return run_tddft_calc(
+        WATER, "B3LYP", "STO-3G", nstates=2, progress_stream=io.StringIO()
+    )
+
+
+class TestGroundStatePanelsForFreqAndTddft:
+    """#6 — Frequency and TD-DFT results fill Isosurface and Populations."""
+
+    def test_registry_order(self):
+        from quantui.app import QuantUIApp
+
+        for ct in ("frequency", "tddft"):
+            names = [n for n, _, _ in QuantUIApp._PANEL_REGISTRY[ct]]
+            assert "Isosurface" in names and "Populations" in names
+            # Energies loads the orbital state Isosurface checks.
+            assert names.index("Energies") < names.index("Isosurface")
+
+    def test_results_carry_ground_state_data(self, water_freq, water_tddft):
+        for r in (water_freq, water_tddft):
+            assert len(r.mulliken_charges) == 3 and r.mulliken_charges[0] < 0
+            assert r.dipole_moment_debye > 1.0
+            assert r.mo_coeff.shape == (7, 7)
+            assert r.spin_square is None  # closed shell
+
+    @pytest.mark.parametrize("which", ["frequency", "tddft"])
+    def test_history_replay_enables_both_panels(
+        self, which, water_freq, water_tddft, tmp_path
+    ):
+        from quantui.app import QuantUIApp
+        from quantui.results_storage import save_orbitals, save_result
+
+        r = water_freq if which == "frequency" else water_tddft
+        spectra = (
+            {"ir": {"frequencies_cm1": list(r.frequencies_cm1)}}
+            if which == "frequency"
+            else {
+                "uv_vis": {
+                    "excitation_energies_ev": list(r.excitation_energies_ev),
+                    "oscillator_strengths": list(r.oscillator_strengths),
+                    "wavelengths_nm": list(r.wavelengths_nm()),
+                }
+            }
+        )
+        saved = save_result(r, results_dir=tmp_path, calc_type=which, spectra=spectra)
+        save_orbitals(saved, r)
+        app = QuantUIApp()
+        app._set_molecule(WATER, "test")
+        app._apply_analysis_context(app._build_history_context(saved))
+        assert "Populations" in app._ana_available
+        assert "Isosurface" in app._ana_available
+
+    def test_worker_payloads_and_tddft_orbitals(
+        self, water_freq, water_tddft, tmp_path
+    ):
+        from quantui.backends.worker_payload import (
+            freq_result_payload,
+            tddft_result_payload,
+            write_analysis_artifacts,
+        )
+
+        fp = freq_result_payload(water_freq, WATER)
+        tp = tddft_result_payload(water_tddft)
+        for p in (fp, tp):
+            assert len(p["mulliken_charges"]) == 3
+            assert p["dipole_moment_debye"] > 1.0
+            json.dumps(p)  # JSON-safe
+        write_analysis_artifacts(tmp_path, "tddft", water_tddft)
+        assert (tmp_path / "orbitals.npz").exists()
