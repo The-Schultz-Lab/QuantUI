@@ -15,7 +15,7 @@ dependencies:
 
   # Scientific computing
   - numpy>=1.24.0
-  - ase>=3.22.0          # Structure I/O, molecule library, geometry optimisation
+  - ase>=3.26.0          # Structure I/O, molecule library, geometry optimisation (Sella needs 3.26)
   - rdkit>=2022.03.1     # PubChem SDF→XYZ conversion, SMILES input
   - xtb-python>=20.2     # GFN-FF metal-capable pre-optimization (the Python API +
                          # ASE calculator; conda-forge has Windows/macOS builds,
@@ -61,4 +61,6 @@ dependencies:
       - pyscf-properties @ git+https://github.com/pyscf/properties.git
       # Grimme D3 for PBE-D3 (PySCF mf.disp); Linux/macOS wheels on PyPI.
       - pyscf-dispersion
+      # Transition-state search (M-TS, DEC-024); pulls in jax (~380 MB).
+      - sella>=2.6
       - -e ..

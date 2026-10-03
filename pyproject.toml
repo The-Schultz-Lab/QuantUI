@@ -159,6 +159,15 @@ xtb = [
     "ase>=3.22.0,<4",
 ]
 
+# Transition-state search (M-TS, DEC-024): Sella drives QuantUI's own ASE
+# calculator. LGPL-3.0, used as a separately installed library (no Sella code
+# in QuantUI). Pulls in jax/jaxlib (~380 MB; jax >= 0.10 needs numpy >= 2 on
+# Python 3.11, older jax resolves on 3.9/3.10). Sella 2.x needs ASE >= 3.26.
+ts = [
+    "sella>=2.6",
+    "ase>=3.26,<4",
+]
+
 # Voilà app server — hides notebook code; students see only the widget UI.
 # Run with: voila notebooks/molecule_computations.ipynb
 app = [

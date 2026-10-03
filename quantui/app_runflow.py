@@ -432,6 +432,7 @@ _SOLVENT_SUPPORTED_CALC_TYPES = frozenset(
     {
         "Single Point",
         "Geometry Opt",
+        "Transition State",
         "Frequency",
         "UV-Vis (TD-DFT)",
         "Reorganization Energy",
@@ -445,6 +446,7 @@ _SOLVENT_LABELS = {
     ),
     "Frequency": "Implicit solvent (PCM) — Raman is not computed in solvent",
     "UV-Vis (TD-DFT)": "Implicit solvent (PCM) — non-equilibrium excitations",
+    "Transition State": "Implicit solvent (PCM) — search and frequency check",
 }
 
 
@@ -506,7 +508,9 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     # Reorganization Energy runs its own neutral + ion optimizations, so the
     # standalone "geometry optimization before this calc" checkbox is
     # meaningless there too (as with Geometry Opt itself).
-    if ct in ("Geometry Opt", "Reorganization Energy"):
+    # A transition-state search must NOT be pre-minimized: that would walk
+    # away from the barrier it is meant to find.
+    if ct in ("Geometry Opt", "Reorganization Energy", "Transition State"):
         app._freq_preopt_cb.value = False
         app._freq_preopt_cb.layout.display = "none"
     elif ct in ("Frequency", "UV-Vis (TD-DFT)"):
@@ -578,6 +582,14 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
                 "STO-3G and 3-21G give qualitative results only. "
                 "Start from an optimised geometry for best accuracy.</span>"
             ),
+        ]
+    elif ct == "Transition State":
+        app.calc_extra_opts.children = [
+            widgets.HBox(
+                [app._ts_fmax_fi, app.max_steps_si],
+                layout=layout_fn(gap="8px"),
+            ),
+            app._ts_note,
         ]
     elif ct == "Reorganization Energy":
         # The neutral and ion legs are real geometry optimizations and the run
@@ -2304,6 +2316,7 @@ def _update_open_shell_hint(app: Any) -> None:
 _CALC_TYPE_KEYS: Dict[str, str] = {
     "Single Point": "single_point",
     "Geometry Opt": "geometry_opt",
+    "Transition State": "transition_state",
     "Frequency": "frequency",
     "UV-Vis (TD-DFT)": "tddft",
     "NMR Shielding": "nmr",

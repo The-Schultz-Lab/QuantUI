@@ -1449,7 +1449,7 @@ class TestNMRWidgets:
 
     def test_calc_type_dd_has_expected_options(self):
         app = QuantUIApp()
-        assert len(app.calc_type_dd.options) == 7
+        assert len(app.calc_type_dd.options) == 8
         assert "Reorganization Energy" in app.calc_type_dd.options
 
     def test_nmr_calc_type_shows_seed_and_note(self):
