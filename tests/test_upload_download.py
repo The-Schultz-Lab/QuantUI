@@ -23,7 +23,7 @@ H 0.000 -0.757 -0.469
 class TestDownloadLinks:
     def test_link_carries_the_file_bytes(self, tmp_path):
         f = tmp_path / "water.xyz"
-        f.write_text(WATER_XYZ)
+        f.write_bytes(WATER_XYZ.encode())  # write_text would add \r on Windows
         html = download_link_html(f)
         assert 'download="water.xyz"' in html
         m = re.search(r'href="data:([^;]+);base64,([^"]+)"', html)

@@ -143,6 +143,7 @@ class TestFrozenOptimization:
         )
 
     def test_bad_frozen_lists(self):
+        pytest.importorskip("pyscf")  # engine check runs before the list check
         pytest.importorskip("ase")
         from quantui.optimizer import optimize_geometry
 
