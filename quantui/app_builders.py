@@ -2636,6 +2636,32 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._orb_accordion.set_title(0, "Energy-level Diagram")
     app._orb_accordion.selected_index = None
 
+    # Orbital gallery (SURF.1, DEC-024): small linked viewers for the
+    # orbitals around the gap, built on demand.
+    app._orb_gallery_btn = widgets.Button(
+        description="Orbital gallery",
+        icon="th",
+        tooltip=(
+            "Show the orbitals around the HOMO-LUMO gap side by side "
+            "(small viewers that rotate together)."
+        ),
+        layout=layout_fn(width="160px", margin="4px 8px 4px 0"),
+    )
+    app._orb_gallery_span_dd = widgets.Dropdown(
+        options=[
+            ("HOMO−1 … LUMO+1 (4)", 2),
+            ("HOMO−2 … LUMO+2 (6)", 3),
+            ("HOMO−3 … LUMO+3 (8)", 4),
+        ],
+        value=3,
+        layout=layout_fn(width="220px"),
+    )
+    app._orb_gallery_box = widgets.HBox(
+        [app._orb_gallery_btn, app._orb_gallery_span_dd],
+        layout=layout_fn(align_items="center", margin="8px 0 0 0"),
+    )
+    app._orb_gallery_output = widgets.Output()
+
     app._iso_generate_btn = widgets.Button(
         description="Generate Isosurface",
         button_style="primary",
@@ -2845,6 +2871,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 layout=layout_fn(align_items="center", gap="6px"),
             ),
             app._orb_iso_output,
+            app._orb_gallery_box,
+            app._orb_gallery_output,
             app._iso_resolution_dd,
             widgets.HBox(
                 [app._iso_isovalue_slider, app._iso_enclosed_label],

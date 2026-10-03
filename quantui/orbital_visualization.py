@@ -2102,3 +2102,209 @@ def plot_cube_isosurface(
     )
 
     return fig
+
+
+# ── Orbital gallery (M-SURFACES SURF.1, DEC-024) ─────────────────────────────
+#
+# A grid of small viewers for the orbitals around the HOMO-LUMO gap, so a
+# student can compare them side by side. Each tile is its own minimal 3Dmol
+# viewer (none of the main viewer's page-wide hooks), and the tiles share one
+# camera: rotating one rotates them all.
+
+#: Cube grid for gallery tiles: coarse on purpose (several cubes per click,
+#: each embedded in the page); the main viewer is for close inspection.
+GALLERY_GRID = 32
+
+_SUBSCRIPT = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
+
+
+def pretty_irrep(label: str) -> str:
+    """'3a1' → '3a₁', '1b2g' → '1b₂g': digits after a letter become subscripts."""
+    return re.sub(
+        r"(?<=[A-Za-z])(\d+)", lambda m: m.group(1).translate(_SUBSCRIPT), label
+    )
+
+
+def compact_cube_text(cube_text: str, digits: int = 4) -> str:
+    """The same cube with its grid values written to *digits* significant figures.
+
+    Gallery tiles embed their cubes in the page; PySCF writes ``%13.5E``, and
+    four figures are plenty for a thumbnail isosurface. Header and atom lines
+    are kept as written.
+    """
+    lines = cube_text.splitlines()
+    n_atoms = int(lines[2].split()[0])
+    header = 6 + abs(n_atoms) + (1 if n_atoms < 0 else 0)
+    values = np.array(" ".join(lines[header:]).split(), dtype=float)
+    fmt = f"{{:.{max(1, digits - 1)}e}}"
+    body = [
+        " ".join(fmt.format(v) for v in values[i : i + 6])
+        for i in range(0, len(values), 6)
+    ]
+    return "\n".join(lines[:header] + body) + "\n"
+
+
+#: "Orbitals each side of the gap" choices for the gallery.
+GALLERY_SPANS = (2, 3, 4)
+
+
+@dataclass
+class GalleryTile:
+    """One gallery viewer: a two-line caption and the cube to draw."""
+
+    label: str
+    caption: str
+    cube_text: str
+    detail: str = ""
+
+
+def gallery_orbital_indices(n_occ: int, n_total: int, each_side: int = 3) -> list:
+    """``[(label, index), …]`` from HOMO−(n−1) up to LUMO+(n−1), clipped to range.
+
+    Labels use a true minus sign (HOMO−1), matching the energy diagram.
+    """
+    out = []
+    for k in range(each_side - 1, -1, -1):
+        idx = n_occ - 1 - k
+        if 0 <= idx < n_total:
+            out.append(("HOMO" if k == 0 else f"HOMO−{k}", idx))
+    for k in range(each_side):
+        idx = n_occ + k
+        if 0 <= idx < n_total:
+            out.append(("LUMO" if k == 0 else f"LUMO+{k}", idx))
+    return out
+
+
+def gallery_caption(
+    label: str,
+    index: int,
+    energy_hartree: Optional[float],
+    irrep: Optional[str] = None,
+) -> Tuple[str, str]:
+    """``("HOMO−1 · 3a₁", "−0.552 Eh (−15.02 eV) · MO 3")``; unknown parts omitted."""
+    title = f"{label} · {pretty_irrep(irrep)}" if irrep else label
+    detail = []
+    if energy_hartree is not None:
+        e = float(energy_hartree)
+        detail.append(f"{e:.3f} Eh ({e * 27.211386245988:.2f} eV)".replace("-", "−"))
+    detail.append(f"MO {index}")
+    return title, " · ".join(detail)
+
+
+_GALLERY_TILE_JS = """
+(function(){
+  var UID="__UID__", GROUP="__GROUP__", DATA=__DATA__;
+  var ISO=__ISO__, POS=__POS__, NEG=__NEG__, BG=__BG__;
+  function build(){
+    var vw=window["viewer_"+UID];
+    if(!vw){ setTimeout(build,50); return; }
+    vw.addModel(DATA,"cube");
+    vw.setStyle({}, {stick:{radius:0.12}});
+    vw.addVolumetricData(DATA,"cube",{isoval: ISO, color: POS, opacity: 0.85, smoothness: 5});
+    vw.addVolumetricData(DATA,"cube",{isoval: -ISO, color: NEG, opacity: 0.85, smoothness: 5});
+    vw.setBackgroundColor(BG);
+    vw.zoomTo();
+    vw.render();
+    // One camera for the whole gallery: link this viewer both ways with
+    // every tile already built in the same group.
+    var reg=(window.__quantuiGallery=window.__quantuiGallery||{});
+    var peers=(reg[GROUP]=reg[GROUP]||[]);
+    for(var i=0;i<peers.length;i++){
+      try{ vw.linkViewer(peers[i]); peers[i].linkViewer(vw); }catch(e){}
+    }
+    if(peers.length){ try{ vw.setView(peers[0].getView()); vw.render(); }catch(e){} }
+    peers.push(vw);
+  }
+  build();
+})();
+"""
+
+
+_GALLERY_VIEWER_JS = """<script>
+(function(){
+  function mk(){
+    if(typeof $3Dmolpromise === 'undefined' || !$3Dmolpromise){ setTimeout(mk,50); return; }
+    $3Dmolpromise.then(function(){
+      window["viewer___UID__"] = $3Dmol.createViewer(
+        document.getElementById("3dmolviewer___UID__"), {backgroundColor: __BG__});
+    });
+  }
+  mk();
+})();
+</script>"""
+
+
+def build_orbital_gallery_html(
+    tiles: List[GalleryTile],
+    *,
+    isovalue: float = 0.02,
+    color_scheme: str = DEFAULT_ORBITAL_COLORS,
+    bgcolor: str = "white",
+    tile_px: int = 230,
+    columns: Optional[int] = None,
+) -> str:
+    """HTML grid of small linked orbital viewers (one per tile).
+
+    *columns* defaults to two rows' worth (occupied above, virtual below for an
+    even split), at most four.
+    """
+    import html as _html
+    import json
+    import uuid
+
+    from quantui.viz_assets import make_view
+
+    if not tiles:
+        return '<p style="padding:8px">No orbitals to show.</p>'
+    if columns is None:
+        columns = min(4, max(1, -(-len(tiles) // 2)))
+    pos, neg = orbital_colors(color_scheme)
+    group = uuid.uuid4().hex[:10]
+    cells = []
+    for n, tile in enumerate(tiles):
+        if n == 0:
+            # The first tile carries the (vendored, offline) 3Dmol.js loader;
+            # the others reuse the page's $3Dmolpromise instead of embedding
+            # the ~0.7 MB library again each.
+            view_html = make_view(width=tile_px, height=tile_px)._make_html()
+            m = re.search(r"3dmolviewer_(\w+)", view_html)
+            if m is None:
+                return '<p style="padding:8px">Viewer could not be built.</p>'
+            uid = m.group(1)
+        else:
+            uid = f"g{group}{n}"
+            view_html = (
+                f'<div id="3dmolviewer_{uid}" style="position:relative;'
+                f'width:{int(tile_px)}px;height:{int(tile_px)}px"></div>'
+                + _GALLERY_VIEWER_JS.replace("__UID__", uid).replace(
+                    "__BG__", json.dumps(bgcolor)
+                )
+            )
+        js = (
+            _GALLERY_TILE_JS.replace("__UID__", uid)
+            .replace("__GROUP__", group)
+            .replace("__DATA__", json.dumps(tile.cube_text))
+            .replace("__ISO__", repr(float(isovalue)))
+            .replace("__POS__", json.dumps(pos))
+            .replace("__NEG__", json.dumps(neg))
+            .replace("__BG__", json.dumps(bgcolor))
+        )
+        cells.append(
+            '<div class="quantui-gallery-tile" style="display:flex;'
+            'flex-direction:column;align-items:center">'
+            f'<div style="font-size:12px;font-weight:600;margin:2px 0 0;'
+            f'text-align:center">{_html.escape(tile.caption)}</div>'
+            f'<div style="font-size:11px;margin:0 0 2px;text-align:center;'
+            f'min-height:14px">{_html.escape(tile.detail)}</div>'
+            f"{view_html}<script>{js}</script></div>"
+        )
+    return (
+        f'<div class="quantui-orbital-gallery" data-group="{group}" '
+        f'style="display:grid;grid-template-columns:repeat({int(columns)},'
+        f'{int(tile_px) + 8}px);gap:8px;justify-content:start">'
+        + "".join(cells)
+        + "</div>"
+        '<p style="font-size:11px;margin:4px 0 0">Drag any tile: all tiles turn '
+        "together. Coarse grid for speed; use Generate above for a detailed "
+        "view of one orbital.</p>"
+    )

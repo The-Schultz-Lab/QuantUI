@@ -1360,6 +1360,9 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
     _attach_mo_irreps(info, result)
 
     app._last_orb_info = info
+    # Full orbital energies (both spin channels for UHF), for the gallery's
+    # captions; the diagram's ``info`` is alpha-only.
+    app._last_orb_mo_energy = mo_energy
     app._last_orb_mo_coeff = getattr(result, "mo_coeff", None)
     app._last_orb_mo_occ = mo_occ
     app._last_orb_mol_atom = getattr(result, "pyscf_mol_atom", None)
@@ -1493,6 +1496,7 @@ def sync_iso_surface_controls(app: Any) -> None:
         and getattr(getattr(app, "_orb_toggle", None), "value", "") == "By index",
     )
     _show("_orb_spin_toggle", orbital and _orbitals_unrestricted(app))
+    _show("_orb_gallery_box", orbital)
     _show("_iso_esp_range_slider", mode == "esp")
     _show(
         "_iso_esp_legend",
@@ -4215,3 +4219,161 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
         "exported. py3Dmol is a required QuantUI dependency — reinstall with "
         "pip install --force-reinstall 'py3Dmol>=2,<3'."
     )
+
+
+# ── Orbital gallery (M-SURFACES SURF.1, DEC-024) ─────────────────────────────
+
+
+def build_gallery_for_app(app: Any, each_side: int = 3) -> str:
+    """Cubes for HOMO−(n−1)…LUMO+(n−1) of the loaded result, as a tile grid.
+
+    Runs in a worker thread (several cubegen calls). Follows the α/β toggle
+    for unrestricted results and the current isovalue / colour scheme.
+    """
+    import re as _re
+    from datetime import datetime as _dt
+
+    import numpy as _np
+
+    from quantui.orbital_visualization import (
+        GALLERY_GRID,
+        GalleryTile,
+        build_orbital_gallery_html,
+        compact_cube_text,
+        gallery_caption,
+        gallery_orbital_indices,
+        generate_cube_from_arrays,
+        generate_pyfock_cube_from_arrays,
+        infer_charge_and_spin,
+    )
+    from quantui.viz_backend_router import VizTask as _VT
+
+    info = getattr(app, "_last_orb_info", None)
+    mo_coeff = getattr(app, "_last_orb_mo_coeff", None)
+    mol_atom = getattr(app, "_last_orb_mol_atom", None)
+    mol_basis = getattr(app, "_last_orb_mol_basis", None)
+    mo_occ = getattr(app, "_last_orb_mo_occ", None)
+    if info is None or mo_coeff is None or mol_atom is None or mol_basis is None:
+        return (
+            '<p style="padding:8px">The gallery needs orbitals: run or load a '
+            "result that has them first.</p>"
+        )
+    if str(app._resolve_backend(_VT.ORBITAL_ISOSURFACE)) != "py3dmol":
+        return (
+            '<p style="padding:8px">The gallery needs the interactive 3D viewer '
+            "(py3Dmol), which is not available here.</p>"
+        )
+
+    coeff = _np.asarray(mo_coeff)
+    energies = getattr(app, "_last_orb_mo_energy", None)
+    energies = _np.asarray(energies) if energies is not None else None
+    occ = _np.asarray(mo_occ) if mo_occ is not None else None
+    beta = (
+        _orbitals_unrestricted(app)
+        and getattr(getattr(app, "_orb_spin_toggle", None), "value", "alpha") == "beta"
+    )
+    channel = 1 if beta else 0
+    if coeff.ndim == 3:
+        coeff = coeff[channel]
+    if energies is not None and energies.ndim == 2:
+        energies = energies[channel]
+    if occ is not None and occ.ndim == 2:
+        n_occ = int((occ[channel] > 0.5).sum())
+    else:
+        n_occ = int(info.n_occupied)
+    n_total = int(coeff.shape[-1])
+    # Symmetry labels describe the alpha orbitals (see _attach_mo_irreps).
+    irreps = None if beta else getattr(info, "irreps", None)
+
+    charge, spin = infer_charge_and_spin(mol_atom, mo_occ, basis=mol_basis)
+    generator: Any = (
+        generate_pyfock_cube_from_arrays
+        if getattr(app, "_last_orb_engine_id", "pyscf") == "pyfock"
+        else generate_cube_from_arrays
+    )
+    result_dir = getattr(app, "_last_result_dir", None)
+    if not isinstance(result_dir, Path):
+        try:
+            result_dir = app._get_results_dir()
+        except Exception:  # noqa: BLE001 — fall back to the working directory
+            result_dir = Path.cwd()
+    out_dir = (
+        Path(result_dir)
+        / "isosurfaces"
+        / f"gallery_{_dt.now().strftime('%Y-%m-%d_%H-%M-%S-%f')}"
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    tiles = []
+    for label, idx in gallery_orbital_indices(n_occ, n_total, each_side):
+        safe = _re.sub(r"[^A-Za-z0-9_+-]+", "_", label.replace("−", "-"))
+        path = out_dir / f"{safe}{'_beta' if beta else ''}.cube"
+        generator(
+            mol_atom,
+            mol_basis,
+            coeff,
+            idx,
+            path,
+            nx=GALLERY_GRID,
+            ny=GALLERY_GRID,
+            nz=GALLERY_GRID,
+            charge=charge,
+            spin=spin,
+            method=str(getattr(app, "_last_orb_method", "") or ""),
+        )
+        e = float(energies[idx]) if energies is not None else None
+        irrep = irreps[idx] if irreps is not None and idx < len(irreps) else None
+        title, detail = gallery_caption(label + (" (β)" if beta else ""), idx, e, irrep)
+        tiles.append(
+            GalleryTile(
+                label=label,
+                caption=title,
+                detail=detail,
+                cube_text=compact_cube_text(path.read_text()),
+            )
+        )
+
+    opts = iso_render_options(app)
+    return build_orbital_gallery_html(
+        tiles,
+        isovalue=opts["isovalue"],
+        color_scheme=opts["color_scheme"],
+        bgcolor=opts["bgcolor"],
+    )
+
+
+def on_orbital_gallery(app: Any, btn: Any = None) -> None:
+    """Build the orbital gallery in the background, then show it."""
+    each_side = int(getattr(getattr(app, "_orb_gallery_span_dd", None), "value", 3))
+    button = getattr(app, "_orb_gallery_btn", None)
+    app._gallery_token = int(getattr(app, "_gallery_token", 0)) + 1
+    token = app._gallery_token
+    if button is not None:
+        button.disabled = True
+        button.description = "Building gallery…"
+    app._set_html_output(
+        app._orb_gallery_output,
+        f'<p style="padding:8px;font-style:italic">⏳ Computing {2 * each_side} '
+        "orbitals…</p>",
+    )
+
+    def _work() -> None:
+        try:
+            html_str = build_gallery_for_app(app, each_side)
+        except Exception as exc:  # noqa: BLE001 — shown in the panel
+            html_str = (
+                '<p style="color:#b91c1c;padding:8px">⚠ Orbital gallery failed: '
+                f"{html.escape(f'{type(exc).__name__}: {exc}')}</p>"
+            )
+
+        def _done() -> None:
+            if token != getattr(app, "_gallery_token", 0):
+                return  # superseded by a newer click
+            app._set_html_output(app._orb_gallery_output, html_str)
+            if button is not None:
+                button.disabled = False
+                button.description = "Orbital gallery"
+
+        app._queue_main_thread_callback(_done)
+
+    threading.Thread(target=_work, daemon=True).start()

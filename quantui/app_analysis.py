@@ -233,8 +233,18 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     # to activate re-sets these in show_orbital_diagram.
     app._last_orb_info = None
     app._last_orb_mo_coeff = None
+    app._last_orb_mo_energy = None
     app._last_orb_mo_occ = None
     app._last_orb_method = None
+    # A gallery belongs to the previous result: clear it, and drop any build
+    # still running for it (SURF.1).
+    app._gallery_token = int(getattr(app, "_gallery_token", 0)) + 1
+    _gallery_out = getattr(app, "_orb_gallery_output", None)
+    if _gallery_out is not None:
+        try:
+            app._set_html_output(_gallery_out, "")
+        except Exception:  # noqa: BLE001 — never block a context switch
+            pass
     app._last_orb_engine_id = "pyscf"
     # Mulliken state consumed by the Populations panel — reset so a context
     # without charges cannot leak the prior calc's chart into this one.

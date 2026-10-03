@@ -526,6 +526,13 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "</ul>"
             "<p>Post-HF results (MP2/CCSD) use the Hartree–Fock reference "
             "orbitals, so their densities are HF densities.</p>"
+            "<p><b>Orbital gallery.</b> With <i>Molecular orbital</i> selected, "
+            "<b>Orbital gallery</b> draws the orbitals on both sides of the "
+            "HOMO–LUMO gap (HOMO−2 … LUMO+2 by default) as small viewers, each "
+            "labelled with its symmetry and energy. Drag any one and they all "
+            "turn together, so you can compare shapes from the same angle. "
+            "For an unrestricted result, set α or β first. The tiles use a "
+            "coarse grid; Generate gives the detailed view of one orbital.</p>"
         ),
     },
     "symmetry": {
