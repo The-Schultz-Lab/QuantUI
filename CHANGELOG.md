@@ -40,6 +40,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - **Edit Structure** — set a bond length, angle or dihedral to a value,
   delete atoms, add a hydrogen, change an element, undo; pick atoms by
   clicking the viewer. **Freeze atoms** for a constrained Geometry Opt.
+- **⟨S²⟩ for open-shell results** — single points record and show ⟨S²⟩
+  next to the ideal S(S+1), flagged when off by more than 10 % (spin
+  contamination). Reorganization-energy results record it at all four
+  points of each channel (`s2_*` fields in `result.json`), so a
+  spin-contaminated ion SCF can be filtered out of a λ dataset.
 
 ### Fixed
 

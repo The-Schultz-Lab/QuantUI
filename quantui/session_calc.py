@@ -65,6 +65,10 @@ class SessionResult:
             disabled), ``"bootstrap"``, ``"level_shift"``, or ``"failed"``
             (both stages tried, still not converged). See
             :mod:`quantui.scf_robust`.
+        spin_square: ⟨S²⟩ of the SCF (reference) wavefunction for an
+            open-shell or unrestricted calculation, ``None`` for closed
+            shell. The exact value is S(S+1) (0.75 for a doublet); an
+            unrestricted SCF can exceed it (spin contamination).
         scf_variant: The actual PySCF class dispatched (``"RHF"``,
             ``"UHF"``, ``"ROHF"``, ``"RKS"``, ``"UKS"``) — the
             restricted/unrestricted choice is automatic from multiplicity,
@@ -120,6 +124,13 @@ class SessionResult:
     # e.g. "PBE-D3" — see :func:`maybe_apply_d3` and :meth:`summary`.
     dispersion_applied: Optional[bool] = None
     solvent: Optional[str] = None
+    # ISSUE.12 — <S^2> of the SCF reference for an open-shell (or any
+    # unrestricted) calculation; None for closed-shell RHF/RKS. Compare with
+    # the ideal S(S+1) to judge spin contamination.
+    spin_square: Optional[float] = None
+    # Spin multiplicity the calculation ran with (2S+1), so the ideal ⟨S²⟩
+    # is known wherever the result goes. None on engines that do not set it.
+    multiplicity: Optional[int] = None
     mo_energy_hartree: Optional[Any] = None  # np.ndarray (n_mo,) or (2, n_mo) UHF
     mo_occ: Optional[Any] = None  # np.ndarray (n_mo,) or (2, n_mo) UHF
     mo_coeff: Optional[Any] = None  # np.ndarray (n_ao, n_mo) or (2, n_ao, n_mo) UHF
@@ -940,6 +951,22 @@ def _run_session_calc_body(
     except Exception as exc:
         logger.debug("Dipole moment extraction failed: %s", exc)
 
+    # ⟨S²⟩ (ISSUE.12): open-shell references only. An unrestricted SCF can
+    # mix in higher spin states, which shifts its energy; without the value
+    # in the result a contaminated SCF cannot be spotted afterwards. For
+    # post-HF methods this is the HF reference's ⟨S²⟩.
+    spin_square: Optional[float] = None
+    if molecule.multiplicity > 1 or str(scf_variant).upper().startswith("U"):
+        try:
+            mf_s2 = mf
+            if not callable(getattr(mf, "spin_square", None)) and callable(
+                getattr(mf, "to_cpu", None)
+            ):
+                mf_s2 = mf.to_cpu()
+            spin_square = float(mf_s2.spin_square()[0])
+        except Exception as exc:
+            logger.debug("<S^2> extraction failed (non-fatal): %s", exc)
+
     # MO arrays for orbital visualization (non-fatal if extraction fails).
     # Uses the same ``_to_numpy_array`` CuPy→host helper defined above
     # (GPU-offload note, fix 2026-05-25):
@@ -1020,6 +1047,8 @@ def _run_session_calc_body(
         density_fit=density_fit_used,
         dispersion_applied=dispersion_applied,
         solvent=_pcm_solvent,
+        spin_square=spin_square,
+        multiplicity=int(molecule.multiplicity),
         mo_energy_hartree=_mo_energy_ha_arr,
         mo_occ=_mo_occ_arr,
         mo_coeff=_mo_coeff_arr,
