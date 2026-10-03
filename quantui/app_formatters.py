@@ -267,8 +267,21 @@ def format_opt_result(r: Any) -> str:
         _result_card_open()
         + f"<b>Geometry Optimisation &mdash; {r.formula} ({r.method}/{r.basis})</b>"
         + _result_card_table_open()
-        + f"{_rows}</table>"
+        + f"{_rows}"
+        + _solvent_row(getattr(r, "solvent", None), "optimized in solvent")
+        + "</table>"
         + _RESULT_CARD_CLOSE
+    )
+
+
+def _solvent_row(solvent: Any, note: str) -> str:
+    """'Solvent (PCM)' card row for a solvated result; '' for gas phase."""
+    if not solvent:
+        return ""
+    return (
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Solvent (PCM)</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{solvent}'
+        f'<span style="color:{_theme.css.TEXT_MUTED}"> &mdash; {note}</span></td></tr>'
     )
 
 
@@ -308,6 +321,7 @@ def format_freq_result(r: Any) -> str:
         + f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">ZPVE</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.zpve_hartree:.6f} Ha '
         f"({r.zpve_hartree * 27.211386245988:.4f} eV)</td></tr>"
+        + _solvent_row(getattr(r, "solvent", None), "Raman not computed in solvent")
     )
     _thermo_rows = ""
     _thermo = getattr(r, "thermo", None)
@@ -352,6 +366,7 @@ def format_tddft_result(r: Any) -> str:
         f'<td style="color:{_cc}">{_conv}</td></tr>'
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">States computed</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{_states_detail}</td></tr>'
+        + _solvent_row(getattr(r, "solvent", None), "non-equilibrium excitations")
     )
     exc_table = ""
     if r.excitation_energies_ev:

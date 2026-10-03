@@ -21,7 +21,7 @@ through a single Calculate tab.
 | **Hartree–Fock** | RHF (closed-shell), UHF (open-shell radicals) — baseline reference; fastest path to convergence |
 | **DFT** | B3LYP, PBE, PBE0, M06-2X, ωB97X-D, CAM-B3LYP, M06-L, HSE06, PBE-D3 — nine functionals spanning hybrid, GGA, meta-hybrid, range-separated, and dispersion-corrected families |
 | **Post-HF** | MP2, CCSD, CCSD(T) — Møller–Plesset (O(N^5^)) for fast post-HF; coupled cluster (O(N^6^) singles+doubles, O(N^7^) with perturbative triples) for benchmark-quality small-molecule energies |
-| **Implicit solvent** | PCM — Water, Ethanol, THF, DMSO, Acetonitrile — single checkbox; compatible with any method above |
+| **Implicit solvent** | PCM (C-PCM) — Water, Ethanol, THF, DMSO, Acetonitrile — single checkbox. Single point, geometry optimization (solvated at every step), frequency (PCM Hessian and IR intensities; Raman is not computed in solvent) and UV-Vis TD-DFT (solvated ground state, non-equilibrium excitations using the solvent's optical dielectric n²). Reorganization energy uses gas-phase optimizations with solvated single points. NMR and PES scans are gas-phase only |
 
 ## Basis sets
 

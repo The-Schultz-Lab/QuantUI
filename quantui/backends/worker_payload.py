@@ -119,6 +119,7 @@ def optimization_result_payload(result, *, trajectory_file: str) -> Dict[str, An
         "formula": result.formula,
         "gpu_used": bool(getattr(result, "gpu_used", False)),
         "gpu_name": getattr(result, "gpu_name", None),
+        "solvent": getattr(result, "solvent", None),
         "trajectory_file": trajectory_file,
     }
 
@@ -162,6 +163,7 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
         "scf_variant": getattr(result, "scf_variant", "") or None,
         # AUDIT F12 — was never serialized, though FreqResult carries it.
         "density_fit": bool(getattr(result, "density_fit", False)),
+        "solvent": getattr(result, "solvent", None),
         "spectra": {
             "ir": {
                 "frequencies_cm1": list(result.frequencies_cm1),
@@ -199,6 +201,7 @@ def tddft_result_payload(result) -> Dict[str, Any]:
         "scf_variant": getattr(result, "scf_variant", "") or None,
         # AUDIT F12 — was never serialized, though TDDFTResult carries it.
         "density_fit": bool(getattr(result, "density_fit", False)),
+        "solvent": getattr(result, "solvent", None),
         # AUDIT F08 (code review follow-up) — per-root convergence detail
         # never left the worker process; a SLURM-submitted TDDFT run's
         # History card could show only the folded "converged" bool, never

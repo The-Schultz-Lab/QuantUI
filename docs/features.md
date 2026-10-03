@@ -39,7 +39,8 @@ local Python kernel.
     RHF, UHF, nine DFT functionals, MP2, CCSD, and CCSD(T) &mdash;
     with six calculation types: single point, geometry optimization,
     frequencies/thermochemistry, TD-DFT UV-Vis, NMR shielding,
-    and 1D PES scans. PCM implicit solvation included.
+    and 1D PES scans. PCM implicit solvation for single points,
+    optimizations, frequencies and TD-DFT.
   </p>
 </div>
 

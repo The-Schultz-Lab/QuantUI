@@ -129,6 +129,9 @@ class FreqResult:
     # M-UX2 UXP2.10 — the actual PySCF class dispatched for the reference
     # SCF (e.g. "RHF", "UHF", "RKS", "UKS"); "" for an older saved result.
     scf_variant: str = ""
+    # PCM solvent the reference SCF, Hessian and IR displacements ran in, or
+    # None for gas phase. Raman is not computed for a solvated run.
+    solvent: Optional[str] = None
 
     @property
     def energy_ev(self) -> float:
@@ -300,6 +303,7 @@ def run_freq_calc(
     scf_rescue: bool = True,
     checkpoint: Optional[Any] = None,
     resume: bool = False,
+    solvent: Optional[str] = None,
 ) -> FreqResult:
     """Run SCF + analytical Hessian to obtain vibrational frequencies.
 
@@ -336,6 +340,12 @@ def run_freq_calc(
             *checkpoint* is ``None`` or has no banked displacements — the
             calc still runs, it just starts from nothing, same as if resume
             were never requested.
+        solvent: PCM solvent name (``config.SOLVENT_OPTIONS``) or ``None``.
+            The reference SCF, the analytical (PCM) Hessian and every IR
+            finite-difference displacement SCF run in the same solvent, so
+            frequencies, IR intensities and thermochemistry are all
+            solvated. The geometry should be optimized in the same solvent.
+            Raman activities are skipped for a solvated run.
 
     Returns:
         :class:`FreqResult` with frequencies, ZPVE, and SCF properties.
@@ -387,6 +397,7 @@ def run_freq_calc(
             scf_rescue=scf_rescue,
             checkpoint=checkpoint,
             resume=resume,
+            solvent=solvent,
             _dft=dft,
             _gto=gto,
             _scf=scf,
@@ -404,6 +415,7 @@ def _run_freq_calc_body(
     scf_rescue: bool = True,
     checkpoint: Optional[Any] = None,
     resume: bool = False,
+    solvent: Optional[str] = None,
     _dft: Any,
     _gto: Any,
     _scf: Any,
@@ -460,6 +472,15 @@ def _run_freq_calc_body(
     from .density_fitting import try_density_fit as _try_density_fit
 
     mf, _density_fit_used = _try_density_fit(mf)
+
+    # Implicit solvent (PCM). mf.Hessian() on a PCM-wrapped mf is PySCF's
+    # PCM Hessian, and the IR displacement SCFs below get the same solvent.
+    from .session_calc import apply_pcm as _apply_pcm
+
+    mf, _pcm_solvent = _apply_pcm(mf, solvent, progress_stream=stream)
+    _pcm_applied = _pcm_solvent is not None
+    if _pcm_applied:
+        _status(f"Implicit solvent (PCM, {_pcm_solvent}) applied to SCF and Hessian.")
 
     # Cooperative cancel between SCF cycles (the Hessian block that
     # follows is a single long native call the callback can't interrupt).
@@ -715,6 +736,9 @@ def _run_freq_calc_body(
                     # any GPU offload, so displaced dipoles stay consistent with
                     # the reference energy.
                     _mf_d, _ = _try_density_fit(_mf_d, enabled=_density_fit_used)
+                    # Same PCM solvent as the reference, so the dipole
+                    # derivatives (IR intensities) are solvated too.
+                    _mf_d, _ = _apply_pcm(_mf_d, _pcm_solvent)
                     # ``method_upper="RHF"`` is a label — try_to_gpu only
                     # uses it to skip CCSD(T). For RHF/UHF/DFT the wrapper
                     # attempts ``mf.to_gpu()`` and falls back to CPU on any
@@ -832,6 +856,7 @@ def _run_freq_calc_body(
                                         mol.ecp,  # AUDIT F05
                                         _density_fit_used,  # AUDIT F19
                                         scf_rescue,  # AUDIT F19
+                                        _pcm_solvent,
                                     ),
                                 ) as _pool:
                                     # Submit all and store futures keyed by task
@@ -948,7 +973,15 @@ def _run_freq_calc_body(
 
             # Static Raman activities: analytical polarizability (pyscf-properties)
             # + the same ±Δ geometry FD loop as IR (see quantui.raman_calc).
-            if displacements is not None and frequencies_cm1:
+            # Not for a solvated run: the polarizability path is gas-phase
+            # only, and mixing a gas-phase Raman with PCM frequencies would
+            # be wrong without saying so.
+            if _pcm_applied and displacements is not None and frequencies_cm1:
+                _status(
+                    "Raman activities are not computed with implicit solvent "
+                    "(gas-phase only); skipping Raman."
+                )
+            elif displacements is not None and frequencies_cm1:
                 try:
                     from quantui.raman_calc import compute_raman_activities
 
@@ -1093,4 +1126,5 @@ def _run_freq_calc_body(
         pyscf_mol_basis=basis,
         density_fit=_density_fit_used,
         scf_variant=scf_variant,
+        solvent=_pcm_solvent,
     )
