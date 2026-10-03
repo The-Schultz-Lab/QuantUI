@@ -120,6 +120,12 @@ def build_calculation_request(
     if calc_type in ("geometry_opt", "reorganization_energy"):
         options["fmax"] = float(app.fmax_fi.value)
         options["max_steps"] = int(app.max_steps_si.value)
+    if calc_type == "geometry_opt":
+        from quantui.app_runflow import frozen_atom_indices
+
+        frozen = frozen_atom_indices(app)
+        if frozen:
+            options["frozen_atoms"] = frozen
     if calc_type == "tddft":
         options["nstates"] = int(app.nstates_si.value)
     if calc_type == "reorganization_energy":
