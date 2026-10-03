@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, List, Optional, Sequence
 
@@ -38,7 +39,29 @@ DEFAULT_TOLERANCE_ANGSTROM = 0.01
 LOOSE_TOLERANCE_ANGSTROM = 0.05
 
 # PySCF's tolerance is a module global; serialize every change to it.
-_TOLERANCE_LOCK = threading.Lock()
+# Re-entrant: detection may run inside detection_tolerance().
+_TOLERANCE_LOCK = threading.RLock()
+
+
+@contextmanager
+def detection_tolerance(tolerance_angstrom: float = DEFAULT_TOLERANCE_ANGSTROM):
+    """Run PySCF symmetry detection at *tolerance_angstrom* inside the block.
+
+    For PySCF code that detects symmetry internally, e.g.
+    ``hessian.thermo.rotational_symmetry_number``: at PySCF's strict default
+    an optimized NH3 gets symmetry number 1 instead of 3, overstating the
+    rotational entropy by R ln 3.
+    """
+    from pyscf.symm import geom
+
+    with _TOLERANCE_LOCK:
+        old = geom.TOLERANCE
+        geom.TOLERANCE = tolerance_angstrom * BOHR_PER_ANGSTROM
+        try:
+            yield
+        finally:
+            geom.TOLERANCE = old
+
 
 _PRETTY = {"Dooh": "D∞h", "Coov": "C∞v", "SO3": "SO(3)"}
 

@@ -141,10 +141,14 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
             "S_jmol": _thermo.S_jmol,
             "G_hartree": _thermo.G_hartree,
             "temperature_k": _thermo.temperature_k,
+            "E_thermal_hartree": getattr(_thermo, "E_thermal_hartree", None),
+            "Cv_jmolk": getattr(_thermo, "Cv_jmolk", None),
+            "Cp_jmolk": getattr(_thermo, "Cp_jmolk", None),
+            "symmetry_number": getattr(_thermo, "symmetry_number", None),
             # AUDIT F18 — pressure and the thermo model itself were never
             # recorded anywhere; both are fixed by the harmonic-oscillator/
             # rigid-rotor/ideal-gas model at 1 atm used in freq_calc.py.
-            "pressure_atm": 1.0,
+            "pressure_atm": getattr(_thermo, "pressure_atm", 1.0),
             "approximation": "ideal_gas_rigid_rotor_harmonic_oscillator",
         }
         if _thermo is not None

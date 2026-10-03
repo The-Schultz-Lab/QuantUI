@@ -2229,6 +2229,62 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         [app.vib_prev_btn, app.vib_mode_dd, app.vib_next_btn],
         layout=layout_fn(align_items="center", margin="0 0 4px 0"),
     )
+    # Amplitude + displacement arrows (live on the py3Dmol viewer, camera kept).
+    app._vib_amp_slider = widgets.FloatSlider(
+        value=0.4,
+        min=0.1,
+        max=1.5,
+        step=0.05,
+        description="Amplitude:",
+        readout_format=".2f",
+        continuous_update=False,
+        tooltip="How far the atoms swing in the animation (and export).",
+        style={"description_width": "75px"},
+        layout=layout_fn(width="300px"),
+    )
+    app._vib_arrows_cb = widgets.Checkbox(
+        value=False,
+        description="Displacement arrows",
+        indent=False,
+        tooltip="Show each atom's direction of motion in this mode.",
+        layout=layout_fn(width="200px"),
+    )
+    vib_appearance_row = widgets.HBox(
+        [app._vib_amp_slider, app._vib_arrows_cb],
+        layout=layout_fn(align_items="center", margin="0 0 4px 0"),
+    )
+    app._vib_mode_table = widgets.HTML(value="")
+    # Thermochemistry at any T/P, recomputed from the stored frequencies.
+    app._thermo_T = widgets.BoundedFloatText(
+        value=298.15,
+        min=1.0,
+        max=5000.0,
+        step=10.0,
+        description="T (K):",
+        style={"description_width": "45px"},
+        layout=layout_fn(width="170px"),
+    )
+    app._thermo_P = widgets.BoundedFloatText(
+        value=1.0,
+        min=0.0001,
+        max=1000.0,
+        step=0.1,
+        description="P (atm):",
+        style={"description_width": "55px"},
+        layout=layout_fn(width="170px"),
+    )
+    app._thermo_html = widgets.HTML(value="")
+    app._thermo_box = widgets.VBox(
+        [
+            widgets.HTML(
+                f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY};'
+                'font-weight:bold">Thermochemistry</span>'
+            ),
+            widgets.HBox([app._thermo_T, app._thermo_P]),
+            app._thermo_html,
+        ],
+        layout=layout_fn(display="none", margin="8px 0 0 0"),
+    )
     app._vib_apply_mode_btn = widgets.Button(
         description="Use mode → new Frequency calc",
         icon="share",
@@ -2293,10 +2349,13 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             widgets.VBox(
                 [
                     vib_mode_row,
+                    vib_appearance_row,
                     app._vib_apply_mode_btn,
                     app.vib_output,
                     vib_export_row,
                     app._vib_png_status,
+                    app._vib_mode_table,
+                    app._thermo_box,
                     app._vib_js_bridge,
                     app._vib_png_inbox,
                 ],

@@ -686,6 +686,9 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     app._last_vib_data = vib_data  # may be None — plotlymol3d optional
     app._last_vib_molecule = molecule
     app._last_vib_freq_result = freq_result
+    _table = getattr(app, "_vib_mode_table", None)
+    if _table is not None:
+        _table.value = vib_mode_table_html(freq_result)
 
     first_label, first_mode = options[0]
 
@@ -3509,7 +3512,31 @@ _VIB_VIEWER_JS = """
   var UID="__UID__";
   var SYM=__SYM__, BASE=__BASE__, DISPL=__DISPL__;
   var NAT=__NAT__, NF=__NF__, AMP=__AMP__, IV=__IV__, BG=__BG__, INIT=__INIT__;
+  var ARROWS=__ARROWS__, CUR=INIT, arrowShapes=[];
   function vw(){ return window["viewer_"+UID]; }
+  // Static displacement arrows (GaussView "display displacement vectors"):
+  // shapes, so they stay put while the frames animate. Length follows the
+  // animation amplitude; atoms that barely move get no arrow.
+  function drawArrows(v, m){
+    for(var i=0;i<arrowShapes.length;i++){ try{ v.removeShape(arrowShapes[i]); }catch(e){} }
+    arrowShapes=[];
+    if(!ARROWS) return;
+    var d=DISPL[m]; if(!d) return;
+    var norms=[], maxn=0;
+    for(var a=0;a<NAT;a++){
+      var n=Math.sqrt(d[a][0]*d[a][0]+d[a][1]*d[a][1]+d[a][2]*d[a][2]);
+      norms.push(n); if(n>maxn) maxn=n;
+    }
+    var s=2.5*AMP;
+    for(var a=0;a<NAT;a++){
+      if(norms[a] < 0.08*maxn) continue;
+      var b=BASE[a];
+      arrowShapes.push(v.addArrow({
+        start:{x:b[0], y:b[1], z:b[2]},
+        end:{x:b[0]+s*d[a][0], y:b[1]+s*d[a][1], z:b[2]+s*d[a][2]},
+        radius:0.06, radiusRatio:2.0, mid:0.72, color:"#16a34a"}));
+    }
+  }
   function frames(m){
     var d=DISPL[m]; if(!d) return null;
     var out="";
@@ -3537,6 +3564,8 @@ _VIB_VIEWER_JS = """
       v.removeAllModels();
       v.addModelsAsFrames(xyz,"xyz");
       v.setStyle({"stick":{},"sphere":{"scale":0.3}});
+      CUR=m;
+      drawArrows(v, m);
       v.setBackgroundColor(BG);
       if(fit) v.zoomTo();   // fit only on first mode; switches keep the camera
       v.animate({"loop":"forward","interval":IV,"reps":0});
@@ -3552,6 +3581,14 @@ _VIB_VIEWER_JS = """
     try{ if(v.stopAnimate) v.stopAnimate();
       v.animate({"loop":"forward","interval":IV,"reps":0}); v.render();
     }catch(e){}
+  };
+  // Live amplitude / arrows (camera preserved: same viewer, new frames).
+  window.__quantuiVibSetAmp=function(a){
+    AMP=Math.max(0.01, +a); return window.__quantuiVibSetMode(CUR, false);
+  };
+  window.__quantuiVibSetArrows=function(on){
+    ARROWS=!!on; var v=vw(); if(!v) return false;
+    drawArrows(v, CUR); v.render(); return true;
   };
   var t=0, poll=setInterval(function(){ t++;
     if(vw()){ clearInterval(poll); window.__quantuiVibSetMode(INIT, true); }
@@ -3574,6 +3611,7 @@ def build_vib_viewer_html(
     width: int = 460,
     height: int = 420,
     capture_class: str = "",
+    arrows: bool = False,
 ) -> str:
     """Build a single py3Dmol viewer that holds every vibrational mode.
 
@@ -3637,6 +3675,7 @@ def build_vib_viewer_html(
         .replace("__IV__", str(interval_ms))
         .replace("__BG__", json.dumps(bgcolor))
         .replace("__INIT__", str(int(initial_mode)))
+        .replace("__ARROWS__", "true" if arrows else "false")
     )
     body = f"{view_html}<script>{js}</script>"
     if capture_class:
@@ -3689,9 +3728,13 @@ def _render_vib_single_viewer(
                 freq_result,
                 mode_numbers,
                 initial_mode,
+                amplitude=vib_amplitude(app),
                 fps=fps,
                 bgcolor=bg,
                 capture_class=_VIB_PNG_INBOX_CLASS,
+                arrows=bool(
+                    getattr(getattr(app, "_vib_arrows_cb", None), "value", False)
+                ),
             )
     except Exception as exc:  # noqa: BLE001 — fall back to the legacy renderer
         try:
@@ -3732,6 +3775,171 @@ def _vib_bridge_set_mode(app: Any, mode_number: int) -> None:
             display(Javascript(js))
     except Exception:
         pass
+
+
+def vib_amplitude(app: Any) -> float:
+    """Animation amplitude (Å per unit displacement) from the panel slider."""
+    try:
+        return float(getattr(getattr(app, "_vib_amp_slider", None), "value", 0.4))
+    except (TypeError, ValueError):
+        return 0.4
+
+
+def _vib_bridge_call(app: Any, fn: str, arg: str) -> None:
+    """One-shot call of ``window.<fn>(<arg>)`` on the live vib viewer."""
+    bridge = getattr(app, "_vib_js_bridge", None)
+    if bridge is None:
+        return
+    from IPython.display import Javascript, display
+
+    js = (
+        "(function(){var n=0;function go(){n++;"  # noqa: UP031 — JS is brace-dense
+        "if(window.%s){window.%s(%s);}"
+        "else if(n<40){setTimeout(go,50);}}go();})();" % (fn, fn, arg)
+    )
+    try:
+        bridge.clear_output(wait=True)
+        with bridge:
+            display(Javascript(js))
+    except Exception:
+        pass
+
+
+def on_vib_amplitude_changed(app: Any, change: Any = None) -> None:
+    _vib_bridge_call(app, "__quantuiVibSetAmp", repr(vib_amplitude(app)))
+
+
+def on_vib_arrows_changed(app: Any, change: Any = None) -> None:
+    on = bool(getattr(getattr(app, "_vib_arrows_cb", None), "value", False))
+    _vib_bridge_call(app, "__quantuiVibSetArrows", "true" if on else "false")
+
+
+def vib_mode_table_html(freq_result: Any) -> str:
+    """Every normal mode with its frequency, IR intensity and Raman activity."""
+    freqs = list(getattr(freq_result, "frequencies_cm1", None) or [])
+    ir = list(getattr(freq_result, "ir_intensities", None) or [])
+    raman = list(getattr(freq_result, "raman_activities", None) or [])
+    if not freqs:
+        return ""
+    has_ir = len(ir) == len(freqs)
+    has_raman = len(raman) == len(freqs)
+    cell = "padding:2px 10px;text-align:right"
+    head = (
+        f'<th style="{cell}">Mode</th><th style="{cell}">ν (cm⁻¹)</th>'
+        + (f'<th style="{cell}">IR (km/mol)</th>' if has_ir else "")
+        + (f'<th style="{cell}">Raman (Å⁴/amu)</th>' if has_raman else "")
+    )
+    rows = []
+    for i, f in enumerate(freqs, start=1):
+        if abs(f) < 10:
+            continue
+        nu = f"{abs(f):.1f}i" if f < 0 else f"{f:.1f}"
+        style = f' style="color:{_theme.css.ACCENT_ERROR_ALT}"' if f < 0 else ""
+        rows.append(
+            f"<tr{style}><td style='{cell}'>{i}</td><td style='{cell}'>{nu}</td>"
+            + (f"<td style='{cell}'>{ir[i - 1]:.1f}</td>" if has_ir else "")
+            + (f"<td style='{cell}'>{raman[i - 1]:.2f}</td>" if has_raman else "")
+            + "</tr>"
+        )
+    return (
+        '<div style="max-height:240px;overflow-y:auto;margin:6px 0;font-size:12px">'
+        f'<table style="border-collapse:collapse"><tr>{head}</tr>{"".join(rows)}</table>'
+        "<small>Imaginary modes (ν shown with i) are in red.</small></div>"
+    )
+
+
+def show_thermo_box(
+    app: Any, molecule: Any, energy_hartree: Any, frequencies_cm1: Any
+) -> None:
+    """Remember what thermochemistry needs and show it at the current T/P."""
+    box = getattr(app, "_thermo_box", None)
+    if molecule is None or energy_hartree is None or not frequencies_cm1:
+        app._thermo_source = None
+        if box is not None:
+            box.layout.display = "none"
+        return
+    app._thermo_source = (molecule, float(energy_hartree), list(frequencies_cm1))
+    if box is not None:
+        box.layout.display = ""
+    on_thermo_inputs_changed(app)
+
+
+def on_thermo_inputs_changed(app: Any, change: Any = None) -> None:
+    """Recompute thermochemistry at the T/P in the panel (no new calculation)."""
+    out = getattr(app, "_thermo_html", None)
+    src = getattr(app, "_thermo_source", None)
+    if out is None or src is None:
+        return
+    molecule, energy, freqs = src
+    try:
+        temp = float(app._thermo_T.value)
+        pres = float(app._thermo_P.value)
+        from quantui.freq_calc import compute_thermochemistry
+
+        td = compute_thermochemistry(
+            list(molecule.atoms),
+            [list(c) for c in molecule.coordinates],
+            energy_hartree=energy,
+            frequencies_cm1=freqs,
+            charge=int(getattr(molecule, "charge", 0)),
+            multiplicity=int(getattr(molecule, "multiplicity", 1)),
+            temperature_k=temp,
+            pressure_atm=pres,
+        )
+    except Exception as exc:  # noqa: BLE001 — show, never raise from an input
+        out.value = f'<span style="color:#b91c1c">Thermochemistry failed: {exc}</span>'
+        return
+    out.value = thermo_table_html(td, energy)
+
+
+def thermo_table_html(td: Any, energy_hartree: float) -> str:
+    """ZPE, U, H, S, G, Cv, Cp, sigma — Hartree and kJ/mol corrections."""
+    kj = 2625.4996
+    cell = "padding:2px 12px 2px 0"
+
+    def _row(label: str, value: str, note: str = "") -> str:
+        return (
+            f"<tr><td style='{cell};color:{_theme.css.TEXT_LABEL}'>{label}</td>"
+            f"<td style='{cell}'>{value}</td>"
+            f"<td style='color:{_theme.css.TEXT_MUTED};font-size:11px'>{note}</td></tr>"
+        )
+
+    def _corr(value: float) -> str:
+        return f"correction {(value - energy_hartree) * kj:+.2f} kJ/mol"
+
+    rows = [
+        _row("Electronic energy E₀", f"{energy_hartree:.6f} Ha"),
+        _row(
+            "Zero-point energy",
+            f"{td.zpve_hartree:.6f} Ha",
+            f"{td.zpve_hartree * kj:.2f} kJ/mol",
+        ),
+    ]
+    if td.E_thermal_hartree is not None:
+        rows.append(
+            _row(
+                "Thermal energy U",
+                f"{td.E_thermal_hartree:.6f} Ha",
+                _corr(td.E_thermal_hartree),
+            )
+        )
+    rows += [
+        _row("Enthalpy H", f"{td.H_hartree:.6f} Ha", _corr(td.H_hartree)),
+        _row("Entropy S", f"{td.S_jmol:.2f} J/(mol·K)"),
+        _row("Gibbs energy G", f"{td.G_hartree:.6f} Ha", _corr(td.G_hartree)),
+    ]
+    if td.Cv_jmolk is not None:
+        rows.append(_row("Heat capacity Cv", f"{td.Cv_jmolk:.2f} J/(mol·K)"))
+    if td.Cp_jmolk is not None:
+        rows.append(_row("Heat capacity Cp", f"{td.Cp_jmolk:.2f} J/(mol·K)"))
+    if td.symmetry_number is not None:
+        rows.append(_row("Rotational symmetry number σ", str(td.symmetry_number)))
+    return (
+        f"<div style='font-size:12px;margin:4px 0'><b>At {td.temperature_k:.2f} K, "
+        f"{td.pressure_atm:g} atm</b> (ideal gas, rigid rotor, harmonic "
+        "oscillator; imaginary modes excluded)"
+        f"<table style='border-collapse:collapse;margin-top:4px'>{''.join(rows)}</table></div>"
+    )
 
 
 def _vib_bridge_set_fps(app: Any, fps: int) -> None:
@@ -3940,7 +4148,7 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
             )
 
         n_frames = 24
-        amplitude = 0.4
+        amplitude = vib_amplitude(app)
         fps = int(
             getattr(
                 getattr(app, "_user_settings", None) and app._user_settings.viz,
