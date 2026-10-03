@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shlex
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from quantui import config
+from quantui.security import SecurityError
 
 from . import cluster_config as cfg
 from .base import CALC_TYPES, BackendCapabilities, CalculationRequest
@@ -56,6 +58,8 @@ _TERMINAL_SLURM = frozenset(
 )
 _TERMINAL_RECORD = frozenset({"success", "error", "cancelled"})
 _ACTIVE_RECORD = frozenset({"queued", "pending", "running", "submitted"})
+# A request id (uuid hex / job-name style) or a numeric SLURM job id.
+_DEPENDENCY_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 class SlurmBackend:
@@ -116,6 +120,7 @@ class SlurmBackend:
         walltime = walltime or estimates["walltime"]
         resources = validate_resources(cores, memory_gb, walltime)
 
+        dependency_job_id = self._resolve_dependency(depends_on)
         email = validate_email(email)
         resolved_events: list[str] = []
         if email is not None:
@@ -143,7 +148,7 @@ class SlurmBackend:
             request_path=request_path,
             job_dir=job_dir,
             resources=resources,
-            depends_on=depends_on,
+            depends_on=dependency_job_id,
             email=email,
             mail_events=resolved_events,
         )
@@ -167,6 +172,36 @@ class SlurmBackend:
         self.registry.start_attempt(request.request_id, slurm_job_id, source="submit")
         self.registry.record_slurm_submit()
         return request.request_id
+
+    def _resolve_dependency(self, depends_on: str | None) -> str | None:
+        """Turn *depends_on* into the SLURM job id ``--dependency`` needs.
+
+        Accepts a QuantUI request id (looked up in the registry; the
+        dependency is that request's current SLURM job) or a numeric SLURM
+        job id. Anything else raises ``SecurityError``. The value ends up
+        on an ``#SBATCH`` line, so it must never carry text or newlines.
+        """
+        if depends_on is None or not str(depends_on).strip():
+            return None
+        value = str(depends_on).strip()
+        if not _DEPENDENCY_TOKEN_RE.match(value):
+            raise SecurityError(
+                f"Invalid --depends-on value {value!r}: give a QuantUI "
+                "request id or a numeric SLURM job id."
+            )
+        record = self.registry.load(value)
+        if record is not None:
+            if not record.slurm_job_id:
+                raise SecurityError(
+                    f"Request {value} has no SLURM job id yet, so nothing "
+                    "can depend on it."
+                )
+            return str(record.slurm_job_id)
+        if value.isdigit():
+            return value
+        raise SecurityError(
+            f"--depends-on {value!r} is not a known request id or a SLURM job id."
+        )
 
     def resubmit(self, request_id: str) -> str:
         """Run a finished job's ``submit.slurm`` again as a new attempt.

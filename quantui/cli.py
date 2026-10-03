@@ -23,8 +23,9 @@ Currently shipped subcommands:
   ``quantui-app`` shell shortcut under ``~/.local/bin``.
 * ``quantui submit REQUEST_JSON [REQUEST_JSON ...] [--dry-run] [--cores N]
   [--memory-gb N] [--walltime HH:MM:SS] [--email ADDR]
-  [--mail-events EVENT,...] [--job-name NAME] [--depends-on REQUEST_ID]
-  [--partition NAME] [--no-apptainer] [--apptainer-image PATH]`` — submit
+  [--mail-events EVENT,...] [--job-name NAME]
+  [--depends-on REQUEST_ID|SLURM_JOB_ID] [--partition NAME] [--no-apptainer]
+  [--apptainer-image PATH]`` — submit
   one or more ``CalculationRequest`` JSON files to the SLURM batch backend
   headlessly, with no interactive app/student session involved (M-CLUSTER2
   CL2.7). Resource sizing defaults to ``estimate_slurm_resources()`` —
@@ -562,8 +563,12 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="depends_on",
         type=str,
         default=None,
-        metavar="REQUEST_ID",
-        help="Make this job depend on another already-submitted request's completion.",
+        metavar="ID",
+        help=(
+            "Start this job only after another job succeeds. Give the other "
+            "job's QuantUI request id (printed by `quantui submit`) or its "
+            "SLURM job id."
+        ),
     )
     submit_parser.add_argument(
         "--partition",
