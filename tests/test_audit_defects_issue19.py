@@ -241,3 +241,72 @@ class TestRamanWithoutActivities:
         app._show_raman_spectrum(stub)
         assert app._raman_accordion.get_title(0) == "Raman Spectrum"
         assert app._last_raman_fig is not None
+
+
+class TestMultiFrameXyzPaste:
+    """#10 — a pasted trajectory gets a teaching message."""
+
+    FRAME = "3\nwater\nO 0 0 0.117\nH 0 0.757 -0.469\nH 0 -0.757 -0.469\n"
+
+    def test_two_frames(self):
+        from quantui.molecule import parse_xyz_input
+
+        with pytest.raises(ValueError, match="multi-frame XYZ file \\(2 structures"):
+            parse_xyz_input(self.FRAME + self.FRAME)
+
+    def test_blank_line_between_frames(self):
+        from quantui.molecule import parse_xyz_input
+
+        with pytest.raises(ValueError, match="Upload File tab"):
+            parse_xyz_input(self.FRAME + "\n" + self.FRAME)
+
+    def test_single_frame_and_headerless_still_parse(self):
+        from quantui.molecule import parse_xyz_input
+
+        assert parse_xyz_input(self.FRAME)[0] == ["O", "H", "H"]
+        assert parse_xyz_input("O 0 0 0\nH 0 0 1\n")[0] == ["O", "H"]
+
+    def test_truncated_second_frame_is_an_ordinary_error(self):
+        from quantui.molecule import parse_xyz_input
+
+        with pytest.raises(ValueError) as exc:
+            parse_xyz_input(self.FRAME + "3\nx\nO 0 0 0\n")
+        assert "multi-frame" not in str(exc.value)
+
+
+class TestFragmentNoteOnEveryLoad:
+    """#9 — disconnected structures are flagged whatever their source."""
+
+    DIMER = Molecule(
+        ["O", "H", "H", "O", "H", "H"],
+        [
+            [0, 0, 0.117],
+            [0, 0.757, -0.469],
+            [0, -0.757, -0.469],
+            [0, 0, 3.117],
+            [0, 0.757, 2.531],
+            [0, -0.757, 2.531],
+        ],
+    )
+
+    def test_note_text(self):
+        from quantui.connectivity import disconnection_note
+
+        note = disconnection_note(self.DIMER.atoms, self.DIMER.coordinates)
+        assert note.startswith("2 separate fragments (2×H2O)")
+        assert disconnection_note(H2.atoms, H2.coordinates) is None
+
+    def test_summary_shows_it_for_a_pasted_or_uploaded_structure(self):
+        from quantui.app import QuantUIApp
+
+        app = QuantUIApp()
+        app._set_molecule(self.DIMER, "XYZ input")
+        assert "2 separate fragments" in app.mol_info_html.value
+        app._set_molecule(H2, "XYZ input")
+        assert "separate fragments" not in app.mol_info_html.value
+
+    def test_search_message_is_unchanged(self):
+        from quantui.connectivity import describe_disconnection
+
+        msg = describe_disconnection(self.DIMER.atoms, self.DIMER.coordinates)
+        assert "resolved to 2 separate fragments (2×H2O)" in msg

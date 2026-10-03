@@ -72,6 +72,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - **No placeholder Raman spectrum** — when Raman activities were not
   computed (PCM run, or `pyscf-properties` missing), the Raman panel drew
   every mode at the same height. It now says why there is no spectrum.
+- **Disconnected structures are flagged for every source** — the molecule
+  summary notes separate fragments for pasted, library, uploaded, edited and
+  History structures, not only Online Search results.
+- **Pasting a multi-frame XYZ** says what it is and how to load it, instead
+  of "Line N: not enough values".
 - **CPU image: NMR and analytical Raman** — the image installed QuantUI
   without the `[pyscf]` extra, so `pyscf-properties` was missing. It now
   installs the extra, and the build fails if `pyscf.prop.nmr` or
