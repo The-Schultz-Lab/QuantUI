@@ -60,6 +60,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - **`quantui submit --depends-on`** accepts a request id or a SLURM job id
   and resolves it; it used to write the request id into
   `--dependency=afterok:` and validate nothing.
+- **CPU image: NMR and analytical Raman** — the image installed QuantUI
+  without the `[pyscf]` extra, so `pyscf-properties` was missing. It now
+  installs the extra, and the build fails if `pyscf.prop.nmr` or
+  `pyscf.dispersion` cannot be imported.
 - **Solvent names are case-insensitive**; an unknown solvent is an error.
   A request with `"water"` used to run in the gas phase.
 - **Export Script** writes into the result folder instead of the server's

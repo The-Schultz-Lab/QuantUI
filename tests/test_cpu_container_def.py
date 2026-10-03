@@ -37,3 +37,24 @@ class TestCpuTeachingImageDefaults:
         gpu_text = GPU_DEF.read_text(encoding="utf-8")
         env = _section(gpu_text, "%environment")
         assert "QUANTUI_FREQ_PARALLEL" not in env
+
+
+class TestCpuImagePySCFExtras:
+    """ISSUE.18 — the CPU image must carry what the [pyscf] extra carries."""
+
+    def test_quantui_is_installed_with_the_pyscf_extra(self, cpu_def_text):
+        post = _section(cpu_def_text, "%post")
+        # A bare `pip install -e .` skipped pyscf-properties (NMR, analytical
+        # Raman) and pyscf-dispersion (PBE-D3).
+        assert re.search(r'pip install[^\n]*-e\s+"?\.\[pyscf\]"?', post)
+        assert not re.search(r"pip install[^\n]*-e\s+\.\s*$", post, re.M)
+
+    def test_build_fails_without_nmr_and_d3(self, cpu_def_text):
+        post = _section(cpu_def_text, "%post")
+        assert "import pyscf.prop.nmr" in post
+        assert "import pyscf.dispersion" in post
+
+    def test_the_extra_still_lists_both_packages(self):
+        text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+        extra = text.split("\npyscf = [", 1)[1].split("]", 1)[0]
+        assert '"pyscf-properties"' in extra and "pyscf-dispersion" in extra
