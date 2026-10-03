@@ -5,10 +5,10 @@ loop is an email, a queue, and a scheduled allocation. A mistake that a local
 build would surface in seconds costs days there, so the things that can go
 quietly wrong are asserted here instead:
 
-- **The version pin falls behind.** ``quantui-gpu.def`` installs a *published*
-  release by number. Bump ``pyproject.toml`` without touching the def and every
-  subsequent image silently ships the previous release — with no error, because
-  the old version installs perfectly well.
+- **A release instead of the tree.** ``quantui-gpu.def`` installs the working
+  tree it is built from (DEC-025), with the same ``%files`` allowlist as the
+  CPU image, and records the commit. It used to pin a PyPI release, which made
+  every GPU fix wait for a release and shipped code other than what CI tested.
 - **The CUDA wheel list gets hand-copied.** ``pyproject.toml`` documents why the
   suffixed ``-cuda12x`` wheels are required (the bare PyPI names are source
   sdists needing a local ``nvcc``). A def that lists those three packages
@@ -41,27 +41,12 @@ VERIFY = REPO / "apptainer" / "verify-gpu.sh"
 BUILD = REPO / "apptainer" / "build-gpu.sh"
 SBATCH = REPO / "apptainer" / "slurm" / "quantui-gpu-test.sbatch"
 PYPROJECT = REPO / "pyproject.toml"
+CPU_DEF = REPO / "apptainer" / "quantui.def"
 
 
 @pytest.fixture(scope="module")
 def def_text() -> str:
     return DEF.read_text(encoding="utf-8")
-
-
-def _pinned_version(text: str) -> str:
-    """The %arguments default, not a version mentioned in a comment.
-
-    An unanchored search matches the ``--build-arg QUANTUI_VERSION=…`` *example*
-    in the comment above the real default, which sits earlier in the file.
-    """
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("#"):
-            continue
-        m = re.match(r"QUANTUI_VERSION=([0-9][^\s]*)$", stripped)
-        if m:
-            return m.group(1)
-    raise AssertionError("no QUANTUI_VERSION default found in %arguments")
 
 
 def _section(text: str, name: str) -> str:
@@ -74,26 +59,58 @@ def _section(text: str, name: str) -> str:
     return rest[: nxt.start()] if nxt else rest
 
 
-def _project_version() -> str:
-    m = re.search(r'^version = "([^"]+)"', PYPROJECT.read_text(encoding="utf-8"), re.M)
-    assert m is not None
-    return m.group(1)
+def _files(text: str) -> list[str]:
+    """The %files entries, without comments or blank lines."""
+    return [
+        ln.strip()
+        for ln in _section(text, "%files").splitlines()
+        if ln.strip() and not ln.strip().startswith("#")
+    ]
 
 
-class TestTheImageTracksThePackage:
-    def test_the_pinned_version_matches_pyproject(self, def_text):
-        # The failure mode is silent: an older release installs cleanly, so the
-        # build goes green and ships the wrong code. Only a comparison catches
-        # it. If this fires after a version bump, update the def's %arguments
-        # default — and remember the release must be on PyPI before it builds.
-        assert _pinned_version(def_text) == _project_version()
+class TestTheImageInstallsTheWorkingTree:
+    def test_installs_the_copied_tree_not_a_release(self, def_text):
+        # DEC-025: the image runs the code it was built from. The PyPI pin it
+        # replaced made every GPU fix wait for a release, and the image ran
+        # different code from the branch CI had just tested.
+        post = _section(def_text, "%post")
+        code = "\n".join(
+            ln for ln in post.splitlines() if not ln.strip().startswith("#")
+        )
+        assert "cd /opt/quantui" in code
+        assert 'pip install --no-cache-dir -e ".[' in code
+        assert "quantui==" not in code and "]==" not in code
+        assert "QUANTUI_VERSION" not in def_text
 
-    def test_the_version_is_a_real_pin_not_a_range(self, def_text):
-        # `pip install quantui==X` — not >=, not bare. An unpinned install makes
-        # the image unreproducible, which defeats the point of pinning a release
-        # rather than cloning a commit.
-        assert '"quantui[' in def_text
-        assert ']=={{ QUANTUI_VERSION }}"' in def_text
+    def test_copies_the_same_allowlist_as_the_cpu_image(self, def_text):
+        # One list for both images; quantui.def explains why it is an
+        # allowlist (a bare `%files .` once copied 13 GB of images in).
+        gpu = _files(def_text)
+        assert gpu == _files(CPU_DEF.read_text(encoding="utf-8"))
+        assert gpu and all(entry.endswith(" /opt/quantui/") for entry in gpu)
+
+    def test_the_build_checks_the_installed_tree(self, def_text):
+        # A wheel in the venv would also import as `quantui`. %test proves it
+        # is the copy in /opt/quantui, at the version its pyproject declares.
+        test = _section(def_text, "%test")
+        assert "/opt/quantui/pyproject.toml" in test
+        assert "quantui.__file__.startswith('/opt/quantui/')" in test
+
+    def test_the_build_records_the_commit(self, def_text):
+        # The provenance the release pin used to give: which code is inside.
+        script = BUILD.read_text(encoding="utf-8")
+        assert "git describe --tags --always --dirty" in script
+        assert '--build-arg "QUANTUI_COMMIT=${COMMIT}"' in script
+        assert re.search(r"^\s*QUANTUI_COMMIT=unknown\s*$", def_text, re.M)
+        assert 'QuantUICommit "{{ QUANTUI_COMMIT }}"' in def_text
+        assert "/opt/build-info/quantui-commit.txt" in _section(def_text, "%post")
+
+    def test_the_build_script_no_longer_needs_pypi(self):
+        script = BUILD.read_text(encoding="utf-8")
+        assert "pypi.org" not in script
+        # The old --version flag is refused with a pointer to the tag, rather
+        # than silently building the working tree under a release's name.
+        assert "git checkout v" in script
 
     def test_the_gpu_extra_is_named_not_expanded(self, def_text):
         # Hand-listing the wheels is how the course container drifted from this
@@ -112,45 +129,12 @@ class TestTheImageTracksThePackage:
 
     def test_the_extras_exist_in_pyproject(self, def_text):
         pyproject = PYPROJECT.read_text(encoding="utf-8")
-        m = re.search(r"quantui\[([^\]]+)\]", def_text)
+        m = re.search(r'-e "\.\[([^\]]+)\]"', def_text)
         assert m is not None
         for extra in m.group(1).split(","):
             assert (
                 f"{extra.strip()} = [" in pyproject
             ), f"def requests extra '{extra.strip()}' that pyproject does not define"
-
-    def test_the_build_script_resolves_the_same_version(self, def_text):
-        """build-gpu.sh must read the same pin the def would use.
-
-        It greps the version out of the def to preflight PyPI before pulling a
-        multi-GB base image. An unanchored pattern matches the ``--build-arg
-        QUANTUI_VERSION=...`` *example* in the comment above the real default,
-        so the script checked for — and would have built — a version nobody
-        asked for. Reported from a live run, 2026-08-04.
-
-        This runs the pattern **read out of the script** rather than a copy, so
-        editing the script's grep is what this test actually exercises.
-        """
-        script = BUILD.read_text(encoding="utf-8")
-        m = re.search(r"grep -oP '([^']+)' \"\$DEF\"", script)
-        assert m is not None, "no version-extraction grep found in build-gpu.sh"
-
-        # Applied with Python's re, not by shelling out to grep. This module
-        # claims to be pure text assertions, and it should be: `grep -oP` is
-        # absent or PCRE-less on Windows, where it silently matched nothing.
-        # Translating \K (PCRE "drop everything before this") to a capture
-        # group is exact for this shape of pattern.
-        pattern = m.group(1)
-        assert "\\K" in pattern, "expected a \\K pattern; update this translation"
-        pre, post = pattern.split("\\K", 1)
-        resolved = re.findall(
-            pre + "(" + post + ")", DEF.read_text(encoding="utf-8"), re.M
-        )
-        assert resolved, f"pattern {pattern!r} matched nothing in the def"
-        assert resolved[0] == _pinned_version(def_text), (
-            f"build-gpu.sh resolves {resolved[0]!r}, def pins "
-            f"{_pinned_version(def_text)!r} — the pattern is matching a comment"
-        )
 
 
 class TestCudaLineIsCorrectForTheTarget:

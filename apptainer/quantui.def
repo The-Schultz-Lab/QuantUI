@@ -34,8 +34,8 @@ FROM: condaforge/miniforge3:26.1.1-3
   # Deliberately not a version number: this image installs the working tree
   # (%files . /opt/quantui), so a hardcoded label here goes stale on every bump
   # and says nothing the install does not. `quantui.__version__` inside the
-  # image is the authoritative answer. The GPU image pins a released version
-  # instead, and a test keeps that pin in step with pyproject.
+  # image is the authoritative answer. The GPU image installs the working tree
+  # too (DEC-025) and also records the commit it was built from.
   Source "working tree at build time — see quantui.__version__ in the image"
 
 %environment
