@@ -16,6 +16,9 @@ local Python kernel.
     a structure search by name, SMILES, InChI, CID, or CAS &mdash;
     PubChem &rarr; NCI CACTUS &rarr; an <strong>offline</strong>
     bundled-library fallback, so the search still works with no network.
+    Or upload a file (XYZ, MOL/SDF, MOL2, PDB, CIF, Gaussian input/output)
+    and <strong>edit the structure</strong>: set bond lengths, angles and
+    dihedrals, delete atoms, add hydrogens, change elements, freeze atoms.
   </p>
 </div>
 
@@ -37,10 +40,12 @@ local Python kernel.
   <div class="feature-card__title">Calculations</div>
   <p class="feature-card__body">
     RHF, UHF, nine DFT functionals, MP2, CCSD, and CCSD(T) &mdash;
-    with six calculation types: single point, geometry optimization,
-    frequencies/thermochemistry, TD-DFT UV-Vis, NMR shielding,
-    and 1D PES scans. PCM implicit solvation for single points,
-    optimizations, frequencies and TD-DFT.
+    with eight calculation types: single point, geometry optimization,
+    <strong>transition-state search</strong> (Sella, with an automatic
+    frequency check), frequencies/thermochemistry, TD-DFT UV-Vis, NMR
+    shielding, 1D PES scans and Marcus reorganization energies. PCM
+    implicit solvation for single points, optimizations, frequencies
+    and TD-DFT.
   </p>
 </div>
 
@@ -49,9 +54,12 @@ local Python kernel.
   <div class="feature-card__title">Spectra &amp; Analysis</div>
   <p class="feature-card__body">
     IR spectrum (stick + Lorentzian-broadened), UV-Vis plot,
-    orbital energy-level diagram with HOMO/LUMO isosurfaces,
-    and <sup>1</sup>H/<sup>13</sup>C NMR chemical shifts vs TMS.
-    Side-by-side comparison table for multiple calculations.
+    <sup>1</sup>H/<sup>13</sup>C NMR shifts vs TMS, point groups and an
+    orbital diagram with symmetry labels. Any orbital (&alpha;/&beta;), an
+    <strong>orbital gallery</strong> in linked viewers, density, spin
+    density and ESP-mapped surfaces. Vibration viewer with displacement
+    arrows; thermochemistry at any T and P; &lang;S&sup2;&rang; for
+    open-shell results; side-by-side comparison tables.
   </p>
 </div>
 
@@ -64,7 +72,9 @@ local Python kernel.
     orbital data (Molden), trajectories (multi-frame XYZ, ASE
     <code class="inline-code">.traj</code>), cube files, spectra
     as HTML, full result bundles as <code class="inline-code">.zip</code>,
-    or any run as a standalone <code class="inline-code">.py</code> script.
+    or any run as a standalone <code class="inline-code">.py</code> script
+    &mdash; each one also downloads to your computer, even from a remote
+    Voil&agrave;/OnDemand session.
   </p>
 </div>
 
@@ -104,6 +114,19 @@ local Python kernel.
     (<code class="inline-code">analytics build --open</code>) with
     GPU-vs-CPU speedup tables, method usage, and estimator-accuracy
     tracking. See the <a href="CLI.md">CLI reference</a>.
+  </p>
+</div>
+
+<div class="card">
+  <div class="feature-card__icon">🗂️</div>
+  <div class="feature-card__title">Cluster Batch Jobs</div>
+  <p class="feature-card__body">
+    <code class="inline-code">quantui-batch</code> submits QuantUI
+    calculations to SLURM from a cluster login node over SSH, without
+    starting the image there: presets, chaining from another job's
+    optimized geometry, reruns with more memory or time, and result
+    summaries. <code class="inline-code">quantui submit</code> does the
+    same wherever QuantUI is installed.
   </p>
 </div>
 
