@@ -2,15 +2,15 @@
 # build-gpu.sh — Build the QuantUI GPU Apptainer image.
 #
 # Usage (from the repo root):
-#   bash apptainer/build-gpu.sh                    # build the pinned version
-#   bash apptainer/build-gpu.sh --version 0.5.3    # build a different release
+#   bash apptainer/build-gpu.sh                    # build the working tree
 #   bash apptainer/build-gpu.sh --clean            # remove the old .sif first
 #   bash apptainer/build-gpu.sh --test             # build, then run %test
 #   bash apptainer/build-gpu.sh --fakeroot         # build unprivileged (HPC)
 #
-# Unlike build.sh, this does NOT copy the working tree into the image — it
-# installs a published release from PyPI. So it can be run from anywhere, and
-# what lands in the image is something anyone else can install by name.
+# Like build.sh, this copies the working tree into the image (the def's %files
+# allowlist), so run it from the repo root on the code you want to ship. To
+# build a release, check out its tag first (git checkout v0.9.0). The commit
+# is recorded in the image (label QuantUICommit, /opt/build-info).
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -21,15 +21,18 @@ APPTAINER_CMD="${APPTAINER_CMD:-apptainer}"
 CLEAN=false
 RUN_TESTS=false
 FAKEROOT=false
-VERSION=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --clean)    CLEAN=true; shift ;;
     --test)     RUN_TESTS=true; shift ;;
     --fakeroot) FAKEROOT=true; shift ;;
-    --version)  VERSION="${2:-}"; shift 2 ;;
-    --help|-h)  sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --version)
+      echo "ERROR: --version was removed: the GPU image now builds from the working" >&2
+      echo "       tree, like the CPU image. Check out the release tag instead:" >&2
+      echo "         git checkout v<x.y.z> && bash apptainer/build-gpu.sh" >&2
+      exit 1 ;;
+    --help|-h)  sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown flag: $1  (use --help)" >&2; exit 1 ;;
   esac
 done
@@ -43,39 +46,13 @@ command -v "$APPTAINER_CMD" >/dev/null 2>&1 || {
   exit 1
 }
 
-# Resolve the version the def would use, so the preflight below checks the same
-# thing the build will actually request.
-if [[ -z "$VERSION" ]]; then
-  # ^\s* anchors to the %arguments default. Without the anchor this matches the
-  # `--build-arg QUANTUI_VERSION=...` EXAMPLE in the comment above it, which
-  # sits earlier in the file — so the script would preflight and build a
-  # version nobody asked for.
-  VERSION="$(grep -oP '^\s*QUANTUI_VERSION=\K[0-9][^\s]*' "$DEF" | head -1)"
-  if [[ -z "$VERSION" ]]; then
-    echo "ERROR: could not read the QUANTUI_VERSION default from $DEF." >&2
-    echo "       Pass one explicitly:  --version <x.y.z>" >&2
-    exit 1
-  fi
-fi
-
-# Preflight: confirm the release exists on PyPI before spending 20+ minutes
-# pulling a multi-GB CUDA base image only to fail on the last pip step. This is
-# a real trap right after cutting a tag — the GitHub release can be published
-# while the PyPI job is still waiting on its environment approval.
-echo "Checking PyPI for quantui==${VERSION} ..."
-if command -v curl >/dev/null 2>&1; then
-  http="$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/quantui/${VERSION}/json")"
-  if [[ "$http" != "200" ]]; then
-    echo "ERROR: quantui==${VERSION} is not on PyPI (HTTP ${http})." >&2
-    echo "       If you just tagged it, the release workflow may still be waiting" >&2
-    echo "       on the 'pypi' environment approval. Check:" >&2
-    echo "         gh run list --workflow=release.yml --limit 3" >&2
-    echo "       Or build a version that is published:  --version <x.y.z>" >&2
-    exit 1
-  fi
-  echo "  found."
-else
-  echo "  (curl unavailable — skipping preflight)"
+# What is being built, for the banner and the image's provenance record. The
+# version is the tree's own; the commit says which tree (`-dirty` when tracked
+# files differ from it, since %files copies the files as they are on disk).
+VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -1)"
+COMMIT="unknown"
+if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+  COMMIT="$(git describe --tags --always --dirty --abbrev=12)"
 fi
 
 # --clean maps to apptainer's --force below rather than rm-ing the image here:
@@ -95,13 +72,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/_build_env.sh"
 BUILD_OPTS=()
 [[ "$FAKEROOT" == true ]] && BUILD_OPTS+=(--fakeroot)
 [[ "$CLEAN" == true ]] && BUILD_OPTS+=(--force)
-BUILD_OPTS+=(--build-arg "QUANTUI_VERSION=${VERSION}")
+BUILD_OPTS+=(--build-arg "QUANTUI_COMMIT=${COMMIT}")
 
 cat <<EOF
 ============================================================
 Building: $SIF
 From:     $DEF
-QuantUI:  $VERSION  (from PyPI)
+QuantUI:  $VERSION  (working tree, $COMMIT)
 Options:  ${BUILD_OPTS[*]}
 
 The CUDA devel base is several GB — expect ~15-30 min on a

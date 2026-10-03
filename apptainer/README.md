@@ -21,7 +21,7 @@ air-gapped or restricted-network classroom.
 | `quantui.def` | CPU image definition — the local teaching interface |
 | `build.sh` | Build script with clean/test/fakeroot options |
 | `quantui-gpu.def` | **GPU image** definition (CUDA 12.x + gpu4pyscf) |
-| `build-gpu.sh` | GPU build script (`--version`, `--clean`, `--test`, `--fakeroot`) |
+| `build-gpu.sh` | GPU build script (`--clean`, `--test`, `--fakeroot`) |
 | `verify-gpu.sh` | Six-step check that a GPU image really reaches the GPU |
 | `slurm/quantui-gpu-test.sbatch` | Batch template for verifying on a cluster |
 | `ncshare-gpu-diagnostic.ipynb` | Interactive diagnostic to run **inside** the image on a GPU node |
@@ -31,9 +31,9 @@ air-gapped or restricted-network classroom.
 **Two images, on purpose.** `quantui.def` is CPU-only and conda-based — it is
 the "run QuantUI without a cluster" image students copy to a laptop.
 `quantui-gpu.def` targets NVIDIA datacenter GPUs under Slurm and differs at
-every layer (CUDA base image, all-pip install, a pinned PyPI release rather than
-the working tree). Merging them would ship a multi-GB CUDA stack to students who
-will never have a GPU. See [GPU image](#gpu-image) below.
+every layer (CUDA base image, all-pip install, no Voilà default). Both install
+the working tree they are built from. Merging them would ship a multi-GB CUDA
+stack to students who will never have a GPU. See [GPU image](#gpu-image) below.
 
 **CPU image environment defaults** (set in `quantui.def` `%environment`):
 
@@ -456,13 +456,13 @@ flagged values in the sbatch template.
 | Base | `condaforge/miniforge3` | `nvidia/cuda:12.8.1-devel-ubuntu24.04` |
 | Installer | mamba + pip | **pip only** |
 | Python | 3.11 (conda env pin) | **3.11 via deadsnakes** (base image ships 3.12 only) |
-| QuantUI source | working tree (`%files`) | **pinned release from PyPI** |
+| QuantUI source | working tree (`%files`) | working tree (`%files`, same allowlist) |
 | GPU | none | `gpu4pyscf` / `cupy` / `cutensor` via the `gpu-cuda12x` extra |
 | Metal pre-opt | xtb-python via conda-forge | xtb via the `xtb` pip extra |
 | Needs `--nv` | no | **yes, on every invocation** |
 | Default action | launches Voilà or JupyterLab | none — `exec` what you want |
 
-Four choices worth the words:
+Four choices worth the words, plus one shared with the CPU image:
 
 **One installer, not two.** The CPU image uses conda for the scientific stack
 because conda-forge's `pyscf` is prebuilt against conda's BLAS. Mixing conda and
@@ -471,10 +471,14 @@ leaving conda's metadata claiming files it no longer owns. The GPU image avoids
 the question entirely: it carries no MPI or HYPRE, so there is no BLAS/OpenMP
 linkage to protect and no reason to involve a second installer.
 
-**A pinned PyPI release, not a git commit.** `pip install quantui==0.5.2` names
-an immutable artifact anyone can download and diff. Cloning and checking out a
-SHA leaves a detached HEAD — reproducible in principle, murkier in practice, and
-it ties the image to one person's working tree.
+**The working tree, like the CPU image (DEC-025).** The GPU image used to pin a
+published PyPI release. That made every GPU fix wait for a release before it
+could be tried on a GPU node, and the image ran different code from the branch
+CI had just tested. It now copies the same `%files` allowlist as `quantui.def`
+and installs it editable. `build-gpu.sh` records which commit that was
+(`git describe --tags --always --dirty`) in the `QuantUICommit` label and
+`/opt/build-info/quantui-commit.txt`; a `-dirty` suffix means files differed
+from that commit. To build a release, check out its tag first.
 
 **`cuda12x`, not `cuda13x`.** CUDA's driver API is backward compatible, so the
 `cuda12x` wheels run on NCShare's 570-series driver *and* on any 580+ update.
@@ -497,25 +501,22 @@ to get it. Needs outbound access to `ppa.launchpadcontent.net` at build time.
 ### Build
 
 ```bash
-# From the repo root. Installs the version pinned in the def's %arguments.
+# From the repo root. Installs the working tree, like build.sh.
 bash apptainer/build-gpu.sh --test
 ```
 
 ```bash
-# Build a different release (must already be published to PyPI)
-bash apptainer/build-gpu.sh --version 0.5.3
+# Build a release: check out its tag first
+git checkout v0.9.0
+bash apptainer/build-gpu.sh --test
 ```
-
-The script checks PyPI for the requested version **before** pulling a multi-GB
-base image — a real trap right after cutting a tag, when the GitHub release
-exists but the PyPI publish job is still waiting on its environment approval.
 
 `--fakeroot` builds without root, for HPC login nodes.
 
 ### Verify
 
 `%test` runs on the *build host*, which usually has no GPU, so it can only prove
-the stack imports and the versions are right. Proving the GPU works is a
+the stack imports and QuantUI is the copied working tree at its declared version. Proving the GPU works is a
 separate step that has to run where a device exists:
 
 ```bash

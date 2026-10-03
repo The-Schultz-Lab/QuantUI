@@ -64,6 +64,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   points of each channel (`s2_*` fields in `result.json`), so a
   spin-contaminated ion SCF can be filtered out of a λ dataset.
 
+### Changed
+
+- **The GPU image builds from the working tree, like the CPU image** —
+  `quantui-gpu.def` copies the same `%files` allowlist as `quantui.def` and
+  installs it editable, instead of a pinned PyPI release, so a GPU node runs
+  the code that was just tested. `build-gpu.sh` records the commit
+  (`git describe`) in the image's `QuantUICommit` label and
+  `/opt/build-info/quantui-commit.txt`; its `--version` flag is gone — check
+  out a release tag to build that release.
+
 ### Fixed
 
 - **PBE-D3 now includes D3** — it needed `pyscf.dftd3`, which no QuantUI

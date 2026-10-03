@@ -15,15 +15,17 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
 # ─────────────────────────────────────────────────────────────────────────────
 
 %arguments
-    # Which released QuantUI to install. Overridable at build time:
-    #   apptainer build --build-arg QUANTUI_VERSION=0.5.3 quantui-gpu.sif ...
-    # Pinning a PUBLISHED RELEASE rather than cloning a commit is deliberate.
-    # A git clone + `git checkout <sha>` leaves a detached HEAD, which is
-    # exactly where version derivation gets murky; a version on PyPI is an
-    # immutable artifact that anyone can `pip download` and diff. It is also
-    # the provenance story worth demonstrating: the image records a version
-    # someone else can install, not a SHA from one person's working tree.
-    QUANTUI_VERSION=0.9.0
+    # Provenance only: which commit the working tree was at. build-gpu.sh
+    # fills it in (`git describe --tags --always --dirty`); a bare
+    # `apptainer build` leaves it "unknown". It does NOT choose what gets
+    # installed — %files copies the working tree as it is on disk.
+    #
+    # This image used to pin a published PyPI release instead. That made every
+    # GPU fix wait for a release before it could be tried on a GPU node, and
+    # the image ran different code from the branch CI had just tested. It now
+    # installs the working tree, like quantui.def (DEC-025); to build a
+    # release, check out its tag first.
+    QUANTUI_COMMIT=unknown
 
 %help
   QuantUI — GPU image (PySCF + gpu4pyscf on CUDA 12.x, xtb GFN-FF pre-opt)
@@ -61,7 +63,11 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
 %labels
   Maintainer "Jonathan Schultz"
   Purpose "GPU-accelerated PySCF via QuantUI, for Slurm clusters (NCShare H200)"
-  QuantUIVersion "{{ QUANTUI_VERSION }}"
+  # Not a version number, as in quantui.def: the image installs the working
+  # tree, so `quantui.__version__` inside the image is the answer, and the
+  # commit below says which tree it was.
+  Source "working tree at build time — see quantui.__version__ in the image"
+  QuantUICommit "{{ QUANTUI_COMMIT }}"
   CudaLine "12.8 / cuda12x wheels"
   TargetArch "sm_90 (H200) — prebuilt wheels, no nvcc build required"
 
@@ -82,6 +88,21 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
   # Deliberately NOT set here: QUANTUI_DISABLE_GPU (would defeat the image) and
   # QUANTUI_SETTINGS_PATH (see %help — the host preference is inherited, and
   # hiding that would hide a real property of every QuantUI container).
+
+%files
+  # Source paths are relative to where you run `apptainer build` (repo root).
+  # The same explicit allowlist as quantui.def — see the reasoning there (a
+  # bare `%files .` once copied 13 GB of .sif images into a build); a test
+  # keeps the two lists identical.
+  pyproject.toml /opt/quantui/
+  README.md /opt/quantui/
+  LICENSE /opt/quantui/
+  MANIFEST.in /opt/quantui/
+  CHANGELOG.md /opt/quantui/
+  quantui /opt/quantui/
+  notebooks /opt/quantui/
+  tests /opt/quantui/
+  docs /opt/quantui/
 
 %post
   set -eux
@@ -114,8 +135,8 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
   apt-get update
   apt-get install -y --no-install-recommends \
     python3.11 python3.11-venv python3.11-distutils
-  # No git: nothing is cloned here — QuantUI comes from PyPI — and this apt
-  # step is the slowest part of the build on a poor mirror.
+  # No git: nothing is cloned here — QuantUI arrives via %files — and this
+  # apt step is the slowest part of the build on a poor mirror.
   rm -rf /var/lib/apt/lists/*
 
   # A venv, not the system interpreter: Ubuntu 24.04 marks its python
@@ -126,7 +147,7 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
   export PATH="/opt/venv/bin:${PATH}"
   pip install --no-cache-dir --upgrade pip setuptools wheel
 
-  echo "── QuantUI + PySCF + GPU stack, in ONE pip resolve ──────────────────"
+  echo "── QuantUI (working tree) + PySCF + GPU stack, in ONE pip resolve ───"
   # One installer owns every package. The course image mixes conda-forge and
   # pip for pyscf, where pip can overwrite a conda-managed install in place and
   # leave conda's metadata claiming files it no longer owns. That image has a
@@ -149,13 +170,17 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
   # at the quantui.preopt level (falls back to the honest-failure message if
   # absent) but there is no reason to ship without it here — it's a normal
   # Linux pip wheel now that the venv above is pinned to 3.11.
-  pip install --no-cache-dir \
-    "quantui[pyscf,ase,app,gpu-cuda12x,xtb]=={{ QUANTUI_VERSION }}"
+  #
+  # Editable from /opt/quantui, as in quantui.def: the image runs the code in
+  # the tree it was built from.
+  cd /opt/quantui
+  pip install --no-cache-dir -e ".[pyscf,ase,app,gpu-cuda12x,xtb]"
 
   echo "── Build provenance ─────────────────────────────────────────────────"
   mkdir -p /opt/build-info
   pip freeze > /opt/build-info/pip-freeze.txt
   python -c "import quantui; print(quantui.__version__)" > /opt/build-info/quantui-version.txt
+  echo "{{ QUANTUI_COMMIT }}" > /opt/build-info/quantui-commit.txt
   date -u +"%Y-%m-%dT%H:%M:%SZ" > /opt/build-info/build-date.txt
   nvidia-smi --version > /opt/build-info/cuda-toolkit.txt 2>&1 || \
     echo "no nvidia-smi at build time (expected on a CPU build host)" \
@@ -187,7 +212,12 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
   python -c "import cupy; print('cupy', cupy.__version__)"
   python -c "import importlib.metadata as m; [print(' ', d, m.version(d)) for d in ('gpu4pyscf-cuda12x', 'cupy-cuda12x', 'cutensor-cu12')]"
 
-  chmod -R a+rX /opt/venv /opt/build-info
+  # Only what the build itself creates (same as quantui.def).
+  find /opt/quantui -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+  find /opt/quantui -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
+  rm -rf /opt/quantui/.pytest_cache
+
+  chmod -R a+rX /opt/venv /opt/build-info /opt/quantui
 
 %runscript
   # No default server here — unlike quantui.def, this image's job is batch and
@@ -229,7 +259,9 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
   # because the job succeeds and the number is right.
   test -z "${QUANTUI_DISABLE_GPU:-}"
 
-  echo "[7/7] QuantUI reports the pinned version"
-  python -c "import quantui; assert quantui.__version__ == '{{ QUANTUI_VERSION }}', quantui.__version__; print(quantui.__version__)"
+  echo "[7/7] QuantUI is the working tree copied in by %files"
+  # Imported from /opt/quantui (not a release wheel in the venv), at the
+  # version that tree's pyproject.toml declares.
+  python -c "import quantui, tomllib; v = tomllib.load(open('/opt/quantui/pyproject.toml', 'rb'))['project']['version']; assert quantui.__file__.startswith('/opt/quantui/'), quantui.__file__; assert quantui.__version__ == v, (quantui.__version__, v); print(quantui.__version__, 'from', quantui.__file__)"
 
   echo "All build-time tests passed. Run verify-gpu.sh on a GPU node next."
