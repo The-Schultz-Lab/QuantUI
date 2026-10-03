@@ -268,6 +268,27 @@ def describe_disconnection(
     cisplatin-salt case (MET.2), where a name resolves to separate ions rather
     than the coordinated complex.
     """
+    fragments = fragment_formulas(atoms, coords, tolerance)
+    if fragments is None:
+        return None
+    n_components, fragments_text = fragments
+
+    return (
+        f"This structure is disconnected — it resolved to {n_components} "
+        f"separate fragments ({fragments_text}), not one bonded molecule. For a metal "
+        "complex this usually means the name returned an ionic salt form rather "
+        "than the coordinated complex, so the geometry shown is not the real "
+        "molecule. Start from a known-good geometry instead — paste one in the "
+        "XYZ Input tab, or load a bundled inorganic example."
+    )
+
+
+def fragment_formulas(
+    atoms: Sequence[str],
+    coords: Sequence[Sequence[float]],
+    tolerance: float = DEFAULT_TOLERANCE,
+) -> Optional[Tuple[int, str]]:
+    """``(n_fragments, "2×H2O + Na")`` for a disconnected structure, else ``None``."""
     components = covalent_components(atoms, coords, tolerance)
     if len(components) <= 1:
         return None
@@ -282,13 +303,25 @@ def describe_disconnection(
     parts = [
         (f"{formula_counts[f]}×{f}" if formula_counts[f] > 1 else f) for f in order
     ]
-    fragments = " + ".join(parts)
+    return len(components), " + ".join(parts)
 
+
+def disconnection_note(
+    atoms: Sequence[str],
+    coords: Sequence[Sequence[float]],
+    tolerance: float = DEFAULT_TOLERANCE,
+) -> Optional[str]:
+    """Source-neutral version of :func:`describe_disconnection` (ISSUE.19 #9).
+
+    Shown for every load (XYZ, library, upload, edits, History), where a
+    deliberate dimer or ion pair is as likely as a broken structure.
+    """
+    fragments = fragment_formulas(atoms, coords, tolerance)
+    if fragments is None:
+        return None
+    n_components, fragments_text = fragments
     return (
-        f"This structure is disconnected — it resolved to {len(components)} "
-        f"separate fragments ({fragments}), not one bonded molecule. For a metal "
-        "complex this usually means the name returned an ionic salt form rather "
-        "than the coordinated complex, so the geometry shown is not the real "
-        "molecule. Start from a known-good geometry instead — paste one in the "
-        "XYZ Input tab, or load a bundled inorganic example."
+        f"{n_components} separate fragments ({fragments_text}), not one bonded "
+        "molecule. Fine for a deliberate dimer, complex or ion pair; otherwise "
+        "check the geometry (a missing bond or a salt form)."
     )

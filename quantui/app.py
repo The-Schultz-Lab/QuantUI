@@ -5474,6 +5474,22 @@ class QuantUIApp:
                     _pg_str = f" &bull; point group {_pg.summary_html()}"
             except Exception:  # noqa: BLE001 — informational only
                 _pg_str = ""
+        # Disconnected structure (ISSUE.19 #9): checked for every source, not
+        # only Online Search results; worded neutrally since a dimer or ion
+        # pair can be deliberate.
+        _frag_str = ""
+        if len(mol.atoms) <= 500:
+            try:
+                from quantui.connectivity import disconnection_note
+
+                _note = disconnection_note(mol.atoms, mol.coordinates)
+                if _note:
+                    _frag_str = (
+                        f'<br><span style="color:{_theme.css.ACCENT_WARNING};'
+                        f'font-size:12px">⚠ {_html.escape(_note)}</span>'
+                    )
+            except Exception:  # noqa: BLE001 — informational only
+                _frag_str = ""
         _summary = (
             f'<b style="font-size:15px">{mol.get_formula()}</b>'
             f'&ensp;<span style="color:{_theme.css.TEXT_SECONDARY};font-size:13px">'
@@ -5481,7 +5497,7 @@ class QuantUIApp:
             + (f" &bull; {e_str}" if e_str else "")
             + f" &bull; charge {mol.charge} &bull; mult {mol.multiplicity}"
             + _pg_str
-            + f"</span>{_lbl}"
+            + f"</span>{_frag_str}{_lbl}"
         )
         self.mol_info_html.value = _summary
         self.mol_summary_compact.value = (
