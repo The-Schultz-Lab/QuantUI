@@ -271,6 +271,7 @@ SCRIPT_FULL_CALC_TYPES = frozenset({"single_point", "frequency", "tddft"})
 _CALC_TYPE_LABELS = {
     "single_point": "Single Point",
     "geometry_opt": "Geometry Opt",
+    "transition_state": "Transition State",
     "frequency": "Frequency",
     "tddft": "UV-Vis (TD-DFT)",
     "nmr": "NMR Shielding",

@@ -435,6 +435,61 @@ def format_freq_result(r: Any) -> str:
     )
 
 
+def ts_verdict_rows(block: Optional[dict]) -> str:
+    """Result-card rows for a transition-state search (M-TS TS.2).
+
+    *block* is the ``transition_state`` spectra entry
+    (:meth:`quantui.ts_search.TSResult.to_spectra`), so the live and History
+    cards render the same thing.
+    """
+    if not block:
+        return ""
+    n = block.get("n_imaginary")
+    ok = n == 1 and bool(block.get("search_converged"))
+    color = _theme.css.ACCENT_SUCCESS if ok else _theme.css.ACCENT_WARNING
+    icon = "✓" if ok else "⚠"
+    imag = block.get("imaginary_cm1") or []
+    imag_txt = (
+        ", ".join(f"{abs(float(f)):.0f}i" for f in imag) + " cm⁻¹" if imag else "none"
+    )
+    steps = block.get("n_steps")
+    search = (
+        f"{steps} steps, "
+        f"{'converged' if block.get('search_converged') else 'NOT converged'}"
+    )
+
+    def _row(label: str, value: str, vc: str) -> str:
+        return (
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL};'
+            f'vertical-align:top">{label}</td>'
+            f'<td style="color:{vc}">{value}</td></tr>'
+        )
+
+    return (
+        _row("Verdict", f"{icon} {html.escape(str(block.get('verdict', '')))}", color)
+        + _row("Imaginary frequencies", imag_txt, _theme.css.TEXT_HEADING)
+        + _row("Saddle-point search", search, _theme.css.TEXT_HEADING)
+    )
+
+
+def format_ts_result(r: Any) -> str:
+    """Format a transition-state search result card (M-TS TS.2)."""
+    _rows = f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Energy</td>' f'<td style="color:{_theme.css.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>' + ts_verdict_rows(
+        r.to_spectra()
+    ) + _solvent_row(
+        getattr(r, "solvent", None), "search and frequencies in solvent"
+    ) + _point_group_row(
+        _point_group_html(lambda k, d=None: getattr(r, k, d))
+    )
+    return (
+        _result_card_open() + f"<b>Transition State &mdash; {r.formula} "
+        f"({_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))})</b>"
+        + _result_card_table_open()
+        + f"{_rows}</table>"
+        + _RESULT_CARD_CLOSE
+    )
+
+
 def format_tddft_result(r: Any) -> str:
     """Format a TD-DFT / UV-Vis result card."""
     # AUDIT F08 — r.converged now folds in per-root TD convergence, so the
@@ -996,6 +1051,11 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
             _theme.css.ACCENT_WARNING,
             _theme.css.SURFACE_ORANGE_BG,
         ),
+        "transition_state": (
+            "Transition State",
+            _theme.css.ACCENT_PURPLE,
+            _theme.css.SURFACE_PURPLE_BG,
+        ),
     }
     ct = data.get("calc_type", "")
     _ct_label, _ct_fg, _ct_bg = _ct_labels.get(
@@ -1020,7 +1080,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     # format_tddft_result). A bare "SCF converged" label here would blame
     # the SCF for a CC/TD/Hessian-only failure whose reference SCF was
     # fine — mirror each live formatter's label choice.
-    if ct == "frequency":
+    if ct in ("frequency", "transition_state"):
         _conv_label = "Converged"
     elif ct == "tddft":
         _conv_label = "Converged"
@@ -1110,6 +1170,10 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     # card came back without the numbers the calculation exists to produce.
     # Keyed on the calc type AND the payload, so a reorg result saved before λ
     # persistence gets an explanation instead of a silently incomplete card.
+    _ts_html = ""
+    if ct == "transition_state":
+        _ts_html = ts_verdict_rows((data.get("spectra") or {}).get("transition_state"))
+
     _reorg_html = ""
     if ct == "reorganization_energy":
         _channels = data.get("reorg_channels")
@@ -1127,6 +1191,6 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         f'{_method_basis_label(data["method"], data["basis"], data.get("scf_variant"))}</b>'
         f'&ensp;<small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{ts}</small>'
         + _result_card_table_open()
-        + f"{_rows}{_extra}{_thermo_html}</table>{_reorg_html}"
+        + f"{_rows}{_ts_html}{_extra}{_thermo_html}</table>{_reorg_html}"
         + _RESULT_CARD_CLOSE
     )

@@ -124,6 +124,11 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "  <td style='padding:3px 12px;'>Relaxes the structure to a minimum-"
             "energy geometry</td>"
             "  <td style='padding:3px 12px;'>Moderate</td></tr>"
+            "<tr><td style='padding:3px 12px;'><b>Transition State</b></td>"
+            "  <td style='padding:3px 12px;'>Finds the saddle point (barrier top) "
+            "near the input geometry, then checks it has exactly one imaginary "
+            "frequency (needs the optional Sella package)</td>"
+            "  <td style='padding:3px 12px;'>Higher (search + frequencies)</td></tr>"
             "<tr><td style='padding:3px 12px;'><b>Frequency</b></td>"
             "  <td style='padding:3px 12px;'>Vibrational modes + IR spectrum; "
             "confirms a true minimum (no imaginary modes). On multi-core hosts "
@@ -500,6 +505,38 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "usually changes them, so check Calculation Setup. An edited "
             "structure is a starting guess: optimize it before trusting "
             "energies.</p>"
+        ),
+    },
+    "transition_state": {
+        "title": "Transition states — finding and checking a barrier top",
+        "body": (
+            "<p>A <b>transition state</b> (TS) is the highest-energy point on "
+            "the lowest-energy path between reactant and product: a maximum "
+            "along the reaction coordinate and a minimum in every other "
+            "direction. Mathematically it is a <b>first-order saddle point</b>, "
+            "so its frequency calculation has <b>exactly one imaginary "
+            "frequency</b> (shown as a negative number, e.g. −1246 cm⁻¹), whose "
+            "motion is the reaction itself.</p>"
+            "<p><b>How to use it.</b> Load a geometry close to the barrier top "
+            "(the highest point of a PES scan along the bond being made or "
+            "broken is a good start) and run <b>Transition State</b>. QuantUI "
+            "searches for the saddle point with Sella, starting from the "
+            "analytic Hessian, then runs a frequency calculation there.</p>"
+            "<p><b>Reading the verdict:</b></p><ul>"
+            "<li><b>One imaginary frequency</b> — a transition state. Animate "
+            "that mode in the Vibrational panel: the atoms should move along "
+            "your reaction (bond forming / breaking). If they move some other "
+            "way, it is the TS of a different process.</li>"
+            "<li><b>No imaginary frequency</b> — the search slid down to a "
+            "minimum. Start closer to the barrier top.</li>"
+            "<li><b>Two or more</b> — a higher-order saddle point (a maximum in "
+            "more than one direction). Displace along the extra mode(s) and "
+            "search again.</li></ul>"
+            "<p>The barrier height is E(TS) − E(reactant), both at the same "
+            "method/basis (add zero-point energies from Frequency runs for "
+            "ΔH‡ or ΔG‡). Use a DFT functional or HF; MP2/CCSD have no "
+            "analytic gradients here. The Trajectory panel shows the search "
+            "path, not the reaction path (that is an IRC, coming later).</p>"
         ),
     },
     "surfaces": {

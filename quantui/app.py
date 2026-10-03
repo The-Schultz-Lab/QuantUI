@@ -217,6 +217,9 @@ from quantui.app_formatters import (
 from quantui.app_formatters import (
     format_tddft_result as _fmt_tddft_result,
 )
+from quantui.app_formatters import (
+    format_ts_result as _fmt_ts_result,
+)
 from quantui.app_history import (
     build_history_context as _hist_build_history_context,
 )
@@ -1684,6 +1687,8 @@ class QuantUIApp:
         _reorg_overlay_pair: Any
         _reorg_exaggerate: Any
         _reorg_mode_dd: Any
+        _ts_fmax_fi: Any
+        _ts_note: Any
         _reorg_export_btn: Any
         _reorg_export_status: Any
         _reorg_png_inbox: Any
@@ -2322,9 +2327,13 @@ class QuantUIApp:
             "_mulliken_accordion",
             "Single Point / Geometry Opt / Frequency / UV-Vis",
         ),
-        ("Trajectory", "traj_accordion", "Geometry Opt / PES Scan / Frequency pre-opt"),
-        ("Vibrational", "vib_accordion", "Frequency"),
-        ("IR Spectrum", "_ir_accordion", "Frequency"),
+        (
+            "Trajectory",
+            "traj_accordion",
+            "Geometry Opt / Transition State / PES Scan / Frequency pre-opt",
+        ),
+        ("Vibrational", "vib_accordion", "Frequency / Transition State"),
+        ("IR Spectrum", "_ir_accordion", "Frequency / Transition State"),
         ("Raman Spectrum", "_raman_accordion", "Frequency"),
         ("PES Scan", "_pes_scan_accordion", "PES Scan"),
         (
@@ -2379,6 +2388,17 @@ class QuantUIApp:
             # Energies loads the orbital state Isosurface checks, so it stays
             # ahead of it (see geometry_opt). ISSUE.19 #6 added the last two.
             ("Energies", "_pop_energies", True),
+            ("Isosurface", "_pop_isosurface", False),
+            ("Populations", "_pop_mulliken", False),
+        ],
+        # M-TS TS.2: the frequency check carries the modes; Vibrational opens
+        # first so the imaginary mode can be animated straight away. Energies
+        # precedes Isosurface (it loads the orbital state Isosurface checks).
+        "transition_state": [
+            ("Vibrational", "_pop_vibrational", True),
+            ("IR Spectrum", "_pop_ir_spectrum", False),
+            ("Trajectory", "_pop_geo_trajectory", False),
+            ("Energies", "_pop_energies", False),
             ("Isosurface", "_pop_isosurface", False),
             ("Populations", "_pop_mulliken", False),
         ],
@@ -4187,6 +4207,7 @@ class QuantUIApp:
         calc_type_labels = {
             "single_point": "Single Point",
             "geometry_opt": "Geometry Opt",
+            "transition_state": "Transition State",
             "frequency": "Frequency",
             "tddft": "UV-Vis (TD-DFT)",
             "nmr": "NMR Shielding",
@@ -6295,6 +6316,51 @@ class QuantUIApp:
                 result.engine_id = getattr(_sp_result, "engine_id", result.engine_id)
                 result_html = self._format_opt_result(result)
                 save_spectra, save_type = {}, "geometry_opt"
+            elif ct == "Transition State":
+                from quantui.ts_search import run_ts_search
+
+                self.run_status.value = "Searching for a transition state…"
+                result = run_ts_search(
+                    calc_mol,
+                    self.method_dd.value,
+                    self.basis_dd.value,
+                    fmax=float(self._ts_fmax_fi.value),
+                    steps=int(self.max_steps_si.value),
+                    progress_stream=log,  # type: ignore[arg-type]
+                    solvent=_run_solvent,
+                    cancel_check=self._cancel_event.is_set,
+                )
+                # Everything downstream (viewer, saved geometry, Vibrational
+                # panel) describes the stationary point that was found.
+                calc_mol = result.molecule
+                result_html = self._format_ts_result(result)
+                _ts_disp = None
+                if result.displacements is not None:
+                    try:
+                        import numpy as _np_ts
+
+                        _ts_disp = _np_ts.asarray(result.displacements).tolist()
+                    except Exception:  # noqa: BLE001 — modes are optional
+                        _ts_disp = None
+                save_spectra = {
+                    "ir": {
+                        "frequencies_cm1": list(result.frequencies_cm1 or []),
+                        "ir_intensities": list(result.ir_intensities or []),
+                        "raman_activities": list(result.raman_activities or []),
+                        "zpve_hartree": result.zpve_hartree,
+                        "displacements": _ts_disp,
+                    },
+                    "molecule": {
+                        "atoms": list(calc_mol.atoms),
+                        "coords": [
+                            list(map(float, row)) for row in calc_mol.coordinates
+                        ],
+                        "charge": calc_mol.charge,
+                        "multiplicity": calc_mol.multiplicity,
+                    },
+                    "transition_state": result.to_spectra(),
+                }
+                save_type = "transition_state"
             elif ct == "Frequency":
                 from quantui.freq_calc import run_freq_calc
 
@@ -6728,6 +6794,12 @@ class QuantUIApp:
                     'margin:6px 0 2px">Optimized neutral geometry</p>'
                 )
                 self._viz_label.layout.display = ""
+            elif ct == "Transition State":
+                self._viz_label.value = (
+                    f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:12px;font-weight:600;'
+                    'margin:6px 0 2px">Stationary point found (see verdict)</p>'
+                )
+                self._viz_label.layout.display = ""
             self._queue_main_thread_callback(
                 self._show_result_3d,
                 _viz_mol,
@@ -6806,10 +6878,10 @@ class QuantUIApp:
                 _ana_ctx.result_dir = _saved_dir
                 _ana_ctx.timestamp = str(_saved_data.get("timestamp", ""))
                 # Persist trajectory so history viewer can replay it.
-                if ct in ("Geometry Opt", "PES Scan"):
+                if ct in ("Geometry Opt", "Transition State", "PES Scan"):
                     _traj = getattr(
                         result,
-                        "trajectory" if ct == "Geometry Opt" else "coordinates_list",
+                        "coordinates_list" if ct == "PES Scan" else "trajectory",
                         None,
                     )
                     _e_list = getattr(result, "energies_hartree", [])
@@ -6856,6 +6928,7 @@ class QuantUIApp:
                 if ct in (
                     "Single Point",
                     "Geometry Opt",
+                    "Transition State",
                     "Frequency",
                     "UV-Vis (TD-DFT)",
                 ):
@@ -6866,8 +6939,14 @@ class QuantUIApp:
                 # outer try block above and the calc still completes.
                 # For SP / GeoOpt this writes orbitals + structure; for
                 # Frequency it writes structure + [FREQ] / [FR-NORM-COORD]
-                # blocks so Avogadro can animate vibrations directly.
-                if ct in ("Single Point", "Geometry Opt", "Frequency"):
+                # blocks so Avogadro can animate vibrations directly
+                # (for a Transition State, including the imaginary mode).
+                if ct in (
+                    "Single Point",
+                    "Geometry Opt",
+                    "Transition State",
+                    "Frequency",
+                ):
                     try:
                         from quantui.results_storage import (
                             save_molden as _save_molden,
@@ -7706,6 +7785,9 @@ class QuantUIApp:
 
     def _format_freq_result(self, r) -> str:
         return _fmt_freq_result(r)
+
+    def _format_ts_result(self, r) -> str:
+        return _fmt_ts_result(r)
 
     def _format_tddft_result(self, r) -> str:
         return _fmt_tddft_result(r)

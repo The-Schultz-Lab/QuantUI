@@ -44,6 +44,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   shows the orbitals around the HOMO–LUMO gap (2, 3 or 4 on each side) as
   small viewers that rotate together, each labelled with its symmetry and
   energy; follows the α/β choice for unrestricted results.
+- **Transition State calc type** — searches for the saddle point near the
+  input geometry with Sella (starting from the analytic Hessian, with the
+  same PySCF settings as an optimization: PCM, density fitting, D3, GPU, SCF
+  rescue), then runs a frequency calculation and says plainly whether it
+  found a transition state (exactly one imaginary frequency), a minimum, or
+  a higher-order saddle point. Results open on the Vibrational panel to
+  animate the imaginary mode, plus IR, search trajectory, orbitals and
+  populations. Needs the optional extra: `pip install "quantui[ts]"`.
+  Local runs only for now (not SLURM batch).
 - **Populations and Isosurface for Frequency and TD-DFT results** — both
   record the reference SCF's Mulliken charges, dipole and orbitals (both spin
   channels for UHF/UKS), so the Populations, Isosurface and (TD-DFT) Energies

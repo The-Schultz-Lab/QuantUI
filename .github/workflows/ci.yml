@@ -30,7 +30,8 @@ jobs:
           python -m pip install --upgrade pip
           # xtb (GFN-FF metal pre-opt) is Linux-only on PyPI, so it's included
           # here (ubuntu) but not in the Windows job below — its tests skip there.
-          pip install -e ".[pyscf,ase,dev,xtb]"
+          # ts: Sella for the Transition State tests (M-TS); Linux jobs only.
+          pip install -e ".[pyscf,ase,dev,xtb,ts]"
 
       - name: Run tests (skip network tests)
         run: |

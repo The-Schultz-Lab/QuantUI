@@ -1205,6 +1205,7 @@ def build_shared_widgets(
         options=[
             "Single Point",
             "Geometry Opt",
+            "Transition State",
             "Frequency",
             "UV-Vis (TD-DFT)",
             "NMR Shielding",
@@ -1499,6 +1500,37 @@ def build_shared_widgets(
         layout=layout_fn(width="320px"),
         tooltip="Which reorganization energy channel(s) to compute",
     )
+    # Transition State (M-TS TS.2): its own force threshold, tighter than a
+    # minimization's, so switching calc types never changes the other's.
+    from quantui.ts_search import DEFAULT_TS_FMAX, sella_available
+
+    app._ts_fmax_fi = widgets.BoundedFloatText(
+        value=DEFAULT_TS_FMAX,
+        min=0.001,
+        max=0.2,
+        step=0.005,
+        description="Force thr. (eV/Å):",
+        style={"description_width": "130px"},
+        layout=layout_fn(width="250px"),
+    )
+    _ts_avail = (
+        ""
+        if sella_available()
+        else (
+            f'<br><span style="color:{_theme.css.ACCENT_WARNING}">⚠ Needs the '
+            "optional Sella package, which is not installed here: "
+            '<code>pip install "quantui[ts]"</code></span>'
+        )
+    )
+    app._ts_note = widgets.HTML(
+        f'<span style="color:{_theme.css.TEXT_SECONDARY};font-size:12px">'
+        "Searches for a <b>first-order saddle point</b> near the current "
+        "geometry (Sella, starting from the analytic Hessian), then runs a "
+        "frequency calculation to check it: a transition state has exactly "
+        "<b>one imaginary frequency</b>. Start close to the barrier top, e.g. "
+        "the highest point of a PES scan." + _ts_avail + "</span>"
+    )
+
     app._reorg_note = widgets.HTML(
         f'<span style="color:{_theme.css.TEXT_SECONDARY};font-size:12px">'
         "4-point Marcus scheme: optimizes the neutral and ion geometries, then "

@@ -35,7 +35,7 @@ python -m pip install --upgrade --ignore-installed setuptools wheel || true
 # upgrade above targets `python`, so a bare `pip` install used the distro
 # setuptools and failed to build pyscf-properties, which left the session
 # with nothing installed.
-python -m pip install -e ".[pyscf,ase,dev,xtb]"
+python -m pip install -e ".[pyscf,ase,dev,xtb,ts]"
 
 echo "QuantUI cloud env ready: package + [pyscf,ase,dev,xtb] installed." >&2
 
