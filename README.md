@@ -462,11 +462,11 @@ Five step-by-step notebooks in [`notebooks/tutorials/`](https://github.com/The-S
 | PBE | DFT GGA | Large molecules; metals; when speed matters |
 | PBE0 | DFT hybrid | Charge-transfer, band gaps |
 | M06-2X | DFT meta-hybrid | Thermochemistry, barrier heights |
-| wB97X-D | DFT range-sep. + D3 | Non-covalent interactions, excited states |
+| wB97X-D | DFT range-sep. + built-in dispersion | Non-covalent interactions, excited states |
 | CAM-B3LYP | DFT range-sep. | Charge-transfer UV-Vis, Rydberg states |
 | M06-L | DFT local meta-GGA | Large molecules; transition metals |
 | HSE06 | DFT screened hybrid | Band gaps, large molecules |
-| PBE-D3 | DFT GGA + dispersion | Van der Waals complexes, stacking |
+| PBE-D3 | DFT GGA + Grimme D3 (zero damping) | Van der Waals complexes, stacking |
 | MP2 | Post-HF | Accurate energetics for small molecules (O(N⁵)) |
 | CCSD | Post-HF coupled cluster | High-accuracy small-molecule energies (O(N⁶)) |
 | CCSD(T) | Post-HF coupled cluster | Benchmark "gold standard" energies (O(N⁷); CPU only) |

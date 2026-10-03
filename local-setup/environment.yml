@@ -59,4 +59,6 @@ dependencies:
       # reshape bug fixed in commit 4eee5a4 (2024-11-07, unreleased).  Install
       # from GitHub source until a new release lands on PyPI.
       - pyscf-properties @ git+https://github.com/pyscf/properties.git
+      # Grimme D3 for PBE-D3 (PySCF mf.disp); Linux/macOS wheels on PyPI.
+      - pyscf-dispersion
       - -e ..

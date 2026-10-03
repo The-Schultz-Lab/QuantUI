@@ -130,7 +130,8 @@ FROM: condaforge/miniforge3:26.1.1-3
     voila \
     ase \
     py3dmol \
-    requests
+    requests \
+    pyscf-dispersion
 
   echo "Installing QuantUI..."
   cd /opt/quantui
