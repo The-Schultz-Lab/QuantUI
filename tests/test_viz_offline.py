@@ -96,7 +96,10 @@ def test_orbital_isosurface_renderer_is_cdn_free(tmp_path):
     assert _CDN not in html
     # Two lobes (M-ORBVIZ contract) + loads vendored 3Dmol offline.
     # Count CALLS, not mentions: the surrounding comment names the API too.
-    assert html.count("vw.addVolumetricData(") == 2
+    # Orbital mode draws both lobes; the density/ESP branches (M-SURFACES)
+    # share the same JS, hence four calls in the source.
+    assert html.count("vw.addVolumetricData(") == 4
+    assert 'var MODE="orbital"' in html
     assert "data:text/javascript;base64," in html
 
 

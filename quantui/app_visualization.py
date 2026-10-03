@@ -1343,6 +1343,8 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
     # exported — the cube's own provenance comment used to silently name
     # whatever method the dropdown showed at that later moment instead.
     app._last_orb_method = str(getattr(result, "method", "") or "")
+    # Spin toggle only for unrestricted results (SURF.1).
+    sync_iso_surface_controls(app)
 
     plotly_rendered = False
     try:
@@ -1420,6 +1422,66 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
     return True
 
 
+_SURFACE_LABELS = {
+    "density": "Electron density",
+    "spin": "Spin density",
+    "esp": "ESP map",
+}
+
+
+def _surface_mode(app: Any) -> str:
+    """Selected surface kind ("orbital", "density", "spin", "esp")."""
+    value = getattr(getattr(app, "_iso_surface_dd", None), "value", "orbital")
+    return str(value or "orbital")
+
+
+def _orbitals_unrestricted(app: Any) -> bool:
+    import numpy as _np
+
+    coeff = getattr(app, "_last_orb_mo_coeff", None)
+    try:
+        return coeff is not None and _np.asarray(coeff).ndim == 3
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def sync_iso_surface_controls(app: Any) -> None:
+    """Show the controls that apply to the selected surface kind."""
+    mode = _surface_mode(app)
+    orbital = mode == "orbital"
+
+    def _show(name: str, on: bool) -> None:
+        w = getattr(app, name, None)
+        if w is not None:
+            w.layout.display = "" if on else "none"
+
+    _show("_orb_toggle", orbital)
+    _show(
+        "_orb_index_input",
+        orbital
+        and getattr(getattr(app, "_orb_toggle", None), "value", "") == "By index",
+    )
+    _show("_orb_spin_toggle", orbital and _orbitals_unrestricted(app))
+    _show("_iso_esp_range_slider", mode == "esp")
+    _show(
+        "_iso_esp_legend",
+        mode == "esp" and bool(getattr(app, "_last_esp_cube_path", None)),
+    )
+    # The ESP map takes its colours from the potential, not the scheme.
+    _show("_iso_colors_dd", mode != "esp")
+
+
+def on_iso_surface_changed(app: Any, change: Any = None) -> None:
+    """Surface kind changed: reset the isovalue to that kind's usual value."""
+    from quantui.orbital_visualization import DEFAULT_SURFACE_ISOVALUE
+
+    mode = _surface_mode(app)
+    slider = getattr(app, "_iso_isovalue_slider", None)
+    if slider is not None:
+        slider.value = DEFAULT_SURFACE_ISOVALUE.get(mode, 0.02)
+    sync_iso_surface_controls(app)
+
+
 def on_iso_generate(app: Any, btn: Any) -> None:
     """Generate orbital isosurface for currently selected orbital."""
     orbital_label = app._orb_toggle.value
@@ -1427,6 +1489,9 @@ def on_iso_generate(app: Any, btn: Any) -> None:
     # into the label as "MO <n>"; render_orbital_isosurface parses it back.
     if orbital_label == "By index":
         orbital_label = f"MO {int(app._orb_index_input.value)}"
+    _mode = _surface_mode(app)
+    if _mode != "orbital":
+        orbital_label = _SURFACE_LABELS[_mode]
     app._iso_render_token = int(getattr(app, "_iso_render_token", 0)) + 1
     render_token = app._iso_render_token
     btn.disabled = True
@@ -1574,8 +1639,27 @@ def render_orbital_isosurface(
     if orb_info is None:
         return
 
+    _mode = _surface_mode(app)
+    if _mode != "orbital":
+        render_density_surface(app, _mode, orbital_label, render_token=render_token)
+        return
+
     n_occ = orb_info.n_occupied
     n_total = len(orb_info.mo_energies_ev)
+    # Unrestricted results: the beta channel has its own orbitals and its
+    # own HOMO (SURF.1). The diagram and orb_info describe alpha.
+    _beta = (
+        _orbitals_unrestricted(app)
+        and getattr(getattr(app, "_orb_spin_toggle", None), "value", "alpha") == "beta"
+    )
+    if _beta:
+        try:
+            import numpy as _np
+
+            _occ_b = _np.asarray(getattr(app, "_last_orb_mo_occ", None))[1]
+            n_occ = int((_occ_b > 0.5).sum())
+        except Exception:  # noqa: BLE001 — fall back to alpha counting
+            _beta = False
     idx_map = {
         "HOMO-1": n_occ - 2,
         "HOMO": n_occ - 1,
@@ -1686,6 +1770,12 @@ def render_orbital_isosurface(
             if getattr(app, "_last_orb_engine_id", "pyscf") == "pyfock"
             else generate_cube_from_arrays
         )
+        if _beta:
+            import numpy as _np
+
+            mo_coeff = _np.asarray(mo_coeff)[1]
+            orbital_label = f"{orbital_label} (β)"
+            cube_path = cube_path.with_name(cube_path.stem + "_beta.cube")
         _cube_generator(
             mol_atom,
             mol_basis,
@@ -1771,6 +1861,8 @@ def render_orbital_isosurface(
     # label so the "Export cube" button can copy it to the top-level
     # result dir with a friendly name without re-deriving the path.
     app._last_cube_path = cube_path
+    app._last_cube_kind = "orbital"
+    app._last_esp_cube_path = None
     # The enclosed-density readout depends on the cube that was just written,
     # so it can only be filled in now — not when the slider was last moved.
     update_iso_enclosed_label(app)
@@ -1805,6 +1897,187 @@ def render_orbital_isosurface(
             pass
 
     app._queue_main_thread_callback(_enable_cube_btn)
+
+
+def render_density_surface(
+    app: Any, mode: str, label: str, render_token: int | None = None
+) -> None:
+    """Total density, spin density or ESP map (M-SURFACES SURF.2/3).
+
+    Built from the stored orbitals and occupations — no new SCF. Runs on the
+    isosurface worker thread like the orbital path, and shares its viewer,
+    sliders, PNG capture and cube export.
+    """
+    import re as _re
+    from datetime import datetime as _dt
+
+    import numpy as _np
+
+    def _is_stale() -> bool:
+        return render_token is not None and render_token != int(
+            getattr(app, "_iso_render_token", 0)
+        )
+
+    def _show_msg(msg: str) -> None:
+        if _is_stale():
+            return
+        app._queue_main_thread_callback(
+            app._set_html_output,
+            app._orb_iso_output,
+            f'<p style="color:#b91c1c;padding:8px">⚠ {msg}</p>',
+        )
+
+    mo_coeff = getattr(app, "_last_orb_mo_coeff", None)
+    mo_occ = getattr(app, "_last_orb_mo_occ", None)
+    mol_atom = getattr(app, "_last_orb_mol_atom", None)
+    mol_basis = getattr(app, "_last_orb_mol_basis", None)
+    if mo_coeff is None or mo_occ is None or mol_atom is None or mol_basis is None:
+        _show_msg("This result has no stored orbitals to build a density from.")
+        return
+    if getattr(app, "_last_orb_engine_id", "pyscf") == "pyfock":
+        _show_msg(
+            "Density surfaces need a PySCF result (PyFock orbitals use another AO order)."
+        )
+        return
+    occ = _np.asarray(mo_occ, dtype=float)
+    if mode == "spin":
+        n_unpaired = (
+            float(abs(occ[0].sum() - occ[1].sum()))
+            if occ.ndim == 2
+            else float((_np.abs(occ - 1.0) < 0.5).sum())
+        )
+        if n_unpaired < 0.5:
+            _show_msg(
+                "This is a closed-shell result: the alpha and beta densities are "
+                "identical, so the spin density is zero everywhere."
+            )
+            return
+
+    try:
+        import plotly.io as _pio
+
+        from quantui.orbital_visualization import (
+            DEFAULT_ISO_RESOLUTION,
+            ISO_RESOLUTION_PRESETS,
+            generate_surface_cubes,
+            infer_charge_and_spin,
+            max_render_points,
+            plot_cube_isosurface,
+            render_surface_py3dmol,
+        )
+        from quantui.viz_backend_router import VizTask as _VT
+
+        result_dir = getattr(app, "_last_result_dir", None)
+        if not isinstance(result_dir, Path):
+            try:
+                result_dir = app._get_results_dir()
+            except Exception:
+                result_dir = Path.cwd()
+        cube_dir = Path(result_dir) / "isosurfaces"
+        cube_dir.mkdir(parents=True, exist_ok=True)
+        orb_info = getattr(app, "_last_orb_info", None)
+        formula = str(getattr(orb_info, "formula", "") or "molecule")
+        safe_formula = (
+            _re.sub(r"[^A-Za-z0-9_.-]+", "_", formula).strip("._") or "molecule"
+        )
+        ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
+        stem = f"{safe_formula}_{mode}_{ts}"
+        cube_path = cube_dir / f"{stem}.cube"
+
+        _charge, _spin = infer_charge_and_spin(mol_atom, occ, basis=mol_basis)
+        _res_key = getattr(
+            getattr(app, "_iso_resolution_dd", None), "value", DEFAULT_ISO_RESOLUTION
+        )
+        _grid = ISO_RESOLUTION_PRESETS.get(
+            _res_key, ISO_RESOLUTION_PRESETS[DEFAULT_ISO_RESOLUTION]
+        )
+        if mode == "esp":
+            # The potential costs far more per point than the density, and
+            # the viewer carries both cubes; the 60³ default is plenty for
+            # colouring a surface.
+            _grid = min(_grid, 60)
+        cubes = generate_surface_cubes(
+            mode,
+            mol_atom,
+            mol_basis,
+            mo_coeff,
+            occ,
+            cube_path,
+            esp_output_path=cube_dir / f"{stem}_esp.cube",
+            nx=_grid,
+            ny=_grid,
+            nz=_grid,
+            charge=_charge,
+            spin=_spin,
+            method=str(getattr(app, "_last_orb_method", "") or ""),
+        )
+        opts = iso_render_options(app)
+        esp_range = cubes.get("esp_range") or opts["esp_range"]
+        chosen = app._resolve_backend(_VT.ORBITAL_ISOSURFACE)
+        use_py3dmol = str(chosen) == "py3dmol"
+        backend_label = "py3dmol" if use_py3dmol else "plotlymol"
+        with _viz_render_event(app, task=_VT.ORBITAL_ISOSURFACE, backend=backend_label):
+            if use_py3dmol:
+                html_str = render_surface_py3dmol(
+                    cube_path,
+                    mode=mode,
+                    esp_cube_path=cubes.get("esp_cube"),
+                    esp_range=float(esp_range),
+                    isovalue=opts["isovalue"],
+                    opacity=opts["opacity"],
+                    wireframe=opts["wireframe"],
+                    color_scheme=opts["color_scheme"],
+                    bgcolor=opts["bgcolor"],
+                    capture_class=opts["capture_class"],
+                )
+            else:
+                # The Plotly fallback draws the surface but cannot colour it by
+                # a second volume; say so rather than show a plain density as
+                # if it were an ESP map.
+                fig = plot_cube_isosurface(
+                    cube_path,
+                    max_points=max_render_points(_grid),
+                    title=f"{label}",
+                    show_molecule=True,
+                    show_grid=False,
+                    scene_bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+                )
+                html_str = _pio.to_html(
+                    fig, include_plotlyjs="require", full_html=False
+                )
+                if mode == "esp":
+                    html_str = (
+                        '<p style="color:#92400e;padding:4px 8px">ESP colouring '
+                        "needs the py3Dmol backend; showing the density surface "
+                        "only.</p>" + html_str
+                    )
+    except Exception as exc:  # noqa: BLE001 — surface the failure in the panel
+        _show_msg(f"{label} failed: {type(exc).__name__}: {exc}")
+        return
+    if _is_stale():
+        return
+
+    app._last_cube_path = cube_path
+    app._last_cube_kind = mode
+    app._last_esp_cube_path = cubes.get("esp_cube")
+    app._last_cube_orbital = label.replace(" ", "_")
+    update_iso_enclosed_label(app)
+
+    def _finish() -> None:
+        if mode == "esp":
+            slider = getattr(app, "_iso_esp_range_slider", None)
+            if slider is not None and cubes.get("esp_range"):
+                # Suggested range for THIS molecule; the user can still drag it.
+                slider.value = float(cubes["esp_range"])
+            _update_esp_legend(app)
+        sync_iso_surface_controls(app)
+        try:
+            app._iso_export_cube_btn.disabled = False
+        except Exception:
+            pass
+
+    app._queue_main_thread_callback(app._set_html_output, app._orb_iso_output, html_str)
+    app._queue_main_thread_callback(_finish)
 
 
 def _swap_vib_output(app: Any, html_str: str) -> None:
@@ -2338,6 +2611,7 @@ def iso_render_options(app: Any) -> dict:
         "opacity": _val("_iso_opacity_slider", 0.85),
         "wireframe": _val("_iso_wireframe_cb", False),
         "color_scheme": _val("_iso_colors_dd", "blue-red"),
+        "esp_range": _val("_iso_esp_range_slider", 0.05),
         "bgcolor": app._plotly_theme_colors()["scene_bgcolor"],
         "capture_class": (
             _ORB_PNG_INBOX_CLASS
@@ -2480,15 +2754,27 @@ def update_iso_enclosed_label(app: Any) -> None:
     if cube is None or not Path(cube).exists():
         label.value = ""
         return
-    from quantui.orbital_visualization import enclosed_density_fraction
+    from quantui.orbital_visualization import (
+        enclosed_density_fraction,
+        enclosed_electron_fraction,
+    )
 
-    frac = enclosed_density_fraction(Path(cube), iso)
+    kind = getattr(app, "_last_cube_kind", "orbital")
+    if kind == "spin":
+        label.value = ""
+        return
+    if kind in ("density", "esp"):
+        frac = enclosed_electron_fraction(Path(cube), iso)
+        what = "of the electrons"
+    else:
+        frac = enclosed_density_fraction(Path(cube), iso)
+        what = "of the density"
     label.value = (
         ""
         if frac is None
         else (
             f'<span style="font-size:12px;color:#555">encloses '
-            f"<b>{frac * 100:.1f}%</b> of the density</span>"
+            f"<b>{frac * 100:.1f}%</b> {what}</span>"
         )
     )
 
@@ -2506,8 +2792,23 @@ def on_iso_appearance_changed(app: Any, change: dict | None = None) -> None:
         wf=opts["wireframe"],
         pos=pos,
         neg=neg,
+        range=opts["esp_range"],
     )
+    _update_esp_legend(app)
     update_iso_enclosed_label(app)
+
+
+def _update_esp_legend(app: Any) -> None:
+    legend = getattr(app, "_iso_esp_legend", None)
+    if legend is None:
+        return
+    from quantui.orbital_visualization import esp_legend_html
+
+    try:
+        rng = float(getattr(getattr(app, "_iso_esp_range_slider", None), "value", 0.05))
+    except (TypeError, ValueError):
+        return
+    legend.value = esp_legend_html(rng)
 
 
 def rerender_3d_scenes_for_theme(app: Any) -> None:

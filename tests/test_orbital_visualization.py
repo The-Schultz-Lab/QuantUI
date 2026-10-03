@@ -486,7 +486,10 @@ class TestRenderOrbitalIsosurfacePy3Dmol:
         html = render_orbital_isosurface_py3dmol(minimal_cube_file, isovalue=0.02)
         # Count CALLS, not mentions — the surrounding comment names the API
         # too, and a comment is not a lobe.
-        assert html.count("vw.addVolumetricData(") == 2
+        # The JS also holds the density (1 call) and ESP (1 call) branches
+        # for M-SURFACES; orbital mode takes the two-lobe branch.
+        assert html.count("vw.addVolumetricData(") == 4
+        assert 'var MODE="orbital"' in html
         assert "iso:0.02" in html.replace(" ", "")  # initial +isovalue
         assert "isoval: -state.iso" in html  # the mirrored lobe
 

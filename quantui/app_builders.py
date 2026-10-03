@@ -2482,13 +2482,37 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         style={"description_width": "40px"},
         layout=layout_fn(display="none", width="150px", margin="0 0 4px 0"),
     )
+    # M-SURFACES: what to draw. Orbitals are the original panel; the density
+    # surfaces are built from the same stored orbitals + occupations.
+    app._iso_surface_dd = widgets.Dropdown(
+        options=[
+            ("Molecular orbital", "orbital"),
+            ("Electron density", "density"),
+            ("Spin density (α − β)", "spin"),
+            ("Electrostatic potential on density (ESP map)", "esp"),
+        ],
+        value="orbital",
+        description="Surface:",
+        style={"description_width": "60px"},
+        layout=layout_fn(width="420px", margin="4px 0"),
+    )
+    # Spin channel for unrestricted (UHF/UKS) results; hidden otherwise.
+    app._orb_spin_toggle = widgets.ToggleButtons(
+        options=[("α spin", "alpha"), ("β spin", "beta")],
+        value="alpha",
+        tooltip="Unrestricted results have separate alpha and beta orbitals.",
+        style={"button_width": "80px"},
+        layout=layout_fn(display="none", margin="4px 0"),
+    )
     app._orb_iso_output = widgets.Output()
     app._orb_iso_controls = widgets.VBox(
         [
             widgets.HTML(
                 f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY};font-weight:bold">'
-                "Orbital isosurface:</span>"
+                "Isosurface:</span>"
             ),
+            app._iso_surface_dd,
+            app._orb_spin_toggle,
             app._orb_toggle,
             app._orb_index_input,
             # The viewer is NOT here. It sits below the Generate button in
@@ -2569,7 +2593,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._iso_isovalue_slider = widgets.FloatLogSlider(
         value=0.02,
         base=10,
-        min=-3.0,  # 0.001
+        min=-4.0,  # 0.0001 (density surfaces go this low)
         max=-0.7,  # ~0.2
         step=0.02,
         description="Isovalue:",
@@ -2584,6 +2608,22 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._iso_enclosed_label = widgets.HTML(
         value="", layout=layout_fn(margin="0 0 0 6px")
     )
+    # ESP colour range (± a.u.); shown only for the ESP map. Filled with a
+    # suggested value from the potential on the surface after each generate.
+    app._iso_esp_range_slider = widgets.FloatLogSlider(
+        value=0.05,
+        base=10,
+        min=-3.0,  # 0.001
+        max=-0.5,  # ~0.32
+        step=0.02,
+        description="ESP ±:",
+        readout_format=".3f",
+        continuous_update=False,
+        tooltip="Colour range of the ESP map in atomic units (1 a.u. = 627.5 kcal/mol).",
+        style={"description_width": "70px"},
+        layout=layout_fn(width="330px", display="none"),
+    )
+    app._iso_esp_legend = widgets.HTML(value="", layout=layout_fn(display="none"))
     app._iso_colors_dd = widgets.Dropdown(
         options=list(_ORBITAL_COLOR_OPTIONS),
         value=_DEFAULT_ORBITAL_COLORS,
@@ -2685,8 +2725,9 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         [
             widgets.HTML(
                 f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:12px;margin:0 0 8px">'
-                "Visualise a molecular orbital as a 3D isosurface (Linux / WSL only — "
-                "requires PySCF and RDKit). Run or load a Single Point or Geometry "
+                "Visualise a molecular orbital, the electron or spin density, or an "
+                "electrostatic-potential (ESP) map as a 3D isosurface (Linux / WSL "
+                "only — requires PySCF). Run or load a Single Point or Geometry "
                 "Optimization first, then click <b>Generate</b>.</p>"
             ),
             app._orb_iso_controls,
@@ -2706,6 +2747,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 [app._iso_isovalue_slider, app._iso_enclosed_label],
                 layout=layout_fn(align_items="center"),
             ),
+            app._iso_esp_range_slider,
+            app._iso_esp_legend,
             app._iso_opacity_slider,
             app._iso_wireframe_cb,
             app._iso_colors_dd,
