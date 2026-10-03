@@ -40,6 +40,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - **Edit Structure** — set a bond length, angle or dihedral to a value,
   delete atoms, add a hydrogen, change an element, undo; pick atoms by
   clicking the viewer. **Freeze atoms** for a constrained Geometry Opt.
+- **Orbital gallery** — the Isosurface panel's **Orbital gallery** button
+  shows the orbitals around the HOMO–LUMO gap (2, 3 or 4 on each side) as
+  small viewers that rotate together, each labelled with its symmetry and
+  energy; follows the α/β choice for unrestricted results.
 - **Populations and Isosurface for Frequency and TD-DFT results** — both
   record the reference SCF's Mulliken charges, dipole and orbitals (both spin
   channels for UHF/UKS), so the Populations, Isosurface and (TD-DFT) Energies

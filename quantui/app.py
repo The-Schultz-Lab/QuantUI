@@ -473,6 +473,9 @@ from quantui.app_visualization import (
     on_orb_range_changed as _viz_on_orb_range_changed,
 )
 from quantui.app_visualization import (
+    on_orbital_gallery as _viz_on_orbital_gallery,
+)
+from quantui.app_visualization import (
     on_raman_fwhm_changed as _viz_on_raman_fwhm_changed,
 )
 from quantui.app_visualization import (
@@ -1616,6 +1619,12 @@ class QuantUIApp:
         _iso_esp_range_slider: Any
         _iso_esp_legend: Any
         _orb_spin_toggle: Any
+        _orb_gallery_btn: Any
+        _orb_gallery_span_dd: Any
+        _orb_gallery_box: Any
+        _orb_gallery_output: Any
+        _last_orb_mo_energy: Any
+        _gallery_token: int
         _iso_opacity_slider: Any
         _iso_wireframe_cb: Any
         _iso_resolution_dd: Any
@@ -1824,6 +1833,7 @@ class QuantUIApp:
         # ``_apply_analysis_context`` resets these between contexts so stale
         # state from a prior calc cannot leak into the next molecule.
         self._last_orb_mo_coeff: Any = None
+        self._last_orb_mo_energy: Any = None
         self._last_orb_mo_occ: Any = None
         self._last_orb_mol_atom: Any = None
         self._last_orb_mol_basis: Any = None
@@ -2905,6 +2915,7 @@ class QuantUIApp:
         )
         # Orbital isosurface generate button
         self._iso_generate_btn.on_click(self._on_iso_generate)
+        self._orb_gallery_btn.on_click(self._on_orbital_gallery)
         # Reveal the free-entry MO-index input only in "By index" mode.
         self._orb_toggle.observe(
             self._safe_cb(self._on_orb_toggle_changed), names="value"
@@ -5804,6 +5815,9 @@ class QuantUIApp:
 
     def _on_iso_generate(self, btn) -> None:
         _viz_on_iso_generate(self, btn)
+
+    def _on_orbital_gallery(self, btn=None) -> None:
+        _viz_on_orbital_gallery(self, btn)
 
     def _on_orb_toggle_changed(self, change) -> None:
         """Show/hide the free-entry MO-index input for the 'By index' mode."""
