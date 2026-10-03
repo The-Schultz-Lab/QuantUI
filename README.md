@@ -112,8 +112,9 @@ Real output from QuantUI, straight from the app:
   via `mf.to_gpu()` (RHF / UHF / RKS / UKS supported; CCSD(T) stays on CPU).
   The Status tab + every result card show which compute device was used.
   Set `QUANTUI_DISABLE_GPU=1` to force CPU even when the GPU is available.
-  Geometry-optimization SCF steps are currently CPU-only; that limitation was
-  reproduced on real GPU hardware and remains an open optimizer-path fix.
+  Geometry-optimization SCF and gradient steps offload the same way. For a
+  frequency calculation, the displaced IR SCFs offload, but the reference SCF
+  and the analytical Hessian still run on the CPU.
 - **Timing calibration** — one-click benchmark suite populates the time
   estimator with real machine data so predictions are accurate from the first run
 - **Voilà app mode** — serve the notebook as a polished widget-only UI (no
