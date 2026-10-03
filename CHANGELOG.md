@@ -7,6 +7,59 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- **Upload structure files** — new **Upload File** tab (Calculate → Molecule
+  Input) and **Load as molecule** on the Files tab: XYZ (last frame), MOL,
+  SDF, MOL2, PDB, CIF, Gaussian `.gjf`/`.com` and `.log`/`.out`. Charge and
+  multiplicity are read from the file when it records them; 2-D MOL/SDF
+  drawings are embedded in 3-D.
+- **Download to your computer** — every export (structure files, script,
+  bundle, cubes, PNGs, plots, CSV, animations) now offers a browser download
+  link, and the Files tab has a **Download** button. Works on remote
+  Voilà/OnDemand sessions; files over 25 MB get a notice instead.
+- **Implicit solvent for optimizations, frequencies and TD-DFT** — Geometry
+  Opt is solvated at every step; Frequency uses PySCF's PCM Hessian and
+  solvated IR displacements (Raman is skipped in solvent); TD-DFT uses an
+  equilibrium ground state and non-equilibrium excitations with each
+  solvent's own optical dielectric. Also in SLURM batch jobs.
+- **Point groups and orbital symmetry labels** — the molecule summary and
+  result cards show the point group (0.01 Å tolerance, with a "nearly X"
+  hint); the orbital energy diagram labels orbitals textbook-style
+  (1a₁, 2a₁, 1b₂, 3a₁, 1b₁ for water; σ/π for linear molecules; C₃ᵥ labels
+  for NH₃).
+- **Density, spin-density and ESP surfaces** — the Isosurface panel draws the
+  electron density, the spin density (α − β) and the electrostatic potential
+  mapped on the density surface (red = negative, blue = positive, with a
+  colour bar), and α/β orbitals for unrestricted results.
+- **Vibration viewer** — displacement arrows, an amplitude slider and a table
+  of every mode with IR intensity and Raman activity.
+- **Thermochemistry at any temperature and pressure** — recomputed from the
+  stored frequencies (no new calculation), with U, H, S, G, Cv, Cp and the
+  rotational symmetry number.
+- **Edit Structure** — set a bond length, angle or dihedral to a value,
+  delete atoms, add a hydrogen, change an element, undo; pick atoms by
+  clicking the viewer. **Freeze atoms** for a constrained Geometry Opt.
+
+### Fixed
+
+- **PBE-D3 now includes D3** — it needed `pyscf.dftd3`, which no QuantUI
+  environment installed, so PBE-D3 ran as plain PBE (with a warning). D3
+  (zero damping) is now applied through PySCF's built-in dispersion
+  (`pyscf-dispersion`, added to the `[pyscf]` extra, the conda environment
+  and the CPU image), including in gradients and Hessians.
+- **Rotational symmetry number** — thermochemistry detected symmetry at
+  PySCF's strict tolerance, so slightly unsymmetric geometries (any
+  optimized water or ammonia) used σ = 1, overstating the entropy by R ln σ.
+  Symmetric molecules' S and G change.
+- **`quantui submit --depends-on`** accepts a request id or a SLURM job id
+  and resolves it; it used to write the request id into
+  `--dependency=afterok:` and validate nothing.
+- **Solvent names are case-insensitive**; an unknown solvent is an error.
+  A request with `"water"` used to run in the gas phase.
+- **Export Script** writes into the result folder instead of the server's
+  working directory.
+
 ## [0.9.0] - 2026-09-26
 
 ### Added
