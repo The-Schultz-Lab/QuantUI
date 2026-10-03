@@ -1278,6 +1278,40 @@ def update_nmr_figure(app: Any, nucleus: str) -> None:
             pass
 
 
+def _attach_mo_irreps(info: Any, result: Any) -> None:
+    """Best-effort symmetry labels for the diagram (M-CHEM CHEM.1).
+
+    PySCF results only (PyFock orders its AOs differently). For an
+    unrestricted result the diagram shows the alpha channel, so the alpha
+    orbitals are labelled. Any failure leaves the diagram unlabelled.
+    """
+    try:
+        if str(getattr(result, "engine_id", "pyscf") or "pyscf") != "pyscf":
+            return
+        mol_atom = getattr(result, "pyscf_mol_atom", None)
+        basis = getattr(result, "pyscf_mol_basis", None)
+        coeff = getattr(result, "mo_coeff", None)
+        energy = getattr(result, "mo_energy_hartree", None)
+        if not mol_atom or not basis or coeff is None or len(mol_atom) > 200:
+            return
+        import numpy as _np
+
+        coeff = _np.asarray(coeff)
+        energy = _np.asarray(energy) if energy is not None else None
+        if coeff.ndim == 3:
+            coeff = coeff[0]
+            if energy is not None and energy.ndim == 2:
+                energy = energy[0]
+        from quantui.symmetry import label_mo_irreps
+
+        irreps = label_mo_irreps(mol_atom, str(basis), coeff, mo_energy=energy)
+        if irreps is not None and len(irreps.labels) == len(info.mo_energies_ev):
+            info.irreps = irreps.labels
+            info.irrep_caption = irreps.caption()
+    except Exception:  # noqa: BLE001 — labels are informational only
+        pass
+
+
 def show_orbital_diagram(app: Any, result: Any) -> bool:
     """Build and reveal interactive orbital diagram accordion."""
     mo_energy = getattr(result, "mo_energy_hartree", None)
@@ -1291,6 +1325,8 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
         info = orbital_info_from_arrays(mo_energy, mo_occ, formula=result.formula)
     except Exception:
         return False
+
+    _attach_mo_irreps(info, result)
 
     app._last_orb_info = info
     app._last_orb_mo_coeff = getattr(result, "mo_coeff", None)

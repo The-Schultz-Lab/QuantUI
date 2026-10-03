@@ -5334,12 +5334,25 @@ class QuantUIApp:
             if label
             else ""
         )
+        # Point group (M-CHEM CHEM.1) — informational; skipped for very
+        # large structures and when PySCF is unavailable.
+        _pg_str = ""
+        if len(mol.atoms) <= 200:
+            try:
+                from quantui.symmetry import point_group_of_molecule
+
+                _pg = point_group_of_molecule(mol)
+                if _pg is not None:
+                    _pg_str = f" &bull; point group {_pg.summary_html()}"
+            except Exception:  # noqa: BLE001 — informational only
+                _pg_str = ""
         _summary = (
             f'<b style="font-size:15px">{mol.get_formula()}</b>'
             f'&ensp;<span style="color:{_theme.css.TEXT_SECONDARY};font-size:13px">'
             f"{len(mol.atoms)} atoms"
             + (f" &bull; {e_str}" if e_str else "")
             + f" &bull; charge {mol.charge} &bull; mult {mol.multiplicity}"
+            + _pg_str
             + f"</span>{_lbl}"
         )
         self.mol_info_html.value = _summary

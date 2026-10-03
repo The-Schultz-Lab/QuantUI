@@ -477,6 +477,31 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "this rather than showing a number.</p>"
         ),
     },
+    "symmetry": {
+        "title": "Point groups and orbital symmetry labels",
+        "body": (
+            "<p>QuantUI reports the molecule's <b>point group</b> (Schoenflies "
+            "symbol, e.g. C<sub>2v</sub> for water, C<sub>3v</sub> for ammonia, "
+            "D<sub>∞h</sub> for CO<sub>2</sub>) under the molecule summary and on "
+            "result cards.</p>"
+            "<p><b>Tolerance.</b> Atoms may sit up to 0.01 Å from exact "
+            "symmetry positions and still count as symmetric; typed-in or "
+            "optimized coordinates are never exact. When the structure is only "
+            "<i>nearly</i> more symmetric (within 0.05 Å) the card says so, "
+            "e.g. <i>C<sub>2h</sub>; nearly D<sub>3d</sub></i>. A slightly "
+            "distorted structure can be a real result (Jahn–Teller), not noise.</p>"
+            "<p><b>Orbital labels</b> in the energy-level diagram are numbered "
+            "per symmetry in energy order, as in textbooks: water's occupied "
+            "orbitals are 1a<sub>1</sub>, 2a<sub>1</sub>, 1b<sub>2</sub>, "
+            "3a<sub>1</sub>, 1b<sub>1</sub> (HOMO). Linear molecules use "
+            "σ/π/δ. For most non-abelian groups (T<sub>d</sub>, O<sub>h</sub>, "
+            "D<sub>3h</sub>, …) the labels belong to a subgroup PySCF works in, "
+            "and the diagram names it; C<sub>3v</sub> molecules get full "
+            "C<sub>3v</sub> labels (a<sub>1</sub>, a<sub>2</sub>, e).</p>"
+            "<p>The calculation itself never imposes symmetry; labels are "
+            "assigned afterwards, so they cannot bias the result.</p>"
+        ),
+    },
     "mulliken": {
         "title": "Mulliken populations (partial charges)",
         "body": (

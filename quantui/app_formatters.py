@@ -118,6 +118,10 @@ def _result_extra_rows(get: Any) -> str:
     if _solvent is not None:
         rows += _num("Solvent (PCM)", str(_solvent))
 
+    _pg = _point_group_html(get)
+    if _pg:
+        rows += _num("Point group", _pg)
+
     # Compute device — always shown; old saved results lack the
     # field and safely read "CPU".
     if bool(get("gpu_used", False)):
@@ -269,8 +273,53 @@ def format_opt_result(r: Any) -> str:
         + _result_card_table_open()
         + f"{_rows}"
         + _solvent_row(getattr(r, "solvent", None), "optimized in solvent")
+        + _point_group_row(_opt_point_group_html(r))
         + "</table>"
         + _RESULT_CARD_CLOSE
+    )
+
+
+def _point_group_html(get: Any) -> str:
+    """Point group of the result's geometry as HTML, or '' (M-CHEM CHEM.1).
+
+    Reads ``pyscf_mol_atom`` (live results) or the saved frequency
+    ``spectra.molecule`` block; other saved results carry no geometry here.
+    """
+    try:
+        from quantui.symmetry import detect_point_group, point_group_of_atom_list
+
+        mol_atom = get("pyscf_mol_atom")
+        if mol_atom:
+            pg = point_group_of_atom_list(mol_atom)
+        else:
+            spectra = get("spectra") or {}
+            mol = spectra.get("molecule") if isinstance(spectra, dict) else None
+            if not mol or not mol.get("atoms"):
+                return ""
+            pg = detect_point_group(mol["atoms"], mol.get("coords") or [])
+        return pg.summary_html() if pg is not None else ""
+    except Exception:  # noqa: BLE001 — informational row only
+        return ""
+
+
+def _opt_point_group_html(r: Any) -> str:
+    """Point group of an optimization's final geometry ('' if unknown)."""
+    try:
+        from quantui.symmetry import point_group_of_molecule
+
+        mol = getattr(r, "molecule", None)
+        pg = point_group_of_molecule(mol) if mol is not None else None
+        return pg.summary_html() if pg is not None else ""
+    except Exception:  # noqa: BLE001 — informational row only
+        return ""
+
+
+def _point_group_row(pg_html: str) -> str:
+    if not pg_html:
+        return ""
+    return (
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Point group</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{pg_html}</td></tr>'
     )
 
 
@@ -322,6 +371,7 @@ def format_freq_result(r: Any) -> str:
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.zpve_hartree:.6f} Ha '
         f"({r.zpve_hartree * 27.211386245988:.4f} eV)</td></tr>"
         + _solvent_row(getattr(r, "solvent", None), "Raman not computed in solvent")
+        + _point_group_row(_point_group_html(lambda k, d=None: getattr(r, k, d)))
     )
     _thermo_rows = ""
     _thermo = getattr(r, "thermo", None)

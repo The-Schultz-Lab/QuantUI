@@ -92,6 +92,10 @@ class OrbitalInfo:
     lumo_energy_ev: float
     homo_lumo_gap_ev: float
     formula: str  # for chart title
+    # Optional symmetry labels, one per MO ("1a1", "1b1", "1πg"), and the
+    # caption naming their group (quantui.symmetry.label_mo_irreps).
+    irreps: Optional[List[str]] = None
+    irrep_caption: Optional[str] = None
 
     @property
     def n_virtual(self) -> int:
@@ -392,6 +396,11 @@ def plot_orbital_diagram_plotly(
 
     LHW = 0.3  # half-width of each horizontal line in x
 
+    irreps = info.irreps if info.irreps and len(info.irreps) == n_total else None
+
+    def _sym(idx: int) -> str:
+        return f" ({irreps[idx]})" if irreps else ""
+
     traces = []
     for idx in range(start, end):
         e = float(energies[idx])
@@ -401,16 +410,16 @@ def plot_orbital_diagram_plotly(
 
         if is_homo:
             color, lw = "#2171b5", 3.0
-            hover = f"MO #{idx + 1} — HOMO<br>{e:+.4f} eV"
+            hover = f"MO #{idx + 1}{_sym(idx)} — HOMO<br>{e:+.4f} eV"
         elif is_lumo:
             color, lw = "#e6550d", 3.0
-            hover = f"MO #{idx + 1} — LUMO<br>{e:+.4f} eV"
+            hover = f"MO #{idx + 1}{_sym(idx)} — LUMO<br>{e:+.4f} eV"
         elif is_occ:
             color, lw = "#2171b5", 1.5
-            hover = f"MO #{idx + 1} (occupied)<br>{e:+.4f} eV"
+            hover = f"MO #{idx + 1}{_sym(idx)} (occupied)<br>{e:+.4f} eV"
         else:
             color, lw = "#9e9e9e", 1.5
-            hover = f"MO #{idx + 1} (virtual)<br>{e:+.4f} eV"
+            hover = f"MO #{idx + 1}{_sym(idx)} (virtual)<br>{e:+.4f} eV"
 
         traces.append(
             go.Scatter(
@@ -435,7 +444,7 @@ def plot_orbital_diagram_plotly(
             y=homo_e,
             xref="x",
             yref="y",
-            text="<b>HOMO</b>",
+            text=f"<b>HOMO</b>{_sym(n_occ - 1)}",
             showarrow=False,
             font=dict(size=fs_label, color="#2171b5"),
             xanchor="left",
@@ -446,7 +455,7 @@ def plot_orbital_diagram_plotly(
             y=lumo_e,
             xref="x",
             yref="y",
-            text="<b>LUMO</b>",
+            text=f"<b>LUMO</b>{_sym(n_occ)}",
             showarrow=False,
             font=dict(size=fs_label, color="#e6550d"),
             xanchor="left",
@@ -485,7 +494,12 @@ def plot_orbital_diagram_plotly(
         height=height,
         margin=dict(l=60, r=110, t=50, b=30),
         title=dict(
-            text=title or f"Orbital Energy Levels — {info.formula}",
+            text=(title or f"Orbital Energy Levels — {info.formula}")
+            + (
+                f"<br><sup>{info.irrep_caption}</sup>"
+                if irreps and info.irrep_caption
+                else ""
+            ),
             font=dict(size=fs_title, family="Arial"),
         ),
         xaxis=dict(
