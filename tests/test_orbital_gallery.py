@@ -97,6 +97,11 @@ class TestGalleryHtml:
 
 
 class TestAppGallery:
+    @pytest.fixture(autouse=True)
+    def _results_in_tmp(self, tmp_path, monkeypatch):
+        # Gallery cubes go to the results folder; keep them out of the repo.
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+
     def _app(self, mol, method, basis):
         pytest.importorskip("pyscf")
         from quantui.app import QuantUIApp
