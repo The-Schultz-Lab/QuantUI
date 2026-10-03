@@ -82,6 +82,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   History structures, not only Online Search results.
 - **Pasting a multi-frame XYZ** says what it is and how to load it, instead
   of "Line N: not enough values".
+- **Export Script follows the calculation** — it used to write a gas-phase
+  single point whatever was set up. It now applies the selected PCM solvent
+  and density fitting, adds the Hessian + thermochemistry for Frequency and
+  the excited states (with the solvent's optical dielectric) for TD-DFT, and
+  says plainly when it covers only the SCF (Geometry Opt, NMR, PES Scan,
+  Reorganization Energy).
 - **CPU image: NMR and analytical Raman** — the image installed QuantUI
   without the `[pyscf]` extra, so `pyscf-properties` was missing. It now
   installs the extra, and the build fails if `pyscf.prop.nmr` or
