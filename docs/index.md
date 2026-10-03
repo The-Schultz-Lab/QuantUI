@@ -22,8 +22,9 @@ hide:
           QuantUI puts <a class="hero__link" href="https://pyscf.org" target="_blank" rel="noopener">PySCF</a>
           and a guarded native-Windows <a class="hero__link" href="https://github.com/manassharma07/PyFock" target="_blank" rel="noopener">PyFock</a> subset
           behind an interactive Jupyter/Voil&agrave; UI. Run DFT, MP2, CCSD,
-          CCSD(T), TD-DFT, NMR, geometry optimization, frequencies, and
-          PES scans &mdash; visualize structures, orbitals, IR and UV-Vis
+          CCSD(T), TD-DFT, NMR, geometry optimization, transition-state
+          searches, frequencies, and PES scans &mdash; visualize structures,
+          orbitals, densities, IR and UV-Vis
           spectra, all on your laptop with optional NVIDIA GPU offload via
           <a class="hero__link" href="https://github.com/pyscf/gpu4pyscf" target="_blank" rel="noopener">gpu4pyscf</a>.
         </p>
@@ -34,7 +35,7 @@ hide:
         <div class="hero__meta">
           <span class="hero__stat">Python 3.9&ndash;3.11</span>
           <span class="hero__sep">&middot;</span>
-          <span class="hero__stat">1500+ tests</span>
+          <span class="hero__stat">3700+ tests</span>
           <span class="hero__sep">&middot;</span>
           <span class="hero__stat">MIT License</span>
           <span class="hero__sep">&middot;</span>

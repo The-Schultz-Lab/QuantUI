@@ -11,9 +11,10 @@ quantui --help
 
 The CLI is meant to *complement* the Voilà app. Most commands are
 read-only diagnostics against `~/.quantui/` (or whatever
-`QUANTUI_LOG_DIR` points at). The exception is **`quantui run app`**
+`QUANTUI_LOG_DIR` points at). The exceptions are **`quantui run app`**
 and **`quantui setup`**, which start (or prepare) the student-facing
-Voilà interface.
+Voilà interface, and **`quantui submit`** / **`quantui install-launcher`**,
+which send calculations to a SLURM cluster.
 
 Reach for the CLI when you want to:
 
@@ -34,6 +35,8 @@ Reach for the CLI when you want to:
 | [`quantui log tail`](#quantui-log-tail) | Print recent events from `event_log.jsonl` |
 | [`quantui gpu check`](#quantui-gpu-check) | Probe GPU-offload availability and explain failures |
 | [`quantui analytics build`](#quantui-analytics-build) | Build an HTML usage dashboard from `perf_log.jsonl` |
+| [`quantui submit`](#quantui-submit) | Submit `.xyz` or request-JSON files as SLURM batch jobs |
+| [`quantui install-launcher`](#quantui-install-launcher) | Write the `quantui-batch` launcher for submitting from a login node |
 
 ---
 
@@ -337,6 +340,53 @@ successfully; only the auto-open is best-effort.
 - **Speedup table empty?** It only shows tuples that have runs on
   *both* devices. After enabling GPU, re-run any prior CPU calc on
   the GPU to populate at least one row.
+
+---
+
+## `quantui submit`
+
+Submit calculations to the SLURM batch backend without the app. Each input is
+an `.xyz` file (with `--calc`) or a CalculationRequest JSON file; flags given
+on the command line override a JSON file's values.
+
+```bash
+# A frequency job from an XYZ file
+quantui submit water.xyz --calc frequency --method B3LYP --basis def2-SVP
+
+# Check the resource estimate without submitting
+quantui submit water.xyz --calc tddft --solvent Water --dry-run
+
+# Start only after another job succeeds
+quantui submit water.xyz --calc frequency --depends-on <request id>
+
+# Write the job folder (request.json + submit.slurm) but do not call sbatch
+quantui submit water.xyz --calc geometry_opt --prepare-only
+```
+
+Useful flags: `--charge`, `--mult`, `--solvent`, `--preopt`,
+`--option KEY=VALUE` (repeatable), `--cores`, `--memory-gb`, `--walltime`,
+`--email`, `--job-name`, `--partition`. `quantui submit --help` lists them all.
+An impossible charge/multiplicity, an unknown solvent, or a solvent on a calc
+type the batch worker runs gas-phase only (NMR, PES scan) is refused before
+anything is queued.
+
+---
+
+## `quantui install-launcher`
+
+Write `quantui-batch`, a standard-library Python launcher for submitting
+QuantUI jobs from a cluster login node over SSH. The launcher never starts the
+image or imports QuantUI on the login node; the calculation runs in the image
+on a compute node. Run this once per image, inside it, from an allocation:
+
+```bash
+apptainer exec /path/to/quantui.sif quantui install-launcher /shared/bin
+```
+
+Students then use `quantui-batch submit`, `status`, `results`, `log`,
+`rerun --more-memory`, `cancel` and more. Full guide (presets, `--from`
+chaining, `--queue-rest`, `check`):
+[apptainer/slurm/README.md](https://github.com/The-Schultz-Lab/QuantUI/blob/main/apptainer/slurm/README.md#submitting-from-a-terminal-quantui-batch).
 
 ---
 

@@ -1,18 +1,20 @@
 # Supported Methods
 
-Six calculation types over fourteen methods and nine basis sets, all dispatched
-through a single Calculate tab.
+Eight calculation types over fourteen methods and ten basis sets, all
+dispatched through a single Calculate tab.
 
 ## Calculation types
 
 | Calculation type | Output |
 | --- | --- |
 | **Single Point** | Energy, HOMO–LUMO gap, Mulliken charges, dipole moment |
-| **Geometry Opt** | Optimized structure with step-by-step trajectory animation |
-| **Frequency** | Vibrational frequencies, ZPVE, IR intensities, thermochemistry (H/S/G at 298 K), animated normal modes |
+| **Geometry Opt** | Optimized structure with step-by-step trajectory animation; optional frozen atoms |
+| **Transition State** | Saddle point near the input geometry (Sella; `pip install "quantui[ts]"`), then a frequency check that says whether it is a transition state (one imaginary frequency), a minimum, or a higher-order saddle point |
+| **Frequency** | Vibrational frequencies, ZPVE, IR intensities, thermochemistry at any temperature and pressure, animated normal modes |
 | **UV-Vis (TD-DFT)** | Excitation energies, oscillator strengths, UV-Vis spectrum plot |
 | **NMR Shielding** | ^1^H and ^13^C chemical shifts vs TMS via GIAO |
 | **PES Scan** | 1D bond/angle/dihedral scan; energy profile + per-step geometries |
+| **Reorganization Energy** | Marcus four-point internal reorganization energy λ = λ₁ + λ₂ for hole (cation) and/or electron (anion) transfer |
 
 ## Methods by family
 
@@ -27,7 +29,7 @@ through a single Calculate tab.
 
 From fast iteration to higher accuracy:
 
-`STO-3G` → `3-21G` → `6-31G` → `6-31G*` → `6-31G**` → `cc-pVDZ` → `cc-pVTZ` → `def2-SVP` → `def2-TZVP`
+`STO-3G` → `3-21G` → `6-31G` → `6-31G*` → `6-31G**` → `cc-pVDZ` → `cc-pVTZ` → `def2-SVP` → `def2-TZVP` → `LANL2DZ`
 
 !!! tip "Choosing a basis"
     - **STO-3G** — fast iteration and classroom demos

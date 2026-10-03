@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-03
+
 ### Added
 
 - **Upload structure files** — new **Upload File** tab (Calculate → Molecule
@@ -104,6 +106,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   (`git describe`) in the image's `QuantUICommit` label and
   `/opt/build-info/quantui-commit.txt`; its `--version` flag is gone — check
   out a release tag to build that release.
+- **Finished batch attempts reach History when the app starts**, even where
+  SLURM is unavailable (e.g. an OnDemand session), so jobs submitted from a
+  terminal show up without opening the Cluster Jobs tab.
 
 ### Fixed
 
@@ -160,12 +165,6 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   `estimate_slurm_resources()` used a short element table without Mn, Co,
   Ni, Mo and most other metals, so a metal counted as 0 electrons and the
   memory estimate came out low. It now uses the full table.
-
-### Changed
-
-- **Finished batch attempts reach History when the app starts**, even where
-  SLURM is unavailable (e.g. an OnDemand session), so jobs submitted from a
-  terminal show up without opening the Cluster Jobs tab.
 
 ## [0.9.0] - 2026-09-26
 
@@ -1094,7 +1093,8 @@ Initial public scaffolding of the QuantUI package: `quantui` package with
 `calculator.py`, basic notebook launcher, Apptainer container definition,
 MIT license, and project metadata.
 
-[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.8.0...v0.8.1
