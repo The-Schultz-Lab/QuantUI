@@ -402,3 +402,90 @@ class TestGroundStatePanelsForFreqAndTddft:
             json.dumps(p)  # JSON-safe
         write_analysis_artifacts(tmp_path, "tddft", water_tddft)
         assert (tmp_path / "orbitals.npz").exists()
+
+
+class TestExportScriptFollowsTheCalculation:
+    """#7 — Export Script used to be a gas-phase single point every time."""
+
+    def _script(self, tmp_path, calc_type="single_point", method="RHF", **kw):
+        from quantui.calculator import PySCFCalculation
+
+        return PySCFCalculation(
+            WATER, method=method, basis="STO-3G"
+        ).generate_calculation_script(
+            tmp_path / f"{calc_type}.py", calc_type=calc_type, **kw
+        )
+
+    @pytest.mark.parametrize(
+        "calc_type",
+        [
+            "single_point",
+            "geometry_opt",
+            "frequency",
+            "tddft",
+            "nmr",
+            "pes_scan",
+            "reorganization_energy",
+        ],
+    )
+    @pytest.mark.parametrize("solvent", [None, "water"])
+    def test_every_variant_is_valid_python(self, tmp_path, calc_type, solvent):
+        src = self._script(tmp_path, calc_type, solvent=solvent, density_fit=True)
+        compile(src, "exported.py", "exec")
+
+    def test_single_point_has_no_extras(self, tmp_path):
+        src = self._script(tmp_path)
+        assert "PCM" not in src and "density_fit()" not in src
+        assert "NOTE: QuantUI ran" not in src
+
+    def test_solvent_and_density_fitting(self, tmp_path):
+        src = self._script(tmp_path, solvent="water", density_fit=True)
+        assert "mf = PCM(mf)" in src and "mf.with_solvent.eps = 78.39" in src
+        assert "mf = mf.density_fit()" in src
+
+    def test_unknown_solvent_is_an_error(self, tmp_path):
+        with pytest.raises(ValueError):
+            self._script(tmp_path, solvent="Unobtainium")
+
+    def test_tddft_uses_the_optical_dielectric(self, tmp_path):
+        src = self._script(
+            tmp_path, "tddft", method="B3LYP", solvent="Ethanol", nstates=4
+        )
+        assert "td.nstates = 4" in src and "td.with_solvent.eps = 1.853" in src
+
+    def test_partial_workflows_say_so(self, tmp_path):
+        src = self._script(tmp_path, "geometry_opt")
+        assert "QuantUI ran a Geometry Opt calculation" in src
+
+    def test_app_export_passes_the_settings(self, tmp_path):
+        from quantui.app import QuantUIApp
+
+        app = QuantUIApp()
+        app._set_molecule(WATER, "test")
+        app._last_result_dir = tmp_path
+        app.calc_type_dd.value = "Geometry Opt"
+        app.solvent_cb.value = True
+        app.solvent_dd.value = "Water"
+        app._on_export(None)
+        src = next(tmp_path.glob("*.py")).read_text(encoding="utf-8")
+        assert "mf = PCM(mf)" in src
+        assert "SCF at this geometry only" in app.export_status.value
+
+    def test_frequency_script_matches_the_app(self, tmp_path, water_freq):
+        import re
+        import subprocess
+        import sys
+
+        self._script(tmp_path, "frequency")
+        run = subprocess.run(
+            [sys.executable, str(tmp_path / "frequency.py")],
+            capture_output=True,
+            text=True,
+            timeout=600,
+            cwd=tmp_path,
+        )
+        assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
+        m = re.search(r"Frequencies \(cm\^-1\):\n\[([^\]]+)\]", run.stdout)
+        got = sorted(float(x) for x in m.group(1).split())
+        want = sorted(f for f in water_freq.frequencies_cm1 if f > 0)
+        assert got == pytest.approx(want, abs=1.0)

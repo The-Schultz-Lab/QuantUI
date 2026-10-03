@@ -112,8 +112,33 @@ def on_export(app: Any, btn: Any) -> None:
         # could never find it).
         result_dir = getattr(app, "_last_result_dir", None)
         dest = (result_dir / fname) if isinstance(result_dir, Path) else Path(fname)
-        calc.generate_calculation_script(dest)
-        app.export_status.value = f"Saved: {dest}"
+        # ISSUE.19 #7 — follow the calc type, solvent and density fitting the
+        # app would use, instead of always a gas-phase single point.
+        from quantui.app_runflow import _CALC_TYPE_KEYS
+        from quantui.calculator import SCRIPT_FULL_CALC_TYPES
+
+        ct_label = app.calc_type_dd.value
+        calc_type = _CALC_TYPE_KEYS.get(ct_label, "single_point")
+        solvent = app.solvent_dd.value if app.solvent_cb.value else None
+        settings = getattr(app, "_user_settings", None)
+        density_fit = bool(
+            getattr(getattr(settings, "compute", None), "density_fit", False)
+        )
+        nstates_w = getattr(app, "nstates_si", None)
+        calc.generate_calculation_script(
+            dest,
+            calc_type=calc_type,
+            solvent=solvent,
+            density_fit=density_fit,
+            nstates=int(nstates_w.value) if nstates_w is not None else 10,
+        )
+        status = f"Saved: {dest}"
+        if calc_type not in SCRIPT_FULL_CALC_TYPES:
+            status += (
+                f" — the script runs the SCF at this geometry only, not the "
+                f"{ct_label} workflow."
+            )
+        app.export_status.value = status
         offer_download(app, dest)
     except Exception as exc:
         app.export_status.value = f"Error: {exc}"
