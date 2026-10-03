@@ -245,19 +245,23 @@ class FreqResult:
     ``None`` if the Hessian calculation failed or PySCF version does not
     provide ``norm_mode``.
     """
-    mo_energy_hartree: Optional[List] = None
-    """Orbital energies for the Energies panel's diagram, in Hartrees.
-
-    AUDIT additional-concerns — for an open-shell (UHF/UKS) reference,
-    this is the ALPHA-channel orbital energies only; the beta channel is
-    extracted and then discarded (``_moe[0]`` on a 2-D ``mf.mo_energy``).
-    Not a complete open-shell orbital spectrum.
-    """
-    mo_occ: Optional[List] = None
-    """Orbital occupations matching ``mo_energy_hartree`` — same
-    alpha-only caveat for an open-shell reference."""
+    mo_energy_hartree: Optional[Any] = None
+    """Orbital energies (Hartree) of the reference SCF; ``(2, n_mo)`` for
+    UHF/UKS, as on :class:`~quantui.session_calc.SessionResult` (both spin
+    channels since ISSUE.19 #6; older results kept alpha only)."""
+    mo_occ: Optional[Any] = None
+    """Occupations matching ``mo_energy_hartree``."""
+    mo_coeff: Optional[Any] = None
+    """MO coefficients, for the Isosurface panel (ISSUE.19 #6)."""
     pyscf_mol_atom: Optional[List] = None
     pyscf_mol_basis: Optional[str] = None
+    # Ground-state populations of the reference SCF, for the Populations
+    # panel (ISSUE.19 #6) — same meaning as on SessionResult.
+    atom_symbols: Optional[List[str]] = None
+    mulliken_charges: Optional[List[float]] = None
+    dipole_moment_debye: Optional[float] = None
+    dipole_vector_debye: Optional[List[float]] = None
+    spin_square: Optional[float] = None
     density_fit: bool = False
     # M-UX2 UXP2.10 — the actual PySCF class dispatched for the reference
     # SCF (e.g. "RHF", "UHF", "RKS", "UKS"); "" for an older saved result.
@@ -659,42 +663,12 @@ def _run_freq_calc_body(
     except Exception as exc:
         logger.debug("HOMO-LUMO gap extraction failed in freq calc: %s", exc)
 
-    # ── MO data for orbital energy diagram (best-effort) ─────────────────────
-    mo_energy_hartree: Optional[List] = None
-    mo_occ_list: Optional[List] = None
-    pyscf_mol_atom: Optional[List] = None
-    try:
-        import numpy as _np_mo
+    # ── Ground-state analysis: populations, dipole, MO arrays ────────────────
+    # Same helper as Single Point, so Frequency results fill the Energies,
+    # Isosurface and Populations panels (ISSUE.19 #6).
+    from .session_calc import ground_state_analysis
 
-        _moe = mf.mo_energy
-        _moo = mf.mo_occ
-        if isinstance(_moe, (list, _np_mo.ndarray)) and hasattr(_moe[0], "__len__"):
-            # AUDIT additional-concerns — open-shell (UHF/UKS): mo_energy
-            # is (2, n_mo), alpha then beta. Only the alpha channel is
-            # kept for the orbital-diagram fields below; see
-            # mo_energy_hartree/mo_occ's field docstrings above.
-            _moe, _moo = _moe[0], _moo[0]
-        mo_energy_hartree = _np_mo.asarray(_moe, dtype=float).tolist()
-        mo_occ_list = _np_mo.asarray(_moo, dtype=float).tolist()
-        # Build from molecule.atoms/coordinates (Angstrom) rather than
-        # mol._atom, which PySCF always stores internally in Bohr. Every
-        # consumer of pyscf_mol_atom (Molden export, cube generation,
-        # session_calc's/optimizer's own construction of this field)
-        # assumes Angstrom; using mol._atom here silently shipped Bohr
-        # coordinates ~1.89x too large.
-        pyscf_mol_atom = [
-            (atom, list(map(float, coords)))
-            for atom, coords in zip(molecule.atoms, molecule.coordinates)
-        ]
-    except Exception as exc:
-        # Silent failure here ships a FreqResult with no MO data,
-        # breaking the Energies panel on history replay. Log to surface
-        # in the Log tab.
-        logger.warning(
-            "MO data extraction failed in freq calc for %s: %s",
-            molecule.get_formula(),
-            exc,
-        )
+    _gs = ground_state_analysis(mf, molecule, basis, label=f"{method}/{basis} freq")
 
     # ── Hessian + frequency analysis ─────────────────────────────────────────
     frequencies_cm1: List[float] = []
@@ -1205,10 +1179,16 @@ def _run_freq_calc_body(
         zpve_hartree=zpve_hartree,
         thermo=thermo_data,
         displacements=displacements,
-        mo_energy_hartree=mo_energy_hartree,
-        mo_occ=mo_occ_list,
-        pyscf_mol_atom=pyscf_mol_atom,
+        mo_energy_hartree=_gs["mo_energy_hartree"],
+        mo_occ=_gs["mo_occ"],
+        mo_coeff=_gs["mo_coeff"],
+        pyscf_mol_atom=_gs["pyscf_mol_atom"],
         pyscf_mol_basis=basis,
+        atom_symbols=_gs["atom_symbols"],
+        mulliken_charges=_gs["mulliken_charges"],
+        dipole_moment_debye=_gs["dipole_moment_debye"],
+        dipole_vector_debye=_gs["dipole_vector_debye"],
+        spin_square=_gs["spin_square"],
         density_fit=_density_fit_used,
         scf_variant=scf_variant,
         solvent=_pcm_solvent,

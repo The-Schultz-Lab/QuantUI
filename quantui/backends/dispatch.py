@@ -181,7 +181,7 @@ def build_calculation_request(
 
         # A mode-displaced Frequency seed is off the minimum and must be
         # re-optimized (ISSUE.19 #8); any other seed is already optimized.
-        seed_is_optimized = bool(seed_path) and not is_freq_mode_seed(seed_path)
+        seed_is_optimized = bool(seed_path) and not is_freq_mode_seed(seed_path or "")
         if calc_type in _PREOPT_ANY_SEED_CALC_TYPES or (
             calc_type in _PREOPT_CALC_TYPES and not seed_is_optimized
         ):

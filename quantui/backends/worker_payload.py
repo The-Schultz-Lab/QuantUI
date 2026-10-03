@@ -125,6 +125,21 @@ def optimization_result_payload(result, *, trajectory_file: str) -> Dict[str, An
     }
 
 
+def _ground_state_fields(result) -> Dict[str, Any]:
+    """Populations / dipole / ⟨S²⟩ of the reference SCF (ISSUE.19 #6).
+
+    For Frequency and TD-DFT payloads; ``_basic_result`` on ingest reads the
+    same keys as for a single point.
+    """
+    return {
+        "atom_symbols": getattr(result, "atom_symbols", None),
+        "mulliken_charges": getattr(result, "mulliken_charges", None),
+        "dipole_moment_debye": getattr(result, "dipole_moment_debye", None),
+        "dipole_vector_debye": getattr(result, "dipole_vector_debye", None),
+        "spin_square": getattr(result, "spin_square", None),
+    }
+
+
 def freq_result_payload(result, molecule) -> Dict[str, Any]:
     displacements = None
     if result.displacements is not None:
@@ -169,6 +184,7 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
         # AUDIT F12 — was never serialized, though FreqResult carries it.
         "density_fit": bool(getattr(result, "density_fit", False)),
         "solvent": getattr(result, "solvent", None),
+        **_ground_state_fields(result),
         "spectra": {
             "ir": {
                 "frequencies_cm1": list(result.frequencies_cm1),
@@ -218,6 +234,7 @@ def tddft_result_payload(result) -> Dict[str, Any]:
             else None
         ),
         "n_converged_states": getattr(result, "n_converged_states", None),
+        **_ground_state_fields(result),
         "spectra": {
             "uv_vis": {
                 "excitation_energies_ev": list(result.excitation_energies_ev),
@@ -349,6 +366,9 @@ def write_analysis_artifacts(
         save_trajectory_xyz,
     )
 
+    if calc_type == "tddft":
+        # Ground-state orbitals only (ISSUE.19 #6): Energies / Isosurface.
+        save_orbitals(staging_dir, result)
     if calc_type in ("single_point", "geometry_opt", "frequency"):
         save_orbitals(staging_dir, result)
         try:
