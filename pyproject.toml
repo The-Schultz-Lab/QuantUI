@@ -108,6 +108,8 @@ quantui = [
     "data/manifests/*.json",
     "data/js/*.js",
     "data/js/*.txt",
+    # Host-side quantui-batch launcher, written out by `quantui install-launcher`.
+    "data/launcher/*.py",
 ]
 
 [project.optional-dependencies]

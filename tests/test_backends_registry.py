@@ -152,11 +152,22 @@ class TestEstimateResourcesFreqParallelAwareness:
     def test_multiplier_kicks_in_when_env_var_set(self, monkeypatch):
         from quantui.backends import cluster_config as cfg
 
+        # A light molecule, so the serial estimate sits below the site cap and
+        # the multiplier has room to show. (The default Mn(H2O)6 request now
+        # counts Mn's electrons and is already at the cap without it; the
+        # cap case is test_multiplier_never_exceeds_the_site_memory_cap.)
+        light = self._freq_request()
+        light.molecule = {
+            "atoms": ["O", "H", "H"],
+            "coords": [[0.0, 0.0, 0.0], [0.0, 0.76, 0.59], [0.0, -0.76, 0.59]],
+        }
+        light.charge, light.multiplicity = 0, 1
+
         monkeypatch.delenv("QUANTUI_FREQ_PARALLEL", raising=False)
-        baseline = estimate_slurm_resources(self._freq_request())
+        baseline = estimate_slurm_resources(light)
 
         monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "1")
-        parallel = estimate_slurm_resources(self._freq_request())
+        parallel = estimate_slurm_resources(light)
 
         assert parallel["freq_parallel_memory_multiplier"] > 1
         # Same cores/walltime — only the memory estimate changes.

@@ -63,6 +63,37 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   contamination). Reorganization-energy results record it at all four
   points of each channel (`s2_*` fields in `result.json`), so a
   spin-contaminated ion SCF can be filtered out of a λ dataset.
+- **Submit from a login node with `quantui-batch`** — a standard-library
+  Python 3.6+ launcher for SSH users. It never starts the image or imports
+  QuantUI on the login node: it writes the same job folder as
+  `SlurmBackend.prepare()` (constants copied from QuantUI at install time,
+  logic held equal by tests) and calls `sbatch`; the calculation runs in the
+  image on a compute node. Install once per image, e.g.
+  `apptainer exec IMAGE quantui install-launcher /shared/bin`.
+  `quantui-batch submit mol.xyz --calc frequency --method B3LYP --basis def2-SVP`;
+  `status`, `log`, `rerun` (e.g. `--mem=64G` after running out of memory),
+  `cancel`, `estimate` and `path` follow it. At most
+  `QUANTUI_MAX_CONCURRENT_JOBS` (default 2) QuantUI jobs may be queued or
+  running per user, counted from the real queue.
+- **`quantui-batch` workflow commands** — `--preset NAME` (shared
+  `presets.json` beside the launcher, plus per-user presets); `--from JOB`
+  starts from another job's optimized geometry, waiting on it with an
+  `afterok` dependency if it is still running (the worker loads the geometry
+  at run time, `quantui/backends/batch_chain.py`); `--queue-rest` lines jobs
+  up behind the user's running ones instead of refusing them; a duplicate
+  guard (`--again` to override); `rerun --more-memory` / `--more-time`;
+  `results JOB` (energy, convergence, imaginary modes, strongest IR bands,
+  excited states, shifts); `presets`; and `check` (python, image, Slurm
+  commands, job folders and free space, presets).
+- **Every QuantUI batch job is tagged `#SBATCH --comment=quantui`**, so an
+  operator can list all of them with `squeue -o "%k"`.
+- **`quantui submit` accepts `.xyz` files** with `--calc`, `--method`,
+  `--basis`, `--charge`, `--mult`, `--solvent`, `--preopt` and repeatable
+  `--option KEY=VALUE`; an impossible charge/multiplicity is refused before
+  anything is queued. The same flags override a request JSON's values.
+- **`quantui submit --prepare-only`** writes the job folder (`request.json` +
+  `submit.slurm`) without calling `sbatch` and prints the script path. Its
+  registry record has the new non-active status `prepared`.
 
 ### Changed
 
@@ -119,6 +150,22 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   A request with `"water"` used to run in the gas phase.
 - **Export Script** writes into the result folder instead of the server's
   working directory.
+
+- **Solvated batch requests the worker cannot run are refused up front** —
+  `quantui submit` and `quantui-batch` reject an unknown solvent, and a
+  solvent on a calc type the batch worker runs gas-phase only (e.g. `nmr`),
+  instead of letting the job queue and then fail. The supported set now
+  lives in one place (`batch_input.SOLVENT_CALC_TYPES`).
+- **SLURM memory estimate for transition-metal complexes** —
+  `estimate_slurm_resources()` used a short element table without Mn, Co,
+  Ni, Mo and most other metals, so a metal counted as 0 electrons and the
+  memory estimate came out low. It now uses the full table.
+
+### Changed
+
+- **Finished batch attempts reach History when the app starts**, even where
+  SLURM is unavailable (e.g. an OnDemand session), so jobs submitted from a
+  terminal show up without opening the Cluster Jobs tab.
 
 ## [0.9.0] - 2026-09-26
 

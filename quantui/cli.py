@@ -32,7 +32,15 @@ Currently shipped subcommands:
   the same estimator the interactive app uses — unless overridden. Pass
   ``--dry-run`` to print the resolved cores/memory/walltime for each
   request without actually submitting. Respects the same
-  ``QUANTUI_ENABLE_SLURM`` site gate as the interactive app.
+  ``QUANTUI_ENABLE_SLURM`` site gate as the interactive app. Inputs may be
+  ``.xyz`` files (with ``--calc`` and optional ``--method``/``--basis``/
+  ``--charge``/``--mult``/``--solvent``/``--preopt``/``--option K=V``).
+  ``--prepare-only`` writes the job folder without calling ``sbatch`` and
+  prints its ``submit.slurm`` path (no site gate needed).
+* ``quantui install-launcher [DIR] [--image PATH] [--force]`` — write the
+  host-side ``quantui-batch`` launcher (default ``~/bin``; one shared install
+  serves every user), which writes job folders and submits them from the
+  login node without starting the image there.
 
 Adding a new subcommand:
 
@@ -272,7 +280,7 @@ def _cmd_setup(args: argparse.Namespace) -> int:
 
 
 def _cmd_submit(args: argparse.Namespace) -> int:
-    """Submit one or more CalculationRequest JSON files to SLURM (M-CLUSTER2 CL2.7).
+    """Submit one or more requests (JSON or ``.xyz``) to SLURM (M-CLUSTER2 CL2.7).
 
     Headless equivalent of the interactive app's Slurm batch path — no
     student session or Voilà app involved. Before this existed, the only
@@ -282,16 +290,37 @@ def _cmd_submit(args: argparse.Namespace) -> int:
     ``SlurmBackend.dispatch()`` + ``estimate_slurm_resources()`` path the
     app itself uses, so a batch caller gets the same resource-sizing
     accuracy without reinventing it.
+
+    ``--prepare-only`` writes each job dir (``request.json`` +
+    ``submit.slurm``) without calling ``sbatch``, and prints one
+    ``submit.slurm`` path per line on stdout (everything else goes to
+    stderr), for callers that run ``sbatch`` themselves. (The login-node
+    ``quantui-batch`` launcher does the same job without QuantUI; see
+    ``quantui/batch_launcher.py``.)
     """
-    from quantui.backends.base import CalculationRequest
+    from quantui.backends.batch_input import (
+        BatchInputError,
+        load_request,
+        parse_option_pairs,
+    )
     from quantui.backends.cluster_config import submit_cooldown_seconds
     from quantui.backends.dispatch import is_slurm_available, slurm_unavailable_note
     from quantui.backends.slurm_utils import estimate_slurm_resources
     from quantui.security import SecurityError
 
-    if not args.dry_run and not is_slurm_available():
+    if args.dry_run and args.prepare_only:
+        print("quantui submit: --dry-run and --prepare-only conflict", file=sys.stderr)
+        return 2
+    submitting = not args.dry_run and not args.prepare_only
+    if submitting and not is_slurm_available():
         print(f"quantui submit: {slurm_unavailable_note()}", file=sys.stderr)
         return 1
+
+    try:
+        extra_options = parse_option_pairs(args.option)
+    except BatchInputError as exc:
+        print(f"quantui submit: {exc}", file=sys.stderr)
+        return 2
 
     backend = None
     if not args.dry_run:
@@ -310,8 +339,21 @@ def _cmd_submit(args: argparse.Namespace) -> int:
     for request_path_str in args.request:
         request_path = Path(request_path_str)
         try:
-            data = json.loads(request_path.read_text())
-            request = CalculationRequest.from_dict(data)
+            request, warnings = load_request(
+                request_path,
+                calc_type=args.calc,
+                method=args.method,
+                basis=args.basis,
+                charge=args.charge,
+                multiplicity=args.mult,
+                solvent=args.solvent,
+                options=extra_options,
+                preopt=args.preopt,
+            )
+        except BatchInputError as exc:
+            print(f"{request_path}: {exc}", file=sys.stderr)
+            exit_code = 1
+            continue
         except Exception as exc:  # noqa: BLE001 — surfaced to the user below
             print(
                 f"{request_path}: could not read/parse request — {exc}",
@@ -319,6 +361,8 @@ def _cmd_submit(args: argparse.Namespace) -> int:
             )
             exit_code = 1
             continue
+        for warning in warnings:
+            print(f"{request_path}: warning — {warning}", file=sys.stderr)
 
         if args.dry_run:
             estimate = estimate_slurm_resources(request)
@@ -338,6 +382,33 @@ def _cmd_submit(args: argparse.Namespace) -> int:
             )
             continue
 
+        assert backend is not None  # not args.dry_run, guarded above
+        if args.prepare_only:
+            try:
+                record = backend.prepare(
+                    request,
+                    cores=args.cores,
+                    memory_gb=args.memory_gb,
+                    walltime=args.walltime,
+                    email=args.email,
+                    mail_events=mail_events,
+                    job_name=args.job_name,
+                )
+            except SecurityError as exc:
+                print(f"{request_path}: rejected — {exc}", file=sys.stderr)
+                exit_code = 1
+                continue
+            res = record.resources
+            print(
+                f"{request_path}: prepared {Path(record.job_dir or '').name} "
+                f"({request.calc_type} {request.method}/{request.basis}, "
+                f"cores={res.get('cores')} memory_gb={res.get('memory_gb')} "
+                f"walltime={res.get('walltime')})",
+                file=sys.stderr,
+            )
+            print(Path(record.job_dir or "") / "submit.slurm")
+            continue
+
         # SlurmBackend enforces a post-submit cooldown (protects the
         # interactive app from accidental rapid-fire submits). A batch of
         # N requests submitted in one invocation would otherwise trip that
@@ -350,7 +421,6 @@ def _cmd_submit(args: argparse.Namespace) -> int:
             if cooldown > 0:
                 time.sleep(cooldown)
 
-        assert backend is not None  # not args.dry_run, guarded above
         try:
             request_id = backend.dispatch(
                 request,
@@ -372,15 +442,24 @@ def _cmd_submit(args: argparse.Namespace) -> int:
             continue
 
         submitted_count += 1
-        record = backend.registry.load(request_id)
-        slurm_job_id = record.slurm_job_id if record else None
-        staging = (record.job_dir or record.staging_dir) if record else "?"
+        loaded = backend.registry.load(request_id)
+        slurm_job_id = loaded.slurm_job_id if loaded else None
+        staging = (loaded.job_dir or loaded.staging_dir) if loaded else "?"
         print(
             f"{request_path}: submitted request_id={request_id} "
             f"slurm_job_id={slurm_job_id or '?'} staging={staging}"
         )
 
     return exit_code
+
+
+def _cmd_install_launcher(args: argparse.Namespace) -> int:
+    """Write the host-side ``quantui-batch`` launcher (see quantui/batch_launcher.py)."""
+    from quantui.batch_launcher import install_launcher
+
+    return install_launcher(
+        Path(args.dest).expanduser(), image=args.image, force=args.force
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -559,6 +638,68 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     submit_parser.add_argument(
+        "--prepare-only",
+        dest="prepare_only",
+        action="store_true",
+        help=(
+            "Write each job folder (request.json + submit.slurm) but do not "
+            "call sbatch; print one submit.slurm path per line, for callers "
+            "that submit themselves."
+        ),
+    )
+    input_group = submit_parser.add_argument_group(
+        "building a request from an .xyz file",
+        "Required for .xyz inputs: --calc. For JSON inputs, any flag given "
+        "here overrides the file's value.",
+    )
+    input_group.add_argument(
+        "--calc",
+        default=None,
+        metavar="TYPE",
+        help=(
+            "Calculation type: single_point, geometry_opt, frequency, tddft, "
+            "nmr, pes_scan, reorganization_energy."
+        ),
+    )
+    input_group.add_argument(
+        "--method",
+        default=None,
+        help="Method / functional (.xyz default: the app's default method).",
+    )
+    input_group.add_argument(
+        "--basis",
+        default=None,
+        help="Basis set (.xyz default: the app's default basis).",
+    )
+    input_group.add_argument(
+        "--charge", type=int, default=None, help="Total charge (.xyz default 0)."
+    )
+    input_group.add_argument(
+        "--mult",
+        type=int,
+        default=None,
+        help="Spin multiplicity 2S+1 (.xyz default 1).",
+    )
+    input_group.add_argument(
+        "--solvent",
+        default=None,
+        help="Implicit (PCM) solvent name, e.g. Water.",
+    )
+    input_group.add_argument(
+        "--preopt",
+        action="store_true",
+        help="Optimize the geometry first (frequency, tddft, pes_scan).",
+    )
+    input_group.add_argument(
+        "--option",
+        action="append",
+        metavar="KEY=VALUE",
+        help=(
+            "Extra request option, repeatable; VALUE is read as JSON when it "
+            "parses (e.g. --option nstates=10 --option atom_indices=[0,1])."
+        ),
+    )
+    submit_parser.add_argument(
         "--depends-on",
         dest="depends_on",
         type=str,
@@ -592,6 +733,37 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override the Apptainer image path (default: site-configured).",
     )
     submit_parser.set_defaults(func=_cmd_submit)
+
+    launcher_parser = sub.add_parser(
+        "install-launcher",
+        help=(
+            "Write the quantui-batch launcher, which submits QuantUI jobs from "
+            "a cluster login node without starting the image there. Run it "
+            "inside the image it should submit to (from an allocation): "
+            "apptainer exec IMAGE quantui install-launcher DIR"
+        ),
+    )
+    launcher_parser.add_argument(
+        "dest",
+        nargs="?",
+        default="~/bin",
+        help="Directory to write quantui-batch into (default: ~/bin).",
+    )
+    launcher_parser.add_argument(
+        "--image",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Apptainer image the launcher should use (default: the image this "
+            "command is running in)."
+        ),
+    )
+    launcher_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing quantui-batch.",
+    )
+    launcher_parser.set_defaults(func=_cmd_install_launcher)
 
     return parser
 
