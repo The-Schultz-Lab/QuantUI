@@ -66,6 +66,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   along mode" as the Frequency seed disabled the pre-optimization, so the
   frequencies were computed at a geometry that is not a stationary point.
   The checkbox is now ticked for that seed (left on, user can untick).
+- **Reorganization Energy shows its optimizer settings** — the run used the
+  max-force and max-steps fields while they were hidden, so values left over
+  from Geometry Opt or PES Scan applied unseen.
+- **No placeholder Raman spectrum** — when Raman activities were not
+  computed (PCM run, or `pyscf-properties` missing), the Raman panel drew
+  every mode at the same height. It now says why there is no spectrum.
 - **CPU image: NMR and analytical Raman** — the image installed QuantUI
   without the `[pyscf]` extra, so `pyscf-properties` was missing. It now
   installs the extra, and the build fails if `pyscf.prop.nmr` or

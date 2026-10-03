@@ -177,3 +177,67 @@ class TestSeedGating:
         app = self._app("")
         _gate_preopt_for_seed(app, "")
         assert app._freq_preopt_cb.disabled is False
+
+
+class TestReorgShowsItsOptimizerFields:
+    """#4 — the run reads fmax / max steps, so the panel must show them."""
+
+    def test_fields_are_on_the_reorg_panel(self):
+        from quantui.app import QuantUIApp
+
+        app = QuantUIApp()
+        app.calc_type_dd.value = "Reorganization Energy"
+
+        def _walk(w):
+            yield w
+            for c in getattr(w, "children", ()):
+                yield from _walk(c)
+
+        shown = list(_walk(app.calc_extra_opts))
+        assert app.fmax_fi in shown and app.max_steps_si in shown
+        assert app._reorg_mode_dd in shown
+
+
+class TestRamanWithoutActivities:
+    """#5 — no fake equal-height spectrum when activities are missing."""
+
+    def _app(self):
+        from quantui.app import QuantUIApp
+
+        app = QuantUIApp()
+        captured = {}
+        orig = app._set_html_output
+
+        def _grab(out, html):
+            if out is app._raman_fig:
+                captured["html"] = html
+            return orig(out, html)
+
+        app._set_html_output = _grab
+        return app, captured
+
+    def test_missing_activities_explain_instead_of_plotting(self):
+        app, captured = self._app()
+        stub = SimpleNamespace(frequencies_cm1=[1600.0, 3700.0], raman_activities=[])
+        assert app._show_raman_spectrum(stub) is True
+        assert "not computed" in app._raman_accordion.get_title(0)
+        assert "pyscf-properties" in captured["html"]
+        assert app._last_raman_fig is None
+        # A later re-render (theme switch, mode toggle) must not draw peaks.
+        app._update_raman_figure("Stick", 20.0)
+        assert app._last_raman_fig is None
+
+    def test_pcm_result_names_the_solvent(self):
+        app, captured = self._app()
+        stub = SimpleNamespace(
+            frequencies_cm1=[1600.0], raman_activities=None, solvent="Water"
+        )
+        app._show_raman_spectrum(stub)
+        assert "implicit solvent (Water)" in captured["html"]
+
+    def test_real_activities_still_plot(self):
+        app, _ = self._app()
+        stub = SimpleNamespace(frequencies_cm1=[1600.0], raman_activities=[5.0])
+        app._show_raman_spectrum(stub)
+        assert app._raman_accordion.get_title(0) == "Raman Spectrum"
+        assert app._last_raman_fig is not None
