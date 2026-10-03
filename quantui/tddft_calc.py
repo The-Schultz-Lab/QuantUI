@@ -114,6 +114,9 @@ class TDDFTResult:
     # ground-state SCF (e.g. "RHF", "UHF", "RKS", "UKS"); "" for an older
     # saved result.
     scf_variant: str = ""
+    # PCM solvent (None = gas phase). Ground state: equilibrium PCM with the
+    # static dielectric. Excitations: non-equilibrium (optical dielectric).
+    solvent: Optional[str] = None
 
     @property
     def energy_ev(self) -> float:
@@ -128,6 +131,37 @@ class TDDFTResult:
         ]
 
 
+def _use_optical_dielectric(td: Any, solvent: Optional[str], stream: Any) -> None:
+    """Point a PCM TD object's (non-equilibrium) solvent at *solvent*'s eps_inf.
+
+    PySCF's PCM TD-DFT defaults to non-equilibrium solvation with a fixed
+    optical dielectric of 1.78 (water). Other solvents get their own n^2.
+    """
+    from . import config as _config
+
+    eps_inf = _config.SOLVENT_OPTICAL_EPS.get(solvent or "")
+    with_solvent = getattr(td, "with_solvent", None)
+    if eps_inf is None or with_solvent is None:
+        return
+    if getattr(with_solvent, "equilibrium_solvation", False):
+        return
+    try:
+        with_solvent.reset()
+        with_solvent.eps = eps_inf
+        with_solvent.build()
+    except Exception as exc:  # noqa: BLE001 — keep PySCF's default eps_inf
+        logger.warning("Could not set optical dielectric for %s: %s", solvent, exc)
+        return
+    try:
+        stream.write(
+            f"\nPCM ({solvent}): ground state with eps = "
+            f"{_config.SOLVENT_OPTIONS.get(solvent or '', float('nan')):.2f}; "
+            f"excitations non-equilibrium with eps_inf = {eps_inf:.3f}.\n"
+        )
+    except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
+        pass
+
+
 # ============================================================================
 # Main function
 # ============================================================================
@@ -140,6 +174,7 @@ def run_tddft_calc(
     nstates: int = 10,
     progress_stream: Optional[IO[str]] = None,
     scf_rescue: bool = True,
+    solvent: Optional[str] = None,
 ) -> TDDFTResult:
     """Run a TD-DFT excited-state calculation to obtain UV-Vis absorption data.
 
@@ -165,6 +200,12 @@ def run_tddft_calc(
         scf_rescue: Whether the ground-state SCF automatically retries
             through the shared rescue helper on non-convergence
             (M-SCF-ROBUST, see :mod:`quantui.scf_robust`). Default ``True``.
+        solvent: PCM solvent name (``config.SOLVENT_OPTIONS``) or ``None``.
+            The ground state is solvated with the static dielectric constant;
+            the vertical excitations use non-equilibrium solvation with the
+            solvent's optical dielectric constant
+            (``config.SOLVENT_OPTICAL_EPS``), because only the solvent's
+            electrons can follow a fast electronic transition.
 
     Returns:
         :class:`TDDFTResult` with excitation energies and oscillator strengths.
@@ -212,6 +253,7 @@ def run_tddft_calc(
             nstates=nstates,
             progress_stream=progress_stream,
             scf_rescue=scf_rescue,
+            solvent=solvent,
             _dft=dft,
             _gto=gto,
             _scf=scf,
@@ -227,6 +269,7 @@ def _run_tddft_calc_body(
     nstates: int,
     progress_stream: Optional[IO[str]],
     scf_rescue: bool = True,
+    solvent: Optional[str] = None,
     _dft: Any,
     _gto: Any,
     _scf: Any,
@@ -275,6 +318,12 @@ def _run_tddft_calc_body(
     from .density_fitting import try_density_fit as _try_density_fit
 
     mf, density_fit_used = _try_density_fit(mf)
+
+    # Implicit solvent (PCM) for the ground state; the TD step below switches
+    # the solvent to its non-equilibrium (optical) response.
+    from .session_calc import apply_pcm
+
+    mf, pcm_solvent = apply_pcm(mf, solvent, progress_stream=progress_stream)
 
     if using_hf and progress_stream is not None:
         try:
@@ -351,6 +400,8 @@ def _run_tddft_calc_body(
             f"excited states ({nstates})…",
         )
         td = mf.TDHF() if using_hf else mf.TDDFT()
+        if pcm_solvent:
+            _use_optical_dielectric(td, pcm_solvent, stream)
         td.nstates = nstates
         # verbose=5 (DEBUG) is what surfaces PySCF's per-root "root %d
         # converged" lines during the Davidson solve — the only progress
@@ -416,6 +467,7 @@ def _run_tddft_calc_body(
         nstates=nstates,
         density_fit=density_fit_used,
         scf_variant=scf_variant,
+        solvent=pcm_solvent,
         td_converged=td_converged,
         n_converged_states=n_converged_states,
     )

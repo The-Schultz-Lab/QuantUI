@@ -77,7 +77,9 @@ Real output from QuantUI, straight from the app:
   with def2-SVP/def2-TZVP, including orbital and population analysis;
   engine capabilities automatically gate the setup menus
 - **Implicit solvent** — PCM solvation (Water, Ethanol, THF, DMSO,
-  Acetonitrile) via a single checkbox
+  Acetonitrile) via a single checkbox: single points, solvated geometry
+  optimizations, frequencies (PCM Hessian + IR; Raman stays gas-phase) and
+  TD-DFT (non-equilibrium excitations). NMR and PES scans are gas-phase only
 - **Rich results** — total energy, HOMO-LUMO gap, Mulliken charges, dipole
   moment, thermochemistry (H, S, G at 298 K), IR spectrum chart (stick and
   Lorentzian-broadened), ¹H/¹³C NMR chemical shifts, orbital energy-level

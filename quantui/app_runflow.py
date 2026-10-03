@@ -416,23 +416,36 @@ def on_basis_fix(app: Any, btn: Any = None) -> None:
         pass
 
 
-# AUDIT F11 — run_freq_calc, run_tddft_calc, run_nmr_calc, and run_pes_scan
-# don't accept a solvent argument at all, so checking "Implicit solvent
-# (PCM)" for Frequency/UV-Vis/NMR Shielding/PES Scan used to be a complete
-# no-op: the backend received molecule/method/basis/progress_stream and
-# silently ran gas-phase while the UI kept showing the box checked.
+# AUDIT F11 — a calc type whose runner ignores the solvent must not offer
+# the checkbox (it used to be a silent no-op for Frequency/UV-Vis/NMR/PES).
 #
-# "Single Point" has full PCM support (session_calc.run_in_session).
-# "Geometry Opt" and "Reorganization Energy" get a real, but partial,
-# solvent treatment: the geometry optimization itself runs gas-phase, then
-# a single point WITH solvent is computed at the final geometry and its
-# energy/orbitals replace the last trajectory frame's — a real published
-# approximation, not silently ignored, but not a solvated optimization
-# either (see _run_required_final_single_point in app.py and
-# reorganization_energy.py's own docstring).
+# Full PCM support (session_calc.apply_pcm everywhere):
+# - "Single Point".
+# - "Geometry Opt": every optimization step's SCF + gradient is solvated.
+# - "Frequency": reference SCF, PCM Hessian and IR displacement SCFs
+#   (Raman is skipped in solvent).
+# - "UV-Vis (TD-DFT)": solvated ground state, non-equilibrium excitations.
+# "Reorganization Energy" keeps its documented approximation: gas-phase
+# optimizations, solvated single points (reorganization_energy.py).
+# NMR Shielding and PES Scan stay gas-phase only (DEC-023).
 _SOLVENT_SUPPORTED_CALC_TYPES = frozenset(
-    {"Single Point", "Geometry Opt", "Reorganization Energy"}
+    {
+        "Single Point",
+        "Geometry Opt",
+        "Frequency",
+        "UV-Vis (TD-DFT)",
+        "Reorganization Energy",
+    }
 )
+
+_SOLVENT_LABELS = {
+    "Reorganization Energy": (
+        "Implicit solvent (PCM) — gas-phase optimization, "
+        "solvated final single point"
+    ),
+    "Frequency": "Implicit solvent (PCM) — Raman is not computed in solvent",
+    "UV-Vis (TD-DFT)": "Implicit solvent (PCM) — non-equilibrium excitations",
+}
 
 
 def _update_solvent_control_for_calc_type(app: Any, ct: str) -> None:
@@ -444,15 +457,9 @@ def _update_solvent_control_for_calc_type(app: Any, ct: str) -> None:
         return
     if ct in _SOLVENT_SUPPORTED_CALC_TYPES:
         cb.disabled = False
-        if ct in ("Geometry Opt", "Reorganization Energy"):
-            # AUDIT F11 — label the approximation explicitly rather than
-            # letting a checked box imply a fully solvated optimization.
-            cb.description = (
-                "Implicit solvent (PCM) — gas-phase optimization, "
-                "solvated final single point"
-            )
-        else:
-            cb.description = "Implicit solvent (PCM)"
+        # AUDIT F11 — label any approximation explicitly rather than letting
+        # a checked box imply more than the run does.
+        cb.description = _SOLVENT_LABELS.get(ct, "Implicit solvent (PCM)")
     else:
         cb.value = False  # also hides solvent_dd via on_solvent_cb_changed
         cb.disabled = True
@@ -2360,6 +2367,13 @@ def checkpoint_identity(app: Any) -> Any:
                 )
             except Exception:  # noqa: BLE001 — checkpointing is never load-bearing
                 extra = ()
+        # A solvated run must never resume a gas-phase checkpoint (or the
+        # reverse): optimization steps and IR displacements depend on it.
+        try:
+            if app.solvent_cb.value and app.solvent_dd.value:
+                extra = extra + (f"solvent={app.solvent_dd.value}",)
+        except AttributeError:
+            pass
         return CalcIdentity.from_molecule(
             molecule,
             calc_type=_ct,

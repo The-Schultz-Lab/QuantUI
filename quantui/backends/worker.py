@@ -50,22 +50,22 @@ logger = logging.getLogger(__name__)
 
 _SUPPORTED_CALC_TYPES = frozenset(CALC_TYPES)
 
-# AUDIT F11 (additional concern, code review) — the science APIs behind
-# most of these calc types (run_freq_calc, run_tddft_calc, run_nmr_calc,
-# run_pes_scan, optimize_geometry) don't accept a solvent argument at all,
-# so request.solvent used to be silently dropped rather than either applied
-# or rejected. These three runners actually thread request.solvent through
-# to a PCM-capable API: session_calc.run_in_session for "single_point";
-# reorganization_energy.run_reorganization_energy for
-# "reorganization_energy" (its own docstring documents the gas-phase-
-# optimization + PCM-single-point approximation); and _run_geometry_opt for
-# "geometry_opt", which mirrors the interactive app's approximation —
-# optimize gas-phase, then run a required solvated single point on the
-# final geometry (see app.py's _run_required_final_single_point) — so the
-# app_runflow.py UI, which enables the solvent checkbox for these same
-# three calc types, is never lying about what a submitted job will do.
+# AUDIT F11 (additional concern, code review) — a solvent on a calc type
+# whose runner ignores it must fail the request, never silently run
+# gas-phase. These runners thread request.solvent through to PCM
+# (session_calc.apply_pcm), matching the app's solvent checkbox
+# (app_runflow._SOLVENT_SUPPORTED_CALC_TYPES):
+# - single_point: run_in_session.
+# - geometry_opt: every optimization step solvated, then the same required
+#   solvated single point the app runs on the final geometry.
+# - frequency: solvated pre-opt (if requested), reference SCF, PCM Hessian
+#   and IR displacements (Raman is skipped in solvent).
+# - tddft: solvated pre-opt, ground state, non-equilibrium excitations.
+# - reorganization_energy: gas-phase optimizations + solvated single
+#   points (documented in reorganization_energy.py).
+# nmr and pes_scan stay gas-phase only (DEC-023).
 _SOLVENT_SUPPORTED_CALC_TYPES = frozenset(
-    {"single_point", "geometry_opt", "reorganization_energy"}
+    {"single_point", "geometry_opt", "frequency", "tddft", "reorganization_energy"}
 )
 
 
@@ -236,6 +236,7 @@ def _maybe_run_preopt(
             scf_rescue=scf_rescue,
             checkpoint=ckpt,
             resume=resumable,
+            solvent=request.solvent,
         )
         conv = "converged" if pre_opt.converged else "did NOT fully converge"
         energy = (
@@ -425,15 +426,13 @@ def _run_geometry_opt(
         scf_rescue=scf_rescue,
         checkpoint=ckpt,
         resume=resumable,
+        solvent=request.solvent,
     )
 
-    # AUDIT F11 (additional concern) — mirror app.py's interactive
-    # "Geometry Opt" + solvent handling: optimize_geometry has no solvent
-    # argument, so a solvated result here means gas-phase optimization
-    # followed by a required PCM single point on the final geometry, whose
-    # energy/convergence replace the optimizer's last-step values. Without
-    # this, request.solvent for geometry_opt would either be rejected
-    # outright (AUDIT F11) or, if permitted, silently ignored.
+    # Mirror app.py's interactive "Geometry Opt" + solvent handling: the
+    # optimization itself is solvated (every step), then a required PCM
+    # single point on the final geometry supplies the orbitals, populations
+    # and final energy, exactly as the app's _run_required_final_single_point.
     if request.solvent:
         _write_progress(
             staging_dir, "running", "Running required solvated single point", 90.0
@@ -529,6 +528,7 @@ def _run_frequency(
         scf_rescue=scf_rescue,
         checkpoint=ckpt,
         resume=resumable,
+        solvent=request.solvent,
     )
     return result, molecule
 
@@ -557,6 +557,7 @@ def _run_tddft(request: CalculationRequest, staging_dir: Path, log_stream) -> An
         nstates=nstates,
         progress_stream=log_stream,
         scf_rescue=scf_rescue,
+        solvent=request.solvent,
     )
 
 
@@ -774,6 +775,24 @@ def run_worker_request(
             retryable=False,
             save_type=calc_type,
         )
+
+    # An unknown solvent name fails up front (before any pre-opt runs),
+    # instead of reaching apply_pcm mid-calculation.
+    if request.solvent:
+        from quantui.session_calc import resolve_solvent
+
+        try:
+            resolve_solvent(request.solvent)
+        except ValueError as exc:
+            _append_log(staging_dir, str(exc))
+            return _error_result(
+                request,
+                staging_dir,
+                code="VALIDATION_ERROR",
+                message=str(exc),
+                retryable=False,
+                save_type=calc_type,
+            )
 
     runners: dict[str, Callable[..., Any]] = {
         "single_point": _run_single_point,

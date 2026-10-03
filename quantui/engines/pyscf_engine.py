@@ -140,6 +140,7 @@ class PyscfEngine:
             scf_rescue=bool(request.options.get("scf_rescue", True)),
             engine_id=self.engine_id,
             use_gpu=request.options.get("use_gpu"),
+            solvent=request.solvent,
         )
         return EngineResult(
             request_id=request.request_id,

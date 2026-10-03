@@ -1308,14 +1308,12 @@ class TestSolventWidgets:
         assert "Ethanol" in html
         assert "PCM" in html
 
-    @pytest.mark.parametrize(
-        "calc_type", ["Frequency", "UV-Vis (TD-DFT)", "NMR Shielding", "PES Scan"]
-    )
+    @pytest.mark.parametrize("calc_type", ["NMR Shielding", "PES Scan"])
     def test_solvent_disabled_for_unsupported_calc_type(self, calc_type):
-        """AUDIT F11 — run_freq_calc/run_tddft_calc/run_nmr_calc/run_pes_scan
-        don't accept a solvent argument at all, so the checkbox must not be
-        left checkable (and checked) for these — that used to be a
-        silent no-op."""
+        """AUDIT F11 — run_nmr_calc/run_pes_scan don't accept a solvent, so
+        the checkbox must not be left checkable (and checked) for these —
+        that used to be a silent no-op. (Frequency and UV-Vis gained PCM,
+        DEC-023.)"""
         app = QuantUIApp()
         app.solvent_cb.value = True
         app.calc_type_dd.value = calc_type
@@ -1325,13 +1323,54 @@ class TestSolventWidgets:
         assert app.solvent_dd.layout.display == "none"
 
     @pytest.mark.parametrize(
-        "calc_type", ["Single Point", "Geometry Opt", "Reorganization Energy"]
+        "calc_type",
+        [
+            "Single Point",
+            "Geometry Opt",
+            "Frequency",
+            "UV-Vis (TD-DFT)",
+            "Reorganization Energy",
+        ],
     )
     def test_solvent_enabled_for_supported_calc_type(self, calc_type):
         app = QuantUIApp()
-        app.calc_type_dd.value = "Frequency"  # disables it
+        app.calc_type_dd.value = "PES Scan"  # disables it
         app.calc_type_dd.value = calc_type  # switching back must re-enable
         assert app.solvent_cb.disabled is False
+
+    @pytest.mark.parametrize(
+        "calc_type, phrase",
+        [
+            ("Frequency", "Raman"),
+            ("UV-Vis (TD-DFT)", "non-equilibrium"),
+            ("Reorganization Energy", "gas-phase optimization"),
+        ],
+    )
+    def test_solvent_label_states_the_approximation(self, calc_type, phrase):
+        app = QuantUIApp()
+        app.calc_type_dd.value = calc_type
+        assert phrase in app.solvent_cb.description
+
+    def test_geometry_opt_solvent_label_is_plain(self):
+        # Optimizations are now solvated at every step — no caveat.
+        app = QuantUIApp()
+        app.calc_type_dd.value = "Geometry Opt"
+        assert app.solvent_cb.description == "Implicit solvent (PCM)"
+
+    def test_checkpoint_identity_separates_solvated_runs(self):
+        from quantui.app_runflow import checkpoint_identity
+        from quantui.molecule import Molecule
+
+        app = QuantUIApp()
+        app._molecule = Molecule(
+            atoms=["H", "H"], coordinates=[[0, 0, 0], [0, 0, 0.74]]
+        )
+        app.calc_type_dd.value = "Geometry Opt"
+        gas = checkpoint_identity(app)
+        app.solvent_cb.value = True
+        app.solvent_dd.value = "Water"
+        water = checkpoint_identity(app)
+        assert gas.resume_key != water.resume_key
 
     def test_solvent_checkbox_re_enables_after_switching_back(self):
         app = QuantUIApp()

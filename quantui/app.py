@@ -5930,6 +5930,9 @@ class QuantUIApp:
             calc_mol = mol
 
             ct = self.calc_type_dd.value
+            # PCM solvent for this run (None = gas phase). The checkbox is
+            # disabled for calc types without solvent support.
+            _run_solvent = self.solvent_dd.value if self.solvent_cb.value else None
             result: Any = None
             result_html: str = ""
             save_spectra: dict = {}
@@ -5967,6 +5970,7 @@ class QuantUIApp:
                         method=self.method_dd.value,
                         basis=self.basis_dd.value,
                         progress_stream=log,  # type: ignore[arg-type]
+                        solvent=_run_solvent,
                     )
                     calc_mol = _pre_opt.molecule
                     _conv_str = (
@@ -6050,6 +6054,7 @@ class QuantUIApp:
                         },
                         progress_stream=log,  # type: ignore[arg-type]
                         checkpoint=_ckpt,
+                        solvent=_run_solvent,
                     ),
                     preferred=cast(
                         EnginePreference,
@@ -6136,6 +6141,7 @@ class QuantUIApp:
                             method=self.method_dd.value,
                             basis=self.basis_dd.value,
                             progress_stream=log,  # type: ignore[arg-type]
+                            solvent=_run_solvent,
                         )
                         calc_mol = _pre_opt.molecule
                         _conv_str = (
@@ -6165,6 +6171,15 @@ class QuantUIApp:
                         )
 
                 # ── Step 3: frequency analysis ────────────────────────────────
+                if _run_solvent and not self._freq_preopt_cb.value:
+                    log.write(
+                        f"\nNote: PCM ({_run_solvent}) frequencies are only "
+                        "meaningful at a geometry optimized in the same "
+                        "solvent. If this geometry came from a gas-phase "
+                        "optimization, expect shifted or small imaginary "
+                        "modes; tick 'Geometry optimization before "
+                        "calculation' to optimize in solvent first.\n"
+                    )
                 self.run_status.value = "Computing frequencies (SCF + Hessian)…"
                 result = run_freq_calc(
                     molecule=calc_mol,
@@ -6180,6 +6195,7 @@ class QuantUIApp:
                     # resumed here.
                     checkpoint=_ckpt,
                     resume=_resume,
+                    solvent=_run_solvent,
                 )
                 result_html = self._format_freq_result(result)
                 _displacements_serialized = None
@@ -6271,6 +6287,7 @@ class QuantUIApp:
                             method=self.method_dd.value,
                             basis=self.basis_dd.value,
                             progress_stream=log,  # type: ignore[arg-type]
+                            solvent=_run_solvent,
                         )
                         calc_mol = _pre_opt.molecule
                         _conv_str = (
@@ -6305,6 +6322,7 @@ class QuantUIApp:
                     basis=self.basis_dd.value,
                     nstates=self.nstates_si.value,
                     progress_stream=log,  # type: ignore[arg-type]
+                    solvent=_run_solvent,
                 )
                 result_html = self._format_tddft_result(result)
                 save_spectra = {

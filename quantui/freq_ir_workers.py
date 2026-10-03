@@ -59,6 +59,7 @@ def init_worker(
     ecp: dict | None = None,
     density_fit: bool = False,
     scf_rescue: bool = True,
+    solvent: str | None = None,
 ) -> None:
     """ProcessPoolExecutor worker initializer.
 
@@ -123,6 +124,9 @@ def init_worker(
         (``run_scf_with_rescue(_mf_d, dm0=_dm0, rescue=scf_rescue)``); this
         worker previously hardcoded the rescue default (``True``)
         regardless of what the caller requested.
+    solvent:
+        PCM solvent of the reference SCF (``None`` for gas phase). Every
+        displaced SCF uses the same solvent, as in the serial loop.
     """
     # Order matters: set env vars before any NumPy / PySCF import.
     threads = str(int(omp_threads))
@@ -147,6 +151,7 @@ def init_worker(
         ecp=ecp or {},
         density_fit=bool(density_fit),
         scf_rescue=bool(scf_rescue),
+        solvent=solvent,
     )
 
 
@@ -227,6 +232,10 @@ def run_displaced_scf(item_id: str, coords_bohr_flat) -> Any:
     from .density_fitting import try_density_fit
 
     mf, _ = try_density_fit(mf, enabled=bool(state.get("density_fit", False)))
+    # Same PCM solvent as the reference SCF (serial loop does the same).
+    from .session_calc import apply_pcm
+
+    mf, _ = apply_pcm(mf, state.get("solvent"))
     from .scf_robust import run_scf_with_rescue
 
     # AUDIT F19 — honor the caller's scf_rescue choice instead of always

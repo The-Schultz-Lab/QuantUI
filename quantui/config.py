@@ -237,6 +237,19 @@ SOLVENT_OPTIONS: Dict[str, float] = {
     "Acetonitrile": 35.69,
 }
 
+# Optical (high-frequency) dielectric constants, eps_inf = n_D^2 at 20 C,
+# for non-equilibrium solvation of vertical excitations (TD-DFT): only the
+# solvent's electrons can follow a fast electronic transition. Refractive
+# indices: water 1.3330, ethanol 1.3611, THF 1.4072, DMSO 1.4793,
+# acetonitrile 1.3442 (CRC Handbook).
+SOLVENT_OPTICAL_EPS: Dict[str, float] = {
+    "Water": 1.777,
+    "Ethanol": 1.853,
+    "THF": 1.980,
+    "DMSO": 2.188,
+    "Acetonitrile": 1.807,
+}
+
 # TMS isotropic shielding reference constants for NMR chemical shift computation.
 # Key: "method/basis" → {element: σ_TMS (ppm)}.  δ = σ_TMS − σ_molecule.
 # Source: Cheeseman et al., J. Chem. Phys. 104 (1996) 5497; CCCBDB.

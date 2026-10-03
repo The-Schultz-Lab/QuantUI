@@ -317,6 +317,65 @@ def maybe_apply_d3(mf, method: str, progress_stream=None):
     return mf, False
 
 
+def resolve_solvent(solvent: Optional[str]) -> Optional[str]:
+    """Canonical ``config.SOLVENT_OPTIONS`` name for *solvent* (case-insensitive).
+
+    ``None``/empty means gas phase. An unknown name raises ``ValueError``
+    rather than quietly running in the gas phase (a batch request may say
+    ``"water"`` where the app says ``"Water"``).
+    """
+    if solvent is None or not str(solvent).strip():
+        return None
+    from . import config as _cfg
+
+    wanted = str(solvent).strip().lower()
+    for name in _cfg.SOLVENT_OPTIONS:
+        if name.lower() == wanted:
+            return name
+    raise ValueError(
+        f"Unknown solvent {solvent!r}. Available: "
+        f"{', '.join(_cfg.SOLVENT_OPTIONS)}."
+    )
+
+
+def apply_pcm(mf, solvent: Optional[str], progress_stream=None):
+    """Wrap ``mf`` in PySCF's PCM (C-PCM) for *solvent*, if one is given.
+
+    The single PCM entry point for every calc type (single point,
+    optimization steps, frequency reference + displacements, TD-DFT ground
+    state), so they all use the same model and dielectric constants
+    (``config.SOLVENT_OPTIONS``). Call it after density fitting and before
+    GPU offload, as ``run_in_session`` does.
+
+    Returns ``(mf, applied)``: ``applied`` is the canonical solvent name, or
+    ``None`` when *solvent* is None or PySCF's solvent module fails (a
+    warning then goes to *progress_stream* and the run continues in the gas
+    phase). An unknown solvent name raises ``ValueError``.
+    """
+    name = resolve_solvent(solvent)
+    if name is None:
+        return mf, None
+    from . import config as _cfg
+
+    _eps = _cfg.SOLVENT_OPTIONS[name]
+    try:
+        from pyscf.solvent import PCM as _PCM
+
+        mf = _PCM(mf)
+        mf.with_solvent.eps = _eps
+    except Exception as exc:  # noqa: BLE001 — optional probe (PySCF version drift)
+        logger.debug("PCM solvent unavailable, falling back to gas phase: %s", exc)
+        if progress_stream is not None:
+            try:
+                progress_stream.write(
+                    "\n⚠  PCM solvent unavailable — running in gas phase.\n"
+                )
+            except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
+                pass
+        return mf, None
+    return mf, name
+
+
 def run_in_session(
     molecule: Molecule,
     method: str = "RHF",
@@ -614,26 +673,7 @@ def _run_session_calc_body(
                 pass
 
     # --- Wrap with implicit solvent (PCM) if requested ---
-    if solvent is not None:
-        from . import config as _cfg
-
-        _eps = _cfg.SOLVENT_OPTIONS.get(solvent)
-        if _eps is not None:
-            try:
-                from pyscf.solvent import PCM as _PCM
-
-                mf = _PCM(mf)
-                mf.with_solvent.eps = _eps
-            except (
-                Exception
-            ) as exc:  # noqa: BLE001 — optional probe (PySCF version drift)
-                logger.debug(
-                    "PCM solvent unavailable, falling back to gas phase: %s", exc
-                )
-                if progress_stream is not None:
-                    progress_stream.write(
-                        "\n⚠  PCM solvent unavailable — running in gas phase.\n"
-                    )
+    mf, _pcm_solvent = apply_pcm(mf, solvent, progress_stream=progress_stream)
 
     # --- Try GPU offload ---
     # Migrate the SCF object to gpu4pyscf when (a) the package is installed,
@@ -979,7 +1019,7 @@ def _run_session_calc_body(
         gpu_name=gpu_name,
         density_fit=density_fit_used,
         dispersion_applied=dispersion_applied,
-        solvent=solvent,
+        solvent=_pcm_solvent,
         mo_energy_hartree=_mo_energy_ha_arr,
         mo_occ=_mo_occ_arr,
         mo_coeff=_mo_coeff_arr,
