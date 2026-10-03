@@ -21,6 +21,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   `cancel`, `estimate` and `path` follow it. At most
   `QUANTUI_MAX_CONCURRENT_JOBS` (default 2) QuantUI jobs may be queued or
   running per user, counted from the real queue.
+- **`quantui-batch` workflow commands** — `--preset NAME` (shared
+  `presets.json` beside the launcher, plus per-user presets); `--from JOB`
+  starts from another job's optimized geometry, waiting on it with an
+  `afterok` dependency if it is still running (the worker loads the geometry
+  at run time, `quantui/backends/batch_chain.py`); `--queue-rest` lines jobs
+  up behind the user's running ones instead of refusing them; a duplicate
+  guard (`--again` to override); `rerun --more-memory` / `--more-time`;
+  `results JOB` (energy, convergence, imaginary modes, strongest IR bands,
+  excited states, shifts); `presets`; and `check` (python, image, Slurm
+  commands, job folders and free space, presets).
+- **Every QuantUI batch job is tagged `#SBATCH --comment=quantui`**, so an
+  operator can list all of them with `squeue -o "%k"`.
 - **`quantui submit` accepts `.xyz` files** with `--calc`, `--method`,
   `--basis`, `--charge`, `--mult`, `--solvent`, `--preopt` and repeatable
   `--option KEY=VALUE`; an impossible charge/multiplicity is refused before
@@ -31,6 +43,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- **Solvated batch requests the worker cannot run are refused up front** —
+  `quantui submit` and `quantui-batch` reject an unknown solvent, and a
+  solvent on a calc type the batch worker runs gas-phase only (e.g. `tddft`),
+  instead of letting the job queue and then fail. The supported set now
+  lives in one place (`batch_input.SOLVENT_CALC_TYPES`).
 - **SLURM memory estimate for transition-metal complexes** —
   `estimate_slurm_resources()` used a short element table without Mn, Co,
   Ni, Mo and most other metals, so a metal counted as 0 electrons and the

@@ -49,7 +49,7 @@ def site_constants() -> Dict[str, Any]:
     from quantui.backends import cluster_config as cfg
     from quantui.backends import slurm_utils
     from quantui.backends.base import CALC_TYPES
-    from quantui.backends.batch_input import PREOPT_CALC_TYPES
+    from quantui.backends.batch_input import PREOPT_CALC_TYPES, SOLVENT_CALC_TYPES
     from quantui.freq_ir_workers import freq_parallel_opt_in
 
     return {
@@ -76,6 +76,8 @@ def site_constants() -> Dict[str, Any]:
         # The image's environment decides this for jobs run in it (the CPU
         # image sets QUANTUI_FREQ_PARALLEL=1), and the estimate must match.
         "freq_parallel": bool(freq_parallel_opt_in()),
+        "solvent_options": sorted(config.SOLVENT_OPTIONS),
+        "solvent_calc_types": sorted(SOLVENT_CALC_TYPES),
     }
 
 

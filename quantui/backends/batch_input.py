@@ -20,6 +20,12 @@ from .base import CALC_TYPES, CalculationRequest
 
 # Calc types whose worker runner honours options["preopt_before_run"].
 PREOPT_CALC_TYPES = frozenset({"frequency", "tddft", "pes_scan"})
+# Calc types the batch worker runs with a PCM solvent; it fails any other
+# calc type that asks for one (worker._SOLVENT_SUPPORTED_CALC_TYPES), so a
+# request is refused here, before it waits in the queue.
+SOLVENT_CALC_TYPES = frozenset(
+    {"single_point", "geometry_opt", "reorganization_energy"}
+)
 
 
 class BatchInputError(ValueError):
@@ -142,6 +148,28 @@ def request_from_xyz(
     return request, warnings
 
 
+def check_solvent(request: CalculationRequest) -> None:
+    """Normalise ``request.solvent`` to QuantUI's spelling, or refuse it."""
+    if not request.solvent:
+        request.solvent = None
+        return
+    from quantui import config
+
+    names = {name.lower(): name for name in config.SOLVENT_OPTIONS}
+    canonical = names.get(str(request.solvent).lower())
+    if canonical is None:
+        raise BatchInputError(
+            f"unknown solvent {request.solvent!r}; choose one of "
+            f"{', '.join(sorted(config.SOLVENT_OPTIONS))}."
+        )
+    if request.calc_type not in SOLVENT_CALC_TYPES:
+        raise BatchInputError(
+            f"a solvent works only with {', '.join(sorted(SOLVENT_CALC_TYPES))} "
+            f"in batch jobs, not {request.calc_type}; drop --solvent."
+        )
+    request.solvent = canonical
+
+
 def load_request(
     path: Path,
     *,
@@ -163,7 +191,7 @@ def load_request(
     if path.suffix.lower() == ".xyz":
         from quantui import config
 
-        return request_from_xyz(
+        request, warnings = request_from_xyz(
             path,
             calc_type=calc_type,
             method=method or config.DEFAULT_METHOD,
@@ -174,6 +202,8 @@ def load_request(
             options=options,
             preopt=preopt,
         )
+        check_solvent(request)
+        return request, warnings
 
     data = json.loads(path.read_text())
     request = CalculationRequest.from_dict(data)
@@ -200,4 +230,5 @@ def load_request(
         request.options.update(options)
     if preopt and request.calc_type in PREOPT_CALC_TYPES:
         request.options["preopt_before_run"] = True
+    check_solvent(request)
     return request, warnings

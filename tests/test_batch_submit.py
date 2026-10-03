@@ -816,7 +816,14 @@ echo "$n"
             )
 
         def set_queue(self, *rows):
-            (mock / "queue").write_text("".join(r + "\n" for r in rows))
+            """Rows are "id|STATE|script" or "id|STATE|reason|script"."""
+            lines = []
+            for row in rows:
+                parts = row.split("|")
+                if len(parts) == 3:
+                    parts.insert(2, "None")
+                lines.append("|".join(parts) + "\n")
+            (mock / "queue").write_text("".join(lines))
 
         def set_sacct(self, job_id, text):
             (mock / f"sacct_{job_id}").write_text(textwrap.dedent(text).lstrip())
@@ -827,6 +834,9 @@ echo "$n"
 
     c = Cluster()
     c.image = image
+    c.shared = tmp_path / "shared-bin"
+    c.home = home
+    c.mock = mock
     return c
 
 
@@ -887,7 +897,7 @@ class TestLauncherEndToEnd:
         cluster.set_queue()
         cluster.set_sacct("1001", "1001|COMPLETED|00:01:00|\n")
         r = cluster.run("status")
-        assert "DONE" in r.stdout and "attempt-01_job1001" in r.stdout
+        assert "DONE" in r.stdout and "quantui-batch results h2o" in r.stdout
 
     def test_out_of_memory_gets_a_rerun_hint(self, cluster):
         assert cluster.submit_water("--job-name", "big").returncode == 0
@@ -902,7 +912,7 @@ class TestLauncherEndToEnd:
         r = cluster.run("status")
         assert "OUT_OF_MEMORY" in r.stdout
         assert "used 31.5G" in r.stdout
-        assert "quantui-batch rerun big --mem=" in r.stdout
+        assert "quantui-batch rerun big --more-memory" in r.stdout
 
     def test_rerun_passes_sbatch_overrides_and_records_new_id(self, cluster):
         assert cluster.submit_water("--job-name", "big").returncode == 0
@@ -967,6 +977,490 @@ class TestLauncherEndToEnd:
         assert r.returncode == 0
         assert str(cluster.image) in r.stdout
         assert str(cluster.staging) in r.stdout  # this user's, not the installer's
+
+
+# ---------------------------------------------------------------------------
+# quantui-batch workflow features: presets, --from, --queue-rest, duplicate
+# guard, rerun --more-*, results, check, job tag, solvent checks
+# ---------------------------------------------------------------------------
+
+
+def _request_of(job_dir):
+    return json.loads((job_dir / "request.json").read_text())
+
+
+def _freq_result(imaginary=(-48.3,), strong=((1019.0, 113.0), (996.0, 217.0))):
+    freqs = list(imaginary) + [400.0 + i for i in range(10)] + [f for f, _ in strong]
+    ints = [0.1] * len(imaginary) + [1.0] * 10 + [i for _, i in strong]
+    return {
+        "calc_type": "frequency",
+        "method": "B3LYP",
+        "basis": "def2-SVP",
+        "formula": "H2O",
+        "converged": True,
+        "energy_hartree": -76.4,
+        "homo_lumo_gap_ev": 7.1,
+        "spectra": {
+            "ir": {
+                "frequencies_cm1": freqs,
+                "ir_intensities": ints,
+                "thermo": {"G_hartree": -76.39, "temperature_k": 298.15},
+            },
+            "molecule": {
+                "atoms": ["O", "H", "H"],
+                "coords": [[0, 0, 0.12], [0, 0.75, -0.47], [0, -0.75, -0.47]],
+                "charge": 0,
+                "multiplicity": 1,
+            },
+        },
+    }
+
+
+def _finish(job_dir, attempt, result, trajectory=None, name="trajectory.json"):
+    d = job_dir / attempt
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "result.json").write_text(json.dumps(result))
+    if trajectory is not None:
+        (d / name).write_text(json.dumps(trajectory))
+    return d
+
+
+_OPT_TRAJ = {
+    "atoms": ["O", "H", "H"],
+    "charge": 0,
+    "multiplicity": 1,
+    "steps": [
+        {"coords": [[0, 0, 0.1], [0, 0.7, -0.4], [0, -0.7, -0.4]], "energy": -76.3},
+        {
+            "coords": [[0, 0, 0.12], [0, 0.76, -0.47], [0, -0.76, -0.47]],
+            "energy": -76.4,
+        },
+    ],
+}
+
+
+@needs_posix
+class TestPresets:
+    def _write(self, path, presets):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(presets))
+
+    def test_shared_preset_fills_settings_and_flags_override(self, cluster):
+        self._write(
+            cluster.shared / "presets.json",
+            {
+                "_comment": "ignored",
+                "lab4-ir": {
+                    "description": "Lab 4 Part II",
+                    "calc": "frequency",
+                    "method": "B3LYP",
+                    "basis": "6-31G*",
+                    "preopt": True,
+                },
+            },
+        )
+        r = cluster.run("submit", "water.xyz", "--preset", "lab4-ir", "--job-name", "a")
+        assert r.returncode == 0, r.stderr
+        req = _request_of(cluster.staging / "a")
+        assert (req["calc_type"], req["method"], req["basis"]) == (
+            "frequency",
+            "B3LYP",
+            "6-31G*",
+        )
+        assert req["options"]["preopt_before_run"] is True
+
+        r = cluster.run(
+            "submit",
+            "water.xyz",
+            "--preset",
+            "lab4-ir",
+            "--basis",
+            "STO-3G",
+            "--no-preopt",
+            "--job-name",
+            "b",
+        )
+        assert r.returncode == 0, r.stderr
+        req = _request_of(cluster.staging / "b")
+        assert req["basis"] == "STO-3G"
+        assert "preopt_before_run" not in req["options"]
+
+    def test_user_presets_override_shared_ones(self, cluster):
+        self._write(cluster.shared / "presets.json", {"p": {"calc": "single_point"}})
+        self._write(
+            cluster.home / ".quantui" / "batch-presets.json",
+            {"p": {"calc": "geometry_opt", "method": "RHF", "basis": "STO-3G"}},
+        )
+        r = cluster.run("submit", "water.xyz", "--preset", "p", "--job-name", "x")
+        assert r.returncode == 0, r.stderr
+        assert _request_of(cluster.staging / "x")["calc_type"] == "geometry_opt"
+
+    def test_unknown_preset_lists_the_available_ones(self, cluster):
+        self._write(
+            cluster.shared / "presets.json", {"lab1-opt": {"calc": "geometry_opt"}}
+        )
+        r = cluster.run("submit", "water.xyz", "--preset", "lab9")
+        assert r.returncode == 2
+        assert "lab1-opt" in r.stderr
+        assert cluster.log("sbatch.log") == ""
+
+    def test_presets_command_and_bad_keys(self, cluster):
+        self._write(
+            cluster.shared / "presets.json",
+            {
+                "lab1-opt": {
+                    "description": "Lab 1 optimizations",
+                    "calc": "geometry_opt",
+                    "method": "B3LYP",
+                    "basis": "6-31G*",
+                    "colour": "red",
+                }
+            },
+        )
+        r = cluster.run("presets")
+        assert "lab1-opt" in r.stdout and "Lab 1 optimizations" in r.stdout
+        assert "calc=geometry_opt" in r.stdout
+        assert "unknown keys ['colour']" in r.stderr
+        assert "unknown keys" in cluster.run("check").stdout
+
+
+@needs_posix
+class TestChainedJobs:
+    def _opt_job(self, cluster, name="opt"):
+        r = cluster.run(
+            "submit",
+            "water.xyz",
+            "--calc",
+            "geometry_opt",
+            "--method",
+            "RHF",
+            "--basis",
+            "STO-3G",
+            "--job-name",
+            name,
+        )
+        assert r.returncode == 0, r.stderr
+        return cluster.staging / name
+
+    def test_from_a_running_job_waits_for_it(self, cluster):
+        src = self._opt_job(cluster)
+        cluster.set_queue(f"1001|RUNNING|{src / 'submit.slurm'}")
+        r = cluster.run(
+            "submit", "--from", "opt", "--calc", "frequency", "--job-name", "f"
+        )
+        assert r.returncode == 0, r.stderr
+        assert "starts after job 1001 succeeds" in r.stdout
+        assert (
+            cluster.log("sbatch.log")
+            .splitlines()[-1]
+            .startswith(
+                "--parsable --dependency=afterok:1001 --kill-on-invalid-dep=yes "
+            )
+        )
+        req = _request_of(cluster.staging / "f")
+        assert req["run_context"]["geometry_from"] == str(src)
+        assert (req["method"], req["basis"]) == ("RHF", "STO-3G")  # inherited
+        assert req["molecule"]["atoms"] == ["O", "H", "H"]
+
+    def test_from_a_finished_job_runs_now(self, cluster):
+        src = self._opt_job(cluster)
+        _finish(src, "attempt-01_job1001", {"calc_type": "geometry_opt"}, _OPT_TRAJ)
+        r = cluster.run(
+            "submit", "--from", "opt", "--calc", "frequency", "--job-name", "f"
+        )
+        assert r.returncode == 0, r.stderr
+        assert "--dependency" not in cluster.log("sbatch.log").splitlines()[-1]
+
+    def test_from_refuses_jobs_without_an_optimized_geometry(self, cluster):
+        assert cluster.submit_water("--job-name", "sp").returncode == 0
+        r = cluster.run("submit", "--from", "sp", "--calc", "frequency")
+        assert r.returncode == 1 and "does not optimize the geometry" in r.stderr
+
+    def test_from_refuses_a_failed_job(self, cluster):
+        self._opt_job(cluster)
+        cluster.set_sacct("1001", "1001|FAILED|00:01:00|\n")
+        r = cluster.run("submit", "--from", "opt", "--calc", "frequency")
+        assert (
+            r.returncode == 1
+            and "no finished result" in r.stderr
+            and "FAILED" in r.stderr
+        )
+
+    def test_from_with_files_is_a_usage_error(self, cluster):
+        r = cluster.run("submit", "water.xyz", "--from", "opt", "--calc", "frequency")
+        assert r.returncode == 2
+
+
+class TestFinalGeometry:
+    def _job(self, tmp_path, calc, options=None):
+        job = tmp_path / "job"
+        job.mkdir()
+        (job / "request.json").write_text(
+            json.dumps({"calc_type": calc, "options": options or {}})
+        )
+        return job
+
+    def test_geometry_opt_uses_the_last_trajectory_step(self, tmp_path):
+        from quantui.backends.batch_chain import final_geometry
+
+        job = self._job(tmp_path, "geometry_opt")
+        _finish(job, "attempt-01_job1", {}, _OPT_TRAJ)
+        geo = final_geometry(job)
+        assert geo["coords"] == _OPT_TRAJ["steps"][-1]["coords"]
+        assert geo["source"] == "job/attempt-01_job1"
+
+    def test_newest_finished_attempt_wins(self, tmp_path):
+        from quantui.backends.batch_chain import final_geometry
+
+        job = self._job(tmp_path, "geometry_opt")
+        _finish(job, "attempt-01_job1", {}, _OPT_TRAJ)
+        newer = json.loads(json.dumps(_OPT_TRAJ))
+        newer["steps"][-1]["coords"][0] = [9, 9, 9]
+        _finish(job, "attempt-02_job2", {}, newer)
+        (job / "attempt-03_job3").mkdir()  # unfinished: no result.json
+        assert final_geometry(job)["coords"][0] == [9, 9, 9]
+
+    def test_frequency_uses_preopt_then_its_own_molecule(self, tmp_path):
+        from quantui.backends.batch_chain import final_geometry
+
+        job = self._job(tmp_path, "frequency")
+        _finish(job, "attempt-01_job1", _freq_result())
+        assert final_geometry(job)["atoms"] == ["O", "H", "H"]
+
+    def test_pes_scan_trajectory_is_never_used(self, tmp_path):
+        from quantui.backends.batch_chain import final_geometry
+
+        job = self._job(tmp_path, "pes_scan")
+        _finish(job, "attempt-01_job1", {}, _OPT_TRAJ)  # scan points, not a minimum
+        with pytest.raises(ValueError, match="did not optimize"):
+            final_geometry(job)
+        _finish(job, "attempt-01_job1", {}, _OPT_TRAJ, name="preopt_trajectory.json")
+        assert final_geometry(job)["coords"] == _OPT_TRAJ["steps"][-1]["coords"]
+
+    def test_no_finished_attempt(self, tmp_path):
+        from quantui.backends.batch_chain import final_geometry
+
+        job = self._job(tmp_path, "geometry_opt")
+        with pytest.raises(ValueError, match="no finished attempt"):
+            final_geometry(job)
+
+    def test_worker_starts_from_the_source_geometry(self, tmp_path, monkeypatch, roots):
+        from quantui.backends import worker
+
+        src = self._job(tmp_path, "geometry_opt")
+        _finish(src, "attempt-01_job1", {}, _OPT_TRAJ)
+        job = tmp_path / "freq"
+        job.mkdir()
+        request = {
+            "request_id": "chain-1",
+            "calc_type": "single_point",
+            "method": "RHF",
+            "basis": "STO-3G",
+            "charge": 0,
+            "multiplicity": 1,
+            "molecule": {"atoms": ["O", "H", "H"], "coords": [[0, 0, 0]] * 3},
+            "run_context": {"geometry_from": str(src)},
+        }
+        (job / "request.json").write_text(json.dumps(request))
+        seen = {}
+
+        def fake_runner(req, staging_dir, log_stream):
+            seen["coords"] = req.molecule["coords"]
+            raise RuntimeError("stop here")
+
+        monkeypatch.setattr(worker, "_run_single_point", fake_runner)
+        worker.run_worker_request(job / "request.json")
+        assert seen["coords"] == _OPT_TRAJ["steps"][-1]["coords"]
+        assert "final geometry of job/attempt-01_job1" in (job / "live.log").read_text()
+
+    def test_worker_fails_clearly_when_the_source_has_no_geometry(
+        self, tmp_path, roots
+    ):
+        from quantui.backends import worker
+
+        src = self._job(tmp_path, "geometry_opt")  # never finished
+        job = tmp_path / "freq"
+        job.mkdir()
+        (job / "request.json").write_text(
+            json.dumps(
+                {
+                    "request_id": "chain-2",
+                    "calc_type": "single_point",
+                    "method": "RHF",
+                    "basis": "STO-3G",
+                    "charge": 0,
+                    "multiplicity": 1,
+                    "molecule": {"atoms": ["O", "H", "H"], "coords": [[0, 0, 0]] * 3},
+                    "run_context": {"geometry_from": str(src)},
+                }
+            )
+        )
+        result = worker.run_worker_request(job / "request.json")
+        assert result.status == "error"
+        assert "no finished attempt" in result.error["user_message"]
+
+
+@needs_posix
+class TestQueueRestAndDuplicates:
+    def test_queue_rest_lines_jobs_up_behind_the_oldest(self, cluster):
+        s = cluster.staging
+        s.mkdir(parents=True, exist_ok=True)
+        cluster.set_queue(
+            f"901|RUNNING|{s / 'b' / 'submit.slurm'}",
+            f"900|RUNNING|{s / 'a' / 'submit.slurm'}",
+        )
+        (cluster.home / "w2.xyz").write_text(WATER_XYZ.replace("0.1173", "0.2"))
+        r = cluster.submit_water()
+        assert r.returncode == 1 and "--queue-rest" in r.stderr
+        r = cluster.run(
+            "submit",
+            "water.xyz",
+            "w2.xyz",
+            "--calc",
+            "single_point",
+            "--method",
+            "RHF",
+            "--basis",
+            "STO-3G",
+            "--queue-rest",
+        )
+        assert r.returncode == 0, r.stderr
+        lines = cluster.log("sbatch.log").splitlines()
+        assert "--dependency=afterany:900" in lines[0]
+        assert "--dependency=afterany:901" in lines[1]
+        assert r.stdout.count("queued behind job") == 2
+
+    def test_same_calculation_twice_is_refused_unless_again(self, cluster):
+        assert cluster.submit_water().returncode == 0
+        r = cluster.submit_water()
+        assert r.returncode == 1
+        assert "same calculation as water_sp_RHF_STO-3G" in r.stderr
+        assert len(cluster.log("sbatch.log").splitlines()) == 1
+        r = cluster.submit_water("--again")
+        assert r.returncode == 0, r.stderr
+        assert len(cluster.log("sbatch.log").splitlines()) == 2
+
+    def test_a_failed_earlier_run_is_not_a_duplicate(self, cluster):
+        assert cluster.submit_water().returncode == 0
+        cluster.set_sacct("1001", "1001|FAILED|00:01:00|\n")
+        assert cluster.submit_water().returncode == 0
+
+
+@needs_posix
+class TestRerunMore:
+    def test_more_memory_doubles_or_uses_what_it_used(self, cluster):
+        assert cluster.submit_water("--job-name", "big").returncode == 0
+        cluster.set_sacct(
+            "1001",
+            "1001|OUT_OF_MEMORY|00:10:00|\n1001.batch|OUT_OF_MEMORY|00:10:00|31.5G\n",
+        )
+        r = cluster.run("rerun", "big", "--more-memory")
+        assert r.returncode == 0, r.stderr
+        # script has --mem=4G: max(2 x 4, 1.5 x 31.5 = 47.25) -> 48G
+        assert "--mem=48G" in cluster.log("sbatch.log").splitlines()[-1]
+        cluster.set_sacct("1002", "1002|OUT_OF_MEMORY|00:10:00|\n")
+        r = cluster.run("rerun", "big", "--more-memory")
+        assert "--mem=96G" in cluster.log("sbatch.log").splitlines()[-1]
+
+    def test_more_time_steps_up_and_keeps_earlier_overrides(self, cluster):
+        assert cluster.submit_water("--job-name", "slow").returncode == 0
+        assert cluster.run("rerun", "slow", "--mem=20G").returncode == 0
+        r = cluster.run("rerun", "slow", "--more-time")
+        assert r.returncode == 0, r.stderr
+        last = cluster.log("sbatch.log").splitlines()[-1]
+        assert "--mem=20G" in last and "--time=01:00:00" in last  # 00:30:00 -> next
+        cluster.run("rerun", "slow", "--time=48:00:00")
+        cluster.run("rerun", "slow", "--more-time")
+        assert "--time=96:00:00" in cluster.log("sbatch.log").splitlines()[-1]
+
+
+@needs_posix
+class TestResultsAndCheck:
+    def test_results_summarizes_a_frequency_job(self, cluster):
+        assert cluster.submit_water("--job-name", "f").returncode == 0
+        _finish(cluster.staging / "f", "attempt-01_job1001", _freq_result())
+        r = cluster.run("results", "f")
+        assert r.returncode == 0, r.stderr
+        out = r.stdout
+        assert "converged:        yes" in out
+        assert "-76.40000000 hartree" in out
+        assert "IMAGINARY modes:  1 (48.3i cm-1)" in out
+        assert "1019.0" in out and "996.0" in out
+        assert "Gibbs energy" in out
+
+    def test_results_for_tddft_and_geometry_opt(self, cluster):
+        assert cluster.submit_water("--job-name", "t").returncode == 0
+        _finish(
+            cluster.staging / "t",
+            "attempt-01_job1001",
+            {
+                "calc_type": "tddft",
+                "converged": True,
+                "energy_hartree": -76.0,
+                "spectra": {
+                    "uv_vis": {
+                        "excitation_energies_ev": [7.5, 9.1],
+                        "wavelengths_nm": [165.3, 136.2],
+                        "oscillator_strengths": [0.05, 0.1],
+                    }
+                },
+            },
+        )
+        assert "165.3" in cluster.run("results", "t").stdout
+        assert cluster.submit_water("--job-name", "o", "--again").returncode == 0
+        _finish(
+            cluster.staging / "o",
+            "attempt-01_job1002",
+            {"calc_type": "geometry_opt", "converged": True, "n_steps": 7},
+        )
+        assert "submit --from o --calc frequency" in cluster.run("results", "o").stdout
+
+    def test_results_before_the_job_finishes(self, cluster):
+        assert cluster.submit_water("--job-name", "p").returncode == 0
+        cluster.set_queue(f"1001|PENDING|{cluster.staging / 'p' / 'submit.slurm'}")
+        r = cluster.run("results", "p")
+        assert r.returncode == 1 and "no finished result yet (PENDING" in r.stdout
+
+    def test_check_passes_on_a_working_setup_and_flags_a_missing_image(self, cluster):
+        r = cluster.run("check")
+        assert r.returncode == 0, r.stdout
+        assert "All checks passed." in r.stdout
+        r = cluster.run("check", extra_env={"QUANTUI_BATCH_IMAGE": "/nope.sif"})
+        assert r.returncode == 1 and "[FAIL] image /nope.sif" in r.stdout
+
+
+@needs_posix
+class TestTagAndSolvent:
+    def test_every_job_is_tagged_quantui(self, cluster):
+        from quantui.backends import cluster_config as cfg
+
+        assert "#SBATCH --comment=quantui" in cfg.SLURM_SCRIPT_TEMPLATE
+        assert cluster.submit_water("--job-name", "t").returncode == 0
+        assert (
+            "#SBATCH --comment=quantui"
+            in (cluster.staging / "t" / "submit.slurm").read_text()
+        )
+
+    def test_solvent_is_normalised_and_refused_where_unsupported(self, cluster):
+        r = cluster.submit_water("--solvent", "water", "--job-name", "w")
+        assert r.returncode == 0, r.stderr
+        assert _request_of(cluster.staging / "w")["solvent"] == "Water"
+        r = cluster.run("submit", "water.xyz", "--calc", "tddft", "--solvent", "Water")
+        assert r.returncode == 1 and "drop --solvent" in r.stderr
+        r = cluster.submit_water("--solvent", "Seawater")
+        assert r.returncode == 1 and "unknown solvent" in r.stderr
+
+    def test_quantui_submit_refuses_the_same(self, roots, water):
+        rc, _out, err = _capture(
+            ["submit", str(water), "--dry-run", "--calc", "tddft", "--solvent", "Water"]
+        )
+        assert rc == 1 and "drop --solvent" in err
+
+    def test_solvent_calc_types_match_the_worker(self):
+        from quantui.backends import worker
+        from quantui.backends.batch_input import SOLVENT_CALC_TYPES
+
+        assert worker._SOLVENT_SUPPORTED_CALC_TYPES == SOLVENT_CALC_TYPES
 
 
 # ---------------------------------------------------------------------------

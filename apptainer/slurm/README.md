@@ -39,24 +39,54 @@ apptainer exec /opt/apps/containers/users/quantui.sif \
 Users add that folder to `PATH` once, then on the login node:
 
 ```bash
+quantui-batch check                                    # is everything this needs in place?
 quantui-batch submit water.xyz --calc frequency --method B3LYP --basis def2-SVP --preopt
+quantui-batch submit water.xyz --preset lab4-ir        # named settings (see Presets)
+quantui-batch submit --from water-opt --calc frequency # start from that job's optimized geometry
 quantui-batch estimate water.xyz --calc frequency      # cores / memory / time, submits nothing
 quantui-batch status                                   # PENDING, RUNNING 40%, DONE, OUT_OF_MEMORY ...
+quantui-batch results <job>                            # energy, imaginary modes, IR bands, excited states
 quantui-batch log <job> -f                             # follow live.log of the latest attempt
-quantui-batch rerun <job> --mem=64G --time=24:00:00    # new attempt; sbatch options override the script
+quantui-batch rerun <job> --more-memory                # or --more-time, or any sbatch option
 quantui-batch cancel <job>
 ```
 
-- Inputs are `.xyz` files (`--calc` required; `--method`, `--basis`,
-  `--charge`, `--mult`, `--solvent`, `--preopt`, `--option KEY=VALUE`) or
-  request JSON. A charge/multiplicity that cannot fit the electron count is
-  refused before anything is queued.
+- Inputs are `.xyz` files (`--calc` required unless a preset sets it;
+  `--method`, `--basis`, `--charge`, `--mult`, `--solvent`, `--preopt`,
+  `--option KEY=VALUE`) or request JSON. A charge/multiplicity that cannot
+  fit the electron count, an unknown solvent, or a solvent on a calc type the
+  batch worker runs gas-phase only (`tddft`, `frequency`, ...) is refused
+  before anything is queued.
+- **Presets** (`--preset NAME`; list with `quantui-batch presets`) are named
+  settings: `calc`, `method`, `basis`, `charge`, `mult`, `solvent`, `preopt`,
+  `options`, `description`. Read from `presets.json` beside the launcher
+  (shared, operator-maintained; `install-launcher --force` leaves it alone),
+  then `~/.quantui/batch-presets.json`, then `$QUANTUI_BATCH_PRESETS`; later
+  files win, and command-line options override the preset.
+- **Chained jobs**: `--from JOB` (a `geometry_opt` or `frequency` job, or one
+  run with `--preopt`) takes JOB's molecule, charge, multiplicity, method and
+  basis unless given, and the worker loads JOB's final geometry when the job
+  starts (`quantui/backends/batch_chain.py`; never a PES-scan trajectory). If
+  JOB is still queued or running, the new job gets
+  `--dependency=afterok:<id> --kill-on-invalid-dep=yes`.
+- **Duplicate guard**: a request identical to an earlier job (same
+  calculation, settings and geometry) is refused unless that job failed;
+  `--again` overrides.
+- **Job limit**: at most `QUANTUI_MAX_CONCURRENT_JOBS` (default 2) QuantUI
+  jobs per user may be queued or running, counted from `squeue` (jobs whose
+  script is under the job root). `--queue-rest` submits the rest anyway, each
+  with `--dependency=afterany:<oldest QuantUI job>`, so no more than the
+  limit run at once.
+- **Reruns** keep earlier attempts. `--more-memory` asks for twice the
+  previous memory, or 1.5x the `sacct` MaxRSS if that is more; `--more-time`
+  moves to the next `WALLTIME_OPTIONS` step (doubling past 48 h). Overrides
+  carry over to later reruns. Submissions are logged in
+  `<job>/.quantui-batch-jobs` (id, time, sbatch options).
 - Job folders go to the user's job root: `QUANTUI_STAGING_DIR`, else
   **System Settings → SLURM job folder** (`compute.slurm_job_root` in
   `~/.quantui/settings.json`), else `~/.quantui/staging`.
-- At most `QUANTUI_MAX_CONCURRENT_JOBS` (default 2) QuantUI jobs per user may
-  be queued or running, counted from `squeue` (jobs whose script is under the
-  job root). Raise it for heavy users.
+- Every generated script carries `#SBATCH --comment=quantui`, so an operator
+  can list everyone's QuantUI jobs: `squeue -h -o "%i|%u|%j|%T|%M|%k" | grep '|quantui$'`.
 - `QUANTUI_BATCH_IMAGE` points the launcher at another image of the same
   kind (e.g. `/data/schultzlab/apptainers/quantui.sif`); for a different kind
   (the GPU image has a different `python`), install a launcher from it.

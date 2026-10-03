@@ -188,6 +188,8 @@ def build_attempt_setup(job_dir: str) -> str:
 
 # SLURM batch script template. ``{worker_command}`` is the full command line
 # run inside the allocation (Apptainer-wrapped when configured).
+# ``--comment=quantui`` tags every QuantUI job so an operator can list them
+# all (``squeue -o "%i %u %j %T %k"``), whoever submitted them and from where.
 SLURM_SCRIPT_TEMPLATE = """#!/bin/bash
 #SBATCH --job-name={job_name}
 #SBATCH --partition={partition}
@@ -195,6 +197,7 @@ SLURM_SCRIPT_TEMPLATE = """#!/bin/bash
 #SBATCH --ntasks={cores}
 #SBATCH --mem={memory}G
 #SBATCH --time={walltime}
+#SBATCH --comment=quantui
 #SBATCH --output="{output_file}"
 #SBATCH --error="{error_file}"{optional_directives}
 

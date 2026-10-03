@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .base import CALC_TYPES, CalculationRequest, CalculationResult
+from .batch_input import SOLVENT_CALC_TYPES
 from .registry import JobRegistry
 from .worker_payload import (
     freq_result_payload,
@@ -64,9 +65,9 @@ _SUPPORTED_CALC_TYPES = frozenset(CALC_TYPES)
 # final geometry (see app.py's _run_required_final_single_point) — so the
 # app_runflow.py UI, which enables the solvent checkbox for these same
 # three calc types, is never lying about what a submitted job will do.
-_SOLVENT_SUPPORTED_CALC_TYPES = frozenset(
-    {"single_point", "geometry_opt", "reorganization_energy"}
-)
+# Defined in batch_input so `quantui submit` and the quantui-batch launcher
+# can refuse a solvated request before it is queued.
+_SOLVENT_SUPPORTED_CALC_TYPES = SOLVENT_CALC_TYPES
 
 
 def _write_progress(
@@ -738,6 +739,38 @@ def run_worker_request(
 
     _append_log(staging_dir, f"Worker starting for {request.request_id} ({calc_type})")
     _write_progress(staging_dir, "running", "Starting calculation", 5.0)
+
+    # quantui-batch --from: take the starting geometry from another job's
+    # result now, at run time; that job may still have been queued when this
+    # one was submitted (see batch_chain).
+    geometry_from = (request.run_context or {}).get("geometry_from")
+    if geometry_from:
+        from .batch_chain import final_geometry
+
+        try:
+            geo = final_geometry(Path(geometry_from))
+            if list(geo["atoms"]) != list(request.molecule.get("atoms") or []):
+                raise ValueError(
+                    "its atoms differ from this job's; the job folder was changed"
+                )
+        except ValueError as exc:
+            msg = f"Could not take the starting geometry from {geometry_from}: {exc}"
+            _append_log(staging_dir, msg)
+            return _error_result(
+                request,
+                staging_dir,
+                code="EXECUTION_FAILED",
+                message=msg,
+                retryable=False,
+                save_type=calc_type,
+            )
+        request.molecule = {
+            **request.molecule,
+            "coords": [[float(c) for c in row] for row in geo["coords"]],
+        }
+        _append_log(
+            staging_dir, f"Starting geometry: final geometry of {geo['source']}"
+        )
 
     if calc_type not in _SUPPORTED_CALC_TYPES:
         msg = (
