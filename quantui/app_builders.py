@@ -1647,6 +1647,7 @@ def build_shared_widgets(
         layout=layout_fn(width="180px"),
     )
     app._export_bundle_status = widgets.Label()
+    app._download_html = widgets.HTML(value="", layout=layout_fn(margin="6px 0 0 0"))
 
 
 def build_theme_selector(app: Any, *, layout_fn: Any) -> None:
@@ -1849,6 +1850,18 @@ def build_molecule_section(
     )
     app.xyz_msg = widgets.Label()
 
+    # File upload (DEC-023 Tier-1 #1): the bytes travel over the widget
+    # channel, so it works on a remote Voilà/OnDemand session too.
+    from quantui.structure_upload import SUPPORTED_SUFFIXES as _UPLOAD_SUFFIXES
+
+    app.structure_upload = widgets.FileUpload(
+        accept=",".join(_UPLOAD_SUFFIXES),
+        multiple=False,
+        description="Choose file",
+        layout=layout_fn(width="180px"),
+    )
+    app.upload_msg = widgets.HTML(value="")
+
     build_xyz_interactive_widgets(app, layout_fn=layout_fn)
     try:
         sync_textarea_from_table(app)
@@ -1933,8 +1946,20 @@ def build_molecule_section(
             app.pubchem_candidates_dd,
         ]
     )
-    input_tab = widgets.Tab(children=[tab_preset, tab_xyz, tab_pubchem])
-    for i, title in enumerate(["Library", "XYZ Input", "Online Search"]):
+    tab_upload = widgets.VBox(
+        [
+            widgets.HTML(
+                hint + "Upload a structure file from your computer: XYZ, MOL, "
+                "SDF, MOL2, PDB, CIF, or a Gaussian input (.gjf/.com) or "
+                "output (.log/.out). Charge and multiplicity are taken from "
+                "the file when it records them.</p>"
+            ),
+            app.structure_upload,
+            app.upload_msg,
+        ]
+    )
+    input_tab = widgets.Tab(children=[tab_preset, tab_xyz, tab_pubchem, tab_upload])
+    for i, title in enumerate(["Library", "XYZ Input", "Online Search", "Upload File"]):
         input_tab.set_title(i, title)
 
     app.mol_input_expanded = widgets.VBox(
@@ -3455,6 +3480,9 @@ def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) ->
                 [app._export_bundle_btn, app._export_bundle_status],
                 layout=layout_fn(align_items="center", gap="6px"),
             ),
+            # Download link for whatever was exported last (to the user's
+            # own computer — exports are written where the kernel runs).
+            app._download_html,
         ]
     )
     app.advanced_accordion = widgets.Accordion(children=[export_content])
@@ -3715,6 +3743,21 @@ def build_files_tab(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="100px"),
         tooltip="Refresh roots, folder contents, and preview",
     )
+    app._files_download_btn = widgets.Button(
+        description="Download",
+        icon="download",
+        disabled=True,
+        layout=layout_fn(width="120px"),
+        tooltip="Download the selected file to this computer",
+    )
+    app._files_load_btn = widgets.Button(
+        description="Load as molecule",
+        icon="upload",
+        disabled=True,
+        layout=layout_fn(width="160px"),
+        tooltip="Load the selected structure file (XYZ, MOL, SDF, PDB, …) into Calculate",
+    )
+    app._files_download_html = widgets.HTML(value="")
     app._files_status_html = widgets.HTML(
         value=(
             f'<span style="font-size:12px;color:{_theme.css.TEXT_SUBTLE}">'
@@ -3741,11 +3784,18 @@ def build_files_tab(app: Any, *, layout_fn: Any) -> None:
             app._files_root_dd,
             app._files_path_html,
             widgets.HBox(
-                [app._files_up_btn, app._files_open_btn, app._files_refresh_btn],
-                layout=layout_fn(gap="8px", margin="6px 0"),
+                [
+                    app._files_up_btn,
+                    app._files_open_btn,
+                    app._files_refresh_btn,
+                    app._files_download_btn,
+                    app._files_load_btn,
+                ],
+                layout=layout_fn(gap="8px", margin="6px 0", flex_wrap="wrap"),
             ),
             app._files_entries,
             app._files_status_html,
+            app._files_download_html,
             app._files_preview_output,
         ],
         layout=layout_fn(padding="8px 0"),

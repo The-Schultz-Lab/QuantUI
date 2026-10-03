@@ -569,6 +569,9 @@ from quantui.app_xyz_input import (
     on_load_xyz as _xyz_on_load_xyz,
 )
 from quantui.app_xyz_input import (
+    on_structure_upload as _xyz_on_structure_upload,
+)
+from quantui.app_xyz_input import (
     on_xyz_add_atom as _xyz_on_add_atom,
 )
 from quantui.app_xyz_input import (
@@ -605,6 +608,7 @@ from quantui.config import (
     SUPPORTED_BASIS_SETS,
     SUPPORTED_METHODS,
 )
+from quantui.downloads import download_link_html as _download_link_html
 from quantui.engines import is_pyfock_available as _is_pyfock_available
 from quantui.engines import is_pyscf_available as _is_pyscf_available
 from quantui.freq_ir_workers import (
@@ -1449,6 +1453,12 @@ class QuantUIApp:
         files_tab_panel: Any
         _files_entries: Any
         _files_open_btn: Any
+        _files_download_btn: Any
+        _files_load_btn: Any
+        _files_download_html: Any
+        _download_html: Any
+        structure_upload: Any
+        upload_msg: Any
         _files_path_html: Any
         _files_preview_output: Any
         _files_refresh_btn: Any
@@ -2606,6 +2616,9 @@ class QuantUIApp:
         )
         self.lib_results_dd.observe(self._safe_cb(self._on_lib_select), names="value")
         self.xyz_btn.on_click(self._on_load_xyz)
+        self.structure_upload.observe(
+            self._safe_cb(lambda c: _xyz_on_structure_upload(self, c)), names="value"
+        )
         self.xyz_add_atom_btn.on_click(self._on_xyz_add_atom)
         self.xyz_fill_table_btn.on_click(self._on_xyz_fill_table)
         self.xyz_apply_table_btn.on_click(self._on_xyz_apply_table)
@@ -2814,6 +2827,8 @@ class QuantUIApp:
             self._safe_cb(self._on_files_entry_changed), names="value"
         )
         self._files_open_btn.on_click(self._on_files_open)
+        self._files_download_btn.on_click(self._safe_cb(self._on_files_download))
+        self._files_load_btn.on_click(self._safe_cb(self._on_files_load))
         self._files_up_btn.on_click(self._on_files_up)
         self._files_refresh_btn.on_click(self._on_files_refresh)
         # Issue reporting
@@ -3010,6 +3025,45 @@ class QuantUIApp:
             return f"{size_bytes / 1024:.1f} KB"
         return f"{size_bytes / (1024 * 1024):.1f} MB"
 
+    def _sync_files_action_buttons(self) -> None:
+        """Download for any selected file; Load only for structure files."""
+        from quantui.structure_upload import SUPPORTED_SUFFIXES
+
+        path = self._files_selected_path
+        is_file = path is not None and path.is_file()
+        self._files_download_btn.disabled = not is_file
+        self._files_load_btn.disabled = not (
+            is_file and path is not None and path.suffix.lower() in SUPPORTED_SUFFIXES
+        )
+        self._files_download_html.value = ""
+
+    def _on_files_download(self, _btn) -> None:
+        """Offer the selected file as a browser download (remote-safe)."""
+        from quantui.downloads import download_link_html
+
+        path = self._files_selected_path
+        if path is None or not path.is_file():
+            self._set_files_status("Select a file first.")
+            return
+        self._files_download_html.value = download_link_html(path)
+
+    def _on_files_load(self, _btn) -> None:
+        """Load the selected structure file into Calculate."""
+        from quantui.app_xyz_input import load_structure_bytes
+
+        path = self._files_selected_path
+        if path is None or not path.is_file():
+            self._set_files_status("Select a structure file first.")
+            return
+        try:
+            msg = load_structure_bytes(self, path.name, path.read_bytes())
+        except ValueError as exc:
+            self._set_files_status(f"⚠ {exc}", _theme.css.ACCENT_ERROR)
+            return
+        self._set_files_status(
+            msg.replace("<br>• ", " ") + " Open the Calculate tab to run it."
+        )
+
     def _set_files_status(
         self, message: str, color: str = _theme.css.TEXT_SLATE
     ) -> None:
@@ -3076,6 +3130,7 @@ class QuantUIApp:
                 "Current folder: unavailable</span>"
             )
             self._files_open_btn.disabled = True
+            self._sync_files_action_buttons()
             self._files_up_btn.disabled = True
             self._set_files_status(
                 "No readable roots available.", _theme.css.ACCENT_ERROR
@@ -3119,6 +3174,7 @@ class QuantUIApp:
             self._files_entries.value = ""
             self._files_selected_path = None
             self._files_open_btn.disabled = True
+            self._sync_files_action_buttons()
             self._files_up_btn.disabled = True
             self._files_preview_output.clear_output(wait=True)
             return
@@ -3142,6 +3198,7 @@ class QuantUIApp:
             self._files_entries.value = ""
             self._files_selected_path = None
             self._files_open_btn.disabled = True
+            self._sync_files_action_buttons()
             self._files_up_btn.disabled = True
             self._files_preview_output.clear_output(wait=True)
             self._set_files_status(
@@ -3179,6 +3236,7 @@ class QuantUIApp:
 
         self._files_selected_path = Path(new_selection) if new_selection else None
         self._files_open_btn.disabled = self._files_selected_path is None
+        self._sync_files_action_buttons()
 
         _parent = current.parent
         self._files_up_btn.disabled = (
@@ -3522,6 +3580,7 @@ class QuantUIApp:
         new_value = str(change.get("new") or "")
         self._files_selected_path = Path(new_value) if new_value else None
         self._files_open_btn.disabled = self._files_selected_path is None
+        self._sync_files_action_buttons()
         if self._files_selected_path is None:
             self._set_files_status("Select a folder or file.")
             return
@@ -4777,7 +4836,7 @@ class QuantUIApp:
 
         status.value = (
             f'<span style="color:{_theme.css.ACCENT_SUCCESS};font-size:12px">'
-            f"Saved ({backend}): {dest}</span>"
+            f"Saved ({backend}): {dest}</span> " + _download_link_html(dest)
         )
         try:
             _calc_log.log_event(
@@ -4863,7 +4922,8 @@ class QuantUIApp:
             if status is not None:
                 status.value = (
                     f'<span style="color:{_theme.css.ACCENT_SUCCESS_ALT};font-size:12px">'
-                    f"Saved minimum geometry: {dest.name}</span>"
+                    f"Saved minimum geometry: {dest.name}</span> "
+                    + _download_link_html(dest)
                 )
         except Exception as exc:
             if status is not None:
@@ -4920,7 +4980,7 @@ class QuantUIApp:
 
             status_widget.value = (
                 f'<span style="color:{_theme.css.ACCENT_SUCCESS};font-size:12px">'
-                f"Saved: {dest}</span>"
+                f"Saved: {dest}</span> " + _download_link_html(dest)
             )
         except Exception as exc:
             msg = str(exc)
@@ -5050,7 +5110,7 @@ class QuantUIApp:
         status_widget.value = (
             f'<span style="color:{_theme.css.ACCENT_SUCCESS};font-size:12px">'
             f"Saved CSV: {dest} &mdash; copied to clipboard"
-            "</span>"
+            "</span> " + _download_link_html(dest)
         )
 
     def _on_ir_copy_data(self, _btn) -> None:

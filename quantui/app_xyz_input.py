@@ -250,3 +250,60 @@ def on_load_xyz(app: Any, _btn: Any = None) -> None:
             app.xyz_msg.value = f"Loaded {mol.get_formula()} ({len(mol.atoms)} atoms)."
     except Exception as exc:
         app.xyz_msg.value = f"Parse error: {exc}"
+
+
+def load_structure_bytes(app: Any, filename: str, content: bytes) -> str:
+    """Load an uploaded/selected structure file into the app; return a message.
+
+    Shared by the Upload File tab and the Files tab's "Load as molecule".
+    Raises ``ValueError`` (student-readable) when the file cannot be read.
+    """
+    from quantui.structure_upload import read_uploaded_structure
+
+    up = read_uploaded_structure(
+        filename,
+        content,
+        charge=int(app.charge_si.value),
+        multiplicity=int(app.mult_si.value),
+    )
+    mol = up.molecule
+    app._set_molecule(
+        mol,
+        f"Loaded from file {filename}",
+        sync_charge_mult=up.charge_mult_from_file,
+    )
+    notes = list(up.notes)
+    try:
+        from quantui.connectivity import describe_disconnection
+
+        warn = describe_disconnection(mol.atoms, mol.coordinates)
+        if warn:
+            notes.append(warn)
+    except Exception:  # noqa: BLE001 — the warning is advisory
+        pass
+    msg = (
+        f"Loaded {mol.get_formula()} ({len(mol.atoms)} atoms, charge "
+        f"{app._molecule.charge}, multiplicity {app._molecule.multiplicity})."
+    )
+    return msg + "".join(f"<br>• {n}" for n in notes)
+
+
+def on_structure_upload(app: Any, change: Any = None) -> None:
+    """FileUpload observer: read the chosen file and load it."""
+    widget = app.structure_upload
+    files = widget.value
+    if not files:
+        return
+    item = files[0] if isinstance(files, (list, tuple)) else next(iter(files.values()))
+    name = str(item.get("name", "upload"))
+    content = bytes(item.get("content", b""))
+    try:
+        app.upload_msg.value = load_structure_bytes(app, name, content)
+    except ValueError as exc:
+        app.upload_msg.value = f'<span style="color:#b91c1c">⚠ {exc}</span>'
+    finally:
+        # Clear so choosing the same file again fires the observer again.
+        try:
+            widget.value = ()
+        except Exception:  # noqa: BLE001
+            pass

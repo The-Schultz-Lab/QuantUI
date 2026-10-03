@@ -20,6 +20,7 @@ from quantui.app_builders import (
     _TRAJ_PNG_INBOX_CLASS,
     _VIB_PNG_INBOX_CLASS,
 )
+from quantui.downloads import download_link_html as _download_link_html
 from quantui.orbital_visualization import _GENERIC_CAPTURE_JS, _png_capture_controls
 
 logger = logging.getLogger(__name__)
@@ -431,7 +432,7 @@ def show_opt_trajectory(
                     "value",
                     (
                         f'<span style="color:#16a34a;font-size:12px">'
-                        f"✓ Saved: {out_path}</span>"
+                        f"✓ Saved: {out_path}</span> " + _download_link_html(out_path)
                     ),
                 )
             except Exception as exc:
