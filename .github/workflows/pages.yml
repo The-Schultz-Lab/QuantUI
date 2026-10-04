@@ -1,7 +1,7 @@
 name: Deploy GitHub Pages
 
 # Publishes the MkDocs site plus the browser QuantUI Viewer (Voici + Pyodide,
-# M-LITE) at <site>/viewer/app/; <site>/viewer/ is its docs page
+# M-VIEWER) at <site>/viewer/app/; <site>/viewer/ is its docs page
 # (docs/viewer.md). The viewer is built from the checked-out commit: on a
 # release that is the release tag, so the hosted viewer matches the
 # installers attached to that release.
