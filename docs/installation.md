@@ -50,6 +50,7 @@ other methods and workflows, use WSL or the Apptainer container described in
 | `ase` | ASE bridge for trajectory export and structure I/O |
 | `app` | Voilà, JupyterLab, and notebook launcher dependencies |
 | `xtb` | GFN-FF metal pre-optimization via xtb |
+| `ts` | Transition-state searches via [Sella](https://github.com/zadorlab/sella) (pulls in jax, about 380 MB) |
 
 ## Next steps
 

@@ -50,14 +50,11 @@ class TestWorker:
         assert outcome.status == "error"
         assert outcome.error["code"] == "UNSUPPORTED_CAPABILITY"
 
-    @pytest.mark.parametrize("calc_type", ["frequency", "tddft", "nmr", "pes_scan"])
+    @pytest.mark.parametrize("calc_type", ["nmr", "pes_scan"])
     def test_solvent_on_unsupported_calc_type_returns_error(self, staging, calc_type):
-        """AUDIT F11 — run_freq_calc/run_tddft_calc/run_nmr_calc/run_pes_scan
-        don't accept a solvent argument at all; a solvent set for one of
-        these calc_types must fail the request rather than silently run
-        gas-phase. ("geometry_opt" is covered separately — see
-        test_solvent_on_geometry_opt_runs_required_final_single_point below
-        (code review) — it now has a real, documented approximation.)
+        """AUDIT F11 — run_nmr_calc/run_pes_scan don't accept a solvent; a
+        solvent set for one of these calc_types must fail the request rather
+        than silently run gas-phase. (frequency/tddft gained PCM, DEC-023.)
         """
         data = json.loads((staging / "request.json").read_text())
         data["calc_type"] = calc_type
@@ -206,8 +203,10 @@ class TestWorker:
         outcome = run_worker_request(staging / "request.json")
         assert outcome.status == "success"
         assert mock_run.call_args.kwargs["solvent"] == "water"
-        # The solvated single-point energy replaces the gas-phase
-        # optimizer's last-step energy, mirroring app.py's interactive
+        # The optimization itself is solvated now, not just the final SP.
+        assert mock_opt.call_args.kwargs["solvent"] == "water"
+        # The solvated single-point energy replaces the optimizer's
+        # last-step energy, mirroring app.py's interactive
         # _run_required_final_single_point handling.
         payload = json.loads((staging / "result.json").read_text())
         assert payload["energy_hartree"] == -1.12
@@ -254,6 +253,36 @@ class TestWorker:
 
         outcome = run_worker_request(staging / "request.json")
         assert outcome.status == "error"
+
+    def test_unknown_solvent_fails_before_running(self, staging):
+        data = json.loads((staging / "request.json").read_text())
+        data["solvent"] = "seawater"
+        (staging / "request.json").write_text(json.dumps(data))
+        with patch("quantui.session_calc.run_in_session") as mock_run:
+            outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "error"
+        assert outcome.error["code"] == "VALIDATION_ERROR"
+        assert "seawater" in outcome.error["user_message"]
+        mock_run.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "calc_type, target",
+        [
+            ("frequency", "quantui.freq_calc.run_freq_calc"),
+            ("tddft", "quantui.tddft_calc.run_tddft_calc"),
+        ],
+    )
+    def test_solvent_reaches_frequency_and_tddft(self, staging, calc_type, target):
+        """DEC-023 / B2.2 — PCM frequency and TD-DFT run in batch too."""
+        data = json.loads((staging / "request.json").read_text())
+        data["calc_type"] = calc_type
+        data["solvent"] = "Water"
+        (staging / "request.json").write_text(json.dumps(data))
+        with patch(target, side_effect=RuntimeError("stop after dispatch")) as m:
+            outcome = run_worker_request(staging / "request.json")
+        assert m.call_args.kwargs["solvent"] == "Water"
+        # The stub raised, so the job errors — but not as "unsupported".
+        assert outcome.error["code"] != "UNSUPPORTED_CAPABILITY"
 
     @patch("quantui.freq_calc.run_freq_calc")
     def test_frequency_success(self, mock_freq, staging):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import threading
 import time
@@ -20,6 +21,7 @@ from quantui.app_builders import (
     _TRAJ_PNG_INBOX_CLASS,
     _VIB_PNG_INBOX_CLASS,
 )
+from quantui.downloads import download_link_html as _download_link_html
 from quantui.orbital_visualization import _GENERIC_CAPTURE_JS, _png_capture_controls
 
 logger = logging.getLogger(__name__)
@@ -446,7 +448,7 @@ def show_opt_trajectory(
                     "value",
                     (
                         f'<span style="color:#16a34a;font-size:12px">'
-                        f"✓ Saved: {out_path}</span>"
+                        f"✓ Saved: {out_path}</span> " + _download_link_html(out_path)
                     ),
                 )
             except Exception as exc:
@@ -701,6 +703,9 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     app._last_vib_data = vib_data  # may be None — plotlymol3d optional
     app._last_vib_molecule = molecule
     app._last_vib_freq_result = freq_result
+    _table = getattr(app, "_vib_mode_table", None)
+    if _table is not None:
+        _table.value = vib_mode_table_html(freq_result)
 
     first_label, first_mode = options[0]
 
@@ -859,24 +864,48 @@ def show_raman_spectrum(app: Any, freq_result: Any) -> bool:
         return False
 
     app._raman_activities_real = bool(acts)
-    if not acts:
-        acts = [1.0] * len(freqs)
-    app._raman_accordion.set_title(
-        0,
-        (
-            "Raman Spectrum"
-            if app._raman_activities_real
-            else "Raman Spectrum (positions only — activities unavailable)"
-        ),
-    )
-
     app._last_raman_freqs = freqs
     app._last_raman_acts = acts
+    if not acts:
+        # ISSUE.19 #5 — this used to plot every mode at the same height,
+        # which reads as a real spectrum in class. Say why there is none.
+        app._raman_accordion.set_title(0, "Raman Spectrum (not computed)")
+        app._raman_mode_toggle.layout.display = "none"
+        app._raman_fwhm_slider.layout.display = "none"
+        app._last_raman_fig = None
+        app._set_html_output(
+            app._raman_fig,
+            raman_unavailable_html(getattr(freq_result, "solvent", None)),
+        )
+        return True
 
+    app._raman_accordion.set_title(0, "Raman Spectrum")
+    app._raman_mode_toggle.layout.display = ""
     app._update_raman_figure("Stick", 20.0)
     app._queue_main_thread_callback(app._wire_raman_controls)
 
     return True
+
+
+def raman_unavailable_html(solvent: Any = None) -> str:
+    """Why a Frequency result has no Raman activities."""
+    if solvent:
+        why = (
+            f"This frequency calculation used implicit solvent ({html.escape(str(solvent))}), "
+            "and Raman activities are only computed in the gas phase."
+        )
+    else:
+        why = (
+            "Raman activities need the <code>pyscf-properties</code> package, "
+            "which was not available where this calculation ran (or the "
+            "polarizability step failed; see the log)."
+        )
+    return (
+        f'<div style="padding:10px;color:{_theme.css.TEXT_SECONDARY};font-size:13px">'
+        f"<b>No Raman spectrum for this result.</b> {why} The vibrational "
+        "frequencies are in the IR panel and the mode table; peak heights "
+        "there are IR intensities, not Raman activities.</div>"
+    )
 
 
 def wire_raman_controls(app: Any) -> None:
@@ -912,6 +941,8 @@ def on_raman_fwhm_changed(app: Any, change: dict[str, Any]) -> None:
 
 def update_raman_figure(app: Any, mode: str, fwhm: float) -> None:
     """Re-render Raman spectrum chart for mode and FWHM settings."""
+    if not getattr(app, "_last_raman_acts", None):
+        return  # no activities: the panel holds raman_unavailable_html
     try:
         import plotly.io as _pio
 
@@ -1290,6 +1321,40 @@ def update_nmr_figure(app: Any, nucleus: str) -> None:
             pass
 
 
+def _attach_mo_irreps(info: Any, result: Any) -> None:
+    """Best-effort symmetry labels for the diagram (M-CHEM CHEM.1).
+
+    PySCF results only (PyFock orders its AOs differently). For an
+    unrestricted result the diagram shows the alpha channel, so the alpha
+    orbitals are labelled. Any failure leaves the diagram unlabelled.
+    """
+    try:
+        if str(getattr(result, "engine_id", "pyscf") or "pyscf") != "pyscf":
+            return
+        mol_atom = getattr(result, "pyscf_mol_atom", None)
+        basis = getattr(result, "pyscf_mol_basis", None)
+        coeff = getattr(result, "mo_coeff", None)
+        energy = getattr(result, "mo_energy_hartree", None)
+        if not mol_atom or not basis or coeff is None or len(mol_atom) > 200:
+            return
+        import numpy as _np
+
+        coeff = _np.asarray(coeff)
+        energy = _np.asarray(energy) if energy is not None else None
+        if coeff.ndim == 3:
+            coeff = coeff[0]
+            if energy is not None and energy.ndim == 2:
+                energy = energy[0]
+        from quantui.symmetry import label_mo_irreps
+
+        irreps = label_mo_irreps(mol_atom, str(basis), coeff, mo_energy=energy)
+        if irreps is not None and len(irreps.labels) == len(info.mo_energies_ev):
+            info.irreps = irreps.labels
+            info.irrep_caption = irreps.caption()
+    except Exception:  # noqa: BLE001 — labels are informational only
+        pass
+
+
 def show_orbital_diagram(app: Any, result: Any) -> bool:
     """Build and reveal interactive orbital diagram accordion."""
     mo_energy = getattr(result, "mo_energy_hartree", None)
@@ -1304,7 +1369,12 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
     except Exception:
         return False
 
+    _attach_mo_irreps(info, result)
+
     app._last_orb_info = info
+    # Full orbital energies (both spin channels for UHF), for the gallery's
+    # captions; the diagram's ``info`` is alpha-only.
+    app._last_orb_mo_energy = mo_energy
     app._last_orb_mo_coeff = getattr(result, "mo_coeff", None)
     app._last_orb_mo_occ = mo_occ
     app._last_orb_mol_atom = getattr(result, "pyscf_mol_atom", None)
@@ -1319,6 +1389,8 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
     # exported — the cube's own provenance comment used to silently name
     # whatever method the dropdown showed at that later moment instead.
     app._last_orb_method = str(getattr(result, "method", "") or "")
+    # Spin toggle only for unrestricted results (SURF.1).
+    sync_iso_surface_controls(app)
 
     plotly_rendered = False
     try:
@@ -1396,6 +1468,67 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
     return True
 
 
+_SURFACE_LABELS = {
+    "density": "Electron density",
+    "spin": "Spin density",
+    "esp": "ESP map",
+}
+
+
+def _surface_mode(app: Any) -> str:
+    """Selected surface kind ("orbital", "density", "spin", "esp")."""
+    value = getattr(getattr(app, "_iso_surface_dd", None), "value", "orbital")
+    return str(value or "orbital")
+
+
+def _orbitals_unrestricted(app: Any) -> bool:
+    import numpy as _np
+
+    coeff = getattr(app, "_last_orb_mo_coeff", None)
+    try:
+        return coeff is not None and _np.asarray(coeff).ndim == 3
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def sync_iso_surface_controls(app: Any) -> None:
+    """Show the controls that apply to the selected surface kind."""
+    mode = _surface_mode(app)
+    orbital = mode == "orbital"
+
+    def _show(name: str, on: bool) -> None:
+        w = getattr(app, name, None)
+        if w is not None:
+            w.layout.display = "" if on else "none"
+
+    _show("_orb_toggle", orbital)
+    _show(
+        "_orb_index_input",
+        orbital
+        and getattr(getattr(app, "_orb_toggle", None), "value", "") == "By index",
+    )
+    _show("_orb_spin_toggle", orbital and _orbitals_unrestricted(app))
+    _show("_orb_gallery_box", orbital)
+    _show("_iso_esp_range_slider", mode == "esp")
+    _show(
+        "_iso_esp_legend",
+        mode == "esp" and bool(getattr(app, "_last_esp_cube_path", None)),
+    )
+    # The ESP map takes its colours from the potential, not the scheme.
+    _show("_iso_colors_dd", mode != "esp")
+
+
+def on_iso_surface_changed(app: Any, change: Any = None) -> None:
+    """Surface kind changed: reset the isovalue to that kind's usual value."""
+    from quantui.orbital_visualization import DEFAULT_SURFACE_ISOVALUE
+
+    mode = _surface_mode(app)
+    slider = getattr(app, "_iso_isovalue_slider", None)
+    if slider is not None:
+        slider.value = DEFAULT_SURFACE_ISOVALUE.get(mode, 0.02)
+    sync_iso_surface_controls(app)
+
+
 def on_iso_generate(app: Any, btn: Any) -> None:
     """Generate orbital isosurface for currently selected orbital."""
     orbital_label = app._orb_toggle.value
@@ -1403,6 +1536,9 @@ def on_iso_generate(app: Any, btn: Any) -> None:
     # into the label as "MO <n>"; render_orbital_isosurface parses it back.
     if orbital_label == "By index":
         orbital_label = f"MO {int(app._orb_index_input.value)}"
+    _mode = _surface_mode(app)
+    if _mode != "orbital":
+        orbital_label = _SURFACE_LABELS[_mode]
     app._iso_render_token = int(getattr(app, "_iso_render_token", 0)) + 1
     render_token = app._iso_render_token
     btn.disabled = True
@@ -1551,8 +1687,27 @@ def render_orbital_isosurface(
     if orb_info is None:
         return
 
+    _mode = _surface_mode(app)
+    if _mode != "orbital":
+        render_density_surface(app, _mode, orbital_label, render_token=render_token)
+        return
+
     n_occ = orb_info.n_occupied
     n_total = len(orb_info.mo_energies_ev)
+    # Unrestricted results: the beta channel has its own orbitals and its
+    # own HOMO (SURF.1). The diagram and orb_info describe alpha.
+    _beta = (
+        _orbitals_unrestricted(app)
+        and getattr(getattr(app, "_orb_spin_toggle", None), "value", "alpha") == "beta"
+    )
+    if _beta:
+        try:
+            import numpy as _np
+
+            _occ_b = _np.asarray(getattr(app, "_last_orb_mo_occ", None))[1]
+            n_occ = int((_occ_b > 0.5).sum())
+        except Exception:  # noqa: BLE001 — fall back to alpha counting
+            _beta = False
     idx_map = {
         "HOMO-1": n_occ - 2,
         "HOMO": n_occ - 1,
@@ -1663,6 +1818,12 @@ def render_orbital_isosurface(
             if getattr(app, "_last_orb_engine_id", "pyscf") == "pyfock"
             else generate_cube_from_arrays
         )
+        if _beta:
+            import numpy as _np
+
+            mo_coeff = _np.asarray(mo_coeff)[1]
+            orbital_label = f"{orbital_label} (β)"
+            cube_path = cube_path.with_name(cube_path.stem + "_beta.cube")
         _cube_generator(
             mol_atom,
             mol_basis,
@@ -1748,6 +1909,8 @@ def render_orbital_isosurface(
     # label so the "Export cube" button can copy it to the top-level
     # result dir with a friendly name without re-deriving the path.
     app._last_cube_path = cube_path
+    app._last_cube_kind = "orbital"
+    app._last_esp_cube_path = None
     # The enclosed-density readout depends on the cube that was just written,
     # so it can only be filled in now — not when the slider was last moved.
     update_iso_enclosed_label(app)
@@ -1782,6 +1945,187 @@ def render_orbital_isosurface(
             pass
 
     app._queue_main_thread_callback(_enable_cube_btn)
+
+
+def render_density_surface(
+    app: Any, mode: str, label: str, render_token: int | None = None
+) -> None:
+    """Total density, spin density or ESP map (M-SURFACES SURF.2/3).
+
+    Built from the stored orbitals and occupations — no new SCF. Runs on the
+    isosurface worker thread like the orbital path, and shares its viewer,
+    sliders, PNG capture and cube export.
+    """
+    import re as _re
+    from datetime import datetime as _dt
+
+    import numpy as _np
+
+    def _is_stale() -> bool:
+        return render_token is not None and render_token != int(
+            getattr(app, "_iso_render_token", 0)
+        )
+
+    def _show_msg(msg: str) -> None:
+        if _is_stale():
+            return
+        app._queue_main_thread_callback(
+            app._set_html_output,
+            app._orb_iso_output,
+            f'<p style="color:#b91c1c;padding:8px">⚠ {msg}</p>',
+        )
+
+    mo_coeff = getattr(app, "_last_orb_mo_coeff", None)
+    mo_occ = getattr(app, "_last_orb_mo_occ", None)
+    mol_atom = getattr(app, "_last_orb_mol_atom", None)
+    mol_basis = getattr(app, "_last_orb_mol_basis", None)
+    if mo_coeff is None or mo_occ is None or mol_atom is None or mol_basis is None:
+        _show_msg("This result has no stored orbitals to build a density from.")
+        return
+    if getattr(app, "_last_orb_engine_id", "pyscf") == "pyfock":
+        _show_msg(
+            "Density surfaces need a PySCF result (PyFock orbitals use another AO order)."
+        )
+        return
+    occ = _np.asarray(mo_occ, dtype=float)
+    if mode == "spin":
+        n_unpaired = (
+            float(abs(occ[0].sum() - occ[1].sum()))
+            if occ.ndim == 2
+            else float((_np.abs(occ - 1.0) < 0.5).sum())
+        )
+        if n_unpaired < 0.5:
+            _show_msg(
+                "This is a closed-shell result: the alpha and beta densities are "
+                "identical, so the spin density is zero everywhere."
+            )
+            return
+
+    try:
+        import plotly.io as _pio
+
+        from quantui.orbital_visualization import (
+            DEFAULT_ISO_RESOLUTION,
+            ISO_RESOLUTION_PRESETS,
+            generate_surface_cubes,
+            infer_charge_and_spin,
+            max_render_points,
+            plot_cube_isosurface,
+            render_surface_py3dmol,
+        )
+        from quantui.viz_backend_router import VizTask as _VT
+
+        result_dir = getattr(app, "_last_result_dir", None)
+        if not isinstance(result_dir, Path):
+            try:
+                result_dir = app._get_results_dir()
+            except Exception:
+                result_dir = Path.cwd()
+        cube_dir = Path(result_dir) / "isosurfaces"
+        cube_dir.mkdir(parents=True, exist_ok=True)
+        orb_info = getattr(app, "_last_orb_info", None)
+        formula = str(getattr(orb_info, "formula", "") or "molecule")
+        safe_formula = (
+            _re.sub(r"[^A-Za-z0-9_.-]+", "_", formula).strip("._") or "molecule"
+        )
+        ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
+        stem = f"{safe_formula}_{mode}_{ts}"
+        cube_path = cube_dir / f"{stem}.cube"
+
+        _charge, _spin = infer_charge_and_spin(mol_atom, occ, basis=mol_basis)
+        _res_key = getattr(
+            getattr(app, "_iso_resolution_dd", None), "value", DEFAULT_ISO_RESOLUTION
+        )
+        _grid = ISO_RESOLUTION_PRESETS.get(
+            _res_key, ISO_RESOLUTION_PRESETS[DEFAULT_ISO_RESOLUTION]
+        )
+        if mode == "esp":
+            # The potential costs far more per point than the density, and
+            # the viewer carries both cubes; the 60³ default is plenty for
+            # colouring a surface.
+            _grid = min(_grid, 60)
+        cubes = generate_surface_cubes(
+            mode,
+            mol_atom,
+            mol_basis,
+            mo_coeff,
+            occ,
+            cube_path,
+            esp_output_path=cube_dir / f"{stem}_esp.cube",
+            nx=_grid,
+            ny=_grid,
+            nz=_grid,
+            charge=_charge,
+            spin=_spin,
+            method=str(getattr(app, "_last_orb_method", "") or ""),
+        )
+        opts = iso_render_options(app)
+        esp_range = cubes.get("esp_range") or opts["esp_range"]
+        chosen = app._resolve_backend(_VT.ORBITAL_ISOSURFACE)
+        use_py3dmol = str(chosen) == "py3dmol"
+        backend_label = "py3dmol" if use_py3dmol else "plotlymol"
+        with _viz_render_event(app, task=_VT.ORBITAL_ISOSURFACE, backend=backend_label):
+            if use_py3dmol:
+                html_str = render_surface_py3dmol(
+                    cube_path,
+                    mode=mode,
+                    esp_cube_path=cubes.get("esp_cube"),
+                    esp_range=float(esp_range),
+                    isovalue=opts["isovalue"],
+                    opacity=opts["opacity"],
+                    wireframe=opts["wireframe"],
+                    color_scheme=opts["color_scheme"],
+                    bgcolor=opts["bgcolor"],
+                    capture_class=opts["capture_class"],
+                )
+            else:
+                # The Plotly fallback draws the surface but cannot colour it by
+                # a second volume; say so rather than show a plain density as
+                # if it were an ESP map.
+                fig = plot_cube_isosurface(
+                    cube_path,
+                    max_points=max_render_points(_grid),
+                    title=f"{label}",
+                    show_molecule=True,
+                    show_grid=False,
+                    scene_bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
+                )
+                html_str = _pio.to_html(
+                    fig, include_plotlyjs="require", full_html=False
+                )
+                if mode == "esp":
+                    html_str = (
+                        '<p style="color:#92400e;padding:4px 8px">ESP colouring '
+                        "needs the py3Dmol backend; showing the density surface "
+                        "only.</p>" + html_str
+                    )
+    except Exception as exc:  # noqa: BLE001 — surface the failure in the panel
+        _show_msg(f"{label} failed: {type(exc).__name__}: {exc}")
+        return
+    if _is_stale():
+        return
+
+    app._last_cube_path = cube_path
+    app._last_cube_kind = mode
+    app._last_esp_cube_path = cubes.get("esp_cube")
+    app._last_cube_orbital = label.replace(" ", "_")
+    update_iso_enclosed_label(app)
+
+    def _finish() -> None:
+        if mode == "esp":
+            slider = getattr(app, "_iso_esp_range_slider", None)
+            if slider is not None and cubes.get("esp_range"):
+                # Suggested range for THIS molecule; the user can still drag it.
+                slider.value = float(cubes["esp_range"])
+            _update_esp_legend(app)
+        sync_iso_surface_controls(app)
+        try:
+            app._iso_export_cube_btn.disabled = False
+        except Exception:
+            pass
+
+    app._queue_main_thread_callback(app._set_html_output, app._orb_iso_output, html_str)
+    app._queue_main_thread_callback(_finish)
 
 
 def _swap_vib_output(app: Any, html_str: str) -> None:
@@ -2315,6 +2659,7 @@ def iso_render_options(app: Any) -> dict:
         "opacity": _val("_iso_opacity_slider", 0.85),
         "wireframe": _val("_iso_wireframe_cb", False),
         "color_scheme": _val("_iso_colors_dd", "blue-red"),
+        "esp_range": _val("_iso_esp_range_slider", 0.05),
         "bgcolor": app._plotly_theme_colors()["scene_bgcolor"],
         "capture_class": (
             _ORB_PNG_INBOX_CLASS
@@ -2457,15 +2802,27 @@ def update_iso_enclosed_label(app: Any) -> None:
     if cube is None or not Path(cube).exists():
         label.value = ""
         return
-    from quantui.orbital_visualization import enclosed_density_fraction
+    from quantui.orbital_visualization import (
+        enclosed_density_fraction,
+        enclosed_electron_fraction,
+    )
 
-    frac = enclosed_density_fraction(Path(cube), iso)
+    kind = getattr(app, "_last_cube_kind", "orbital")
+    if kind == "spin":
+        label.value = ""
+        return
+    if kind in ("density", "esp"):
+        frac = enclosed_electron_fraction(Path(cube), iso)
+        what = "of the electrons"
+    else:
+        frac = enclosed_density_fraction(Path(cube), iso)
+        what = "of the density"
     label.value = (
         ""
         if frac is None
         else (
             f'<span style="font-size:12px;color:#555">encloses '
-            f"<b>{frac * 100:.1f}%</b> of the density</span>"
+            f"<b>{frac * 100:.1f}%</b> {what}</span>"
         )
     )
 
@@ -2483,8 +2840,23 @@ def on_iso_appearance_changed(app: Any, change: dict | None = None) -> None:
         wf=opts["wireframe"],
         pos=pos,
         neg=neg,
+        range=opts["esp_range"],
     )
+    _update_esp_legend(app)
     update_iso_enclosed_label(app)
+
+
+def _update_esp_legend(app: Any) -> None:
+    legend = getattr(app, "_iso_esp_legend", None)
+    if legend is None:
+        return
+    from quantui.orbital_visualization import esp_legend_html
+
+    try:
+        rng = float(getattr(getattr(app, "_iso_esp_range_slider", None), "value", 0.05))
+    except (TypeError, ValueError):
+        return
+    legend.value = esp_legend_html(rng)
 
 
 def rerender_3d_scenes_for_theme(app: Any) -> None:
@@ -3182,7 +3554,31 @@ _VIB_VIEWER_JS = """
   var UID="__UID__";
   var SYM=__SYM__, BASE=__BASE__, DISPL=__DISPL__;
   var NAT=__NAT__, NF=__NF__, AMP=__AMP__, IV=__IV__, BG=__BG__, INIT=__INIT__;
+  var ARROWS=__ARROWS__, CUR=INIT, arrowShapes=[];
   function vw(){ return window["viewer_"+UID]; }
+  // Static displacement arrows (GaussView "display displacement vectors"):
+  // shapes, so they stay put while the frames animate. Length follows the
+  // animation amplitude; atoms that barely move get no arrow.
+  function drawArrows(v, m){
+    for(var i=0;i<arrowShapes.length;i++){ try{ v.removeShape(arrowShapes[i]); }catch(e){} }
+    arrowShapes=[];
+    if(!ARROWS) return;
+    var d=DISPL[m]; if(!d) return;
+    var norms=[], maxn=0;
+    for(var a=0;a<NAT;a++){
+      var n=Math.sqrt(d[a][0]*d[a][0]+d[a][1]*d[a][1]+d[a][2]*d[a][2]);
+      norms.push(n); if(n>maxn) maxn=n;
+    }
+    var s=2.5*AMP;
+    for(var a=0;a<NAT;a++){
+      if(norms[a] < 0.08*maxn) continue;
+      var b=BASE[a];
+      arrowShapes.push(v.addArrow({
+        start:{x:b[0], y:b[1], z:b[2]},
+        end:{x:b[0]+s*d[a][0], y:b[1]+s*d[a][1], z:b[2]+s*d[a][2]},
+        radius:0.06, radiusRatio:2.0, mid:0.72, color:"#16a34a"}));
+    }
+  }
   function frames(m){
     var d=DISPL[m]; if(!d) return null;
     var out="";
@@ -3210,6 +3606,8 @@ _VIB_VIEWER_JS = """
       v.removeAllModels();
       v.addModelsAsFrames(xyz,"xyz");
       v.setStyle({"stick":{},"sphere":{"scale":0.3}});
+      CUR=m;
+      drawArrows(v, m);
       v.setBackgroundColor(BG);
       if(fit) v.zoomTo();   // fit only on first mode; switches keep the camera
       v.animate({"loop":"forward","interval":IV,"reps":0});
@@ -3225,6 +3623,14 @@ _VIB_VIEWER_JS = """
     try{ if(v.stopAnimate) v.stopAnimate();
       v.animate({"loop":"forward","interval":IV,"reps":0}); v.render();
     }catch(e){}
+  };
+  // Live amplitude / arrows (camera preserved: same viewer, new frames).
+  window.__quantuiVibSetAmp=function(a){
+    AMP=Math.max(0.01, +a); return window.__quantuiVibSetMode(CUR, false);
+  };
+  window.__quantuiVibSetArrows=function(on){
+    ARROWS=!!on; var v=vw(); if(!v) return false;
+    drawArrows(v, CUR); v.render(); return true;
   };
   var t=0, poll=setInterval(function(){ t++;
     if(vw()){ clearInterval(poll); window.__quantuiVibSetMode(INIT, true); }
@@ -3247,6 +3653,7 @@ def build_vib_viewer_html(
     width: int = 460,
     height: int = 420,
     capture_class: str = "",
+    arrows: bool = False,
 ) -> str:
     """Build a single py3Dmol viewer that holds every vibrational mode.
 
@@ -3310,6 +3717,7 @@ def build_vib_viewer_html(
         .replace("__IV__", str(interval_ms))
         .replace("__BG__", json.dumps(bgcolor))
         .replace("__INIT__", str(int(initial_mode)))
+        .replace("__ARROWS__", "true" if arrows else "false")
     )
     body = f"{view_html}<script>{js}</script>"
     if capture_class:
@@ -3362,9 +3770,13 @@ def _render_vib_single_viewer(
                 freq_result,
                 mode_numbers,
                 initial_mode,
+                amplitude=vib_amplitude(app),
                 fps=fps,
                 bgcolor=bg,
                 capture_class=_VIB_PNG_INBOX_CLASS,
+                arrows=bool(
+                    getattr(getattr(app, "_vib_arrows_cb", None), "value", False)
+                ),
             )
     except Exception as exc:  # noqa: BLE001 — fall back to the legacy renderer
         try:
@@ -3405,6 +3817,171 @@ def _vib_bridge_set_mode(app: Any, mode_number: int) -> None:
             display(Javascript(js))
     except Exception:
         pass
+
+
+def vib_amplitude(app: Any) -> float:
+    """Animation amplitude (Å per unit displacement) from the panel slider."""
+    try:
+        return float(getattr(getattr(app, "_vib_amp_slider", None), "value", 0.4))
+    except (TypeError, ValueError):
+        return 0.4
+
+
+def _vib_bridge_call(app: Any, fn: str, arg: str) -> None:
+    """One-shot call of ``window.<fn>(<arg>)`` on the live vib viewer."""
+    bridge = getattr(app, "_vib_js_bridge", None)
+    if bridge is None:
+        return
+    from IPython.display import Javascript, display
+
+    js = (
+        "(function(){var n=0;function go(){n++;"  # noqa: UP031 — JS is brace-dense
+        "if(window.%s){window.%s(%s);}"
+        "else if(n<40){setTimeout(go,50);}}go();})();" % (fn, fn, arg)
+    )
+    try:
+        bridge.clear_output(wait=True)
+        with bridge:
+            display(Javascript(js))
+    except Exception:
+        pass
+
+
+def on_vib_amplitude_changed(app: Any, change: Any = None) -> None:
+    _vib_bridge_call(app, "__quantuiVibSetAmp", repr(vib_amplitude(app)))
+
+
+def on_vib_arrows_changed(app: Any, change: Any = None) -> None:
+    on = bool(getattr(getattr(app, "_vib_arrows_cb", None), "value", False))
+    _vib_bridge_call(app, "__quantuiVibSetArrows", "true" if on else "false")
+
+
+def vib_mode_table_html(freq_result: Any) -> str:
+    """Every normal mode with its frequency, IR intensity and Raman activity."""
+    freqs = list(getattr(freq_result, "frequencies_cm1", None) or [])
+    ir = list(getattr(freq_result, "ir_intensities", None) or [])
+    raman = list(getattr(freq_result, "raman_activities", None) or [])
+    if not freqs:
+        return ""
+    has_ir = len(ir) == len(freqs)
+    has_raman = len(raman) == len(freqs)
+    cell = "padding:2px 10px;text-align:right"
+    head = (
+        f'<th style="{cell}">Mode</th><th style="{cell}">ν (cm⁻¹)</th>'
+        + (f'<th style="{cell}">IR (km/mol)</th>' if has_ir else "")
+        + (f'<th style="{cell}">Raman (Å⁴/amu)</th>' if has_raman else "")
+    )
+    rows = []
+    for i, f in enumerate(freqs, start=1):
+        if abs(f) < 10:
+            continue
+        nu = f"{abs(f):.1f}i" if f < 0 else f"{f:.1f}"
+        style = f' style="color:{_theme.css.ACCENT_ERROR_ALT}"' if f < 0 else ""
+        rows.append(
+            f"<tr{style}><td style='{cell}'>{i}</td><td style='{cell}'>{nu}</td>"
+            + (f"<td style='{cell}'>{ir[i - 1]:.1f}</td>" if has_ir else "")
+            + (f"<td style='{cell}'>{raman[i - 1]:.2f}</td>" if has_raman else "")
+            + "</tr>"
+        )
+    return (
+        '<div style="max-height:240px;overflow-y:auto;margin:6px 0;font-size:12px">'
+        f'<table style="border-collapse:collapse"><tr>{head}</tr>{"".join(rows)}</table>'
+        "<small>Imaginary modes (ν shown with i) are in red.</small></div>"
+    )
+
+
+def show_thermo_box(
+    app: Any, molecule: Any, energy_hartree: Any, frequencies_cm1: Any
+) -> None:
+    """Remember what thermochemistry needs and show it at the current T/P."""
+    box = getattr(app, "_thermo_box", None)
+    if molecule is None or energy_hartree is None or not frequencies_cm1:
+        app._thermo_source = None
+        if box is not None:
+            box.layout.display = "none"
+        return
+    app._thermo_source = (molecule, float(energy_hartree), list(frequencies_cm1))
+    if box is not None:
+        box.layout.display = ""
+    on_thermo_inputs_changed(app)
+
+
+def on_thermo_inputs_changed(app: Any, change: Any = None) -> None:
+    """Recompute thermochemistry at the T/P in the panel (no new calculation)."""
+    out = getattr(app, "_thermo_html", None)
+    src = getattr(app, "_thermo_source", None)
+    if out is None or src is None:
+        return
+    molecule, energy, freqs = src
+    try:
+        temp = float(app._thermo_T.value)
+        pres = float(app._thermo_P.value)
+        from quantui.freq_calc import compute_thermochemistry
+
+        td = compute_thermochemistry(
+            list(molecule.atoms),
+            [list(c) for c in molecule.coordinates],
+            energy_hartree=energy,
+            frequencies_cm1=freqs,
+            charge=int(getattr(molecule, "charge", 0)),
+            multiplicity=int(getattr(molecule, "multiplicity", 1)),
+            temperature_k=temp,
+            pressure_atm=pres,
+        )
+    except Exception as exc:  # noqa: BLE001 — show, never raise from an input
+        out.value = f'<span style="color:#b91c1c">Thermochemistry failed: {exc}</span>'
+        return
+    out.value = thermo_table_html(td, energy)
+
+
+def thermo_table_html(td: Any, energy_hartree: float) -> str:
+    """ZPE, U, H, S, G, Cv, Cp, sigma — Hartree and kJ/mol corrections."""
+    kj = 2625.4996
+    cell = "padding:2px 12px 2px 0"
+
+    def _row(label: str, value: str, note: str = "") -> str:
+        return (
+            f"<tr><td style='{cell};color:{_theme.css.TEXT_LABEL}'>{label}</td>"
+            f"<td style='{cell}'>{value}</td>"
+            f"<td style='color:{_theme.css.TEXT_MUTED};font-size:11px'>{note}</td></tr>"
+        )
+
+    def _corr(value: float) -> str:
+        return f"correction {(value - energy_hartree) * kj:+.2f} kJ/mol"
+
+    rows = [
+        _row("Electronic energy E₀", f"{energy_hartree:.6f} Ha"),
+        _row(
+            "Zero-point energy",
+            f"{td.zpve_hartree:.6f} Ha",
+            f"{td.zpve_hartree * kj:.2f} kJ/mol",
+        ),
+    ]
+    if td.E_thermal_hartree is not None:
+        rows.append(
+            _row(
+                "Thermal energy U",
+                f"{td.E_thermal_hartree:.6f} Ha",
+                _corr(td.E_thermal_hartree),
+            )
+        )
+    rows += [
+        _row("Enthalpy H", f"{td.H_hartree:.6f} Ha", _corr(td.H_hartree)),
+        _row("Entropy S", f"{td.S_jmol:.2f} J/(mol·K)"),
+        _row("Gibbs energy G", f"{td.G_hartree:.6f} Ha", _corr(td.G_hartree)),
+    ]
+    if td.Cv_jmolk is not None:
+        rows.append(_row("Heat capacity Cv", f"{td.Cv_jmolk:.2f} J/(mol·K)"))
+    if td.Cp_jmolk is not None:
+        rows.append(_row("Heat capacity Cp", f"{td.Cp_jmolk:.2f} J/(mol·K)"))
+    if td.symmetry_number is not None:
+        rows.append(_row("Rotational symmetry number σ", str(td.symmetry_number)))
+    return (
+        f"<div style='font-size:12px;margin:4px 0'><b>At {td.temperature_k:.2f} K, "
+        f"{td.pressure_atm:g} atm</b> (ideal gas, rigid rotor, harmonic "
+        "oscillator; imaginary modes excluded)"
+        f"<table style='border-collapse:collapse;margin-top:4px'>{''.join(rows)}</table></div>"
+    )
 
 
 def _vib_bridge_set_fps(app: Any, fps: int) -> None:
@@ -3613,7 +4190,7 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
             )
 
         n_frames = 24
-        amplitude = 0.4
+        amplitude = vib_amplitude(app)
         fps = int(
             getattr(
                 getattr(app, "_user_settings", None) and app._user_settings.viz,
@@ -3652,3 +4229,161 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
         "exported. py3Dmol is a required QuantUI dependency — reinstall with "
         "pip install --force-reinstall 'py3Dmol>=2,<3'."
     )
+
+
+# ── Orbital gallery (M-SURFACES SURF.1, DEC-024) ─────────────────────────────
+
+
+def build_gallery_for_app(app: Any, each_side: int = 3) -> str:
+    """Cubes for HOMO−(n−1)…LUMO+(n−1) of the loaded result, as a tile grid.
+
+    Runs in a worker thread (several cubegen calls). Follows the α/β toggle
+    for unrestricted results and the current isovalue / colour scheme.
+    """
+    import re as _re
+    from datetime import datetime as _dt
+
+    import numpy as _np
+
+    from quantui.orbital_visualization import (
+        GALLERY_GRID,
+        GalleryTile,
+        build_orbital_gallery_html,
+        compact_cube_text,
+        gallery_caption,
+        gallery_orbital_indices,
+        generate_cube_from_arrays,
+        generate_pyfock_cube_from_arrays,
+        infer_charge_and_spin,
+    )
+    from quantui.viz_backend_router import VizTask as _VT
+
+    info = getattr(app, "_last_orb_info", None)
+    mo_coeff = getattr(app, "_last_orb_mo_coeff", None)
+    mol_atom = getattr(app, "_last_orb_mol_atom", None)
+    mol_basis = getattr(app, "_last_orb_mol_basis", None)
+    mo_occ = getattr(app, "_last_orb_mo_occ", None)
+    if info is None or mo_coeff is None or mol_atom is None or mol_basis is None:
+        return (
+            '<p style="padding:8px">The gallery needs orbitals: run or load a '
+            "result that has them first.</p>"
+        )
+    if str(app._resolve_backend(_VT.ORBITAL_ISOSURFACE)) != "py3dmol":
+        return (
+            '<p style="padding:8px">The gallery needs the interactive 3D viewer '
+            "(py3Dmol), which is not available here.</p>"
+        )
+
+    coeff = _np.asarray(mo_coeff)
+    energies = getattr(app, "_last_orb_mo_energy", None)
+    energies = _np.asarray(energies) if energies is not None else None
+    occ = _np.asarray(mo_occ) if mo_occ is not None else None
+    beta = (
+        _orbitals_unrestricted(app)
+        and getattr(getattr(app, "_orb_spin_toggle", None), "value", "alpha") == "beta"
+    )
+    channel = 1 if beta else 0
+    if coeff.ndim == 3:
+        coeff = coeff[channel]
+    if energies is not None and energies.ndim == 2:
+        energies = energies[channel]
+    if occ is not None and occ.ndim == 2:
+        n_occ = int((occ[channel] > 0.5).sum())
+    else:
+        n_occ = int(info.n_occupied)
+    n_total = int(coeff.shape[-1])
+    # Symmetry labels describe the alpha orbitals (see _attach_mo_irreps).
+    irreps = None if beta else getattr(info, "irreps", None)
+
+    charge, spin = infer_charge_and_spin(mol_atom, mo_occ, basis=mol_basis)
+    generator: Any = (
+        generate_pyfock_cube_from_arrays
+        if getattr(app, "_last_orb_engine_id", "pyscf") == "pyfock"
+        else generate_cube_from_arrays
+    )
+    result_dir = getattr(app, "_last_result_dir", None)
+    if not isinstance(result_dir, Path):
+        try:
+            result_dir = app._get_results_dir()
+        except Exception:  # noqa: BLE001 — fall back to the working directory
+            result_dir = Path.cwd()
+    out_dir = (
+        Path(result_dir)
+        / "isosurfaces"
+        / f"gallery_{_dt.now().strftime('%Y-%m-%d_%H-%M-%S-%f')}"
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    tiles = []
+    for label, idx in gallery_orbital_indices(n_occ, n_total, each_side):
+        safe = _re.sub(r"[^A-Za-z0-9_+-]+", "_", label.replace("−", "-"))
+        path = out_dir / f"{safe}{'_beta' if beta else ''}.cube"
+        generator(
+            mol_atom,
+            mol_basis,
+            coeff,
+            idx,
+            path,
+            nx=GALLERY_GRID,
+            ny=GALLERY_GRID,
+            nz=GALLERY_GRID,
+            charge=charge,
+            spin=spin,
+            method=str(getattr(app, "_last_orb_method", "") or ""),
+        )
+        e = float(energies[idx]) if energies is not None else None
+        irrep = irreps[idx] if irreps is not None and idx < len(irreps) else None
+        title, detail = gallery_caption(label + (" (β)" if beta else ""), idx, e, irrep)
+        tiles.append(
+            GalleryTile(
+                label=label,
+                caption=title,
+                detail=detail,
+                cube_text=compact_cube_text(path.read_text()),
+            )
+        )
+
+    opts = iso_render_options(app)
+    return build_orbital_gallery_html(
+        tiles,
+        isovalue=opts["isovalue"],
+        color_scheme=opts["color_scheme"],
+        bgcolor=opts["bgcolor"],
+    )
+
+
+def on_orbital_gallery(app: Any, btn: Any = None) -> None:
+    """Build the orbital gallery in the background, then show it."""
+    each_side = int(getattr(getattr(app, "_orb_gallery_span_dd", None), "value", 3))
+    button = getattr(app, "_orb_gallery_btn", None)
+    app._gallery_token = int(getattr(app, "_gallery_token", 0)) + 1
+    token = app._gallery_token
+    if button is not None:
+        button.disabled = True
+        button.description = "Building gallery…"
+    app._set_html_output(
+        app._orb_gallery_output,
+        f'<p style="padding:8px;font-style:italic">⏳ Computing {2 * each_side} '
+        "orbitals…</p>",
+    )
+
+    def _work() -> None:
+        try:
+            html_str = build_gallery_for_app(app, each_side)
+        except Exception as exc:  # noqa: BLE001 — shown in the panel
+            html_str = (
+                '<p style="color:#b91c1c;padding:8px">⚠ Orbital gallery failed: '
+                f"{html.escape(f'{type(exc).__name__}: {exc}')}</p>"
+            )
+
+        def _done() -> None:
+            if token != getattr(app, "_gallery_token", 0):
+                return  # superseded by a newer click
+            app._set_html_output(app._orb_gallery_output, html_str)
+            if button is not None:
+                button.disabled = False
+                button.description = "Orbital gallery"
+
+        app._queue_main_thread_callback(_done)
+
+    _start_daemon(_work)

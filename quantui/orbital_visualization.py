@@ -92,6 +92,10 @@ class OrbitalInfo:
     lumo_energy_ev: float
     homo_lumo_gap_ev: float
     formula: str  # for chart title
+    # Optional symmetry labels, one per MO ("1a1", "1b1", "1πg"), and the
+    # caption naming their group (quantui.symmetry.label_mo_irreps).
+    irreps: Optional[List[str]] = None
+    irrep_caption: Optional[str] = None
 
     @property
     def n_virtual(self) -> int:
@@ -392,6 +396,11 @@ def plot_orbital_diagram_plotly(
 
     LHW = 0.3  # half-width of each horizontal line in x
 
+    irreps = info.irreps if info.irreps and len(info.irreps) == n_total else None
+
+    def _sym(idx: int) -> str:
+        return f" ({irreps[idx]})" if irreps else ""
+
     traces = []
     for idx in range(start, end):
         e = float(energies[idx])
@@ -401,16 +410,16 @@ def plot_orbital_diagram_plotly(
 
         if is_homo:
             color, lw = "#2171b5", 3.0
-            hover = f"MO #{idx + 1} — HOMO<br>{e:+.4f} eV"
+            hover = f"MO #{idx + 1}{_sym(idx)} — HOMO<br>{e:+.4f} eV"
         elif is_lumo:
             color, lw = "#e6550d", 3.0
-            hover = f"MO #{idx + 1} — LUMO<br>{e:+.4f} eV"
+            hover = f"MO #{idx + 1}{_sym(idx)} — LUMO<br>{e:+.4f} eV"
         elif is_occ:
             color, lw = "#2171b5", 1.5
-            hover = f"MO #{idx + 1} (occupied)<br>{e:+.4f} eV"
+            hover = f"MO #{idx + 1}{_sym(idx)} (occupied)<br>{e:+.4f} eV"
         else:
             color, lw = "#9e9e9e", 1.5
-            hover = f"MO #{idx + 1} (virtual)<br>{e:+.4f} eV"
+            hover = f"MO #{idx + 1}{_sym(idx)} (virtual)<br>{e:+.4f} eV"
 
         traces.append(
             go.Scatter(
@@ -435,7 +444,7 @@ def plot_orbital_diagram_plotly(
             y=homo_e,
             xref="x",
             yref="y",
-            text="<b>HOMO</b>",
+            text=f"<b>HOMO</b>{_sym(n_occ - 1)}",
             showarrow=False,
             font=dict(size=fs_label, color="#2171b5"),
             xanchor="left",
@@ -446,7 +455,7 @@ def plot_orbital_diagram_plotly(
             y=lumo_e,
             xref="x",
             yref="y",
-            text="<b>LUMO</b>",
+            text=f"<b>LUMO</b>{_sym(n_occ)}",
             showarrow=False,
             font=dict(size=fs_label, color="#e6550d"),
             xanchor="left",
@@ -485,7 +494,12 @@ def plot_orbital_diagram_plotly(
         height=height,
         margin=dict(l=60, r=110, t=50, b=30),
         title=dict(
-            text=title or f"Orbital Energy Levels — {info.formula}",
+            text=(title or f"Orbital Energy Levels — {info.formula}")
+            + (
+                f"<br><sup>{info.irrep_caption}</sup>"
+                if irreps and info.irrep_caption
+                else ""
+            ),
             font=dict(size=fs_title, family="Arial"),
         ),
         xaxis=dict(
@@ -660,6 +674,7 @@ def _write_cube_provenance(
     charge: int,
     spin: int,
     method: str = "",
+    quantity: str = "orbital",
 ) -> None:
     """Overwrite a freshly written cube file's two free-text comment lines
     with QuantUI provenance (M-EXPORT2 EXP2.4 / M-ORBEXPORT ORBX.4).
@@ -675,9 +690,9 @@ def _write_cube_provenance(
     once the file has been handed to Avogadro / VMD / Multiwfn or emailed on.
     """
     line1 = (
-        f"QuantUI orbital cube — {method}/{basis}"
+        f"QuantUI {quantity} cube — {method}/{basis}"
         if method
-        else f"QuantUI orbital cube — basis {basis}"
+        else f"QuantUI {quantity} cube — basis {basis}"
     )
     label = _resolution_label(nx, ny, nz)
     line2 = f"grid {nx}x{ny}x{nz} ({label}); charge={charge} spin={spin}"
@@ -909,6 +924,155 @@ def generate_cube_from_arrays(
     return output_path
 
 
+# Surfaces other than single orbitals (M-SURFACES SURF.2/3). Default
+# isovalues in atomic units: 0.002 e/bohr^3 is the classic "molecular
+# surface" used for ESP maps (roughly the van der Waals envelope).
+SURFACE_KINDS = ("orbital", "density", "spin", "esp")
+DEFAULT_SURFACE_ISOVALUE = {
+    "orbital": 0.02,
+    "density": 0.002,
+    "spin": 0.002,
+    "esp": 0.002,
+}
+
+
+def density_matrices(mo_coeff: Any, mo_occ: Any) -> Tuple[np.ndarray, np.ndarray]:
+    """Alpha and beta AO density matrices from orbitals and occupations.
+
+    Handles restricted closed-shell (occupations 2/0), restricted open-shell
+    (2/1/0: singly occupied orbitals are alpha) and unrestricted results
+    (``(2, n_ao, n_mo)`` coefficients with ``(2, n_mo)`` occupations).
+    """
+    coeff = np.asarray(mo_coeff, dtype=float)
+    occ = np.asarray(mo_occ, dtype=float)
+    if coeff.ndim == 3:
+        if occ.ndim != 2:
+            raise ValueError("unrestricted orbitals need per-spin occupations")
+        dm_a = (coeff[0] * occ[0]) @ coeff[0].T
+        dm_b = (coeff[1] * occ[1]) @ coeff[1].T
+        return dm_a, dm_b
+    if occ.ndim != 1:
+        raise ValueError("restricted orbitals need one occupation per orbital")
+    occ_a = (occ > 0.5).astype(float)
+    occ_b = (occ > 1.5).astype(float)
+    return (coeff * occ_a) @ coeff.T, (coeff * occ_b) @ coeff.T
+
+
+def esp_surface_range(
+    density: np.ndarray, potential: np.ndarray, isovalue: float
+) -> Optional[float]:
+    """Symmetric colour range (a.u.) for an ESP map on the ρ = *isovalue* surface.
+
+    The 95th percentile of |V| over grid points whose density is close to
+    the isovalue, so one extreme point (near a nucleus poking through a
+    coarse grid) cannot wash the map out. ``None`` if no point qualifies.
+    """
+    rho = np.asarray(density, dtype=float).ravel()
+    pot = np.asarray(potential, dtype=float).ravel()
+    near = (rho > 0.7 * isovalue) & (rho < 1.4 * isovalue)
+    if not near.any():
+        return None
+    value = float(np.percentile(np.abs(pot[near]), 95))
+    return value if value > 0 else None
+
+
+def generate_surface_cubes(
+    kind: str,
+    mol_atom: list,
+    mol_basis: str,
+    mo_coeff: Any,
+    mo_occ: Any,
+    output_path: Path,
+    *,
+    esp_output_path: Optional[Path] = None,
+    nx: int = 60,
+    ny: int = 60,
+    nz: int = 60,
+    margin: float = 5.0,
+    charge: int = 0,
+    spin: int = 0,
+    method: str = "",
+) -> dict:
+    """Write the cube(s) for a density-type surface (M-SURFACES SURF.2/3).
+
+    *kind* is ``"density"`` (total electron density), ``"spin"`` (alpha minus
+    beta; positive = excess alpha) or ``"esp"`` (total density, plus the
+    molecular electrostatic potential on the same grid at
+    *esp_output_path*, to colour the density surface).
+
+    Returns ``{"cube": Path, "esp_cube": Path | None, "esp_range": float | None}``.
+    ``esp_range`` is a suggested symmetric colour range in a.u.
+
+    ECPs are attached for heavy-element bases: the potential's nuclear term
+    uses the ECP-reduced core charges, as the SCF did.
+    """
+    if kind not in ("density", "spin", "esp"):
+        raise ValueError(f"unknown surface kind {kind!r}")
+    try:
+        from pyscf import gto
+        from pyscf.tools import cubegen
+    except ImportError as exc:
+        raise ImportError(
+            "PySCF is required for cube file generation (Linux/WSL only).\n"
+            "  conda install -c conda-forge pyscf"
+        ) from exc
+    from quantui.inorganic_guards import ecp_for_basis
+
+    mol = gto.M(
+        atom=mol_atom,
+        basis=mol_basis,
+        ecp=ecp_for_basis(mol_basis, [str(a[0]) for a in mol_atom]),
+        unit="Angstrom",
+        charge=charge,
+        spin=spin,
+    )
+    dm_a, dm_b = density_matrices(mo_coeff, mo_occ)
+    dm = dm_a - dm_b if kind == "spin" else dm_a + dm_b
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    grid = dict(nx=nx, ny=ny, nz=nz, margin=margin)
+    rho = cubegen.density(mol, str(output_path), dm, **grid)
+    _write_cube_provenance(
+        output_path,
+        basis=mol_basis,
+        nx=nx,
+        ny=ny,
+        nz=nz,
+        charge=charge,
+        spin=spin,
+        method=method,
+        quantity="spin density" if kind == "spin" else "electron density",
+    )
+    result: dict = {"cube": output_path, "esp_cube": None, "esp_range": None}
+    if kind == "esp":
+        esp_path = (
+            Path(esp_output_path)
+            if esp_output_path is not None
+            else output_path.with_name(output_path.stem + "_esp.cube")
+        )
+        # Same Cube construction arguments, so the same grid: the viewer
+        # samples the potential at the density surface's vertices.
+        pot = cubegen.mep(mol, str(esp_path), dm, **grid)
+        _write_cube_provenance(
+            esp_path,
+            basis=mol_basis,
+            nx=nx,
+            ny=ny,
+            nz=nz,
+            charge=charge,
+            spin=spin,
+            method=method,
+            quantity="electrostatic potential",
+        )
+        result["esp_cube"] = esp_path
+        result["esp_range"] = esp_surface_range(
+            rho, pot, DEFAULT_SURFACE_ISOVALUE["esp"]
+        )
+    logger.info("Wrote %s cube: %s", kind, output_path)
+    return result
+
+
 def generate_pyfock_cube_from_arrays(
     mol_atom: list,
     mol_basis: str,
@@ -1102,6 +1266,25 @@ def parse_cube_file(cube_path: Path) -> dict:
     }
 
 
+def enclosed_electron_fraction(cube_path: Path, isovalue: float) -> Optional[float]:
+    """Fraction of the electrons inside the ρ >= *isovalue* surface.
+
+    The density counterpart of :func:`enclosed_density_fraction`: the cube
+    already holds ρ, so the enclosed share is a straight ratio of sums.
+    """
+    try:
+        cube = parse_cube_file(Path(cube_path))
+        rho = np.asarray(cube["data"], dtype=float)
+        total = float(rho[rho > 0].sum())
+        if total <= 0.0:
+            return None
+        inside = float(rho[rho >= float(isovalue)].sum())
+        return max(0.0, min(1.0, inside / total))
+    except Exception as exc:  # noqa: BLE001 — a readout must never break a render
+        logger.debug("enclosed_electron_fraction failed: %s", exc)
+        return None
+
+
 def enclosed_density_fraction(cube_path: Path, isovalue: float) -> Optional[float]:
     """Fraction of the orbital's probability density inside |psi| >= *isovalue*.
 
@@ -1225,7 +1408,12 @@ _ISO_VIEWER_JS = """
 (function(){
   var UID="__UID__", DATA=__DATA__, FMT=__FMT__;
   var WITH_SURFACES=__WITH_SURFACES__, SCENE=__SCENE__;
-  var state={iso:__ISO__, op:__OP__, pos:__POS__, neg:__NEG__, bg:__BG__, wf:__WF__};
+  // MODE: "orbital" / "spin" draw +iso and -iso lobes; "density" draws one
+  // surface; "esp" draws the density surface coloured by VOL (the potential
+  // on the same grid), red = negative to blue = positive over +-range.
+  var MODE=__MODE__, VOL=__VOL__, volObj=null;
+  var state={iso:__ISO__, op:__OP__, pos:__POS__, neg:__NEG__, bg:__BG__, wf:__WF__,
+             range:__RANGE__};
   function v(){ return window["viewer_"+UID]; }
 
   // ⚠️ Isosurfaces are SHAPES, not surfaces. viewer.addVolumetricData() routes
@@ -1245,6 +1433,21 @@ _ISO_VIEWER_JS = """
       try{ vw.removeShape(shapes[i]); }catch(e){}
     }
     shapes=[];
+    if(MODE==="esp"){
+      // Parse the potential once; adjustVolumeStyle keeps a VolumeData as is.
+      if(!volObj){ volObj=new $3Dmol.VolumeData(VOL,"cube"); }
+      shapes.push(vw.addVolumetricData(DATA,"cube",
+        {isoval: state.iso, opacity: state.op, smoothness: 5, wireframe: state.wf,
+         voldata: volObj,
+         volscheme: {gradient: "rwb", min: -state.range, max: state.range}}));
+      return;
+    }
+    if(MODE==="density"){
+      shapes.push(vw.addVolumetricData(DATA,"cube",
+        {isoval: state.iso, color: state.pos, opacity: state.op, smoothness: 5,
+         wireframe: state.wf}));
+      return;
+    }
     // smoothness = Laplacian smoothing passes 3Dmol.js runs on the raw
     // marching-cubes mesh. Default (1) leaves visible triangle facets on the
     // lobes; the roughness is the mesh, not the grid, so more cubegen points
@@ -1301,6 +1504,7 @@ _ISO_VIEWER_JS = """
     // isosurface shape, so a toggle rebuilds it like every other appearance
     // change here.
     if(opts.wf!==undefined && opts.wf!==state.wf){ state.wf=opts.wf; geom=true; }
+    if(opts.range!==undefined && opts.range!==state.range){ state.range=opts.range; geom=true; }
     if(opts.bg!==undefined){ state.bg=opts.bg; vw.setBackgroundColor(state.bg); }
     if(geom){
       var cam=null;
@@ -1407,6 +1611,73 @@ def render_orbital_isosurface_py3dmol(
     )
 
 
+def render_surface_py3dmol(
+    cube_path: Path,
+    *,
+    mode: str,
+    esp_cube_path: Optional[Path] = None,
+    esp_range: float = 0.05,
+    isovalue: float = 0.002,
+    opacity: float = 0.85,
+    wireframe: bool = False,
+    width: int = 760,
+    height: int = 620,
+    color_scheme: str = DEFAULT_ORBITAL_COLORS,
+    bgcolor: str = "white",
+    style: str = "stick",
+    capture_class: str = "",
+) -> str:
+    """Density-type surface viewer (M-SURFACES): same viewer and live
+    controls as :func:`render_orbital_isosurface_py3dmol`.
+
+    *mode* ``"density"`` draws one surface; ``"spin"`` draws positive
+    (excess alpha) and negative (excess beta) lobes in the scheme's two
+    colours; ``"esp"`` colours the density surface by the potential in
+    *esp_cube_path*, red (negative, electron-rich) through white to blue
+    (positive, electron-poor) over ±*esp_range* a.u.
+    """
+    cube_text = Path(cube_path).read_text()
+    vol_text = (
+        Path(esp_cube_path).read_text()
+        if mode == "esp" and esp_cube_path is not None
+        else None
+    )
+    return _build_iso_viewer(
+        cube_text,
+        data_format="cube",
+        scene_key=_scene_key(cube_text),
+        with_surfaces=True,
+        isovalue=isovalue,
+        opacity=opacity,
+        wireframe=wireframe,
+        width=width,
+        height=height,
+        color_scheme=color_scheme,
+        bgcolor=bgcolor,
+        style=style,
+        capture_class=capture_class,
+        mode="orbital" if mode == "spin" else mode,
+        voldata_text=vol_text,
+        vol_range=esp_range,
+    )
+
+
+def esp_legend_html(esp_range: float) -> str:
+    """Colour bar for an ESP map: red (−range) → white → blue (+range)."""
+    kcal = esp_range * 627.5095
+    return (
+        '<div style="display:flex;align-items:center;gap:8px;font-size:12px;'
+        'margin:4px 0">'
+        f"<span>−{esp_range:.3f} a.u.<br><small>(−{kcal:.0f} kcal/mol)</small></span>"
+        '<span style="display:inline-block;width:220px;height:14px;'
+        "border:1px solid #999;border-radius:3px;"
+        'background:linear-gradient(to right,#ff0000,#ffffff,#0000ff)"></span>'
+        f"<span>+{esp_range:.3f} a.u.<br><small>(+{kcal:.0f} kcal/mol)</small></span>"
+        '<span style="color:#666">red: electron-rich (attracts a + charge) · '
+        "blue: electron-poor</span></div>"
+    )
+
+
 def _scene_key(cube_text: str) -> str:
     """Identity of the molecule in a cube, used to decide whether a saved
     camera still applies. The atom block only — a different orbital of the same
@@ -1481,6 +1752,9 @@ def _build_iso_viewer(
     bgcolor: str = "white",
     style: str = "stick",
     capture_class: str = "",
+    mode: str = "orbital",
+    voldata_text: Optional[str] = None,
+    vol_range: float = 0.05,
 ) -> str:
     import json
 
@@ -1510,6 +1784,9 @@ def _build_iso_viewer(
         .replace("__NEG__", json.dumps(neg_color))
         .replace("__BG__", json.dumps(bgcolor))
         .replace("__STYLE__", style)
+        .replace("__MODE__", json.dumps(mode))
+        .replace("__VOL__", json.dumps(voldata_text))
+        .replace("__RANGE__", repr(float(vol_range)))
     )
     busy = (
         f'<div id="orb_busy_{uid}" style="display:none;position:absolute;'
@@ -1825,3 +2102,209 @@ def plot_cube_isosurface(
     )
 
     return fig
+
+
+# ── Orbital gallery (M-SURFACES SURF.1, DEC-024) ─────────────────────────────
+#
+# A grid of small viewers for the orbitals around the HOMO-LUMO gap, so a
+# student can compare them side by side. Each tile is its own minimal 3Dmol
+# viewer (none of the main viewer's page-wide hooks), and the tiles share one
+# camera: rotating one rotates them all.
+
+#: Cube grid for gallery tiles: coarse on purpose (several cubes per click,
+#: each embedded in the page); the main viewer is for close inspection.
+GALLERY_GRID = 32
+
+_SUBSCRIPT = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
+
+
+def pretty_irrep(label: str) -> str:
+    """'3a1' → '3a₁', '1b2g' → '1b₂g': digits after a letter become subscripts."""
+    return re.sub(
+        r"(?<=[A-Za-z])(\d+)", lambda m: m.group(1).translate(_SUBSCRIPT), label
+    )
+
+
+def compact_cube_text(cube_text: str, digits: int = 4) -> str:
+    """The same cube with its grid values written to *digits* significant figures.
+
+    Gallery tiles embed their cubes in the page; PySCF writes ``%13.5E``, and
+    four figures are plenty for a thumbnail isosurface. Header and atom lines
+    are kept as written.
+    """
+    lines = cube_text.splitlines()
+    n_atoms = int(lines[2].split()[0])
+    header = 6 + abs(n_atoms) + (1 if n_atoms < 0 else 0)
+    values = np.array(" ".join(lines[header:]).split(), dtype=float)
+    fmt = f"{{:.{max(1, digits - 1)}e}}"
+    body = [
+        " ".join(fmt.format(v) for v in values[i : i + 6])
+        for i in range(0, len(values), 6)
+    ]
+    return "\n".join(lines[:header] + body) + "\n"
+
+
+#: "Orbitals each side of the gap" choices for the gallery.
+GALLERY_SPANS = (2, 3, 4)
+
+
+@dataclass
+class GalleryTile:
+    """One gallery viewer: a two-line caption and the cube to draw."""
+
+    label: str
+    caption: str
+    cube_text: str
+    detail: str = ""
+
+
+def gallery_orbital_indices(n_occ: int, n_total: int, each_side: int = 3) -> list:
+    """``[(label, index), …]`` from HOMO−(n−1) up to LUMO+(n−1), clipped to range.
+
+    Labels use a true minus sign (HOMO−1), matching the energy diagram.
+    """
+    out = []
+    for k in range(each_side - 1, -1, -1):
+        idx = n_occ - 1 - k
+        if 0 <= idx < n_total:
+            out.append(("HOMO" if k == 0 else f"HOMO−{k}", idx))
+    for k in range(each_side):
+        idx = n_occ + k
+        if 0 <= idx < n_total:
+            out.append(("LUMO" if k == 0 else f"LUMO+{k}", idx))
+    return out
+
+
+def gallery_caption(
+    label: str,
+    index: int,
+    energy_hartree: Optional[float],
+    irrep: Optional[str] = None,
+) -> Tuple[str, str]:
+    """``("HOMO−1 · 3a₁", "−0.552 Eh (−15.02 eV) · MO 3")``; unknown parts omitted."""
+    title = f"{label} · {pretty_irrep(irrep)}" if irrep else label
+    detail = []
+    if energy_hartree is not None:
+        e = float(energy_hartree)
+        detail.append(f"{e:.3f} Eh ({e * 27.211386245988:.2f} eV)".replace("-", "−"))
+    detail.append(f"MO {index}")
+    return title, " · ".join(detail)
+
+
+_GALLERY_TILE_JS = """
+(function(){
+  var UID="__UID__", GROUP="__GROUP__", DATA=__DATA__;
+  var ISO=__ISO__, POS=__POS__, NEG=__NEG__, BG=__BG__;
+  function build(){
+    var vw=window["viewer_"+UID];
+    if(!vw){ setTimeout(build,50); return; }
+    vw.addModel(DATA,"cube");
+    vw.setStyle({}, {stick:{radius:0.12}});
+    vw.addVolumetricData(DATA,"cube",{isoval: ISO, color: POS, opacity: 0.85, smoothness: 5});
+    vw.addVolumetricData(DATA,"cube",{isoval: -ISO, color: NEG, opacity: 0.85, smoothness: 5});
+    vw.setBackgroundColor(BG);
+    vw.zoomTo();
+    vw.render();
+    // One camera for the whole gallery: link this viewer both ways with
+    // every tile already built in the same group.
+    var reg=(window.__quantuiGallery=window.__quantuiGallery||{});
+    var peers=(reg[GROUP]=reg[GROUP]||[]);
+    for(var i=0;i<peers.length;i++){
+      try{ vw.linkViewer(peers[i]); peers[i].linkViewer(vw); }catch(e){}
+    }
+    if(peers.length){ try{ vw.setView(peers[0].getView()); vw.render(); }catch(e){} }
+    peers.push(vw);
+  }
+  build();
+})();
+"""
+
+
+_GALLERY_VIEWER_JS = """<script>
+(function(){
+  function mk(){
+    if(typeof $3Dmolpromise === 'undefined' || !$3Dmolpromise){ setTimeout(mk,50); return; }
+    $3Dmolpromise.then(function(){
+      window["viewer___UID__"] = $3Dmol.createViewer(
+        document.getElementById("3dmolviewer___UID__"), {backgroundColor: __BG__});
+    });
+  }
+  mk();
+})();
+</script>"""
+
+
+def build_orbital_gallery_html(
+    tiles: List[GalleryTile],
+    *,
+    isovalue: float = 0.02,
+    color_scheme: str = DEFAULT_ORBITAL_COLORS,
+    bgcolor: str = "white",
+    tile_px: int = 230,
+    columns: Optional[int] = None,
+) -> str:
+    """HTML grid of small linked orbital viewers (one per tile).
+
+    *columns* defaults to two rows' worth (occupied above, virtual below for an
+    even split), at most four.
+    """
+    import html as _html
+    import json
+    import uuid
+
+    from quantui.viz_assets import make_view
+
+    if not tiles:
+        return '<p style="padding:8px">No orbitals to show.</p>'
+    if columns is None:
+        columns = min(4, max(1, -(-len(tiles) // 2)))
+    pos, neg = orbital_colors(color_scheme)
+    group = uuid.uuid4().hex[:10]
+    cells = []
+    for n, tile in enumerate(tiles):
+        if n == 0:
+            # The first tile carries the (vendored, offline) 3Dmol.js loader;
+            # the others reuse the page's $3Dmolpromise instead of embedding
+            # the ~0.7 MB library again each.
+            view_html = make_view(width=tile_px, height=tile_px)._make_html()
+            m = re.search(r"3dmolviewer_(\w+)", view_html)
+            if m is None:
+                return '<p style="padding:8px">Viewer could not be built.</p>'
+            uid = m.group(1)
+        else:
+            uid = f"g{group}{n}"
+            view_html = (
+                f'<div id="3dmolviewer_{uid}" style="position:relative;'
+                f'width:{int(tile_px)}px;height:{int(tile_px)}px"></div>'
+                + _GALLERY_VIEWER_JS.replace("__UID__", uid).replace(
+                    "__BG__", json.dumps(bgcolor)
+                )
+            )
+        js = (
+            _GALLERY_TILE_JS.replace("__UID__", uid)
+            .replace("__GROUP__", group)
+            .replace("__DATA__", json.dumps(tile.cube_text))
+            .replace("__ISO__", repr(float(isovalue)))
+            .replace("__POS__", json.dumps(pos))
+            .replace("__NEG__", json.dumps(neg))
+            .replace("__BG__", json.dumps(bgcolor))
+        )
+        cells.append(
+            '<div class="quantui-gallery-tile" style="display:flex;'
+            'flex-direction:column;align-items:center">'
+            f'<div style="font-size:12px;font-weight:600;margin:2px 0 0;'
+            f'text-align:center">{_html.escape(tile.caption)}</div>'
+            f'<div style="font-size:11px;margin:0 0 2px;text-align:center;'
+            f'min-height:14px">{_html.escape(tile.detail)}</div>'
+            f"{view_html}<script>{js}</script></div>"
+        )
+    return (
+        f'<div class="quantui-orbital-gallery" data-group="{group}" '
+        f'style="display:grid;grid-template-columns:repeat({int(columns)},'
+        f'{int(tile_px) + 8}px);gap:8px;justify-content:start">'
+        + "".join(cells)
+        + "</div>"
+        '<p style="font-size:11px;margin:4px 0 0">Drag any tile: all tiles turn '
+        "together. Coarse grid for speed; use Generate above for a detailed "
+        "view of one orbital.</p>"
+    )

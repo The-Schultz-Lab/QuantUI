@@ -16,7 +16,12 @@ from .slurm import SlurmBackend
 # Calc types that can consume a History seed geometry.
 _SEED_CALC_TYPES = frozenset({"geometry_opt", "frequency", "tddft", "nmr", "pes_scan"})
 # Calc types that may run a DFT geometry optimization before the main step.
-_PREOPT_CALC_TYPES = frozenset({"frequency", "tddft"})
+# "Geometry optimization before the calculation" — mirrors the local run:
+# Frequency / TD-DFT / PES skip it when an (already optimized) seed is
+# selected; Single Point and NMR honour the checkbox regardless (ISSUE.19 #3:
+# the SLURM path used to drop it for those two).
+_PREOPT_CALC_TYPES = frozenset({"frequency", "tddft", "pes_scan"})
+_PREOPT_ANY_SEED_CALC_TYPES = frozenset({"single_point", "nmr"})
 
 _TRUTHY_ENV = frozenset({"1", "true", "yes", "on"})
 
@@ -120,6 +125,12 @@ def build_calculation_request(
     if calc_type in ("geometry_opt", "reorganization_energy"):
         options["fmax"] = float(app.fmax_fi.value)
         options["max_steps"] = int(app.max_steps_si.value)
+    if calc_type == "geometry_opt":
+        from quantui.app_runflow import frozen_atom_indices
+
+        frozen = frozen_atom_indices(app)
+        if frozen:
+            options["frozen_atoms"] = frozen
     if calc_type == "tddft":
         options["nstates"] = int(app.nstates_si.value)
     if calc_type == "reorganization_energy":
@@ -164,13 +175,16 @@ def build_calculation_request(
             run_context["seed_mode_number"] = int(app._freq_perturb_mode_dd.value)
             run_context["seed_mode_fraction"] = float(app._freq_perturb_fraction.value)
 
-    if calc_type in _PREOPT_CALC_TYPES and not seed_path:
-        preopt_cb = getattr(app, "_freq_preopt_cb", None)
-        if preopt_cb is not None and bool(preopt_cb.value):
-            options["preopt_before_run"] = True
-    if calc_type == "pes_scan" and not seed_path:
-        preopt_cb = getattr(app, "_freq_preopt_cb", None)
-        if preopt_cb is not None and bool(preopt_cb.value):
+    preopt_cb = getattr(app, "_freq_preopt_cb", None)
+    if preopt_cb is not None and bool(preopt_cb.value):
+        from quantui.freq_calc import is_freq_mode_seed
+
+        # A mode-displaced Frequency seed is off the minimum and must be
+        # re-optimized (ISSUE.19 #8); any other seed is already optimized.
+        seed_is_optimized = bool(seed_path) and not is_freq_mode_seed(seed_path or "")
+        if calc_type in _PREOPT_ANY_SEED_CALC_TYPES or (
+            calc_type in _PREOPT_CALC_TYPES and not seed_is_optimized
+        ):
             options["preopt_before_run"] = True
 
     return CalculationRequest(

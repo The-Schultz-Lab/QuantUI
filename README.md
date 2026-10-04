@@ -61,7 +61,11 @@ Real output from QuantUI, straight from the app:
   ready-to-run coordination complexes**, searchable by name/formula), or run a
   structure search by name, SMILES, InChI, PubChem CID, InChIKey, or CAS number
   (PubChem → NCI CACTUS → offline bundled-library fallback; SMILES/InChI resolve
-  locally with no network)
+  locally with no network), or upload a structure file (XYZ, MOL/SDF, MOL2,
+  PDB, CIF, Gaussian input or output)
+- **Structure editing** — set a bond length, angle or dihedral to a value,
+  delete atoms, add a hydrogen, change an element, undo; pick atoms by
+  clicking the viewer. Freeze atoms for a constrained geometry optimization
 - **Offline-first** — runs with no internet: the bundled molecule library and
   the 3D viewer's JavaScript (3Dmol.js) are vendored, so structure lookup and
   every 3D view work in an air-gapped classroom. (Network is used only for the
@@ -71,21 +75,30 @@ Real output from QuantUI, straight from the app:
   router picks the right renderer per task, and a Status-tab toggle persists
   your default-backend preference between sessions
 - **In-session calculations** — RHF, UHF, 9 DFT functionals, MP2, CCSD,
-  CCSD(T), NMR shielding, TD-DFT UV-Vis, and 1D PES scans via PySCF, running
+  CCSD(T), NMR shielding, TD-DFT UV-Vis, 1D PES scans, Marcus reorganization
+  energies and **transition-state searches** (Sella, with an automatic
+  frequency check that says whether it found a TS) via PySCF, running
   in your Python kernel. Optional PyFock 0.1.x adds native-Windows PBE
   single points and geometry optimizations for neutral, closed-shell molecules
   with def2-SVP/def2-TZVP, including orbital and population analysis;
   engine capabilities automatically gate the setup menus
 - **Implicit solvent** — PCM solvation (Water, Ethanol, THF, DMSO,
-  Acetonitrile) via a single checkbox
+  Acetonitrile) via a single checkbox: single points, solvated geometry
+  optimizations, frequencies (PCM Hessian + IR; Raman stays gas-phase) and
+  TD-DFT (non-equilibrium excitations). NMR and PES scans are gas-phase only
 - **Rich results** — total energy, HOMO-LUMO gap, Mulliken charges, dipole
-  moment, thermochemistry (H, S, G at 298 K), IR spectrum chart (stick and
-  Lorentzian-broadened), ¹H/¹³C NMR chemical shifts, orbital energy-level
-  diagram, HOMO/LUMO isosurface (cube-file rendering with toggle for HOMO-1,
-  HOMO, LUMO, LUMO+1), and a side-by-side comparison table for multiple
-  calculations
+  moment, point group, ⟨S²⟩ with a spin-contamination flag for open-shell
+  results, thermochemistry (U, H, S, G, Cv, Cp at any temperature and
+  pressure), IR spectrum chart (stick and Lorentzian-broadened), ¹H/¹³C NMR
+  chemical shifts, an orbital energy-level diagram with symmetry labels
+  (1a₁, 1b₂ …), and a side-by-side comparison table for multiple calculations
+- **Surfaces** — any molecular orbital (α and β for unrestricted results), an
+  **orbital gallery** of the orbitals around the HOMO–LUMO gap in small linked
+  viewers, the electron density, the spin density, and the electrostatic
+  potential mapped on the density surface
 - **Geometry optimization** — BFGS optimizer with step-by-step trajectory
   animation; vibrational frequency analysis with animated normal modes,
+  displacement arrows, an amplitude slider and a table of every mode,
   user-tunable playback FPS, and a per-result-directory disk cache so mode
   switches on repeat visits and history replay are instant
 - **Inorganic / coordination complexes** — first-class support for
@@ -104,7 +117,9 @@ Real output from QuantUI, straight from the app:
   timestamped directory; a built-in browser lets you reload past results
   after a kernel restart; the full `pyscf.log` is shown inline
 - **Structure exports** — download XYZ, MOL/SDF, or PDB files alongside the
-  saved results; script export for a standalone `.py` file
+  saved results; script export for a standalone `.py` file. Every export also
+  downloads straight to your computer, including from a remote
+  Voilà/OnDemand session
 - **Plot export** — save IR, UV-Vis, PES, and orbital diagrams as standalone
   HTML
 - **Optional GPU acceleration** — when [gpu4pyscf](https://github.com/pyscf/gpu4pyscf)
@@ -112,8 +127,14 @@ Real output from QuantUI, straight from the app:
   via `mf.to_gpu()` (RHF / UHF / RKS / UKS supported; CCSD(T) stays on CPU).
   The Status tab + every result card show which compute device was used.
   Set `QUANTUI_DISABLE_GPU=1` to force CPU even when the GPU is available.
-  Geometry-optimization SCF steps are currently CPU-only; that limitation was
-  reproduced on real GPU hardware and remains an open optimizer-path fix.
+  Geometry-optimization SCF and gradient steps offload the same way. For a
+  frequency calculation, the displaced IR SCFs offload, but the reference SCF
+  and the analytical Hessian still run on the CPU.
+- **Cluster batch jobs** — `quantui-batch` submits QuantUI calculations to
+  SLURM from a login node over SSH, without starting the image there (presets,
+  chaining from another job's optimized geometry, reruns with more memory or
+  time, results summaries); `quantui submit` does the same wherever QuantUI is
+  installed. See [apptainer/slurm/README.md](https://github.com/The-Schultz-Lab/QuantUI/blob/main/apptainer/slurm/README.md)
 - **Timing calibration** — one-click benchmark suite populates the time
   estimator with real machine data so predictions are accurate from the first run
 - **Voilà app mode** — serve the notebook as a polished widget-only UI (no
@@ -263,6 +284,19 @@ reports the reason. GPU single points use PyFock's GPU SCF/integral/XC path;
 GPU geometry optimizations use numerical finite-difference forces because the
 installed PyFock release's analytical gradient implementation is CPU-only.
 
+### Optional: transition-state searches (Sella)
+
+The **Transition State** calc type uses [Sella](https://github.com/zadorlab/sella),
+installed as an optional extra:
+
+```bash
+pip install "quantui[ts]"
+```
+
+Sella pulls in jax/jaxlib (about 380 MB) and is LGPL-3.0, used as a
+separately installed library. Without it the calc type stays in the menu and
+says how to install it. Local runs only for now (not SLURM batch jobs).
+
 ### Optional: GFN-FF metal pre-optimization (xtb)
 
 The classical (MMFF/UFF) pre-optimizer relies on RDKit's organic valence
@@ -411,7 +445,12 @@ dashboard. After installation:
 quantui log tail -n 50        # last 50 events from event_log.jsonl
 quantui gpu check             # is GPU offload available right now?
 quantui analytics build --open  # build dashboard.html + open in browser
+quantui submit water.xyz --calc frequency --method B3LYP --basis def2-SVP  # SLURM batch job
 ```
+
+On a cluster, `apptainer exec IMAGE quantui install-launcher DIR` writes the
+`quantui-batch` launcher for submitting from a login node — see
+[apptainer/slurm/README.md](https://github.com/The-Schultz-Lab/QuantUI/blob/main/apptainer/slurm/README.md).
 
 Full reference with all flags and examples: [docs/CLI.md](https://github.com/The-Schultz-Lab/QuantUI/blob/main/docs/CLI.md).
 
@@ -461,11 +500,11 @@ Five step-by-step notebooks in [`notebooks/tutorials/`](https://github.com/The-S
 | PBE | DFT GGA | Large molecules; metals; when speed matters |
 | PBE0 | DFT hybrid | Charge-transfer, band gaps |
 | M06-2X | DFT meta-hybrid | Thermochemistry, barrier heights |
-| wB97X-D | DFT range-sep. + D3 | Non-covalent interactions, excited states |
+| wB97X-D | DFT range-sep. + built-in dispersion | Non-covalent interactions, excited states |
 | CAM-B3LYP | DFT range-sep. | Charge-transfer UV-Vis, Rydberg states |
 | M06-L | DFT local meta-GGA | Large molecules; transition metals |
 | HSE06 | DFT screened hybrid | Band gaps, large molecules |
-| PBE-D3 | DFT GGA + dispersion | Van der Waals complexes, stacking |
+| PBE-D3 | DFT GGA + Grimme D3 (zero damping) | Van der Waals complexes, stacking |
 | MP2 | Post-HF | Accurate energetics for small molecules (O(N⁵)) |
 | CCSD | Post-HF coupled cluster | High-accuracy small-molecule energies (O(N⁶)) |
 | CCSD(T) | Post-HF coupled cluster | Benchmark "gold standard" energies (O(N⁷); CPU only) |
@@ -475,11 +514,13 @@ Five step-by-step notebooks in [`notebooks/tutorials/`](https://github.com/The-S
 | Type | Output |
 | --- | --- |
 | Single Point | Energy, HOMO-LUMO gap, Mulliken charges, dipole moment |
-| Geometry Opt | Optimised structure, trajectory animation |
-| Frequency | Vibrational frequencies, ZPVE, IR intensities, thermochemistry (H/S/G at 298 K), animated normal modes, IR spectrum chart (stick / Lorentzian broadened) |
+| Geometry Opt | Optimised structure, trajectory animation; optional frozen atoms |
+| Transition State | Saddle point near the input geometry (Sella, optional `[ts]` extra), then a frequency check: transition state, minimum, or higher-order saddle point; animated imaginary mode |
+| Frequency | Vibrational frequencies, ZPVE, IR intensities, thermochemistry at any temperature and pressure, animated normal modes, IR spectrum chart (stick / Lorentzian broadened) |
 | UV-Vis (TD-DFT) | Excitation energies, oscillator strengths, UV-Vis spectrum plot |
 | NMR Shielding | ¹H and ¹³C chemical shifts relative to TMS via GIAO; tabulated by element |
 | PES Scan | 1D potential energy surface along a bond, angle, or dihedral; energy profile chart; geometry animation at each scan point |
+| Reorganization Energy | Marcus four-point internal reorganization energy λ = λ₁ + λ₂ for hole (cation) and/or electron (anion) transfer |
 
 ### Basis sets
 
@@ -528,6 +569,8 @@ quantui/                  Main package
   freq_calc.py            Vibrational frequency + thermochemistry
   ir_plot.py              IR spectrum chart (stick / Lorentzian broadened)
   tddft_calc.py           TD-DFT UV-Vis excited-state calculations
+  ts_search.py            Transition-state search (Sella) + frequency check
+  reorganization_energy.py  Marcus four-point reorganization energy
   nmr_calc.py             NMR shielding + ¹H/¹³C chemical shifts
   pes_scan.py             1D potential energy surface scan
   optimizer.py            QM geometry optimization with trajectory
@@ -548,12 +591,14 @@ quantui/                  Main package
   benchmarks.py           Timing calibration benchmark suite
   config.py               Methods, basis sets, solvent/NMR options, presets
   ase_bridge.py           ASE structure I/O
+  batch_launcher.py       Renders the quantui-batch login-node launcher
+  backends/               SLURM batch backend, worker and job registry
   preopt.py               RDKit MMFF94/UFF force-field pre-optimization
   data/                   Bundled library (SQLite + manifests) + vendored 3Dmol.js
 notebooks/
   molecule_computations.ipynb   Main user-facing interface (3-cell launcher)
   tutorials/                    Step-by-step guided notebooks (01–05)
-tests/                    pytest test suite (~1500 tests; run in parallel via pytest-xdist)
+tests/                    pytest test suite (~3,700 tests; run in parallel via pytest-xdist)
 apptainer/                Container definition for reproducible deployment
 local-setup/              Conda environment definition
 pyproject.toml            Package metadata and tool config

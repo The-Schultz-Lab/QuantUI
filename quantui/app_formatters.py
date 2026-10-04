@@ -76,6 +76,23 @@ def _result_card_table_open() -> str:
     )
 
 
+def _s2_html(s2: Any, multiplicity: Any) -> str:
+    """'0.7533 (ideal 0.7500)' plus a warning when spin-contaminated (ISSUE.12)."""
+    from quantui.reorganization_energy import ideal_s2, spin_contaminated
+
+    text = f"{float(s2):.4f}"
+    if not multiplicity:
+        return text
+    mult = int(multiplicity)
+    text += f" (ideal {ideal_s2(mult):.4f})"
+    if spin_contaminated(s2, mult):
+        text += (
+            f' <span style="color:{_theme.css.ACCENT_WARNING}">'
+            "⚠ spin contaminated: energies may be unreliable</span>"
+        )
+    return text
+
+
 def _result_extra_rows(get: Any) -> str:
     """Build the shared 'extra' result-card rows from an accessor.
 
@@ -117,6 +134,15 @@ def _result_extra_rows(get: Any) -> str:
     _solvent = get("solvent")
     if _solvent is not None:
         rows += _num("Solvent (PCM)", str(_solvent))
+
+    _s2 = get("spin_square")
+    if _s2 is not None:
+        _mult = get("multiplicity") or (get("geometry") or {}).get("multiplicity")
+        rows += _num("⟨S²⟩", _s2_html(_s2, _mult))
+
+    _pg = _point_group_html(get)
+    if _pg:
+        rows += _num("Point group", _pg)
 
     # Compute device — always shown; old saved results lack the
     # field and safely read "CPU".
@@ -267,8 +293,79 @@ def format_opt_result(r: Any) -> str:
         _result_card_open()
         + f"<b>Geometry Optimisation &mdash; {r.formula} ({r.method}/{r.basis})</b>"
         + _result_card_table_open()
-        + f"{_rows}</table>"
+        + f"{_rows}"
+        + _solvent_row(getattr(r, "solvent", None), "optimized in solvent")
+        + _frozen_row(getattr(r, "frozen_atoms", None))
+        + _point_group_row(_opt_point_group_html(r))
+        + "</table>"
         + _RESULT_CARD_CLOSE
+    )
+
+
+def _point_group_html(get: Any) -> str:
+    """Point group of the result's geometry as HTML, or '' (M-CHEM CHEM.1).
+
+    Reads ``pyscf_mol_atom`` (live results) or the saved frequency
+    ``spectra.molecule`` block; other saved results carry no geometry here.
+    """
+    try:
+        from quantui.symmetry import detect_point_group, point_group_of_atom_list
+
+        mol_atom = get("pyscf_mol_atom")
+        if mol_atom:
+            pg = point_group_of_atom_list(mol_atom)
+        else:
+            spectra = get("spectra") or {}
+            mol = spectra.get("molecule") if isinstance(spectra, dict) else None
+            if not mol or not mol.get("atoms"):
+                return ""
+            pg = detect_point_group(mol["atoms"], mol.get("coords") or [])
+        return pg.summary_html() if pg is not None else ""
+    except Exception:  # noqa: BLE001 — informational row only
+        return ""
+
+
+def _frozen_row(frozen: Any) -> str:
+    if not frozen:
+        return ""
+    nums = ", ".join(str(int(i) + 1) for i in frozen)
+    return (
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Frozen atoms</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{nums}'
+        f'<span style="color:{_theme.css.TEXT_MUTED}"> &mdash; held fixed '
+        "(constrained optimization)</span></td></tr>"
+    )
+
+
+def _opt_point_group_html(r: Any) -> str:
+    """Point group of an optimization's final geometry ('' if unknown)."""
+    try:
+        from quantui.symmetry import point_group_of_molecule
+
+        mol = getattr(r, "molecule", None)
+        pg = point_group_of_molecule(mol) if mol is not None else None
+        return pg.summary_html() if pg is not None else ""
+    except Exception:  # noqa: BLE001 — informational row only
+        return ""
+
+
+def _point_group_row(pg_html: str) -> str:
+    if not pg_html:
+        return ""
+    return (
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Point group</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{pg_html}</td></tr>'
+    )
+
+
+def _solvent_row(solvent: Any, note: str) -> str:
+    """'Solvent (PCM)' card row for a solvated result; '' for gas phase."""
+    if not solvent:
+        return ""
+    return (
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Solvent (PCM)</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{solvent}'
+        f'<span style="color:{_theme.css.TEXT_MUTED}"> &mdash; {note}</span></td></tr>'
     )
 
 
@@ -308,6 +405,8 @@ def format_freq_result(r: Any) -> str:
         + f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">ZPVE</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.zpve_hartree:.6f} Ha '
         f"({r.zpve_hartree * 27.211386245988:.4f} eV)</td></tr>"
+        + _solvent_row(getattr(r, "solvent", None), "Raman not computed in solvent")
+        + _point_group_row(_point_group_html(lambda k, d=None: getattr(r, k, d)))
     )
     _thermo_rows = ""
     _thermo = getattr(r, "thermo", None)
@@ -316,7 +415,8 @@ def format_freq_result(r: Any) -> str:
         _thermo_rows = (
             f'<tr><td colspan="2" style="padding:6px 0 2px 0;color:{_theme.css.TEXT_MUTED};'
             f'font-size:12px;font-style:italic">'
-            f"&#8212; Thermochemistry at {_thermo.temperature_k:.0f} K / 1 atm &#8212;"
+            f"&#8212; Thermochemistry at {_thermo.temperature_k:.0f} K / "
+            f"{getattr(_thermo, 'pressure_atm', 1.0):g} atm &#8212;"
             f"</td></tr>"
             f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">H (298 K)</td>'
             f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo.H_hartree:.6f} Ha</td></tr>'
@@ -331,6 +431,61 @@ def format_freq_result(r: Any) -> str:
         f"({_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))})</b>"
         + _result_card_table_open()
         + f"{_rows}{_thermo_rows}</table>"
+        + _RESULT_CARD_CLOSE
+    )
+
+
+def ts_verdict_rows(block: Optional[dict]) -> str:
+    """Result-card rows for a transition-state search (M-TS TS.2).
+
+    *block* is the ``transition_state`` spectra entry
+    (:meth:`quantui.ts_search.TSResult.to_spectra`), so the live and History
+    cards render the same thing.
+    """
+    if not block:
+        return ""
+    n = block.get("n_imaginary")
+    ok = n == 1 and bool(block.get("search_converged"))
+    color = _theme.css.ACCENT_SUCCESS if ok else _theme.css.ACCENT_WARNING
+    icon = "✓" if ok else "⚠"
+    imag = block.get("imaginary_cm1") or []
+    imag_txt = (
+        ", ".join(f"{abs(float(f)):.0f}i" for f in imag) + " cm⁻¹" if imag else "none"
+    )
+    steps = block.get("n_steps")
+    search = (
+        f"{steps} steps, "
+        f"{'converged' if block.get('search_converged') else 'NOT converged'}"
+    )
+
+    def _row(label: str, value: str, vc: str) -> str:
+        return (
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL};'
+            f'vertical-align:top">{label}</td>'
+            f'<td style="color:{vc}">{value}</td></tr>'
+        )
+
+    return (
+        _row("Verdict", f"{icon} {html.escape(str(block.get('verdict', '')))}", color)
+        + _row("Imaginary frequencies", imag_txt, _theme.css.TEXT_HEADING)
+        + _row("Saddle-point search", search, _theme.css.TEXT_HEADING)
+    )
+
+
+def format_ts_result(r: Any) -> str:
+    """Format a transition-state search result card (M-TS TS.2)."""
+    _rows = f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Energy</td>' f'<td style="color:{_theme.css.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>' + ts_verdict_rows(
+        r.to_spectra()
+    ) + _solvent_row(
+        getattr(r, "solvent", None), "search and frequencies in solvent"
+    ) + _point_group_row(
+        _point_group_html(lambda k, d=None: getattr(r, k, d))
+    )
+    return (
+        _result_card_open() + f"<b>Transition State &mdash; {r.formula} "
+        f"({_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))})</b>"
+        + _result_card_table_open()
+        + f"{_rows}</table>"
         + _RESULT_CARD_CLOSE
     )
 
@@ -352,6 +507,7 @@ def format_tddft_result(r: Any) -> str:
         f'<td style="color:{_cc}">{_conv}</td></tr>'
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">States computed</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{_states_detail}</td></tr>'
+        + _solvent_row(getattr(r, "solvent", None), "non-equilibrium excitations")
     )
     exc_table = ""
     if r.excitation_energies_ev:
@@ -726,6 +882,15 @@ def reorg_channels_html(channels: list[dict]) -> str:
         # Geometry relaxation (REORG.4): what λ physically measures. Only
         # present once the ion geometry is saved, so older results simply omit
         # these rows rather than showing blanks.
+        # ⟨S²⟩ per open-shell point (ISSUE.12); absent on older saves.
+        from quantui.reorganization_energy import s2_points
+
+        _neutral_mult = (ch.get("neutral_geometry") or {}).get("multiplicity", 1)
+        for key, label, mult in s2_points(
+            ch.get("ion_multiplicity") or 1, _neutral_mult
+        ):
+            if ch.get(key) is not None:
+                rows.append((f"⟨S²⟩ {label}", _s2_html(ch[key], mult)))
         relax = ch.get("relaxation")
         if relax:
             rows.append(("Geometry RMSD", f"{relax['rmsd']:.4f} Å"))
@@ -886,6 +1051,11 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
             _theme.css.ACCENT_WARNING,
             _theme.css.SURFACE_ORANGE_BG,
         ),
+        "transition_state": (
+            "Transition State",
+            _theme.css.ACCENT_PURPLE,
+            _theme.css.SURFACE_PURPLE_BG,
+        ),
     }
     ct = data.get("calc_type", "")
     _ct_label, _ct_fg, _ct_bg = _ct_labels.get(
@@ -910,7 +1080,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     # format_tddft_result). A bare "SCF converged" label here would blame
     # the SCF for a CC/TD/Hessian-only failure whose reference SCF was
     # fine — mirror each live formatter's label choice.
-    if ct == "frequency":
+    if ct in ("frequency", "transition_state"):
         _conv_label = "Converged"
     elif ct == "tddft":
         _conv_label = "Converged"
@@ -1000,6 +1170,10 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     # card came back without the numbers the calculation exists to produce.
     # Keyed on the calc type AND the payload, so a reorg result saved before λ
     # persistence gets an explanation instead of a silently incomplete card.
+    _ts_html = ""
+    if ct == "transition_state":
+        _ts_html = ts_verdict_rows((data.get("spectra") or {}).get("transition_state"))
+
     _reorg_html = ""
     if ct == "reorganization_energy":
         _channels = data.get("reorg_channels")
@@ -1017,6 +1191,6 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         f'{_method_basis_label(data["method"], data["basis"], data.get("scf_variant"))}</b>'
         f'&ensp;<small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{ts}</small>'
         + _result_card_table_open()
-        + f"{_rows}{_extra}{_thermo_html}</table>{_reorg_html}"
+        + f"{_rows}{_ts_html}{_extra}{_thermo_html}</table>{_reorg_html}"
         + _RESULT_CARD_CLOSE
     )

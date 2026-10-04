@@ -112,6 +112,7 @@ def _basic_result(payload: dict[str, Any], record: JobRecord) -> SimpleNamespace
         n_converged_states=payload.get("n_converged_states"),
         dispersion_applied=payload.get("dispersion_applied"),
         solvent=payload.get("solvent"),
+        spin_square=payload.get("spin_square"),
         gpu_used=bool(payload.get("gpu_used", False)),
         gpu_name=payload.get("gpu_name"),
         density_fit=bool(payload.get("density_fit", False)),
@@ -175,6 +176,7 @@ def _ingest_reorganization_energy(
     extras: dict[str, Any],
 ) -> Path:
     from quantui import save_result
+    from quantui.reorganization_energy import S2_KEYS
 
     neutral_geom = payload.get("neutral_geometry") or {}
     neutral_mol = (
@@ -200,6 +202,8 @@ def _ingest_reorganization_energy(
                 lambda_hartree=ch_data["lambda_hartree"],
                 converged=ch_data["converged"],
                 ion_molecule=ion_mol,
+                # ISSUE.12 — absent from payloads written before it.
+                **{k: ch_data.get(k) for k in S2_KEYS},
             )
         )
     result = SimpleNamespace(

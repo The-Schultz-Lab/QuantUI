@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quantui"
-version = "0.9.0"
+version = "0.10.0"
 description = "An open-source frontend for DFT and post-HF quantum chemistry with PySCF"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -108,6 +108,8 @@ quantui = [
     "data/manifests/*.json",
     "data/js/*.js",
     "data/js/*.txt",
+    # Host-side quantui-batch launcher, written out by `quantui install-launcher`.
+    "data/launcher/*.py",
 ]
 
 [project.optional-dependencies]
@@ -124,6 +126,9 @@ pyscf = [
     # installers too, not just for our dependency bot.
     "pyscf>=2.13.0,<3",
     "pyscf-properties",
+    # Grimme D3/D4 for PBE-D3 via PySCF's built-in mf.disp (energies,
+    # gradients and Hessians). Without it PBE-D3 runs as plain PBE.
+    "pyscf-dispersion>=1.0",
 ]
 
 # Native-Windows-capable pure-Python DFT backend (M-PYFOCK). PyFock 0.1.7
@@ -154,6 +159,15 @@ ase = [
 xtb = [
     "xtb>=22.1",
     "ase>=3.22.0,<4",
+]
+
+# Transition-state search (M-TS, DEC-024): Sella drives QuantUI's own ASE
+# calculator. LGPL-3.0, used as a separately installed library (no Sella code
+# in QuantUI). Pulls in jax/jaxlib (~380 MB; jax >= 0.10 needs numpy >= 2 on
+# Python 3.11, older jax resolves on 3.9/3.10). Sella 2.x needs ASE >= 3.26.
+ts = [
+    "sella>=2.6",
+    "ase>=3.26,<4",
 ]
 
 # Voilà app server — hides notebook code; students see only the widget UI.

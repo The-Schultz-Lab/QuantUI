@@ -444,3 +444,54 @@ class TestSlurmBackendCancel:
         assert slurm_backend.cancel("done") is True
         record = slurm_backend.registry.load("done")
         assert record.status == "cancelled"
+
+
+class TestDependsOn:
+    """``--depends-on`` accepts a request id or a SLURM job id, nothing else."""
+
+    @staticmethod
+    def _sbatch_ok(mock_run, job_id: str) -> None:
+        mock_run.return_value.stdout = f"Submitted batch job {job_id}\n"
+        mock_run.return_value.stderr = ""
+        mock_run.return_value.returncode = 0
+
+    @patch("quantui.backends.slurm.check_submit_cooldown")
+    @patch("quantui.backends.slurm.subprocess.run")
+    def test_request_id_resolves_to_its_slurm_job_id(
+        self, mock_run, _cooldown, slurm_backend
+    ):
+        self._sbatch_ok(mock_run, "111")
+        parent = slurm_backend.dispatch(_request("parent01"))
+        self._sbatch_ok(mock_run, "222")
+        child = slurm_backend.dispatch(_request("child001"), depends_on=parent)
+        record = slurm_backend.registry.load(child)
+        text = (record.job_path / "submit.slurm").read_text()
+        assert "#SBATCH --dependency=afterok:111" in text
+        assert parent not in text.split("--dependency=", 1)[1].splitlines()[0]
+
+    @patch("quantui.backends.slurm.subprocess.run")
+    def test_numeric_slurm_job_id_is_used_as_is(self, mock_run, slurm_backend):
+        self._sbatch_ok(mock_run, "333")
+        rid = slurm_backend.dispatch(_request("num00001"), depends_on="987654")
+        text = (slurm_backend.registry.load(rid).job_path / "submit.slurm").read_text()
+        assert "#SBATCH --dependency=afterok:987654" in text
+
+    @pytest.mark.parametrize(
+        "bad",
+        ["no-such-request", "123\nrm -rf ~", "abc;echo", "../x", "1 2"],
+    )
+    @patch("quantui.backends.slurm.subprocess.run")
+    def test_unknown_or_unsafe_values_are_rejected_before_submit(
+        self, mock_run, slurm_backend, bad
+    ):
+        with pytest.raises(SecurityError):
+            slurm_backend.dispatch(_request("bad00001"), depends_on=bad)
+        mock_run.assert_not_called()
+        assert slurm_backend.registry.load("bad00001") is None
+
+    @patch("quantui.backends.slurm.subprocess.run")
+    def test_request_without_slurm_job_id_is_rejected(self, mock_run, slurm_backend):
+        slurm_backend.registry.create(_request("pending1"), slurm_backend.backend_id)
+        with pytest.raises(SecurityError, match="no SLURM job id"):
+            slurm_backend.dispatch(_request("child002"), depends_on="pending1")
+        mock_run.assert_not_called()

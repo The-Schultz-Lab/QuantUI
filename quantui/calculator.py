@@ -9,6 +9,7 @@ batch script submission.
 
 import logging
 from pathlib import Path
+from typing import Dict, Optional
 
 from . import config
 from .molecule import Molecule
@@ -74,15 +75,34 @@ class PySCFCalculation:
             f"{self.molecule.get_formula()}"
         )
 
-    def generate_calculation_script(self, output_path: Path) -> str:
+    def generate_calculation_script(
+        self,
+        output_path: Path,
+        *,
+        calc_type: str = "single_point",
+        solvent: Optional[str] = None,
+        density_fit: bool = False,
+        nstates: int = 10,
+    ) -> str:
         """
         Generate a standalone Python script for the calculation.
 
         The script runs independently (no QuantUI required) and saves
         results to results.npz next to the script file.
 
+        ISSUE.19 #7: the script follows the app's settings — PCM *solvent*
+        and *density_fit* — and adds the Hessian/thermochemistry section for
+        ``"frequency"`` and the excited-state section for ``"tddft"``. Other
+        calc types (geometry optimization, NMR, PES scan, reorganization
+        energy) get the SCF at the exported geometry plus a note saying so.
+
         Args:
             output_path: Path where the script will be saved
+            calc_type: QuantUI calc-type key (``"single_point"``,
+                ``"frequency"``, ``"tddft"``, …)
+            solvent: PCM solvent name, or None for gas phase
+            density_fit: Whether the app runs with density fitting
+            nstates: Excited states for ``"tddft"``
 
         Returns:
             str: The generated script content
@@ -120,6 +140,9 @@ class PySCFCalculation:
             )
             ecp = {}
 
+        sections = script_sections(
+            calc_type, solvent=solvent, density_fit=density_fit, nstates=nstates
+        )
         script_content = config.PYSCF_SCRIPT_TEMPLATE.format(
             job_name=job_name,
             method=self.method,
@@ -128,6 +151,7 @@ class PySCFCalculation:
             geometry=geometry,
             charge=self.molecule.charge,
             spin=spin,
+            **sections,
         )
 
         output_path = Path(output_path)
@@ -239,3 +263,65 @@ def create_calculation(
         PySCFCalculation: Initialized calculation object
     """
     return PySCFCalculation(molecule=molecule, method=method, basis=basis)
+
+
+#: Calc types whose QuantUI workflow the exported script reproduces in full.
+SCRIPT_FULL_CALC_TYPES = frozenset({"single_point", "frequency", "tddft"})
+
+_CALC_TYPE_LABELS = {
+    "single_point": "Single Point",
+    "geometry_opt": "Geometry Opt",
+    "transition_state": "Transition State",
+    "frequency": "Frequency",
+    "tddft": "UV-Vis (TD-DFT)",
+    "nmr": "NMR Shielding",
+    "pes_scan": "PES Scan",
+    "reorganization_energy": "Reorganization Energy",
+}
+
+
+def script_sections(
+    calc_type: str = "single_point",
+    *,
+    solvent: Optional[str] = None,
+    density_fit: bool = False,
+    nstates: int = 10,
+) -> Dict[str, str]:
+    """Template fields for the optional parts of the exported script.
+
+    An unknown solvent name raises ``ValueError`` (same rule as the app).
+    """
+    label = _CALC_TYPE_LABELS.get(calc_type, calc_type)
+    out = {
+        "calc_type_label": label,
+        "scope_note": (
+            ""
+            if calc_type in SCRIPT_FULL_CALC_TYPES
+            else config.SCRIPT_SCOPE_NOTE.format(calc_type_label=label)
+        ),
+        "density_fit_block": config.SCRIPT_DENSITY_FIT_BLOCK if density_fit else "",
+        "solvent_block": "",
+        "post_scf_block": "",
+    }
+    name = None
+    if solvent:
+        from .session_calc import resolve_solvent
+
+        name = resolve_solvent(solvent)
+    if name is not None:
+        out["solvent_block"] = config.SCRIPT_SOLVENT_BLOCK.format(
+            name=name, eps=config.SOLVENT_OPTIONS[name]
+        )
+    if calc_type == "frequency":
+        out["post_scf_block"] = config.SCRIPT_FREQUENCY_BLOCK
+    elif calc_type == "tddft":
+        eps_inf = config.SOLVENT_OPTICAL_EPS.get(name or "")
+        optical = (
+            config.SCRIPT_OPTICAL_EPS_BLOCK.format(eps_inf=eps_inf)
+            if eps_inf is not None
+            else ""
+        )
+        out["post_scf_block"] = config.SCRIPT_TDDFT_BLOCK.format(
+            optical_eps=optical, nstates=int(nstates)
+        )
+    return out

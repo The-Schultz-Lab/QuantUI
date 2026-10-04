@@ -416,23 +416,56 @@ def on_basis_fix(app: Any, btn: Any = None) -> None:
         pass
 
 
-# AUDIT F11 — run_freq_calc, run_tddft_calc, run_nmr_calc, and run_pes_scan
-# don't accept a solvent argument at all, so checking "Implicit solvent
-# (PCM)" for Frequency/UV-Vis/NMR Shielding/PES Scan used to be a complete
-# no-op: the backend received molecule/method/basis/progress_stream and
-# silently ran gas-phase while the UI kept showing the box checked.
+# AUDIT F11 — a calc type whose runner ignores the solvent must not offer
+# the checkbox (it used to be a silent no-op for Frequency/UV-Vis/NMR/PES).
 #
-# "Single Point" has full PCM support (session_calc.run_in_session).
-# "Geometry Opt" and "Reorganization Energy" get a real, but partial,
-# solvent treatment: the geometry optimization itself runs gas-phase, then
-# a single point WITH solvent is computed at the final geometry and its
-# energy/orbitals replace the last trajectory frame's — a real published
-# approximation, not silently ignored, but not a solvated optimization
-# either (see _run_required_final_single_point in app.py and
-# reorganization_energy.py's own docstring).
+# Full PCM support (session_calc.apply_pcm everywhere):
+# - "Single Point".
+# - "Geometry Opt": every optimization step's SCF + gradient is solvated.
+# - "Frequency": reference SCF, PCM Hessian and IR displacement SCFs
+#   (Raman is skipped in solvent).
+# - "UV-Vis (TD-DFT)": solvated ground state, non-equilibrium excitations.
+# "Reorganization Energy" keeps its documented approximation: gas-phase
+# optimizations, solvated single points (reorganization_energy.py).
+# NMR Shielding and PES Scan stay gas-phase only (DEC-023).
 _SOLVENT_SUPPORTED_CALC_TYPES = frozenset(
-    {"Single Point", "Geometry Opt", "Reorganization Energy"}
+    {
+        "Single Point",
+        "Geometry Opt",
+        "Transition State",
+        "Frequency",
+        "UV-Vis (TD-DFT)",
+        "Reorganization Energy",
+    }
 )
+
+_SOLVENT_LABELS = {
+    "Reorganization Energy": (
+        "Implicit solvent (PCM) — gas-phase optimization, "
+        "solvated final single point"
+    ),
+    "Frequency": "Implicit solvent (PCM) — Raman is not computed in solvent",
+    "UV-Vis (TD-DFT)": "Implicit solvent (PCM) — non-equilibrium excitations",
+    "Transition State": "Implicit solvent (PCM) — search and frequency check",
+}
+
+
+def frozen_atom_indices(app: Any) -> list:
+    """0-based frozen-atom indices from the Freeze atoms field ([] if empty).
+
+    Raises ValueError with a readable message for a malformed list or an
+    atom number beyond the loaded molecule.
+    """
+    text = str(getattr(getattr(app, "frozen_atoms_txt", None), "value", "") or "")
+    if not text.strip():
+        return []
+    from quantui.structure_edit import parse_atom_list
+
+    mol = getattr(app, "_molecule", None)
+    try:
+        return parse_atom_list(text, len(mol.atoms) if mol is not None else None)
+    except ValueError as exc:
+        raise ValueError(f"Freeze atoms: {exc}") from exc
 
 
 def _update_solvent_control_for_calc_type(app: Any, ct: str) -> None:
@@ -444,15 +477,9 @@ def _update_solvent_control_for_calc_type(app: Any, ct: str) -> None:
         return
     if ct in _SOLVENT_SUPPORTED_CALC_TYPES:
         cb.disabled = False
-        if ct in ("Geometry Opt", "Reorganization Energy"):
-            # AUDIT F11 — label the approximation explicitly rather than
-            # letting a checked box imply a fully solvated optimization.
-            cb.description = (
-                "Implicit solvent (PCM) — gas-phase optimization, "
-                "solvated final single point"
-            )
-        else:
-            cb.description = "Implicit solvent (PCM)"
+        # AUDIT F11 — label any approximation explicitly rather than letting
+        # a checked box imply more than the run does.
+        cb.description = _SOLVENT_LABELS.get(ct, "Implicit solvent (PCM)")
     else:
         cb.value = False  # also hides solvent_dd via on_solvent_cb_changed
         cb.disabled = True
@@ -481,7 +508,9 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     # Reorganization Energy runs its own neutral + ion optimizations, so the
     # standalone "geometry optimization before this calc" checkbox is
     # meaningless there too (as with Geometry Opt itself).
-    if ct in ("Geometry Opt", "Reorganization Energy"):
+    # A transition-state search must NOT be pre-minimized: that would walk
+    # away from the barrier it is meant to find.
+    if ct in ("Geometry Opt", "Reorganization Energy", "Transition State"):
         app._freq_preopt_cb.value = False
         app._freq_preopt_cb.layout.display = "none"
     elif ct in ("Frequency", "UV-Vis (TD-DFT)"):
@@ -494,11 +523,7 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
         # is empty, and switching either -> Single Point and back left the
         # checkbox permanently disabled with no way to clear it (pre-existing
         # bug, fixed here as a side effect of the consolidation).
-        if app._seed_dd.value:
-            app._freq_preopt_cb.value = False
-            app._freq_preopt_cb.disabled = True
-        else:
-            app._freq_preopt_cb.disabled = False
+        _gate_preopt_for_seed(app, app._seed_dd.value or "")
     else:
         app._freq_preopt_cb.layout.display = ""
         app._freq_preopt_cb.disabled = False
@@ -510,6 +535,7 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
                 [app.fmax_fi, app.max_steps_si],
                 layout=layout_fn(gap="8px"),
             ),
+            app.frozen_atoms_txt,
             widgets.HBox(
                 [app._geo_seed_dd, app._geo_seed_refresh_btn],
                 layout=layout_fn(align_items="center", gap="6px", width="100%"),
@@ -557,9 +583,25 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
                 "Start from an optimised geometry for best accuracy.</span>"
             ),
         ]
+    elif ct == "Transition State":
+        app.calc_extra_opts.children = [
+            widgets.HBox(
+                [app._ts_fmax_fi, app.max_steps_si],
+                layout=layout_fn(gap="8px"),
+            ),
+            app._ts_note,
+        ]
     elif ct == "Reorganization Energy":
+        # The neutral and ion legs are real geometry optimizations and the run
+        # uses these two fields, so they are shown here too (ISSUE.19 #4: they
+        # were read while hidden, carrying over whatever was last set on
+        # Geometry Opt / PES Scan).
         app.calc_extra_opts.children = [
             app._reorg_mode_dd,
+            widgets.HBox(
+                [app.fmax_fi, app.max_steps_si],
+                layout=layout_fn(gap="8px"),
+            ),
             app._reorg_note,
         ]
     elif ct == "PES Scan":
@@ -1285,6 +1327,29 @@ def refresh_seed_options(app: Any) -> None:
     _refresh_seed_options(app, app._seed_dd, include_freq_seeds=include_freq_seeds)
 
 
+def _gate_preopt_for_seed(app: Any, path_str: str) -> None:
+    """Frequency / UV-Vis: set the pre-opt checkbox from the selected seed.
+
+    - An optimized seed (a Geometry Opt result) is already at a minimum, so
+      re-optimizing first is redundant: untick and disable.
+    - A mode-displaced Frequency seed is deliberately *off* the minimum (the
+      point is to step away from a saddle point), and frequencies there mean
+      nothing until it is re-optimized: tick it and leave it enabled
+      (ISSUE.19 #8 — this path used to disable it).
+    - No seed: enable.
+    """
+    from quantui.freq_calc import is_freq_mode_seed
+
+    if path_str and is_freq_mode_seed(path_str):
+        app._freq_preopt_cb.disabled = False
+        app._freq_preopt_cb.value = True
+    elif path_str:
+        app._freq_preopt_cb.value = False
+        app._freq_preopt_cb.disabled = True
+    else:
+        app._freq_preopt_cb.disabled = False
+
+
 def on_seed_changed(app: Any, change: Any) -> None:
     """Update the seed note; gate the pre-opt checkbox where a seed makes it
     redundant.
@@ -1293,9 +1358,9 @@ def on_seed_changed(app: Any, change: Any) -> None:
     handlers — the dropdown is now one shared widget, so one
     handler suffices, made calc-type-aware where the three used to differ:
 
-    - **Frequency / UV-Vis (TD-DFT):** a selected seed is already an optimised
-      geometry, so re-optimising first would be redundant — disable
-      ``_freq_preopt_cb`` while one is selected.
+    - **Frequency / UV-Vis (TD-DFT):** see :func:`_gate_preopt_for_seed` —
+      an optimised seed disables ``_freq_preopt_cb``; a mode-displaced
+      Frequency seed ticks it, since that geometry must be re-optimised.
     - **Geometry Opt (and everything else):** leave that checkbox alone. For
       Geometry Opt specifically, "optimise before the calculation" is
       meaningless — the optimisation *is* the calculation — and for other
@@ -1308,11 +1373,7 @@ def on_seed_changed(app: Any, change: Any) -> None:
     ct = app.calc_type_dd.value
     path_str = change["new"]
     if ct in ("Frequency", "UV-Vis (TD-DFT)"):
-        if path_str:
-            app._freq_preopt_cb.value = False
-            app._freq_preopt_cb.disabled = True
-        else:
-            app._freq_preopt_cb.disabled = False
+        _gate_preopt_for_seed(app, path_str)
     if ct == "Frequency":
         _update_freq_perturb_seed_ui(app, path_str)
     if path_str:
@@ -1322,7 +1383,9 @@ def on_seed_changed(app: Any, change: Any) -> None:
             app._seed_note.value = (
                 f'<span style="font-size:12px;color:{_theme.css.ACCENT_SUCCESS}">'
                 "✓ The run will start from the selected Frequency geometry "
-                "displaced along the chosen normal mode."
+                "displaced along the chosen normal mode. The displaced "
+                "geometry is not a minimum, so it is re-optimized first "
+                "(geometry optimization before the calculation is on)."
                 "</span>"
             )
         else:
@@ -2253,6 +2316,7 @@ def _update_open_shell_hint(app: Any) -> None:
 _CALC_TYPE_KEYS: Dict[str, str] = {
     "Single Point": "single_point",
     "Geometry Opt": "geometry_opt",
+    "Transition State": "transition_state",
     "Frequency": "frequency",
     "UV-Vis (TD-DFT)": "tddft",
     "NMR Shielding": "nmr",
@@ -2360,6 +2424,22 @@ def checkpoint_identity(app: Any) -> Any:
                 )
             except Exception:  # noqa: BLE001 — checkpointing is never load-bearing
                 extra = ()
+        # Frozen atoms change the optimization path, so a constrained run
+        # must not resume an unconstrained one (or another constraint set).
+        if _ct == "geometry_opt":
+            try:
+                _frozen = frozen_atom_indices(app)
+            except ValueError:
+                _frozen = []
+            if _frozen:
+                extra = extra + ("frozen=" + ",".join(map(str, _frozen)),)
+        # A solvated run must never resume a gas-phase checkpoint (or the
+        # reverse): optimization steps and IR displacements depend on it.
+        try:
+            if app.solvent_cb.value and app.solvent_dd.value:
+                extra = extra + (f"solvent={app.solvent_dd.value}",)
+        except AttributeError:
+            pass
         return CalcIdentity.from_molecule(
             molecule,
             calc_type=_ct,

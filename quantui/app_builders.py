@@ -1205,6 +1205,7 @@ def build_shared_widgets(
         options=[
             "Single Point",
             "Geometry Opt",
+            "Transition State",
             "Frequency",
             "UV-Vis (TD-DFT)",
             "NMR Shielding",
@@ -1232,6 +1233,19 @@ def build_shared_widgets(
         description="Max steps:",
         style={"description_width": "100px"},
         layout=layout_fn(width="200px"),
+    )
+    # Atoms held fixed during a Geometry Opt (INT.8): 1-based, ranges ok.
+    app.frozen_atoms_txt = widgets.Text(
+        value="",
+        placeholder="e.g. 1, 2, 5-7",
+        description="Freeze atoms:",
+        tooltip=(
+            "Atom numbers kept fixed while the rest of the structure is "
+            "optimized (constrained optimization). Leave empty to optimize "
+            "every atom. The Edit Structure panel can fill this from picks."
+        ),
+        style={"description_width": "100px"},
+        layout=layout_fn(width="330px"),
     )
     app.nstates_si = widgets.BoundedIntText(
         value=10,
@@ -1486,6 +1500,37 @@ def build_shared_widgets(
         layout=layout_fn(width="320px"),
         tooltip="Which reorganization energy channel(s) to compute",
     )
+    # Transition State (M-TS TS.2): its own force threshold, tighter than a
+    # minimization's, so switching calc types never changes the other's.
+    from quantui.ts_search import DEFAULT_TS_FMAX, sella_available
+
+    app._ts_fmax_fi = widgets.BoundedFloatText(
+        value=DEFAULT_TS_FMAX,
+        min=0.001,
+        max=0.2,
+        step=0.005,
+        description="Force thr. (eV/Å):",
+        style={"description_width": "130px"},
+        layout=layout_fn(width="250px"),
+    )
+    _ts_avail = (
+        ""
+        if sella_available()
+        else (
+            f'<br><span style="color:{_theme.css.ACCENT_WARNING}">⚠ Needs the '
+            "optional Sella package, which is not installed here: "
+            '<code>pip install "quantui[ts]"</code></span>'
+        )
+    )
+    app._ts_note = widgets.HTML(
+        f'<span style="color:{_theme.css.TEXT_SECONDARY};font-size:12px">'
+        "Searches for a <b>first-order saddle point</b> near the current "
+        "geometry (Sella, starting from the analytic Hessian), then runs a "
+        "frequency calculation to check it: a transition state has exactly "
+        "<b>one imaginary frequency</b>. Start close to the barrier top, e.g. "
+        "the highest point of a PES scan." + _ts_avail + "</span>"
+    )
+
     app._reorg_note = widgets.HTML(
         f'<span style="color:{_theme.css.TEXT_SECONDARY};font-size:12px">'
         "4-point Marcus scheme: optimizes the neutral and ion geometries, then "
@@ -1647,6 +1692,7 @@ def build_shared_widgets(
         layout=layout_fn(width="180px"),
     )
     app._export_bundle_status = widgets.Label()
+    app._download_html = widgets.HTML(value="", layout=layout_fn(margin="6px 0 0 0"))
 
 
 def build_theme_selector(app: Any, *, layout_fn: Any) -> None:
@@ -1849,6 +1895,18 @@ def build_molecule_section(
     )
     app.xyz_msg = widgets.Label()
 
+    # File upload (DEC-023 Tier-1 #1): the bytes travel over the widget
+    # channel, so it works on a remote Voilà/OnDemand session too.
+    from quantui.structure_upload import SUPPORTED_SUFFIXES as _UPLOAD_SUFFIXES
+
+    app.structure_upload = widgets.FileUpload(
+        accept=",".join(_UPLOAD_SUFFIXES),
+        multiple=False,
+        description="Choose file",
+        layout=layout_fn(width="180px"),
+    )
+    app.upload_msg = widgets.HTML(value="")
+
     build_xyz_interactive_widgets(app, layout_fn=layout_fn)
     try:
         sync_textarea_from_table(app)
@@ -1933,8 +1991,20 @@ def build_molecule_section(
             app.pubchem_candidates_dd,
         ]
     )
-    input_tab = widgets.Tab(children=[tab_preset, tab_xyz, tab_pubchem])
-    for i, title in enumerate(["Library", "XYZ Input", "Online Search"]):
+    tab_upload = widgets.VBox(
+        [
+            widgets.HTML(
+                hint + "Upload a structure file from your computer: XYZ, MOL, "
+                "SDF, MOL2, PDB, CIF, or a Gaussian input (.gjf/.com) or "
+                "output (.log/.out). Charge and multiplicity are taken from "
+                "the file when it records them.</p>"
+            ),
+            app.structure_upload,
+            app.upload_msg,
+        ]
+    )
+    input_tab = widgets.Tab(children=[tab_preset, tab_xyz, tab_pubchem, tab_upload])
+    for i, title in enumerate(["Library", "XYZ Input", "Online Search", "Upload File"]):
         input_tab.set_title(i, title)
 
     app.mol_input_expanded = widgets.VBox(
@@ -1978,6 +2048,12 @@ def build_molecule_section(
         mol_container_children.append(app.viz_backend_toggle)
     if visualization_available:
         mol_container_children.append(app.viz_controls_box)
+    # Edit Structure (M-INTERACT INT.8): works on typed atom numbers even
+    # without a viewer; clicking atoms needs py3Dmol.
+    from quantui.app_structure_edit import build_edit_widgets
+
+    build_edit_widgets(app, layout_fn=layout_fn)
+    mol_container_children.append(app._edit_accordion)
     app.mol_input_container = widgets.VBox(
         mol_container_children,
         layout=layout_fn(margin="0 0 4px 0"),
@@ -2229,6 +2305,62 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         [app.vib_prev_btn, app.vib_mode_dd, app.vib_next_btn],
         layout=layout_fn(align_items="center", margin="0 0 4px 0"),
     )
+    # Amplitude + displacement arrows (live on the py3Dmol viewer, camera kept).
+    app._vib_amp_slider = widgets.FloatSlider(
+        value=0.4,
+        min=0.1,
+        max=1.5,
+        step=0.05,
+        description="Amplitude:",
+        readout_format=".2f",
+        continuous_update=False,
+        tooltip="How far the atoms swing in the animation (and export).",
+        style={"description_width": "75px"},
+        layout=layout_fn(width="300px"),
+    )
+    app._vib_arrows_cb = widgets.Checkbox(
+        value=False,
+        description="Displacement arrows",
+        indent=False,
+        tooltip="Show each atom's direction of motion in this mode.",
+        layout=layout_fn(width="200px"),
+    )
+    vib_appearance_row = widgets.HBox(
+        [app._vib_amp_slider, app._vib_arrows_cb],
+        layout=layout_fn(align_items="center", margin="0 0 4px 0"),
+    )
+    app._vib_mode_table = widgets.HTML(value="")
+    # Thermochemistry at any T/P, recomputed from the stored frequencies.
+    app._thermo_T = widgets.BoundedFloatText(
+        value=298.15,
+        min=1.0,
+        max=5000.0,
+        step=10.0,
+        description="T (K):",
+        style={"description_width": "45px"},
+        layout=layout_fn(width="170px"),
+    )
+    app._thermo_P = widgets.BoundedFloatText(
+        value=1.0,
+        min=0.0001,
+        max=1000.0,
+        step=0.1,
+        description="P (atm):",
+        style={"description_width": "55px"},
+        layout=layout_fn(width="170px"),
+    )
+    app._thermo_html = widgets.HTML(value="")
+    app._thermo_box = widgets.VBox(
+        [
+            widgets.HTML(
+                f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY};'
+                'font-weight:bold">Thermochemistry</span>'
+            ),
+            widgets.HBox([app._thermo_T, app._thermo_P]),
+            app._thermo_html,
+        ],
+        layout=layout_fn(display="none", margin="8px 0 0 0"),
+    )
     app._vib_apply_mode_btn = widgets.Button(
         description="Use mode → new Frequency calc",
         icon="share",
@@ -2293,10 +2425,13 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             widgets.VBox(
                 [
                     vib_mode_row,
+                    vib_appearance_row,
                     app._vib_apply_mode_btn,
                     app.vib_output,
                     vib_export_row,
                     app._vib_png_status,
+                    app._vib_mode_table,
+                    app._thermo_box,
                     app._vib_js_bridge,
                     app._vib_png_inbox,
                 ],
@@ -2482,13 +2617,37 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         style={"description_width": "40px"},
         layout=layout_fn(display="none", width="150px", margin="0 0 4px 0"),
     )
+    # M-SURFACES: what to draw. Orbitals are the original panel; the density
+    # surfaces are built from the same stored orbitals + occupations.
+    app._iso_surface_dd = widgets.Dropdown(
+        options=[
+            ("Molecular orbital", "orbital"),
+            ("Electron density", "density"),
+            ("Spin density (α − β)", "spin"),
+            ("Electrostatic potential on density (ESP map)", "esp"),
+        ],
+        value="orbital",
+        description="Surface:",
+        style={"description_width": "60px"},
+        layout=layout_fn(width="420px", margin="4px 0"),
+    )
+    # Spin channel for unrestricted (UHF/UKS) results; hidden otherwise.
+    app._orb_spin_toggle = widgets.ToggleButtons(
+        options=[("α spin", "alpha"), ("β spin", "beta")],
+        value="alpha",
+        tooltip="Unrestricted results have separate alpha and beta orbitals.",
+        style={"button_width": "80px"},
+        layout=layout_fn(display="none", margin="4px 0"),
+    )
     app._orb_iso_output = widgets.Output()
     app._orb_iso_controls = widgets.VBox(
         [
             widgets.HTML(
                 f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY};font-weight:bold">'
-                "Orbital isosurface:</span>"
+                "Isosurface:</span>"
             ),
+            app._iso_surface_dd,
+            app._orb_spin_toggle,
             app._orb_toggle,
             app._orb_index_input,
             # The viewer is NOT here. It sits below the Generate button in
@@ -2508,6 +2667,32 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._orb_accordion.set_title(0, "Energy-level Diagram")
     app._orb_accordion.selected_index = None
+
+    # Orbital gallery (SURF.1, DEC-024): small linked viewers for the
+    # orbitals around the gap, built on demand.
+    app._orb_gallery_btn = widgets.Button(
+        description="Orbital gallery",
+        icon="th",
+        tooltip=(
+            "Show the orbitals around the HOMO-LUMO gap side by side "
+            "(small viewers that rotate together)."
+        ),
+        layout=layout_fn(width="160px", margin="4px 8px 4px 0"),
+    )
+    app._orb_gallery_span_dd = widgets.Dropdown(
+        options=[
+            ("HOMO−1 … LUMO+1 (4)", 2),
+            ("HOMO−2 … LUMO+2 (6)", 3),
+            ("HOMO−3 … LUMO+3 (8)", 4),
+        ],
+        value=3,
+        layout=layout_fn(width="220px"),
+    )
+    app._orb_gallery_box = widgets.HBox(
+        [app._orb_gallery_btn, app._orb_gallery_span_dd],
+        layout=layout_fn(align_items="center", margin="8px 0 0 0"),
+    )
+    app._orb_gallery_output = widgets.Output()
 
     app._iso_generate_btn = widgets.Button(
         description="Generate Isosurface",
@@ -2569,7 +2754,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._iso_isovalue_slider = widgets.FloatLogSlider(
         value=0.02,
         base=10,
-        min=-3.0,  # 0.001
+        min=-4.0,  # 0.0001 (density surfaces go this low)
         max=-0.7,  # ~0.2
         step=0.02,
         description="Isovalue:",
@@ -2584,6 +2769,22 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._iso_enclosed_label = widgets.HTML(
         value="", layout=layout_fn(margin="0 0 0 6px")
     )
+    # ESP colour range (± a.u.); shown only for the ESP map. Filled with a
+    # suggested value from the potential on the surface after each generate.
+    app._iso_esp_range_slider = widgets.FloatLogSlider(
+        value=0.05,
+        base=10,
+        min=-3.0,  # 0.001
+        max=-0.5,  # ~0.32
+        step=0.02,
+        description="ESP ±:",
+        readout_format=".3f",
+        continuous_update=False,
+        tooltip="Colour range of the ESP map in atomic units (1 a.u. = 627.5 kcal/mol).",
+        style={"description_width": "70px"},
+        layout=layout_fn(width="330px", display="none"),
+    )
+    app._iso_esp_legend = widgets.HTML(value="", layout=layout_fn(display="none"))
     app._iso_colors_dd = widgets.Dropdown(
         options=list(_ORBITAL_COLOR_OPTIONS),
         value=_DEFAULT_ORBITAL_COLORS,
@@ -2685,8 +2886,9 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         [
             widgets.HTML(
                 f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:12px;margin:0 0 8px">'
-                "Visualise a molecular orbital as a 3D isosurface (Linux / WSL only — "
-                "requires PySCF and RDKit). Run or load a Single Point or Geometry "
+                "Visualise a molecular orbital, the electron or spin density, or an "
+                "electrostatic-potential (ESP) map as a 3D isosurface (Linux / WSL "
+                "only — requires PySCF). Run or load a Single Point or Geometry "
                 "Optimization first, then click <b>Generate</b>.</p>"
             ),
             app._orb_iso_controls,
@@ -2701,11 +2903,15 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 layout=layout_fn(align_items="center", gap="6px"),
             ),
             app._orb_iso_output,
+            app._orb_gallery_box,
+            app._orb_gallery_output,
             app._iso_resolution_dd,
             widgets.HBox(
                 [app._iso_isovalue_slider, app._iso_enclosed_label],
                 layout=layout_fn(align_items="center"),
             ),
+            app._iso_esp_range_slider,
+            app._iso_esp_legend,
             app._iso_opacity_slider,
             app._iso_wireframe_cb,
             app._iso_colors_dd,
@@ -3353,6 +3559,9 @@ def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) ->
                 [app._export_bundle_btn, app._export_bundle_status],
                 layout=layout_fn(align_items="center", gap="6px"),
             ),
+            # Download link for whatever was exported last (to the user's
+            # own computer — exports are written where the kernel runs).
+            app._download_html,
         ]
     )
     app.advanced_accordion = widgets.Accordion(children=[export_content])
@@ -3613,6 +3822,21 @@ def build_files_tab(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="100px"),
         tooltip="Refresh roots, folder contents, and preview",
     )
+    app._files_download_btn = widgets.Button(
+        description="Download",
+        icon="download",
+        disabled=True,
+        layout=layout_fn(width="120px"),
+        tooltip="Download the selected file to this computer",
+    )
+    app._files_load_btn = widgets.Button(
+        description="Load as molecule",
+        icon="upload",
+        disabled=True,
+        layout=layout_fn(width="160px"),
+        tooltip="Load the selected structure file (XYZ, MOL, SDF, PDB, …) into Calculate",
+    )
+    app._files_download_html = widgets.HTML(value="")
     app._files_status_html = widgets.HTML(
         value=(
             f'<span style="font-size:12px;color:{_theme.css.TEXT_SUBTLE}">'
@@ -3639,11 +3863,18 @@ def build_files_tab(app: Any, *, layout_fn: Any) -> None:
             app._files_root_dd,
             app._files_path_html,
             widgets.HBox(
-                [app._files_up_btn, app._files_open_btn, app._files_refresh_btn],
-                layout=layout_fn(gap="8px", margin="6px 0"),
+                [
+                    app._files_up_btn,
+                    app._files_open_btn,
+                    app._files_refresh_btn,
+                    app._files_download_btn,
+                    app._files_load_btn,
+                ],
+                layout=layout_fn(gap="8px", margin="6px 0", flex_wrap="wrap"),
             ),
             app._files_entries,
             app._files_status_html,
+            app._files_download_html,
             app._files_preview_output,
         ],
         layout=layout_fn(padding="8px 0"),

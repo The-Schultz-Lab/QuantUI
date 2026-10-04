@@ -266,6 +266,8 @@ if [ "$FAIL" -eq 0 ]; then
   printf '  Record the pairing that worked, for the next build:\n'
   $APPTAINER_CMD exec "$IMAGE" cat /opt/build-info/quantui-version.txt 2>/dev/null \
     | sed 's/^/    quantui  /'
+  $APPTAINER_CMD exec "$IMAGE" cat /opt/build-info/quantui-commit.txt 2>/dev/null \
+    | sed 's/^/    commit   /'
   nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null \
     | head -1 | sed 's/^/    driver   /'
   exit 0

@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from .downloads import offer_download, saved_with_download_html
 from .results_storage import _safe_name
 
 
@@ -106,8 +107,39 @@ def on_export(app: Any, btn: Any) -> None:
             f"{_safe_name(app._molecule.get_formula())}"
             f"_{_safe_name(app.method_dd.value)}_{_safe_name(app.basis_dd.value)}.py"
         )
-        calc.generate_calculation_script(Path(fname))
-        app.export_status.value = f"Saved: {fname}"
+        # Next to the result files when there is a result folder (it used
+        # to go to the server's working directory, where a remote user
+        # could never find it).
+        result_dir = getattr(app, "_last_result_dir", None)
+        dest = (result_dir / fname) if isinstance(result_dir, Path) else Path(fname)
+        # ISSUE.19 #7 — follow the calc type, solvent and density fitting the
+        # app would use, instead of always a gas-phase single point.
+        from quantui.app_runflow import _CALC_TYPE_KEYS
+        from quantui.calculator import SCRIPT_FULL_CALC_TYPES
+
+        ct_label = app.calc_type_dd.value
+        calc_type = _CALC_TYPE_KEYS.get(ct_label, "single_point")
+        solvent = app.solvent_dd.value if app.solvent_cb.value else None
+        settings = getattr(app, "_user_settings", None)
+        density_fit = bool(
+            getattr(getattr(settings, "compute", None), "density_fit", False)
+        )
+        nstates_w = getattr(app, "nstates_si", None)
+        calc.generate_calculation_script(
+            dest,
+            calc_type=calc_type,
+            solvent=solvent,
+            density_fit=density_fit,
+            nstates=int(nstates_w.value) if nstates_w is not None else 10,
+        )
+        status = f"Saved: {dest}"
+        if calc_type not in SCRIPT_FULL_CALC_TYPES:
+            status += (
+                f" — the script runs the SCF at this geometry only, not the "
+                f"{ct_label} workflow."
+            )
+        app.export_status.value = status
+        offer_download(app, dest)
     except Exception as exc:
         app.export_status.value = f"Error: {exc}"
 
@@ -137,6 +169,7 @@ def on_export_xyz(app: Any, btn: Any) -> None:
         dest = (app._last_result_dir / fname) if app._last_result_dir else Path(fname)
         dest.write_text(full_xyz, encoding="utf-8")
         app.struct_export_status.value = f"Saved: {dest}"
+        offer_download(app, dest)
     except Exception as exc:
         app.struct_export_status.value = f"Error: {exc}"
 
@@ -159,6 +192,7 @@ def on_export_mol(app: Any, btn: Any) -> None:
         dest = (app._last_result_dir / fname) if app._last_result_dir else Path(fname)
         dest.write_text(mol_block, encoding="utf-8")
         app.struct_export_status.value = f"Saved: {dest}"
+        offer_download(app, dest)
     except Exception as exc:
         app.struct_export_status.value = f"Error: {exc}"
 
@@ -181,6 +215,7 @@ def on_export_pdb(app: Any, btn: Any) -> None:
         dest = (app._last_result_dir / fname) if app._last_result_dir else Path(fname)
         dest.write_text(pdb_block, encoding="utf-8")
         app.struct_export_status.value = f"Saved: {dest}"
+        offer_download(app, dest)
     except Exception as exc:
         app.struct_export_status.value = f"Error: {exc}"
 
@@ -437,7 +472,7 @@ def on_orb_png_captured(app: Any, change: dict) -> None:
         return
 
     logger.info("Saved orbital PNG: %s (%d bytes)", dest, len(raw))
-    app._iso_export_status.value = f'<span style="color:#2a7">Saved: {dest.name}</span>'
+    app._iso_export_status.value = saved_with_download_html(dest)
     _clear_inbox(app)
 
 
@@ -523,7 +558,7 @@ def on_reorg_png_captured(app: Any, change: dict) -> None:
 
     logger.info("Saved reorg geometry PNG: %s (%d bytes)", dest, len(raw))
     if status is not None:
-        status.value = f'<span style="color:#2a7">Saved: {dest.name}</span>'
+        status.value = saved_with_download_html(dest)
     _clear_inbox(app)
 
 
@@ -615,7 +650,7 @@ def on_vib_png_captured(app: Any, change: dict) -> None:
 
     logger.info("Saved vibrational mode PNG: %s (%d bytes)", dest, len(raw))
     if status is not None:
-        status.value = f'<span style="color:#2a7">Saved: {dest.name}</span>'
+        status.value = saved_with_download_html(dest)
     _clear_inbox(app)
 
 
@@ -721,7 +756,7 @@ def _on_mol_png_captured(
 
     logger.info("Saved molecule PNG (%s): %s (%d bytes)", slot_label, dest, len(raw))
     if status is not None:
-        status.value = f'<span style="color:#2a7">Saved: {dest.name}</span>'
+        status.value = saved_with_download_html(dest)
     _clear_inbox(app)
 
 
@@ -844,7 +879,7 @@ def on_traj_png_captured(
 
     logger.info("Saved trajectory PNG: %s (%d bytes)", dest, len(raw))
     if status is not None:
-        status.value = f'<span style="color:#2a7">Saved: {dest.name}</span>'
+        status.value = saved_with_download_html(dest)
     _clear_inbox()
 
 
@@ -878,7 +913,19 @@ def on_iso_export_cube(app: Any, btn: Any) -> None:
             '<span style="color:#b22">Cube export failed (see log).</span>'
         )
         return
-    app._iso_export_status.value = f'<span style="color:#2a7">Saved: {dest.name}</span>'
+    saved = [dest.name]
+    # An ESP map is two cubes: the density surface and the potential.
+    esp = getattr(app, "_last_esp_cube_path", None)
+    if isinstance(esp, Path) and esp.exists():
+        esp_dest = export_cube(esp, result_dir, orbital_label=f"{label}_potential")
+        if esp_dest is not None:
+            saved.append(esp_dest.name)
+    from .downloads import download_link_html
+
+    app._iso_export_status.value = (
+        f'<span style="color:#2a7">Saved: {", ".join(saved)}</span> '
+        + " ".join(download_link_html(dest.parent / name) for name in saved)
+    )
 
 
 def on_export_bundle(app: Any, btn: Any) -> None:
@@ -894,6 +941,7 @@ def on_export_bundle(app: Any, btn: Any) -> None:
         app._export_bundle_status.value = "Bundle export failed (see log)."
         return
     app._export_bundle_status.value = f"Saved: {out_path}"
+    offer_download(app, out_path)
 
 
 def molecule_to_rdkit(mol: Any) -> Any:

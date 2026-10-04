@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shlex
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from quantui import config
+from quantui.security import SecurityError
 
 from . import cluster_config as cfg
 from .base import CALC_TYPES, BackendCapabilities, CalculationRequest
@@ -29,7 +31,7 @@ from .cluster_security import (
     validate_mail_events,
     validate_resources,
 )
-from .registry import JobRegistry
+from .registry import JobRecord, JobRegistry
 from .slurm_errors import format_error_for_student
 from .slurm_utils import (
     SLURM_JOB_NAME_MAX_LEN,
@@ -56,6 +58,8 @@ _TERMINAL_SLURM = frozenset(
 )
 _TERMINAL_RECORD = frozenset({"success", "error", "cancelled"})
 _ACTIVE_RECORD = frozenset({"queued", "pending", "running", "submitted"})
+# A request id (uuid hex / job-name style) or a numeric SLURM job id.
+_DEPENDENCY_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 class SlurmBackend:
@@ -100,9 +104,6 @@ class SlurmBackend:
         mail_events: list[str] | None = None,
         job_name: str | None = None,
     ) -> str:
-        if not request.request_id:
-            request.request_id = uuid.uuid4().hex[:12]
-
         active_slurm = sum(
             1
             for record in self.registry.list_active()
@@ -110,43 +111,20 @@ class SlurmBackend:
         )
         check_concurrent_job_limit(active_slurm)
         check_submit_cooldown(self.registry.seconds_since_last_slurm_submit())
-        estimates = estimate_slurm_resources(request)
-        cores = cores or estimates["cores"]
-        memory_gb = memory_gb or estimates["memory_gb"]
-        walltime = walltime or estimates["walltime"]
-        resources = validate_resources(cores, memory_gb, walltime)
-
-        email = validate_email(email)
-        resolved_events: list[str] = []
-        if email is not None:
-            resolved_events = validate_mail_events(mail_events)
-
-        # M-JOBDIRS: the job dir name doubles as the SLURM job name, so
-        # squeue output matches the directory on disk.
-        name = sanitize_job_name(job_name or "") or default_job_name(request)
-        record = self.registry.create(
+        record = self._create_job(
             request,
-            self.backend_id,
-            resources=resources,
             status="queued",
-            job_name=name,
-        )
-        job_dir = record.job_path
-        assert job_dir is not None  # create(job_name=...) always sets it
-        request_path = job_dir / "request.json"
-        request_path.write_text(json.dumps(request.to_dict(), indent=2))
-
-        slurm_script = job_dir / "submit.slurm"
-        self._write_slurm_script(
-            slurm_script,
-            job_name=job_dir.name[:SLURM_JOB_NAME_MAX_LEN],
-            request_path=request_path,
-            job_dir=job_dir,
-            resources=resources,
+            cores=cores,
+            memory_gb=memory_gb,
+            walltime=walltime,
             depends_on=depends_on,
             email=email,
-            mail_events=resolved_events,
+            mail_events=mail_events,
+            job_name=job_name,
         )
+        job_dir = record.job_path
+        assert job_dir is not None  # _create_job always makes a job dir
+        slurm_script = job_dir / "submit.slurm"
 
         try:
             slurm_job_id = self._submit_to_slurm(slurm_script)
@@ -167,6 +145,128 @@ class SlurmBackend:
         self.registry.start_attempt(request.request_id, slurm_job_id, source="submit")
         self.registry.record_slurm_submit()
         return request.request_id
+
+    def prepare(
+        self,
+        request: CalculationRequest,
+        *,
+        cores: int | None = None,
+        memory_gb: int | None = None,
+        walltime: str | None = None,
+        email: str | None = None,
+        mail_events: list[str] | None = None,
+        job_name: str | None = None,
+    ) -> JobRecord:
+        """Write a job dir with ``request.json`` + ``submit.slurm``; do not submit.
+
+        For callers that run ``sbatch`` themselves, outside this process
+        (``quantui submit --prepare-only``). The login-node ``quantui-batch``
+        launcher writes the same folder and record without importing QuantUI;
+        keep the two in step (tests/test_batch_submit.py checks it). The
+        record gets status ``prepared``, which is not an active
+        status, so it never counts toward the concurrent-job limit and its
+        hand-run attempts are ingested into History like any other.
+        Resources are validated exactly as in :meth:`dispatch`; the
+        concurrent-job limit and cooldown are left to the caller, which is
+        the one that can see the real queue.
+        """
+        return self._create_job(
+            request,
+            status="prepared",
+            cores=cores,
+            memory_gb=memory_gb,
+            walltime=walltime,
+            depends_on=None,
+            email=email,
+            mail_events=mail_events,
+            job_name=job_name,
+        )
+
+    def _create_job(
+        self,
+        request: CalculationRequest,
+        *,
+        status: str,
+        cores: int | None,
+        memory_gb: int | None,
+        walltime: str | None,
+        depends_on: str | None,
+        email: str | None,
+        mail_events: list[str] | None,
+        job_name: str | None,
+    ) -> JobRecord:
+        """Validate, register, and write the job dir (shared by dispatch/prepare)."""
+        if not request.request_id:
+            request.request_id = uuid.uuid4().hex[:12]
+
+        estimates = estimate_slurm_resources(request)
+        cores = cores or estimates["cores"]
+        memory_gb = memory_gb or estimates["memory_gb"]
+        walltime = walltime or estimates["walltime"]
+        resources = validate_resources(cores, memory_gb, walltime)
+
+        dependency_job_id = self._resolve_dependency(depends_on)
+        email = validate_email(email)
+        resolved_events: list[str] = []
+        if email is not None:
+            resolved_events = validate_mail_events(mail_events)
+
+        # M-JOBDIRS: the job dir name doubles as the SLURM job name, so
+        # squeue output matches the directory on disk.
+        name = sanitize_job_name(job_name or "") or default_job_name(request)
+        record = self.registry.create(
+            request,
+            self.backend_id,
+            resources=resources,
+            status=status,
+            job_name=name,
+        )
+        job_dir = record.job_path
+        assert job_dir is not None  # create(job_name=...) always sets it
+        request_path = job_dir / "request.json"
+        request_path.write_text(json.dumps(request.to_dict(), indent=2))
+
+        self._write_slurm_script(
+            job_dir / "submit.slurm",
+            job_name=job_dir.name[:SLURM_JOB_NAME_MAX_LEN],
+            request_path=request_path,
+            job_dir=job_dir,
+            resources=resources,
+            depends_on=dependency_job_id,
+            email=email,
+            mail_events=resolved_events,
+        )
+        return record
+
+    def _resolve_dependency(self, depends_on: str | None) -> str | None:
+        """Turn *depends_on* into the SLURM job id ``--dependency`` needs.
+
+        Accepts a QuantUI request id (looked up in the registry; the
+        dependency is that request's current SLURM job) or a numeric SLURM
+        job id. Anything else raises ``SecurityError``. The value ends up
+        on an ``#SBATCH`` line, so it must never carry text or newlines.
+        """
+        if depends_on is None or not str(depends_on).strip():
+            return None
+        value = str(depends_on).strip()
+        if not _DEPENDENCY_TOKEN_RE.match(value):
+            raise SecurityError(
+                f"Invalid --depends-on value {value!r}: give a QuantUI "
+                "request id or a numeric SLURM job id."
+            )
+        record = self.registry.load(value)
+        if record is not None:
+            if not record.slurm_job_id:
+                raise SecurityError(
+                    f"Request {value} has no SLURM job id yet, so nothing "
+                    "can depend on it."
+                )
+            return str(record.slurm_job_id)
+        if value.isdigit():
+            return value
+        raise SecurityError(
+            f"--depends-on {value!r} is not a known request id or a SLURM job id."
+        )
 
     def resubmit(self, request_id: str) -> str:
         """Run a finished job's ``submit.slurm`` again as a new attempt.

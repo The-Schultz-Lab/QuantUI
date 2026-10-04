@@ -197,6 +197,8 @@ def _reorg_channels_payload(result) -> Optional[list]:
     channels = getattr(result, "channels", None)
     if not channels:
         return None
+    from .reorganization_energy import s2_fields
+
     # The neutral geometry rides along with the channels rather than being
     # looked up elsewhere in the saved file. The top-level schema stores
     # atom_symbols but not coordinates, so a history card had no reliable way
@@ -229,6 +231,7 @@ def _reorg_channels_payload(result) -> Optional[list]:
             "lambda2_hartree": _opt_float(getattr(ch, "lambda2_hartree", None)),
             "lambda_hartree": _opt_float(getattr(ch, "lambda_hartree", None)),
             "converged": bool(getattr(ch, "converged", False)),
+            **s2_fields(ch),
         }
         if neutral_geom is not None:
             entry["neutral_geometry"] = neutral_geom
@@ -377,6 +380,8 @@ def save_result(
         # history card falls back exactly as before (CPU / no dipole / no
         # charges). Coerced JSON-safe (numpy scalars/arrays → float/list).
         "solvent": getattr(result, "solvent", None),
+        # ISSUE.12 — ⟨S²⟩ of an open-shell SCF; None for closed shell.
+        "spin_square": _opt_float(getattr(result, "spin_square", None)),
         "gpu_used": bool(getattr(result, "gpu_used", False)),
         "gpu_name": getattr(result, "gpu_name", None),
         "density_fit": bool(getattr(result, "density_fit", False)),

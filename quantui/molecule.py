@@ -271,6 +271,30 @@ class Molecule:
         return self.__str__()
 
 
+def _count_xyz_frames(lines: List[str], count_idx: int, n_atoms: int) -> int:
+    """How many back-to-back XYZ frames start at *count_idx* (1 if not multi-frame).
+
+    A frame is a count line, a title line and *n_atoms* atom lines. Blank
+    lines between frames are tolerated; anything else after the first frame
+    means "not a trajectory" and the normal parser reports it.
+    """
+    frames = 0
+    idx = count_idx
+    while idx < len(lines):
+        if lines[idx].strip() == "":
+            idx += 1
+            continue
+        try:
+            n = int(lines[idx].strip())
+        except ValueError:
+            break
+        if n != n_atoms or n <= 0 or idx + 2 + n > len(lines):
+            break  # a different count, or a truncated frame
+        frames += 1
+        idx += 2 + n
+    return max(frames, 1)
+
+
 def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
     """
     Parse XYZ coordinate input from text.
@@ -343,6 +367,20 @@ def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
         except ValueError:
             pass  # first content line isn't a bare count -> no header
         break  # only the first non-blank/non-comment line is eligible
+
+    if expected_atoms is not None:
+        n_frames = _count_xyz_frames(lines, body_start - 2, expected_atoms)
+        if n_frames > 1:
+            # ISSUE.19 #10 — the second frame's count line used to fail as
+            # "Line N: not enough values", which says nothing useful.
+            raise ValueError(
+                f"❌ This looks like a multi-frame XYZ file ({n_frames} "
+                f"structures of {expected_atoms} atoms each, e.g. an "
+                "optimization trajectory).\n\n"
+                "💡 Paste only one structure (one count line, one title line, "
+                "then the atom lines), or load the whole file with the "
+                "Upload File tab, which takes the last structure."
+            )
 
     body_lines = lines[body_start:]
 

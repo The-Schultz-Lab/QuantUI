@@ -217,6 +217,9 @@ from quantui.app_formatters import (
 from quantui.app_formatters import (
     format_tddft_result as _fmt_tddft_result,
 )
+from quantui.app_formatters import (
+    format_ts_result as _fmt_ts_result,
+)
 from quantui.app_history import (
     build_history_context as _hist_build_history_context,
 )
@@ -255,6 +258,9 @@ from quantui.app_runflow import (
 )
 from quantui.app_runflow import (
     do_calibration as _run_do_calibration,
+)
+from quantui.app_runflow import (
+    frozen_atom_indices as _run_frozen_atoms,
 )
 from quantui.app_runflow import (
     on_accumulate as _run_on_accumulate,
@@ -463,16 +469,25 @@ from quantui.app_visualization import (
     on_iso_generate as _viz_on_iso_generate,
 )
 from quantui.app_visualization import (
+    on_iso_surface_changed as _viz_on_iso_surface_changed,
+)
+from quantui.app_visualization import (
     on_nmr_nucleus_changed as _viz_on_nmr_nucleus_changed,
 )
 from quantui.app_visualization import (
     on_orb_range_changed as _viz_on_orb_range_changed,
 )
 from quantui.app_visualization import (
+    on_orbital_gallery as _viz_on_orbital_gallery,
+)
+from quantui.app_visualization import (
     on_raman_fwhm_changed as _viz_on_raman_fwhm_changed,
 )
 from quantui.app_visualization import (
     on_raman_mode_changed as _viz_on_raman_mode_changed,
+)
+from quantui.app_visualization import (
+    on_thermo_inputs_changed as _viz_on_thermo_inputs_changed,
 )
 from quantui.app_visualization import (
     on_traj_expand as _viz_on_traj_expand,
@@ -485,6 +500,12 @@ from quantui.app_visualization import (
 )
 from quantui.app_visualization import (
     on_uv_range_changed as _viz_on_uv_range_changed,
+)
+from quantui.app_visualization import (
+    on_vib_amplitude_changed as _viz_on_vib_amplitude_changed,
+)
+from quantui.app_visualization import (
+    on_vib_arrows_changed as _viz_on_vib_arrows_changed,
 )
 from quantui.app_visualization import (
     on_vib_mode_changed as _viz_on_vib_mode_changed,
@@ -559,6 +580,9 @@ from quantui.app_xyz_input import (
     on_load_xyz as _xyz_on_load_xyz,
 )
 from quantui.app_xyz_input import (
+    on_structure_upload as _xyz_on_structure_upload,
+)
+from quantui.app_xyz_input import (
     on_xyz_add_atom as _xyz_on_add_atom,
 )
 from quantui.app_xyz_input import (
@@ -595,6 +619,7 @@ from quantui.config import (
     SUPPORTED_BASIS_SETS,
     SUPPORTED_METHODS,
 )
+from quantui.downloads import download_link_html as _download_link_html
 from quantui.engines import is_pyfock_available as _is_pyfock_available
 from quantui.engines import is_pyscf_available as _is_pyscf_available
 from quantui.freq_ir_workers import (
@@ -1439,6 +1464,21 @@ class QuantUIApp:
         files_tab_panel: Any
         _files_entries: Any
         _files_open_btn: Any
+        _files_download_btn: Any
+        _files_load_btn: Any
+        _files_download_html: Any
+        _download_html: Any
+        structure_upload: Any
+        frozen_atoms_txt: Any
+        _edit_accordion: Any
+        _edit_atoms_txt: Any
+        _edit_value: Any
+        _edit_msg: Any
+        _edit_pick_inbox: Any
+        _edit_undo_stack: Any
+        _edit_element_txt: Any
+        _edit_current_html: Any
+        upload_msg: Any
         _files_path_html: Any
         _files_preview_output: Any
         _files_refresh_btn: Any
@@ -1573,6 +1613,23 @@ class QuantUIApp:
         _iso_colors_dd: Any
         _iso_export_cube_btn: Any
         _iso_isovalue_slider: Any
+        _iso_surface_dd: Any
+        _vib_amp_slider: Any
+        _vib_arrows_cb: Any
+        _vib_mode_table: Any
+        _thermo_T: Any
+        _thermo_P: Any
+        _thermo_html: Any
+        _thermo_box: Any
+        _iso_esp_range_slider: Any
+        _iso_esp_legend: Any
+        _orb_spin_toggle: Any
+        _orb_gallery_btn: Any
+        _orb_gallery_span_dd: Any
+        _orb_gallery_box: Any
+        _orb_gallery_output: Any
+        _last_orb_mo_energy: Any
+        _gallery_token: int
         _iso_opacity_slider: Any
         _iso_wireframe_cb: Any
         _iso_resolution_dd: Any
@@ -1632,6 +1689,8 @@ class QuantUIApp:
         _reorg_overlay_pair: Any
         _reorg_exaggerate: Any
         _reorg_mode_dd: Any
+        _ts_fmax_fi: Any
+        _ts_note: Any
         _reorg_export_btn: Any
         _reorg_export_status: Any
         _reorg_png_inbox: Any
@@ -1789,6 +1848,7 @@ class QuantUIApp:
         # ``_apply_analysis_context`` resets these between contexts so stale
         # state from a prior calc cannot leak into the next molecule.
         self._last_orb_mo_coeff: Any = None
+        self._last_orb_mo_energy: Any = None
         self._last_orb_mo_occ: Any = None
         self._last_orb_mol_atom: Any = None
         self._last_orb_mol_basis: Any = None
@@ -2290,13 +2350,25 @@ class QuantUIApp:
 
     _PANEL_META: ClassVar[list] = [
         ("Energies", "_orb_accordion", "Single Point / Geometry Opt"),
-        ("Populations", "_mulliken_accordion", "Single Point / Geometry Opt"),
-        ("Trajectory", "traj_accordion", "Geometry Opt / PES Scan / Frequency pre-opt"),
-        ("Vibrational", "vib_accordion", "Frequency"),
-        ("IR Spectrum", "_ir_accordion", "Frequency"),
+        (
+            "Populations",
+            "_mulliken_accordion",
+            "Single Point / Geometry Opt / Frequency / UV-Vis",
+        ),
+        (
+            "Trajectory",
+            "traj_accordion",
+            "Geometry Opt / Transition State / PES Scan / Frequency pre-opt",
+        ),
+        ("Vibrational", "vib_accordion", "Frequency / Transition State"),
+        ("IR Spectrum", "_ir_accordion", "Frequency / Transition State"),
         ("Raman Spectrum", "_raman_accordion", "Frequency"),
         ("PES Scan", "_pes_scan_accordion", "PES Scan"),
-        ("Isosurface", "_iso_accordion", "Single Point (Linux/WSL only)"),
+        (
+            "Isosurface",
+            "_iso_accordion",
+            "Single Point / Geometry Opt / Frequency / UV-Vis (Linux/WSL only)",
+        ),
         ("Geometries", "_reorg_geom_accordion", "Reorganization Energy"),
         ("UV-Vis", "_tddft_accordion", "UV-Vis (TD-DFT)"),
         ("NMR", "_nmr_accordion", "NMR Shielding"),
@@ -2341,10 +2413,29 @@ class QuantUIApp:
             ("IR Spectrum", "_pop_ir_spectrum", True),
             ("Raman Spectrum", "_pop_raman_spectrum", False),
             ("Trajectory", "_pop_preopt_trajectory", False),
+            # Energies loads the orbital state Isosurface checks, so it stays
+            # ahead of it (see geometry_opt). ISSUE.19 #6 added the last two.
             ("Energies", "_pop_energies", True),
+            ("Isosurface", "_pop_isosurface", False),
+            ("Populations", "_pop_mulliken", False),
+        ],
+        # M-TS TS.2: the frequency check carries the modes; Vibrational opens
+        # first so the imaginary mode can be animated straight away. Energies
+        # precedes Isosurface (it loads the orbital state Isosurface checks).
+        "transition_state": [
+            ("Vibrational", "_pop_vibrational", True),
+            ("IR Spectrum", "_pop_ir_spectrum", False),
+            ("Trajectory", "_pop_geo_trajectory", False),
+            ("Energies", "_pop_energies", False),
+            ("Isosurface", "_pop_isosurface", False),
+            ("Populations", "_pop_mulliken", False),
         ],
         "tddft": [
             ("UV-Vis", "_pop_uv_vis", True),
+            # Ground-state analysis of the reference SCF (ISSUE.19 #6).
+            ("Energies", "_pop_energies", False),
+            ("Isosurface", "_pop_isosurface", False),
+            ("Populations", "_pop_mulliken", False),
         ],
         "nmr": [
             ("NMR", "_pop_nmr_shielding", True),
@@ -2613,6 +2704,12 @@ class QuantUIApp:
         )
         self.lib_results_dd.observe(self._safe_cb(self._on_lib_select), names="value")
         self.xyz_btn.on_click(self._on_load_xyz)
+        from quantui.app_structure_edit import wire_edit_widgets
+
+        wire_edit_widgets(self)
+        self.structure_upload.observe(
+            self._safe_cb(lambda c: _xyz_on_structure_upload(self, c)), names="value"
+        )
         self.xyz_add_atom_btn.on_click(self._on_xyz_add_atom)
         self.xyz_fill_table_btn.on_click(self._on_xyz_fill_table)
         self.xyz_apply_table_btn.on_click(self._on_xyz_apply_table)
@@ -2821,6 +2918,8 @@ class QuantUIApp:
             self._safe_cb(self._on_files_entry_changed), names="value"
         )
         self._files_open_btn.on_click(self._on_files_open)
+        self._files_download_btn.on_click(self._safe_cb(self._on_files_download))
+        self._files_load_btn.on_click(self._safe_cb(self._on_files_load))
         self._files_up_btn.on_click(self._on_files_up)
         self._files_refresh_btn.on_click(self._on_files_refresh)
         # Issue reporting
@@ -2866,6 +2965,7 @@ class QuantUIApp:
         )
         # Orbital isosurface generate button
         self._iso_generate_btn.on_click(self._on_iso_generate)
+        self._orb_gallery_btn.on_click(self._on_orbital_gallery)
         # Reveal the free-entry MO-index input only in "By index" mode.
         self._orb_toggle.observe(
             self._safe_cb(self._on_orb_toggle_changed), names="value"
@@ -2941,10 +3041,29 @@ class QuantUIApp:
             self._iso_opacity_slider,
             self._iso_wireframe_cb,
             self._iso_colors_dd,
+            self._iso_esp_range_slider,
             # NOT _iso_png_transparent: it is an export-only option, applied at
             # capture time. Observing it here would change the live viewer.
         ):
             _w.observe(self._safe_cb(self._on_iso_appearance_changed), names="value")
+        # Vibration amplitude / arrows / thermochemistry T-P (live updates).
+        self._vib_amp_slider.observe(
+            self._safe_cb(lambda c: _viz_on_vib_amplitude_changed(self, c)),
+            names="value",
+        )
+        self._vib_arrows_cb.observe(
+            self._safe_cb(lambda c: _viz_on_vib_arrows_changed(self, c)),
+            names="value",
+        )
+        for _w in (self._thermo_T, self._thermo_P):
+            _w.observe(
+                self._safe_cb(lambda c: _viz_on_thermo_inputs_changed(self, c)),
+                names="value",
+            )
+        # M-SURFACES: surface type switches which controls apply.
+        self._iso_surface_dd.observe(
+            self._safe_cb(self._on_iso_surface_changed), names="value"
+        )
         self._export_bundle_btn.on_click(self._on_export_bundle)
 
     # ── Files tab ────────────────────────────────────────────────────────
@@ -2997,6 +3116,45 @@ class QuantUIApp:
         if size_bytes < 1024 * 1024:
             return f"{size_bytes / 1024:.1f} KB"
         return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+    def _sync_files_action_buttons(self) -> None:
+        """Download for any selected file; Load only for structure files."""
+        from quantui.structure_upload import SUPPORTED_SUFFIXES
+
+        path = self._files_selected_path
+        is_file = path is not None and path.is_file()
+        self._files_download_btn.disabled = not is_file
+        self._files_load_btn.disabled = not (
+            is_file and path is not None and path.suffix.lower() in SUPPORTED_SUFFIXES
+        )
+        self._files_download_html.value = ""
+
+    def _on_files_download(self, _btn) -> None:
+        """Offer the selected file as a browser download (remote-safe)."""
+        from quantui.downloads import download_link_html
+
+        path = self._files_selected_path
+        if path is None or not path.is_file():
+            self._set_files_status("Select a file first.")
+            return
+        self._files_download_html.value = download_link_html(path)
+
+    def _on_files_load(self, _btn) -> None:
+        """Load the selected structure file into Calculate."""
+        from quantui.app_xyz_input import load_structure_bytes
+
+        path = self._files_selected_path
+        if path is None or not path.is_file():
+            self._set_files_status("Select a structure file first.")
+            return
+        try:
+            msg = load_structure_bytes(self, path.name, path.read_bytes())
+        except ValueError as exc:
+            self._set_files_status(f"⚠ {exc}", _theme.css.ACCENT_ERROR)
+            return
+        self._set_files_status(
+            msg.replace("<br>• ", " ") + " Open the Calculate tab to run it."
+        )
 
     def _set_files_status(
         self, message: str, color: str = _theme.css.TEXT_SLATE
@@ -3064,6 +3222,7 @@ class QuantUIApp:
                 "Current folder: unavailable</span>"
             )
             self._files_open_btn.disabled = True
+            self._sync_files_action_buttons()
             self._files_up_btn.disabled = True
             self._set_files_status(
                 "No readable roots available.", _theme.css.ACCENT_ERROR
@@ -3107,6 +3266,7 @@ class QuantUIApp:
             self._files_entries.value = ""
             self._files_selected_path = None
             self._files_open_btn.disabled = True
+            self._sync_files_action_buttons()
             self._files_up_btn.disabled = True
             self._files_preview_output.clear_output(wait=True)
             return
@@ -3130,6 +3290,7 @@ class QuantUIApp:
             self._files_entries.value = ""
             self._files_selected_path = None
             self._files_open_btn.disabled = True
+            self._sync_files_action_buttons()
             self._files_up_btn.disabled = True
             self._files_preview_output.clear_output(wait=True)
             self._set_files_status(
@@ -3167,6 +3328,7 @@ class QuantUIApp:
 
         self._files_selected_path = Path(new_selection) if new_selection else None
         self._files_open_btn.disabled = self._files_selected_path is None
+        self._sync_files_action_buttons()
 
         _parent = current.parent
         self._files_up_btn.disabled = (
@@ -3510,6 +3672,7 @@ class QuantUIApp:
         new_value = str(change.get("new") or "")
         self._files_selected_path = Path(new_value) if new_value else None
         self._files_open_btn.disabled = self._files_selected_path is None
+        self._sync_files_action_buttons()
         if self._files_selected_path is None:
             self._set_files_status("Select a folder or file.")
             return
@@ -3663,7 +3826,13 @@ class QuantUIApp:
         if self._molecule is None or _render_molecule_html is None:
             return
         backend_to_use = backend if backend is not None else self._viz_backend
-        show_atom_indices = self.calc_type_dd.value == "PES Scan"
+        from quantui.app_structure_edit import (
+            editing_active,
+            finalize_edit_calc_html,
+        )
+
+        _editing = editing_active(self)
+        show_atom_indices = _editing or self.calc_type_dd.value == "PES Scan"
         html = _render_molecule_html(
             self._molecule,
             backend=backend_to_use,
@@ -3673,7 +3842,9 @@ class QuantUIApp:
             capture_class=_MOL_CALC_PNG_INBOX_CLASS,
             show_atom_indices=show_atom_indices,
         )
-        if show_atom_indices and str(backend_to_use) == "py3dmol":
+        if _editing:
+            html = finalize_edit_calc_html(self, html, backend_to_use)
+        elif show_atom_indices and str(backend_to_use) == "py3dmol":
             from quantui.app_pes_pick import finalize_pes_calc_html
 
             html = finalize_pes_calc_html(self, html, backend_to_use)
@@ -4066,6 +4237,7 @@ class QuantUIApp:
         calc_type_labels = {
             "single_point": "Single Point",
             "geometry_opt": "Geometry Opt",
+            "transition_state": "Transition State",
             "frequency": "Frequency",
             "tddft": "UV-Vis (TD-DFT)",
             "nmr": "NMR Shielding",
@@ -4592,6 +4764,9 @@ class QuantUIApp:
     def _on_iso_appearance_changed(self, change) -> None:
         _viz_on_iso_appearance_changed(self, change)
 
+    def _on_iso_surface_changed(self, change) -> None:
+        _viz_on_iso_surface_changed(self, change)
+
     def _on_orb_png_captured(self, change) -> None:
         _exp_on_orb_png_captured(self, change)
 
@@ -4762,7 +4937,7 @@ class QuantUIApp:
 
         status.value = (
             f'<span style="color:{_theme.css.ACCENT_SUCCESS};font-size:12px">'
-            f"Saved ({backend}): {dest}</span>"
+            f"Saved ({backend}): {dest}</span> " + _download_link_html(dest)
         )
         try:
             _calc_log.log_event(
@@ -4848,7 +5023,8 @@ class QuantUIApp:
             if status is not None:
                 status.value = (
                     f'<span style="color:{_theme.css.ACCENT_SUCCESS_ALT};font-size:12px">'
-                    f"Saved minimum geometry: {dest.name}</span>"
+                    f"Saved minimum geometry: {dest.name}</span> "
+                    + _download_link_html(dest)
                 )
         except Exception as exc:
             if status is not None:
@@ -4905,7 +5081,7 @@ class QuantUIApp:
 
             status_widget.value = (
                 f'<span style="color:{_theme.css.ACCENT_SUCCESS};font-size:12px">'
-                f"Saved: {dest}</span>"
+                f"Saved: {dest}</span> " + _download_link_html(dest)
             )
         except Exception as exc:
             msg = str(exc)
@@ -5035,7 +5211,7 @@ class QuantUIApp:
         status_widget.value = (
             f'<span style="color:{_theme.css.ACCENT_SUCCESS};font-size:12px">'
             f"Saved CSV: {dest} &mdash; copied to clipboard"
-            "</span>"
+            "</span> " + _download_link_html(dest)
         )
 
     def _on_ir_copy_data(self, _btn) -> None:
@@ -5364,13 +5540,42 @@ class QuantUIApp:
             if label
             else ""
         )
+        # Point group (M-CHEM CHEM.1) — informational; skipped for very
+        # large structures and when PySCF is unavailable.
+        _pg_str = ""
+        if len(mol.atoms) <= 200:
+            try:
+                from quantui.symmetry import point_group_of_molecule
+
+                _pg = point_group_of_molecule(mol)
+                if _pg is not None:
+                    _pg_str = f" &bull; point group {_pg.summary_html()}"
+            except Exception:  # noqa: BLE001 — informational only
+                _pg_str = ""
+        # Disconnected structure (ISSUE.19 #9): checked for every source, not
+        # only Online Search results; worded neutrally since a dimer or ion
+        # pair can be deliberate.
+        _frag_str = ""
+        if len(mol.atoms) <= 500:
+            try:
+                from quantui.connectivity import disconnection_note
+
+                _note = disconnection_note(mol.atoms, mol.coordinates)
+                if _note:
+                    _frag_str = (
+                        f'<br><span style="color:{_theme.css.ACCENT_WARNING};'
+                        f'font-size:12px">⚠ {_html.escape(_note)}</span>'
+                    )
+            except Exception:  # noqa: BLE001 — informational only
+                _frag_str = ""
         _summary = (
             f'<b style="font-size:15px">{mol.get_formula()}</b>'
             f'&ensp;<span style="color:{_theme.css.TEXT_SECONDARY};font-size:13px">'
             f"{len(mol.atoms)} atoms"
             + (f" &bull; {e_str}" if e_str else "")
             + f" &bull; charge {mol.charge} &bull; mult {mol.multiplicity}"
-            + f"</span>{_lbl}"
+            + _pg_str
+            + f"</span>{_frag_str}{_lbl}"
         )
         self.mol_info_html.value = _summary
         self.mol_summary_compact.value = (
@@ -5661,6 +5866,9 @@ class QuantUIApp:
 
     def _on_iso_generate(self, btn) -> None:
         _viz_on_iso_generate(self, btn)
+
+    def _on_orbital_gallery(self, btn=None) -> None:
+        _viz_on_orbital_gallery(self, btn)
 
     def _on_orb_toggle_changed(self, change) -> None:
         """Show/hide the free-entry MO-index input for the 'By index' mode."""
@@ -5960,6 +6168,9 @@ class QuantUIApp:
             calc_mol = mol
 
             ct = self.calc_type_dd.value
+            # PCM solvent for this run (None = gas phase). The checkbox is
+            # disabled for calc types without solvent support.
+            _run_solvent = self.solvent_dd.value if self.solvent_cb.value else None
             result: Any = None
             result_html: str = ""
             save_spectra: dict = {}
@@ -5997,6 +6208,7 @@ class QuantUIApp:
                         method=self.method_dd.value,
                         basis=self.basis_dd.value,
                         progress_stream=log,  # type: ignore[arg-type]
+                        solvent=_run_solvent,
                     )
                     calc_mol = _pre_opt.molecule
                     _conv_str = (
@@ -6077,9 +6289,11 @@ class QuantUIApp:
                             "resume": _resume,
                             "scf_rescue": True,
                             "use_gpu": bool(self._user_settings.compute.gpu_enabled),
+                            "frozen_atoms": _run_frozen_atoms(self),
                         },
                         progress_stream=log,  # type: ignore[arg-type]
                         checkpoint=_ckpt,
+                        solvent=_run_solvent,
                     ),
                     preferred=cast(
                         EnginePreference,
@@ -6132,6 +6346,51 @@ class QuantUIApp:
                 result.engine_id = getattr(_sp_result, "engine_id", result.engine_id)
                 result_html = self._format_opt_result(result)
                 save_spectra, save_type = {}, "geometry_opt"
+            elif ct == "Transition State":
+                from quantui.ts_search import run_ts_search
+
+                self.run_status.value = "Searching for a transition state…"
+                result = run_ts_search(
+                    calc_mol,
+                    self.method_dd.value,
+                    self.basis_dd.value,
+                    fmax=float(self._ts_fmax_fi.value),
+                    steps=int(self.max_steps_si.value),
+                    progress_stream=log,  # type: ignore[arg-type]
+                    solvent=_run_solvent,
+                    cancel_check=self._cancel_event.is_set,
+                )
+                # Everything downstream (viewer, saved geometry, Vibrational
+                # panel) describes the stationary point that was found.
+                calc_mol = result.molecule
+                result_html = self._format_ts_result(result)
+                _ts_disp = None
+                if result.displacements is not None:
+                    try:
+                        import numpy as _np_ts
+
+                        _ts_disp = _np_ts.asarray(result.displacements).tolist()
+                    except Exception:  # noqa: BLE001 — modes are optional
+                        _ts_disp = None
+                save_spectra = {
+                    "ir": {
+                        "frequencies_cm1": list(result.frequencies_cm1 or []),
+                        "ir_intensities": list(result.ir_intensities or []),
+                        "raman_activities": list(result.raman_activities or []),
+                        "zpve_hartree": result.zpve_hartree,
+                        "displacements": _ts_disp,
+                    },
+                    "molecule": {
+                        "atoms": list(calc_mol.atoms),
+                        "coords": [
+                            list(map(float, row)) for row in calc_mol.coordinates
+                        ],
+                        "charge": calc_mol.charge,
+                        "multiplicity": calc_mol.multiplicity,
+                    },
+                    "transition_state": result.to_spectra(),
+                }
+                save_type = "transition_state"
             elif ct == "Frequency":
                 from quantui.freq_calc import run_freq_calc
 
@@ -6166,6 +6425,7 @@ class QuantUIApp:
                             method=self.method_dd.value,
                             basis=self.basis_dd.value,
                             progress_stream=log,  # type: ignore[arg-type]
+                            solvent=_run_solvent,
                         )
                         calc_mol = _pre_opt.molecule
                         _conv_str = (
@@ -6195,6 +6455,15 @@ class QuantUIApp:
                         )
 
                 # ── Step 3: frequency analysis ────────────────────────────────
+                if _run_solvent and not self._freq_preopt_cb.value:
+                    log.write(
+                        f"\nNote: PCM ({_run_solvent}) frequencies are only "
+                        "meaningful at a geometry optimized in the same "
+                        "solvent. If this geometry came from a gas-phase "
+                        "optimization, expect shifted or small imaginary "
+                        "modes; tick 'Geometry optimization before "
+                        "calculation' to optimize in solvent first.\n"
+                    )
                 self.run_status.value = "Computing frequencies (SCF + Hessian)…"
                 result = run_freq_calc(
                     molecule=calc_mol,
@@ -6210,6 +6479,7 @@ class QuantUIApp:
                     # resumed here.
                     checkpoint=_ckpt,
                     resume=_resume,
+                    solvent=_run_solvent,
                 )
                 result_html = self._format_freq_result(result)
                 _displacements_serialized = None
@@ -6230,12 +6500,18 @@ class QuantUIApp:
                         "S_jmol": _thermo.S_jmol,
                         "G_hartree": _thermo.G_hartree,
                         "temperature_k": _thermo.temperature_k,
+                        "E_thermal_hartree": getattr(
+                            _thermo, "E_thermal_hartree", None
+                        ),
+                        "Cv_jmolk": getattr(_thermo, "Cv_jmolk", None),
+                        "Cp_jmolk": getattr(_thermo, "Cp_jmolk", None),
+                        "symmetry_number": getattr(_thermo, "symmetry_number", None),
                         # AUDIT F18 — the temperature was already tracked on
                         # ThermoData; pressure and the model itself were not,
                         # and neither survived a save. Both are fixed by the
                         # harmonic-oscillator/rigid-rotor/ideal-gas model at
                         # 1 atm used throughout freq_calc.py's thermo block.
-                        "pressure_atm": 1.0,
+                        "pressure_atm": getattr(_thermo, "pressure_atm", 1.0),
                         "approximation": "ideal_gas_rigid_rotor_harmonic_oscillator",
                     }
                     if _thermo is not None
@@ -6301,6 +6577,7 @@ class QuantUIApp:
                             method=self.method_dd.value,
                             basis=self.basis_dd.value,
                             progress_stream=log,  # type: ignore[arg-type]
+                            solvent=_run_solvent,
                         )
                         calc_mol = _pre_opt.molecule
                         _conv_str = (
@@ -6335,6 +6612,7 @@ class QuantUIApp:
                     basis=self.basis_dd.value,
                     nstates=self.nstates_si.value,
                     progress_stream=log,  # type: ignore[arg-type]
+                    solvent=_run_solvent,
                 )
                 result_html = self._format_tddft_result(result)
                 save_spectra = {
@@ -6546,6 +6824,12 @@ class QuantUIApp:
                     'margin:6px 0 2px">Optimized neutral geometry</p>'
                 )
                 self._viz_label.layout.display = ""
+            elif ct == "Transition State":
+                self._viz_label.value = (
+                    f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:12px;font-weight:600;'
+                    'margin:6px 0 2px">Stationary point found (see verdict)</p>'
+                )
+                self._viz_label.layout.display = ""
             self._queue_main_thread_callback(
                 self._show_result_3d,
                 _viz_mol,
@@ -6624,10 +6908,10 @@ class QuantUIApp:
                 _ana_ctx.result_dir = _saved_dir
                 _ana_ctx.timestamp = str(_saved_data.get("timestamp", ""))
                 # Persist trajectory so history viewer can replay it.
-                if ct in ("Geometry Opt", "PES Scan"):
+                if ct in ("Geometry Opt", "Transition State", "PES Scan"):
                     _traj = getattr(
                         result,
-                        "trajectory" if ct == "Geometry Opt" else "coordinates_list",
+                        "coordinates_list" if ct == "PES Scan" else "trajectory",
                         None,
                     )
                     _e_list = getattr(result, "energies_hartree", [])
@@ -6671,7 +6955,13 @@ class QuantUIApp:
                             filename="preopt_trajectory.json",
                         )
                 # Persist MO data for orbital diagram + isosurface replay.
-                if ct in ("Single Point", "Geometry Opt", "Frequency"):
+                if ct in (
+                    "Single Point",
+                    "Geometry Opt",
+                    "Transition State",
+                    "Frequency",
+                    "UV-Vis (TD-DFT)",
+                ):
                     save_orbitals(_saved_dir, result)
                 # Write a Molden-format companion
                 # file so users can open results in Avogadro / IQmol /
@@ -6679,8 +6969,14 @@ class QuantUIApp:
                 # outer try block above and the calc still completes.
                 # For SP / GeoOpt this writes orbitals + structure; for
                 # Frequency it writes structure + [FREQ] / [FR-NORM-COORD]
-                # blocks so Avogadro can animate vibrations directly.
-                if ct in ("Single Point", "Geometry Opt", "Frequency"):
+                # blocks so Avogadro can animate vibrations directly
+                # (for a Transition State, including the imaginary mode).
+                if ct in (
+                    "Single Point",
+                    "Geometry Opt",
+                    "Transition State",
+                    "Frequency",
+                ):
                     try:
                         from quantui.results_storage import (
                             save_molden as _save_molden,
@@ -7519,6 +7815,9 @@ class QuantUIApp:
 
     def _format_freq_result(self, r) -> str:
         return _fmt_freq_result(r)
+
+    def _format_ts_result(self, r) -> str:
+        return _fmt_ts_result(r)
 
     def _format_tddft_result(self, r) -> str:
         return _fmt_tddft_result(r)

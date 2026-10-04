@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html as _html_mod
 import types as _types_mod
+from pathlib import Path
 from typing import Any, Optional
 
 import ipywidgets as widgets
@@ -232,8 +233,18 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     # to activate re-sets these in show_orbital_diagram.
     app._last_orb_info = None
     app._last_orb_mo_coeff = None
+    app._last_orb_mo_energy = None
     app._last_orb_mo_occ = None
     app._last_orb_method = None
+    # A gallery belongs to the previous result: clear it, and drop any build
+    # still running for it (SURF.1).
+    app._gallery_token = int(getattr(app, "_gallery_token", 0)) + 1
+    _gallery_out = getattr(app, "_orb_gallery_output", None)
+    if _gallery_out is not None:
+        try:
+            app._set_html_output(_gallery_out, "")
+        except Exception:  # noqa: BLE001 — never block a context switch
+            pass
     app._last_orb_engine_id = "pyscf"
     # Mulliken state consumed by the Populations panel — reset so a context
     # without charges cannot leak the prior calc's chart into this one.
@@ -659,8 +670,31 @@ def pop_vibrational(app: Any, ctx: Any) -> bool:
             frequencies_cm1=freqs,
             ir_intensities=ints,
             displacements=disps,
+            raman_activities=ir.get("raman_activities") or [],
         )
-    return bool(app._show_vib_animation(freq_stub, mol))
+    shown = bool(app._show_vib_animation(freq_stub, mol))
+    if shown:
+        _show_thermochemistry(app, ctx, freq_stub, mol)
+    return shown
+
+
+def _show_thermochemistry(app: Any, ctx: Any, freq_stub: Any, mol: Any) -> None:
+    """Thermochemistry box: needs the SCF energy, live or from result.json."""
+    from quantui.app_visualization import show_thermo_box
+
+    energy = getattr(ctx.live_result, "energy_hartree", None)
+    if energy is None and ctx.result_dir is not None:
+        try:
+            import json as _json
+
+            data = _json.loads((Path(ctx.result_dir) / "result.json").read_text())
+            energy = data.get("energy_hartree")
+        except Exception:  # noqa: BLE001 — the box just stays hidden
+            energy = None
+    try:
+        show_thermo_box(app, mol, energy, getattr(freq_stub, "frequencies_cm1", None))
+    except Exception:  # noqa: BLE001 — informational panel
+        pass
 
 
 def pop_ir_spectrum(app: Any, ctx: Any) -> bool:
@@ -688,9 +722,18 @@ def pop_raman_spectrum(app: Any, ctx: Any) -> bool:
         freqs = ir.get("frequencies_cm1")
         if not freqs:
             return False
+        solvent = None
+        if ctx.result_dir is not None:
+            try:
+                from quantui import load_result
+
+                solvent = load_result(ctx.result_dir).get("solvent")
+            except Exception:  # noqa: BLE001 — only used for the explanation
+                solvent = None
         freq_stub = _types_mod.SimpleNamespace(
             frequencies_cm1=freqs,
             raman_activities=ir.get("raman_activities") or [],
+            solvent=solvent,
         )
     return bool(app._show_raman_spectrum(freq_stub))
 

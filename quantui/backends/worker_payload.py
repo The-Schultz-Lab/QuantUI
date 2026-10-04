@@ -96,6 +96,7 @@ def session_result_payload(result) -> Dict[str, Any]:
         "cc_converged": getattr(result, "cc_converged", None),
         "dispersion_applied": getattr(result, "dispersion_applied", None),
         "solvent": getattr(result, "solvent", None),
+        "spin_square": getattr(result, "spin_square", None),
         "gpu_used": bool(getattr(result, "gpu_used", False)),
         "gpu_name": getattr(result, "gpu_name", None),
         "density_fit": bool(getattr(result, "density_fit", False)),
@@ -119,7 +120,23 @@ def optimization_result_payload(result, *, trajectory_file: str) -> Dict[str, An
         "formula": result.formula,
         "gpu_used": bool(getattr(result, "gpu_used", False)),
         "gpu_name": getattr(result, "gpu_name", None),
+        "solvent": getattr(result, "solvent", None),
         "trajectory_file": trajectory_file,
+    }
+
+
+def _ground_state_fields(result) -> Dict[str, Any]:
+    """Populations / dipole / ⟨S²⟩ of the reference SCF (ISSUE.19 #6).
+
+    For Frequency and TD-DFT payloads; ``_basic_result`` on ingest reads the
+    same keys as for a single point.
+    """
+    return {
+        "atom_symbols": getattr(result, "atom_symbols", None),
+        "mulliken_charges": getattr(result, "mulliken_charges", None),
+        "dipole_moment_debye": getattr(result, "dipole_moment_debye", None),
+        "dipole_vector_debye": getattr(result, "dipole_vector_debye", None),
+        "spin_square": getattr(result, "spin_square", None),
     }
 
 
@@ -140,10 +157,14 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
             "S_jmol": _thermo.S_jmol,
             "G_hartree": _thermo.G_hartree,
             "temperature_k": _thermo.temperature_k,
+            "E_thermal_hartree": getattr(_thermo, "E_thermal_hartree", None),
+            "Cv_jmolk": getattr(_thermo, "Cv_jmolk", None),
+            "Cp_jmolk": getattr(_thermo, "Cp_jmolk", None),
+            "symmetry_number": getattr(_thermo, "symmetry_number", None),
             # AUDIT F18 — pressure and the thermo model itself were never
             # recorded anywhere; both are fixed by the harmonic-oscillator/
             # rigid-rotor/ideal-gas model at 1 atm used in freq_calc.py.
-            "pressure_atm": 1.0,
+            "pressure_atm": getattr(_thermo, "pressure_atm", 1.0),
             "approximation": "ideal_gas_rigid_rotor_harmonic_oscillator",
         }
         if _thermo is not None
@@ -162,6 +183,8 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
         "scf_variant": getattr(result, "scf_variant", "") or None,
         # AUDIT F12 — was never serialized, though FreqResult carries it.
         "density_fit": bool(getattr(result, "density_fit", False)),
+        "solvent": getattr(result, "solvent", None),
+        **_ground_state_fields(result),
         "spectra": {
             "ir": {
                 "frequencies_cm1": list(result.frequencies_cm1),
@@ -199,6 +222,7 @@ def tddft_result_payload(result) -> Dict[str, Any]:
         "scf_variant": getattr(result, "scf_variant", "") or None,
         # AUDIT F12 — was never serialized, though TDDFTResult carries it.
         "density_fit": bool(getattr(result, "density_fit", False)),
+        "solvent": getattr(result, "solvent", None),
         # AUDIT F08 (code review follow-up) — per-root convergence detail
         # never left the worker process; a SLURM-submitted TDDFT run's
         # History card could show only the folded "converged" bool, never
@@ -210,6 +234,7 @@ def tddft_result_payload(result) -> Dict[str, Any]:
             else None
         ),
         "n_converged_states": getattr(result, "n_converged_states", None),
+        **_ground_state_fields(result),
         "spectra": {
             "uv_vis": {
                 "excitation_energies_ev": list(result.excitation_energies_ev),
@@ -272,6 +297,8 @@ def pes_scan_result_payload(result, *, trajectory_file: str) -> Dict[str, Any]:
 
 
 def reorg_result_payload(result) -> Dict[str, Any]:
+    from quantui.reorganization_energy import s2_fields
+
     neutral = molecule_to_dict(result.molecule)
     channels = []
     for ch in result.channels:
@@ -287,6 +314,7 @@ def reorg_result_payload(result) -> Dict[str, Any]:
             "lambda2_hartree": ch.lambda2_hartree,
             "lambda_hartree": ch.lambda_hartree,
             "converged": ch.converged,
+            **s2_fields(ch),
         }
         if ch.ion_molecule is not None:
             entry["ion_geometry"] = molecule_to_dict(ch.ion_molecule)
@@ -338,6 +366,9 @@ def write_analysis_artifacts(
         save_trajectory_xyz,
     )
 
+    if calc_type == "tddft":
+        # Ground-state orbitals only (ISSUE.19 #6): Energies / Isosurface.
+        save_orbitals(staging_dir, result)
     if calc_type in ("single_point", "geometry_opt", "frequency"):
         save_orbitals(staging_dir, result)
         try:

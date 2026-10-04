@@ -26,6 +26,165 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   activity-light timer fall back to running inline when threads are
   unavailable instead of leaving the panel stuck.
 
+## [0.10.0] - 2026-10-03
+
+### Added
+
+- **Upload structure files** — new **Upload File** tab (Calculate → Molecule
+  Input) and **Load as molecule** on the Files tab: XYZ (last frame), MOL,
+  SDF, MOL2, PDB, CIF, Gaussian `.gjf`/`.com` and `.log`/`.out`. Charge and
+  multiplicity are read from the file when it records them; 2-D MOL/SDF
+  drawings are embedded in 3-D.
+- **Download to your computer** — every export (structure files, script,
+  bundle, cubes, PNGs, plots, CSV, animations) now offers a browser download
+  link, and the Files tab has a **Download** button. Works on remote
+  Voilà/OnDemand sessions; files over 25 MB get a notice instead.
+- **Implicit solvent for optimizations, frequencies and TD-DFT** — Geometry
+  Opt is solvated at every step; Frequency uses PySCF's PCM Hessian and
+  solvated IR displacements (Raman is skipped in solvent); TD-DFT uses an
+  equilibrium ground state and non-equilibrium excitations with each
+  solvent's own optical dielectric. Also in SLURM batch jobs.
+- **Point groups and orbital symmetry labels** — the molecule summary and
+  result cards show the point group (0.01 Å tolerance, with a "nearly X"
+  hint); the orbital energy diagram labels orbitals textbook-style
+  (1a₁, 2a₁, 1b₂, 3a₁, 1b₁ for water; σ/π for linear molecules; C₃ᵥ labels
+  for NH₃).
+- **Density, spin-density and ESP surfaces** — the Isosurface panel draws the
+  electron density, the spin density (α − β) and the electrostatic potential
+  mapped on the density surface (red = negative, blue = positive, with a
+  colour bar), and α/β orbitals for unrestricted results.
+- **Vibration viewer** — displacement arrows, an amplitude slider and a table
+  of every mode with IR intensity and Raman activity.
+- **Thermochemistry at any temperature and pressure** — recomputed from the
+  stored frequencies (no new calculation), with U, H, S, G, Cv, Cp and the
+  rotational symmetry number.
+- **Edit Structure** — set a bond length, angle or dihedral to a value,
+  delete atoms, add a hydrogen, change an element, undo; pick atoms by
+  clicking the viewer. **Freeze atoms** for a constrained Geometry Opt.
+- **Orbital gallery** — the Isosurface panel's **Orbital gallery** button
+  shows the orbitals around the HOMO–LUMO gap (2, 3 or 4 on each side) as
+  small viewers that rotate together, each labelled with its symmetry and
+  energy; follows the α/β choice for unrestricted results.
+- **Transition State calc type** — searches for the saddle point near the
+  input geometry with Sella (starting from the analytic Hessian, with the
+  same PySCF settings as an optimization: PCM, density fitting, D3, GPU, SCF
+  rescue), then runs a frequency calculation and says plainly whether it
+  found a transition state (exactly one imaginary frequency), a minimum, or
+  a higher-order saddle point. Results open on the Vibrational panel to
+  animate the imaginary mode, plus IR, search trajectory, orbitals and
+  populations. Needs the optional extra: `pip install "quantui[ts]"`.
+  Local runs only for now (not SLURM batch).
+- **Populations and Isosurface for Frequency and TD-DFT results** — both
+  record the reference SCF's Mulliken charges, dipole and orbitals (both spin
+  channels for UHF/UKS), so the Populations, Isosurface and (TD-DFT) Energies
+  panels fill for them too, locally and from SLURM. Frequency Molden files
+  now include the orbitals.
+- **⟨S²⟩ for open-shell results** — single points record and show ⟨S²⟩
+  next to the ideal S(S+1), flagged when off by more than 10 % (spin
+  contamination). Reorganization-energy results record it at all four
+  points of each channel (`s2_*` fields in `result.json`), so a
+  spin-contaminated ion SCF can be filtered out of a λ dataset.
+- **Submit from a login node with `quantui-batch`** — a standard-library
+  Python 3.6+ launcher for SSH users. It never starts the image or imports
+  QuantUI on the login node: it writes the same job folder as
+  `SlurmBackend.prepare()` (constants copied from QuantUI at install time,
+  logic held equal by tests) and calls `sbatch`; the calculation runs in the
+  image on a compute node. Install once per image, e.g.
+  `apptainer exec IMAGE quantui install-launcher /shared/bin`.
+  `quantui-batch submit mol.xyz --calc frequency --method B3LYP --basis def2-SVP`;
+  `status`, `log`, `rerun` (e.g. `--mem=64G` after running out of memory),
+  `cancel`, `estimate` and `path` follow it. At most
+  `QUANTUI_MAX_CONCURRENT_JOBS` (default 2) QuantUI jobs may be queued or
+  running per user, counted from the real queue.
+- **`quantui-batch` workflow commands** — `--preset NAME` (shared
+  `presets.json` beside the launcher, plus per-user presets); `--from JOB`
+  starts from another job's optimized geometry, waiting on it with an
+  `afterok` dependency if it is still running (the worker loads the geometry
+  at run time, `quantui/backends/batch_chain.py`); `--queue-rest` lines jobs
+  up behind the user's running ones instead of refusing them; a duplicate
+  guard (`--again` to override); `rerun --more-memory` / `--more-time`;
+  `results JOB` (energy, convergence, imaginary modes, strongest IR bands,
+  excited states, shifts); `presets`; and `check` (python, image, Slurm
+  commands, job folders and free space, presets).
+- **Every QuantUI batch job is tagged `#SBATCH --comment=quantui`**, so an
+  operator can list all of them with `squeue -o "%k"`.
+- **`quantui submit` accepts `.xyz` files** with `--calc`, `--method`,
+  `--basis`, `--charge`, `--mult`, `--solvent`, `--preopt` and repeatable
+  `--option KEY=VALUE`; an impossible charge/multiplicity is refused before
+  anything is queued. The same flags override a request JSON's values.
+- **`quantui submit --prepare-only`** writes the job folder (`request.json` +
+  `submit.slurm`) without calling `sbatch` and prints the script path. Its
+  registry record has the new non-active status `prepared`.
+
+### Changed
+
+- **The GPU image builds from the working tree, like the CPU image** —
+  `quantui-gpu.def` copies the same `%files` allowlist as `quantui.def` and
+  installs it editable, instead of a pinned PyPI release, so a GPU node runs
+  the code that was just tested. `build-gpu.sh` records the commit
+  (`git describe`) in the image's `QuantUICommit` label and
+  `/opt/build-info/quantui-commit.txt`; its `--version` flag is gone — check
+  out a release tag to build that release.
+- **Finished batch attempts reach History when the app starts**, even where
+  SLURM is unavailable (e.g. an OnDemand session), so jobs submitted from a
+  terminal show up without opening the Cluster Jobs tab.
+
+### Fixed
+
+- **PBE-D3 now includes D3** — it needed `pyscf.dftd3`, which no QuantUI
+  environment installed, so PBE-D3 ran as plain PBE (with a warning). D3
+  (zero damping) is now applied through PySCF's built-in dispersion
+  (`pyscf-dispersion`, added to the `[pyscf]` extra, the conda environment
+  and the CPU image), including in gradients and Hessians.
+- **Rotational symmetry number** — thermochemistry detected symmetry at
+  PySCF's strict tolerance, so slightly unsymmetric geometries (any
+  optimized water or ammonia) used σ = 1, overstating the entropy by R ln σ.
+  Symmetric molecules' S and G change.
+- **`quantui submit --depends-on`** accepts a request id or a SLURM job id
+  and resolves it; it used to write the request id into
+  `--dependency=afterok:` and validate nothing.
+- **"Geometry optimization before the calculation" on SLURM** — Single
+  Point and NMR batch jobs ignored the checkbox (the local run honoured it).
+- **Mode-displaced Frequency seeds are re-optimized** — picking "displace
+  along mode" as the Frequency seed disabled the pre-optimization, so the
+  frequencies were computed at a geometry that is not a stationary point.
+  The checkbox is now ticked for that seed (left on, user can untick).
+- **Reorganization Energy shows its optimizer settings** — the run used the
+  max-force and max-steps fields while they were hidden, so values left over
+  from Geometry Opt or PES Scan applied unseen.
+- **No placeholder Raman spectrum** — when Raman activities were not
+  computed (PCM run, or `pyscf-properties` missing), the Raman panel drew
+  every mode at the same height. It now says why there is no spectrum.
+- **Disconnected structures are flagged for every source** — the molecule
+  summary notes separate fragments for pasted, library, uploaded, edited and
+  History structures, not only Online Search results.
+- **Pasting a multi-frame XYZ** says what it is and how to load it, instead
+  of "Line N: not enough values".
+- **Export Script follows the calculation** — it used to write a gas-phase
+  single point whatever was set up. It now applies the selected PCM solvent
+  and density fitting, adds the Hessian + thermochemistry for Frequency and
+  the excited states (with the solvent's optical dielectric) for TD-DFT, and
+  says plainly when it covers only the SCF (Geometry Opt, NMR, PES Scan,
+  Reorganization Energy).
+- **CPU image: NMR and analytical Raman** — the image installed QuantUI
+  without the `[pyscf]` extra, so `pyscf-properties` was missing. It now
+  installs the extra, and the build fails if `pyscf.prop.nmr` or
+  `pyscf.dispersion` cannot be imported.
+- **Solvent names are case-insensitive**; an unknown solvent is an error.
+  A request with `"water"` used to run in the gas phase.
+- **Export Script** writes into the result folder instead of the server's
+  working directory.
+
+- **Solvated batch requests the worker cannot run are refused up front** —
+  `quantui submit` and `quantui-batch` reject an unknown solvent, and a
+  solvent on a calc type the batch worker runs gas-phase only (e.g. `nmr`),
+  instead of letting the job queue and then fail. The supported set now
+  lives in one place (`batch_input.SOLVENT_CALC_TYPES`).
+- **SLURM memory estimate for transition-metal complexes** —
+  `estimate_slurm_resources()` used a short element table without Mn, Co,
+  Ni, Mo and most other metals, so a metal counted as 0 electrons and the
+  memory estimate came out low. It now uses the full table.
+
 ## [0.9.0] - 2026-09-26
 
 ### Added
@@ -953,7 +1112,8 @@ Initial public scaffolding of the QuantUI package: `quantui` package with
 `calculator.py`, basic notebook launcher, Apptainer container definition,
 MIT license, and project metadata.
 
-[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.8.0...v0.8.1

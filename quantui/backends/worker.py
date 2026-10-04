@@ -8,7 +8,7 @@ Invoked from a batch script::
 Supports all QuantUI Calculate-tab calc types (see ``CALC_TYPES``).
 
 Checkpoint/resume (M-CLUSTER2 CL2.8): ``geometry_opt`` and ``pes_scan`` (plus
-any ``preopt_before_run`` step ahead of frequency/tddft/pes_scan) open a
+any ``preopt_before_run`` step ahead of another calc type) open a
 :class:`~quantui.checkpoint.Checkpoint` scoped to their own staging directory
 (``<staging_dir>/.checkpoint/``, distinct from the interactive app's
 ``~/.quantui/checkpoints``) — see :func:`_begin_worker_checkpoint`. A job
@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .base import CALC_TYPES, CalculationRequest, CalculationResult
+from .batch_input import SOLVENT_CALC_TYPES
 from .registry import JobRegistry
 from .worker_payload import (
     freq_result_payload,
@@ -50,23 +51,23 @@ logger = logging.getLogger(__name__)
 
 _SUPPORTED_CALC_TYPES = frozenset(CALC_TYPES)
 
-# AUDIT F11 (additional concern, code review) — the science APIs behind
-# most of these calc types (run_freq_calc, run_tddft_calc, run_nmr_calc,
-# run_pes_scan, optimize_geometry) don't accept a solvent argument at all,
-# so request.solvent used to be silently dropped rather than either applied
-# or rejected. These three runners actually thread request.solvent through
-# to a PCM-capable API: session_calc.run_in_session for "single_point";
-# reorganization_energy.run_reorganization_energy for
-# "reorganization_energy" (its own docstring documents the gas-phase-
-# optimization + PCM-single-point approximation); and _run_geometry_opt for
-# "geometry_opt", which mirrors the interactive app's approximation —
-# optimize gas-phase, then run a required solvated single point on the
-# final geometry (see app.py's _run_required_final_single_point) — so the
-# app_runflow.py UI, which enables the solvent checkbox for these same
-# three calc types, is never lying about what a submitted job will do.
-_SOLVENT_SUPPORTED_CALC_TYPES = frozenset(
-    {"single_point", "geometry_opt", "reorganization_energy"}
-)
+# AUDIT F11 (additional concern, code review) — a solvent on a calc type
+# whose runner ignores it must fail the request, never silently run
+# gas-phase. These runners thread request.solvent through to PCM
+# (session_calc.apply_pcm), matching the app's solvent checkbox
+# (app_runflow._SOLVENT_SUPPORTED_CALC_TYPES):
+# - single_point: run_in_session.
+# - geometry_opt: every optimization step solvated, then the same required
+#   solvated single point the app runs on the final geometry.
+# - frequency: solvated pre-opt (if requested), reference SCF, PCM Hessian
+#   and IR displacements (Raman is skipped in solvent).
+# - tddft: solvated pre-opt, ground state, non-equilibrium excitations.
+# - reorganization_energy: gas-phase optimizations + solvated single
+#   points (documented in reorganization_energy.py).
+# nmr and pes_scan stay gas-phase only (DEC-023).
+# Defined in batch_input so `quantui submit` and the quantui-batch launcher
+# can refuse a solvated request before it is queued.
+_SOLVENT_SUPPORTED_CALC_TYPES = SOLVENT_CALC_TYPES
 
 
 def _write_progress(
@@ -150,7 +151,10 @@ def _maybe_run_preopt(
     stage_label: str,
     write_preopt_trajectory: bool,
 ):
-    """Optional DFT geometry optimization before frequency / TD-DFT (mirrors ``app._do_run``)."""
+    """Optional DFT geometry optimization before the calculation (mirrors ``app._do_run``).
+
+    Used by single point, NMR, frequency, TD-DFT and PES scan.
+    """
     options = request.options or {}
     if not options.get("preopt_before_run"):
         return molecule, None
@@ -236,6 +240,7 @@ def _maybe_run_preopt(
             scf_rescue=scf_rescue,
             checkpoint=ckpt,
             resume=resumable,
+            solvent=request.solvent,
         )
         conv = "converged" if pre_opt.converged else "did NOT fully converge"
         energy = (
@@ -368,6 +373,16 @@ def _run_single_point(
     from quantui.session_calc import run_in_session
 
     molecule = molecule_from_request(request)
+    # ISSUE.19 #3 — honour "geometry optimization before the calculation",
+    # as the local run does.
+    molecule, _pre_opt = _maybe_run_preopt(
+        request,
+        molecule,
+        staging_dir,
+        log_stream,
+        stage_label="single point",
+        write_preopt_trajectory=False,
+    )
     options = request.options or {}
     scf_rescue = bool(options.get("scf_rescue", True))
     _write_progress(staging_dir, "running", "Running single-point SCF", 20.0)
@@ -392,6 +407,8 @@ def _run_geometry_opt(
     fmax = float(options.get("fmax", 0.05))
     max_steps = int(options.get("max_steps", 200))
     scf_rescue = bool(options.get("scf_rescue", True))
+    # 0-based indices held fixed (INT.8); same option name as the app sends.
+    frozen = [int(i) for i in (options.get("frozen_atoms") or [])]
     _write_progress(staging_dir, "running", "Optimizing geometry", 15.0)
 
     # M-CLUSTER2 CL2.8 — a job killed by OOM/TIMEOUT can resume close to
@@ -425,15 +442,14 @@ def _run_geometry_opt(
         scf_rescue=scf_rescue,
         checkpoint=ckpt,
         resume=resumable,
+        solvent=request.solvent,
+        frozen_atoms=frozen,
     )
 
-    # AUDIT F11 (additional concern) — mirror app.py's interactive
-    # "Geometry Opt" + solvent handling: optimize_geometry has no solvent
-    # argument, so a solvated result here means gas-phase optimization
-    # followed by a required PCM single point on the final geometry, whose
-    # energy/convergence replace the optimizer's last-step values. Without
-    # this, request.solvent for geometry_opt would either be rejected
-    # outright (AUDIT F11) or, if permitted, silently ignored.
+    # Mirror app.py's interactive "Geometry Opt" + solvent handling: the
+    # optimization itself is solvated (every step), then a required PCM
+    # single point on the final geometry supplies the orbitals, populations
+    # and final energy, exactly as the app's _run_required_final_single_point.
     if request.solvent:
         _write_progress(
             staging_dir, "running", "Running required solvated single point", 90.0
@@ -529,6 +545,7 @@ def _run_frequency(
         scf_rescue=scf_rescue,
         checkpoint=ckpt,
         resume=resumable,
+        solvent=request.solvent,
     )
     return result, molecule
 
@@ -557,6 +574,7 @@ def _run_tddft(request: CalculationRequest, staging_dir: Path, log_stream) -> An
         nstates=nstates,
         progress_stream=log_stream,
         scf_rescue=scf_rescue,
+        solvent=request.solvent,
     )
 
 
@@ -565,6 +583,14 @@ def _run_nmr(request: CalculationRequest, staging_dir: Path, log_stream) -> Any:
 
     _log_seed_context(request, staging_dir)
     molecule = molecule_from_request(request)
+    molecule, _pre_opt = _maybe_run_preopt(
+        request,
+        molecule,
+        staging_dir,
+        log_stream,
+        stage_label="NMR shielding",
+        write_preopt_trajectory=False,
+    )
     options = request.options or {}
     scf_rescue = bool(options.get("scf_rescue", True))
     _write_progress(staging_dir, "running", "Running NMR shielding (GIAO)", 15.0)
@@ -699,6 +725,13 @@ def _build_payload(
         )
         return freq_result_payload(result, molecule)
     if calc_type == "tddft":
+        write_analysis_artifacts(
+            staging_dir,
+            calc_type,
+            outcome,
+            charge=request.charge,
+            multiplicity=request.multiplicity,
+        )
         return tddft_result_payload(outcome)
     if calc_type == "nmr":
         return nmr_result_payload(outcome)
@@ -739,6 +772,38 @@ def run_worker_request(
     _append_log(staging_dir, f"Worker starting for {request.request_id} ({calc_type})")
     _write_progress(staging_dir, "running", "Starting calculation", 5.0)
 
+    # quantui-batch --from: take the starting geometry from another job's
+    # result now, at run time; that job may still have been queued when this
+    # one was submitted (see batch_chain).
+    geometry_from = (request.run_context or {}).get("geometry_from")
+    if geometry_from:
+        from .batch_chain import final_geometry
+
+        try:
+            geo = final_geometry(Path(geometry_from))
+            if list(geo["atoms"]) != list(request.molecule.get("atoms") or []):
+                raise ValueError(
+                    "its atoms differ from this job's; the job folder was changed"
+                )
+        except ValueError as exc:
+            msg = f"Could not take the starting geometry from {geometry_from}: {exc}"
+            _append_log(staging_dir, msg)
+            return _error_result(
+                request,
+                staging_dir,
+                code="EXECUTION_FAILED",
+                message=msg,
+                retryable=False,
+                save_type=calc_type,
+            )
+        request.molecule = {
+            **request.molecule,
+            "coords": [[float(c) for c in row] for row in geo["coords"]],
+        }
+        _append_log(
+            staging_dir, f"Starting geometry: final geometry of {geo['source']}"
+        )
+
     if calc_type not in _SUPPORTED_CALC_TYPES:
         msg = (
             f"Batch worker does not yet support calc_type={calc_type!r}. "
@@ -774,6 +839,24 @@ def run_worker_request(
             retryable=False,
             save_type=calc_type,
         )
+
+    # An unknown solvent name fails up front (before any pre-opt runs),
+    # instead of reaching apply_pcm mid-calculation.
+    if request.solvent:
+        from quantui.session_calc import resolve_solvent
+
+        try:
+            resolve_solvent(request.solvent)
+        except ValueError as exc:
+            _append_log(staging_dir, str(exc))
+            return _error_result(
+                request,
+                staging_dir,
+                code="VALIDATION_ERROR",
+                message=str(exc),
+                retryable=False,
+                save_type=calc_type,
+            )
 
     runners: dict[str, Callable[..., Any]] = {
         "single_point": _run_single_point,

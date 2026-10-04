@@ -1,18 +1,20 @@
 # Supported Methods
 
-Six calculation types over fourteen methods and nine basis sets, all dispatched
-through a single Calculate tab.
+Eight calculation types over fourteen methods and ten basis sets, all
+dispatched through a single Calculate tab.
 
 ## Calculation types
 
 | Calculation type | Output |
 | --- | --- |
 | **Single Point** | Energy, HOMO–LUMO gap, Mulliken charges, dipole moment |
-| **Geometry Opt** | Optimized structure with step-by-step trajectory animation |
-| **Frequency** | Vibrational frequencies, ZPVE, IR intensities, thermochemistry (H/S/G at 298 K), animated normal modes |
+| **Geometry Opt** | Optimized structure with step-by-step trajectory animation; optional frozen atoms |
+| **Transition State** | Saddle point near the input geometry (Sella; `pip install "quantui[ts]"`), then a frequency check that says whether it is a transition state (one imaginary frequency), a minimum, or a higher-order saddle point |
+| **Frequency** | Vibrational frequencies, ZPVE, IR intensities, thermochemistry at any temperature and pressure, animated normal modes |
 | **UV-Vis (TD-DFT)** | Excitation energies, oscillator strengths, UV-Vis spectrum plot |
 | **NMR Shielding** | ^1^H and ^13^C chemical shifts vs TMS via GIAO |
 | **PES Scan** | 1D bond/angle/dihedral scan; energy profile + per-step geometries |
+| **Reorganization Energy** | Marcus four-point internal reorganization energy λ = λ₁ + λ₂ for hole (cation) and/or electron (anion) transfer |
 
 ## Methods by family
 
@@ -21,13 +23,13 @@ through a single Calculate tab.
 | **Hartree–Fock** | RHF (closed-shell), UHF (open-shell radicals) — baseline reference; fastest path to convergence |
 | **DFT** | B3LYP, PBE, PBE0, M06-2X, ωB97X-D, CAM-B3LYP, M06-L, HSE06, PBE-D3 — nine functionals spanning hybrid, GGA, meta-hybrid, range-separated, and dispersion-corrected families |
 | **Post-HF** | MP2, CCSD, CCSD(T) — Møller–Plesset (O(N^5^)) for fast post-HF; coupled cluster (O(N^6^) singles+doubles, O(N^7^) with perturbative triples) for benchmark-quality small-molecule energies |
-| **Implicit solvent** | PCM — Water, Ethanol, THF, DMSO, Acetonitrile — single checkbox; compatible with any method above |
+| **Implicit solvent** | PCM (C-PCM) — Water, Ethanol, THF, DMSO, Acetonitrile — single checkbox. Single point, geometry optimization (solvated at every step), frequency (PCM Hessian and IR intensities; Raman is not computed in solvent) and UV-Vis TD-DFT (solvated ground state, non-equilibrium excitations using the solvent's optical dielectric n²). Reorganization energy uses gas-phase optimizations with solvated single points. NMR and PES scans are gas-phase only |
 
 ## Basis sets
 
 From fast iteration to higher accuracy:
 
-`STO-3G` → `3-21G` → `6-31G` → `6-31G*` → `6-31G**` → `cc-pVDZ` → `cc-pVTZ` → `def2-SVP` → `def2-TZVP`
+`STO-3G` → `3-21G` → `6-31G` → `6-31G*` → `6-31G**` → `cc-pVDZ` → `cc-pVTZ` → `def2-SVP` → `def2-TZVP` → `LANL2DZ`
 
 !!! tip "Choosing a basis"
     - **STO-3G** — fast iteration and classroom demos

@@ -45,7 +45,7 @@ import logging
 import math
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any, List, Optional
 
@@ -99,6 +99,7 @@ try:
             expected_steps=None,
             scf_rescue: bool = True,
             use_gpu: Optional[bool] = None,
+            solvent: Optional[str] = None,
             **kwargs,
         ) -> None:
             super().__init__(**kwargs)
@@ -106,6 +107,11 @@ try:
             self.basis = basis
             self.charge = charge
             self.spin = spin
+            # PCM solvent for every step's SCF and gradient (a solvated
+            # optimization). None = gas phase.
+            self.solvent = solvent
+            # Canonical solvent name once PCM has been applied to a step.
+            self.solvent_applied: Optional[str] = None
             # M-SCF-ROBUST — whether each step's SCF goes through the shared
             # rescue helper on non-convergence (default on; a batch caller
             # can disable it via CalculationRequest.options).
@@ -223,6 +229,16 @@ try:
             from .density_fitting import try_density_fit as _try_density_fit
 
             mf, self._density_fit_used = _try_density_fit(mf)
+
+            # Implicit solvent (PCM): PySCF's PCM gradients make this a true
+            # solvated optimization. Same helper and order as run_in_session
+            # (after density fitting, before GPU offload).
+            if self.solvent is not None:
+                from .session_calc import apply_pcm
+
+                mf, self.solvent_applied = apply_pcm(
+                    mf, self.solvent, progress_stream=self.progress_stream
+                )
 
             # This is deliberately inside ``calculate``: ASE rebuilds the
             # PySCF object for every geometry, so offload must be requested for
@@ -355,6 +371,10 @@ class OptimizationResult:
     # doesn't use D3), True/False (does, and pyscf.dftd3 was/wasn't
     # importable during the optimization).
     dispersion_applied: Optional[bool] = None
+    # PCM solvent the optimization ran in (every step), or None for gas phase.
+    solvent: Optional[str] = None
+    # 0-based indices held fixed (ASE FixAtoms); empty when none were.
+    frozen_atoms: List[int] = field(default_factory=list)
     # Final-geometry Mulliken / dipole — same fields SessionResult carries so
     # the Populations Analysis panel activates after a Geometry Opt too.
     atom_symbols: Optional[List[str]] = None
@@ -500,6 +520,8 @@ def optimize_geometry(
     engine_id: str = "pyscf",
     ncores: int = 1,
     use_gpu: Optional[bool] = None,
+    solvent: Optional[str] = None,
+    frozen_atoms: Optional[List[int]] = None,
 ) -> OptimizationResult:
     """
     Optimize a molecular geometry at the QM level using ASE-BFGS.
@@ -547,6 +569,12 @@ def optimize_geometry(
             runtime probe. For PyFock geometry optimization, GPU execution
             uses numerical forces because PyFock 0.1.7's analytical gradient
             implementation is CPU-only.
+        solvent: PCM solvent name (``config.SOLVENT_OPTIONS``) applied to
+            every step's SCF and gradient, or ``None`` for gas phase.
+            PySCF engine only.
+        frozen_atoms: 0-based indices of atoms held fixed during the
+            optimization (ASE ``FixAtoms``), e.g. to optimize only part of a
+            structure. ``None``/empty optimizes every atom.
 
     Returns:
         :class:`OptimizationResult` containing the optimized molecule,
@@ -657,6 +685,26 @@ def optimize_geometry(
     start_molecule = _resume_from if _resume_from is not None else molecule
 
     atoms = molecule_to_atoms(start_molecule)
+    _frozen = sorted({int(i) for i in (frozen_atoms or [])})
+    if _frozen:
+        if _frozen[0] < 0 or _frozen[-1] >= len(atoms):
+            raise ValueError(
+                f"Frozen atom {_frozen[-1] + 1} does not exist "
+                f"(this structure has {len(atoms)} atoms)."
+            )
+        if len(_frozen) >= len(atoms):
+            raise ValueError("Every atom is frozen; there is nothing to optimize.")
+        from ase.constraints import FixAtoms
+
+        atoms.set_constraint(FixAtoms(indices=_frozen))
+        try:
+            _stream.write(
+                "\nFrozen atoms (held fixed): "
+                + ", ".join(str(i + 1) for i in _frozen)
+                + "\n"
+            )
+        except Exception:  # noqa: BLE001 — informational
+            pass
     if engine_id == "pyscf":
         atoms.calc = _QuantUIPySCFCalc(
             method=method,
@@ -669,8 +717,11 @@ def optimize_geometry(
             expected_steps=expected_steps,
             scf_rescue=scf_rescue,
             use_gpu=use_gpu,
+            solvent=solvent,
         )
     else:
+        if solvent is not None:
+            raise ValueError("Implicit solvent is not available with PyFock.")
         from .pyfock_gpu import resolve_pyfock_gpu
 
         _pyfock_use_gpu, _pyfock_gpu_name, _pyfock_gpu_reason = resolve_pyfock_gpu(
@@ -1016,6 +1067,8 @@ def optimize_geometry(
         dipole_moment_debye=_opt_dipole,
         dipole_vector_debye=_opt_dipole_vec,
         dispersion_applied=getattr(atoms.calc, "dispersion_applied", None),
+        solvent=getattr(atoms.calc, "solvent_applied", None),
+        frozen_atoms=_frozen,
         engine_id=engine_id,
     )
 

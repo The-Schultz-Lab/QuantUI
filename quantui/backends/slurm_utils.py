@@ -111,6 +111,30 @@ def parse_sacct_states(sacct_output: str) -> Dict[str, str]:
     }
 
 
+# Resource-estimate factors. Module-level so ``quantui install-launcher`` can
+# copy them into the host-side ``quantui-batch`` launcher, which re-implements
+# this estimate without importing QuantUI (tests/test_batch_submit.py checks
+# that the two agree).
+BASIS_FACTORS = {
+    "STO-3G": 1.0,
+    "3-21G": 1.2,
+    "6-31G": 1.5,
+    "6-31G*": 2.0,
+    "6-31G**": 2.5,
+    "cc-pVDZ": 3.0,
+    "cc-pVTZ": 5.0,
+}
+CALC_FACTORS = {
+    "single_point": 1.0,
+    "geometry_opt": 2.5,
+    "frequency": 4.0,
+    "tddft": 2.0,
+    "nmr": 2.0,
+    "pes_scan": 3.0,
+    "reorganization_energy": 6.0,
+}
+
+
 def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
     """
     Heuristic cores / memory / walltime for a batch submission.
@@ -124,18 +148,14 @@ def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
     num_atoms = len(atoms)
     charge = int(mol.get("charge", 0))
     mult = int(mol.get("multiplicity", 1))
-    num_electrons = sum(_ATOMIC_NUMBERS.get(str(a).title(), 0) for a in atoms) - charge
+    from quantui.config import ATOMIC_NUMBERS
 
-    basis_factors = {
-        "STO-3G": 1.0,
-        "3-21G": 1.2,
-        "6-31G": 1.5,
-        "6-31G*": 2.0,
-        "6-31G**": 2.5,
-        "cc-pVDZ": 3.0,
-        "cc-pVTZ": 5.0,
-    }
-    basis_factor = basis_factors.get(request.basis, 2.0)
+    # The full periodic table: the old short list here had no Mn, Co, Ni or Mo,
+    # so a transition-metal complex's metal counted as 0 electrons and its
+    # memory came out low.
+    num_electrons = sum(ATOMIC_NUMBERS.get(str(a).title(), 0) for a in atoms) - charge
+
+    basis_factor = BASIS_FACTORS.get(request.basis, 2.0)
 
     method_upper = request.method.upper()
     method_factor = 1.2 if method_upper == "UHF" else 1.0
@@ -144,16 +164,7 @@ def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
     elif method_upper not in ("RHF", "UHF"):
         method_factor = max(method_factor, 1.3)
 
-    calc_factors = {
-        "single_point": 1.0,
-        "geometry_opt": 2.5,
-        "frequency": 4.0,
-        "tddft": 2.0,
-        "nmr": 2.0,
-        "pes_scan": 3.0,
-        "reorganization_energy": 6.0,
-    }
-    calc_factor = calc_factors.get(request.calc_type, 1.5)
+    calc_factor = CALC_FACTORS.get(request.calc_type, 1.5)
 
     base_memory = max(
         4, int(2 * (max(num_electrons, 1) / 10) * basis_factor * method_factor)
@@ -233,32 +244,3 @@ def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
         "walltime": walltime,
         "freq_parallel_memory_multiplier": freq_parallel_multiplier,
     }
-
-
-_ATOMIC_NUMBERS = {
-    "H": 1,
-    "He": 2,
-    "Li": 3,
-    "Be": 4,
-    "B": 5,
-    "C": 6,
-    "N": 7,
-    "O": 8,
-    "F": 9,
-    "Ne": 10,
-    "Na": 11,
-    "Mg": 12,
-    "Al": 13,
-    "Si": 14,
-    "P": 15,
-    "S": 16,
-    "Cl": 17,
-    "Ar": 18,
-    "K": 19,
-    "Ca": 20,
-    "Fe": 26,
-    "Cu": 29,
-    "Zn": 30,
-    "Br": 35,
-    "I": 53,
-}

@@ -31,6 +31,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import IO, Any, List, Optional, cast
 
 from .molecule import Molecule
@@ -52,10 +53,12 @@ _HARTREE_TO_JMOL: float = 2625499.6  # J/mol per Hartree (NIST 2018 CODATA)
 
 @dataclass
 class ThermoData:
-    """Thermochemical data from the harmonic approximation at 298.15 K / 1 atm.
+    """Thermochemistry: ideal gas, rigid rotor, harmonic oscillator.
 
-    All energies are in Hartrees; entropy is in J/(mol·K).
-    H and G include the SCF electronic energy.
+    All energies are in Hartrees; entropy and heat capacities in J/(mol·K).
+    U (``E_thermal_hartree``), H and G include the SCF electronic energy.
+    Defaults to 298.15 K / 1 atm; :func:`compute_thermochemistry` recomputes
+    at any temperature and pressure from stored frequencies.
     """
 
     zpve_hartree: float
@@ -63,6 +66,136 @@ class ThermoData:
     S_jmol: float
     G_hartree: float
     temperature_k: float = 298.15
+    pressure_atm: float = 1.0
+    E_thermal_hartree: Optional[float] = None
+    Cv_jmolk: Optional[float] = None
+    Cp_jmolk: Optional[float] = None
+    # Rotational symmetry number used for S_rot (2 for water, 3 for NH3).
+    symmetry_number: Optional[int] = None
+
+
+def _cm1_to_thermo_au(frequencies_cm1: Any) -> Any:
+    """Wavenumbers → the frequency unit ``pyscf.hessian.thermo`` expects.
+
+    PySCF's ``harmonic_analysis`` ``freq_au`` is an angular frequency in
+    sqrt(Eh / (amu bohr^2)), which ``thermo`` turns into Hz with
+    ``au2hz``. It is NOT an energy in Hartree: multiplying cm^-1 by the
+    cm^-1→Hartree factor is off by orders of magnitude.
+    """
+    import numpy as np
+    from pyscf.data import nist
+
+    au2hz = (nist.HARTREE2J / (nist.ATOMIC_MASS * nist.BOHR_SI**2)) ** 0.5 / (2 * np.pi)
+    c_cm_per_s = nist.LIGHT_SPEED_SI * 100.0
+    return np.asarray(frequencies_cm1, dtype=float) * c_cm_per_s / au2hz
+
+
+def _thermo_value(v: Any) -> float:
+    """PySCF 2.x returns (value, unit) tuples; older versions plain floats."""
+    if isinstance(v, (tuple, list)):
+        return float(v[0])
+    if hasattr(v, "item"):
+        return float(v.item())
+    return float(v)
+
+
+def _run_thermo(
+    pyscf_thermo: Any,
+    model: Any,
+    freq_au: Any,
+    temperature_k: float,
+    pressure_atm: float,
+    *,
+    fallback_zpve: float = 0.0,
+) -> ThermoData:
+    """PySCF ``hessian.thermo.thermo`` → :class:`ThermoData`.
+
+    The rotational symmetry number comes from PySCF's own point-group
+    detection, run here at QuantUI's 0.01 Å tolerance: at PySCF's strict
+    default an optimized water or NH3 gets sigma = 1 instead of 2 or 3,
+    overstating the rotational entropy by R ln sigma.
+    """
+    from .symmetry import detection_tolerance
+
+    pressure_pa = float(pressure_atm) * 101325.0
+    with detection_tolerance():
+        try:
+            tout = pyscf_thermo.thermo(model, freq_au, temperature_k, pressure_pa)
+        except TypeError:  # very old PySCF: no pressure argument
+            tout = pyscf_thermo.thermo(model, freq_au, temperature_k)
+
+    def _first(*keys: str) -> Any:
+        for k in keys:
+            if tout.get(k) is not None:
+                return tout[k]
+        return None
+
+    # PySCF 2.x (>=2.6) uses "H_tot"/"S_tot"; earlier versions used "H"/"S".
+    h_raw = _first("H_tot", "H", "Htot", "H_0K")
+    s_raw = _first("S_tot", "S", "Stot")
+    z_raw = _first("ZPE", "zpve", "ZPE_vib")
+    if h_raw is None or s_raw is None:
+        raise KeyError(f"Missing H or S in thermo dict (keys: {sorted(tout.keys())})")
+    h = _thermo_value(h_raw)
+    # PySCF's thermo() returns S_tot (and Cv/Cp) in Eh/K, not J/(mol·K).
+    # Convert for storage/display; G = H - T*S uses the Eh/K value
+    # (AUDIT F01).
+    s_eh = _thermo_value(s_raw)
+
+    def _jmolk(*keys: str) -> Optional[float]:
+        raw = _first(*keys)
+        return None if raw is None else _thermo_value(raw) * _HARTREE_TO_JMOL
+
+    u_raw = _first("E_tot")
+    sigma_raw = _first("sym_number")
+    return ThermoData(
+        zpve_hartree=_thermo_value(z_raw) if z_raw is not None else fallback_zpve,
+        H_hartree=h,
+        S_jmol=s_eh * _HARTREE_TO_JMOL,
+        G_hartree=h - float(temperature_k) * s_eh,
+        temperature_k=float(temperature_k),
+        pressure_atm=float(pressure_atm),
+        E_thermal_hartree=_thermo_value(u_raw) if u_raw is not None else None,
+        Cv_jmolk=_jmolk("Cv_tot"),
+        Cp_jmolk=_jmolk("Cp_tot"),
+        symmetry_number=(
+            int(round(_thermo_value(sigma_raw))) if sigma_raw is not None else None
+        ),
+    )
+
+
+def compute_thermochemistry(
+    atoms: List[str],
+    coordinates: List[List[float]],
+    *,
+    energy_hartree: float,
+    frequencies_cm1: List[float],
+    charge: int = 0,
+    multiplicity: int = 1,
+    temperature_k: float = 298.15,
+    pressure_atm: float = 1.0,
+) -> ThermoData:
+    """Thermochemistry at any temperature and pressure from stored results.
+
+    Needs only the geometry (Å), the SCF energy and the harmonic
+    frequencies — no new SCF or Hessian — so the UI can recompute it as the
+    user changes T or P. Imaginary modes (negative entries) are left out of
+    the vibrational partition function, as in the original calculation.
+    """
+    from pyscf import gto
+    from pyscf.hessian import thermo as pyscf_thermo
+
+    if temperature_k <= 0 or pressure_atm <= 0:
+        raise ValueError("temperature and pressure must be positive")
+    atom_spec = [(a, list(map(float, c))) for a, c in zip(atoms, coordinates)]
+    spin = int(multiplicity) - 1
+    try:
+        mol = gto.M(atom=atom_spec, basis="sto-3g", charge=charge, spin=spin, verbose=0)
+    except Exception:  # noqa: BLE001 — elements beyond STO-3G: no basis needed
+        mol = gto.M(atom=atom_spec, basis={}, charge=charge, spin=spin, verbose=0)
+    freq_au = _cm1_to_thermo_au(frequencies_cm1)
+    model = SimpleNamespace(mol=mol, e_tot=float(energy_hartree))
+    return _run_thermo(pyscf_thermo, model, freq_au, temperature_k, pressure_atm)
 
 
 @dataclass
@@ -112,23 +245,30 @@ class FreqResult:
     ``None`` if the Hessian calculation failed or PySCF version does not
     provide ``norm_mode``.
     """
-    mo_energy_hartree: Optional[List] = None
-    """Orbital energies for the Energies panel's diagram, in Hartrees.
-
-    AUDIT additional-concerns — for an open-shell (UHF/UKS) reference,
-    this is the ALPHA-channel orbital energies only; the beta channel is
-    extracted and then discarded (``_moe[0]`` on a 2-D ``mf.mo_energy``).
-    Not a complete open-shell orbital spectrum.
-    """
-    mo_occ: Optional[List] = None
-    """Orbital occupations matching ``mo_energy_hartree`` — same
-    alpha-only caveat for an open-shell reference."""
+    mo_energy_hartree: Optional[Any] = None
+    """Orbital energies (Hartree) of the reference SCF; ``(2, n_mo)`` for
+    UHF/UKS, as on :class:`~quantui.session_calc.SessionResult` (both spin
+    channels since ISSUE.19 #6; older results kept alpha only)."""
+    mo_occ: Optional[Any] = None
+    """Occupations matching ``mo_energy_hartree``."""
+    mo_coeff: Optional[Any] = None
+    """MO coefficients, for the Isosurface panel (ISSUE.19 #6)."""
     pyscf_mol_atom: Optional[List] = None
     pyscf_mol_basis: Optional[str] = None
+    # Ground-state populations of the reference SCF, for the Populations
+    # panel (ISSUE.19 #6) — same meaning as on SessionResult.
+    atom_symbols: Optional[List[str]] = None
+    mulliken_charges: Optional[List[float]] = None
+    dipole_moment_debye: Optional[float] = None
+    dipole_vector_debye: Optional[List[float]] = None
+    spin_square: Optional[float] = None
     density_fit: bool = False
     # M-UX2 UXP2.10 — the actual PySCF class dispatched for the reference
     # SCF (e.g. "RHF", "UHF", "RKS", "UKS"); "" for an older saved result.
     scf_variant: str = ""
+    # PCM solvent the reference SCF, Hessian and IR displacements ran in, or
+    # None for gas phase. Raman is not computed for a solvated run.
+    solvent: Optional[str] = None
 
     @property
     def energy_ev(self) -> float:
@@ -300,6 +440,7 @@ def run_freq_calc(
     scf_rescue: bool = True,
     checkpoint: Optional[Any] = None,
     resume: bool = False,
+    solvent: Optional[str] = None,
 ) -> FreqResult:
     """Run SCF + analytical Hessian to obtain vibrational frequencies.
 
@@ -336,6 +477,12 @@ def run_freq_calc(
             *checkpoint* is ``None`` or has no banked displacements — the
             calc still runs, it just starts from nothing, same as if resume
             were never requested.
+        solvent: PCM solvent name (``config.SOLVENT_OPTIONS``) or ``None``.
+            The reference SCF, the analytical (PCM) Hessian and every IR
+            finite-difference displacement SCF run in the same solvent, so
+            frequencies, IR intensities and thermochemistry are all
+            solvated. The geometry should be optimized in the same solvent.
+            Raman activities are skipped for a solvated run.
 
     Returns:
         :class:`FreqResult` with frequencies, ZPVE, and SCF properties.
@@ -387,6 +534,7 @@ def run_freq_calc(
             scf_rescue=scf_rescue,
             checkpoint=checkpoint,
             resume=resume,
+            solvent=solvent,
             _dft=dft,
             _gto=gto,
             _scf=scf,
@@ -404,6 +552,7 @@ def _run_freq_calc_body(
     scf_rescue: bool = True,
     checkpoint: Optional[Any] = None,
     resume: bool = False,
+    solvent: Optional[str] = None,
     _dft: Any,
     _gto: Any,
     _scf: Any,
@@ -461,6 +610,15 @@ def _run_freq_calc_body(
 
     mf, _density_fit_used = _try_density_fit(mf)
 
+    # Implicit solvent (PCM). mf.Hessian() on a PCM-wrapped mf is PySCF's
+    # PCM Hessian, and the IR displacement SCFs below get the same solvent.
+    from .session_calc import apply_pcm as _apply_pcm
+
+    mf, _pcm_solvent = _apply_pcm(mf, solvent, progress_stream=stream)
+    _pcm_applied = _pcm_solvent is not None
+    if _pcm_applied:
+        _status(f"Implicit solvent (PCM, {_pcm_solvent}) applied to SCF and Hessian.")
+
     # Cooperative cancel between SCF cycles (the Hessian block that
     # follows is a single long native call the callback can't interrupt).
     from .cancellation import attach_scf_cancel_callback, cancel_check_from_stream
@@ -505,42 +663,12 @@ def _run_freq_calc_body(
     except Exception as exc:
         logger.debug("HOMO-LUMO gap extraction failed in freq calc: %s", exc)
 
-    # ── MO data for orbital energy diagram (best-effort) ─────────────────────
-    mo_energy_hartree: Optional[List] = None
-    mo_occ_list: Optional[List] = None
-    pyscf_mol_atom: Optional[List] = None
-    try:
-        import numpy as _np_mo
+    # ── Ground-state analysis: populations, dipole, MO arrays ────────────────
+    # Same helper as Single Point, so Frequency results fill the Energies,
+    # Isosurface and Populations panels (ISSUE.19 #6).
+    from .session_calc import ground_state_analysis
 
-        _moe = mf.mo_energy
-        _moo = mf.mo_occ
-        if isinstance(_moe, (list, _np_mo.ndarray)) and hasattr(_moe[0], "__len__"):
-            # AUDIT additional-concerns — open-shell (UHF/UKS): mo_energy
-            # is (2, n_mo), alpha then beta. Only the alpha channel is
-            # kept for the orbital-diagram fields below; see
-            # mo_energy_hartree/mo_occ's field docstrings above.
-            _moe, _moo = _moe[0], _moo[0]
-        mo_energy_hartree = _np_mo.asarray(_moe, dtype=float).tolist()
-        mo_occ_list = _np_mo.asarray(_moo, dtype=float).tolist()
-        # Build from molecule.atoms/coordinates (Angstrom) rather than
-        # mol._atom, which PySCF always stores internally in Bohr. Every
-        # consumer of pyscf_mol_atom (Molden export, cube generation,
-        # session_calc's/optimizer's own construction of this field)
-        # assumes Angstrom; using mol._atom here silently shipped Bohr
-        # coordinates ~1.89x too large.
-        pyscf_mol_atom = [
-            (atom, list(map(float, coords)))
-            for atom, coords in zip(molecule.atoms, molecule.coordinates)
-        ]
-    except Exception as exc:
-        # Silent failure here ships a FreqResult with no MO data,
-        # breaking the Energies panel on history replay. Log to surface
-        # in the Log tab.
-        logger.warning(
-            "MO data extraction failed in freq calc for %s: %s",
-            molecule.get_formula(),
-            exc,
-        )
+    _gs = ground_state_analysis(mf, molecule, basis, label=f"{method}/{basis} freq")
 
     # ── Hessian + frequency analysis ─────────────────────────────────────────
     frequencies_cm1: List[float] = []
@@ -715,6 +843,9 @@ def _run_freq_calc_body(
                     # any GPU offload, so displaced dipoles stay consistent with
                     # the reference energy.
                     _mf_d, _ = _try_density_fit(_mf_d, enabled=_density_fit_used)
+                    # Same PCM solvent as the reference, so the dipole
+                    # derivatives (IR intensities) are solvated too.
+                    _mf_d, _ = _apply_pcm(_mf_d, _pcm_solvent)
                     # ``method_upper="RHF"`` is a label — try_to_gpu only
                     # uses it to skip CCSD(T). For RHF/UHF/DFT the wrapper
                     # attempts ``mf.to_gpu()`` and falls back to CPU on any
@@ -832,6 +963,7 @@ def _run_freq_calc_body(
                                         mol.ecp,  # AUDIT F05
                                         _density_fit_used,  # AUDIT F19
                                         scf_rescue,  # AUDIT F19
+                                        _pcm_solvent,
                                     ),
                                 ) as _pool:
                                     # Submit all and store futures keyed by task
@@ -948,7 +1080,15 @@ def _run_freq_calc_body(
 
             # Static Raman activities: analytical polarizability (pyscf-properties)
             # + the same ±Δ geometry FD loop as IR (see quantui.raman_calc).
-            if displacements is not None and frequencies_cm1:
+            # Not for a solvated run: the polarizability path is gas-phase
+            # only, and mixing a gas-phase Raman with PCM frequencies would
+            # be wrong without saying so.
+            if _pcm_applied and displacements is not None and frequencies_cm1:
+                _status(
+                    "Raman activities are not computed with implicit solvent "
+                    "(gas-phase only); skipping Raman."
+                )
+            elif displacements is not None and frequencies_cm1:
                 try:
                     from quantui.raman_calc import compute_raman_activities
 
@@ -986,7 +1126,7 @@ def _run_freq_calc_body(
 
             _freq_au = freq_info.get("freq_au")
             if _freq_au is None:
-                _freq_au = _np.array(frequencies_cm1) * _CM1_TO_HARTREE
+                _freq_au = _cm1_to_thermo_au(frequencies_cm1)
             else:
                 # PySCF may return complex freq_au for imaginary modes; take real parts.
                 _freq_au = _np.array(
@@ -994,56 +1134,8 @@ def _run_freq_calc_body(
                     dtype=float,
                 )
 
-            # PySCF 2.x thermo() may or may not accept the pressure argument.
-            try:
-                _tout = pyscf_thermo.thermo(mf, _freq_au, 298.15, 101325)
-            except TypeError:
-                _tout = pyscf_thermo.thermo(mf, _freq_au, 298.15)
-
-            # PySCF 2.x returns (value, unit_string) tuples; earlier versions
-            # return plain floats.  _tv() extracts the numeric value either way.
-            def _tv(v):
-                if isinstance(v, (tuple, list)):
-                    return float(v[0])
-                if hasattr(v, "item"):
-                    return float(v.item())
-                return float(v)
-
-            # PySCF 2.x (>=2.6) uses "H_tot"/"S_tot"; earlier versions used "H"/"S".
-            _H_raw, _S_raw, _Z_raw = None, None, None
-            for _k in ("H_tot", "H", "Htot", "H_0K"):
-                if _tout.get(_k) is not None:
-                    _H_raw = _tout[_k]
-                    break
-            for _k in ("S_tot", "S", "Stot"):
-                if _tout.get(_k) is not None:
-                    _S_raw = _tout[_k]
-                    break
-            for _k in ("ZPE", "zpve", "ZPE_vib"):
-                if _tout.get(_k) is not None:
-                    _Z_raw = _tout[_k]
-                    break
-            if _H_raw is None or _S_raw is None:
-                raise KeyError(
-                    f"Missing H or S in thermo dict (keys: {sorted(_tout.keys())})"
-                )
-            _H = _tv(_H_raw)
-            # PySCF's thermo() returns S_tot in Eh/K, not J/(mol·K) — despite
-            # the misleading local variable name this used to carry. Convert
-            # to J/(mol·K) for storage/display, and use the Eh/K value
-            # (matching H_hartree's units) to compute G = H - T*S. The old
-            # code stored the raw Eh/K number as S_jmol, then divided by
-            # _HARTREE_TO_JMOL again when forming G — nearly canceling the
-            # entropy term's contribution to G (see AUDIT F01).
-            _S_hartree_per_k = _tv(_S_raw)
-            _S_jmol = _S_hartree_per_k * _HARTREE_TO_JMOL
-            _zpve = _tv(_Z_raw) if _Z_raw is not None else zpve_hartree
-            _G = _H - 298.15 * _S_hartree_per_k
-            thermo_data = ThermoData(
-                zpve_hartree=_zpve,
-                H_hartree=_H,
-                S_jmol=_S_jmol,
-                G_hartree=_G,
+            thermo_data = _run_thermo(
+                pyscf_thermo, mf, _freq_au, 298.15, 1.0, fallback_zpve=zpve_hartree
             )
             _status("Frequency backend complete.")
         except Exception as _exc:
@@ -1087,10 +1179,17 @@ def _run_freq_calc_body(
         zpve_hartree=zpve_hartree,
         thermo=thermo_data,
         displacements=displacements,
-        mo_energy_hartree=mo_energy_hartree,
-        mo_occ=mo_occ_list,
-        pyscf_mol_atom=pyscf_mol_atom,
+        mo_energy_hartree=_gs["mo_energy_hartree"],
+        mo_occ=_gs["mo_occ"],
+        mo_coeff=_gs["mo_coeff"],
+        pyscf_mol_atom=_gs["pyscf_mol_atom"],
         pyscf_mol_basis=basis,
+        atom_symbols=_gs["atom_symbols"],
+        mulliken_charges=_gs["mulliken_charges"],
+        dipole_moment_debye=_gs["dipole_moment_debye"],
+        dipole_vector_debye=_gs["dipole_vector_debye"],
+        spin_square=_gs["spin_square"],
         density_fit=_density_fit_used,
         scf_variant=scf_variant,
+        solvent=_pcm_solvent,
     )
