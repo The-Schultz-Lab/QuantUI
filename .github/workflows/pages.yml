@@ -1,5 +1,11 @@
 name: Deploy GitHub Pages
 
+# Publishes the MkDocs site plus the browser QuantUI Viewer (Voici + Pyodide,
+# M-LITE) at <site>/viewer/app/; <site>/viewer/ is its docs page
+# (docs/viewer.md). The viewer is built from the checked-out commit: on a
+# release that is the release tag, so the hosted viewer matches the
+# installers attached to that release.
+
 on:
   push:
     branches: [main]
@@ -8,7 +14,10 @@ on:
       - "mkdocs.yml"
       - "requirements-docs.txt"
       - "CHANGELOG.md"
+      - "packaging/viewer/**"
       - ".github/workflows/pages.yml"
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -40,6 +49,21 @@ jobs:
 
       - name: Build documentation
         run: mkdocs build --strict
+
+      # Own venv: the viewer build pulls in QuantUI, PySCF and Voici, which
+      # must not mix with the docs toolchain above.
+      - name: Build the browser viewer into site/viewer/app/
+        run: |
+          python -m venv "$RUNNER_TEMP/viewer-env"
+          source "$RUNNER_TEMP/viewer-env/bin/activate"
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir "$RUNNER_TEMP/dist"
+          pip install ".[pyscf,ase]"
+          python packaging/viewer/browser/make_samples.py "$RUNNER_TEMP/samples"
+          packaging/viewer/browser/build.sh "$RUNNER_TEMP"/dist/quantui-*.whl \
+            "$RUNNER_TEMP/samples" site/viewer/app
+          test -f site/viewer/app/voici/render/viewer.html
+          test -f site/viewer/index.html  # the docs page survived
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5

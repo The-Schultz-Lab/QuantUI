@@ -7,15 +7,22 @@ name: Viewer builds
 #              .sh), UNSIGNED, each silently installed and smoke-tested.
 #   browser    static Voici + Pyodide site (runs entirely in the browser).
 #
-# Runs only when the viewer packaging changes (or on demand), never on the
-# normal PR path, so it cannot slow or break regular CI.
+# Runs only when the viewer packaging changes, on demand, or when a GitHub
+# Release is published — never on the normal PR path, so it cannot slow or
+# break regular CI. On a release, the three installers are attached to it
+# (the browser build is published by pages.yml instead).
 
 on:
   push:
     paths:
       - "packaging/viewer/**"
       - ".github/workflows/viewer-builds.yml"
+  release:
+    types: [published]
   workflow_dispatch: {}
+
+permissions:
+  contents: read
 
 jobs:
   wheel:
@@ -108,6 +115,8 @@ jobs:
 
   browser:
     name: Browser build (Voici + Pyodide)
+    # On a release pages.yml builds and publishes it; no need to twice.
+    if: github.event_name != 'release'
     needs: wheel
     runs-on: ubuntu-latest
     steps:
@@ -131,3 +140,25 @@ jobs:
           name: browser-site
           path: site
           if-no-files-found: error
+
+  attach:
+    name: Attach installers to the release
+    if: github.event_name == 'release'
+    needs: installer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: installer-*
+          path: installers
+          merge-multiple: true
+      - name: Upload to ${{ github.event.release.tag_name }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          ls -la installers
+          gh release upload "$TAG" installers/QuantUI-Viewer-* \
+            --repo "$GITHUB_REPOSITORY" --clobber

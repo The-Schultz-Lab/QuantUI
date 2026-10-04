@@ -12,7 +12,17 @@ quantui view path/to/results     # or just `quantui view` and pick the folder in
 ```
 
 Two ways to ship it, both built by
-[`.github/workflows/viewer-builds.yml`](../../.github/workflows/viewer-builds.yml):
+[`.github/workflows/viewer-builds.yml`](../../.github/workflows/viewer-builds.yml).
+Where students get them:
+
+- **Browser build** — published with the docs by
+  [`pages.yml`](../../.github/workflows/pages.yml) at
+  `https://the-schultz-lab.github.io/QuantUI/viewer/app/voici/render/viewer.html`
+  (CDN Pyodide), linked from the docs page
+  [`docs/viewer.md`](../../docs/viewer.md) (`/viewer/`). Rebuilt on every
+  release and on docs / `packaging/viewer/` changes to `main`.
+- **Installers** — attached to each GitHub Release by `viewer-builds.yml`
+  when the release is published.
 
 | | Desktop installer (`installer/`) | Browser build (`browser/`) |
 | --- | --- | --- |

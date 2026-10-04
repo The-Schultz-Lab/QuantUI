@@ -16,6 +16,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   opens the browser. Packaging for two delivery routes lives in
   `packaging/viewer/` (unsigned conda-constructor desktop installers and a
   Voici/Pyodide browser build), built by the new `viewer-builds` workflow.
+- **QuantUI Viewer in the docs** — new *QuantUI Viewer* page
+  (`/viewer/`) with a link to the browser Viewer, which the Pages workflow now
+  builds and publishes at `/viewer/app/` on each release and docs change.
+  Publishing a release also attaches the three Viewer installers to it.
 
 ### Fixed
 
