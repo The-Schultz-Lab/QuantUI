@@ -74,7 +74,7 @@ def quantui_home() -> Path:
 
 def _viewer_notebook() -> dict:
     """The app notebook with the display cell switched to viewer mode."""
-    nb = json.loads(json.dumps(_APP_NOTEBOOK))
+    nb: dict = json.loads(json.dumps(_APP_NOTEBOOK))
     nb["cells"][0]["source"] = ["# QuantUI Viewer\n"]
     nb["cells"][1]["source"] = [
         "from quantui.app import QuantUIApp\n",

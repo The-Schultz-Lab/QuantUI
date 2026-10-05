@@ -1408,6 +1408,7 @@ class QuantUIApp:
         _clear_log_cache_btn: Any
         _clear_log_cache_confirm_btn: Any
         _exit_btn: Any
+        _viewer_folder_bar: Any
         _exit_output: Any
         _exit_cancel_btn: Any
         _exit_warn_html: Any
