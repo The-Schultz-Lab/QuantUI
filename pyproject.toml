@@ -142,7 +142,7 @@ pyfock = [
     "scipy>=1.10,<2",
     # 0.68.0rc1 can be selected by PyFock's permissive floor and brought a
     # prerelease llvmlite that crashed at import on Linux/Python 3.12.
-    "numba>=0.57,<0.68",
+    "numba>=0.57,<0.69",
 ]
 
 # ASE: structure I/O, extended molecule library, geometry optimisation
