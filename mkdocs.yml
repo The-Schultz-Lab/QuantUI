@@ -81,6 +81,7 @@ nav:
   - Getting Started:
       - Installation: installation.md
       - Platform Support: platforms.md
+      - QuantUI Viewer: viewer.md
       - Tutorials: tutorials.md
   - User Guide:
       - Features: features.md

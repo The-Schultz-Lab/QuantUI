@@ -10,8 +10,10 @@ repos:
         exclude: "notebooks/"   # notebooks manage their own line endings
       - id: check-yaml
         # mkdocs.yml uses Material's !!python/name: tags for emoji config;
-        # the stock YAML parser rejects those without --unsafe.
-        exclude: ^mkdocs\.yml$
+        # the stock YAML parser rejects those without --unsafe. construct.yaml
+        # is a conda-constructor template (jinja + per-OS "# [win]" selector
+        # lines that repeat keys), not plain YAML.
+        exclude: ^(mkdocs\.yml|packaging/viewer/installer/construct\.yaml)$
       - id: check-json
         exclude: "notebooks/"   # notebook JSON is managed by Jupyter
       - id: check-merge-conflict

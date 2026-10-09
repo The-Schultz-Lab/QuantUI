@@ -442,6 +442,8 @@ from quantui.app_slurm import (
 from quantui.app_slurm import (
     startup_slurm_check as _slurm_startup_check,
 )
+from quantui.app_viewer import build_viewer_folder_bar as _viewer_build_folder_bar
+from quantui.app_viewer import set_results_dir as _viewer_set_results_dir
 from quantui.app_visualization import (
     build_vib_data_from_freq_result as _viz_build_vib_data_from_freq_result,
 )
@@ -1406,6 +1408,7 @@ class QuantUIApp:
         _clear_log_cache_btn: Any
         _clear_log_cache_confirm_btn: Any
         _exit_btn: Any
+        _viewer_folder_bar: Any
         _exit_output: Any
         _exit_cancel_btn: Any
         _exit_warn_html: Any
@@ -1806,7 +1809,15 @@ class QuantUIApp:
         _mol_analysis_png_status: Any
         _last_vib_molecule: Any
 
-    def __init__(self) -> None:
+    def __init__(
+        self, *, viewer: bool = False, results_dir: Optional[str | Path] = None
+    ) -> None:
+        # ── Mode ──────────────────────────────────────────────────────────
+        # viewer=True: History + Analysis only, for browsing a results
+        # folder with no quantum engine (see quantui/app_viewer.py).
+        self._viewer_mode: bool = viewer
+        if results_dir is not None:
+            _viewer_set_results_dir(Path(results_dir).expanduser().resolve())
         # ── Instance state ────────────────────────────────────────────────
         self._molecule: Optional[Molecule] = None
         self._last_result: Any = None
@@ -1945,7 +1956,15 @@ class QuantUIApp:
 
         # Kick off slow startup work (GPU detection, History/Compare loading)
         # off the synchronous construction path so the UI paints fast.
-        self._start_deferred_startup_tasks()
+        if self._viewer_mode:
+            # Browsing only: no GPU probe, resume offers, or SLURM checks.
+            loop = self._get_kernel_io_loop()
+            if loop is not None:
+                loop.add_callback(self._refresh_results_browser)
+            else:
+                self._refresh_results_browser()
+        else:
+            self._start_deferred_startup_tasks()
 
     def _start_deferred_startup_tasks(self) -> None:
         """Run slow startup work AFTER widget construction so it doesn't block
@@ -2045,6 +2064,11 @@ class QuantUIApp:
                     self._exit_output,
                     self._theme_style,
                     self.help_tab_panel,
+                    *(
+                        [self._viewer_folder_bar]
+                        if getattr(self, "_viewer_mode", False)
+                        else []
+                    ),
                     self.root_tab,
                 ]
             )
@@ -2074,6 +2098,8 @@ class QuantUIApp:
         self._build_files_tab()
         self._build_help_section()
         self._build_issue_widgets()
+        if self._viewer_mode:
+            _viewer_build_folder_bar(self, layout_fn=_layout)
 
     # ── Theme selector ────────────────────────────────────────────────────
 
@@ -2142,7 +2168,10 @@ class QuantUIApp:
             kwargs={"kind": kind},
         )
         timer.daemon = True
-        timer.start()
+        try:
+            timer.start()
+        except RuntimeError:  # no threads (browser/Pyodide viewer build)
+            self._activity_end(kind=kind)
 
     def _on_root_tab_changed(self, change) -> None:
         """Pulse the activity light on tab navigation actions."""
@@ -2519,6 +2548,8 @@ class QuantUIApp:
     # ── Tab assembly (Cell 10) ────────────────────────────────────────────
 
     def _root_tab_order(self) -> list[str]:
+        if getattr(self, "_viewer_mode", False):
+            return ["history", "analysis"]
         order = ["calculate"]
         if _slurm_jobs_tab_visible(self):
             order.append("slurm_jobs")

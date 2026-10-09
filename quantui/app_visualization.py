@@ -27,6 +27,21 @@ from quantui.orbital_visualization import _GENERIC_CAPTURE_JS, _png_capture_cont
 logger = logging.getLogger(__name__)
 
 
+def _start_daemon(target: Any, *args: Any, **kwargs: Any) -> bool:
+    """Run *target* on a daemon thread; return False if it ran inline instead.
+
+    Browser (Pyodide/WebAssembly) builds of the viewer have no threads —
+    ``Thread.start`` raises ``RuntimeError`` — so fall back to a synchronous
+    call there. On normal Python this is exactly ``Thread(...).start()``.
+    """
+    try:
+        threading.Thread(target=target, args=args, kwargs=kwargs, daemon=True).start()
+    except RuntimeError:
+        target(*args, **kwargs)
+        return False
+    return True
+
+
 @contextmanager
 def _viz_render_event(app: Any, task: Any, backend: Any, **extras: Any):
     """Lifecycle telemetry context manager for one render-path execution.
@@ -446,7 +461,7 @@ def show_opt_trajectory(
             finally:
                 app._queue_main_thread_callback(setattr, _btn, "disabled", False)
 
-        threading.Thread(target=_do_export, daemon=True).start()
+        _start_daemon(_do_export)
 
     export_btn.on_click(_on_export)
 
@@ -731,12 +746,9 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
         _VIB_CAMERA_RESET_JS + f'<p style="color:#555;font-style:italic;padding:8px">'
         f"⏳ Rendering vibrational animation ({first_label})…</p>",
     )
-    threading.Thread(
-        target=app._render_vib_mode,
-        args=(vib_data, molecule, first_mode),
-        kwargs={"render_token": token},
-        daemon=True,
-    ).start()
+    _start_daemon(
+        app._render_vib_mode, vib_data, molecule, first_mode, render_token=token
+    )
 
     return True
 
@@ -1618,8 +1630,9 @@ def on_iso_generate(app: Any, btn: Any) -> None:
 
         app._queue_main_thread_callback(_show_timeout)
 
-    threading.Thread(target=_run, daemon=True).start()
-    threading.Thread(target=_watchdog, daemon=True).start()
+    # No watchdog when _run already finished inline (no-thread runtimes).
+    if _start_daemon(_run):
+        _start_daemon(_watchdog)
 
 
 def on_orb_range_changed(app: Any, _change: Any = None) -> None:
@@ -2972,12 +2985,9 @@ def on_vib_mode_changed(app: Any, change: dict[str, Any]) -> None:
         f'<p style="color:#555;font-style:italic;padding:8px">'
         f"⏳ Rendering vibrational animation ({label})…</p>",
     )
-    threading.Thread(
-        target=app._render_vib_mode,
-        args=(vib_data, molecule, mode_number),
-        kwargs={"render_token": token},
-        daemon=True,
-    ).start()
+    _start_daemon(
+        app._render_vib_mode, vib_data, molecule, mode_number, render_token=token
+    )
 
 
 _STEPPER_BTN_STYLE = (
@@ -4376,4 +4386,4 @@ def on_orbital_gallery(app: Any, btn: Any = None) -> None:
 
         app._queue_main_thread_callback(_done)
 
-    threading.Thread(target=_work, daemon=True).start()
+    _start_daemon(_work)

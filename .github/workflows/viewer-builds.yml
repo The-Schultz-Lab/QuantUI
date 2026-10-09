@@ -1,0 +1,164 @@
+name: Viewer builds
+
+# Lightweight QuantUI Viewer (History + Analysis only, no quantum engine) in
+# its two delivery forms — see packaging/viewer/README.md:
+#
+#   installer  conda-constructor installers (Windows .exe, macOS .pkg, Linux
+#              .sh), UNSIGNED, each silently installed and smoke-tested.
+#   browser    static Voici + Pyodide site (runs entirely in the browser).
+#
+# Runs only when the viewer packaging changes, on demand, or when a GitHub
+# Release is published — never on the normal PR path, so it cannot slow or
+# break regular CI. On a release, the three installers are attached to it
+# (the browser build is published by pages.yml instead).
+
+on:
+  push:
+    paths:
+      - "packaging/viewer/**"
+      - ".github/workflows/viewer-builds.yml"
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  wheel:
+    name: Build QuantUI wheel
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip build
+      - run: python -m build --wheel
+      - id: ver
+        run: |
+          v=$(ls dist/quantui-*.whl | sed -E 's/.*quantui-([^-]+)-.*/\1/')
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
+  installer:
+    name: Installer (${{ matrix.os }})
+    needs: wheel
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+    defaults:
+      run:
+        shell: bash -el {0}
+    env:
+      QUANTUI_VERSION: ${{ needs.wheel.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: wheel
+          path: packaging/viewer/installer
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: build
+          python-version: "3.11"
+      - name: Install constructor
+        run: conda install -y -c conda-forge constructor
+      - name: Build installer
+        run: |
+          cp LICENSE packaging/viewer/installer/
+          constructor packaging/viewer/installer --output-dir out
+          ls -la out
+
+      - name: Smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          bash out/*.sh -b -p "$RUNNER_TEMP/qv"
+          "$RUNNER_TEMP/qv/bin/quantui" view --help
+          "$RUNNER_TEMP/qv/bin/python" -c "from quantui.app import QuantUIApp; QuantUIApp(viewer=True); print('viewer ok')"
+          test -f "$HOME/.local/share/applications/quantui-viewer.desktop"
+      - name: Smoke test (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          installer -pkg out/*.pkg -target CurrentUserHomeDirectory
+          q=$(find "$HOME" -maxdepth 4 -path "*/bin/quantui" -type f | head -1)
+          echo "installed at: $q"
+          "$q" view --help
+          "$(dirname "$q")/python" -c "from quantui.app import QuantUIApp; QuantUIApp(viewer=True); print('viewer ok')"
+          test -x "$HOME/Applications/QuantUI Viewer.app/Contents/MacOS/QuantUI Viewer"
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = (Get-ChildItem out\*.exe)[0].FullName
+          Start-Process -Wait -FilePath $exe -ArgumentList '/S', '/InstallationType=JustMe', '/D=C:\qv'
+          & C:\qv\Scripts\quantui.exe view --help
+          & C:\qv\python.exe -c "from quantui.app import QuantUIApp; QuantUIApp(viewer=True); print('viewer ok')"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-Content C:\qv\post_install.log -ErrorAction SilentlyContinue
+          if (-not (Test-Path ([Environment]::GetFolderPath('Programs') + '\QuantUI Viewer.lnk'))) { throw 'Start-menu shortcut missing' }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installer-${{ runner.os }}
+          path: out/QuantUI-Viewer-*
+          if-no-files-found: error
+
+  browser:
+    name: Browser build (Voici + Pyodide)
+    # On a release pages.yml builds and publishes it; no need to twice.
+    if: github.event_name != 'release'
+    needs: wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v8
+        with:
+          name: wheel
+          path: dist
+      - name: Generate demo results (needs PySCF)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[pyscf,ase]"
+          python packaging/viewer/browser/make_samples.py samples
+      - name: Build static site
+        run: packaging/viewer/browser/build.sh dist/quantui-*.whl samples site
+      - uses: actions/upload-artifact@v7
+        with:
+          name: browser-site
+          path: site
+          if-no-files-found: error
+
+  attach:
+    name: Attach installers to the release
+    if: github.event_name == 'release'
+    needs: installer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: installer-*
+          path: installers
+          merge-multiple: true
+      - name: Upload to ${{ github.event.release.tag_name }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          ls -la installers
+          gh release upload "$TAG" installers/QuantUI-Viewer-* \
+            --repo "$GITHUB_REPOSITORY" --clobber

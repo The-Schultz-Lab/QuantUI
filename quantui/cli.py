@@ -19,6 +19,9 @@ Currently shipped subcommands:
 * ``quantui run app [--port PORT] [--open]`` — start the Voilà student
   app. Writes ``~/.quantui/app.ipynb`` on first use (requires the
   ``[app]`` extra: ``pip install 'quantui[app]'``).
+* ``quantui view [FOLDER] [--port PORT] [--no-browser]`` — open the
+  lightweight History + Analysis viewer on a results folder (no quantum
+  engine needed; requires the ``[app]`` extra).
 * ``quantui setup [--force]`` — write ``~/.quantui/app.ipynb`` and a
   ``quantui-app`` shell shortcut under ``~/.local/bin``.
 * ``quantui submit REQUEST_JSON [REQUEST_JSON ...] [--dry-run] [--cores N]
@@ -269,6 +272,17 @@ def _cmd_run_app(args: argparse.Namespace) -> int:
         port=args.port,
         open_browser=args.open,
         force_notebook_refresh=args.force,
+    )
+
+
+def _cmd_view(args: argparse.Namespace) -> int:
+    """Start the History + Analysis viewer on a results folder."""
+    from quantui.app_launcher import run_viewer_app
+
+    return run_viewer_app(
+        Path(args.folder) if args.folder else None,
+        port=args.port,
+        open_browser=not args.no_browser,
     )
 
 
@@ -563,6 +577,31 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Regenerate ~/.quantui/app.ipynb before starting.",
     )
     run_app.set_defaults(func=_cmd_run_app)
+
+    view_parser = sub.add_parser(
+        "view",
+        help="Open the History + Analysis viewer on a results folder.",
+    )
+    view_parser.add_argument(
+        "folder",
+        nargs="?",
+        default=None,
+        metavar="FOLDER",
+        help="QuantUI results folder (default: pick it in the app).",
+    )
+    view_parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        metavar="PORT",
+        help="TCP port for Voilà (default: a free port).",
+    )
+    view_parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not open the browser automatically.",
+    )
+    view_parser.set_defaults(func=_cmd_view)
 
     submit_parser = sub.add_parser(
         "submit",
