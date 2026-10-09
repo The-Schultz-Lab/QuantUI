@@ -142,7 +142,7 @@ pyfock = [
     "scipy>=1.10,<2",
     # 0.68.0rc1 can be selected by PyFock's permissive floor and brought a
     # prerelease llvmlite that crashed at import on Linux/Python 3.12.
-    "numba>=0.57,<0.68",
+    "numba>=0.57,<0.69",
 ]
 
 # ASE: structure I/O, extended molecule library, geometry optimisation
@@ -233,7 +233,7 @@ dev = [
     # that let quantui.engines silently vanish from the shipped package
     # while CI, always editable, stayed green).
     "build>=1.0.0",
-    "mypy>=1.10,<2.4",  # pinned, not an open floor — same reasoning as
+    "mypy>=1.10,<2.5",  # pinned, not an open floor — same reasoning as
     # black/ruff below: it must agree with .pre-commit-config.yaml's rev,
     # which is what CI enforces (M-TYPECHECK TYPE.2). A newer mypy silently
     # disagrees: 2.x drops support for python_version = "3.9" (this repo's
