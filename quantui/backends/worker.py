@@ -32,7 +32,7 @@ from typing import Any, Callable
 
 from .base import CALC_TYPES, CalculationRequest, CalculationResult
 from .batch_input import SOLVENT_CALC_TYPES
-from .registry import JobRegistry
+from .registry import JobRegistry, parse_attempt_dir_name
 from .worker_payload import (
     freq_result_payload,
     molecule_from_request,
@@ -103,6 +103,24 @@ def _tag_from_stage_label(stage_label: str) -> str:
     return (stage_label.split() or ["run"])[0].lower()
 
 
+def _job_state_dir(staging_dir: Path) -> Path:
+    """Where state that must outlive one attempt lives: the job folder.
+
+    Since M-JOBDIRS each run of ``submit.slurm`` writes into its own
+    ``attempt-NN_job<id>/`` folder. A checkpoint or cached pre-opt geometry
+    kept there was invisible to the resubmission, which starts in a new
+    attempt folder, so CL2.8/CHK.4 resume never happened. For an attempt
+    folder this returns its job folder; for a legacy staging dir (no
+    attempts) the dir itself.
+    """
+    if (
+        parse_attempt_dir_name(staging_dir.name) is not None
+        and (staging_dir.parent / "request.json").is_file()
+    ):
+        return staging_dir.parent
+    return staging_dir
+
+
 def _begin_worker_checkpoint(
     molecule,
     *,
@@ -116,10 +134,11 @@ def _begin_worker_checkpoint(
     """Open a checkpoint for this job, scoped to its own staging directory
     (M-CLUSTER2 CL2.8).
 
-    Checkpoints live at ``<staging_dir>/.checkpoint/`` — inside the job's
-    own staging area, not ``~/.quantui/checkpoints`` (the interactive
-    app's location) — so a batch job's checkpoint stays self-contained
-    next to its other artifacts and never collides with another job's.
+    Checkpoints live at ``<job folder>/.checkpoint/`` (``_job_state_dir``)
+    — inside the job's own folder, not ``~/.quantui/checkpoints`` (the
+    interactive app's location) — so a batch job's checkpoint stays
+    self-contained, never collides with another job's, and is shared by
+    all of the job's attempts.
 
     Resumability is read from ``resumable_state()`` *before* calling
     ``begin()`` — ``begin()`` rewrites the metadata with a fresh "running"
@@ -135,7 +154,7 @@ def _begin_worker_checkpoint(
     identity = CalcIdentity.from_molecule(
         molecule, calc_type=calc_type, method=method, basis=basis, extra=extra
     )
-    ckpt = Checkpoint(identity, root=staging_dir / ".checkpoint")
+    ckpt = Checkpoint(identity, root=_job_state_dir(staging_dir) / ".checkpoint")
     ckpt.attach_log(log_stream)
     resumable = ckpt.resumable_state() is not None
     ckpt.begin()
@@ -181,7 +200,7 @@ def _maybe_run_preopt(
     # checkpoint identity is byte-identical across attempts (and skips the
     # preopt's own cost on every resubmission besides).
     tag = _tag_from_stage_label(stage_label)
-    saved_path = staging_dir / f"preopt_geometry_{tag}.json"
+    saved_path = _job_state_dir(staging_dir) / f"preopt_geometry_{tag}.json"
     if saved_path.is_file():
         try:
             from quantui.molecule import Molecule
