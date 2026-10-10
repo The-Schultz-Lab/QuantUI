@@ -59,6 +59,14 @@ logger = logging.getLogger(__name__)
 # Defaults also exposed in config.py for the notebook UI
 DEFAULT_FMAX: float = 0.05  # eV/Å — tight enough for educational use
 DEFAULT_OPT_STEPS: int = 200  # generous upper limit for small molecules
+# Pre-optimization before a frequency calculation (M-BATCH2 B2.5). Harmonic
+# frequencies are only meaningful at a stationary point, and the residual
+# forces left at DEFAULT_FMAX are enough to turn soft modes (methyl rotors,
+# torsions) imaginary: CHEM-3200 Lab 4's MoO2(acac)2 came back with 112i and
+# 48i cm-1 rotor modes after a 0.05 eV/Å pre-opt. 0.01 eV/Å (about
+# 2e-4 Ha/bohr, between Gaussian's default and "tight" force criteria)
+# costs a few more BFGS steps.
+FREQ_PREOPT_FMAX: float = 0.01
 
 
 # ============================================================================

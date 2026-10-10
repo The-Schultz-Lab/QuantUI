@@ -40,6 +40,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `apptainer exec --nv` is no longer used for CPU jobs, and the worker runs
   the batch image's own `python` instead of the submitting process's
   interpreter path, which need not exist in that image.
+- The geometry optimization before a Frequency calculation (app and batch)
+  now converges to 0.01 eV/Å instead of 0.05. Residual forces at 0.05 left
+  soft modes such as methyl rotors wrong, or imaginary (CHEM-3200 Lab 4).
+  Plain Geometry Opt and the pre-opt for other calc types are unchanged.
 
 - History → "View Results" / "View Analysis" navigated by fixed tab index, so
   with the Cluster Jobs tab visible they landed one tab early. They now look
