@@ -719,3 +719,49 @@ class TestCheckpointWiring:
         _args, kwargs = mock_freq.call_args
         assert kwargs["resume"] is True
         assert "Resuming frequency analysis" in (staging / "live.log").read_text()
+
+
+class TestCheckpointsOutliveAttempts:
+    """Since M-JOBDIRS each run writes into its own attempt folder; the
+    checkpoint and the cached pre-opt geometry must live in the job folder
+    or a resubmission (new attempt folder) can never resume."""
+
+    def _job(self, tmp_path):
+        job = tmp_path / "H2_opt"
+        job.mkdir()
+        (job / "request.json").write_text("{}")
+        a1 = job / "attempt-01_job101"
+        a2 = job / "attempt-02_job102"
+        a1.mkdir()
+        a2.mkdir()
+        return job, a1, a2
+
+    def test_state_dir_is_the_job_folder_for_attempts(self, tmp_path):
+        from quantui.backends.worker import _job_state_dir
+
+        job, a1, _a2 = self._job(tmp_path)
+        assert _job_state_dir(a1) == job
+        legacy = tmp_path / "legacy"
+        legacy.mkdir()
+        assert _job_state_dir(legacy) == legacy
+
+    def test_second_attempt_resumes_the_first_attempts_checkpoint(self, tmp_path):
+        import io
+
+        from quantui.backends.worker import _begin_worker_checkpoint
+        from quantui.molecule import Molecule
+
+        job, a1, a2 = self._job(tmp_path)
+        mol = Molecule(["H", "H"], [[0, 0, 0], [0, 0, 0.74]])
+        kw = dict(calc_type="geometry_opt", method="RHF", basis="STO-3G")
+        ckpt, resumable = _begin_worker_checkpoint(
+            mol, staging_dir=a1, log_stream=io.StringIO(), **kw
+        )
+        assert not resumable
+        ckpt.trajectory_path.write_text("progress from the killed attempt")
+        _ckpt2, resumable2 = _begin_worker_checkpoint(
+            mol, staging_dir=a2, log_stream=io.StringIO(), **kw
+        )
+        assert resumable2
+        assert (job / ".checkpoint").is_dir()
+        assert not (a1 / ".checkpoint").exists()

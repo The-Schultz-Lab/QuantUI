@@ -40,6 +40,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `apptainer exec --nv` is no longer used for CPU jobs, and the worker runs
   the batch image's own `python` instead of the submitting process's
   interpreter path, which need not exist in that image.
+- SLURM jobs resume again after a resubmission. Since job folders got one
+  attempt folder per run, the checkpoint and the cached pre-opt geometry
+  were kept inside the attempt folder, which the next attempt never sees,
+  so killed geometry optimizations, PES scans and frequency runs restarted
+  from scratch. Both now live in the job folder.
 - The geometry optimization before a Frequency calculation (app and batch)
   now converges to 0.01 eV/Å instead of 0.05. Residual forces at 0.05 left
   soft modes such as methyl rotors wrong, or imaginary (CHEM-3200 Lab 4).
