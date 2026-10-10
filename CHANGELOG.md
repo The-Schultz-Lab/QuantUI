@@ -20,8 +20,21 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   (`/viewer/`) with a link to the browser Viewer, which the Pages workflow now
   builds and publishes at `/viewer/app/` on each release and docs change.
   Publishing a release also attaches the three Viewer installers to it.
+- **SLURM GPU and account settings** — `QUANTUI_SLURM_GRES`,
+  `QUANTUI_SLURM_QOS` and `QUANTUI_SLURM_ACCOUNT` add `#SBATCH --gres`,
+  `--qos` and `--account` lines to generated batch scripts (app, `quantui
+  submit` and `quantui-batch`). A GRES that asks for a GPU also turns on
+  `apptainer exec --nv`.
 
 ### Fixed
+
+- Generated SLURM scripts ask for one task with N CPUs
+  (`--ntasks=1 --cpus-per-task=N`) instead of N tasks, which is what the
+  single multi-threaded worker uses; a `SLURM_CPUS_PER_TASK` inherited from
+  the submitting allocation no longer sets the thread count.
+- `apptainer exec --nv` is no longer used for CPU jobs, and the worker runs
+  the batch image's own `python` instead of the submitting process's
+  interpreter path, which need not exist in that image.
 
 - History → "View Results" / "View Analysis" navigated by fixed tab index, so
   with the Cluster Jobs tab visible they landed one tab early. They now look

@@ -92,10 +92,12 @@ quantui-batch cancel <job>
   (the GPU image has a different `python`), install a launcher from it.
 - The launcher drops the caller's `SLURM_*` before `sbatch`, so submitting
   from inside an allocation never leaks e.g. `SLURM_CPUS_PER_TASK` into the
-  new job (the generated script sets `--ntasks`, not `--cpus-per-task`).
+  new job. (The generated script now also asks for `--ntasks=1
+  --cpus-per-task=N`, so Slurm sets the job's own value either way.)
 - Finished attempts appear in the app's **History** the next time the app
   starts (no Cluster Jobs tab or `QUANTUI_ENABLE_SLURM` needed).
-- CPU image only for now: the generated script requests no GPU (`--gres`).
+- No GPU unless `QUANTUI_SLURM_GRES` asks for one (see the table below);
+  `apptainer exec --nv` is used only then.
 
 ## Job folders
 
@@ -141,6 +143,9 @@ See the [NCShare SLURM batch runbook](https://github.com/The-Schultz-Lab/QuantUI
 | `QUANTUI_SLURM_STALE_NO_ID_S` | `600` | Stale registry rows without SLURM id |
 | `QUANTUI_SLURM_CANCEL_CONFIRM_S` | `30` | Seconds to wait for `scancel` confirmation via `sacct` |
 | `QUANTUI_SLURM_PARTITION` | `common` | Default `#SBATCH` partition |
+| `QUANTUI_SLURM_GRES` | *(unset)* | `#SBATCH --gres=` value, e.g. `gpu:h200:1`. A value containing `gpu` also adds `--nv` to `apptainer exec`. |
+| `QUANTUI_SLURM_QOS` | *(unset)* | `#SBATCH --qos=` value, e.g. `nccu_h200_hp` with partition `gpu-hp` |
+| `QUANTUI_SLURM_ACCOUNT` | *(unset)* | `#SBATCH --account=` value |
 | `QUANTUI_BATCH_IMAGE` | `~/quantui-gpu.sif` | Apptainer image for batch worker |
 | `QUANTUI_STAGING_DIR` | *(unset — System Settings value, else `~/.quantui/staging`)* | Job folder root. Overrides the System Settings value and locks that field. A root outside `$HOME` is bound into Apptainer automatically. |
 

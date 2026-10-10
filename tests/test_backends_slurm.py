@@ -284,6 +284,85 @@ class TestSlurmBackendWorkerCommandQuoting:
         assert error_line == f'#SBATCH --error="{record.staging_path / "slurm-%j.err"}"'
 
 
+class TestSlurmBackendResourceLines:
+    """M-BATCH2 B2.1: one task with N CPUs; GPU/account lines from the site env."""
+
+    @pytest.fixture(autouse=True)
+    def _no_site_env(self, monkeypatch):
+        for var in ("QUANTUI_SLURM_GRES", "QUANTUI_SLURM_QOS", "QUANTUI_SLURM_ACCOUNT"):
+            monkeypatch.delenv(var, raising=False)
+
+    @staticmethod
+    def _prepare(tmp_path, *, use_apptainer=True, rid="res001"):
+        registry = JobRegistry(
+            jobs_root=tmp_path / "jobs", staging_root=tmp_path / "staging"
+        )
+        backend = SlurmBackend(
+            registry=registry,
+            partition="test",
+            use_apptainer=use_apptainer,
+            apptainer_image="/images/q.sif",
+        )
+        record = backend.prepare(_request(rid), cores=8)
+        return (record.job_path / "submit.slurm").read_text()
+
+    def test_one_task_with_cores_as_cpus(self, tmp_path):
+        text = self._prepare(tmp_path)
+        assert "#SBATCH --ntasks=1\n" in text
+        assert "#SBATCH --cpus-per-task=8\n" in text
+        assert 'OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"' in text
+
+    def test_cpu_job_has_no_nv_and_no_gpu_lines(self, tmp_path):
+        text = self._prepare(tmp_path)
+        assert "apptainer exec --bind" in text
+        assert "--nv" not in text
+        assert "--gres" not in text and "--qos" not in text
+
+    def test_gres_adds_site_lines_and_nv(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_SLURM_GRES", "gpu:h200:1")
+        monkeypatch.setenv("QUANTUI_SLURM_QOS", "nccu_h200_hp")
+        monkeypatch.setenv("QUANTUI_SLURM_ACCOUNT", "schultzlab")
+        text = self._prepare(tmp_path)
+        lines = text.splitlines()
+        site = [
+            i
+            for i, ln in enumerate(lines)
+            if ln.startswith(("#SBATCH --account", "#SBATCH --qos", "#SBATCH --gres"))
+        ]
+        assert [lines[i] for i in site] == [
+            "#SBATCH --account=schultzlab",
+            "#SBATCH --qos=nccu_h200_hp",
+            "#SBATCH --gres=gpu:h200:1",
+        ]
+        assert "apptainer exec --nv --bind" in text
+
+    def test_non_gpu_gres_does_not_add_nv(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUANTUI_SLURM_GRES", "tmpdisk:100")
+        text = self._prepare(tmp_path)
+        assert "#SBATCH --gres=tmpdisk:100" in text
+        assert "--nv" not in text
+
+    def test_bad_site_value_is_refused_before_the_job_folder(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("QUANTUI_SLURM_GRES", "gpu:1\nrm -rf ~")
+        with pytest.raises(SecurityError, match="QUANTUI_SLURM_GRES"):
+            self._prepare(tmp_path)
+        assert not list((tmp_path / "staging").glob("*/submit.slurm"))
+        assert not list((tmp_path / "jobs").glob("*.json"))
+
+    def test_image_python_is_found_on_the_image_path(self, tmp_path):
+        # The app may run in another image, whose sys.executable the batch
+        # image does not have.
+        text = self._prepare(tmp_path)
+        assert "/images/q.sif python -m quantui.backends.worker" in text
+        assert sys.executable not in text
+
+    def test_without_apptainer_the_running_python_is_used(self, tmp_path):
+        text = self._prepare(tmp_path, use_apptainer=False)
+        assert f"{shlex.quote(sys.executable)} -m quantui.backends.worker" in text
+
+
 class TestSlurmBackendReconcile:
     def test_reconcile_stale_record_without_slurm_id(self, slurm_backend, monkeypatch):
         monkeypatch.setenv("QUANTUI_SLURM_STALE_NO_ID_S", "60")

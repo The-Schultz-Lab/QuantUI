@@ -13,6 +13,7 @@ cluster; on-cluster behaviour still needs the NCShare check list.
 import io
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -642,7 +643,14 @@ class TestLauncherMatchesQuantUI:
         assert launcher.default_job_name(req).startswith("water_opt_B3LYP_")
 
     @pytest.mark.parametrize("email", [None, "me@example.edu"])
-    def test_job_folder_script_and_record(self, launcher, roots, water, email):
+    @pytest.mark.parametrize("gpu", [False, True])
+    def test_job_folder_script_and_record(
+        self, launcher, roots, water, email, gpu, monkeypatch
+    ):
+        if gpu:
+            monkeypatch.setenv("QUANTUI_SLURM_GRES", "gpu:h200:1")
+            monkeypatch.setenv("QUANTUI_SLURM_QOS", "nccu_h200_hp")
+            monkeypatch.setenv("QUANTUI_SLURM_ACCOUNT", "lab")
         from quantui.backends.base import CalculationRequest
         from quantui.backends.registry import JobRecord
         from quantui.backends.slurm import SlurmBackend
@@ -664,9 +672,17 @@ class TestLauncherMatchesQuantUI:
         theirs = Path(record.job_dir) / "submit.slurm"
 
         a, b = ours.parent, theirs.parent
-        assert ours.read_text().replace(str(a), "DIR").replace("jobA", "NAME") == (
+        # The one intended difference: the launcher runs the image's Python by
+        # the path recorded when it was installed from that image; the app
+        # may run in another image, so it uses plain ``python`` (B2.1).
+        mine_text = ours.read_text().replace(
+            f" {shlex.quote(launcher.IMAGE_PYTHON)} -m quantui.", " python -m quantui."
+        )
+        assert mine_text.replace(str(a), "DIR").replace("jobA", "NAME") == (
             theirs.read_text().replace(str(b), "DIR").replace("jobB", "NAME")
         )
+        assert ("--nv " in mine_text) is gpu
+        assert ("#SBATCH --gres=gpu:h200:1" in mine_text) is gpu
         assert json.loads((a / "request.json").read_text()) == json.loads(
             (b / "request.json").read_text()
         )
