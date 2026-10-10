@@ -273,6 +273,9 @@ class FreqResult:
     # followed, the re-optimization, and what is left. See
     # :func:`run_saddle_retry`.
     imaginary_mode_retry: Optional[dict] = None
+    # GPU provenance of the reference SCF + analytical Hessian.
+    gpu_used: bool = False
+    gpu_name: Optional[str] = None
 
     @property
     def energy_ev(self) -> float:
@@ -623,6 +626,20 @@ def _run_freq_calc_body(
     if _pcm_applied:
         _status(f"Implicit solvent (PCM, {_pcm_solvent}) applied to SCF and Hessian.")
 
+    # GPU offload (GOTCHAS 2026-09-26): the reference SCF and the analytical
+    # Hessian, usually the most expensive part of a frequency job, ran on CPU
+    # even on the GPU image. Same rule as the single point and the optimizer
+    # (PR #125): after density fitting and PCM, before the kernel; any
+    # failure leaves the CPU object.
+    from .gpu_offload import try_to_gpu as _try_to_gpu
+
+    mf, gpu_used, gpu_name = _try_to_gpu(mf, method_upper)
+    if gpu_used:
+        try:
+            stream.write(f"\n🚀  GPU offload active — running on {gpu_name}\n")
+        except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
+            pass
+
     # Cooperative cancel between SCF cycles (the Hessian block that
     # follows is a single long native call the callback can't interrupt).
     from .cancellation import attach_scf_cancel_callback, cancel_check_from_stream
@@ -651,8 +668,10 @@ def _run_freq_calc_body(
     try:
         import numpy as _np
 
-        mo_occ = mf.mo_occ
-        mo_energy = mf.mo_energy
+        from .session_calc import _host_array
+
+        mo_occ = _host_array(mf.mo_occ)
+        mo_energy = _host_array(mf.mo_energy)
         if isinstance(mo_energy, (list, _np.ndarray)) and hasattr(
             mo_energy[0], "__len__"
         ):
@@ -672,7 +691,9 @@ def _run_freq_calc_body(
     # Isosurface and Populations panels (ISSUE.19 #6).
     from .session_calc import ground_state_analysis
 
-    _gs = ground_state_analysis(mf, molecule, basis, label=f"{method}/{basis} freq")
+    _gs = ground_state_analysis(
+        mf, molecule, basis, label=f"{method}/{basis} freq", gpu_used=gpu_used
+    )
 
     # ── Hessian + frequency analysis ─────────────────────────────────────────
     frequencies_cm1: List[float] = []
@@ -689,14 +710,12 @@ def _run_freq_calc_body(
     _hessian_completed = False
 
     try:
-        hess_obj = mf.Hessian()
-        # verbose=6 surfaces per-atom integral contractions — the only
-        # in-kernel progress signal during an analytical Hessian build.
-        # _LogCapture.write greps for per-atom contraction lines.
-        hess_obj.verbose = 6
-        hess_obj.stdout = stream
-
-        h = hess_obj.kernel()
+        h = _analytical_hessian(mf, gpu_used, stream, _status)
+        if gpu_used:
+            # Everything below (IR/Raman displacement SCFs and their dm0,
+            # thermochemistry) works on the CPU object, as before the GPU
+            # Hessian; the displaced SCFs offload themselves.
+            mf = mf.to_cpu()
 
         _status("Analytical Hessian complete. Running harmonic analysis...")
 
@@ -1196,7 +1215,42 @@ def _run_freq_calc_body(
         density_fit=_density_fit_used,
         scf_variant=scf_variant,
         solvent=_pcm_solvent,
+        gpu_used=gpu_used,
+        gpu_name=gpu_name,
     )
+
+
+def _analytical_hessian(mf: Any, gpu_used: bool, stream: IO[str], status: Any) -> Any:
+    """The analytical Hessian of converged *mf* as a NumPy array.
+
+    On a GPU (gpu4pyscf) object the Hessian runs on the GPU. If that raises
+    (an ECP, dispersion or solvent term gpu4pyscf's Hessian does not cover,
+    GPU memory), it is recomputed on CPU from ``mf.to_cpu()``, so the job
+    still finishes. ``verbose=6`` surfaces the per-atom contraction lines,
+    the only in-kernel progress signal (``_LogCapture.write`` greps them).
+    """
+    from .session_calc import _host_array
+
+    def _kernel(obj: Any) -> Any:
+        hess_obj = obj.Hessian()
+        hess_obj.verbose = 6
+        hess_obj.stdout = stream
+        return hess_obj.kernel()
+
+    if not gpu_used:
+        return _host_array(_kernel(mf))
+    status("Computing the analytical Hessian on the GPU...")
+    try:
+        return _host_array(_kernel(mf))
+    except Exception as exc:  # noqa: BLE001 — the CPU Hessian is the fallback
+        logger.warning("GPU Hessian failed, recomputing on CPU: %s", exc)
+        try:
+            stream.write(
+                f"\n⚠ GPU Hessian failed ({exc}); recomputing the Hessian on CPU.\n"
+            )
+        except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
+            pass
+        return _host_array(_kernel(mf.to_cpu()))
 
 
 # ============================================================================

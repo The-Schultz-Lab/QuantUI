@@ -193,6 +193,8 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
         # AUDIT F12 — was never serialized, though FreqResult carries it.
         "density_fit": bool(getattr(result, "density_fit", False)),
         "solvent": getattr(result, "solvent", None),
+        "gpu_used": bool(getattr(result, "gpu_used", False)),
+        "gpu_name": getattr(result, "gpu_name", None),
         **_ground_state_fields(result),
         "spectra": {
             "ir": {
