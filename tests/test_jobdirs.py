@@ -407,7 +407,7 @@ def test_submit_script_rerun_by_hand_keeps_both_attempts(tmp_path, monkeypatch):
         cwd=tmp_path,
     )
     assert first.returncode != 0  # worker reports the unsupported calc type
-    first_log = (job / "attempt-01_job41" / "live.log").read_text()
+    first_log = (job / "attempt-01_job41" / "live.log").read_text(encoding="utf-8")
 
     second = subprocess.run(
         ["bash", str(script)],
@@ -418,7 +418,9 @@ def test_submit_script_rerun_by_hand_keeps_both_attempts(tmp_path, monkeypatch):
     )
     assert second.returncode != 0
     assert (job / "attempt-02_job42" / "live.log").exists()
-    assert (job / "attempt-01_job41" / "live.log").read_text() == first_log
+    assert (job / "attempt-01_job41" / "live.log").read_text(
+        encoding="utf-8"
+    ) == first_log
     # The hand-run job (42) is not the tracked one (41): record untouched by it.
     assert backend.registry.load(rid).slurm_job_id == "41"
 
