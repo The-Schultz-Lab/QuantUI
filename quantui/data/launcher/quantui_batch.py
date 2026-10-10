@@ -153,6 +153,11 @@ def site_directives():
 
 
 def gpu_requested():
+    override = os.environ.get("QUANTUI_SLURM_NV", "").strip().lower()
+    if override in ("1", "true", "yes", "on"):
+        return True
+    if override in ("0", "false", "no", "off"):
+        return False
     return "gpu" in os.environ.get("QUANTUI_SLURM_GRES", "").lower()
 
 

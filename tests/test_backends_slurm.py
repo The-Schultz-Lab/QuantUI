@@ -289,7 +289,12 @@ class TestSlurmBackendResourceLines:
 
     @pytest.fixture(autouse=True)
     def _no_site_env(self, monkeypatch):
-        for var in ("QUANTUI_SLURM_GRES", "QUANTUI_SLURM_QOS", "QUANTUI_SLURM_ACCOUNT"):
+        for var in (
+            "QUANTUI_SLURM_GRES",
+            "QUANTUI_SLURM_QOS",
+            "QUANTUI_SLURM_ACCOUNT",
+            "QUANTUI_SLURM_NV",
+        ):
             monkeypatch.delenv(var, raising=False)
 
     @staticmethod
@@ -341,6 +346,15 @@ class TestSlurmBackendResourceLines:
         text = self._prepare(tmp_path)
         assert "#SBATCH --gres=tmpdisk:100" in text
         assert "--nv" not in text
+
+    @pytest.mark.parametrize(
+        "gres,nv,expected",
+        [("shard:1", "1", True), ("gpu:h200:1", "0", False), ("gpu:1", "auto", True)],
+    )
+    def test_nv_override(self, tmp_path, monkeypatch, gres, nv, expected):
+        monkeypatch.setenv("QUANTUI_SLURM_GRES", gres)
+        monkeypatch.setenv("QUANTUI_SLURM_NV", nv)
+        assert ("exec --nv" in self._prepare(tmp_path)) is expected
 
     def test_bad_site_value_is_refused_before_the_job_folder(
         self, tmp_path, monkeypatch

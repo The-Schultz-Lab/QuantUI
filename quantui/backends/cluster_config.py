@@ -124,11 +124,19 @@ def site_directives() -> list[str]:
 
 
 def gpu_requested() -> bool:
-    """True when ``QUANTUI_SLURM_GRES`` asks for a GPU.
+    """True when the worker should get ``apptainer exec --nv``.
 
-    Only then does the worker get ``apptainer exec --nv``: without a GPU in
-    the allocation ``--nv`` has nothing to expose.
+    ``QUANTUI_SLURM_NV=1``/``0`` decides outright; otherwise (unset or
+    ``auto``) it is on when ``QUANTUI_SLURM_GRES`` names a GPU, e.g.
+    ``gpu:h200:1``. Without a GPU in the allocation ``--nv`` has nothing to
+    expose. A site whose GPU GRES has another name (``shard:1``) sets
+    ``QUANTUI_SLURM_NV=1``.
     """
+    override = os.environ.get("QUANTUI_SLURM_NV", "").strip().lower()
+    if override in ("1", "true", "yes", "on"):
+        return True
+    if override in ("0", "false", "no", "off"):
+        return False
     return "gpu" in os.environ.get("QUANTUI_SLURM_GRES", "").lower()
 
 

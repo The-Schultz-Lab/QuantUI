@@ -651,6 +651,7 @@ class TestLauncherMatchesQuantUI:
             monkeypatch.setenv("QUANTUI_SLURM_GRES", "gpu:h200:1")
             monkeypatch.setenv("QUANTUI_SLURM_QOS", "nccu_h200_hp")
             monkeypatch.setenv("QUANTUI_SLURM_ACCOUNT", "lab")
+        monkeypatch.delenv("QUANTUI_SLURM_NV", raising=False)
         from quantui.backends.base import CalculationRequest
         from quantui.backends.registry import JobRecord
         from quantui.backends.slurm import SlurmBackend
@@ -693,6 +694,24 @@ class TestLauncherMatchesQuantUI:
             str(a),
             res,
         )
+
+    @pytest.mark.parametrize(
+        "env",
+        [
+            {"QUANTUI_SLURM_GRES": "shard:1", "QUANTUI_SLURM_NV": "1"},
+            {"QUANTUI_SLURM_GRES": "gpu:h200:1", "QUANTUI_SLURM_NV": "0"},
+            {"QUANTUI_SLURM_GRES": "gpu:h200:1"},
+            {"QUANTUI_SLURM_GRES": "tmpdisk:10"},
+        ],
+    )
+    def test_gpu_decision_matches_quantui(self, launcher, monkeypatch, env):
+        from quantui.backends import cluster_config as cfg
+
+        for var in ("QUANTUI_SLURM_GRES", "QUANTUI_SLURM_NV"):
+            monkeypatch.delenv(var, raising=False)
+        for k, v in env.items():
+            monkeypatch.setenv(k, v)
+        assert launcher.gpu_requested() == cfg.gpu_requested()
 
     def test_overrides_are_validated_like_quantui(self, launcher, water):
         args = _args(

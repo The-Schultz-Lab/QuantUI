@@ -69,6 +69,29 @@ DEFAULT_OPT_STEPS: int = 200  # generous upper limit for small molecules
 FREQ_PREOPT_FMAX: float = 0.01
 
 
+def join_optimizations(first: Any, second: Any) -> Any:
+    """*second* with *first*'s trajectory and energies in front (B2.5).
+
+    For a re-optimization that started from a displaced copy of *first*'s
+    final geometry (saddle-point retry): the joined trajectory runs from
+    the original start to the final minimum, and the displacement counts
+    as one step. Anything that is not an :class:`OptimizationResult` pair
+    returns *second* unchanged.
+    """
+    import dataclasses
+
+    if not (
+        isinstance(first, OptimizationResult) and isinstance(second, OptimizationResult)
+    ):
+        return second
+    return dataclasses.replace(
+        second,
+        trajectory=list(first.trajectory) + list(second.trajectory),
+        energies_hartree=list(first.energies_hartree) + list(second.energies_hartree),
+        n_steps=int(first.n_steps) + int(second.n_steps) + 1,
+    )
+
+
 # ============================================================================
 # Minimal ASE Calculator wrapping PySCF
 # ============================================================================
