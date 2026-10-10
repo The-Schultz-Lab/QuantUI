@@ -23,6 +23,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- **Viewer installers: the shortcut opened and closed a console without
+  starting anything.** `quantui view` looked for the `voila` command on
+  `PATH`, which a shortcut launch of an unactivated install does not set; it
+  printed "Voilà is not installed or not on PATH" and exited. It now runs
+  Voilà as `python -m voila` from its own interpreter and puts the install's
+  folders on `PATH` for the server. The Windows shortcut runs through
+  `cmd /c ... || pause`, so any future failure stays on screen. Stopping
+  `quantui view` now stops Voilà too, instead of leaving it serving. The
+  installer CI smoke test starts the viewer the way a shortcut does and
+  fetches a page (it previously only ran `quantui view --help`).
+
 - History → "View Results" / "View Analysis" navigated by fixed tab index, so
   with the Cluster Jobs tab visible they landed one tab early. They now look
   the tab up by name.

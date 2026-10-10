@@ -85,6 +85,8 @@ jobs:
           bash out/*.sh -b -p "$RUNNER_TEMP/qv"
           "$RUNNER_TEMP/qv/bin/quantui" view --help
           "$RUNNER_TEMP/qv/bin/python" -c "from quantui.app import QuantUIApp; QuantUIApp(viewer=True); print('viewer ok')"
+          # Start it the way the shortcut does (env not activated) and fetch a page.
+          "$RUNNER_TEMP/qv/bin/python" packaging/viewer/installer/smoke_launch.py "$RUNNER_TEMP/qv/bin/quantui"
           test -f "$HOME/.local/share/applications/quantui-viewer.desktop"
       - name: Smoke test (macOS)
         if: runner.os == 'macOS'
@@ -94,6 +96,7 @@ jobs:
           echo "installed at: $q"
           "$q" view --help
           "$(dirname "$q")/python" -c "from quantui.app import QuantUIApp; QuantUIApp(viewer=True); print('viewer ok')"
+          "$(dirname "$q")/python" packaging/viewer/installer/smoke_launch.py "$q"
           test -x "$HOME/Applications/QuantUI Viewer.app/Contents/MacOS/QuantUI Viewer"
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'
@@ -103,6 +106,9 @@ jobs:
           Start-Process -Wait -FilePath $exe -ArgumentList '/S', '/InstallationType=JustMe', '/D=C:\qv'
           & C:\qv\Scripts\quantui.exe view --help
           & C:\qv\python.exe -c "from quantui.app import QuantUIApp; QuantUIApp(viewer=True); print('viewer ok')"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # Start it the way the Start-menu shortcut does (env not on PATH).
+          & C:\qv\python.exe packaging\viewer\installer\smoke_launch.py C:\qv\Scripts\quantui.exe
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Get-Content C:\qv\post_install.log -ErrorAction SilentlyContinue
           if (-not (Test-Path ([Environment]::GetFolderPath('Programs') + '\QuantUI Viewer.lnk'))) { throw 'Start-menu shortcut missing' }

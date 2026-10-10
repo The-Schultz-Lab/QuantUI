@@ -156,3 +156,28 @@ class TestExtractResultsZip:
         with pytest.raises(ValueError, match="Unsafe path"):
             extract_results_zip(data, "bad.zip", root=tmp_path / "up")
         assert not (tmp_path / "evil.txt").exists()
+
+
+class TestViewerLaunchWithoutPath:
+    """Installer shortcuts start `quantui view` without the env on PATH."""
+
+    def test_voila_runs_as_module_of_this_interpreter(self, monkeypatch):
+        import sys
+
+        # Even with no `voila` command on PATH, the module form is used.
+        monkeypatch.setattr(app_launcher, "voila_executable", lambda: None)
+        assert app_launcher._viewer_voila_command() == [
+            sys.executable,
+            "-m",
+            "voila",
+        ]
+
+    def test_prefix_dirs_prepended_to_path(self):
+        import os
+        import sys
+        from pathlib import Path
+
+        env = app_launcher._env_with_prefix_on_path({"PATH": "/usr/bin"})
+        first = env["PATH"].split(os.pathsep)[0]
+        assert Path(first).resolve().is_relative_to(Path(sys.prefix).resolve())
+        assert env["PATH"].endswith("/usr/bin")

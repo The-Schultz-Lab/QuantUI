@@ -334,6 +334,61 @@ def _wait_for_port(port: int, proc: subprocess.Popen, timeout_s: float) -> bool:
     return False
 
 
+def _viewer_voila_command() -> Optional[List[str]]:
+    """How to start Voilà for the viewer, without relying on ``PATH``.
+
+    The desktop installers launch ``quantui view`` from a shortcut, where the
+    installed environment is not activated and its ``Scripts``/``bin`` folder
+    is not on ``PATH``. Running Voilà as a module of this very interpreter
+    works regardless; ``PATH`` is only the fallback.
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("voila") is not None:
+        return [sys.executable, "-m", "voila"]
+    voila = voila_executable()
+    return [voila] if voila else None
+
+
+def _env_with_prefix_on_path(env: dict) -> dict:
+    """Prepend this interpreter's environment folders to ``PATH``.
+
+    What ``conda activate`` would do for an unactivated install, so anything
+    Voilà or the kernel starts by name (and Windows DLL lookup) resolves
+    inside the installed environment.
+    """
+    prefix = Path(sys.prefix)
+    if os.name == "nt":
+        dirs = [prefix, prefix / "Library" / "bin", prefix / "Scripts"]
+    else:
+        dirs = [prefix / "bin"]
+    extra = [str(d) for d in dirs if d.is_dir()]
+    env["PATH"] = os.pathsep.join(extra + [env.get("PATH", "")])
+    return env
+
+
+def _stop_child_on_termination(proc: subprocess.Popen) -> None:
+    """Stop Voila too when this launcher is terminated (SIGTERM/SIGHUP).
+
+    Without this, killing ``quantui view`` (or closing its terminal on
+    macOS/Linux) orphans Voila, which keeps serving on its port.
+    """
+    import signal
+
+    def _handler(signum: int, _frame: object) -> None:
+        if proc.poll() is None:
+            proc.terminate()
+        raise SystemExit(128 + signum)
+
+    for name in ("SIGTERM", "SIGHUP"):
+        sig = getattr(signal, name, None)
+        if sig is not None:
+            try:
+                signal.signal(sig, _handler)
+            except (ValueError, OSError):  # not the main thread
+                pass
+
+
 def run_viewer_app(
     results_dir: Optional[Path] = None,
     *,
@@ -347,12 +402,12 @@ def run_viewer_app(
     environment); with no folder the viewer opens on the user's home directory
     and the in-app folder bar picks the real one.
     """
-    voila = voila_executable()
-    if voila is None:
+    voila_cmd = _viewer_voila_command()
+    if voila_cmd is None:
         print(voila_missing_message(), file=sys.stderr)
         return 1
 
-    env = dict(os.environ)
+    env = _env_with_prefix_on_path(dict(os.environ))
     if results_dir is not None:
         folder = Path(results_dir).expanduser().resolve()
         if not folder.is_dir():
@@ -365,18 +420,33 @@ def run_viewer_app(
     port = port or find_free_port()
     notebook = ensure_viewer_notebook()
     argv = build_voila_argv(notebook, port=port, no_browser=True)
-    argv[0] = voila
+    argv[:1] = voila_cmd
     argv.append("--Voila.ip=127.0.0.1")
 
     url = f"http://127.0.0.1:{port}"
     print(f"Starting QuantUI Viewer at {url}")
     print(f"Results folder: {env['QUANTUI_RESULTS_DIR']}")
     proc = subprocess.Popen(argv, env=env)
-    if open_browser and _wait_for_port(port, proc, timeout_s=60):
+    _stop_child_on_termination(proc)
+    started = _wait_for_port(port, proc, timeout_s=60)
+    if not started:
+        rc = proc.poll()
+        print(
+            f"QuantUI Viewer did not start (Voila exit code {rc}). "
+            "See the messages above.",
+            file=sys.stderr,
+        )
+        if rc is None:
+            proc.terminate()
+        return rc or 1
+    if open_browser:
         _open_url_best_effort(url)
     print("Use the Exit button in the app (or Ctrl-C here) to stop.")
     try:
-        return proc.wait()
+        # The app's Exit button stops Voila by signal; once the viewer has
+        # been up, that is a normal shutdown, not an error to report.
+        proc.wait()
+        return 0
     except KeyboardInterrupt:
         proc.terminate()
         try:
