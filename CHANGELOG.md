@@ -25,6 +25,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   `--qos` and `--account` lines to generated batch scripts (app, `quantui
   submit` and `quantui-batch`). A GRES that asks for a GPU also turns on
   `apptainer exec --nv`.
+- **Batch Geometry Opt results are complete** — a SLURM `geometry_opt`
+  result now records the optimized geometry (`final_molecule`), the final
+  SCF's dipole moment and Mulliken charges, so History and
+  `quantui-batch results` show them without a follow-up single point.
+  `--from` chaining reads the recorded geometry.
 
 ### Fixed
 
