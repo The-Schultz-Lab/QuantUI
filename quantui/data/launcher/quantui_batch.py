@@ -127,6 +127,35 @@ def partition():
     return os.environ.get("QUANTUI_SLURM_PARTITION") or SITE["default_partition"]
 
 
+# Port of cluster_config.SITE_DIRECTIVE_ENV / site_directives() /
+# gpu_requested(): optional account/QOS/GRES lines, read per job.
+SITE_DIRECTIVE_ENV = (
+    ("QUANTUI_SLURM_ACCOUNT", "account"),
+    ("QUANTUI_SLURM_QOS", "qos"),
+    ("QUANTUI_SLURM_GRES", "gres"),
+)
+_SITE_DIRECTIVE_VALUE_RE = re.compile(r"^[A-Za-z0-9_.:,=+-]+$")
+
+
+def site_directives():
+    lines = []
+    for var, flag in SITE_DIRECTIVE_ENV:
+        value = os.environ.get(var, "").strip()
+        if not value:
+            continue
+        if not _SITE_DIRECTIVE_VALUE_RE.match(value):
+            raise InputError(
+                f"{var}={value!r} has characters not allowed in an #SBATCH "
+                "value (use letters, digits and _ . : , = + -)"
+            )
+        lines.append(f"#SBATCH --{flag}={value}")
+    return lines
+
+
+def gpu_requested():
+    return "gpu" in os.environ.get("QUANTUI_SLURM_GRES", "").lower()
+
+
 def staging_root():
     """QuantUI's job root: env, then the user's System Settings, then default."""
     override = os.environ.get("QUANTUI_STAGING_DIR")
@@ -533,14 +562,15 @@ def worker_command(request_path, job_dir, image_path):
     if not _is_within(job_dir, Path.home()):
         job_arg = shlex.quote(str(job_dir))
         binds += f" --bind {job_arg}:{job_arg}"
+    nv = " --nv" if gpu_requested() else ""
     return (
-        f'apptainer exec --nv {binds} --pwd "$ATTEMPT_DIR" '
+        f'apptainer exec{nv} {binds} --pwd "$ATTEMPT_DIR" '
         f"{shlex.quote(image_path)} {inner}"
     )
 
 
 def slurm_script(job_dir, request_path, resources, image_path, email):
-    extra = []
+    extra = site_directives()
     if email:
         extra.append(f"#SBATCH --mail-user={email}")
         extra.append("#SBATCH --mail-type=" + ",".join(SITE["default_mail_events"]))
@@ -565,6 +595,7 @@ def utc_now():
 
 def prepare_job(request, resources, job_name, email, image_path):
     """Write the job folder and its record, as SlurmBackend.prepare() does."""
+    site_directives()  # a bad site setting fails before the job folder exists
     root = staging_root()
     name = sanitize_job_name(job_name or "") or default_job_name(request)
     job_dir = new_job_dir(root, name)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shlex
 from pathlib import Path
 
@@ -86,6 +87,50 @@ WALLTIME_OPTIONS = [
 
 # Site-specific — override via env or config.local import in deployment.
 DEFAULT_PARTITION = os.environ.get("QUANTUI_SLURM_PARTITION", "common")
+
+# Optional site directives (M-BATCH2 B2.1), read per job so a changed
+# environment applies without restarting. Each set variable adds one
+# ``#SBATCH`` line, in this order. NCShare GPU jobs, for example, need
+# ``QUANTUI_SLURM_PARTITION=gpu QUANTUI_SLURM_GRES=gpu:h200:1``.
+SITE_DIRECTIVE_ENV = (
+    ("QUANTUI_SLURM_ACCOUNT", "account"),
+    ("QUANTUI_SLURM_QOS", "qos"),
+    ("QUANTUI_SLURM_GRES", "gres"),
+)
+# The values are pasted into the batch script, so only the characters
+# Slurm account/QOS/GRES names use are accepted.
+_SITE_DIRECTIVE_VALUE_RE = re.compile(r"^[A-Za-z0-9_.:,=+-]+$")
+
+
+def site_directives() -> list[str]:
+    """``#SBATCH`` lines for the account/QOS/GRES env settings that are set.
+
+    Raises ``ValueError`` for a value with characters outside
+    ``[A-Za-z0-9_.:,=+-]`` rather than dropping it: a silently missing
+    ``--gres`` would run a GPU job on CPU with a correct-looking result.
+    """
+    lines = []
+    for var, flag in SITE_DIRECTIVE_ENV:
+        value = os.environ.get(var, "").strip()
+        if not value:
+            continue
+        if not _SITE_DIRECTIVE_VALUE_RE.match(value):
+            raise ValueError(
+                f"{var}={value!r} has characters not allowed in an #SBATCH "
+                "value (use letters, digits and _ . : , = + -)"
+            )
+        lines.append(f"#SBATCH --{flag}={value}")
+    return lines
+
+
+def gpu_requested() -> bool:
+    """True when ``QUANTUI_SLURM_GRES`` asks for a GPU.
+
+    Only then does the worker get ``apptainer exec --nv``: without a GPU in
+    the allocation ``--nv`` has nothing to expose.
+    """
+    return "gpu" in os.environ.get("QUANTUI_SLURM_GRES", "").lower()
+
 
 ALLOWED_MAIL_EVENTS = ["NONE", "BEGIN", "END", "FAIL", "REQUEUE", "ALL"]
 DEFAULT_MAIL_EVENTS = ["END", "FAIL"]
@@ -190,11 +235,16 @@ def build_attempt_setup(job_dir: str) -> str:
 # run inside the allocation (Apptainer-wrapped when configured).
 # ``--comment=quantui`` tags every QuantUI job so an operator can list them
 # all (``squeue -o "%i %u %j %T %k"``), whoever submitted them and from where.
+# The worker is one process with OpenMP threads, hence one task with
+# ``{cores}`` CPUs (B2.1). ``--cpus-per-task`` also makes Slurm set this
+# job's own SLURM_CPUS_PER_TASK, so a value inherited from a submitting
+# allocation can no longer set the thread count.
 SLURM_SCRIPT_TEMPLATE = """#!/bin/bash
 #SBATCH --job-name={job_name}
 #SBATCH --partition={partition}
 #SBATCH --nodes=1
-#SBATCH --ntasks={cores}
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task={cores}
 #SBATCH --mem={memory}G
 #SBATCH --time={walltime}
 #SBATCH --comment=quantui

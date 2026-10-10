@@ -206,6 +206,12 @@ class SlurmBackend:
         resources = validate_resources(cores, memory_gb, walltime)
 
         dependency_job_id = self._resolve_dependency(depends_on)
+        # Checked before the job folder exists, so a bad site setting leaves
+        # nothing behind.
+        try:
+            site_lines = cfg.site_directives()
+        except ValueError as exc:
+            raise SecurityError(str(exc)) from exc
         email = validate_email(email)
         resolved_events: list[str] = []
         if email is not None:
@@ -235,6 +241,7 @@ class SlurmBackend:
             depends_on=dependency_job_id,
             email=email,
             mail_events=resolved_events,
+            site_lines=site_lines,
         )
         return record
 
@@ -322,7 +329,13 @@ class SlurmBackend:
         # "$ATTEMPT_DIR" is the one deliberate exception: it is a shell
         # variable set by the attempt-setup block at run time, so it is
         # double-quoted (expanded by the shell, never word-split) instead.
-        py = shlex.quote(sys.executable)
+        #
+        # Inside the image the interpreter is plain ``python``, found on the
+        # image's own PATH (%environment): this process may run in a
+        # different image whose ``sys.executable`` (e.g. the CPU image's
+        # /opt/conda/envs/quantui/bin/python) does not exist in the batch
+        # image (the GPU image's is /opt/venv/bin/python).
+        py = "python" if self.use_apptainer else shlex.quote(sys.executable)
         request_arg = shlex.quote(str(request_path))
         inner = (
             f"{py} -m quantui.backends.worker --request {request_arg} "
@@ -336,7 +349,8 @@ class SlurmBackend:
             if not _is_within(job_dir, Path.home()):
                 job_arg = shlex.quote(str(job_dir))
                 binds += f" --bind {job_arg}:{job_arg}"
-            return f'apptainer exec --nv {binds} --pwd "$ATTEMPT_DIR" {image} {inner}'
+            nv = " --nv" if cfg.gpu_requested() else ""
+            return f'apptainer exec{nv} {binds} --pwd "$ATTEMPT_DIR" {image} {inner}'
         return inner
 
     def _write_slurm_script(
@@ -350,8 +364,9 @@ class SlurmBackend:
         depends_on: str | None,
         email: str | None,
         mail_events: list[str],
+        site_lines: list[str],
     ) -> None:
-        extra: list[str] = []
+        extra: list[str] = list(site_lines)
         if depends_on:
             extra.append(f"#SBATCH --dependency=afterok:{depends_on}")
         if email:
