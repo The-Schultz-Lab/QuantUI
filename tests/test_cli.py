@@ -820,6 +820,59 @@ class TestCliAvoidsGuiStackImport:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "OK" in result.stdout
 
+    @pytest.mark.parametrize(
+        "module",
+        [
+            "quantui",
+            "quantui.cli",
+            "quantui.backends.slurm",
+            "quantui.backends.batch_input",
+            "quantui.backends.worker",
+        ],
+    )
+    def test_entry_points_load_no_scientific_stack(self, module):
+        """M-BATCH2 B2.6 — these run on cluster login nodes (``quantui
+        submit``, the worker's argument parsing), where importing numpy took
+        seconds and could fail against the per-user thread limit."""
+        heavy = [
+            "numpy",
+            "scipy",
+            "rdkit",
+            "ase",
+            "plotly",
+            "plotlymol3d",
+            "pyscf",
+            "matplotlib",
+            "ipywidgets",
+            "IPython",
+            "py3Dmol",
+            "requests",
+        ]
+        script = (
+            "import sys, importlib\n"
+            f"importlib.import_module({module!r})\n"
+            f"loaded = [m for m in {heavy!r} if m in sys.modules]\n"
+            "assert not loaded, loaded\n"
+            "print('OK')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=60
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_every_public_name_resolves(self):
+        script = (
+            "import quantui\n"
+            "for n in quantui.__all__: getattr(quantui, n)\n"
+            "assert quantui.ASE_AVAILABLE in (True, False)\n"
+            "from quantui import Molecule, optimize_geometry\n"
+            "print('OK')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=120
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
     def test_lazy_attrs_still_resolve_on_demand(self):
         script = (
             "import quantui\n"
