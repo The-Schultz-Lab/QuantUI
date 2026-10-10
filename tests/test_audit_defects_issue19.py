@@ -143,6 +143,10 @@ class TestPreoptOnSlurm:
                     runner(req, staging, log)
         m_opt.assert_called_once()
         assert seen["z"] == pytest.approx(0.71)
+        # B2.5 tightens only the frequency pre-opt.
+        from quantui.optimizer import DEFAULT_FMAX
+
+        assert m_opt.call_args.kwargs["fmax"] == DEFAULT_FMAX
 
 
 class TestSeedGating:

@@ -355,6 +355,11 @@ class TestWorker:
         mock_opt.assert_called_once()
         assert (staging / "preopt_trajectory.json").exists()
         assert "Seed geometry loaded from" in (staging / "live.log").read_text()
+        # B2.5 — frequencies need the tighter pre-opt threshold.
+        from quantui.optimizer import FREQ_PREOPT_FMAX
+
+        assert mock_opt.call_args.kwargs["fmax"] == FREQ_PREOPT_FMAX == 0.01
+        assert "Force threshold 0.01 eV/Å" in (staging / "live.log").read_text()
 
     @patch("quantui.tddft_calc.run_tddft_calc")
     def test_tddft_success(self, mock_tddft, staging):

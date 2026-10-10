@@ -159,9 +159,11 @@ def _maybe_run_preopt(
     if not options.get("preopt_before_run"):
         return molecule, None
 
-    from quantui.optimizer import optimize_geometry
+    from quantui.optimizer import DEFAULT_FMAX, FREQ_PREOPT_FMAX, optimize_geometry
 
     scf_rescue = bool(options.get("scf_rescue", True))
+    # B2.5: frequencies need a tighter stationary point (same as the app).
+    preopt_fmax = FREQ_PREOPT_FMAX if request.calc_type == "frequency" else DEFAULT_FMAX
 
     # M-CLUSTER2 CL2.8 — a preopt's *own* starting geometry is fixed (the
     # request's input XYZ, same every attempt), but pes_scan/frequency/
@@ -222,7 +224,8 @@ def _maybe_run_preopt(
 
     _append_log(
         staging_dir,
-        f"\n── Geometry optimization (before {stage_label}) ──",
+        f"\n── Geometry optimization (before {stage_label}) ──\n"
+        f"Force threshold {preopt_fmax} eV/Å",
     )
     _write_progress(
         staging_dir,
@@ -235,6 +238,7 @@ def _maybe_run_preopt(
             molecule=molecule,
             method=request.method,
             basis=request.basis,
+            fmax=preopt_fmax,
             progress_stream=log_stream,
             status_label=f"SLURM pre-opt before {stage_label}",
             scf_rescue=scf_rescue,

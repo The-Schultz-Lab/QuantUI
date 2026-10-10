@@ -6415,16 +6415,20 @@ class QuantUIApp:
                 # the user can iterate if their input was actually wrong.
                 if self._freq_preopt_cb.value:
                     from quantui import optimize_geometry
+                    from quantui.optimizer import FREQ_PREOPT_FMAX
 
                     self.run_status.value = "Optimizing geometry before frequency…"
                     log.write(
                         "\n── Geometry optimization (before frequency analysis) ──────────────────\n"
+                        f"Force threshold {FREQ_PREOPT_FMAX} eV/Å (tighter than a plain "
+                        "Geometry Opt: soft modes need a true stationary point).\n"
                     )
                     try:
                         _pre_opt = optimize_geometry(
                             molecule=calc_mol,
                             method=self.method_dd.value,
                             basis=self.basis_dd.value,
+                            fmax=FREQ_PREOPT_FMAX,
                             progress_stream=log,  # type: ignore[arg-type]
                             solvent=_run_solvent,
                         )
