@@ -11,6 +11,7 @@ PATH" from a Start-menu shortcut).
 
 from __future__ import annotations
 
+import os
 import socket
 import subprocess
 import sys
@@ -50,12 +51,25 @@ def main(quantui: str) -> int:
             print("viewer did not answer within 120 s")
             return 1
     finally:
-        proc.terminate()
+        if os.name == "nt":
+            # TerminateProcess runs no handlers, so Voila (a child) would
+            # outlive it; kill the whole tree. Real Windows use is covered
+            # differently: closing the console window stops every process
+            # attached to it, and the app's Exit button stops Voila itself.
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                capture_output=True,
+            )
+        else:
+            proc.terminate()
         try:
             proc.wait(timeout=15)
         except subprocess.TimeoutExpired:
             proc.kill()
-    # Stopping quantui must stop Voila too, not leave it serving.
+    if os.name == "nt":
+        return 0
+    # macOS/Linux: SIGTERM to quantui must stop Voila too (the launcher
+    # forwards it), not leave it serving.
     time.sleep(3)
     if _port_open(port):
         print(f"Voila still serving on port {port} after quantui stopped")
