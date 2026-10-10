@@ -197,7 +197,7 @@ class TestWorker:
                 "quantui.freq_calc.run_freq_calc", side_effect=results
             ) as m_freq:
                 outcome = run_worker_request(path)
-        payload = json.loads((path.parent / "result.json").read_text())
+        payload = json.loads((path.parent / "result.json").read_text(encoding="utf-8"))
         return outcome, payload, m_opt, m_freq
 
     def test_imaginary_mode_after_preopt_is_retried(self, request_path):
@@ -209,7 +209,7 @@ class TestWorker:
         ir = payload["spectra"]["ir"]
         assert ir["frequencies_cm1"] == [55.0, 500.0, 4400.0]
         assert ir["imaginary_mode_retry"]["followed_cm1"] == [-39.4]
-        log = (request_path.parent / "live.log").read_text()
+        log = (request_path.parent / "live.log").read_text(encoding="utf-8")
         assert "Imaginary mode(s) 39.4i" in log
         # Resume points were recorded in the job folder.
         assert (request_path.parent / "saddle_retry_start.json").is_file()
@@ -255,7 +255,9 @@ class TestWorker:
         )
         assert outcome.status == "success"
         assert payload["spectra"]["ir"]["frequencies_cm1"][0] == -39.4
-        assert "retry failed" in (request_path.parent / "live.log").read_text()
+        assert "retry failed" in (request_path.parent / "live.log").read_text(
+            encoding="utf-8"
+        )
         # A resubmission runs normally instead of resuming a broken retry.
         assert not (request_path.parent / "saddle_retry_start.json").exists()
 

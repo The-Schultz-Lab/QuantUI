@@ -1350,7 +1350,9 @@ class TestFinalGeometry:
         monkeypatch.setattr(worker, "_run_single_point", fake_runner)
         worker.run_worker_request(job / "request.json")
         assert seen["coords"] == _OPT_TRAJ["steps"][-1]["coords"]
-        assert "final geometry of job/attempt-01_job1" in (job / "live.log").read_text()
+        assert "final geometry of job/attempt-01_job1" in (job / "live.log").read_text(
+            encoding="utf-8"
+        )
 
     def test_worker_fails_clearly_when_the_source_has_no_geometry(
         self, tmp_path, roots

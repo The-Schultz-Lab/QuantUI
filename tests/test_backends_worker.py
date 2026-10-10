@@ -354,12 +354,16 @@ class TestWorker:
         assert outcome.status == "success"
         mock_opt.assert_called_once()
         assert (staging / "preopt_trajectory.json").exists()
-        assert "Seed geometry loaded from" in (staging / "live.log").read_text()
+        assert "Seed geometry loaded from" in (staging / "live.log").read_text(
+            encoding="utf-8"
+        )
         # B2.5 — frequencies need the tighter pre-opt threshold.
         from quantui.optimizer import FREQ_PREOPT_FMAX
 
         assert mock_opt.call_args.kwargs["fmax"] == FREQ_PREOPT_FMAX == 0.01
-        assert "Force threshold 0.01 eV/Å" in (staging / "live.log").read_text()
+        assert "Force threshold 0.01 eV/Å" in (staging / "live.log").read_text(
+            encoding="utf-8"
+        )
 
     @patch("quantui.tddft_calc.run_tddft_calc")
     def test_tddft_success(self, mock_tddft, staging):
@@ -489,7 +493,9 @@ class TestCheckpointWiring:
         assert outcome.status == "success"
         _args, kwargs = mock_opt.call_args
         assert kwargs["resume"] is True
-        assert "Resuming geometry optimization" in (staging / "live.log").read_text()
+        assert "Resuming geometry optimization" in (staging / "live.log").read_text(
+            encoding="utf-8"
+        )
 
     @patch("quantui.pes_scan.run_pes_scan")
     def test_pes_scan_first_attempt_gets_a_fresh_checkpoint(self, mock_scan, staging):
@@ -586,7 +592,7 @@ class TestCheckpointWiring:
         assert outcome.status == "success"
         _args, kwargs = mock_scan.call_args
         assert kwargs["resume"] is True
-        log_text = (staging / "live.log").read_text()
+        log_text = (staging / "live.log").read_text(encoding="utf-8")
         assert "Resuming PES scan" in log_text
         assert "1 point(s) already computed" in log_text
 
@@ -644,7 +650,9 @@ class TestCheckpointWiring:
         outcome2 = run_worker_request(staging / "request.json")
         assert outcome2.status == "success"
         mock_opt.assert_called_once()  # still just the one call from attempt 1
-        assert "Reusing saved preopt geometry" in (staging / "live.log").read_text()
+        assert "Reusing saved preopt geometry" in (staging / "live.log").read_text(
+            encoding="utf-8"
+        )
 
     @patch("quantui.freq_calc.run_freq_calc")
     def test_frequency_first_attempt_gets_a_fresh_checkpoint(self, mock_freq, staging):
@@ -718,7 +726,9 @@ class TestCheckpointWiring:
         assert outcome.status == "success"
         _args, kwargs = mock_freq.call_args
         assert kwargs["resume"] is True
-        assert "Resuming frequency analysis" in (staging / "live.log").read_text()
+        assert "Resuming frequency analysis" in (staging / "live.log").read_text(
+            encoding="utf-8"
+        )
 
 
 class TestCheckpointsOutliveAttempts:
