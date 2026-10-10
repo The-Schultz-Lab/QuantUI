@@ -133,8 +133,7 @@ def _ingest_frequency(
     log_text: str,
     extras: dict[str, Any],
 ) -> Path:
-    from quantui import save_result
-    from quantui.results_storage import save_molden
+    from quantui.results_storage import save_molden, save_result
 
     result = _basic_result(payload, record)
     spectra = payload.get("spectra") or {}
@@ -175,8 +174,8 @@ def _ingest_reorganization_energy(
     log_text: str,
     extras: dict[str, Any],
 ) -> Path:
-    from quantui import save_result
     from quantui.reorganization_energy import S2_KEYS
+    from quantui.results_storage import save_result
 
     neutral_geom = payload.get("neutral_geometry") or {}
     neutral_mol = (
@@ -257,7 +256,7 @@ def ingest_staging_success(
     payload = json.loads(result_path.read_text(encoding="utf-8"))
     calc_type = payload.get("calc_type") or record.calc_type
 
-    from quantui import save_result
+    from quantui.results_storage import save_result
 
     if calc_type == "frequency":
         return _ingest_frequency(staging, payload, record, log_text, extras)

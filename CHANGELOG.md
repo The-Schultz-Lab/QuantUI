@@ -31,6 +31,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   `quantui-batch results` show them without a follow-up single point.
   `--from` chaining reads the recorded geometry.
 
+### Changed
+
+- `import quantui` no longer loads numpy, RDKit, ASE, Plotly, IPython or
+  requests; every public name is resolved when first used. `quantui`
+  command-line tools and the batch worker start in a fraction of the time,
+  which matters on cluster login nodes (slow shared filesystems, per-user
+  thread limits).
+
 ### Fixed
 
 - Generated SLURM scripts ask for one task with N CPUs
