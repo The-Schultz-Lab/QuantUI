@@ -501,7 +501,11 @@ def _run_geometry_opt(
 def _run_frequency(
     request: CalculationRequest, staging_dir: Path, log_stream
 ) -> tuple[Any, Any]:
-    from quantui.freq_calc import run_freq_calc
+    from quantui.freq_calc import (
+        imaginary_modes_to_follow,
+        retry_frequency_off_saddle,
+        run_freq_calc,
+    )
 
     _log_seed_context(request, staging_dir)
     molecule = molecule_from_request(request)
@@ -551,6 +555,24 @@ def _run_frequency(
         resume=resumable,
         solvent=request.solvent,
     )
+    # B2.5 — the pre-opt we ran can stop on a rotor saddle point; step off
+    # it once (same as the app). Not checkpointed: a job killed during the
+    # retry repeats the retry, not the first frequency run.
+    if options.get("preopt_before_run") and imaginary_modes_to_follow(result):
+        _write_progress(
+            staging_dir, "running", "Re-optimizing off a saddle point", 80.0
+        )
+        retried = retry_frequency_off_saddle(
+            molecule,
+            result,
+            method=request.method,
+            basis=request.basis,
+            solvent=request.solvent,
+            scf_rescue=scf_rescue,
+            progress_stream=log_stream,
+        )
+        if retried is not None:
+            molecule, result = retried
     return result, molecule
 
 

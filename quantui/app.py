@@ -6486,6 +6486,29 @@ class QuantUIApp:
                     resume=_resume,
                     solvent=_run_solvent,
                 )
+                # B2.5 — our pre-opt can stop on a rotor saddle point; step
+                # off it once and redo the frequencies.
+                if self._freq_preopt_cb.value:
+                    from quantui.freq_calc import (
+                        imaginary_modes_to_follow,
+                        retry_frequency_off_saddle,
+                    )
+
+                    if imaginary_modes_to_follow(result):
+                        self.run_status.value = (
+                            "Imaginary mode found — re-optimizing off the "
+                            "saddle point…"
+                        )
+                        _retried = retry_frequency_off_saddle(
+                            calc_mol,
+                            result,
+                            method=self.method_dd.value,
+                            basis=self.basis_dd.value,
+                            solvent=_run_solvent,
+                            progress_stream=log,  # type: ignore[arg-type]
+                        )
+                        if _retried is not None:
+                            calc_mol, result = _retried
                 result_html = self._format_freq_result(result)
                 _displacements_serialized = None
                 if result.displacements is not None:
@@ -6532,6 +6555,7 @@ class QuantUIApp:
                         # AUDIT F18 — thermo (H, S, G) was computed and shown
                         # live but never made it into the saved result.json.
                         "thermo": _thermo_serialized,
+                        "imaginary_mode_retry": result.imaginary_mode_retry,
                     },
                     "molecule": {
                         "atoms": list(calc_mol.atoms),

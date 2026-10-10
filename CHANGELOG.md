@@ -44,6 +44,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   now converges to 0.01 eV/Å instead of 0.05. Residual forces at 0.05 left
   soft modes such as methyl rotors wrong, or imaginary (CHEM-3200 Lab 4).
   Plain Geometry Opt and the pre-opt for other calc types are unchanged.
+- When that pre-optimized Frequency run still finds an imaginary mode below
+  20i cm⁻¹ (usually a methyl or other rotor stuck at its eclipsed saddle
+  point), QuantUI displaces along the mode, re-optimizes and repeats the
+  frequencies once (app and batch). The result card and `result.json`
+  (`spectra.ir.imaginary_mode_retry`) say what was done; a mode still
+  imaginary after the retry is reported, not retried again.
 
 - History → "View Results" / "View Analysis" navigated by fixed tab index, so
   with the Cluster Jobs tab visible they landed one tab early. They now look

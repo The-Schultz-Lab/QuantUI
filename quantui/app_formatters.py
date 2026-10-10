@@ -388,6 +388,17 @@ def format_freq_result(r: Any) -> str:
             f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Imaginary modes</td>'
             f'<td style="color:{_theme.css.ACCENT_ERROR_ALT}">{n_imag} — geometry may not be a minimum</td></tr>'
         )
+    _retry = getattr(r, "imaginary_mode_retry", None)
+    if _retry:
+        _followed = ", ".join(
+            f"{abs(f):.1f}i" for f in _retry.get("followed_cm1") or []
+        )
+        imag_note += (
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Saddle-point retry</td>'
+            f'<td style="color:{_theme.css.TEXT_HEADING}">first pass had {_followed} cm⁻¹; '
+            f"displaced, re-optimized ({_retry.get('reopt_steps', '?')} steps) "
+            "and recomputed</td></tr>"
+        )
     _rows = (
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF energy</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>'

@@ -79,17 +79,16 @@ def geometry_from_attempt(attempt: Path, calc_type: str) -> Optional[Dict[str, A
         )
         if geo:
             return geo
-    geo = _last_step(attempt / "preopt_trajectory.json")
-    if geo:
-        return geo
     if calc_type == "frequency":
+        # The molecule the frequencies were computed at: the pre-opt's last
+        # step, or the re-optimized geometry after a saddle-point retry (B2.5).
         try:
             result = json.loads((attempt / "result.json").read_text(encoding="utf-8"))
             mol = result["spectra"]["molecule"]
             return {"atoms": list(mol["atoms"]), "coords": mol["coords"]}
         except (OSError, ValueError, KeyError, TypeError):
-            return None
-    return None
+            pass
+    return _last_step(attempt / "preopt_trajectory.json")
 
 
 def final_geometry(job_dir: Path) -> Dict[str, Any]:
