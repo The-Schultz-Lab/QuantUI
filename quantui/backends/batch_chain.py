@@ -47,6 +47,19 @@ def finished_attempts(job_dir: Path) -> List[Path]:
     return attempts
 
 
+def _final_molecule(path: Path) -> Optional[Dict[str, Any]]:
+    """``final_molecule`` from a geometry_opt result.json (B2.3), if recorded.
+
+    Results written before B2.3 have none; the caller falls back to the
+    trajectory's last step.
+    """
+    try:
+        mol = json.loads(path.read_text(encoding="utf-8"))["final_molecule"]
+        return {"atoms": list(mol["atoms"]), "coords": mol["coords"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def _last_step(path: Path) -> Optional[Dict[str, Any]]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -61,7 +74,9 @@ def _last_step(path: Path) -> Optional[Dict[str, Any]]:
 def geometry_from_attempt(attempt: Path, calc_type: str) -> Optional[Dict[str, Any]]:
     """The optimized geometry one finished attempt produced, if it has one."""
     if calc_type == "geometry_opt":
-        geo = _last_step(attempt / "trajectory.json")
+        geo = _final_molecule(attempt / "result.json") or _last_step(
+            attempt / "trajectory.json"
+        )
         if geo:
             return geo
     geo = _last_step(attempt / "preopt_trajectory.json")

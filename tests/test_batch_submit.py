@@ -1254,6 +1254,21 @@ class TestFinalGeometry:
         assert geo["coords"] == _OPT_TRAJ["steps"][-1]["coords"]
         assert geo["source"] == "job/attempt-01_job1"
 
+    def test_geometry_opt_prefers_the_recorded_final_molecule(self, tmp_path):
+        # B2.3: result.json's final_molecule wins over the trajectory file.
+        from quantui.backends.batch_chain import final_geometry
+
+        job = self._job(tmp_path, "geometry_opt")
+        final = {
+            "atoms": ["O", "H", "H"],
+            "coords": [[1, 1, 1], [1, 2, 1], [2, 1, 1]],
+            "charge": 0,
+            "multiplicity": 1,
+        }
+        _finish(job, "attempt-01_job1", {"final_molecule": final}, _OPT_TRAJ)
+        geo = final_geometry(job)
+        assert geo["atoms"] == final["atoms"] and geo["coords"] == final["coords"]
+
     def test_newest_finished_attempt_wins(self, tmp_path):
         from quantui.backends.batch_chain import final_geometry
 

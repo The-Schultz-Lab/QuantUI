@@ -11,11 +11,13 @@ plain CPU single-point would have caught this immediately" (GOTCHAS.md).
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from quantui.backends.worker_payload import (
     freq_result_payload,
     nmr_result_payload,
+    optimization_result_payload,
     session_result_payload,
     tddft_result_payload,
 )
@@ -323,3 +325,55 @@ class TestFreqTddftNmrResultPayloadScfVariant:
         assert payload["scf_variant"] == "RKS"
         # AUDIT F12 — density_fit was never serialized here at all.
         assert payload["density_fit"] is True
+
+
+class TestOptimizationResultPayload:
+    """B2.3 — the batch geometry_opt result carries the optimized geometry
+    and the final SCF's dipole and Mulliken charges."""
+
+    def _result(self, **overrides):
+        final = Molecule(
+            ["O", "H", "H"],
+            [[0.0, 0.0, 0.1], [0.0, 0.76, -0.47], [0.0, -0.76, -0.47]],
+        )
+        fields = dict(
+            molecule=final,
+            energies_hartree=[-75.9, -76.0],
+            converged=True,
+            n_steps=1,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2O",
+            atom_symbols=["O", "H", "H"],
+            mulliken_charges=[-0.4, 0.2, 0.2],
+            dipole_moment_debye=1.71,
+            dipole_vector_debye=[0.0, 0.0, 1.71],
+        )
+        fields.update(overrides)
+        return SimpleNamespace(**fields)
+
+    def test_final_molecule_and_ground_state_fields(self):
+        payload = optimization_result_payload(
+            self._result(), trajectory_file="trajectory.json"
+        )
+        assert payload["final_molecule"] == {
+            "atoms": ["O", "H", "H"],
+            "coords": [[0.0, 0.0, 0.1], [0.0, 0.76, -0.47], [0.0, -0.76, -0.47]],
+            "charge": 0,
+            "multiplicity": 1,
+        }
+        assert payload["mulliken_charges"] == [-0.4, 0.2, 0.2]
+        assert payload["dipole_moment_debye"] == 1.71
+        assert payload["dipole_vector_debye"] == [0.0, 0.0, 1.71]
+        assert payload["atom_symbols"] == ["O", "H", "H"]
+        assert payload["energy_hartree"] == -76.0
+        json.dumps(payload)  # result.json must stay plain JSON
+
+    def test_missing_fields_stay_none(self):
+        bare = self._result(molecule=None)
+        for name in ("mulliken_charges", "dipole_moment_debye", "atom_symbols"):
+            delattr(bare, name)
+        payload = optimization_result_payload(bare, trajectory_file="t.json")
+        assert payload["final_molecule"] is None
+        assert payload["mulliken_charges"] is None
+        assert payload["dipole_moment_debye"] is None
