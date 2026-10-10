@@ -103,20 +103,6 @@ def session_result_payload(result) -> Dict[str, Any]:
     }
 
 
-def _molecule_payload(molecule) -> Dict[str, Any] | None:
-    """``{"atoms", "coords", "charge", "multiplicity"}`` for a Molecule, or None."""
-    if molecule is None:
-        return None
-    import numpy as np
-
-    return {
-        "atoms": list(molecule.atoms),
-        "coords": np.asarray(molecule.coordinates, dtype=float).tolist(),
-        "charge": int(molecule.charge),
-        "multiplicity": int(molecule.multiplicity),
-    }
-
-
 def optimization_result_payload(result, *, trajectory_file: str) -> Dict[str, Any]:
     energy = getattr(result, "energy_hartree", None)
     if energy is None:
@@ -139,7 +125,11 @@ def optimization_result_payload(result, *, trajectory_file: str) -> Dict[str, An
         # B2.3: the optimized geometry and its final-SCF dipole / Mulliken
         # charges, so a course step that needs them (CHEM-3200 Lab 3 dipoles)
         # or a chained job (batch_chain) reads them here.
-        "final_molecule": _molecule_payload(getattr(result, "molecule", None)),
+        "final_molecule": (
+            molecule_to_dict(result.molecule)
+            if getattr(result, "molecule", None) is not None
+            else None
+        ),
         **_ground_state_fields(result),
     }
 

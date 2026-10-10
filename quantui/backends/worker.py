@@ -35,7 +35,9 @@ from .batch_input import SOLVENT_CALC_TYPES
 from .registry import JobRegistry, parse_attempt_dir_name
 from .worker_payload import (
     freq_result_payload,
+    molecule_from_dict,
     molecule_from_request,
+    molecule_to_dict,
     nmr_result_payload,
     optimization_result_payload,
     pes_scan_result_payload,
@@ -101,6 +103,11 @@ def _log_seed_context(request: CalculationRequest, staging_dir: Path) -> None:
 def _tag_from_stage_label(stage_label: str) -> str:
     """First word of *stage_label*, lowercased — e.g. "PES scan" -> "pes"."""
     return (stage_label.split() or ["run"])[0].lower()
+
+
+# Job-folder files for a saddle-point retry (B2.5) that a killed job resumes.
+_SADDLE_RETRY_START = "saddle_retry_start.json"
+_SADDLE_RETRY_GEOMETRY = "saddle_retry_geometry.json"
 
 
 def _job_state_dir(staging_dir: Path) -> Path:
@@ -521,9 +528,10 @@ def _run_frequency(
     request: CalculationRequest, staging_dir: Path, log_stream
 ) -> tuple[Any, Any]:
     from quantui.freq_calc import (
-        imaginary_modes_to_follow,
-        retry_frequency_off_saddle,
+        announce_saddle_retry,
+        displace_off_saddle,
         run_freq_calc,
+        saddle_retry_usable,
     )
 
     _log_seed_context(request, staging_dir)
@@ -538,6 +546,41 @@ def _run_frequency(
     )
     options = request.options or {}
     scf_rescue = bool(options.get("scf_rescue", True))
+
+    # B2.5 — a pre-opt can stop on a rotor saddle point; the frequencies are
+    # then retried once from a displaced geometry. Only after a pre-opt that
+    # succeeded (it saves its geometry in the job folder; a failed one falls
+    # back to the user's geometry, which may be a saddle on purpose).
+    state_dir = _job_state_dir(staging_dir)
+    preopt_ok = (
+        bool(options.get("preopt_before_run"))
+        and (
+            state_dir
+            / f"preopt_geometry_{_tag_from_stage_label('frequency analysis')}.json"
+        ).is_file()
+    )
+    retry_start_path = state_dir / _SADDLE_RETRY_START
+    if preopt_ok and retry_start_path.is_file():
+        start = json.loads(retry_start_path.read_text(encoding="utf-8"))
+        _append_log(
+            staging_dir,
+            "Resuming the saddle-point retry an earlier attempt started (its "
+            "first frequency run found imaginary modes "
+            + ", ".join(f"{abs(f):.1f}i" for f in start["followed_cm1"])
+            + " cm⁻¹).",
+        )
+        opt, result = _run_saddle_retry_resumable(
+            request,
+            molecule_from_dict(start["displaced"]),
+            list(start["followed_cm1"]),
+            start.get("first_energy_hartree"),
+            staging_dir,
+            log_stream,
+            scf_rescue,
+        )
+        _write_retry_trajectory(staging_dir, _pre_opt, opt)
+        return result, opt.molecule
+
     _write_progress(staging_dir, "running", "Running frequency analysis", 15.0)
 
     # M-CHECKPOINT CHK.4 — this is the calc type the real production pain
@@ -574,25 +617,142 @@ def _run_frequency(
         resume=resumable,
         solvent=request.solvent,
     )
-    # B2.5 — the pre-opt we ran can stop on a rotor saddle point; step off
-    # it once (same as the app). Not checkpointed: a job killed during the
-    # retry repeats the retry, not the first frequency run.
-    if options.get("preopt_before_run") and imaginary_modes_to_follow(result):
-        _write_progress(
-            staging_dir, "running", "Re-optimizing off a saddle point", 80.0
+    if preopt_ok:
+        start = displace_off_saddle(molecule, result)
+        if start is not None:
+            displaced, followed = start
+            announce_saddle_retry(followed, log_stream)
+            # Recorded before the retry starts: a killed job resumes the
+            # retry instead of redoing the first frequency run.
+            _write_json(
+                retry_start_path,
+                {
+                    "displaced": molecule_to_dict(displaced),
+                    "followed_cm1": followed,
+                    "first_energy_hartree": float(result.energy_hartree),
+                },
+            )
+            try:
+                opt, new = _run_saddle_retry_resumable(
+                    request,
+                    displaced,
+                    followed,
+                    float(result.energy_hartree),
+                    staging_dir,
+                    log_stream,
+                    scf_rescue,
+                )
+            except Exception as exc:  # noqa: BLE001 — the first result is complete
+                retry_start_path.unlink(missing_ok=True)
+                _append_log(
+                    staging_dir,
+                    f"⚠ The saddle-point retry failed ({exc}); keeping the "
+                    "first frequency result, imaginary mode(s) included.",
+                )
+                return result, molecule
+            if saddle_retry_usable(new):
+                _write_retry_trajectory(staging_dir, _pre_opt, opt)
+                return new, opt.molecule
+            _append_log(staging_dir, "Keeping the first frequency result.")
+    return result, molecule
+
+
+def _write_json(path: Path, data: dict) -> None:
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _run_saddle_retry_resumable(
+    request: CalculationRequest,
+    displaced,
+    followed: list,
+    first_energy: float | None,
+    staging_dir: Path,
+    log_stream,
+    scf_rescue: bool,
+):
+    """``freq_calc.run_saddle_retry`` with the batch job's resume points (B2.5).
+
+    The re-optimization is checkpointed, and its final geometry is saved in
+    the job folder once it finishes, so a later attempt goes straight to
+    the frequency run, whose checkpoint is keyed by that exact geometry.
+    """
+    from quantui.freq_calc import run_saddle_retry
+
+    state_dir = _job_state_dir(staging_dir)
+    done_path = state_dir / _SADDLE_RETRY_GEOMETRY
+    optimized = None
+    if done_path.is_file():
+        data = json.loads(done_path.read_text(encoding="utf-8"))
+        from types import SimpleNamespace
+
+        optimized = SimpleNamespace(
+            molecule=molecule_from_dict(data["molecule"]),
+            n_steps=int(data.get("n_steps", 0)),
+            converged=bool(data.get("converged", True)),
         )
-        retried = retry_frequency_off_saddle(
-            molecule,
-            result,
+        _append_log(
+            staging_dir,
+            "Reusing the saddle-point re-optimization a previous attempt finished.",
+        )
+    opt_ckpt, opt_resume = _begin_worker_checkpoint(
+        displaced,
+        calc_type="saddle_retry_opt",
+        method=request.method,
+        basis=request.basis,
+        staging_dir=staging_dir,
+        log_stream=log_stream,
+    )
+
+    def _record(opt) -> None:
+        _write_json(
+            done_path,
+            {
+                "molecule": molecule_to_dict(opt.molecule),
+                "n_steps": int(opt.n_steps),
+                "converged": bool(opt.converged),
+            },
+        )
+
+    def _freq_checkpoint(mol):
+        return _begin_worker_checkpoint(
+            mol,
+            calc_type="frequency",
             method=request.method,
             basis=request.basis,
-            solvent=request.solvent,
-            scf_rescue=scf_rescue,
-            progress_stream=log_stream,
+            staging_dir=staging_dir,
+            log_stream=log_stream,
         )
-        if retried is not None:
-            molecule, result = retried
-    return result, molecule
+
+    _write_progress(staging_dir, "running", "Re-optimizing off a saddle point", 80.0)
+    return run_saddle_retry(
+        displaced,
+        followed,
+        method=request.method,
+        basis=request.basis,
+        first_energy_hartree=first_energy,
+        solvent=request.solvent,
+        scf_rescue=scf_rescue,
+        progress_stream=log_stream,
+        opt_checkpoint=opt_ckpt,
+        opt_resume=opt_resume,
+        optimized=optimized,
+        on_optimized=_record,
+        freq_checkpoint_factory=_freq_checkpoint,
+    )
+
+
+def _write_retry_trajectory(staging_dir: Path, pre_opt, retry_opt) -> None:
+    """preopt_trajectory.json ending at the geometry the frequencies used."""
+    from quantui.optimizer import OptimizationResult, join_optimizations
+
+    traj = join_optimizations(pre_opt, retry_opt) if pre_opt is not None else retry_opt
+    if isinstance(traj, OptimizationResult) and traj.trajectory:
+        write_trajectory_json(
+            staging_dir,
+            traj.trajectory,
+            traj.energies_hartree,
+            filename="preopt_trajectory.json",
+        )
 
 
 def _run_tddft(request: CalculationRequest, staging_dir: Path, log_stream) -> Any:

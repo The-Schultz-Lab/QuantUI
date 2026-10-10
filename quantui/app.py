@@ -6487,12 +6487,15 @@ class QuantUIApp:
                     solvent=_run_solvent,
                 )
                 # B2.5 — our pre-opt can stop on a rotor saddle point; step
-                # off it once and redo the frequencies.
-                if self._freq_preopt_cb.value:
+                # off it once and redo the frequencies. Only after a pre-opt
+                # that succeeded (_pre_opt is None when it failed and the
+                # user's geometry, maybe a saddle on purpose, was used).
+                if _pre_opt is not None:
                     from quantui.freq_calc import (
                         imaginary_modes_to_follow,
                         retry_frequency_off_saddle,
                     )
+                    from quantui.optimizer import join_optimizations
 
                     if imaginary_modes_to_follow(result):
                         self.run_status.value = (
@@ -6508,7 +6511,11 @@ class QuantUIApp:
                             progress_stream=log,  # type: ignore[arg-type]
                         )
                         if _retried is not None:
-                            calc_mol, result = _retried
+                            _retry_opt, result = _retried
+                            calc_mol = _retry_opt.molecule
+                            # The saved pre-opt trajectory must end where
+                            # the frequencies were computed.
+                            _pre_opt = join_optimizations(_pre_opt, _retry_opt)
                 result_html = self._format_freq_result(result)
                 _displacements_serialized = None
                 if result.displacements is not None:

@@ -144,6 +144,7 @@ See the [NCShare SLURM batch runbook](https://github.com/The-Schultz-Lab/QuantUI
 | `QUANTUI_SLURM_CANCEL_CONFIRM_S` | `30` | Seconds to wait for `scancel` confirmation via `sacct` |
 | `QUANTUI_SLURM_PARTITION` | `common` | Default `#SBATCH` partition |
 | `QUANTUI_SLURM_GRES` | *(unset)* | `#SBATCH --gres=` value, e.g. `gpu:h200:1`. A value containing `gpu` also adds `--nv` to `apptainer exec`. |
+| `QUANTUI_SLURM_NV` | *(unset — auto)* | `1` / `0` forces `apptainer exec --nv` on / off; unset follows `QUANTUI_SLURM_GRES` (on when it contains `gpu`). Set `1` for a GPU GRES named otherwise, e.g. `shard:1`. |
 | `QUANTUI_SLURM_QOS` | *(unset)* | `#SBATCH --qos=` value, e.g. `nccu_h200_hp` with partition `gpu-hp` |
 | `QUANTUI_SLURM_ACCOUNT` | *(unset)* | `#SBATCH --account=` value |
 | `QUANTUI_BATCH_IMAGE` | `~/quantui-gpu.sif` | Apptainer image for batch worker |

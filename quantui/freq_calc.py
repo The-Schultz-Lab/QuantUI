@@ -245,9 +245,6 @@ class FreqResult:
     ``None`` if the Hessian calculation failed or PySCF version does not
     provide ``norm_mode``.
     """
-    imaginary_mode_retry: Optional[dict] = None
-    """Set when this result came from :func:`retry_frequency_off_saddle`:
-    the modes followed, the re-optimization, and what is left (B2.5)."""
     mo_energy_hartree: Optional[Any] = None
     """Orbital energies (Hartree) of the reference SCF; ``(2, n_mo)`` for
     UHF/UKS, as on :class:`~quantui.session_calc.SessionResult` (both spin
@@ -272,6 +269,10 @@ class FreqResult:
     # PCM solvent the reference SCF, Hessian and IR displacements ran in, or
     # None for gas phase. Raman is not computed for a solvated run.
     solvent: Optional[str] = None
+    # Set when this result came from a saddle-point retry (B2.5): the modes
+    # followed, the re-optimization, and what is left. See
+    # :func:`run_saddle_retry`.
+    imaginary_mode_retry: Optional[dict] = None
 
     @property
     def energy_ev(self) -> float:
@@ -1208,12 +1209,140 @@ IMAGINARY_RETRY_THRESHOLD_CM1: float = -20.0
 
 
 def imaginary_modes_to_follow(result: Any) -> List[int]:
-    """0-based indices of the modes :func:`retry_frequency_off_saddle` follows."""
+    """0-based indices of the modes a saddle-point retry follows."""
     freqs = list(getattr(result, "frequencies_cm1", None) or [])
     disps = getattr(result, "displacements", None)
     if not freqs or disps is None or len(disps) != len(freqs):
         return []
     return [i for i, f in enumerate(freqs) if f < IMAGINARY_RETRY_THRESHOLD_CM1]
+
+
+def displace_off_saddle(
+    molecule: Molecule, result: Any
+) -> Optional[tuple[Molecule, List[float]]]:
+    """``(displaced molecule, followed frequencies)``, or None if nothing to follow.
+
+    Displaces along every imaginary mode below
+    :data:`IMAGINARY_RETRY_THRESHOLD_CM1` (:func:`perturb_along_mode`,
+    0.3 Å scale). At a saddle both directions lead downhill.
+    """
+    modes = imaginary_modes_to_follow(result)
+    if not modes:
+        return None
+    displaced = molecule
+    for i in modes:
+        displaced = perturb_along_mode(displaced, result.displacements, i)
+    return displaced, [float(result.frequencies_cm1[i]) for i in modes]
+
+
+def saddle_retry_usable(result: Any) -> bool:
+    """A retried result worth keeping over the first one: it has frequencies."""
+    return bool(getattr(result, "converged", False)) and bool(
+        getattr(result, "frequencies_cm1", None)
+    )
+
+
+def run_saddle_retry(
+    displaced: Molecule,
+    followed_cm1: List[float],
+    *,
+    method: str,
+    basis: str,
+    first_energy_hartree: Optional[float] = None,
+    solvent: Optional[str] = None,
+    scf_rescue: bool = True,
+    progress_stream: Optional[IO[str]] = None,
+    opt_checkpoint: Optional[Any] = None,
+    opt_resume: bool = False,
+    optimized: Optional[Any] = None,
+    on_optimized: Optional[Any] = None,
+    freq_checkpoint_factory: Optional[Any] = None,
+) -> tuple[Any, FreqResult]:
+    """Re-optimize from *displaced* and redo the frequencies; return ``(opt, freq)``.
+
+    Raises whatever the optimizer or frequency run raises. The batch worker
+    uses the hooks to resume a retry that was killed: *opt_checkpoint*
+    resumes the optimization, *optimized* (anything with ``molecule``,
+    ``n_steps``, ``converged``) skips it when an earlier attempt finished
+    it, *on_optimized(opt)* records it, and *freq_checkpoint_factory*
+    (``molecule -> (checkpoint, resume)``) resumes the frequency run.
+    """
+    from .optimizer import FREQ_PREOPT_FMAX, optimize_geometry
+
+    out = progress_stream if progress_stream is not None else sys.stdout
+    if optimized is not None:
+        opt = optimized
+    else:
+        opt = optimize_geometry(
+            molecule=displaced,
+            method=method,
+            basis=basis,
+            fmax=FREQ_PREOPT_FMAX,
+            progress_stream=out,
+            status_label="Re-optimizing off the saddle point",
+            scf_rescue=scf_rescue,
+            solvent=solvent,
+            checkpoint=opt_checkpoint,
+            resume=opt_resume,
+        )
+        if on_optimized is not None:
+            on_optimized(opt)
+    freq_ckpt, freq_resume = (
+        freq_checkpoint_factory(opt.molecule)
+        if freq_checkpoint_factory is not None
+        else (None, False)
+    )
+    new_result = run_freq_calc(
+        molecule=opt.molecule,
+        method=method,
+        basis=basis,
+        progress_stream=out,
+        scf_rescue=scf_rescue,
+        checkpoint=freq_ckpt,
+        resume=freq_resume,
+        solvent=solvent,
+    )
+    remaining = [
+        float(f)
+        for f in new_result.frequencies_cm1
+        if f < IMAGINARY_RETRY_THRESHOLD_CM1
+    ]
+    new_result.imaginary_mode_retry = {
+        "followed_cm1": list(followed_cm1),
+        "displacement_angstrom": DEFAULT_MODE_PERTURBATION_FRACTION
+        * VIB_MODE_DISPLAY_AMPLITUDE_ANGSTROM,
+        "reopt_steps": int(opt.n_steps),
+        "reopt_converged": bool(opt.converged),
+        "reopt_fmax_ev_per_angstrom": FREQ_PREOPT_FMAX,
+        "energy_change_hartree": (
+            float(new_result.energy_hartree) - float(first_energy_hartree)
+            if first_energy_hartree is not None
+            else None
+        ),
+        "remaining_imaginary_cm1": remaining,
+    }
+    if not saddle_retry_usable(new_result):
+        out.write("⚠ The frequency run after the retry did not complete.\n")
+    elif remaining:
+        out.write(
+            "⚠ Still imaginary after one retry: "
+            + ", ".join(f"{abs(f):.1f}i" for f in remaining)
+            + " cm⁻¹. The structure may be a genuine transition state, or "
+            "the rotor needs a different starting conformation.\n"
+        )
+    else:
+        out.write("No imaginary modes after the retry.\n")
+    return opt, new_result
+
+
+def announce_saddle_retry(followed_cm1: List[float], out: IO[str]) -> None:
+    listed = ", ".join(f"{abs(f):.1f}i" for f in followed_cm1)
+    out.write(
+        f"\n── Imaginary mode(s) {listed} cm⁻¹ after the optimization ──\n"
+        "The optimizer stopped on a saddle point (often a methyl or other "
+        "rotor). Displacing along the mode(s), re-optimizing and repeating "
+        "the frequencies once.\n"
+    )
 
 
 def retry_frequency_off_saddle(
@@ -1225,81 +1354,45 @@ def retry_frequency_off_saddle(
     solvent: Optional[str] = None,
     scf_rescue: bool = True,
     progress_stream: Optional[IO[str]] = None,
-) -> Optional[tuple[Molecule, FreqResult]]:
+) -> Optional[tuple[Any, FreqResult]]:
     """Step off a saddle point once and redo the frequencies.
 
     A geometry optimization can stop on a saddle point where the forces
     vanish by symmetry, most often a methyl or other near-free rotor at its
-    eclipsed conformation (toluene RHF/STO-3G: 39i cm-1). The frequencies
-    then show an imaginary mode. This displaces *molecule* along every
-    imaginary mode below :data:`IMAGINARY_RETRY_THRESHOLD_CM1`
-    (:func:`perturb_along_mode`, default 0.3 Å scale), re-optimizes at
+    eclipsed conformation (toluene RHF/STO-3G: 39i cm-1). This displaces
+    along the imaginary mode(s), re-optimizes at
     ``optimizer.FREQ_PREOPT_FMAX`` and runs the frequencies again, once.
 
-    Returns ``(new_molecule, new_result)``, with
-    ``new_result.imaginary_mode_retry`` describing what was done, or
-    ``None`` when there is nothing to follow. Callers use it only after a
-    pre-optimization they ran themselves: a user-supplied geometry may be
-    a saddle on purpose.
+    Returns ``(optimization, new_result)`` (``new_result.imaginary_mode_retry``
+    says what was done), or ``None`` when there is nothing to follow or the
+    retry failed — the caller then keeps *result*, which is a complete
+    frequency run. Callers use this only after a pre-optimization that
+    succeeded: a user-supplied geometry may be a saddle on purpose.
     """
-    modes = imaginary_modes_to_follow(result)
-    if not modes:
+    start = displace_off_saddle(molecule, result)
+    if start is None:
         return None
-    from .optimizer import FREQ_PREOPT_FMAX, optimize_geometry
-
+    displaced, followed = start
     out = progress_stream if progress_stream is not None else sys.stdout
-    followed = [float(result.frequencies_cm1[i]) for i in modes]
-    listed = ", ".join(f"{abs(f):.1f}i" for f in followed)
-    out.write(
-        f"\n── Imaginary mode(s) {listed} cm⁻¹ after the optimization ──\n"
-        "The optimizer stopped on a saddle point (often a methyl or other "
-        "rotor). Displacing along the mode(s), re-optimizing and repeating "
-        "the frequencies once.\n"
-    )
-    displaced = molecule
-    for i in modes:
-        displaced = perturb_along_mode(displaced, result.displacements or [], i)
-    opt = optimize_geometry(
-        molecule=displaced,
-        method=method,
-        basis=basis,
-        fmax=FREQ_PREOPT_FMAX,
-        progress_stream=out,
-        status_label="Re-optimizing off the saddle point",
-        scf_rescue=scf_rescue,
-        solvent=solvent,
-    )
-    new_result = run_freq_calc(
-        molecule=opt.molecule,
-        method=method,
-        basis=basis,
-        progress_stream=out,
-        scf_rescue=scf_rescue,
-        solvent=solvent,
-    )
-    remaining = [
-        float(f)
-        for f in new_result.frequencies_cm1
-        if f < IMAGINARY_RETRY_THRESHOLD_CM1
-    ]
-    new_result.imaginary_mode_retry = {
-        "followed_cm1": followed,
-        "displacement_angstrom": DEFAULT_MODE_PERTURBATION_FRACTION
-        * VIB_MODE_DISPLAY_AMPLITUDE_ANGSTROM,
-        "reopt_steps": int(opt.n_steps),
-        "reopt_converged": bool(opt.converged),
-        "reopt_fmax_ev_per_angstrom": FREQ_PREOPT_FMAX,
-        "energy_change_hartree": float(new_result.energy_hartree)
-        - float(result.energy_hartree),
-        "remaining_imaginary_cm1": remaining,
-    }
-    if remaining:
-        out.write(
-            "⚠ Still imaginary after one retry: "
-            + ", ".join(f"{abs(f):.1f}i" for f in remaining)
-            + " cm⁻¹. The structure may be a genuine transition state, or "
-            "the rotor needs a different starting conformation.\n"
+    announce_saddle_retry(followed, out)
+    try:
+        opt, new_result = run_saddle_retry(
+            displaced,
+            followed,
+            method=method,
+            basis=basis,
+            first_energy_hartree=result.energy_hartree,
+            solvent=solvent,
+            scf_rescue=scf_rescue,
+            progress_stream=out,
         )
-    else:
-        out.write("No imaginary modes after the retry.\n")
-    return opt.molecule, new_result
+    except Exception as exc:  # noqa: BLE001 — the first result is complete
+        out.write(
+            f"⚠ The saddle-point retry failed ({exc}); keeping the first "
+            "frequency result, imaginary mode(s) included.\n"
+        )
+        return None
+    if not saddle_retry_usable(new_result):
+        out.write("Keeping the first frequency result.\n")
+        return None
+    return opt, new_result

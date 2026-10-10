@@ -24,7 +24,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   `QUANTUI_SLURM_QOS` and `QUANTUI_SLURM_ACCOUNT` add `#SBATCH --gres`,
   `--qos` and `--account` lines to generated batch scripts (app, `quantui
   submit` and `quantui-batch`). A GRES that asks for a GPU also turns on
-  `apptainer exec --nv`.
+  `apptainer exec --nv`; `QUANTUI_SLURM_NV=1`/`0` overrides that.
 - **Batch Geometry Opt results are complete** — a SLURM `geometry_opt`
   result now records the optimized geometry (`final_molecule`), the final
   SCF's dipole moment and Mulliken charges, so History and

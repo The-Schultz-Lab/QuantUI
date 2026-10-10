@@ -369,6 +369,33 @@ def _solvent_row(solvent: Any, note: str) -> str:
     )
 
 
+def saddle_retry_rows(block: Optional[dict]) -> str:
+    """Result-card row for a saddle-point retry (B2.5), live or from History.
+
+    *block* is ``FreqResult.imaginary_mode_retry`` /
+    ``result.json`` ``spectra.ir.imaginary_mode_retry``.
+    """
+    if not block:
+        return ""
+    followed = ", ".join(
+        f"{abs(float(f)):.1f}i" for f in block.get("followed_cm1") or []
+    )
+    remaining = block.get("remaining_imaginary_cm1") or []
+    outcome = (
+        "still imaginary: "
+        + ", ".join(f"{abs(float(f)):.1f}i" for f in remaining)
+        + " cm⁻¹"
+        if remaining
+        else "none left"
+    )
+    return (
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Saddle-point retry</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">first pass had {followed} cm⁻¹; '
+        f"displaced, re-optimized ({block.get('reopt_steps', '?')} steps) "
+        f"and recomputed &mdash; {outcome}</td></tr>"
+    )
+
+
 def format_freq_result(r: Any) -> str:
     """Format a frequency-analysis result card."""
     # AUDIT F15 — r.converged now also requires the Hessian/harmonic-
@@ -388,17 +415,7 @@ def format_freq_result(r: Any) -> str:
             f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Imaginary modes</td>'
             f'<td style="color:{_theme.css.ACCENT_ERROR_ALT}">{n_imag} — geometry may not be a minimum</td></tr>'
         )
-    _retry = getattr(r, "imaginary_mode_retry", None)
-    if _retry:
-        _followed = ", ".join(
-            f"{abs(f):.1f}i" for f in _retry.get("followed_cm1") or []
-        )
-        imag_note += (
-            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Saddle-point retry</td>'
-            f'<td style="color:{_theme.css.TEXT_HEADING}">first pass had {_followed} cm⁻¹; '
-            f"displaced, re-optimized ({_retry.get('reopt_steps', '?')} steps) "
-            "and recomputed</td></tr>"
-        )
+    imag_note += saddle_retry_rows(getattr(r, "imaginary_mode_retry", None))
     _rows = (
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF energy</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>'
@@ -1157,10 +1174,13 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     # not an error.
     _thermo_html = ""
     if ct == "frequency":
+        _thermo_html = saddle_retry_rows(
+            ((data.get("spectra") or {}).get("ir") or {}).get("imaginary_mode_retry")
+        )
         _thermo = ((data.get("spectra") or {}).get("ir") or {}).get("thermo")
         if _thermo:
             _kj = 2625.5  # kJ/mol per Hartree
-            _thermo_html = (
+            _thermo_html += (
                 f'<tr><td colspan="2" style="padding:6px 0 2px 0;color:{_theme.css.TEXT_MUTED};'
                 f'font-size:12px;font-style:italic">'
                 f"&#8212; Thermochemistry at {_thermo.get('temperature_k', 298.15):.0f} K"
