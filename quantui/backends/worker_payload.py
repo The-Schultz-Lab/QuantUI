@@ -215,6 +215,8 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
                 # but discarded here; the saved JSON had only frequencies,
                 # intensities, activities, displacements, and ZPVE.
                 "thermo": _thermo_payload,
+                # B2.5 — set when the job stepped off a saddle point.
+                "imaginary_mode_retry": getattr(result, "imaginary_mode_retry", None),
             },
             "molecule": {
                 "atoms": list(molecule.atoms),
