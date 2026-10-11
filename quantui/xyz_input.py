@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import List, Sequence, Tuple
 
 from .inorganic_guards import check_charge_multiplicity
-from .molecule import ATOMIC_NUMBERS, Molecule, parse_xyz_input, suggest_multiplicity
+from .molecule import Molecule, parse_xyz_input, suggest_multiplicity
 
 
 def normalize_element_symbol(symbol: str) -> str:
@@ -37,9 +37,10 @@ def format_xyz_body(
 
 
 def electron_count(atoms: Sequence[str], charge: int) -> int:
-    """Total electron count for ``atoms`` at ``charge``."""
-    nuclear = sum(ATOMIC_NUMBERS.get(atom, 0) for atom in atoms)
-    return nuclear - charge
+    """Total electron count for ``atoms`` at ``charge`` (``config.electron_count``)."""
+    from .config import electron_count as _electron_count
+
+    return _electron_count(atoms, charge)
 
 
 def spin_compatibility_note(

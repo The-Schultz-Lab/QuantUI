@@ -148,12 +148,12 @@ def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
     num_atoms = len(atoms)
     charge = int(mol.get("charge", 0))
     mult = int(mol.get("multiplicity", 1))
-    from quantui.config import ATOMIC_NUMBERS
+    from quantui.config import electron_count
 
-    # The full periodic table: the old short list here had no Mn, Co, Ni or Mo,
-    # so a transition-metal complex's metal counted as 0 electrons and its
-    # memory came out low.
-    num_electrons = sum(ATOMIC_NUMBERS.get(str(a).title(), 0) for a in atoms) - charge
+    # The full periodic table (config.electron_count): the old short list here
+    # had no Mn, Co, Ni or Mo, so a transition-metal complex's metal counted
+    # as 0 electrons and its memory came out low.
+    num_electrons = electron_count(atoms, charge)
 
     basis_factor = BASIS_FACTORS.get(request.basis, 2.0)
 
