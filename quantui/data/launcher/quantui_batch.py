@@ -273,11 +273,15 @@ def parse_xyz(text):
         coords.append(xyz)
     if not atoms:
         raise InputError("no atoms found")
-    warnings = []
+    warnings = []  # type: list[str]
     if expected is not None and expected != len(atoms):
-        # QuantUI only warns here too; the atoms listed are what runs.
-        warnings.append(
-            f"the first line says {expected} atoms but the file lists {len(atoms)}"
+        # B2.11, as quantui submit: an unattended job must not run a
+        # truncated or padded file.
+        raise InputError(
+            f"the first line says {expected} atoms but the file lists "
+            f"{len(atoms)}. The file may be cut off or have extra lines; fix "
+            "the count line, or delete the first two lines to submit the "
+            "atoms as listed."
         )
     return atoms, coords, warnings
 
@@ -527,14 +531,29 @@ def sanitize_job_name(name):
     return cleaned[: SITE["job_name_max_len"]].rstrip("_-")
 
 
+def job_name_basis(basis):
+    # Port of slurm_utils.job_name_basis: 6-31G* -> 6-31Gd, + -> p.
+    if basis.endswith("**"):
+        basis = basis[:-2] + "(d,p)"
+    elif basis.endswith("*"):
+        basis = basis[:-1] + "(d)"
+    basis = re.sub(r"[(),]", "", basis).replace("+", "p")
+    return re.sub(r"[^\w\-]", "x", basis)
+
+
 def default_job_name(request):
     def safe(text):
         return re.sub(r"[^\w\-]", "x", text)
 
     label = str(request["molecule"].get("label") or "quantui")
     tag = SITE["calc_tags"].get(request["calc_type"], request["calc_type"])
-    parts = [label, tag, request["method"], request["basis"]]
-    name = "_".join(safe(str(p)) for p in parts if p)
+    parts = [
+        safe(label),
+        safe(str(tag)),
+        safe(str(request["method"])),
+        job_name_basis(str(request["basis"])) if request["basis"] else "",
+    ]
+    name = "_".join(p for p in parts if p)
     return sanitize_job_name(name) or "quantui"
 
 

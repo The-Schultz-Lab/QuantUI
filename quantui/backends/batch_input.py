@@ -63,6 +63,31 @@ def _request_id_for(path: Path) -> str:
     return f"{_file_label(path)[:40]}-{uuid.uuid4().hex[:8]}"
 
 
+def xyz_header_atom_count(text: str) -> Optional[int]:
+    """The atom count on an XYZ file's first line, if it has one.
+
+    Same rule as ``molecule.parse_xyz_input``: the first line that is not
+    blank and not a ``#``/``!`` comment, if it is a bare integer.
+    """
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith(("#", "!")):
+            continue
+        try:
+            return int(stripped)
+        except ValueError:
+            return None
+    return None
+
+
+def xyz_count_mismatch_message(name: str, declared: int, listed: int) -> str:
+    return (
+        f"{name}: the first line says {declared} atoms but the file lists "
+        f"{listed}. The file may be cut off or have extra lines; fix the count "
+        "line, or delete the first two lines to submit the atoms as listed."
+    )
+
+
 def request_from_xyz(
     path: Path,
     *,
@@ -102,6 +127,15 @@ def request_from_xyz(
         )
     except Exception as exc:  # noqa: BLE001 — parser errors are user input errors
         raise BatchInputError(f"{path}: could not read XYZ — {exc}") from exc
+    declared = xyz_header_atom_count(text)
+    if declared is not None and declared != len(mol.atoms):
+        # B2.11: interactively the app only warns, but an unattended job
+        # would run a truncated or padded file without anyone seeing it.
+        # Checked before the spin check: a cut-off file is the real cause
+        # of the odd electron count it usually also has.
+        raise BatchInputError(
+            xyz_count_mismatch_message(path.name, declared, len(mol.atoms))
+        )
     if spin_note:
         raise BatchInputError(
             f"{path.name}: charge {charge} and multiplicity {multiplicity} "
