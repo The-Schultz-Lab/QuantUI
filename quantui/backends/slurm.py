@@ -92,6 +92,25 @@ class SlurmBackend:
             notes="Submits headless worker via sbatch; poll registry + staging logs.",
         )
 
+    def _count_active_slurm_jobs(self) -> int:
+        """Active SLURM records, after syncing them with the queue (B2.9).
+
+        Records only leave ``submitted``/``running`` when someone polls. With
+        no app open (``quantui submit`` from a terminal) nothing did, so
+        finished jobs kept counting toward the concurrent-job limit and
+        submission could refuse forever. A failed poll (no ``squeue``) keeps
+        the registry as it is.
+        """
+        try:
+            self.refresh_registry_statuses()
+        except Exception as exc:  # noqa: BLE001 — the count still works
+            logger.warning("Could not refresh SLURM job states: %s", exc)
+        return sum(
+            1
+            for record in self.registry.list_active()
+            if record.backend_id == self.backend_id
+        )
+
     def dispatch(
         self,
         request: CalculationRequest,
@@ -104,12 +123,7 @@ class SlurmBackend:
         mail_events: list[str] | None = None,
         job_name: str | None = None,
     ) -> str:
-        active_slurm = sum(
-            1
-            for record in self.registry.list_active()
-            if record.backend_id == self.backend_id
-        )
-        check_concurrent_job_limit(active_slurm)
+        check_concurrent_job_limit(self._count_active_slurm_jobs())
         check_submit_cooldown(self.registry.seconds_since_last_slurm_submit())
         record = self._create_job(
             request,
@@ -303,12 +317,7 @@ class SlurmBackend:
                 "Calculate tab."
             )
 
-        active_slurm = sum(
-            1
-            for active in self.registry.list_active()
-            if active.backend_id == self.backend_id
-        )
-        check_concurrent_job_limit(active_slurm)
+        check_concurrent_job_limit(self._count_active_slurm_jobs())
         check_submit_cooldown(self.registry.seconds_since_last_slurm_submit())
 
         slurm_job_id = self._submit_to_slurm(script)

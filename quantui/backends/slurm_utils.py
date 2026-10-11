@@ -50,19 +50,41 @@ def sanitize_job_name(name: str) -> str:
     return cleaned[:_JOB_NAME_MAX_LEN].rstrip("_-")
 
 
+def job_name_basis(basis: str) -> str:
+    """A basis set name as it appears in job and folder names (B2.11).
+
+    Pople polarisation is written the way chemists abbreviate it:
+    ``6-31G*`` / ``6-31G(d)`` → ``6-31Gd``, ``6-31G**`` / ``6-31G(d,p)`` →
+    ``6-31Gdp``, and ``+`` → ``p`` (``6-31+G*`` → ``6-31pGd``). Before, every
+    such character became ``x`` (``6-31Gxdxpx``). Still distinct from
+    ``6-31G``. Any other unsafe character becomes ``x``.
+    """
+    if basis.endswith("**"):
+        basis = basis[:-2] + "(d,p)"
+    elif basis.endswith("*"):
+        basis = basis[:-1] + "(d)"
+    basis = re.sub(r"[(),]", "", basis).replace("+", "p")
+    return re.sub(r"[^\w\-]", "x", basis)
+
+
 def default_job_name(request: CalculationRequest) -> str:
     """``<label>_<calc tag>_<method>_<basis>``, e.g. ``H2O_opt_B3LYP_def2-SVP``.
 
-    Uses the same unsafe-character rule as History result dirs
-    (``results_storage._safe_name``: ``*`` → ``x``), so ``6-31G*`` stays
-    distinguishable from ``6-31G``.
+    Unsafe characters become ``x`` as in History result dirs
+    (``results_storage._safe_name``); the basis is written by
+    :func:`job_name_basis`.
     """
     from quantui.results_storage import _safe_name
 
     label = str(request.molecule.get("label") or "quantui")
     tag = _CALC_TYPE_TAGS.get(request.calc_type, request.calc_type)
-    parts = [label, tag, request.method, request.basis]
-    name = "_".join(_safe_name(str(p)) for p in parts if p)
+    parts = [
+        _safe_name(label),
+        _safe_name(tag),
+        _safe_name(request.method),
+        job_name_basis(request.basis) if request.basis else "",
+    ]
+    name = "_".join(p for p in parts if p)
     return sanitize_job_name(name) or "quantui"
 
 

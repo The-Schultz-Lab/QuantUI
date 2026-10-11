@@ -377,6 +377,63 @@ class TestSlurmBackendResourceLines:
         assert f"{shlex.quote(sys.executable)} -m quantui.backends.worker" in text
 
 
+class TestActiveCountRefreshesFirst:
+    """B2.9 — finished jobs must not keep counting toward the limit when no
+    app has polled them (``quantui submit`` from a terminal)."""
+
+    def _submitted(self, backend, rid, jid):
+        backend.registry.create(_request(rid), "cluster_slurm")
+        backend.registry.update_status(rid, "submitted", slurm_job_id=jid)
+
+    def test_finished_jobs_stop_counting(self, slurm_backend):
+        self._submitted(slurm_backend, "done1", "900001")
+        self._submitted(slurm_backend, "done2", "900002")
+        self._submitted(slurm_backend, "live1", "900003")
+        with patch.object(
+            slurm_backend,
+            "batch_poll_slurm_statuses",
+            return_value={
+                "900001": "FAILED",
+                "900002": "CANCELLED",
+                "900003": "RUNNING",
+            },
+        ):
+            assert slurm_backend._count_active_slurm_jobs() == 1
+        assert slurm_backend.registry.load("done1").status == "error"
+        assert slurm_backend.registry.load("live1").status == "running"
+
+    def test_a_failed_poll_keeps_the_registry(self, slurm_backend):
+        self._submitted(slurm_backend, "s1", "900011")
+        with patch.object(
+            slurm_backend,
+            "batch_poll_slurm_statuses",
+            side_effect=FileNotFoundError("squeue"),
+        ):
+            assert slurm_backend._count_active_slurm_jobs() == 1
+
+    def test_dispatch_is_not_blocked_by_stale_records(self, slurm_backend, monkeypatch):
+        monkeypatch.setenv("QUANTUI_SLURM_SUBMIT_COOLDOWN_S", "0")
+        for i in range(2):
+            self._submitted(slurm_backend, f"old{i}", f"90002{i}")
+        with (
+            patch.object(
+                slurm_backend,
+                "batch_poll_slurm_statuses",
+                return_value={"900020": "FAILED", "900021": "FAILED"},
+            ),
+            patch(
+                "quantui.backends.slurm.subprocess.run",
+                **{
+                    "return_value.stdout": "Submitted batch job 900099\n",
+                    "return_value.stderr": "",
+                    "return_value.returncode": 0,
+                },
+            ),
+        ):
+            rid = slurm_backend.dispatch(_request("new1"))
+        assert slurm_backend.registry.load(rid).slurm_job_id == "900099"
+
+
 class TestSlurmBackendReconcile:
     def test_reconcile_stale_record_without_slurm_id(self, slurm_backend, monkeypatch):
         monkeypatch.setenv("QUANTUI_SLURM_STALE_NO_ID_S", "60")

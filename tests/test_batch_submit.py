@@ -105,6 +105,15 @@ class TestRequestFromXyz:
         )
         assert a.request_id != b.request_id
 
+    def test_atom_count_mismatch_is_an_error(self, tmp_path):
+        # B2.11: a cut-off file must not run unattended.
+        path = tmp_path / "cut.xyz"
+        path.write_text("3\nwater, cut off\nO 0 0 0\nH 0 0 0.96\n")
+        with pytest.raises(BatchInputError, match="first line says 3 atoms"):
+            request_from_xyz(
+                path, calc_type="single_point", method="RHF", basis="STO-3G"
+            )
+
     def test_requires_calc_type(self, water):
         with pytest.raises(BatchInputError, match="needs --calc"):
             request_from_xyz(water, calc_type=None, method="RHF", basis="STO-3G")
@@ -564,12 +573,19 @@ class TestLauncherMatchesQuantUI:
         ],
     )
     def test_xyz_parsing(self, launcher, text):
+        from quantui.backends.batch_input import xyz_header_atom_count
         from quantui.molecule import parse_xyz_input
 
         try:
             expected = parse_xyz_input(text)
         except ValueError:
             with pytest.raises(launcher.InputError):
+                launcher.parse_xyz(text)
+            return
+        declared = xyz_header_atom_count(text)
+        if declared is not None and declared != len(expected[0]):
+            # B2.11: batch input refuses what the app only warns about.
+            with pytest.raises(launcher.InputError, match="first line says"):
                 launcher.parse_xyz(text)
             return
         atoms, coords, _warnings = launcher.parse_xyz(text)
@@ -616,7 +632,9 @@ class TestLauncherMatchesQuantUI:
         ours.pop("request_id"), theirs.pop("request_id")
         assert ours == theirs
 
-    @pytest.mark.parametrize("basis", ["def2-SVP", "6-31G*", "6-31G(d,p)"])
+    @pytest.mark.parametrize(
+        "basis", ["def2-SVP", "6-31G*", "6-31G(d,p)", "6-31+G**", "6-311++G(2df,2p)"]
+    )
     def test_default_job_name(self, launcher, water, basis):
         from quantui.backends.base import CalculationRequest
         from quantui.backends.slurm_utils import default_job_name

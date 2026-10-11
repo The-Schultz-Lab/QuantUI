@@ -41,6 +41,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Batch `live.log` files no longer contain a copy of QuantUI's worker
+  source. PySCF writes the running script into its output at the log level
+  QuantUI uses; in a batch job that script is the worker (~900 lines per
+  calculation). PySCF's version and input summary are still logged.
+- Batch job and folder names write Pople bases the usual way: `6-31G*` →
+  `6-31Gd`, `6-31G(d,p)` → `6-31Gdp`, `6-31+G*` → `6-31pGd` (was
+  `6-31Gx`, `6-31Gxdxpx`, …).
+- `quantui submit` and `quantui-batch` refuse an XYZ file whose first line
+  gives a different atom count from the atoms listed (a cut-off or padded
+  file). The app still only warns, where you see the structure.
+- `quantui submit` (and Resubmit) syncs job states with the SLURM queue before
+  checking the concurrent-job limit. With no app open, finished jobs stayed
+  "submitted" in the registry and kept counting, so after two submissions
+  every further one was refused.
 - Generated SLURM scripts ask for one task with N CPUs
   (`--ntasks=1 --cpus-per-task=N`) instead of N tasks, which is what the
   single multi-threaded worker uses; a `SLURM_CPUS_PER_TASK` inherited from

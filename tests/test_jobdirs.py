@@ -63,7 +63,10 @@ def _sbatch_returning(*job_ids):
 
     def _run(args, **kwargs):
         result = subprocess.CompletedProcess(args, 0)
-        result.stdout = f"Submitted batch job {next(outputs)}\n"
+        # Only sbatch takes the next id; the queue poll before each submit
+        # (B2.9) sees an empty queue.
+        is_sbatch = bool(args) and args[0] == "sbatch"
+        result.stdout = f"Submitted batch job {next(outputs)}\n" if is_sbatch else ""
         result.stderr = ""
         return result
 
@@ -89,7 +92,26 @@ class TestJobNames:
 
     def test_default_name_keeps_star_basis_distinct(self):
         name = default_job_name(_request(calc_type="single_point", basis="6-31G*"))
-        assert name == "H2_sp_B3LYP_6-31Gx"
+        assert name == "H2_sp_B3LYP_6-31Gd"
+
+    @pytest.mark.parametrize(
+        "basis,expected",
+        [
+            ("6-31G", "6-31G"),
+            ("6-31G*", "6-31Gd"),
+            ("6-31G(d)", "6-31Gd"),
+            ("6-31G**", "6-31Gdp"),
+            ("6-31G(d,p)", "6-31Gdp"),
+            ("6-31+G*", "6-31pGd"),
+            ("6-311++G(2df,2p)", "6-311ppG2df2p"),
+            ("def2-TZVP", "def2-TZVP"),
+            ("aug-cc-pVDZ", "aug-cc-pVDZ"),
+        ],
+    )
+    def test_basis_in_job_names(self, basis, expected):
+        from quantui.backends.slurm_utils import job_name_basis
+
+        assert job_name_basis(basis) == expected
 
     def test_missing_label_falls_back(self):
         req = _request(molecule={"atoms": ["H"], "coords": [[0, 0, 0]]})
