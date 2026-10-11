@@ -162,8 +162,17 @@ class TestViewerLaunchWithoutPath:
     """Installer shortcuts start `quantui view` without the env on PATH."""
 
     def test_voila_runs_as_module_of_this_interpreter(self, monkeypatch):
+        import importlib.util
         import sys
 
+        # Voila is in the [app] extra, which the test environment may not
+        # have; what matters is the choice, so report it as importable.
+        real_find_spec = importlib.util.find_spec
+        monkeypatch.setattr(
+            importlib.util,
+            "find_spec",
+            lambda name, *a: object() if name == "voila" else real_find_spec(name, *a),
+        )
         # Even with no `voila` command on PATH, the module form is used.
         monkeypatch.setattr(app_launcher, "voila_executable", lambda: None)
         assert app_launcher._viewer_voila_command() == [
@@ -171,6 +180,20 @@ class TestViewerLaunchWithoutPath:
             "-m",
             "voila",
         ]
+
+    def test_path_command_is_the_fallback(self, monkeypatch):
+        import importlib.util
+
+        real_find_spec = importlib.util.find_spec
+        monkeypatch.setattr(
+            importlib.util,
+            "find_spec",
+            lambda name, *a: None if name == "voila" else real_find_spec(name, *a),
+        )
+        monkeypatch.setattr(app_launcher, "voila_executable", lambda: "/opt/bin/voila")
+        assert app_launcher._viewer_voila_command() == ["/opt/bin/voila"]
+        monkeypatch.setattr(app_launcher, "voila_executable", lambda: None)
+        assert app_launcher._viewer_voila_command() is None
 
     def test_prefix_dirs_prepended_to_path(self):
         import os
