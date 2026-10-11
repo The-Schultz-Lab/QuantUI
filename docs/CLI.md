@@ -36,6 +36,7 @@ Reach for the CLI when you want to:
 | [`quantui gpu check`](#quantui-gpu-check) | Probe GPU-offload availability and explain failures |
 | [`quantui analytics build`](#quantui-analytics-build) | Build an HTML usage dashboard from `perf_log.jsonl` |
 | [`quantui submit`](#quantui-submit) | Submit `.xyz` or request-JSON files as SLURM batch jobs |
+| [`quantui results`](#quantui-results) | Summarize a batch job folder's newest finished result |
 | [`quantui install-launcher`](#quantui-install-launcher) | Write the `quantui-batch` launcher for submitting from a login node |
 
 ---
@@ -369,6 +370,22 @@ Useful flags: `--charge`, `--mult`, `--solvent`, `--preopt`,
 An impossible charge/multiplicity, an unknown solvent, or a solvent on a calc
 type the batch worker runs gas-phase only (NMR, PES scan) is refused before
 anything is queued.
+
+---
+
+## `quantui results`
+
+Print a plain-text summary of a batch job folder's newest finished attempt:
+convergence, energy, gap, dipole, imaginary modes and strongest IR bands,
+excited states, or NMR shifts. It is the same summary as `quantui-batch
+results`, for use inside the image.
+
+```bash
+quantui results ~/.quantui/staging/H2O_freq_B3LYP_def2-SVP
+```
+
+The argument can also be one attempt folder. Exit code 1 means no attempt has
+finished yet.
 
 ---
 

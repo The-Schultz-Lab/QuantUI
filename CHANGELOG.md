@@ -9,6 +9,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **`quantui results JOB_DIR`** — the `quantui-batch results` summary
+  (convergence, energy, imaginary modes, strongest IR bands, excited states,
+  NMR shifts) from inside the image. Both now also note a saddle-point
+  retry.
 - **Site limits for batch jobs** — `QUANTUI_SLURM_MAX_MEMORY_GB`,
   `QUANTUI_SLURM_ESTIMATE_MAX_MEMORY_GB` and `QUANTUI_SLURM_MAX_CORES` set the
   hard limits and the automatic estimate's own memory ceiling (defaults

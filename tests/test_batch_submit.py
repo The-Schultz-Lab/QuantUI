@@ -740,6 +740,31 @@ class TestLauncherMatchesQuantUI:
             monkeypatch.setenv(k, v)
         assert launcher.gpu_requested() == cfg.gpu_requested()
 
+    @pytest.mark.parametrize(
+        "calc",
+        ["single_point", "geometry_opt", "frequency", "tddft", "nmr", "retry"],
+    )
+    def test_results_summary_matches_quantui(self, launcher, tmp_path, calc):
+        # B2.11: `quantui results` (in the image) and `quantui-batch results`
+        # (login node) print the same summary.
+        from quantui.backends.result_summary import summarize
+        from tests.slurm_ingest_helpers import sample_payload
+
+        payload = sample_payload("frequency" if calc == "retry" else calc)
+        if calc == "retry":
+            payload["spectra"]["ir"]["imaginary_mode_retry"] = {
+                "followed_cm1": [-39.4],
+                "reopt_steps": 7,
+            }
+        job = tmp_path / "job"
+        attempt = job / "attempt-01_job1"
+        attempt.mkdir(parents=True)
+        (attempt / "result.json").write_text(json.dumps(payload))
+        ours = launcher.summarize(payload, job, attempt)
+        assert ours == summarize(payload, job, attempt)
+        if calc == "retry":
+            assert any("saddle-point retry" in line for line in ours)
+
     def test_overrides_are_validated_like_quantui(self, launcher, water):
         args = _args(
             launcher,

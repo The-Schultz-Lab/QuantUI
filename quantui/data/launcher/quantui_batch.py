@@ -1531,6 +1531,13 @@ def summarize(result, job_dir, attempt):
             )
         else:
             lines.append("  imaginary modes:  none (a true minimum)")
+        retry = ir.get("imaginary_mode_retry") or {}
+        if retry.get("followed_cm1"):
+            first = ", ".join(f"{abs(float(f)):.1f}i" for f in retry["followed_cm1"])
+            lines.append(
+                f"  saddle-point retry: first pass had {first} cm-1; displaced "
+                f"and re-optimized ({retry.get('reopt_steps', '?')} steps)"
+            )
         strongest = sorted(
             (pair for pair in zip(freqs, ints) if pair[0] > 0),
             key=lambda p: p[1],
