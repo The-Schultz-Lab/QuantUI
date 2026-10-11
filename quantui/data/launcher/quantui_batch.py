@@ -436,6 +436,27 @@ def _next_walltime(walltime):
     return walltime
 
 
+def basis_factor(basis):
+    # Port of slurm_utils.basis_factor: case-insensitive, Pople aliases folded.
+    key = str(basis).strip().lower().replace(" ", "")
+    if key.endswith("(d,p)"):
+        key = key[: -len("(d,p)")] + "**"
+    elif key.endswith("(d)"):
+        key = key[: -len("(d)")] + "*"
+    for name, factor in SITE["basis_factors"].items():
+        if name.lower() == key:
+            return factor
+    return 2.0
+
+
+def _walltime_steps_for(count, default):
+    steps = 0
+    while count > default:
+        steps += 1
+        default *= 2
+    return steps
+
+
 def estimate(request):
     mol = request["molecule"]
     atoms = mol.get("atoms") or []
@@ -445,7 +466,7 @@ def estimate(request):
     z = SITE["atomic_numbers"]
     num_electrons = sum(z.get(str(a).title(), 0) for a in atoms) - charge
 
-    basis_factor = SITE["basis_factors"].get(request["basis"], 2.0)
+    b_factor = basis_factor(request["basis"])
     method_upper = request["method"].upper()
     method_factor = 1.2 if method_upper == "UHF" else 1.0
     if method_upper in ("MP2", "CCSD", "CCSD(T)"):
@@ -455,9 +476,10 @@ def estimate(request):
     calc_factor = SITE["calc_factors"].get(request["calc_type"], 1.5)
 
     base_memory = max(
-        4, int(2 * (max(num_electrons, 1) / 10) * basis_factor * method_factor)
+        4, int(2 * (max(num_electrons, 1) / 10) * b_factor * method_factor)
     )
-    memory_gb = min(int(base_memory * calc_factor), SITE["max_memory_gb"])
+    cap = SITE["estimate_max_memory_gb"]
+    memory_gb = min(int(base_memory * calc_factor), cap)
 
     if num_atoms < 10:
         cores = 4
@@ -486,13 +508,24 @@ def estimate(request):
         walltime = _next_walltime(walltime)
     if mult > 1:
         walltime = _next_walltime(walltime)
+    options = request.get("options") or {}
+    extra_steps = 0
+    try:
+        if request["calc_type"] == "tddft":
+            extra_steps = _walltime_steps_for(int(options.get("nstates", 10)), 10)
+        elif request["calc_type"] == "pes_scan":
+            extra_steps = _walltime_steps_for(int(options.get("steps", 10)), 10)
+    except (TypeError, ValueError):
+        extra_steps = 0
+    for _ in range(extra_steps):
+        walltime = _next_walltime(walltime)
 
     multiplier = 1
     if request["calc_type"] == "frequency" and SITE["freq_parallel"]:
         displacements = max(num_atoms, 1) * 3 * 2
         multiplier = max(1, min(max(1, cores // 2), displacements))
         if multiplier > 1:
-            memory_gb = min(memory_gb * multiplier, SITE["max_memory_gb"])
+            memory_gb = min(memory_gb * multiplier, cap)
     return {
         "cores": cores,
         "memory_gb": memory_gb,

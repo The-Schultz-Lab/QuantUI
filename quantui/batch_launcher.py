@@ -68,6 +68,7 @@ def site_constants() -> Dict[str, Any]:
         "max_cores": cfg.MAX_CORES,
         "min_memory_gb": cfg.MIN_MEMORY_GB,
         "max_memory_gb": cfg.MAX_MEMORY_GB,
+        "estimate_max_memory_gb": cfg.ESTIMATE_MAX_MEMORY_GB,
         "walltime_options": list(cfg.WALLTIME_OPTIONS),
         "default_partition": cfg.DEFAULT_PARTITION,
         "default_mail_events": list(cfg.DEFAULT_MAIL_EVENTS),

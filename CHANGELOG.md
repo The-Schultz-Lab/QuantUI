@@ -9,6 +9,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Site limits for batch jobs** — `QUANTUI_SLURM_MAX_MEMORY_GB`,
+  `QUANTUI_SLURM_ESTIMATE_MAX_MEMORY_GB` and `QUANTUI_SLURM_MAX_CORES` set the
+  hard limits and the automatic estimate's own memory ceiling (defaults
+  unchanged: 128 GB, 32 cores). Set them in the image environment before
+  `quantui install-launcher` so `quantui-batch` uses the same values.
 - **Viewer mode (`quantui view [FOLDER]`)** — a lightweight QuantUI with only
   the History and Analysis tabs, pointed at a results folder, needing no quantum
   engine. `QuantUIApp(viewer=True, results_dir=...)` adds a results-folder bar
@@ -41,6 +46,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- The batch resource estimate knows def2-SVP, def2-TZVP and LANL2DZ (they
+  used a generic factor), treats `6-31G(d)` / `6-31G(d,p)` like `6-31G*` /
+  `6-31G**`, and adds walltime for TD-DFT runs with more than 10 states and
+  PES scans with more than 10 points.
 - Batch `live.log` files no longer contain a copy of QuantUI's worker
   source. PySCF writes the running script into its output at the log level
   QuantUI uses; in a batch job that script is the worker (~900 lines per

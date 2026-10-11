@@ -137,6 +137,11 @@ def parse_sacct_states(sacct_output: str) -> Dict[str, str]:
 # copy them into the host-side ``quantui-batch`` launcher, which re-implements
 # this estimate without importing QuantUI (tests/test_batch_submit.py checks
 # that the two agree).
+# Relative memory per basis. Not calibrated against sacct yet (B2.4 calls
+# for that); new entries are placed by basis size relative to the old ones:
+# def2-SVP has cc-pVDZ's functions (C 3s2p1d, H 2s1p); def2-TZVP matches
+# cc-pVTZ on heavy atoms but is smaller on H; LANL2DZ is D95V-sized on
+# light atoms (its heavy-atom ECP removes core functions).
 BASIS_FACTORS = {
     "STO-3G": 1.0,
     "3-21G": 1.2,
@@ -145,7 +150,39 @@ BASIS_FACTORS = {
     "6-31G**": 2.5,
     "cc-pVDZ": 3.0,
     "cc-pVTZ": 5.0,
+    "def2-SVP": 3.0,
+    "def2-TZVP": 4.5,
+    "LANL2DZ": 1.5,
 }
+DEFAULT_BASIS_FACTOR = 2.0
+
+
+def basis_factor(basis: str) -> float:
+    """BASIS_FACTORS entry for *basis*: case-insensitive, Pople aliases folded.
+
+    ``6-31G(d)`` and ``6-31G(d,p)`` are ``6-31G*`` and ``6-31G**`` written the
+    other way, and used to fall back to the generic factor.
+    """
+    key = str(basis).strip().lower().replace(" ", "")
+    if key.endswith("(d,p)"):
+        key = key[: -len("(d,p)")] + "**"
+    elif key.endswith("(d)"):
+        key = key[: -len("(d)")] + "*"
+    for name, factor in BASIS_FACTORS.items():
+        if name.lower() == key:
+            return factor
+    return DEFAULT_BASIS_FACTOR
+
+
+def _walltime_steps_for(count: int, default: int) -> int:
+    """One extra walltime step per doubling of *count* above *default*."""
+    steps = 0
+    while count > default:
+        steps += 1
+        default *= 2
+    return steps
+
+
 CALC_FACTORS = {
     "single_point": 1.0,
     "geometry_opt": 2.5,
@@ -177,7 +214,7 @@ def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
     # as 0 electrons and its memory came out low.
     num_electrons = electron_count(atoms, charge)
 
-    basis_factor = BASIS_FACTORS.get(request.basis, 2.0)
+    b_factor = basis_factor(request.basis)
 
     method_upper = request.method.upper()
     method_factor = 1.2 if method_upper == "UHF" else 1.0
@@ -189,9 +226,9 @@ def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
     calc_factor = CALC_FACTORS.get(request.calc_type, 1.5)
 
     base_memory = max(
-        4, int(2 * (max(num_electrons, 1) / 10) * basis_factor * method_factor)
+        4, int(2 * (max(num_electrons, 1) / 10) * b_factor * method_factor)
     )
-    memory_gb = min(int(base_memory * calc_factor), cfg.MAX_MEMORY_GB)
+    memory_gb = min(int(base_memory * calc_factor), cfg.ESTIMATE_MAX_MEMORY_GB)
 
     if num_atoms < 10:
         cores = 4
@@ -230,6 +267,24 @@ def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
         if idx + 1 < len(cfg.WALLTIME_OPTIONS):
             walltime = cfg.WALLTIME_OPTIONS[idx + 1]
 
+    # B2.4: work that grows with an option the defaults assume — TD-DFT
+    # states (default 10) and PES scan points (default 10, each one an
+    # optimization). One walltime step per doubling; memory is unchanged.
+    options = request.options or {}
+    extra_steps = 0
+    try:
+        if request.calc_type == "tddft":
+            extra_steps = _walltime_steps_for(int(options.get("nstates", 10)), 10)
+        elif request.calc_type == "pes_scan":
+            extra_steps = _walltime_steps_for(int(options.get("steps", 10)), 10)
+    except (TypeError, ValueError):
+        extra_steps = 0
+    for _ in range(extra_steps):
+        if walltime in cfg.WALLTIME_OPTIONS:
+            idx = cfg.WALLTIME_OPTIONS.index(walltime)
+            if idx + 1 < len(cfg.WALLTIME_OPTIONS):
+                walltime = cfg.WALLTIME_OPTIONS[idx + 1]
+
     # M-CLUSTER2 CL2.9 — QUANTUI_FREQ_PARALLEL awareness. The base `frequency`
     # estimate above (calc_factor=4.0) already independently validated as
     # correct for the *serial* IR-displacement loop (CHEM-3200 Lab 2: a real
@@ -258,7 +313,9 @@ def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
         except Exception:  # noqa: BLE001 — a bad probe must not block sizing
             freq_parallel_multiplier = 1
         if freq_parallel_multiplier > 1:
-            memory_gb = min(memory_gb * freq_parallel_multiplier, cfg.MAX_MEMORY_GB)
+            memory_gb = min(
+                memory_gb * freq_parallel_multiplier, cfg.ESTIMATE_MAX_MEMORY_GB
+            )
 
     return {
         "cores": cores,

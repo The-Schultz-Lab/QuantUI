@@ -514,7 +514,14 @@ class TestLauncherMatchesQuantUI:
         for n_carbons in (0, 2, 5, 10):
             for calc in mod.SITE["calc_types"]:
                 for method in ("RHF", "UHF", "B3LYP", "MP2"):
-                    for basis in ("STO-3G", "def2-SVP", "cc-pVTZ", "6-31G*"):
+                    for basis in (
+                        "STO-3G",
+                        "def2-SVP",
+                        "cc-pVTZ",
+                        "6-31G*",
+                        "6-31G(d,p)",
+                        "lanl2dz",
+                    ):
                         for mult in (1, 3):
                             mol = _molecule(n_carbons)
                             mol["multiplicity"] = mult
@@ -526,13 +533,15 @@ class TestLauncherMatchesQuantUI:
                                 "charge": 0,
                                 "multiplicity": mult,
                                 "molecule": mol,
+                                # B2.4: walltime grows with these.
+                                "options": {"nstates": 40, "steps": 25},
                             }
                             expected = estimate_slurm_resources(
                                 CalculationRequest.from_dict(req)
                             )
                             assert mod.estimate(req) == expected, req
                             checked += 1
-        assert checked == 4 * 7 * 4 * 4 * 2  # every combination compared
+        assert checked == 4 * 7 * 4 * 6 * 2  # every combination compared
 
     def test_estimate_counts_transition_metal_electrons(self, launcher):
         # The old QuantUI table had no Mn/Mo, so these counted as 0 electrons.

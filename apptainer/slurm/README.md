@@ -143,6 +143,9 @@ See the [NCShare SLURM batch runbook](https://github.com/The-Schultz-Lab/QuantUI
 | `QUANTUI_SLURM_STALE_NO_ID_S` | `600` | Stale registry rows without SLURM id |
 | `QUANTUI_SLURM_CANCEL_CONFIRM_S` | `30` | Seconds to wait for `scancel` confirmation via `sacct` |
 | `QUANTUI_SLURM_PARTITION` | `common` | Default `#SBATCH` partition |
+| `QUANTUI_SLURM_MAX_MEMORY_GB` | `128` | Largest memory a submission may request (hard limit). NCShare `common` nodes have 512 GB. |
+| `QUANTUI_SLURM_ESTIMATE_MAX_MEMORY_GB` | same as the hard limit | Ceiling for the automatic estimate, so a site can allow more on request than it asks for by default |
+| `QUANTUI_SLURM_MAX_CORES` | `32` | Largest core count a submission may request |
 | `QUANTUI_SLURM_GRES` | *(unset)* | `#SBATCH --gres=` value, e.g. `gpu:h200:1`. A value containing `gpu` also adds `--nv` to `apptainer exec`. |
 | `QUANTUI_SLURM_NV` | *(unset — auto)* | `1` / `0` forces `apptainer exec --nv` on / off; unset follows `QUANTUI_SLURM_GRES` (on when it contains `gpu`). Set `1` for a GPU GRES named otherwise, e.g. `shard:1`. |
 | `QUANTUI_SLURM_QOS` | *(unset)* | `#SBATCH --qos=` value, e.g. `nccu_h200_hp` with partition `gpu-hp` |
