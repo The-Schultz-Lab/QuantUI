@@ -31,7 +31,25 @@ def _section(text: str, name: str) -> str:
 class TestCpuTeachingImageDefaults:
     def test_cpu_image_enables_ir_parallel_by_default(self, cpu_def_text):
         env = _section(cpu_def_text, "%environment")
-        assert re.search(r"export\s+QUANTUI_FREQ_PARALLEL=1\b", env)
+        assert re.search(
+            r'export\s+QUANTUI_FREQ_PARALLEL="\$\{QUANTUI_FREQ_PARALLEL:-1\}"', env
+        )
+
+    @pytest.mark.parametrize("def_path", [CPU_DEF, GPU_DEF], ids=["cpu", "gpu"])
+    def test_results_dir_is_a_default_the_caller_can_override(self, def_path):
+        # M-BATCH2 B2.12: a hard export clobbered a site's or job's own value.
+        env = _section(def_path.read_text(encoding="utf-8"), "%environment")
+        assert re.search(
+            r'export\s+QUANTUI_RESULTS_DIR="\$\{QUANTUI_RESULTS_DIR:-\$\{HOME\}/\.quantui/results\}"',
+            env,
+        )
+
+    def test_cpu_environment_exports_only_overridable_quantui_defaults(
+        self, cpu_def_text
+    ):
+        env = _section(cpu_def_text, "%environment")
+        for name, value in re.findall(r"export\s+(QUANTUI_\w+)=(\S+)", env):
+            assert value.startswith(f'"${{{name}:-'), (name, value)
 
     def test_gpu_image_does_not_inherit_cpu_ir_parallel_default(self):
         gpu_text = GPU_DEF.read_text(encoding="utf-8")

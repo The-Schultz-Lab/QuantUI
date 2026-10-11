@@ -50,6 +50,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- **CPU image no longer overrides a caller's `QUANTUI_RESULTS_DIR` /
+  `QUANTUI_FREQ_PARALLEL`** (M-BATCH2 B2.12). `apptainer/quantui.def`
+  hard-exported both, so a site module or job script setting either was
+  silently clobbered inside the container. Both are now defaults
+  (`${VAR:-default}`), matching `quantui-gpu.def`.
+
 - History's **Refresh** button also saves batch jobs that finished since
   the app started; before, they appeared only after a restart or a Cluster
   Jobs refresh.
