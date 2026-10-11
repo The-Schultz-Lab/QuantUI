@@ -46,6 +46,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- History's **Refresh** button also saves batch jobs that finished since
+  the app started; before, they appeared only after a restart or a Cluster
+  Jobs refresh.
 - The batch resource estimate knows def2-SVP, def2-TZVP and LANL2DZ (they
   used a generic factor), treats `6-31G(d)` / `6-31G(d,p)` like `6-31G*` /
   `6-31G**`, and adds walltime for TD-DFT runs with more than 10 states and

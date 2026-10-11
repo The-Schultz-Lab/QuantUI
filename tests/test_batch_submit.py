@@ -1630,6 +1630,45 @@ class TestStartupIngest:
         assert refresh.call_count == 1
         assert len(list(results.iterdir())) == 1
 
+    def test_history_refresh_saves_jobs_finished_since_start(
+        self, tmp_path, monkeypatch, water
+    ):
+        # B2.10: a batch job that finishes while the app is open reaches
+        # History on the History tab's Refresh, not only at the next start.
+        from unittest.mock import MagicMock, patch
+
+        from quantui.app_runflow import on_past_refresh
+        from quantui.backends.slurm import SlurmBackend
+        from tests.slurm_ingest_helpers import patch_results_root, sample_payload
+
+        monkeypatch.setenv("QUANTUI_JOBS_DIR", str(tmp_path / "jobs"))
+        results = patch_results_root(tmp_path, monkeypatch)
+        registry = JobRegistry(
+            jobs_root=tmp_path / "jobs", staging_root=tmp_path / "staging"
+        )
+        req, _ = request_from_xyz(
+            water, calc_type="single_point", method="RHF", basis="STO-3G"
+        )
+        record = SlurmBackend(registry=registry, use_apptainer=False).prepare(
+            req, job_name="h2o"
+        )
+        app = self._app(registry)
+        app._refresh_results_browser = MagicMock()
+        with (
+            patch("quantui.app_slurm.is_slurm_available", return_value=False),
+            patch("quantui.app_runflow.refresh_results_browser"),
+        ):
+            on_past_refresh(app, None)  # nothing finished yet
+            assert not results.exists() or not any(results.iterdir())
+            attempt = Path(record.job_dir) / "attempt-01_job4243"
+            attempt.mkdir()
+            (attempt / "result.json").write_text(
+                json.dumps(sample_payload("single_point"))
+            )
+            on_past_refresh(app, None)
+        assert len(list(results.iterdir())) == 1
+        assert app._refresh_results_browser.call_count == 2
+
     def test_no_registry_means_nothing_is_created(self, tmp_path, monkeypatch):
         from quantui.app_slurm import ingest_finished_jobs_on_startup
 

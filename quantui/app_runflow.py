@@ -1709,7 +1709,10 @@ def on_compare_clear(app: Any, btn: Any) -> None:
 
 
 def on_past_refresh(app: Any, btn: Any) -> None:
-    """Refresh History saved-results browser."""
+    """Refresh History, first saving any batch jobs that finished since (B2.10)."""
+    from quantui.app_slurm import ingest_finished_jobs_on_startup
+
+    ingest_finished_jobs_on_startup(app)
     app._refresh_results_browser()
 
 
