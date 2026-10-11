@@ -387,6 +387,29 @@ def apply_pcm(mf, solvent: Optional[str], progress_stream=None):
     return mf, name
 
 
+def build_mole(mol: Any) -> None:
+    """``mol.build()`` without PySCF's copy of the running script.
+
+    At ``verbose > NOTE`` PySCF's ``dump_input`` writes the whole
+    ``__main__`` file into the output before its useful system info and
+    ``[INPUT]`` summary. In the batch worker that file is ``worker.py``, so
+    every SCF-based job's ``live.log`` got ~900 lines of QuantUI source
+    (GOTCHAS 2026-10-10). In Jupyter/Voilà ``__main__`` has no file and
+    nothing changes. The attribute is hidden only for the build.
+    """
+    import __main__
+
+    main_file: Optional[str] = getattr(__main__, "__file__", None)
+    if main_file is None:
+        mol.build()
+        return
+    try:
+        del __main__.__file__
+        mol.build()
+    finally:
+        __main__.__file__ = main_file
+
+
 def _host_array(arr: Any) -> Any:
     """``arr`` as a NumPy array, copying from the GPU first for CuPy arrays.
 
@@ -726,7 +749,7 @@ def _run_session_calc_body(
     mol.spin = molecule.multiplicity - 1
     mol.verbose = verbose
     mol.stdout = stream
-    mol.build()
+    build_mole(mol)
 
     # --- Select SCF method ---
     method_upper = method.upper()

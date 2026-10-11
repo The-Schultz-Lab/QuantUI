@@ -357,7 +357,9 @@ def _run_nmr_calc_body(
     mol.spin = molecule.multiplicity - 1
     mol.verbose = 4
     mol.stdout = stream
-    mol.build()
+    from .session_calc import build_mole
+
+    build_mole(mol)
 
     method_upper = method.upper()
     if method_upper == "RHF":
