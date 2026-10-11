@@ -152,8 +152,7 @@ class Molecule:
         Returns:
             int: Number of electrons (nuclear charges - charge)
         """
-        nuclear_charge = sum(ATOMIC_NUMBERS.get(atom, 0) for atom in self.atoms)
-        return nuclear_charge - self.charge
+        return config.electron_count(self.atoms, self.charge)
 
     def get_formula(self) -> str:
         """
@@ -553,8 +552,7 @@ def suggest_multiplicity(atoms: List[str], charge: int) -> int:
     # Calculate electron count directly without creating Molecule
     # (to avoid validation errors with incompatible multiplicity)
     try:
-        nuclear_charge = sum(ATOMIC_NUMBERS.get(atom, 0) for atom in atoms)
-        num_electrons = nuclear_charge - charge
+        num_electrons = config.electron_count(atoms, charge)
 
         # Even electrons -> singlet, odd electrons -> doublet
         suggested = 1 if num_electrons % 2 == 0 else 2

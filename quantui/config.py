@@ -512,6 +512,18 @@ ATOMIC_NUMBERS: Dict[str, int] = {
     "Og": 118,
 }
 
+
+def electron_count(atoms: Any, charge: int) -> int:
+    """Total electrons for element symbols *atoms* at *charge*.
+
+    The one electron count (M-BATCH2 B2.8): Molecule, the multiplicity
+    suggestion, the XYZ loader and the SLURM resource estimate all use it.
+    Symbols are title-cased (``"cl"`` → ``"Cl"``); an unknown symbol counts 0.
+    """
+    nuclear = sum(ATOMIC_NUMBERS.get(str(atom).strip().title(), 0) for atom in atoms)
+    return nuclear - int(charge)
+
+
 # Valid atomic symbols — every element in ATOMIC_NUMBERS. Derived rather
 # than hand-maintained separately so the two can never drift apart again.
 VALID_ATOMS = list(ATOMIC_NUMBERS.keys())

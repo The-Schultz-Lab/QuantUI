@@ -428,16 +428,8 @@ def on_basis_fix(app: Any, btn: Any = None) -> None:
 # "Reorganization Energy" keeps its documented approximation: gas-phase
 # optimizations, solvated single points (reorganization_energy.py).
 # NMR Shielding and PES Scan stay gas-phase only (DEC-023).
-_SOLVENT_SUPPORTED_CALC_TYPES = frozenset(
-    {
-        "Single Point",
-        "Geometry Opt",
-        "Transition State",
-        "Frequency",
-        "UV-Vis (TD-DFT)",
-        "Reorganization Energy",
-    }
-)
+# The set itself (_SOLVENT_SUPPORTED_CALC_TYPES) is derived below, after
+# _CALC_TYPE_KEYS, from the batch worker's batch_input.SOLVENT_CALC_TYPES.
 
 _SOLVENT_LABELS = {
     "Reorganization Energy": (
@@ -2323,6 +2315,22 @@ _CALC_TYPE_KEYS: Dict[str, str] = {
     "PES Scan": "pes_scan",
     "Reorganization Energy": "reorganization_energy",
 }
+
+
+# Calculate-tab labels whose solvent box is live (B2.8: one source). The
+# batch worker's set, plus Transition State, which runs only in the app so
+# far (M-TS TS.5 adds it to SLURM).
+_APP_ONLY_SOLVENT_CALC_TYPES = frozenset({"transition_state"})
+
+
+def _solvent_supported_labels() -> frozenset:
+    from quantui.backends.batch_input import SOLVENT_CALC_TYPES
+
+    keys = SOLVENT_CALC_TYPES | _APP_ONLY_SOLVENT_CALC_TYPES
+    return frozenset(label for label, key in _CALC_TYPE_KEYS.items() if key in keys)
+
+
+_SOLVENT_SUPPORTED_CALC_TYPES = _solvent_supported_labels()
 
 
 def calc_type_key(app: Any) -> str:
