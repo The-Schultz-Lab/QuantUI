@@ -41,6 +41,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- `quantui submit` (and Resubmit) syncs job states with the SLURM queue before
+  checking the concurrent-job limit. With no app open, finished jobs stayed
+  "submitted" in the registry and kept counting, so after two submissions
+  every further one was refused.
 - Generated SLURM scripts ask for one task with N CPUs
   (`--ntasks=1 --cpus-per-task=N`) instead of N tasks, which is what the
   single multi-threaded worker uses; a `SLURM_CPUS_PER_TASK` inherited from
