@@ -200,16 +200,6 @@ def test_pyscf_resolves_name(basis):
 
 
 @pytest.mark.parametrize("basis", DIFFUSE)
-def test_table_matches_pyscf(basis):
-    gto = pytest.importorskip("pyscf.gto")
-    from quantui.calc_log import _BASIS_FUNCTIONS
-
-    for el, n in _BASIS_FUNCTIONS[basis].items():
-        mol = gto.M(atom=f"{el} 0 0 0", basis=basis, spin=gto.charge(el) % 2, verbose=0)
-        assert mol.nao == n, f"{basis}/{el}: table {n}, PySCF {mol.nao}"
-
-
-@pytest.mark.parametrize("basis", DIFFUSE)
 def test_coverage_guard_passes_organic_anion(basis):
     pytest.importorskip("pyscf")
     from quantui.inorganic_guards import check_basis_coverage

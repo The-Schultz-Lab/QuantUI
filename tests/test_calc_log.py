@@ -371,6 +371,26 @@ def test_basis_function_table_internally_consistent(isolated_log_dir):
         ), f"{basis}: H={table['H']} but He={table['He']}, expected equal"
 
 
+def test_basis_function_table_matches_pyscf():
+    """Every table entry equals PySCF's AO count for that element.
+
+    The table was hand-typed and had drifted (def2-TZVP H was 14, PySCF 6;
+    6-31G* Li 9, PySCF 14), skewing the n_basis-scaled time estimates.
+    """
+    gto = pytest.importorskip("pyscf.gto")
+    import quantui.calc_log as clog
+
+    wrong = []
+    for basis, table in clog._BASIS_FUNCTIONS.items():
+        for el, n in table.items():
+            nao = gto.M(
+                atom=f"{el} 0 0 0", basis=basis, spin=gto.charge(el) % 2, verbose=0
+            ).nao
+            if nao != n:
+                wrong.append(f"{basis}/{el}: table {n}, PySCF {nao}")
+    assert not wrong, wrong
+
+
 # ── B3: outer-step telemetry + geom-opt step prior ──────────────────────────
 
 

@@ -51,6 +51,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- **Time-estimate basis-function counts** — the per-element table behind
+  `calc_log.count_basis_functions` had drifted from PySCF for 75 entries
+  (every element in def2-TZVP, e.g. H 14 instead of 6; Li/Be and Na–Ar in
+  the 6-31G*, cc-pV*Z and def2-SVP rows; Al–Ar in 3-21G/6-31G). It is now
+  generated from PySCF's AO counts and a test checks every entry. History
+  records logged before this keep their old `n_basis`, so estimates for
+  def2-TZVP and second-row/heavier molecules settle as new runs are logged.
 - Batch `live.log` files no longer contain a copy of QuantUI's worker
   source. PySCF writes the running script into its output at the log level
   QuantUI uses; in a batch job that script is the worker (~900 lines per
