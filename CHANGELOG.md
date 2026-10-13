@@ -9,6 +9,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Diffuse basis sets** — `6-31+G*`, `6-31++G**`, `aug-cc-pVDZ` and
+  `def2-SVPD` join the basis menu (each next to the set it extends), for
+  anions, radical anions and weakly bound species. Available with PySCF in the
+  app, `quantui submit` and `quantui-batch`; PyFock's menu is unchanged.
+  `6-31+G(d)` / `6-31++G(d,p)` are accepted as the same sets. The basis card
+  marks them *Diffuse*, the educational notes explain them and nudge an anion
+  on a non-diffuse basis toward one, and the basis-set help topic has a new
+  *Anions need diffuse functions* paragraph. SLURM memory factors and the time
+  estimator's basis-function table cover the new sets.
+  `config.DIFFUSE_BASIS_SETS` / `config.is_diffuse_basis()` list them.
 - **Viewer mode (`quantui view [FOLDER]`)** — a lightweight QuantUI with only
   the History and Analysis tabs, pointed at a results folder, needing no quantum
   engine. `QuantUIApp(viewer=True, results_dir=...)` adds a results-folder bar

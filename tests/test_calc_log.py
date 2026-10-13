@@ -362,6 +362,10 @@ def test_basis_function_table_internally_consistent(isolated_log_dir):
     import quantui.calc_log as clog
 
     for basis, table in clog._BASIS_FUNCTIONS.items():
+        if basis == "6-31++G**":
+            # The one real exception: the second + adds a diffuse s on H but
+            # not on He (PySCF: H 6, He 5).
+            continue
         assert (
             table["H"] == table["He"]
         ), f"{basis}: H={table['H']} but He={table['He']}, expected equal"

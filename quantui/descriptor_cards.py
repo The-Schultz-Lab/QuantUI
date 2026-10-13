@@ -196,4 +196,10 @@ def basis_card_html(basis: str) -> str:
     alias = config.pople_notation_alias(basis)
     if alias:
         body += f' <span style="color:{_theme.css.TEXT_SLATE}">Also written <b>{alias}</b>.</span>'
+    # Same one-line budget: say what the +/aug-/D marker buys and who needs it.
+    if config.is_diffuse_basis(basis):
+        body += (
+            f' <span style="color:{_theme.css.TEXT_SLATE}"><b>Diffuse</b> — '
+            "for anions &amp; weak binding.</span>"
+        )
     return _card_html(fg=fg, bg=bg, icon=icon, title=title, body=body)
