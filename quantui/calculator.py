@@ -199,7 +199,7 @@ class PySCFCalculation:
                 "**STO-3G basis**: Minimal basis set — 3 Gaussians per orbital. "
                 "Very fast but low accuracy. Good for learning, not research."
             )
-        elif "6-31G" in self.basis:
+        elif "6-31" in self.basis:
             note = (
                 "**6-31G family**: Split-valence basis sets with a good balance of "
                 "speed and accuracy. The * adds polarization functions for better "
@@ -234,6 +234,20 @@ class PySCFCalculation:
                 "electrons of a heavy metal with a potential, making transition "
                 "and heavy-metal calculations tractable. A common alternative to "
                 "the def2 sets for the heaviest centres."
+            )
+
+        if config.is_diffuse_basis(self.basis):
+            notes.append(
+                "**Diffuse functions** (the +, aug- or D marker): extra, widely "
+                "spread functions that describe electron density far from the "
+                "nuclei — needed for anions, lone pairs and weakly bound species. "
+                "They cost more and can slow SCF convergence."
+            )
+        elif self.molecule.charge < 0:
+            notes.append(
+                "**Anion without diffuse functions**: an anion's extra electron "
+                "is loosely held and spreads far from the nuclei. Consider a "
+                "diffuse basis (6-31+G*, 6-31++G**, aug-cc-pVDZ or def2-SVPD)."
             )
 
         if self.molecule.multiplicity > 1:

@@ -527,6 +527,9 @@ Five step-by-step notebooks in [`notebooks/tutorials/`](https://github.com/The-S
 STO-3G (fast, good for learning) → 3-21G → 6-31G / 6-31G\* / 6-31G\*\* →
 cc-pVDZ / cc-pVTZ → def2-SVP / def2-TZVP → LANL2DZ
 
+**Diffuse** sets for anions (including radical anions) and weakly bound species:
+6-31+G\* / 6-31++G\*\* / aug-cc-pVDZ / def2-SVPD.
+
 For **transition metals and heavy elements**, use **def2-SVP** / **def2-TZVP**
 or **LANL2DZ** — these carry the effective core potentials that cover metals,
 whereas the Pople (`6-31G…`) and Dunning (`cc-pV…`) sets do not. QuantUI's

@@ -9,6 +9,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Diffuse basis sets** — `6-31+G*`, `6-31++G**`, `aug-cc-pVDZ` and
+  `def2-SVPD` join the basis menu (each next to the set it extends), for
+  anions, radical anions and weakly bound species. Available with PySCF in the
+  app, `quantui submit` and `quantui-batch`; PyFock's menu is unchanged.
+  `6-31+G(d)` / `6-31++G(d,p)` are accepted as the same sets. The basis card
+  marks them *Diffuse*, the educational notes explain them and nudge an anion
+  on a non-diffuse basis toward one, and the basis-set help topic has a new
+  *Anions need diffuse functions* paragraph. SLURM memory factors and the time
+  estimator's basis-function table cover the new sets.
+  `config.DIFFUSE_BASIS_SETS` / `config.is_diffuse_basis()` list them.
 - **Viewer mode (`quantui view [FOLDER]`)** — a lightweight QuantUI with only
   the History and Analysis tabs, pointed at a results folder, needing no quantum
   engine. `QuantUIApp(viewer=True, results_dir=...)` adds a results-folder bar
@@ -41,6 +51,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- **Time-estimate basis-function counts** — the per-element table behind
+  `calc_log.count_basis_functions` had drifted from PySCF for 75 entries
+  (every element in def2-TZVP, e.g. H 14 instead of 6; Li/Be and Na–Ar in
+  the 6-31G*, cc-pV*Z and def2-SVP rows; Al–Ar in 3-21G/6-31G). It is now
+  generated from PySCF's AO counts and a test checks every entry. History
+  records logged before this keep their old `n_basis`, so estimates for
+  def2-TZVP and second-row/heavier molecules settle as new runs are logged.
 - Batch `live.log` files no longer contain a copy of QuantUI's worker
   source. PySCF writes the running script into its output at the log level
   QuantUI uses; in a batch job that script is the worker (~900 lines per

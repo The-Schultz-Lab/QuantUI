@@ -641,6 +641,9 @@ class TestQuantumEngineGating:
         assert "Geometry Opt" in app.calc_type_dd.options
         assert "B3LYP" in app.method_dd.options
         assert "6-31G" in app.basis_dd.options
+        # Diffuse sets come back with PySCF (PyFock's subset has none).
+        for basis in ("6-31+G*", "6-31++G**", "aug-cc-pVDZ", "def2-SVPD"):
+            assert basis in app.basis_dd.options
         assert app.density_fit_enabled_cb.disabled is False
         assert app.execution_backend_dd.disabled is False
 

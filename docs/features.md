@@ -45,7 +45,8 @@ local Python kernel.
     frequency check), frequencies/thermochemistry, TD-DFT UV-Vis, NMR
     shielding, 1D PES scans and Marcus reorganization energies. PCM
     implicit solvation for single points, optimizations, frequencies
-    and TD-DFT.
+    and TD-DFT. Diffuse basis sets (6-31+G*, 6-31++G**, aug-cc-pVDZ,
+    def2-SVPD) for anions and radical anions.
   </p>
 </div>
 

@@ -193,13 +193,34 @@ SUPPORTED_BASIS_SETS = [
     "3-21G",
     "6-31G",
     "6-31G*",
+    "6-31+G*",
     "6-31G**",
+    "6-31++G**",
     "cc-pVDZ",
+    "aug-cc-pVDZ",
     "cc-pVTZ",
     "def2-SVP",
+    "def2-SVPD",
     "def2-TZVP",
     "LANL2DZ",
 ]
+
+# Basis sets above that carry diffuse functions — needed for anions (including
+# radical anions), lone-pair-rich and weakly bound species. One per family:
+# Pople ``+`` / ``++``, Dunning ``aug-``, Karlsruhe ``D`` suffix. def2-SVPD is
+# the only one with ECPs, so it is the diffuse choice for heavy elements.
+DIFFUSE_BASIS_SETS = frozenset({"6-31+G*", "6-31++G**", "aug-cc-pVDZ", "def2-SVPD"})
+
+
+def is_diffuse_basis(basis: str) -> bool:
+    """True if *basis* is one of the supported diffuse sets (either notation).
+
+    ``6-31+G(d)`` is the same basis as ``6-31+G*``, so the parenthesis
+    spelling counts too.
+    """
+    if basis in DIFFUSE_BASIS_SETS:
+        return True
+    return any(pople_notation_alias(b) == basis for b in DIFFUSE_BASIS_SETS)
 
 
 def pople_notation_alias(basis: str) -> str:
