@@ -59,6 +59,27 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   the Y range and squeeze the valence levels into a sliver; the subtitle says
   how many are hidden and a **Show core orbitals** checkbox restores them.
   The HOMO–LUMO gap label no longer overlaps the axis labels.
+- **Dipole arrow convention** — the Mulliken panel says which end the arrow
+  head marks and offers both conventions (− → +, IUPAC/physics, default; or
+  + → −, the chemistry crossed arrow), remembered as `viz.dipole_arrow`.
+- **Frequency card** — title reads "H2O · B3LYP/6-31G* (RKS)"; H and G are
+  shown with their thermal correction vs E in kJ/mol instead of an absolute
+  kJ/mol value.
+- **Less duplication, tidier layout** — viewers no longer repeat the molecule
+  facts in a "Molecule Information" box; the launcher notebook drops its
+  duplicate "QuantUI" heading; result tables are compact and left-aligned;
+  the empty Calculate tab no longer reserves a blank viewer block.
+- **Clearer controls** — no more truncated labels or "?.." buttons; PES atom
+  chips read "O1"; XYZ table headers line up; a **Done** button closes the
+  molecule editor; the Help panel has a **Close** button; System Settings
+  groups all settings in one card and says PlotlyMol; the activity indicator
+  is a neutral status chip; History, Compare and the Analysis heading show
+  readable times ("2026-10-25 04:31").
+- **Context-aware extras** — the spin-state helper appears only for molecules
+  with a transition metal; "Use mode → new Frequency calc" only when there
+  are imaginary modes; Analysis panels that don't apply say what they need in
+  their title; dark themes give 3D viewers the panel colour (also in PNG
+  exports) instead of black.
 - `import quantui` no longer loads numpy, RDKit, ASE, Plotly, IPython or
   requests; every public name is resolved when first used. `quantui`
   command-line tools and the batch worker start in a fraction of the time,
