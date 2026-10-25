@@ -10,7 +10,10 @@ jobs:
   # ── Linux: full suite including PySCF-dependent tests ─────────────────────
   test-linux:
     name: Tests (ubuntu-latest, Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, which actions/setup-python has no
+    # Python 3.9 build for (3.9.x is built for 22.04/24.04 only). Name kept
+    # as-is so existing required-check names still match.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
