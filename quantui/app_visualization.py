@@ -834,6 +834,8 @@ def update_ir_figure(app: Any, mode: str, fwhm: float) -> None:
             mode=mode.lower(),
             fwhm=fwhm,
             yaxis_title=y_title,
+            descending=getattr(getattr(app, "_ir_axis_dd", None), "value", "descending")
+            == "descending",
         )
         app._apply_plotly_theme(fig)
         app._last_ir_fig = fig

@@ -1780,6 +1780,21 @@ class TestShowIRSpectrum:
             app._ir_mode_toggle.value = "Broadened"
         mock_update.assert_called_once_with("Broadened", app._ir_fwhm_slider.value)
 
+    def test_axis_defaults_to_ftir_direction_and_is_remembered(
+        self, tmp_path, monkeypatch
+    ):
+        # D3: 4000 → 400 by default, 400 → 4000 one click away, and the choice
+        # persists to the next launch.
+        monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(tmp_path / "s.json"))
+        app = QuantUIApp()
+        app._show_ir_spectrum(self._make_freq_result())
+        r = list(app._last_ir_fig.layout.xaxis.range)
+        assert app._ir_axis_dd.value == "descending" and r[0] > r[1]
+        app._ir_axis_dd.value = "ascending"
+        r = list(app._last_ir_fig.layout.xaxis.range)
+        assert r[0] < r[1]
+        assert QuantUIApp()._ir_axis_dd.value == "ascending"
+
 
 # ---------------------------------------------------------------------------
 # M-UV — UV-Vis Spectrum accordion widgets

@@ -2191,6 +2191,14 @@ def _persisted_iso_resolution(app: Any) -> str:
         return "medium"
 
 
+def _persisted_ir_axis(app: Any) -> str:
+    """The saved IR axis direction, or the default; same contract as above."""
+    try:
+        return str(app._user_settings.viz.ir_axis)
+    except Exception:  # noqa: BLE001 — settings must never gate widget creation
+        return "descending"
+
+
 def build_results_section(app: Any, *, layout_fn: Any) -> None:
     """Build results and analysis tab panels/widgets."""
 
@@ -2472,9 +2480,22 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="100%", min_height="300px"),
     )
     ir_export_row = _plot_export_row("ir")
+    # Both directions stay available (instructor, 2026-10-25); the choice is
+    # saved in user settings.
+    app._ir_axis_dd = widgets.Dropdown(
+        options=[
+            ("4000 → 400 cm⁻¹ (high → low)", "descending"),
+            ("400 → 4000 cm⁻¹ (low → high)", "ascending"),
+        ],
+        value=_persisted_ir_axis(app),
+        description="Axis:",
+        style={"description_width": "40px"},
+        layout=layout_fn(width="270px", margin="0 8px 0 0"),
+        tooltip="Wavenumber direction; 4000 → 400 is the FTIR convention",
+    )
 
     ir_controls = widgets.HBox(
-        [app._ir_mode_toggle, app._ir_fwhm_slider],
+        [app._ir_mode_toggle, app._ir_axis_dd, app._ir_fwhm_slider],
         layout=layout_fn(align_items="center", margin="0 0 6px 0"),
     )
     ir_body_children = [ir_controls, ir_export_row, app._ir_fig]

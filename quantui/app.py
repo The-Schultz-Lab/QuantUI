@@ -1595,6 +1595,7 @@ class QuantUIApp:
         _ir_export_btn: Any
         _ir_export_fmt_dd: Any
         _ir_export_status: Any
+        _ir_axis_dd: Any
         _ir_fig: Any
         _ir_fwhm_slider: Any
         _ir_mode_toggle: Any
@@ -3035,6 +3036,7 @@ class QuantUIApp:
         self._iso_resolution_dd.observe(
             self._safe_cb(self._on_iso_resolution_changed), names="value"
         )
+        self._ir_axis_dd.observe(self._safe_cb(self._on_ir_axis_changed), names="value")
         # Appearance controls redraw from the cube on disk — no cubegen — so
         # they can respond directly rather than behind an Apply button.
         for _w in (
@@ -4818,6 +4820,19 @@ class QuantUIApp:
             return
         self._user_settings.viz.iso_resolution = str(new_val)
         self._user_settings.save()
+
+    def _on_ir_axis_changed(self, change) -> None:
+        """Redraw the IR spectrum in the new direction and remember it."""
+        new_val = (change or {}).get("new")
+        if not new_val:
+            return
+        if getattr(self, "_last_ir_freqs", None):
+            self._update_ir_figure(
+                self._ir_mode_toggle.value, self._ir_fwhm_slider.value
+            )
+        if new_val != self._user_settings.viz.ir_axis:
+            self._user_settings.viz.ir_axis = str(new_val)
+            self._user_settings.save()
 
     def _on_iso_export_cube(self, btn) -> None:
         _exp_on_iso_export_cube(self, btn)

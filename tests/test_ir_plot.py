@@ -48,6 +48,17 @@ class TestStickMode:
         x_range = list(fig.layout.xaxis.range)
         assert x_range[0] < x_range[1], "x-axis must run low → high (400 → 4000)"
 
+    def test_descending_reverses_the_axis_only(self):
+        # D3: FTIR convention is high → low; the data and the broadened grid
+        # are unchanged, only the axis direction flips.
+        for mode in ("stick", "broadened"):
+            up = plot_ir_spectrum(_SIMPLE_FREQS, _SIMPLE_INTS, mode=mode)
+            down = plot_ir_spectrum(
+                _SIMPLE_FREQS, _SIMPLE_INTS, mode=mode, descending=True
+            )
+            assert list(down.layout.xaxis.range) == list(up.layout.xaxis.range)[::-1]
+            assert list(down.data[0].x) == list(up.data[0].x)
+
     def test_xaxis_title_contains_wavenumber(self):
         fig = plot_ir_spectrum(_SIMPLE_FREQS, _SIMPLE_INTS)
         assert "cm" in fig.layout.xaxis.title.text.lower()

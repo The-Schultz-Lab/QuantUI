@@ -34,7 +34,19 @@ class TestDefaults:
             "default_backend": "auto",
             "vib_framerate_fps": 10,
             "iso_resolution": "medium",
+            "ir_axis": "descending",
         }
+
+    def test_ir_axis_round_trips_and_rejects_junk(self, tmp_path):
+        # D3: the IR direction is remembered; a bad value costs the
+        # preference, not the load.
+        path = tmp_path / "settings.json"
+        s = UserSettings()
+        s.viz.ir_axis = "ascending"
+        s.save(path)
+        assert UserSettings.load(path).viz.ir_axis == "ascending"
+        path.write_text(json.dumps({"_schema_version": 1, "viz": {"ir_axis": 3}}))
+        assert UserSettings.load(path).viz.ir_axis == "descending"
 
     def test_default_vib_framerate_is_10(self):
         assert UserSettings().viz.vib_framerate_fps == 10
