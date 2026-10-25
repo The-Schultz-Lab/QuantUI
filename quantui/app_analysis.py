@@ -683,16 +683,26 @@ def _show_thermochemistry(app: Any, ctx: Any, freq_stub: Any, mol: Any) -> None:
     from quantui.app_visualization import show_thermo_box
 
     energy = getattr(ctx.live_result, "energy_hartree", None)
+    max_force = getattr(ctx.live_result, "max_force_ev_per_ang", None)
     if energy is None and ctx.result_dir is not None:
         try:
             import json as _json
 
             data = _json.loads((Path(ctx.result_dir) / "result.json").read_text())
             energy = data.get("energy_hartree")
+            max_force = ((data.get("spectra") or {}).get("ir") or {}).get(
+                "max_force_ev_per_ang"
+            )
         except Exception:  # noqa: BLE001 — the box just stays hidden
             energy = None
     try:
-        show_thermo_box(app, mol, energy, getattr(freq_stub, "frequencies_cm1", None))
+        show_thermo_box(
+            app,
+            mol,
+            energy,
+            getattr(freq_stub, "frequencies_cm1", None),
+            max_force_ev_per_ang=max_force,
+        )
     except Exception:  # noqa: BLE001 — informational panel
         pass
 

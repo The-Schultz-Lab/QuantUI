@@ -3941,10 +3941,20 @@ def vib_mode_table_html(freq_result: Any) -> str:
 
 
 def show_thermo_box(
-    app: Any, molecule: Any, energy_hartree: Any, frequencies_cm1: Any
+    app: Any,
+    molecule: Any,
+    energy_hartree: Any,
+    frequencies_cm1: Any,
+    *,
+    max_force_ev_per_ang: float | None = None,
 ) -> None:
-    """Remember what thermochemistry needs and show it at the current T/P."""
+    """Remember what thermochemistry needs and show it at the current T/P.
+
+    *max_force_ev_per_ang* (D1) puts the not-a-stationary-point warning above
+    the table, as on the result card.
+    """
     box = getattr(app, "_thermo_box", None)
+    app._thermo_max_force = max_force_ev_per_ang
     if molecule is None or energy_hartree is None or not frequencies_cm1:
         app._thermo_source = None
         if box is not None:
@@ -3981,7 +3991,17 @@ def on_thermo_inputs_changed(app: Any, change: Any = None) -> None:
     except Exception as exc:  # noqa: BLE001 — show, never raise from an input
         out.value = f'<span style="color:#b91c1c">Thermochemistry failed: {exc}</span>'
         return
-    out.value = thermo_table_html(td, energy)
+    from quantui.freq_calc import is_stationary
+
+    warning = ""
+    if is_stationary(getattr(app, "_thermo_max_force", None)) is False:
+        warning = (
+            f'<div style="color:{_theme.css.ACCENT_ERROR_ALT};margin:0 0 6px 0">'
+            "&#9888; Not a stationary point (max force "
+            f"{app._thermo_max_force:.3f} eV/Å): these values are not "
+            "physically meaningful. Optimize the geometry first.</div>"
+        )
+    out.value = warning + thermo_table_html(td, energy)
 
 
 def thermo_table_html(td: Any, energy_hartree: float) -> str:

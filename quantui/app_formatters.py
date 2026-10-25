@@ -396,6 +396,36 @@ def saddle_retry_rows(block: Optional[dict]) -> str:
     )
 
 
+def stationary_point_rows(max_force: Optional[float]) -> str:
+    """Result-card rows for the input-geometry force check (D1), live or History.
+
+    Harmonic frequencies and thermochemistry assume a stationary point (zero
+    gradient). Nothing is shown for results saved before the check existed.
+    """
+    from quantui.freq_calc import STATIONARY_FMAX_EV_PER_ANG, is_stationary
+
+    ok = is_stationary(max_force)
+    if ok is None:
+        return ""
+    _color = _theme.css.TEXT_HEADING if ok else _theme.css.ACCENT_ERROR_ALT
+    rows = (
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Max force</td>'
+        f'<td style="color:{_color}">{max_force:.4f} eV/Å'
+        f'<span style="color:{_theme.css.TEXT_MUTED}"> &mdash; '
+        f"{'stationary point' if ok else 'not a stationary point'}"
+        f" (threshold {STATIONARY_FMAX_EV_PER_ANG:g})</span></td></tr>"
+    )
+    if not ok:
+        rows += (
+            f'<tr><td colspan="2" style="padding:4px 0;color:{_theme.css.ACCENT_ERROR_ALT}">'
+            "&#9888; This geometry is not optimized at this level of theory, so "
+            "the frequencies and thermochemistry below are not physically "
+            "meaningful. Tick <b>Geometry optimization before calculation</b> "
+            "(or optimize first) and re-run.</td></tr>"
+        )
+    return rows
+
+
 def format_freq_result(r: Any) -> str:
     """Format a frequency-analysis result card."""
     # AUDIT F15 — r.converged now also requires the Hessian/harmonic-
@@ -416,7 +446,7 @@ def format_freq_result(r: Any) -> str:
             f'<td style="color:{_theme.css.ACCENT_ERROR_ALT}">{n_imag} — geometry may not be a minimum</td></tr>'
         )
     imag_note += saddle_retry_rows(getattr(r, "imaginary_mode_retry", None))
-    _rows = (
+    _rows = stationary_point_rows(getattr(r, "max_force_ev_per_ang", None)) + (
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF energy</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>'
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Converged</td>'
@@ -1174,9 +1204,10 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     # not an error.
     _thermo_html = ""
     if ct == "frequency":
-        _thermo_html = saddle_retry_rows(
-            ((data.get("spectra") or {}).get("ir") or {}).get("imaginary_mode_retry")
-        )
+        _ir_block = (data.get("spectra") or {}).get("ir") or {}
+        _thermo_html = stationary_point_rows(
+            _ir_block.get("max_force_ev_per_ang")
+        ) + saddle_retry_rows(_ir_block.get("imaginary_mode_retry"))
         _thermo = ((data.get("spectra") or {}).get("ir") or {}).get("thermo")
         if _thermo:
             _kj = 2625.5  # kJ/mol per Hartree

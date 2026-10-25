@@ -6588,6 +6588,8 @@ class QuantUIApp:
                         # live but never made it into the saved result.json.
                         "thermo": _thermo_serialized,
                         "imaginary_mode_retry": result.imaginary_mode_retry,
+                        # D1 — force check at the Hessian geometry.
+                        "max_force_ev_per_ang": result.max_force_ev_per_ang,
                     },
                     "molecule": {
                         "atoms": list(calc_mol.atoms),

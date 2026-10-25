@@ -34,6 +34,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import IO, Any, List, Optional, cast
 
+from .config import DEFAULT_FMAX as _DEFAULT_FMAX
 from .molecule import Molecule
 from .session_calc import HARTREE_TO_EV
 
@@ -44,6 +45,20 @@ _CM1_TO_HARTREE: float = 4.556335252912e-6
 
 # Exact: 1 Hartree = HARTREE_TO_EV * e * N_A joules/mol
 _HARTREE_TO_JMOL: float = 2625499.6  # J/mol per Hartree (NIST 2018 CODATA)
+
+# Stationary-point check (D1). Harmonic frequencies and thermochemistry assume
+# the gradient is zero. Above this largest per-atom force (eV/Å, the
+# optimizer's fmax convention) the result card warns that the geometry is not
+# a stationary point. Same value as the Geometry Opt default, so a structure
+# optimized here with default settings passes.
+STATIONARY_FMAX_EV_PER_ANG: float = _DEFAULT_FMAX
+
+
+def is_stationary(max_force_ev_per_ang: Optional[float]) -> Optional[bool]:
+    """``True``/``False`` against the threshold, ``None`` when not measured."""
+    if max_force_ev_per_ang is None:
+        return None
+    return float(max_force_ev_per_ang) <= STATIONARY_FMAX_EV_PER_ANG
 
 
 # ============================================================================
@@ -276,6 +291,10 @@ class FreqResult:
     # GPU provenance of the reference SCF + analytical Hessian.
     gpu_used: bool = False
     gpu_name: Optional[str] = None
+    # Largest per-atom force (eV/Å) at the geometry the Hessian was computed
+    # at, from the reference SCF's analytic gradient; None when the gradient
+    # was unavailable. See is_stationary() (D1).
+    max_force_ev_per_ang: Optional[float] = None
 
     @property
     def energy_ev(self) -> float:
@@ -696,6 +715,9 @@ def _run_freq_calc_body(
     _gs = ground_state_analysis(
         mf, molecule, basis, label=f"{method}/{basis} freq", gpu_used=gpu_used
     )
+
+    # ── Residual forces at the input geometry (D1) ───────────────────────────
+    max_force_ev_per_ang = _max_residual_force(mf, stream, _status)
 
     # ── Hessian + frequency analysis ─────────────────────────────────────────
     frequencies_cm1: List[float] = []
@@ -1219,7 +1241,50 @@ def _run_freq_calc_body(
         solvent=_pcm_solvent,
         gpu_used=gpu_used,
         gpu_name=gpu_name,
+        max_force_ev_per_ang=max_force_ev_per_ang,
     )
+
+
+def _max_residual_force(mf: Any, stream: IO[str], status: Any) -> Optional[float]:
+    """Largest per-atom force (eV/Å) at the SCF geometry, or ``None``.
+
+    One analytic gradient on the converged reference SCF, cheap next to the
+    Hessian that follows. Non-fatal: a method/solvent combination without
+    gradients just skips the check.
+    """
+    try:
+        import numpy as _np
+
+        from .config import BOHR_TO_ANGSTROM
+        from .session_calc import _host_array
+
+        status("Checking forces at the input geometry…")
+        driver = mf.nuc_grad_method()
+        driver.verbose = 0
+        g = _np.asarray(_host_array(driver.kernel()), dtype=float).reshape(-1, 3)
+        fmax = float(_np.linalg.norm(g, axis=1).max()) * HARTREE_TO_EV
+        fmax /= BOHR_TO_ANGSTROM
+    except Exception as exc:  # noqa: BLE001 — the check must never sink the run
+        logger.debug("residual-force check failed: %s", exc)
+        try:
+            stream.write(f"\nForce check skipped (gradient unavailable: {exc}).\n")
+        except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
+            pass
+        return None
+    try:
+        verdict = (
+            "stationary point"
+            if is_stationary(fmax)
+            else (
+                f"NOT a stationary point (threshold "
+                f"{STATIONARY_FMAX_EV_PER_ANG} eV/Å) — frequencies and "
+                "thermochemistry are not meaningful at this geometry"
+            )
+        )
+        stream.write(f"\nMax force at input geometry: {fmax:.4f} eV/Å — {verdict}.\n")
+    except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
+        pass
+    return fmax
 
 
 def _analytical_hessian(mf: Any, gpu_used: bool, stream: IO[str], status: Any) -> Any:
