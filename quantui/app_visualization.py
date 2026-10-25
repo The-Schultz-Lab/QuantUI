@@ -1901,9 +1901,11 @@ def render_orbital_isosurface(
             if use_py3dmol:
                 # Same options the sliders and the theme path use, so a fresh
                 # render cannot disagree with a redraw of the same orbital.
-                html_str = render_orbital_isosurface_py3dmol(
-                    cube_path, **iso_render_options(app)
-                )
+                # ``esp_range`` only colours ESP surfaces; the orbital renderer
+                # does not take it.
+                _orb_opts = iso_render_options(app)
+                _orb_opts.pop("esp_range", None)
+                html_str = render_orbital_isosurface_py3dmol(cube_path, **_orb_opts)
             else:
                 is_dark = _theme.get_palette(app.theme_btn.value).is_dark
                 axis_color = "#dbeafe" if is_dark else "#1f2937"

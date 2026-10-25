@@ -244,6 +244,20 @@ class TestFilesTab:
         app = QuantUIApp()
         assert len(app._files_root_dd.options) >= 1
 
+    def test_entering_files_tab_lists_results_saved_since_startup(
+        self, tmp_path, monkeypatch
+    ):
+        # UIA.6: a run saved its result folder while Files was out of view and
+        # Files kept showing "(empty directory)" until Refresh was clicked.
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        app._refresh_file_browser()
+        (tmp_path / "2026-10-25_H2O_RHF_6-31G").mkdir()
+        app.root_tab.selected_index = app._tab_index("calculate")
+        app.root_tab.selected_index = app._tab_index("files")
+        labels = [label for label, _ in app._files_entries.options]
+        assert any("2026-10-25_H2O_RHF_6-31G" in label for label in labels)
+
 
 # ---------------------------------------------------------------------------
 # Molecule input — collapse / expand pattern
@@ -291,6 +305,18 @@ class TestMoleculeInputCollapse:
         # Simulate clicking "Change molecule"
         app._on_expand_mol_input(None)
         assert app.mol_input_container.children[0] is app.mol_input_expanded
+
+    def test_edit_structure_and_png_inbox_survive_collapse_and_expand(self):
+        # UIA.2: the collapse and expand paths each rebuilt the children by
+        # hand and dropped Edit Structure (and the viewer's Save-PNG inbox),
+        # so the panel vanished as soon as there was a molecule to edit.
+        app = QuantUIApp()
+        kept = (app._edit_accordion, app._mol_calc_png_inbox, app.viz_output)
+        assert all(w in app.mol_input_container.children for w in kept)
+        app._set_molecule(_water())
+        assert all(w in app.mol_input_container.children for w in kept)
+        app._on_expand_mol_input(None)
+        assert all(w in app.mol_input_container.children for w in kept)
 
     def test_multiplicity_above_one_switches_to_uhf(self):
         app = QuantUIApp()
@@ -1521,6 +1547,19 @@ class TestReorganizationEnergyUI:
         app = QuantUIApp()
         app.calc_type_dd.value = "Reorganization Energy"
         assert app._freq_preopt_cb.layout.display == "none"
+
+    def test_pes_preopt_label_does_not_leak_into_other_types(self):
+        # UIA.4: the PES label was only restored when leaving PES straight for
+        # a plain type, so PES -> Reorg -> Single Point -> Frequency kept
+        # "...before scan" on the Frequency checkbox.
+        app = QuantUIApp()
+        app._set_molecule(_water())
+        app.calc_type_dd.value = "PES Scan"
+        assert "before scan" in app._freq_preopt_cb.description
+        for ct in ("Reorganization Energy", "Single Point", "Frequency"):
+            app.calc_type_dd.value = ct
+            assert "before scan" not in app._freq_preopt_cb.description, ct
+        assert app._freq_preopt_cb.description.startswith("Geometry optimization")
 
     def test_reorg_calc_type_sets_up_mode(self):
         app = QuantUIApp()
@@ -3357,8 +3396,11 @@ class TestIsosurfacePersistence:
                 "quantui.orbital_visualization.generate_cube_from_arrays",
                 side_effect=_fake_generate,
             ) as mock_gen,
+            # autospec: the mock enforces the real signature, so an option the
+            # renderer does not accept (e.g. ``esp_range``) fails here.
             patch(
                 "quantui.orbital_visualization.render_orbital_isosurface_py3dmol",
+                autospec=True,
                 return_value="<div>py3dmol iso</div>",
             ) as mock_py3dmol,
             patch(

@@ -258,6 +258,29 @@ class TestPesScanWidgets:
         assert app._scan_start.value != 0  # bond default from suggest
         assert app._scan_stop.value > app._scan_start.value
 
+    def test_suggested_range_is_rounded_and_unit_follows_stop(self):
+        # UIA.7: Start/Stop showed raw geometry floats (0.70792379…) and the
+        # Å label sat after Points instead of after Stop.
+        from quantui.app import QuantUIApp
+        from quantui.molecule import Molecule
+
+        app = QuantUIApp()
+        app._set_molecule(
+            Molecule(
+                ["O", "H", "H"],
+                [[0.0, 0.0, 0.0], [0.757, 0.587, 0.0], [-0.757, 0.587, 0.0]],
+            )
+        )
+        app.calc_type_dd.value = "PES Scan"
+        for v in (app._scan_start.value, app._scan_stop.value):
+            assert v == round(v, 3)
+        row = next(
+            c.children
+            for c in app.calc_extra_opts.children
+            if app._scan_start in getattr(c, "children", ())
+        )
+        assert row.index(app._scan_unit_lbl) == row.index(app._scan_stop) + 1
+
     def test_scan_atoms_are_dropdowns(self):
         from ipywidgets import Dropdown
 

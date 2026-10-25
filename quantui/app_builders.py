@@ -2037,27 +2037,46 @@ def build_molecule_section(
     app._mol_calc_png_inbox.add_class(_MOL_CALC_PNG_INBOX_CLASS)
     app._mol_calc_png_status = widgets.HTML(value="")
 
-    mol_container_children = [
-        app.mol_input_expanded,
-        app.mol_info_html,
-        app._mol_calc_png_inbox,
-        app.viz_output,
-        app._mol_calc_png_status,
-    ]
-    if app.viz_backend_toggle is not None:
-        mol_container_children.append(app.viz_backend_toggle)
-    if visualization_available:
-        mol_container_children.append(app.viz_controls_box)
     # Edit Structure (M-INTERACT INT.8): works on typed atom numbers even
     # without a viewer; clicking atoms needs py3Dmol.
     from quantui.app_structure_edit import build_edit_widgets
 
     build_edit_widgets(app, layout_fn=layout_fn)
-    mol_container_children.append(app._edit_accordion)
     app.mol_input_container = widgets.VBox(
-        mol_container_children,
+        mol_input_children(
+            app, expanded=True, visualization_available=visualization_available
+        ),
         layout=layout_fn(margin="0 0 4px 0"),
     )
+
+
+def mol_input_children(
+    app: Any, *, expanded: bool, visualization_available: bool
+) -> list[Any]:
+    """Children of ``mol_input_container`` for the expanded or compact view.
+
+    Only the header differs between the two views (full input editor vs the
+    one-line summary + Change button). Everything below it — viewer, its PNG
+    inbox, backend toggle, style controls, Edit Structure — is shared, and
+    must stay that way: when the collapse/expand paths each kept their own
+    list, Edit Structure fell out of both (UIA.2).
+    """
+    head = (
+        [app.mol_input_expanded, app.mol_info_html]
+        if expanded
+        else [app.mol_input_collapsed]
+    )
+    children = head + [
+        app._mol_calc_png_inbox,
+        app.viz_output,
+        app._mol_calc_png_status,
+    ]
+    if app.viz_backend_toggle is not None:
+        children.append(app.viz_backend_toggle)
+    if visualization_available:
+        children.append(app.viz_controls_box)
+    children.append(app._edit_accordion)
+    return children
 
 
 def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
