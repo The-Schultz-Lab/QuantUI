@@ -3326,8 +3326,11 @@ class TestIsosurfacePersistence:
                 "quantui.orbital_visualization.generate_cube_from_arrays",
                 side_effect=_fake_generate,
             ) as mock_gen,
+            # autospec: the mock enforces the real signature, so an option the
+            # renderer does not accept (e.g. ``esp_range``) fails here.
             patch(
                 "quantui.orbital_visualization.render_orbital_isosurface_py3dmol",
+                autospec=True,
                 return_value="<div>py3dmol iso</div>",
             ) as mock_py3dmol,
             patch(
