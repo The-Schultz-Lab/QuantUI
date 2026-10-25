@@ -23,6 +23,7 @@ from quantui.app_builders import (
 )
 from quantui.downloads import download_link_html as _download_link_html
 from quantui.orbital_visualization import _GENERIC_CAPTURE_JS, _png_capture_controls
+from quantui.symmetry import html_irrep
 
 logger = logging.getLogger(__name__)
 
@@ -669,6 +670,29 @@ def build_vib_data_inner(
     )
 
 
+def freq_mode_irreps(freq_result: Any, molecule: Any = None) -> Any:
+    """Symmetry labels of a Frequency result's modes (SPC2.4), or ``None``.
+
+    Needs the normal-mode displacements and the geometry they belong to:
+    ``pyscf_mol_atom`` on a live result, else *molecule* (History).
+    """
+    freqs = getattr(freq_result, "frequencies_cm1", None)
+    disps = getattr(freq_result, "displacements", None)
+    if freqs is None or disps is None or len(freqs) == 0 or len(disps) == 0:
+        return None
+    mol_atom = getattr(freq_result, "pyscf_mol_atom", None)
+    if not mol_atom and molecule is not None:
+        mol_atom = list(zip(molecule.atoms, molecule.coordinates))
+    if not mol_atom:
+        return None
+    try:
+        from quantui.symmetry import label_mode_irreps
+
+        return label_mode_irreps(mol_atom, list(freqs), disps)
+    except Exception:  # noqa: BLE001 — labels are informational
+        return None
+
+
 def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     """Populate vibrational animation accordion after a Frequency result.
 
@@ -694,6 +718,7 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     # Build dropdown options from raw freq_result; skip near-zero translation
     # / rotation modes. Mode numbers are 1-indexed positions in
     # frequencies_cm1.
+    irreps = freq_mode_irreps(freq_result, molecule)
     options = []
     for i, freq_val in enumerate(freqs, start=1):
         if abs(freq_val) < 10:
@@ -703,7 +728,8 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
             if freq_val >= 0
             else f"Mode {i}: {freq_val:.1f} cm⁻¹ (imaginary, TS?)"
         )
-        options.append((label, i))
+        sym = irreps.labels[i - 1] if irreps is not None else None
+        options.append((f"{label} · {sym}" if sym else label, i))
 
     if not options:
         return False
@@ -713,7 +739,7 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     app._last_vib_freq_result = freq_result
     _table = getattr(app, "_vib_mode_table", None)
     if _table is not None:
-        _table.value = vib_mode_table_html(freq_result)
+        _table.value = vib_mode_table_html(freq_result, irreps)
 
     first_label, first_mode = options[0]
 
@@ -782,6 +808,8 @@ def show_ir_spectrum(app: Any, freq_result: Any) -> bool:
 
     app._last_ir_freqs = freqs
     app._last_ir_ints = ints
+    irreps = freq_mode_irreps(freq_result)
+    app._last_ir_labels = irreps.labels if irreps is not None else None
 
     app._update_ir_figure("Stick", 20.0)
 
@@ -844,6 +872,7 @@ def update_ir_figure(app: Any, mode: str, fwhm: float) -> None:
             yaxis_title=y_title,
             descending=getattr(getattr(app, "_ir_axis_dd", None), "value", "descending")
             == "descending",
+            labels=getattr(app, "_last_ir_labels", None),
         )
         app._apply_plotly_theme(fig)
         app._last_ir_fig = fig
@@ -876,6 +905,8 @@ def show_raman_spectrum(app: Any, freq_result: Any) -> bool:
     app._raman_activities_real = bool(acts)
     app._last_raman_freqs = freqs
     app._last_raman_acts = acts
+    irreps = freq_mode_irreps(freq_result) if acts else None
+    app._last_raman_labels = irreps.labels if irreps is not None else None
     if not acts:
         # ISSUE.19 #5 — this used to plot every mode at the same height,
         # which reads as a real spectrum in class. Say why there is none.
@@ -969,6 +1000,7 @@ def update_raman_figure(app: Any, mode: str, fwhm: float) -> None:
             mode=mode.lower(),
             fwhm=fwhm,
             yaxis_title=y_title,
+            labels=getattr(app, "_last_raman_labels", None),
         )
         app._apply_plotly_theme(fig)
         app._last_raman_fig = fig
@@ -3916,8 +3948,12 @@ def on_vib_arrows_changed(app: Any, change: Any = None) -> None:
     _vib_bridge_call(app, "__quantuiVibSetArrows", "true" if on else "false")
 
 
-def vib_mode_table_html(freq_result: Any) -> str:
-    """Every normal mode with its frequency, IR intensity and Raman activity."""
+def vib_mode_table_html(freq_result: Any, irreps: Any = None) -> str:
+    """Every normal mode with its frequency, IR intensity and Raman activity.
+
+    With *irreps* (:class:`~quantui.symmetry.ModeIrreps`), a symmetry column
+    and the molecule's Γvib caption (SPC2.4).
+    """
     freqs = list(getattr(freq_result, "frequencies_cm1", None) or [])
     ir = list(getattr(freq_result, "ir_intensities", None) or [])
     raman = list(getattr(freq_result, "raman_activities", None) or [])
@@ -3925,9 +3961,12 @@ def vib_mode_table_html(freq_result: Any) -> str:
         return ""
     has_ir = len(ir) == len(freqs)
     has_raman = len(raman) == len(freqs)
+    has_sym = irreps is not None and len(irreps.labels) == len(freqs)
     cell = "padding:2px 10px;text-align:right"
+    sym_cell = "padding:2px 10px;text-align:left"
     head = (
         f'<th style="{cell}">Mode</th><th style="{cell}">ν (cm⁻¹)</th>'
+        + (f'<th style="{sym_cell}">Sym.</th>' if has_sym else "")
         + (f'<th style="{cell}">IR (km/mol)</th>' if has_ir else "")
         + (f'<th style="{cell}">Raman (Å⁴/amu)</th>' if has_raman else "")
     )
@@ -3937,14 +3976,27 @@ def vib_mode_table_html(freq_result: Any) -> str:
             continue
         nu = f"{abs(f):.1f}i" if f < 0 else f"{f:.1f}"
         style = f' style="color:{_theme.css.ACCENT_ERROR_ALT}"' if f < 0 else ""
+        sym = irreps.labels[i - 1] if has_sym else None
         rows.append(
             f"<tr{style}><td style='{cell}'>{i}</td><td style='{cell}'>{nu}</td>"
+            + (
+                f"<td style='{sym_cell}'>{html_irrep(sym or '')}</td>"
+                if has_sym
+                else ""
+            )
             + (f"<td style='{cell}'>{ir[i - 1]:.1f}</td>" if has_ir else "")
             + (f"<td style='{cell}'>{raman[i - 1]:.2f}</td>" if has_raman else "")
             + "</tr>"
         )
+    # Γvib sits above the scrolling table so it is always in view.
+    caption = (
+        f'<div style="margin:6px 0 0;font-size:12px">{irreps.caption_html()}</div>'
+        if has_sym
+        else ""
+    )
     return (
-        '<div style="max-height:240px;overflow-y:auto;margin:6px 0;font-size:12px">'
+        caption
+        + '<div style="max-height:240px;overflow-y:auto;margin:6px 0;font-size:12px">'
         f'<table style="border-collapse:collapse"><tr>{head}</tr>{"".join(rows)}</table>'
         "<small>Imaginary modes (ν shown with i) are in red.</small></div>"
     )
