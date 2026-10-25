@@ -2185,6 +2185,11 @@ class QuantUIApp:
             "slurm_jobs"
         ):
             _slurm_refresh_jobs_tab(self)
+        # Runs save new result folders while Files is out of view; re-list on
+        # entry so it never shows a stale "(empty directory)" (UIA.6). Keeps
+        # the current folder.
+        if change.get("new") == self._tab_index("files"):
+            self._refresh_file_browser()
 
     def _go_to_calculate_tab(self) -> None:
         """Navigate to the Calculate tab."""

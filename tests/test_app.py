@@ -244,6 +244,20 @@ class TestFilesTab:
         app = QuantUIApp()
         assert len(app._files_root_dd.options) >= 1
 
+    def test_entering_files_tab_lists_results_saved_since_startup(
+        self, tmp_path, monkeypatch
+    ):
+        # UIA.6: a run saved its result folder while Files was out of view and
+        # Files kept showing "(empty directory)" until Refresh was clicked.
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        app._refresh_file_browser()
+        (tmp_path / "2026-10-25_H2O_RHF_6-31G").mkdir()
+        app.root_tab.selected_index = app._tab_index("calculate")
+        app.root_tab.selected_index = app._tab_index("files")
+        labels = [label for label, _ in app._files_entries.options]
+        assert any("2026-10-25_H2O_RHF_6-31G" in label for label in labels)
+
 
 # ---------------------------------------------------------------------------
 # Molecule input — collapse / expand pattern
