@@ -263,3 +263,15 @@ class TestD17Smalls:
 
         assert signed(-0.00001, 4) == "+0.0000"
         assert signed(-0.5, 3) == "-0.500"
+
+
+class TestHelpEsc:
+    def test_esc_handler_targets_the_help_close_button(self, app):
+        from quantui.app import _HELP_ESC_JS
+
+        assert "quantui-help-close" in app._help_close_btn._dom_classes
+        assert '".quantui-help-close"' in _HELP_ESC_JS
+        assert '"Escape"' in _HELP_ESC_JS
+        # Installed once per page, a no-op while the panel is hidden.
+        assert "__quantuiHelpEsc" in _HELP_ESC_JS
+        assert "offsetParent !== null" in _HELP_ESC_JS

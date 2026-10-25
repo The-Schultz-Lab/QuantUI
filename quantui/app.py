@@ -951,6 +951,21 @@ button.jupyter-button.mod-danger {
 _LAYOUT_TRAITS: frozenset[str] = frozenset(widgets.Layout.class_trait_names())
 
 
+# Esc closes the Help panel by clicking its own Close button, so the Python
+# side (_on_help_close) stays the single place that hides it. Installed once
+# per page; does nothing while the panel is hidden.
+_HELP_ESC_JS = """
+(function(){
+  if (window.__quantuiHelpEsc) { return; }
+  window.__quantuiHelpEsc = true;
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape" || e.defaultPrevented) { return; }
+    var btn = document.querySelector(".quantui-help-close");
+    if (btn && btn.offsetParent !== null) { btn.click(); }
+  });
+})();
+"""
+
 # Bordered 500 px canvas plus its Save-PNG row (measured in Voilà). Was 620 px
 # while an info box sat above the canvas (removed, audit D8).
 _CALC_VIEWER_MIN_HEIGHT = "540px"
@@ -2069,6 +2084,7 @@ class QuantUIApp:
         """Inject global CSS and render the application widget."""
         app_css = _APP_CSS.removeprefix("<style>").removesuffix("</style>")
         display(HTML(_theme.theme_injection_html(app_css, style_id="quantui-app-css")))
+        display(Javascript(_HELP_ESC_JS))
         # NOTE: 3Dmol.js is loaded offline per-view via py3Dmol's own loader
         # (``viz_assets.make_view`` passes ``js=<vendored data: URI>``), NOT a
         # one-time page bootstrap. A startup-time bootstrap ran py3Dmol's
