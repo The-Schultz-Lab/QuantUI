@@ -636,8 +636,8 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
                 [
                     app._scan_start,
                     app._scan_stop,
+                    app._scan_unit_lbl,  # unit of Start/Stop, not of Points
                     app._scan_steps,
-                    app._scan_unit_lbl,
                     app._scan_grid_dd,
                 ],
                 layout=layout_fn(gap="4px", align_items="center"),
@@ -798,8 +798,7 @@ def apply_suggested_scan_range(app: Any) -> None:
     start, stop = suggest_scan_range(
         mol, app._scan_type_dd.value, _selected_scan_atoms(app)
     )
-    app._scan_start.value = float(start)
-    app._scan_stop.value = float(stop)
+    _set_scan_range(app, start, stop)
 
 
 def apply_scan_range_around_current(app: Any) -> None:
@@ -813,8 +812,18 @@ def apply_scan_range_around_current(app: Any) -> None:
         _selected_scan_atoms(app),
         margin=float(app._scan_around_margin.value),
     )
-    app._scan_start.value = float(start)
-    app._scan_stop.value = float(stop)
+    _set_scan_range(app, start, stop)
+
+
+def _set_scan_range(app: Any, start: float, stop: float) -> None:
+    """Write a suggested range, rounded to what a user would type.
+
+    Suggestions are computed from the live geometry, so unrounded they showed
+    as e.g. ``0.70792379`` (UIA.7). 0.001 Å / 0.1° is finer than any scan step.
+    """
+    ndigits = 3 if app._scan_type_dd.value.lower() == "bond" else 1
+    app._scan_start.value = round(float(start), ndigits)
+    app._scan_stop.value = round(float(stop), ndigits)
 
 
 def _sync_scan_around_margin_ui(app: Any, scan_type: str | None = None) -> None:
