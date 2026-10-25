@@ -248,26 +248,30 @@ def build_status_panel(
         options=[
             ("Auto", "auto"),
             ("py3Dmol", "py3dmol"),
-            ("plotlymol3d", "plotlymol"),
+            # Same name as the Calculate-tab toggle ("plotlymol3d" here before).
+            ("PlotlyMol", "plotlymol"),
         ],
         value=viz_default_backend,
         style={"button_width": "110px"},
         tooltips=[
             "Use the recommended backend per task (py3Dmol-first where supported).",
             "Always prefer py3Dmol when available.",
-            "Always prefer plotlymol3d when available.",
+            "Always prefer PlotlyMol when available.",
         ],
     )
+    # Audit D12: the "Settings" card used to be a self-contained HTML box that
+    # wrapped only the title and the first label, leaving the backend toggle
+    # (and everything else) outside it. Now the whole settings column is the
+    # card (see settings_box below) and each label sits above its control.
     settings_html = widgets.HTML(
-        f'<div style="background:{_theme.css.BG_PANEL};border:1px solid {_theme.css.BORDER};'
-        f"border-left:4px solid {_theme.css.TEXT_SUBTLE};padding:12px 16px;border-radius:6px;"
-        'margin:8px 0 4px">'
-        f'<div style="font-weight:600;font-size:14px;color:{_theme.css.TEXT_STRONG}">Settings</div>'
-        f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:8px;margin-bottom:4px">'
-        "Default 3D backend "
+        f'<div style="font-weight:600;font-size:14px;color:{_theme.css.TEXT_STRONG}">'
+        "Settings</div>"
+    )
+    viz_backend_label = widgets.HTML(
+        f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:8px;'
+        'margin-bottom:0px">Default 3D backend '
         f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
         "(persists across launches)</span></div>"
-        "</div>"
     )
     engine_options = [
         ("Automatic (PySCF preferred)", "auto"),
@@ -458,10 +462,11 @@ def build_status_panel(
     settings_box = widgets.VBox(
         [
             settings_html,
+            viz_backend_label,
+            app.viz_default_backend_dd,
             engine_label,
             app.quantum_engine_dd,
             app.quantum_engine_note,
-            app.viz_default_backend_dd,
             vib_fps_label,
             app.vib_framerate_si,
             gpu_toggle_label,
@@ -474,7 +479,14 @@ def build_status_panel(
             exec_backend_note,
             *slurm_root_rows,
         ],
-        layout=layout_fn(margin="0 0 8px 0"),
+        layout=layout_fn(
+            margin="8px 0 8px 0",
+            padding="12px 16px",
+            border_top=f"1px solid {_theme.css.BORDER}",
+            border_right=f"1px solid {_theme.css.BORDER}",
+            border_bottom=f"1px solid {_theme.css.BORDER}",
+            border_left=f"4px solid {_theme.css.TEXT_SUBTLE}",
+        ),
     )
 
     app._status_tab_panel = widgets.VBox(
@@ -1704,13 +1716,17 @@ def build_theme_selector(app: Any, *, layout_fn: Any) -> None:
     app._theme_style = widgets.Output(
         layout=layout_fn(height="0px", overflow="hidden", margin="0", padding="0")
     )
+    # A status indicator, not a control (audit D15): neutral while idle,
+    # coloured only while busy, and styled as a non-clickable chip
+    # (.quantui-status-chip in the app CSS).
     app._activity_btn = widgets.Button(
         description="Idle",
         icon="circle-o",
         tooltip="No active operations.",
-        button_style="success",
+        button_style="",
         layout=layout_fn(width="118px", margin="0 8px 0 0"),
     )
+    app._activity_btn.add_class("quantui-status-chip")
     default_palette = getattr(app, "_user_settings", None)
     initial = (
         default_palette.theme.palette
@@ -2024,6 +2040,14 @@ def build_molecule_section(
         layout=layout_fn(width="100px", height="32px"),
         tooltip="Re-expand the molecule input panel",
     )
+    # Way back from the expanded editor to the compact summary once a molecule
+    # is loaded (audit D11: "Change" was one-way).
+    app.collapse_mol_btn = widgets.Button(
+        description="Done",
+        icon="check",
+        layout=layout_fn(width="90px", height="30px", margin="4px 0"),
+        tooltip="Hide the molecule editor and show the compact summary",
+    )
     app.mol_input_collapsed = widgets.HBox(
         [app.mol_summary_compact, app.change_mol_btn],
         layout=layout_fn(align_items="center", gap="12px", padding="6px 0"),
@@ -2065,11 +2089,12 @@ def mol_input_children(
     must stay that way: when the collapse/expand paths each kept their own
     list, Edit Structure fell out of both (UIA.2).
     """
-    head = (
-        [app.mol_input_expanded, app.mol_info_html]
-        if expanded
-        else [app.mol_input_collapsed]
-    )
+    if not expanded:
+        head = [app.mol_input_collapsed]
+    else:
+        head = [app.mol_input_expanded, app.mol_info_html]
+        if getattr(app, "_molecule", None) is not None:
+            head.append(app.collapse_mol_btn)
     children = head + [
         app._mol_calc_png_inbox,
         app.viz_output,
@@ -2421,8 +2446,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         description="⬇ Export Animation",
         tooltip=(
             "Save the current vibrational mode as a self-contained HTML "
-            "file (plotlymol3d preferred for export quality; py3Dmol "
-            "fallback if plotlymol3d is not installed)"
+            "file (PlotlyMol preferred for export quality; py3Dmol "
+            "fallback if PlotlyMol is not installed)"
         ),
         layout=layout_fn(width="180px"),
     )
@@ -3582,7 +3607,7 @@ def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) ->
     )
     app.compare_clear_btn = widgets.Button(
         description="Clear",
-        button_style="warning",
+        button_style="",  # neutral: clearing a selection is not a warning (D16)
         icon="times",
         layout=layout_fn(width="90px"),
     )
@@ -3594,7 +3619,7 @@ def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) ->
                 '<h3 style="margin:14px 0 6px">Compare Calculations</h3>'
                 f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:0 0 8px">'
                 "Select two or more saved calculations to compare side-by-side. "
-                "Hold Ctrl (or ⌘) to select multiple entries.</p>"
+                "Hold Ctrl (or ⌘) and click to select several; Shift-click selects a range.</p>"
             ),
             widgets.HBox([app.compare_refresh_btn]),
             app.compare_select,
@@ -4009,12 +4034,28 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._exit_output = widgets.Output(layout=layout_fn(height="0px", overflow="hidden"))
 
+    # Audit D14: the panel could only be closed by finding the Help button
+    # again; give it its own close control.
+    app._help_close_btn = widgets.Button(
+        description="Close",
+        icon="times",
+        tooltip="Close the help panel",
+        layout=layout_fn(width="80px", margin="4px 12px 0 auto"),
+    )
     app.help_tab_panel = widgets.VBox(
         [
-            widgets.HTML(
-                f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:4px 0 12px">'
-                "Browse help topics below. Click <b>?</b> next to the Method or Basis Set "
-                "dropdown in the Calculate tab to jump directly to a relevant topic.</p>"
+            widgets.HBox(
+                [
+                    widgets.HTML(
+                        f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;'
+                        'margin:4px 0 12px">'
+                        "Browse help topics below. Click <b>?</b> next to the Method "
+                        "or Basis Set dropdown in the Calculate tab to jump directly "
+                        "to a relevant topic.</p>"
+                    ),
+                    app._help_close_btn,
+                ],
+                layout=layout_fn(width="100%", align_items="flex-start"),
             ),
             app.help_topic_dd,
             app.help_content_html,
@@ -4059,10 +4100,13 @@ def build_issue_widgets(app: Any, *, layout_fn: Any) -> None:
     app._issue_status_html = widgets.HTML()
     app._issue_overlay = widgets.VBox(
         [
+            # Theme tokens, not fixed light-theme browns: on dark palettes the
+            # panel background follows the theme and #92400e/#78350f text was
+            # nearly unreadable (audit D14).
             widgets.HTML(
-                '<p style="font-size:13px;font-weight:600;margin:0 0 6px;color:#92400e">'
-                "&#9872; Report Issue</p>"
-                '<p style="font-size:12px;color:#78350f;margin:0 0 8px">'
+                '<p style="font-size:13px;font-weight:600;margin:0 0 6px;'
+                f'color:{_theme.css.ACCENT_WARNING}">&#9872; Report Issue</p>'
+                f'<p style="font-size:12px;color:{_theme.css.TEXT_BODY};margin:0 0 8px">'
                 "Your report (and a snapshot of the current session state) will be "
                 "saved to <code>issues.db</code> and the session event log.</p>"
             ),
@@ -4079,6 +4123,5 @@ def build_issue_widgets(app: Any, *, layout_fn: Any) -> None:
             border_radius="6px",
             padding="12px 14px",
             margin="0 0 6px",
-            background_color="#fffbeb",
         ),
     )

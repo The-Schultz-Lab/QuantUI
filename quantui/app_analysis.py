@@ -83,7 +83,9 @@ def _analysis_heading_label(ctx: Any) -> str:
     """Return the analysis heading text aligned with history dropdown labels."""
     badge = _CALC_TYPE_BADGES.get(ctx.calc_type, str(ctx.calc_type or "Unknown"))
     core = f"[{badge}] {ctx.label}"
-    ts = str(getattr(ctx, "timestamp", "") or "").strip()
+    from quantui.app_formatters import friendly_timestamp
+
+    ts = friendly_timestamp(str(getattr(ctx, "timestamp", "") or "").strip())
     return f"{ts}  ·  {core}" if ts else core
 
 

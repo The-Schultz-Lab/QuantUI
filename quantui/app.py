@@ -905,6 +905,13 @@ button.jupyter-button.mod-danger {
 .quantui-result-card table.quantui-result-card-table {
     width: auto !important;
 }
+/* Activity indicator: a status chip, not a button (audit D15). */
+.quantui-status-chip {
+    pointer-events: none !important;
+    cursor: default !important;
+    border-radius: 14px !important;
+    box-shadow: none !important;
+}
 .quantui-result-card,
 .quantui-result-card table {
     color: var(--q-text-body) !important;
@@ -1785,6 +1792,8 @@ class QuantUIApp:
         method_help_btn: Any
         mol_info_html: Any
         mol_summary_compact: Any
+        collapse_mol_btn: Any
+        _help_close_btn: Any
         mult_si: Any
         _method_card_html: Any
         _basis_card_html: Any
@@ -2148,7 +2157,7 @@ class QuantUIApp:
 
         self._activity_btn.description = "Idle"
         self._activity_btn.icon = "circle-o"
-        self._activity_btn.button_style = "success"
+        self._activity_btn.button_style = ""
         self._activity_btn.tooltip = "No active operations."
 
     def _refresh_activity_indicator(self, message: str = "") -> None:
@@ -2748,6 +2757,7 @@ class QuantUIApp:
             self._safe_cb(self._on_pubchem_candidate_selected), names="value"
         )
         self.change_mol_btn.on_click(self._on_expand_mol_input)
+        self.collapse_mol_btn.on_click(self._on_collapse_mol_input)
         # Calc type
         self.calc_type_dd.observe(
             self._safe_cb(self._on_calc_type_changed), names="value"
@@ -2955,6 +2965,7 @@ class QuantUIApp:
         self._issue_cancel_btn.on_click(self._on_issue_cancel)
         # Help [?] toggle
         self._help_btn.on_click(self._on_help_toggle)
+        self._help_close_btn.on_click(self._on_help_close)
         # Exit
         self._exit_btn.on_click(self._on_exit_clicked)
         self._exit_cancel_btn.on_click(self._on_exit_cancel)
@@ -4128,7 +4139,7 @@ class QuantUIApp:
         label = getattr(self, "viz_backend_label_ana", None)
         if label is None:
             return
-        display_name = "py3Dmol" if chosen == VizBackend.PY3DMOL else "plotlymol3d"
+        display_name = "py3Dmol" if chosen == VizBackend.PY3DMOL else "PlotlyMol"
         label.value = (
             f'<span style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};font-style:italic">'
             f"Rendering with: {display_name}</span>"
@@ -4630,6 +4641,14 @@ class QuantUIApp:
             self._resolve_and_apply(query, loop)
 
         threading.Thread(target=_do, daemon=True).start()
+
+    def _on_collapse_mol_input(self, _btn=None) -> None:
+        self.mol_input_container.children = _bld_mol_input_children(
+            self, expanded=False, visualization_available=VISUALIZATION_AVAILABLE
+        )
+
+    def _on_help_close(self, _btn=None) -> None:
+        self.help_tab_panel.layout.display = "none"
 
     def _on_expand_mol_input(self, btn) -> None:
         _run_on_expand_mol_input(

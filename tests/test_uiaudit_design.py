@@ -162,3 +162,52 @@ class TestD6FrequencyCard:
         assert "+10.74 kJ/mol vs E" in html
         assert "-200595" not in html
         assert "(298 K)</td>" not in html  # T is in the section header
+
+
+class TestD11MoleculeEditor:
+    def test_done_button_returns_to_the_compact_view(self, app):
+        app._set_molecule(_water())
+        assert app.mol_input_container.children[0] is app.mol_input_collapsed
+        app._on_expand_mol_input(None)
+        assert app.collapse_mol_btn in app.mol_input_container.children
+        app._on_collapse_mol_input()
+        assert app.mol_input_container.children[0] is app.mol_input_collapsed
+
+    def test_no_done_button_before_a_molecule_exists(self, app):
+        assert app.collapse_mol_btn not in app.mol_input_container.children
+
+    def test_atom_table_header_matches_column_widths(self, app):
+        widths = [c.layout.width for c in app.xyz_table_header.children]
+        row = app.xyz_table_box.children[0].children
+        assert widths == [w.layout.width for w in row[:4]]
+
+
+class TestD12Settings:
+    def test_backend_names_match_the_calculate_toggle(self, app):
+        labels = [lbl for lbl, _ in app.viz_default_backend_dd.options]
+        assert "PlotlyMol" in labels and "plotlymol3d" not in labels
+
+
+class TestD14Panels:
+    def test_help_panel_has_its_own_close_button(self, app):
+        app.help_tab_panel.layout.display = ""
+        app._help_close_btn.click()
+        assert app.help_tab_panel.layout.display == "none"
+
+    def test_report_issue_text_uses_theme_colours(self, app):
+        html = app._issue_overlay.children[0].value
+        assert "#92400e" not in html and "#78350f" not in html
+
+
+class TestD15StatusChip:
+    def test_idle_indicator_is_a_neutral_chip(self, app):
+        assert "quantui-status-chip" in app._activity_btn._dom_classes
+        assert app._activity_btn.button_style == ""
+
+
+class TestD16Labels:
+    def test_friendly_timestamp(self):
+        from quantui.app_formatters import friendly_timestamp
+
+        assert friendly_timestamp("2026-10-25_04-31-58-600504") == "2026-10-25 04:31"
+        assert friendly_timestamp("not-a-timestamp") == "not-a-timestamp"

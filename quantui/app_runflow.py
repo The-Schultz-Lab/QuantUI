@@ -2764,7 +2764,7 @@ def refresh_results_browser(app: Any) -> None:
         from quantui import list_results, load_result
     except ImportError:
         return
-    from quantui.app_formatters import slurm_history_marker
+    from quantui.app_formatters import friendly_timestamp, slurm_history_marker
     from quantui.app_history import (
         apply_history_filter,
         entry_date,
@@ -2800,7 +2800,7 @@ def refresh_results_browser(app: Any) -> None:
             method = data.get("method", "?")
             basis = data.get("basis", "?")
             label = (
-                f"{ts}  ·  [{calc_badge}]  "
+                f"{friendly_timestamp(ts)}  ·  [{calc_badge}]  "
                 f"{calib_marker}{slurm_marker}{formula}  "
                 f"{method}/{basis}"
             )
@@ -2860,6 +2860,7 @@ def refresh_comparison(app: Any) -> None:
 
 def populate_compare_list(app: Any) -> None:
     """Populate the Compare tab selector with saved result entries."""
+    from quantui.app_formatters import friendly_timestamp
     from quantui.results_storage import list_results, load_result
 
     dirs = list_results()
@@ -2874,7 +2875,7 @@ def populate_compare_list(app: Any) -> None:
             ts = data.get("timestamp", d.name[:19])
             calc_badge = _calc_type_badge(data.get("calc_type", ""))
             label = (
-                f"{ts}  [{calc_badge}]  "
+                f"{friendly_timestamp(ts)}  ·  [{calc_badge}]  "
                 f"{data.get('formula', '?')}  "
                 f"{data.get('method', '?')}/{data.get('basis', '?')}"
             )

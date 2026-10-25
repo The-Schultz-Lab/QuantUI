@@ -13,6 +13,24 @@ def _converged_color(converged: bool) -> str:
     return _theme.css.ACCENT_SUCCESS if converged else _theme.css.ACCENT_ERROR_ALT
 
 
+def friendly_timestamp(ts: Any) -> str:
+    """``"2026-10-25_04-31-58-600504"`` → ``"2026-10-25 04:31"``.
+
+    Result folders are named by a microsecond timestamp; History, Compare and
+    the Analysis heading showed it raw (audit D16). Anything that doesn't
+    parse is returned unchanged.
+    """
+    from datetime import datetime
+
+    text = str(ts or "")
+    for fmt in ("%Y-%m-%d_%H-%M-%S-%f", "%Y-%m-%d_%H-%M-%S"):
+        try:
+            return datetime.strptime(text[:26], fmt).strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            continue
+    return text
+
+
 def _method_basis_label(method: str, basis: str, scf_variant: str | None) -> str:
     """``"{method}/{basis}"``, with an explicit "(RKS)"/"(UKS)" suffix when
     the dispatched SCF variant differs from the plain method name.

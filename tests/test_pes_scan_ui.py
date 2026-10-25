@@ -95,8 +95,9 @@ class TestValidatePesScanInputs:
 class TestAtomListHtml:
     def test_renders_numbered_atoms(self):
         html = atom_list_html(_water())
-        assert "1" in html and "O1" in html
-        assert "2" in html and "H2" in html
+        assert "<b>O1</b>" in html and "<b>H2</b>" in html
+        # D10: no repeated number/element ("1 O1 (O)").
+        assert "(O)" not in html and "(H)" not in html
 
     def test_uses_theme_tokens_not_hardcoded_light_chip(self):
         html = atom_list_html(
