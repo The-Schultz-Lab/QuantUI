@@ -481,6 +481,9 @@ from quantui.app_visualization import (
     on_orb_range_changed as _viz_on_orb_range_changed,
 )
 from quantui.app_visualization import (
+    on_orb_show_core_changed as _viz_on_orb_show_core_changed,
+)
+from quantui.app_visualization import (
     on_orbital_gallery as _viz_on_orbital_gallery,
 )
 from quantui.app_visualization import (
@@ -1598,6 +1601,7 @@ class QuantUIApp:
         _ir_export_btn: Any
         _ir_export_fmt_dd: Any
         _ir_export_status: Any
+        _ir_axis_dd: Any
         _ir_fig: Any
         _ir_fwhm_slider: Any
         _ir_mode_toggle: Any
@@ -1677,6 +1681,7 @@ class QuantUIApp:
         _orb_iso_controls: Any
         _orb_iso_output: Any
         _orb_n_orb_input: Any
+        _orb_show_core_cb: Any
         _orb_font_scale_slider: Any
         _orb_index_input: Any
         _orb_png_inbox: Any
@@ -2972,6 +2977,9 @@ class QuantUIApp:
         self._orb_font_scale_slider.observe(
             self._safe_cb(self._on_orb_range_changed), names="value"
         )
+        self._orb_show_core_cb.observe(
+            self._safe_cb(self._on_orb_show_core_changed), names="value"
+        )
         # Orbital isosurface generate button
         self._iso_generate_btn.on_click(self._on_iso_generate)
         self._orb_gallery_btn.on_click(self._on_orbital_gallery)
@@ -3043,6 +3051,7 @@ class QuantUIApp:
         self._iso_resolution_dd.observe(
             self._safe_cb(self._on_iso_resolution_changed), names="value"
         )
+        self._ir_axis_dd.observe(self._safe_cb(self._on_ir_axis_changed), names="value")
         # Appearance controls redraw from the cube on disk — no cubegen — so
         # they can respond directly rather than behind an Apply button.
         for _w in (
@@ -4827,6 +4836,19 @@ class QuantUIApp:
         self._user_settings.viz.iso_resolution = str(new_val)
         self._user_settings.save()
 
+    def _on_ir_axis_changed(self, change) -> None:
+        """Redraw the IR spectrum in the new direction and remember it."""
+        new_val = (change or {}).get("new")
+        if not new_val:
+            return
+        if getattr(self, "_last_ir_freqs", None):
+            self._update_ir_figure(
+                self._ir_mode_toggle.value, self._ir_fwhm_slider.value
+            )
+        if new_val != self._user_settings.viz.ir_axis:
+            self._user_settings.viz.ir_axis = str(new_val)
+            self._user_settings.save()
+
     def _on_iso_export_cube(self, btn) -> None:
         _exp_on_iso_export_cube(self, btn)
 
@@ -5885,6 +5907,9 @@ class QuantUIApp:
     def _on_orb_range_changed(self, _change=None) -> None:
         _viz_on_orb_range_changed(self, _change)
 
+    def _on_orb_show_core_changed(self, _change=None) -> None:
+        _viz_on_orb_show_core_changed(self, _change)
+
     def _render_orbital_isosurface(
         self, orbital_label: str, render_token: Optional[int] = None
     ) -> None:
@@ -6568,6 +6593,8 @@ class QuantUIApp:
                         # live but never made it into the saved result.json.
                         "thermo": _thermo_serialized,
                         "imaginary_mode_retry": result.imaginary_mode_retry,
+                        # D1 — force check at the Hessian geometry.
+                        "max_force_ev_per_ang": result.max_force_ev_per_ang,
                     },
                     "molecule": {
                         "atoms": list(calc_mol.atoms),

@@ -34,7 +34,8 @@ from typing import List, Optional, cast
 import numpy as np
 import plotly.graph_objects as go
 
-# x-axis range is low → high wavenumber (user-facing convention in QuantUI).
+# x-axis range is low → high wavenumber; ``plot_ir_spectrum(descending=True)``
+# flips it to the FTIR convention (high → low), which the app uses by default.
 # AUDIT additional-concerns — this used to be the FIXED plot range/grid
 # regardless of the actual data: a real water/STO-3G calculation has O-H
 # stretches at 4486.7/4788.3 cm⁻¹, which used to be clipped off the right
@@ -78,6 +79,7 @@ def plot_ir_spectrum(
     fwhm: float = 20.0,
     mode: str = "stick",
     yaxis_title: str = "IR Intensity (km/mol)",
+    descending: bool = False,
 ) -> go.Figure:
     """Return a Plotly figure for the IR absorption spectrum.
 
@@ -90,6 +92,8 @@ def plot_ir_spectrum(
         mode: Display mode.
             ``"stick"`` — vertical bars at each active frequency.
             ``"broadened"`` — Lorentzian convolution of all peaks.
+        descending: Draw the wavenumber axis high → low (4000 → 400 cm⁻¹),
+            the FTIR convention. Default ``False`` (low → high).
 
     Returns:
         :class:`plotly.graph_objects.Figure` ready for display or wrapping
@@ -102,7 +106,7 @@ def plot_ir_spectrum(
     _base_layout = dict(
         xaxis=dict(
             title="Wavenumber (cm⁻¹)",
-            range=xrange,
+            range=xrange[::-1] if descending else xrange,
             showgrid=True,
             gridcolor="#e5e7eb",
         ),

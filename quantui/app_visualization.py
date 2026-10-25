@@ -834,6 +834,8 @@ def update_ir_figure(app: Any, mode: str, fwhm: float) -> None:
             mode=mode.lower(),
             fwhm=fwhm,
             yaxis_title=y_title,
+            descending=getattr(getattr(app, "_ir_axis_dd", None), "value", "descending")
+            == "descending",
         )
         app._apply_plotly_theme(fig)
         app._last_ir_fig = fig
@@ -1402,11 +1404,9 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
             info,
             max_orbitals=app._orb_n_orb_input.value,
             font_scale=app._orb_font_scale_slider.value,
+            show_core=_orb_show_core(app),
         )
-        yr = fig.layout.yaxis.range
-        if yr is not None:
-            app._orb_ymin_input.value = round(float(yr[0]), 2)
-            app._orb_ymax_input.value = round(float(yr[1]), 2)
+        _sync_orb_range_inputs(app, fig)
         app._apply_plotly_theme(fig)
         app._last_orb_fig = fig
         html_str = _pio.to_html(
@@ -1635,10 +1635,59 @@ def on_iso_generate(app: Any, btn: Any) -> None:
         _start_daemon(_watchdog)
 
 
+def _orb_show_core(app: Any) -> bool:
+    return bool(getattr(getattr(app, "_orb_show_core_cb", None), "value", False))
+
+
+def _sync_orb_range_inputs(app: Any, fig: Any) -> None:
+    """Copy the figure's auto Y range into Y min/max without re-rendering."""
+    yr = fig.layout.yaxis.range
+    if yr is None:
+        return
+    app._orb_range_syncing = True
+    try:
+        app._orb_ymin_input.value = round(float(yr[0]), 2)
+        app._orb_ymax_input.value = round(float(yr[1]), 2)
+    finally:
+        app._orb_range_syncing = False
+
+
+def on_orb_show_core_changed(app: Any, _change: Any = None) -> None:
+    """Show/hide core orbitals and re-fit the Y range to what is shown."""
+    info = getattr(app, "_last_orb_info", None)
+    if info is None:
+        return
+    try:
+        import plotly.io as _pio
+
+        from quantui.orbital_visualization import plot_orbital_diagram_plotly
+
+        fig = plot_orbital_diagram_plotly(
+            info,
+            max_orbitals=app._orb_n_orb_input.value,
+            font_scale=app._orb_font_scale_slider.value,
+            show_core=_orb_show_core(app),
+        )
+        _sync_orb_range_inputs(app, fig)
+        app._apply_plotly_theme(fig)
+        app._last_orb_fig = fig
+        app._set_html_output(
+            app._orb_diagram_html,
+            _pio.to_html(
+                fig,
+                include_plotlyjs="require",
+                full_html=False,
+                config={"responsive": True},
+            ),
+        )
+    except Exception:
+        app._last_orb_fig = None
+
+
 def on_orb_range_changed(app: Any, _change: Any = None) -> None:
     """Live-update orbital diagram for axis limits or orbital count changes."""
     info = getattr(app, "_last_orb_info", None)
-    if info is None:
+    if info is None or getattr(app, "_orb_range_syncing", False):
         return
     ymin = app._orb_ymin_input.value
     ymax = app._orb_ymax_input.value
@@ -1654,6 +1703,7 @@ def on_orb_range_changed(app: Any, _change: Any = None) -> None:
             max_orbitals=app._orb_n_orb_input.value,
             yrange=(ymin, ymax),
             font_scale=app._orb_font_scale_slider.value,
+            show_core=_orb_show_core(app),
         )
         app._apply_plotly_theme(fig)
         app._last_orb_fig = fig
@@ -3893,10 +3943,20 @@ def vib_mode_table_html(freq_result: Any) -> str:
 
 
 def show_thermo_box(
-    app: Any, molecule: Any, energy_hartree: Any, frequencies_cm1: Any
+    app: Any,
+    molecule: Any,
+    energy_hartree: Any,
+    frequencies_cm1: Any,
+    *,
+    max_force_ev_per_ang: float | None = None,
 ) -> None:
-    """Remember what thermochemistry needs and show it at the current T/P."""
+    """Remember what thermochemistry needs and show it at the current T/P.
+
+    *max_force_ev_per_ang* (D1) puts the not-a-stationary-point warning above
+    the table, as on the result card.
+    """
     box = getattr(app, "_thermo_box", None)
+    app._thermo_max_force = max_force_ev_per_ang
     if molecule is None or energy_hartree is None or not frequencies_cm1:
         app._thermo_source = None
         if box is not None:
@@ -3933,7 +3993,17 @@ def on_thermo_inputs_changed(app: Any, change: Any = None) -> None:
     except Exception as exc:  # noqa: BLE001 — show, never raise from an input
         out.value = f'<span style="color:#b91c1c">Thermochemistry failed: {exc}</span>'
         return
-    out.value = thermo_table_html(td, energy)
+    from quantui.freq_calc import is_stationary
+
+    warning = ""
+    if is_stationary(getattr(app, "_thermo_max_force", None)) is False:
+        warning = (
+            f'<div style="color:{_theme.css.ACCENT_ERROR_ALT};margin:0 0 6px 0">'
+            "&#9888; Not a stationary point (max force "
+            f"{app._thermo_max_force:.3f} eV/Å): these values are not "
+            "physically meaningful. Optimize the geometry first.</div>"
+        )
+    out.value = warning + thermo_table_html(td, energy)
 
 
 def thermo_table_html(td: Any, energy_hartree: float) -> str:

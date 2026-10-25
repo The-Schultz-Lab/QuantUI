@@ -2210,6 +2210,14 @@ def _persisted_iso_resolution(app: Any) -> str:
         return "medium"
 
 
+def _persisted_ir_axis(app: Any) -> str:
+    """The saved IR axis direction, or the default; same contract as above."""
+    try:
+        return str(app._user_settings.viz.ir_axis)
+    except Exception:  # noqa: BLE001 — settings must never gate widget creation
+        return "descending"
+
+
 def build_results_section(app: Any, *, layout_fn: Any) -> None:
     """Build results and analysis tab panels/widgets."""
 
@@ -2491,9 +2499,22 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="100%", min_height="300px"),
     )
     ir_export_row = _plot_export_row("ir")
+    # Both directions stay available (instructor, 2026-10-25); the choice is
+    # saved in user settings.
+    app._ir_axis_dd = widgets.Dropdown(
+        options=[
+            ("4000 → 400 cm⁻¹ (high → low)", "descending"),
+            ("400 → 4000 cm⁻¹ (low → high)", "ascending"),
+        ],
+        value=_persisted_ir_axis(app),
+        description="Axis:",
+        style={"description_width": "40px"},
+        layout=layout_fn(width="270px", margin="0 8px 0 0"),
+        tooltip="Wavenumber direction; 4000 → 400 is the FTIR convention",
+    )
 
     ir_controls = widgets.HBox(
-        [app._ir_mode_toggle, app._ir_fwhm_slider],
+        [app._ir_mode_toggle, app._ir_axis_dd, app._ir_fwhm_slider],
         layout=layout_fn(align_items="center", margin="0 0 6px 0"),
     )
     ir_body_children = [ir_controls, ir_export_row, app._ir_fig]
@@ -2548,9 +2569,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._raman_accordion.set_title(0, "Raman Spectrum")
     app._raman_accordion.selected_index = None
 
+    # Bounds wide enough for core levels (O 1s ≈ −560 eV, heavier atoms far
+    # lower): at −500 the "Show core orbitals" view was silently clamped.
     app._orb_ymin_input = widgets.BoundedFloatText(
         value=-30.0,
-        min=-500.0,
+        min=-100000.0,
         max=200.0,
         step=1.0,
         description="Y min:",
@@ -2559,7 +2582,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._orb_ymax_input = widgets.BoundedFloatText(
         value=5.0,
-        min=-500.0,
+        min=-100000.0,
         max=500.0,
         step=1.0,
         description="Y max:",
@@ -2574,6 +2597,15 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         description="Show N:",
         layout=layout_fn(width="120px"),
         style={"description_width": "50px"},
+    )
+    # D2: core levels (hundreds of eV down) squeezed the valence orbitals into
+    # a sliver of the default view; hide them unless asked.
+    app._orb_show_core_cb = widgets.Checkbox(
+        value=False,
+        description="Show core orbitals",
+        indent=False,
+        layout=layout_fn(width="auto", margin="0 8px 0 4px"),
+        tooltip="Include inner-shell orbitals (e.g. O 1s) and re-fit the Y range",
     )
     app._orb_font_scale_slider = widgets.FloatSlider(
         value=1.0,
@@ -2598,6 +2630,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 "Levels shown:</span>"
             ),
             app._orb_n_orb_input,
+            app._orb_show_core_cb,
             app._orb_font_scale_slider,
         ],
         layout=layout_fn(

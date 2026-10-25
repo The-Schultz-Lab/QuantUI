@@ -344,6 +344,20 @@ def plot_orbital_diagram(
 # ============================================================================
 
 
+# Occupied MOs more than this far below the HOMO are treated as core (D2).
+# Valence levels sit well inside it (F 2s is ~30 eV below the HOMO in
+# fluorocarbons); 1s/2p core levels are hundreds of eV down. Defined on
+# energies rather than per-element shell counts so it stays right for ECP
+# bases, whose MO list has no core orbitals to begin with.
+CORE_ORBITAL_GAP_EV = 50.0
+
+
+def count_core_orbitals(info: OrbitalInfo) -> int:
+    """Number of occupied MOs lying more than CORE_ORBITAL_GAP_EV below the HOMO."""
+    cutoff = float(info.homo_energy_ev) - CORE_ORBITAL_GAP_EV
+    return int(sum(1 for e in info.mo_energies_ev[: info.n_occupied] if e < cutoff))
+
+
 def plot_orbital_diagram_plotly(
     info: OrbitalInfo,
     *,
@@ -353,6 +367,7 @@ def plot_orbital_diagram_plotly(
     width: int = 380,
     height: int = 460,
     font_scale: float = 1.0,
+    show_core: bool = True,
 ):
     """Interactive Plotly orbital energy-level diagram.
 
@@ -373,6 +388,10 @@ def plot_orbital_diagram_plotly(
         Custom plot title; defaults to ``"Orbital Energy Levels — {formula}"``.
     width, height:
         Figure dimensions in pixels.
+    show_core:
+        When ``False``, leave out core orbitals (:func:`count_core_orbitals`)
+        so the auto Y range frames the valence levels; the subtitle says how
+        many were hidden.
 
     Returns
     -------
@@ -393,6 +412,11 @@ def plot_orbital_diagram_plotly(
     half = max_orbitals // 2
     start = max(0, n_occ - half)
     end = min(n_total, n_occ + half)
+    n_core_hidden = 0
+    if not show_core:
+        n_core = count_core_orbitals(info)
+        n_core_hidden = max(0, n_core - start)
+        start = max(start, n_core)
 
     LHW = 0.3  # half-width of each horizontal line in x
 
@@ -488,6 +512,15 @@ def plot_orbital_diagram_plotly(
     else:
         y_min, y_max = yrange
 
+    subtitles = []
+    if irreps and info.irrep_caption:
+        subtitles.append(info.irrep_caption)
+    if n_core_hidden:
+        s_ = "s" if n_core_hidden > 1 else ""
+        subtitles.append(
+            f"{n_core_hidden} core orbital{s_} hidden (tick Show core orbitals)"
+        )
+
     fig = go.Figure(data=traces)
     fig.update_layout(
         width=width,
@@ -495,15 +528,13 @@ def plot_orbital_diagram_plotly(
         margin=dict(l=60, r=110, t=50, b=30),
         title=dict(
             text=(title or f"Orbital Energy Levels — {info.formula}")
-            + (
-                f"<br><sup>{info.irrep_caption}</sup>"
-                if irreps and info.irrep_caption
-                else ""
-            ),
+            + "".join(f"<br><sup>{t}</sup>" for t in subtitles),
             font=dict(size=fs_title, family="Arial"),
         ),
         xaxis=dict(
-            range=[-0.9, 0.9],
+            # Room left of the gap arrow for its label, which is right-anchored
+            # at the arrow; at [-0.9, 0.9] it ran over the Y tick labels.
+            range=[-1.2 - 0.3 * (scale - 1.0), 0.9],
             showticklabels=False,
             showgrid=False,
             zeroline=False,

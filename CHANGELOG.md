@@ -43,6 +43,22 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- **Frequency results check the geometry** — every Frequency run now
+  computes the forces at the input geometry. When the largest force is above
+  the Geometry Opt threshold (0.05 eV/Å) the result card (live and History)
+  and the Analysis thermochemistry box warn that the geometry is not a
+  stationary point, so its frequencies and thermochemistry are not
+  meaningful, and say how to fix it. `FreqResult.max_force_ev_per_ang`;
+  saved as `spectra.ir.max_force_ev_per_ang`.
+- **IR spectra run 4000 → 400 cm⁻¹ by default** (FTIR convention). An
+  **Axis** dropdown on the IR panel switches back to 400 → 4000; the choice
+  is remembered (`viz.ir_axis` in user settings). `plot_ir_spectrum()` gains
+  `descending=`.
+- **Energy-level diagram hides core orbitals by default** — occupied
+  orbitals more than 50 eV below the HOMO (e.g. water's O 1s) no longer set
+  the Y range and squeeze the valence levels into a sliver; the subtitle says
+  how many are hidden and a **Show core orbitals** checkbox restores them.
+  The HOMO–LUMO gap label no longer overlaps the axis labels.
 - `import quantui` no longer loads numpy, RDKit, ASE, Plotly, IPython or
   requests; every public name is resolved when first used. `quantui`
   command-line tools and the batch worker start in a fraction of the time,

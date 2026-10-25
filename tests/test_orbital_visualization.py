@@ -329,6 +329,46 @@ class TestPlotOrbitalDiagram:
         assert len(lines) == 6
 
 
+class TestPlotlyDiagramCoreOrbitals:
+    """D2: core levels (O 1s ≈ −559 eV) used to squeeze the valence levels
+    into a sliver of the default view."""
+
+    @staticmethod
+    def _water_hf():
+        # RHF/6-31G water, hartree: 1a1 core, then valence, then virtuals.
+        return orbital_info_from_arrays(
+            np.array([-20.56, -1.34, -0.70, -0.57, -0.50, 0.20, 0.30, 1.06]),
+            np.array([2, 2, 2, 2, 2, 0, 0, 0]),
+            formula="H2O",
+        )
+
+    def test_core_count_uses_the_gap_below_the_homo(self):
+        from quantui.orbital_visualization import count_core_orbitals
+
+        assert count_core_orbitals(self._water_hf()) == 1
+
+    def test_hidden_core_reframes_on_valence_and_says_so(self):
+        pytest.importorskip("plotly")
+        from quantui.orbital_visualization import plot_orbital_diagram_plotly
+
+        info = self._water_hf()
+        full = plot_orbital_diagram_plotly(info)
+        valence = plot_orbital_diagram_plotly(info, show_core=False)
+        assert full.layout.yaxis.range[0] < -500  # includes O 1s
+        # Valence view starts just below 2a1 (−36.5 eV), not at the core.
+        assert -60 < valence.layout.yaxis.range[0] < -36.5
+        assert len(valence.data) == len(full.data) - 1
+        assert "1 core orbital hidden" in valence.layout.title.text
+        assert "core orbital" not in full.layout.title.text
+
+    def test_gap_label_has_room_left_of_the_arrow(self):
+        pytest.importorskip("plotly")
+        from quantui.orbital_visualization import plot_orbital_diagram_plotly
+
+        fig = plot_orbital_diagram_plotly(self._water_hf(), show_core=False)
+        assert fig.layout.xaxis.range[0] <= -1.2
+
+
 # ---------------------------------------------------------------------------
 # Summary HTML
 # ---------------------------------------------------------------------------

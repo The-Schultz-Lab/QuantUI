@@ -1819,6 +1819,21 @@ class TestShowIRSpectrum:
             app._ir_mode_toggle.value = "Broadened"
         mock_update.assert_called_once_with("Broadened", app._ir_fwhm_slider.value)
 
+    def test_axis_defaults_to_ftir_direction_and_is_remembered(
+        self, tmp_path, monkeypatch
+    ):
+        # D3: 4000 → 400 by default, 400 → 4000 one click away, and the choice
+        # persists to the next launch.
+        monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(tmp_path / "s.json"))
+        app = QuantUIApp()
+        app._show_ir_spectrum(self._make_freq_result())
+        r = list(app._last_ir_fig.layout.xaxis.range)
+        assert app._ir_axis_dd.value == "descending" and r[0] > r[1]
+        app._ir_axis_dd.value = "ascending"
+        r = list(app._last_ir_fig.layout.xaxis.range)
+        assert r[0] < r[1]
+        assert QuantUIApp()._ir_axis_dd.value == "ascending"
+
 
 # ---------------------------------------------------------------------------
 # M-UV — UV-Vis Spectrum accordion widgets
@@ -3189,6 +3204,22 @@ class TestShowOrbitalDiagram:
         ]
         val = "\n".join(payloads)
         assert "<div" in val or "<img" in val
+
+    def test_core_hidden_by_default_and_checkbox_refits(self):
+        # D2: water's O 1s (−20.56 Ha ≈ −559 eV) no longer sets the default
+        # Y range; ticking Show core orbitals brings it back into view.
+        import numpy as np
+
+        r = self._make_result_with_mo()
+        r.mo_energy_hartree = np.array([-20.56, -1.34, -0.70, -0.57, -0.50, 0.20])
+        r.mo_occ = np.array([2.0, 2.0, 2.0, 2.0, 2.0, 0.0])
+        app = QuantUIApp()
+        app._show_orbital_diagram(r)
+        assert app._orb_show_core_cb.value is False
+        assert app._orb_ymin_input.value > -60
+        app._orb_show_core_cb.value = True
+        assert app._orb_ymin_input.value < -559
+        assert app._last_orb_fig.layout.yaxis.range[0] < -559
 
     def test_isosurface_controls_hidden_when_no_mo_coeff(self):
         app = QuantUIApp()
