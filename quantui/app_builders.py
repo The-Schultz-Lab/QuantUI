@@ -3213,6 +3213,28 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="300px", margin="0 0 6px 0"),
         continuous_update=False,
     )
+    # Audit D4: both conventions are in use; say which one is drawn and let
+    # the user switch (remembered in settings).
+    try:
+        _arrow_pref = str(app._user_settings.viz.dipole_arrow)
+    except Exception:  # noqa: BLE001 — settings must never gate widget creation
+        _arrow_pref = "physics"
+    app._mulliken_dipole_dir_dd = widgets.Dropdown(
+        options=[
+            ("− → + (IUPAC / physics)", "physics"),
+            ("+ → − (chemistry)", "chemistry"),
+        ],
+        value=_arrow_pref if _arrow_pref in ("physics", "chemistry") else "physics",
+        description="Arrow:",
+        style={"description_width": "45px"},
+        layout=layout_fn(width="240px", margin="0 0 0 12px"),
+    )
+    from quantui.populations_overlay import dipole_caption_html
+
+    app._mulliken_dipole_caption = widgets.HTML(
+        value=dipole_caption_html(app._mulliken_dipole_dir_dd.value),
+        layout=layout_fn(width="100%", margin="0 0 4px 0"),
+    )
     # Dedicated structure viewer for charge colouring — decoupled from the
     # top Analysis-tab viewer used for click-to-measure.
     app._mulliken_mol_output = widgets.Output(
@@ -3239,7 +3261,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(align_items="center", gap="8px", margin="0 0 6px 0"),
     )
     mulliken_overlay_row = widgets.HBox(
-        [app._mulliken_color_cb, app._mulliken_dipole_cb],
+        [
+            app._mulliken_color_cb,
+            app._mulliken_dipole_cb,
+            app._mulliken_dipole_dir_dd,
+        ],
         layout=layout_fn(align_items="center", flex_wrap="wrap", margin="0 0 4px 0"),
     )
     app._mulliken_accordion = widgets.Accordion(
@@ -3249,6 +3275,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                     mulliken_header,
                     app._mulliken_mol_output,
                     mulliken_overlay_row,
+                    app._mulliken_dipole_caption,
                     app._mulliken_vividness_slider,
                     app._mulliken_overlay_note,
                     app._mulliken_summary,

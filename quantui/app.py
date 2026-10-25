@@ -1670,6 +1670,8 @@ class QuantUIApp:
         _mulliken_color_cb: Any
         _mulliken_dipole_cb: Any
         _mulliken_vividness_slider: Any
+        _mulliken_dipole_dir_dd: Any
+        _mulliken_dipole_caption: Any
         _mulliken_mol_output: Any
         _mulliken_overlay_note: Any
         _populations_js_bridge: Any
@@ -3057,6 +3059,9 @@ class QuantUIApp:
         )
         self._mulliken_vividness_slider.observe(
             self._safe_cb(self._on_mulliken_overlay_changed), names="value"
+        )
+        self._mulliken_dipole_dir_dd.observe(
+            self._safe_cb(self._on_dipole_arrow_changed), names="value"
         )
         # Persist the grid choice so it survives a relaunch (ORBX.2).
         self._iso_resolution_dd.observe(
@@ -4839,6 +4844,21 @@ class QuantUIApp:
         from quantui.populations_overlay import push_populations_overlay
 
         push_populations_overlay(self)
+
+    def _on_dipole_arrow_changed(self, change=None) -> None:
+        """Redraw the dipole arrow in the chosen convention and remember it."""
+        from quantui.populations_overlay import (
+            dipole_arrow_convention,
+            dipole_caption_html,
+            push_populations_overlay,
+        )
+
+        convention = dipole_arrow_convention(self)
+        self._mulliken_dipole_caption.value = dipole_caption_html(convention)
+        push_populations_overlay(self)
+        if convention != self._user_settings.viz.dipole_arrow:
+            self._user_settings.viz.dipole_arrow = convention
+            self._user_settings.save()
 
     def _on_iso_resolution_changed(self, change) -> None:
         """Persist the isosurface grid choice.

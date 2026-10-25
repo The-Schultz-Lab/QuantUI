@@ -95,3 +95,70 @@ class TestD9ResultTable:
 
         assert "width:auto" in _result_card_table_open()
         assert "text-align: left !important" in _APP_CSS
+
+
+class TestD4DipoleConvention:
+    def test_chemistry_convention_reverses_only_the_drawing(self):
+        from quantui.populations_overlay import build_overlay_payload
+
+        mol = _water()
+        kw = dict(
+            charges=[-0.8, 0.4, 0.4],
+            color_enabled=False,
+            dipole_vector=[0.0, 2.6, 0.0],
+            dipole_enabled=True,
+            symbols=mol.atoms,
+            coordinates=mol.coordinates,
+        )
+        phys = build_overlay_payload(**kw)["arrow"]
+        chem = build_overlay_payload(**kw, arrow_convention="chemistry")["arrow"]
+        # μ points toward the H atoms (+y): physics head at +y, chemistry at −y.
+        assert phys["end"]["y"] > phys["start"]["y"]
+        assert chem["end"] == phys["start"] and chem["start"] == phys["end"]
+
+    def test_choice_is_captioned_and_remembered(self, app, tmp_path):
+        assert app._mulliken_dipole_dir_dd.value == "physics"
+        assert "positive</b> end" in app._mulliken_dipole_caption.value
+        app._mulliken_dipole_dir_dd.value = "chemistry"
+        assert "negative</b> end" in app._mulliken_dipole_caption.value
+        assert QuantUIApp()._mulliken_dipole_dir_dd.value == "chemistry"
+
+
+class TestD6FrequencyCard:
+    @staticmethod
+    def _result():
+        from quantui.freq_calc import FreqResult, ThermoData
+
+        return FreqResult(
+            energy_hartree=-76.406815,
+            homo_lumo_gap_ev=9.5,
+            converged=True,
+            n_iterations=10,
+            method="B3LYP",
+            basis="6-31G*",
+            formula="H2O",
+            frequencies_cm1=[1713.0, 3727.0, 3849.0],
+            scf_variant="RKS",
+            thermo=ThermoData(
+                zpve_hartree=0.021723,
+                H_hartree=-76.381313,
+                S_jmol=188.56,
+                G_hartree=-76.402725,
+            ),
+        )
+
+    def test_title_has_no_nested_parentheses(self):
+        from quantui.app_formatters import format_freq_result
+
+        html = format_freq_result(self._result())
+        assert "H2O &middot; B3LYP/6-31G* (RKS)</b>" in html
+        assert "(B3LYP/6-31G* (RKS))" not in html
+
+    def test_thermo_shows_corrections_not_absolute_kj(self):
+        from quantui.app_formatters import format_freq_result
+
+        html = format_freq_result(self._result())
+        # G − E = (−76.402725 + 76.406815) Ha × 2625.4996 ≈ +10.74 kJ/mol
+        assert "+10.74 kJ/mol vs E" in html
+        assert "-200595" not in html
+        assert "(298 K)</td>" not in html  # T is in the section header
