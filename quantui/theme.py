@@ -229,6 +229,18 @@ def _neutral_button_css() -> str:
         "color: var(--q-text-body) !important; "
         "border: 1px solid var(--q-border) !important; "
         "border-radius: 5px !important; }\n"
+        # Selected ToggleButtons option. Same selector plus .mod-active so it
+        # outranks the rule above; without it the chosen option looked exactly
+        # like the others (UIA.8).
+        ".jupyter-button.mod-active:not(.mod-info):not(.mod-success)"
+        ":not(.mod-warning):not(.mod-danger):not(.mod-primary), "
+        "button.jupyter-button.mod-active:not(.mod-info):not(.mod-success)"
+        ":not(.mod-warning):not(.mod-danger):not(.mod-primary) "
+        "{ background-color: var(--q-surface-info-bg) !important; "
+        "color: var(--q-text-strong) !important; "
+        "border-color: var(--q-accent-info) !important; "
+        "box-shadow: inset 0 -2px 0 var(--q-accent-info) !important; "
+        "font-weight: 600 !important; }\n"
     )
 
 
