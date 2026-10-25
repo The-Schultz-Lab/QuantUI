@@ -148,6 +148,9 @@ from quantui.app_builders import (
 from quantui.app_builders import (
     library_result_options as _bld_library_result_options,
 )
+from quantui.app_builders import (
+    mol_input_children as _bld_mol_input_children,
+)
 from quantui.app_exports import (
     export_molecule_and_label as _exp_export_molecule_and_label,
 )
@@ -5634,12 +5637,9 @@ class QuantUIApp:
         self._update_estimate()
 
         # Collapse molecule input to compact view
-        _collapsed_children = [self.mol_input_collapsed, self.viz_output]
-        if self.viz_backend_toggle is not None:
-            _collapsed_children.append(self.viz_backend_toggle)
-        if VISUALIZATION_AVAILABLE:
-            _collapsed_children.append(self.viz_controls_box)
-        self.mol_input_container.children = _collapsed_children
+        self.mol_input_container.children = _bld_mol_input_children(
+            self, expanded=False, visualization_available=VISUALIZATION_AVAILABLE
+        )
 
         # Re-filter the (shared) seed-geometry dropdown to only include prior
         # geo-opts of the now-active molecule (formula match). Best-effort:

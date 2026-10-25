@@ -292,6 +292,18 @@ class TestMoleculeInputCollapse:
         app._on_expand_mol_input(None)
         assert app.mol_input_container.children[0] is app.mol_input_expanded
 
+    def test_edit_structure_and_png_inbox_survive_collapse_and_expand(self):
+        # UIA.2: the collapse and expand paths each rebuilt the children by
+        # hand and dropped Edit Structure (and the viewer's Save-PNG inbox),
+        # so the panel vanished as soon as there was a molecule to edit.
+        app = QuantUIApp()
+        kept = (app._edit_accordion, app._mol_calc_png_inbox, app.viz_output)
+        assert all(w in app.mol_input_container.children for w in kept)
+        app._set_molecule(_water())
+        assert all(w in app.mol_input_container.children for w in kept)
+        app._on_expand_mol_input(None)
+        assert all(w in app.mol_input_container.children for w in kept)
+
     def test_multiplicity_above_one_switches_to_uhf(self):
         app = QuantUIApp()
         app.method_dd.value = "RHF"

@@ -11,6 +11,7 @@ import ipywidgets as widgets
 from IPython.display import HTML, Javascript, display
 
 from quantui import theme as _theme
+from quantui.app_builders import mol_input_children
 
 _METAL_FIX_BASIS = "def2-SVP"
 
@@ -1830,12 +1831,9 @@ def on_issue_submit(app: Any, *, issue_tracker_mod: Any) -> None:
 def on_expand_mol_input(app: Any, btn: Any, *, visualization_available: bool) -> None:
     """Expand molecule input section to show full editor and controls."""
     _ = btn
-    children = [app.mol_input_expanded, app.mol_info_html, app.viz_output]
-    if app.viz_backend_toggle is not None:
-        children.append(app.viz_backend_toggle)
-    if visualization_available:
-        children.append(app.viz_controls_box)
-    app.mol_input_container.children = children
+    app.mol_input_container.children = mol_input_children(
+        app, expanded=True, visualization_available=visualization_available
+    )
 
 
 def on_method_help(app: Any, btn: Any) -> None:
