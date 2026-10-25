@@ -296,7 +296,7 @@ def slider_chrome_css() -> str:
         ".widget-slider .widget-readout, "
         ".widget-float-slider .widget-readout "
         "{ color: var(--q-text-strong) !important; "
-        "font-weight: 600 !important; min-width: 2.5em !important; }\n"
+        "font-weight: 600 !important; min-width: 3.2em !important; }\n"
         f"{_nouislider_css()}"
     )
 

@@ -159,7 +159,7 @@ def build_status_panel(
         f"Timing calibration: {cal_label}</div>"
         if cal_label
         else f'<div style="margin-top:6px;font-size:12px;color:{_theme.css.TEXT_SUBTLE}">'
-        "Timing calibration: not yet run &mdash; use the Calibrate panel in History</div>"
+        "Timing calibration: not yet run &mdash; use <b>Calibrate time estimates</b> below</div>"
     )
 
     # GPU offload indicator. Detecting GPUs imports gpu4pyscf +
@@ -1192,6 +1192,9 @@ def build_shared_widgets(
         description="Implicit solvent (PCM)",
         style={"description_width": "initial"},
         indent=False,
+        # Size to the label: per-type reasons ("— Raman is not computed in
+        # solvent") were cut off at ipywidgets' 300 px default.
+        layout=layout_fn(width="auto"),
     )
     app.solvent_dd = widgets.Dropdown(
         options=list(_SOLVENT_OPTS.keys()),
@@ -1307,7 +1310,7 @@ def build_shared_widgets(
     app._seed_refresh_btn = widgets.Button(
         description="",
         icon="refresh",
-        layout=layout_fn(width="32px", height="32px"),
+        layout=layout_fn(width="32px", height="32px", padding="0"),
         tooltip="Refresh the list of saved geometry optimisations",
     )
     app._seed_note = widgets.HTML("")
@@ -1322,6 +1325,7 @@ def build_shared_widgets(
         description="Geometry optimization before calculation (QM, slower)",
         style={"description_width": "initial"},
         indent=False,
+        layout=layout_fn(width="auto"),
     )
 
     app._scan_type_dd = widgets.Dropdown(
@@ -1419,7 +1423,7 @@ def build_shared_widgets(
     )
     app._scan_help_btn = widgets.Button(
         description="?",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="PES Scan setup help",
     )
     app._scan_preopt_note = widgets.HTML(
@@ -1441,7 +1445,7 @@ def build_shared_widgets(
     app._scan_seed_refresh_btn = widgets.Button(
         description="",
         icon="refresh",
-        layout=layout_fn(width="32px", height="28px"),
+        layout=layout_fn(width="32px", height="28px", padding="0"),
         tooltip="Refresh seed geometry list",
     )
     app._scan_suggest_around_btn = widgets.Button(
@@ -1543,19 +1547,19 @@ def build_shared_widgets(
     app.method_help_btn = widgets.Button(
         description="?",
         button_style="",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="RHF vs UHF — opens Help tab",
     )
     app.basis_help_btn = widgets.Button(
         description="?",
         button_style="",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="Choosing a basis set — opens Help tab",
     )
     app.calc_type_help_btn = widgets.Button(
         description="?",
         button_style="",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="What each calculation type computes — opens Help tab",
     )
 
@@ -1822,7 +1826,7 @@ def build_welcome_header(app: Any, *, layout_fn: Any = None) -> None:
         "Free, open, and interactive quantum chemistry</div>"
         f'<div style="font-size:13px;color:{_theme.css.TEXT_SUBTLE};margin-top:5px">'
         f"v{quantui.__version__} &nbsp;&middot;&nbsp; "
-        "<b>Help</b> tab for instructions &nbsp;&middot;&nbsp; "
+        "<b>Help</b> button (top right) for instructions &nbsp;&middot;&nbsp; "
         "<b>System Settings</b> tab for environment + calibration</div>"
         "</div>"
     )
@@ -2473,7 +2477,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._ir_mode_toggle = widgets.ToggleButtons(
         options=["Stick", "Broadened"],
         value="Stick",
-        style={"button_width": "80px"},
+        style={"button_width": "96px"},  # "Broadened" was cut off at 80px
         layout=layout_fn(margin="0 8px 0 0"),
     )
     app._ir_fwhm_slider = widgets.FloatSlider(
@@ -2533,8 +2537,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._raman_mode_toggle = widgets.ToggleButtons(
         options=["Stick", "Broadened"],
         value="Stick",
-        description="Mode:",
-        style={"button_width": "80px"},
+        style={"button_width": "96px"},
         layout=layout_fn(margin="0 8px 0 0"),
     )
     app._raman_fwhm_slider = widgets.FloatSlider(
@@ -2594,9 +2597,9 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         min=4,
         max=200,
         step=2,
-        description="Show N:",
-        layout=layout_fn(width="120px"),
-        style={"description_width": "50px"},
+        # Labelled by the "Levels shown:" text before it; its own "Show N:"
+        # description was truncated to "Show …".
+        layout=layout_fn(width="70px"),
     )
     # D2: core levels (hundreds of eV down) squeezed the valence orbitals into
     # a sliver of the default view; hide them unless asked.
@@ -3065,7 +3068,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._uv_mode_toggle = widgets.ToggleButtons(
         options=["Stick", "Broadened"],
         value="Stick",
-        style={"button_width": "80px"},
+        style={"button_width": "96px"},  # "Broadened" was cut off at 80px
         layout=layout_fn(margin="0 8px 0 0"),
     )
     app._uv_fwhm_slider = widgets.FloatSlider(
@@ -3182,7 +3185,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._mulliken_help_btn = widgets.Button(
         description="?",
         button_style="",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="What are Mulliken charges? — opens Help",
     )
     app._mulliken_color_cb = widgets.Checkbox(
@@ -3206,8 +3209,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         step=0.05,
         readout_format=".0%",
         description="Color vividness:",
-        style={"description_width": "96px"},
-        layout=layout_fn(width="260px", margin="0 0 6px 0"),
+        style={"description_width": "112px"},
+        layout=layout_fn(width="300px", margin="0 0 6px 0"),
         continuous_update=False,
     )
     # Dedicated structure viewer for charge colouring — decoupled from the
@@ -3389,7 +3392,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._measure_help_btn = widgets.Button(
         description="?",
         button_style="",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="Click-to-measure bond length / angle / dihedral — opens Help tab",
     )
     app._measure_controls = widgets.VBox(
