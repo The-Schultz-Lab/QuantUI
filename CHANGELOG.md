@@ -51,6 +51,22 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- **Generate Isosurface works again for molecular orbitals** — it failed for
+  every MO with `unexpected keyword argument 'esp_range'` since the ESP-map
+  release. The orbital gallery was not affected.
+- **Edit Structure stays available after a molecule loads** — loading or
+  changing a molecule rebuilt the Calculate panel without it.
+- **Mulliken viewer** opens charge-coloured with the dipole arrow when those
+  boxes are ticked, instead of only after a box was toggled.
+- **Sliders are visible on every theme** (ipywidgets 8 sliders were unstyled:
+  no visible track, and a white handle on the Light theme), and the selected
+  option of toggle-button groups and History filter chips is now highlighted.
+- The QM pre-optimization checkbox no longer keeps the PES Scan wording
+  ("…before scan") after switching to another calculation type.
+- The Files tab re-lists its folder when opened, so newly saved results show
+  without clicking Refresh.
+- PES Scan: suggested Start/Stop values are rounded (0.001 Å / 0.1°) and the
+  unit label sits after Stop rather than after Points.
 - **Time-estimate basis-function counts** — the per-element table behind
   `calc_log.count_basis_functions` had drifted from PySCF for 75 entries
   (every element in def2-TZVP, e.g. H 14 instead of 6; Li/Be and Na–Ar in

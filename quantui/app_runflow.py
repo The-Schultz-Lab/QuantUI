@@ -11,6 +11,7 @@ import ipywidgets as widgets
 from IPython.display import HTML, Javascript, display
 
 from quantui import theme as _theme
+from quantui.app_builders import mol_input_children
 
 _METAL_FIX_BASIS = "def2-SVP"
 
@@ -223,6 +224,7 @@ def on_run_clicked(app: Any, btn: Any) -> None:
 
 
 _FREQ_PREOPT_DESC_DEFAULT = "Geometry optimization before calculation (QM, slower)"
+_PES_PREOPT_DESC = "Pre-optimize starting geometry before scan (recommended)"
 
 
 def _hide_basis_fix_button(app: Any) -> None:
@@ -502,6 +504,12 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     # meaningless there too (as with Geometry Opt itself).
     # A transition-state search must NOT be pre-minimized: that would walk
     # away from the barrier it is meant to find.
+    # PES Scan relabels this checkbox; every other type uses the default label.
+    # Set it here for all types — restoring it only on the way out of PES
+    # missed PES -> Reorg -> ... -> Frequency (UIA.4).
+    app._freq_preopt_cb.description = (
+        _PES_PREOPT_DESC if ct == "PES Scan" else _FREQ_PREOPT_DESC_DEFAULT
+    )
     if ct in ("Geometry Opt", "Reorganization Energy", "Transition State"):
         app._freq_preopt_cb.value = False
         app._freq_preopt_cb.layout.display = "none"
@@ -599,9 +607,6 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     elif ct == "PES Scan":
         app._freq_preopt_cb.layout.display = ""
         app._freq_preopt_cb.disabled = False
-        app._freq_preopt_cb.description = (
-            "Pre-optimize starting geometry before scan (recommended)"
-        )
         refresh_pes_scan_widgets(app, suggest_range=True, reset_atoms=True)
         refresh_pes_seed_options(app)
         app.calc_extra_opts.children = [
@@ -631,8 +636,8 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
                 [
                     app._scan_start,
                     app._scan_stop,
+                    app._scan_unit_lbl,  # unit of Start/Stop, not of Points
                     app._scan_steps,
-                    app._scan_unit_lbl,
                     app._scan_grid_dd,
                 ],
                 layout=layout_fn(gap="4px", align_items="center"),
@@ -657,8 +662,6 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
             app._scan_pick_bridge,
         ]
     else:
-        if change.get("old") == "PES Scan":
-            app._freq_preopt_cb.description = _FREQ_PREOPT_DESC_DEFAULT
         app.calc_extra_opts.children = []
 
     # Both the runtime estimate and the resume offer are per-calc-type, and
@@ -795,8 +798,7 @@ def apply_suggested_scan_range(app: Any) -> None:
     start, stop = suggest_scan_range(
         mol, app._scan_type_dd.value, _selected_scan_atoms(app)
     )
-    app._scan_start.value = float(start)
-    app._scan_stop.value = float(stop)
+    _set_scan_range(app, start, stop)
 
 
 def apply_scan_range_around_current(app: Any) -> None:
@@ -810,8 +812,18 @@ def apply_scan_range_around_current(app: Any) -> None:
         _selected_scan_atoms(app),
         margin=float(app._scan_around_margin.value),
     )
-    app._scan_start.value = float(start)
-    app._scan_stop.value = float(stop)
+    _set_scan_range(app, start, stop)
+
+
+def _set_scan_range(app: Any, start: float, stop: float) -> None:
+    """Write a suggested range, rounded to what a user would type.
+
+    Suggestions are computed from the live geometry, so unrounded they showed
+    as e.g. ``0.70792379`` (UIA.7). 0.001 Å / 0.1° is finer than any scan step.
+    """
+    ndigits = 3 if app._scan_type_dd.value.lower() == "bond" else 1
+    app._scan_start.value = round(float(start), ndigits)
+    app._scan_stop.value = round(float(stop), ndigits)
 
 
 def _sync_scan_around_margin_ui(app: Any, scan_type: str | None = None) -> None:
@@ -1830,12 +1842,9 @@ def on_issue_submit(app: Any, *, issue_tracker_mod: Any) -> None:
 def on_expand_mol_input(app: Any, btn: Any, *, visualization_available: bool) -> None:
     """Expand molecule input section to show full editor and controls."""
     _ = btn
-    children = [app.mol_input_expanded, app.mol_info_html, app.viz_output]
-    if app.viz_backend_toggle is not None:
-        children.append(app.viz_backend_toggle)
-    if visualization_available:
-        children.append(app.viz_controls_box)
-    app.mol_input_container.children = children
+    app.mol_input_container.children = mol_input_children(
+        app, expanded=True, visualization_available=visualization_available
+    )
 
 
 def on_method_help(app: Any, btn: Any) -> None:
