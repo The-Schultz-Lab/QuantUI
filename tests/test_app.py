@@ -1534,6 +1534,19 @@ class TestReorganizationEnergyUI:
         app.calc_type_dd.value = "Reorganization Energy"
         assert app._freq_preopt_cb.layout.display == "none"
 
+    def test_pes_preopt_label_does_not_leak_into_other_types(self):
+        # UIA.4: the PES label was only restored when leaving PES straight for
+        # a plain type, so PES -> Reorg -> Single Point -> Frequency kept
+        # "...before scan" on the Frequency checkbox.
+        app = QuantUIApp()
+        app._set_molecule(_water())
+        app.calc_type_dd.value = "PES Scan"
+        assert "before scan" in app._freq_preopt_cb.description
+        for ct in ("Reorganization Energy", "Single Point", "Frequency"):
+            app.calc_type_dd.value = ct
+            assert "before scan" not in app._freq_preopt_cb.description, ct
+        assert app._freq_preopt_cb.description.startswith("Geometry optimization")
+
     def test_reorg_calc_type_sets_up_mode(self):
         app = QuantUIApp()
         mol = Molecule(["H", "H"], [[0, 0, 0], [0, 0, 0.74]])

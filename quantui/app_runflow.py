@@ -224,6 +224,7 @@ def on_run_clicked(app: Any, btn: Any) -> None:
 
 
 _FREQ_PREOPT_DESC_DEFAULT = "Geometry optimization before calculation (QM, slower)"
+_PES_PREOPT_DESC = "Pre-optimize starting geometry before scan (recommended)"
 
 
 def _hide_basis_fix_button(app: Any) -> None:
@@ -503,6 +504,12 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     # meaningless there too (as with Geometry Opt itself).
     # A transition-state search must NOT be pre-minimized: that would walk
     # away from the barrier it is meant to find.
+    # PES Scan relabels this checkbox; every other type uses the default label.
+    # Set it here for all types — restoring it only on the way out of PES
+    # missed PES -> Reorg -> ... -> Frequency (UIA.4).
+    app._freq_preopt_cb.description = (
+        _PES_PREOPT_DESC if ct == "PES Scan" else _FREQ_PREOPT_DESC_DEFAULT
+    )
     if ct in ("Geometry Opt", "Reorganization Energy", "Transition State"):
         app._freq_preopt_cb.value = False
         app._freq_preopt_cb.layout.display = "none"
@@ -600,9 +607,6 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     elif ct == "PES Scan":
         app._freq_preopt_cb.layout.display = ""
         app._freq_preopt_cb.disabled = False
-        app._freq_preopt_cb.description = (
-            "Pre-optimize starting geometry before scan (recommended)"
-        )
         refresh_pes_scan_widgets(app, suggest_range=True, reset_atoms=True)
         refresh_pes_seed_options(app)
         app.calc_extra_opts.children = [
@@ -658,8 +662,6 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
             app._scan_pick_bridge,
         ]
     else:
-        if change.get("old") == "PES Scan":
-            app._freq_preopt_cb.description = _FREQ_PREOPT_DESC_DEFAULT
         app.calc_extra_opts.children = []
 
     # Both the runtime estimate and the resume offer are per-calc-type, and
