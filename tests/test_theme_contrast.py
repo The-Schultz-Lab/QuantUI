@@ -155,6 +155,15 @@ class TestTokensAreActuallyUsed:
         assert "quantui-range" in block
         assert "var(--q-accent-info)" in block
 
+    def test_theme_css_styles_ipywidgets8_nouislider(self):
+        # UIA.5: ipywidgets 8 sliders are noUiSlider divs; the native-range
+        # rules never reached them, so the track and handle went unthemed.
+        from quantui.app import _APP_CSS
+
+        for css in (theme.theme_css_block("Dark"), _APP_CSS):
+            assert ".widget-slider .noUi-connects" in css
+            assert ".widget-slider .noUi-handle" in css
+
     def test_app_css_preserves_accent_buttons(self):
         from quantui.app import _APP_CSS
 

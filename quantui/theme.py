@@ -285,6 +285,36 @@ def slider_chrome_css() -> str:
         ".widget-float-slider .widget-readout "
         "{ color: var(--q-text-strong) !important; "
         "font-weight: 600 !important; min-width: 2.5em !important; }\n"
+        f"{_nouislider_css()}"
+    )
+
+
+def _nouislider_css() -> str:
+    """ipywidgets 8 sliders are noUiSlider ``div``s, not ``input[type=range]``.
+
+    The native-range rules above only reach QuantUI's own in-viewer scrubbers.
+    Without these, ``.noUi-connects`` (full track width) took the panel colour
+    and hid the track on every palette, and the white handle vanished on Light
+    (UIA.5).
+    """
+    scope = (".widget-slider", ".widget-hslider", ".widget-vslider")
+
+    def sel(part: str) -> str:
+        return ", ".join(f"{s} {part}" for s in scope)
+
+    return (
+        f"{sel('.noUi-target')}, {sel('.noUi-connects')} "
+        "{ background: var(--q-border-strong) !important; "
+        "border: none !important; box-shadow: none !important; "
+        "border-radius: 3px !important; }\n"
+        f"{sel('.noUi-connect')} "
+        "{ background: var(--q-accent-info) !important; }\n"
+        f"{sel('.noUi-handle')} "
+        "{ background: var(--q-accent-info) !important; "
+        "border: 2px solid var(--q-page-bg) !important; "
+        "box-shadow: 0 0 0 1px var(--q-accent-info), "
+        "0 1px 3px rgba(0,0,0,0.45) !important; "
+        "cursor: pointer !important; }\n"
     )
 
 
