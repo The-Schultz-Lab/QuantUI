@@ -4647,6 +4647,20 @@ class QuantUIApp:
             self, expanded=False, visualization_available=VISUALIZATION_AVAILABLE
         )
 
+    def _sync_spin_helper(self, mol: Any) -> None:
+        """Offer the spin-state helper only for transition-metal molecules.
+
+        It used to sit on every Calculate tab (water included) with Fe
+        preselected (audit D17). Now it appears when the molecule contains a
+        metal it supports, with that metal chosen.
+        """
+        from quantui.spin_presets import supported_metals
+
+        metals = [a for a in getattr(mol, "atoms", []) if a in supported_metals()]
+        self.spin_helper_box.layout.display = "" if metals else "none"
+        if metals and metals[0] in self.spin_metal_dd.options:
+            self.spin_metal_dd.value = metals[0]
+
     def _on_help_close(self, _btn=None) -> None:
         self.help_tab_panel.layout.display = "none"
 
@@ -5690,6 +5704,7 @@ class QuantUIApp:
         self._refresh_calc_mol_viewer()
 
         self._update_notes()
+        self._sync_spin_helper(mol)
 
         if self.calc_type_dd.value == "PES Scan":
             _run_refresh_pes_scan_widgets(self)

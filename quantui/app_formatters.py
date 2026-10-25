@@ -13,6 +13,11 @@ def _converged_color(converged: bool) -> str:
     return _theme.css.ACCENT_SUCCESS if converged else _theme.css.ACCENT_ERROR_ALT
 
 
+def signed(x: Any, ndigits: int) -> str:
+    """``{x:+.nf}`` without a negative zero ("−0.0000" for −1e-6, audit D17)."""
+    return f"{round(float(x), ndigits) + 0.0:+.{ndigits}f}"
+
+
 def friendly_timestamp(ts: Any) -> str:
     """``"2026-10-25_04-31-58-600504"`` → ``"2026-10-25 04:31"``.
 
@@ -213,8 +218,8 @@ def _result_extra_rows(get: Any) -> str:
             _dip_str = (
                 f"{_dip:.4f} D"
                 f' <span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
-                f"(μ = [{float(_vec[0]):+.3f}, {float(_vec[1]):+.3f}, "
-                f"{float(_vec[2]):+.3f}] D)</span>"
+                f"(μ = [{signed(_vec[0], 3)}, {signed(_vec[1], 3)}, "
+                f"{signed(_vec[2], 3)}] D)</span>"
             )
         else:
             _dip_str = (

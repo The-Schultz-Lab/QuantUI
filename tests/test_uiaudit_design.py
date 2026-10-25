@@ -211,3 +211,55 @@ class TestD16Labels:
 
         assert friendly_timestamp("2026-10-25_04-31-58-600504") == "2026-10-25 04:31"
         assert friendly_timestamp("not-a-timestamp") == "not-a-timestamp"
+
+
+class TestD17Smalls:
+    def test_spin_helper_only_for_transition_metals(self, app):
+        from quantui.molecule import Molecule
+
+        assert app.spin_helper_box.layout.display == "none"
+        app._set_molecule(_water())
+        assert app.spin_helper_box.layout.display == "none"
+        cu = Molecule(["Cu", "Cl"], [[0.0, 0.0, 0.0], [0.0, 0.0, 2.1]])
+        app._set_molecule(cu)
+        assert app.spin_helper_box.layout.display == ""
+        assert app.spin_metal_dd.value == "Cu"
+
+    def test_mode_step_button_only_with_imaginary_modes(self, app):
+        from types import SimpleNamespace
+
+        def _res(freqs):
+            return SimpleNamespace(
+                frequencies_cm1=freqs,
+                ir_intensities=[1.0] * len(freqs),
+                displacements=[[[0.0, 0.0, 0.1]] * 3] * len(freqs),
+                raman_activities=[],
+            )
+
+        app._show_vib_animation(_res([1600.0, 3700.0, 3800.0]), _water())
+        assert app._vib_apply_mode_btn.layout.display == "none"
+        app._show_vib_animation(_res([-450.0, 3700.0, 3800.0]), _water())
+        assert app._vib_apply_mode_btn.layout.display == ""
+
+    def test_dark_viewer_background_is_the_panel_colour(self):
+        from quantui import theme
+
+        dark = theme.get_palette("Dark")
+        assert theme.plotly_colors("Dark")["scene_bgcolor"] == dark.bg_panel
+        assert theme.plotly_colors("Light")["scene_bgcolor"] == "#ffffff"
+
+    def test_unavailable_panels_say_what_they_need(self, app):
+        titles = {
+            n: acc.get_title(0)
+            for n, acc in zip(app._ana_panel_names, app._ana_accordions)
+        }
+        assert titles["IR Spectrum"].startswith("IR Spectrum — needs Frequency")
+        app._activate_ana_panel("IR Spectrum", auto_select=False)
+        ir = dict(zip(app._ana_panel_names, app._ana_accordions))["IR Spectrum"]
+        assert ir.get_title(0) == "IR Spectrum"
+
+    def test_no_negative_zero(self):
+        from quantui.app_formatters import signed
+
+        assert signed(-0.00001, 4) == "+0.0000"
+        assert signed(-0.5, 3) == "-0.500"

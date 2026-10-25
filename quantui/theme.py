@@ -692,7 +692,10 @@ def plotly_colors(palette_id: str) -> dict:
         # visible on dark palettes (the plotly_white default is a pale
         # blue-gray meant for white backgrounds).
         "axis_line_color": palette.border_strong,
-        "scene_bgcolor": "#000000" if palette.is_dark else "#ffffff",
+        # Dark palettes: the panel colour rather than pure black, so 3D
+        # viewers sit in the page instead of punching a black hole in it
+        # (audit D17). Light palettes keep a white scene.
+        "scene_bgcolor": palette.bg_panel if palette.is_dark else "#ffffff",
     }
 
 

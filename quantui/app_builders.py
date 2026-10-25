@@ -1121,7 +1121,10 @@ def build_shared_widgets(
                 ],
                 layout=layout_fn(gap="6px"),
             )
-        ]
+        ],
+        # Hidden until a molecule with a supported transition metal is loaded
+        # (audit D17); _sync_spin_helper shows it and preselects the metal.
+        layout=layout_fn(display="none"),
     )
     app.spin_helper_box.set_title(0, "🧲 Spin-state helper (metal complexes)")
     app.spin_helper_box.selected_index = None  # collapsed by default
@@ -1283,7 +1286,10 @@ def build_shared_widgets(
         options=[("(use current molecule)", "")],
         description="Seed geometry:",
         style={"description_width": "110px"},
-        layout=layout_fn(width="auto", flex="1 1 auto", min_width="260px"),
+        # max_width: long History labels stretched it across the page (D17).
+        layout=layout_fn(
+            width="auto", flex="1 1 auto", min_width="260px", max_width="620px"
+        ),
         tooltip=(
             "Optionally start from a previous result: Geo Opt final geometry, "
             "or a Frequency result perturbed along a normal mode (imaginary "
@@ -1451,7 +1457,7 @@ def build_shared_widgets(
         value="",
         description="Seed:",
         style={"description_width": "40px"},
-        layout=layout_fn(width="100%"),
+        layout=layout_fn(width="auto", flex="1 1 auto", max_width="620px"),
         tooltip="Optional optimized geometry from history",
     )
     app._scan_seed_refresh_btn = widgets.Button(
@@ -2420,7 +2426,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._vib_apply_mode_btn = widgets.Button(
         description="Use mode → new Frequency calc",
         icon="share",
-        layout=layout_fn(width="auto", margin="0 0 8px 0"),
+        # Shown only when there are imaginary modes to step off (audit D17);
+        # align_self keeps it button-sized instead of stretching full width.
+        layout=layout_fn(
+            width="auto", margin="0 0 8px 0", align_self="flex-start", display="none"
+        ),
         tooltip=(
             "Displace the structure 75% along the selected normal mode "
             "(same scale as the animation) and switch to a new Frequency run"
