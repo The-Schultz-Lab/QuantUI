@@ -228,8 +228,14 @@ def build_overlay_payload(
     symbols: Optional[Sequence[str]],
     coordinates: Optional[Sequence[Sequence[float]]],
     vividness: float = 1.0,
+    arrow_convention: str = "physics",
 ) -> dict:
-    """Assemble the JSON payload for ``__quantuiPopulationsUpdate``."""
+    """Assemble the JSON payload for ``__quantuiPopulationsUpdate``.
+
+    *arrow_convention* ``"physics"`` points the arrow head at the positive
+    end (the IUPAC dipole vector, − → +); ``"chemistry"`` reverses it to the
+    crossed-arrow convention (+ → −). Only the drawing changes.
+    """
     payload: dict = {"colors": None, "arrow": None}
     if color_enabled and charges:
         payload["colors"] = charge_colors(charges, vividness=vividness)
@@ -242,7 +248,10 @@ def build_overlay_payload(
         and len(symbols) == len(coordinates)
     ):
         com = center_of_mass(symbols, coordinates)
-        payload["arrow"] = dipole_arrow_endpoints(com, dipole_vector)
+        vec = [float(v) for v in dipole_vector[:3]]
+        if arrow_convention == "chemistry":
+            vec = [-v for v in vec]
+        payload["arrow"] = dipole_arrow_endpoints(com, vec)
     return payload
 
 
@@ -345,7 +354,29 @@ def overlay_payload(app: Any, mol: Any) -> dict:
         symbols=symbols or None,
         coordinates=coords or None,
         vividness=_mulliken_vividness(app),
+        arrow_convention=dipole_arrow_convention(app),
     )
+
+
+def dipole_arrow_convention(app: Any) -> str:
+    """The Mulliken panel's arrow-direction choice ("physics"/"chemistry")."""
+    value = getattr(getattr(app, "_mulliken_dipole_dir_dd", None), "value", None)
+    return "chemistry" if value == "chemistry" else "physics"
+
+
+def dipole_caption_html(convention: str) -> str:
+    """One line saying which way the drawn arrow points (audit D4)."""
+    if convention == "chemistry":
+        text = (
+            "Arrow head at the <b>negative</b> end (+ → −, chemistry crossed-arrow "
+            "convention); the dipole vector μ itself points the other way."
+        )
+    else:
+        text = (
+            "Arrow head at the <b>positive</b> end (− → +): the dipole vector μ "
+            "(IUPAC / physics convention). Many chemistry texts draw + → −."
+        )
+    return f'<span style="font-size:12px">{text}</span>'
 
 
 def push_populations_overlay(app: Any) -> None:

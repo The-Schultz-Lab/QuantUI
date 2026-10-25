@@ -159,7 +159,7 @@ def build_status_panel(
         f"Timing calibration: {cal_label}</div>"
         if cal_label
         else f'<div style="margin-top:6px;font-size:12px;color:{_theme.css.TEXT_SUBTLE}">'
-        "Timing calibration: not yet run &mdash; use the Calibrate panel in History</div>"
+        "Timing calibration: not yet run &mdash; use <b>Calibrate time estimates</b> below</div>"
     )
 
     # GPU offload indicator. Detecting GPUs imports gpu4pyscf +
@@ -248,26 +248,30 @@ def build_status_panel(
         options=[
             ("Auto", "auto"),
             ("py3Dmol", "py3dmol"),
-            ("plotlymol3d", "plotlymol"),
+            # Same name as the Calculate-tab toggle ("plotlymol3d" here before).
+            ("PlotlyMol", "plotlymol"),
         ],
         value=viz_default_backend,
         style={"button_width": "110px"},
         tooltips=[
             "Use the recommended backend per task (py3Dmol-first where supported).",
             "Always prefer py3Dmol when available.",
-            "Always prefer plotlymol3d when available.",
+            "Always prefer PlotlyMol when available.",
         ],
     )
+    # Audit D12: the "Settings" card used to be a self-contained HTML box that
+    # wrapped only the title and the first label, leaving the backend toggle
+    # (and everything else) outside it. Now the whole settings column is the
+    # card (see settings_box below) and each label sits above its control.
     settings_html = widgets.HTML(
-        f'<div style="background:{_theme.css.BG_PANEL};border:1px solid {_theme.css.BORDER};'
-        f"border-left:4px solid {_theme.css.TEXT_SUBTLE};padding:12px 16px;border-radius:6px;"
-        'margin:8px 0 4px">'
-        f'<div style="font-weight:600;font-size:14px;color:{_theme.css.TEXT_STRONG}">Settings</div>'
-        f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:8px;margin-bottom:4px">'
-        "Default 3D backend "
+        f'<div style="font-weight:600;font-size:14px;color:{_theme.css.TEXT_STRONG}">'
+        "Settings</div>"
+    )
+    viz_backend_label = widgets.HTML(
+        f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:8px;'
+        'margin-bottom:0px">Default 3D backend '
         f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
         "(persists across launches)</span></div>"
-        "</div>"
     )
     engine_options = [
         ("Automatic (PySCF preferred)", "auto"),
@@ -458,10 +462,11 @@ def build_status_panel(
     settings_box = widgets.VBox(
         [
             settings_html,
+            viz_backend_label,
+            app.viz_default_backend_dd,
             engine_label,
             app.quantum_engine_dd,
             app.quantum_engine_note,
-            app.viz_default_backend_dd,
             vib_fps_label,
             app.vib_framerate_si,
             gpu_toggle_label,
@@ -474,7 +479,14 @@ def build_status_panel(
             exec_backend_note,
             *slurm_root_rows,
         ],
-        layout=layout_fn(margin="0 0 8px 0"),
+        layout=layout_fn(
+            margin="8px 0 8px 0",
+            padding="12px 16px",
+            border_top=f"1px solid {_theme.css.BORDER}",
+            border_right=f"1px solid {_theme.css.BORDER}",
+            border_bottom=f"1px solid {_theme.css.BORDER}",
+            border_left=f"4px solid {_theme.css.TEXT_SUBTLE}",
+        ),
     )
 
     app._status_tab_panel = widgets.VBox(
@@ -871,13 +883,13 @@ def build_shared_widgets(
     # overflow hidden (not auto): the 3D viewer is a fixed-size canvas, so it
     # needs no scrollbar — clipping a few px of margin avoids an internal
     # scrollbar that resets to the top on every backend/palette swap.
-    # min_height, not height: the fragment is the info box (~110px) PLUS the
-    # 500px canvas plus its border, so the old fixed 510px — sized for the
-    # canvas alone — clipped the bottom border off. A minimum still reserves
-    # space so the page doesn't jump when a molecule first renders, but lets
-    # the box grow if the info box wraps to more lines on a narrow window.
+    # min_height, not height: a fixed height sized for the canvas alone
+    # clipped the bottom border off. It starts at 0 so the empty tab has no
+    # blank block; _refresh_calc_mol_viewer reserves the viewer's height once
+    # a molecule renders, so later re-renders (backend/palette swaps) don't
+    # make the page jump.
     app.viz_output = widgets.Output(
-        layout=layout_fn(min_height="620px", overflow="hidden")
+        layout=layout_fn(min_height="0px", overflow="hidden")
     )
     # No .quantui-viewer-frame here: this output renders via
     # render_molecule_html, whose fragment now carries its own border sized
@@ -1109,7 +1121,10 @@ def build_shared_widgets(
                 ],
                 layout=layout_fn(gap="6px"),
             )
-        ]
+        ],
+        # Hidden until a molecule with a supported transition metal is loaded
+        # (audit D17); _sync_spin_helper shows it and preselects the metal.
+        layout=layout_fn(display="none"),
     )
     app.spin_helper_box.set_title(0, "🧲 Spin-state helper (metal complexes)")
     app.spin_helper_box.selected_index = None  # collapsed by default
@@ -1192,6 +1207,9 @@ def build_shared_widgets(
         description="Implicit solvent (PCM)",
         style={"description_width": "initial"},
         indent=False,
+        # Size to the label: per-type reasons ("— Raman is not computed in
+        # solvent") were cut off at ipywidgets' 300 px default.
+        layout=layout_fn(width="auto"),
     )
     app.solvent_dd = widgets.Dropdown(
         options=list(_SOLVENT_OPTS.keys()),
@@ -1268,7 +1286,10 @@ def build_shared_widgets(
         options=[("(use current molecule)", "")],
         description="Seed geometry:",
         style={"description_width": "110px"},
-        layout=layout_fn(width="auto", flex="1 1 auto", min_width="260px"),
+        # max_width: long History labels stretched it across the page (D17).
+        layout=layout_fn(
+            width="auto", flex="1 1 auto", min_width="260px", max_width="620px"
+        ),
         tooltip=(
             "Optionally start from a previous result: Geo Opt final geometry, "
             "or a Frequency result perturbed along a normal mode (imaginary "
@@ -1307,7 +1328,7 @@ def build_shared_widgets(
     app._seed_refresh_btn = widgets.Button(
         description="",
         icon="refresh",
-        layout=layout_fn(width="32px", height="32px"),
+        layout=layout_fn(width="32px", height="32px", padding="0"),
         tooltip="Refresh the list of saved geometry optimisations",
     )
     app._seed_note = widgets.HTML("")
@@ -1322,6 +1343,7 @@ def build_shared_widgets(
         description="Geometry optimization before calculation (QM, slower)",
         style={"description_width": "initial"},
         indent=False,
+        layout=layout_fn(width="auto"),
     )
 
     app._scan_type_dd = widgets.Dropdown(
@@ -1419,7 +1441,7 @@ def build_shared_widgets(
     )
     app._scan_help_btn = widgets.Button(
         description="?",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="PES Scan setup help",
     )
     app._scan_preopt_note = widgets.HTML(
@@ -1435,13 +1457,13 @@ def build_shared_widgets(
         value="",
         description="Seed:",
         style={"description_width": "40px"},
-        layout=layout_fn(width="100%"),
+        layout=layout_fn(width="auto", flex="1 1 auto", max_width="620px"),
         tooltip="Optional optimized geometry from history",
     )
     app._scan_seed_refresh_btn = widgets.Button(
         description="",
         icon="refresh",
-        layout=layout_fn(width="32px", height="28px"),
+        layout=layout_fn(width="32px", height="28px", padding="0"),
         tooltip="Refresh seed geometry list",
     )
     app._scan_suggest_around_btn = widgets.Button(
@@ -1543,19 +1565,19 @@ def build_shared_widgets(
     app.method_help_btn = widgets.Button(
         description="?",
         button_style="",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="RHF vs UHF — opens Help tab",
     )
     app.basis_help_btn = widgets.Button(
         description="?",
         button_style="",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="Choosing a basis set — opens Help tab",
     )
     app.calc_type_help_btn = widgets.Button(
         description="?",
         button_style="",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="What each calculation type computes — opens Help tab",
     )
 
@@ -1700,13 +1722,17 @@ def build_theme_selector(app: Any, *, layout_fn: Any) -> None:
     app._theme_style = widgets.Output(
         layout=layout_fn(height="0px", overflow="hidden", margin="0", padding="0")
     )
+    # A status indicator, not a control (audit D15): neutral while idle,
+    # coloured only while busy, and styled as a non-clickable chip
+    # (.quantui-status-chip in the app CSS).
     app._activity_btn = widgets.Button(
         description="Idle",
         icon="circle-o",
         tooltip="No active operations.",
-        button_style="success",
+        button_style="",
         layout=layout_fn(width="118px", margin="0 8px 0 0"),
     )
+    app._activity_btn.add_class("quantui-status-chip")
     default_palette = getattr(app, "_user_settings", None)
     initial = (
         default_palette.theme.palette
@@ -1822,7 +1848,7 @@ def build_welcome_header(app: Any, *, layout_fn: Any = None) -> None:
         "Free, open, and interactive quantum chemistry</div>"
         f'<div style="font-size:13px;color:{_theme.css.TEXT_SUBTLE};margin-top:5px">'
         f"v{quantui.__version__} &nbsp;&middot;&nbsp; "
-        "<b>Help</b> tab for instructions &nbsp;&middot;&nbsp; "
+        "<b>Help</b> button (top right) for instructions &nbsp;&middot;&nbsp; "
         "<b>System Settings</b> tab for environment + calibration</div>"
         "</div>"
     )
@@ -2020,6 +2046,14 @@ def build_molecule_section(
         layout=layout_fn(width="100px", height="32px"),
         tooltip="Re-expand the molecule input panel",
     )
+    # Way back from the expanded editor to the compact summary once a molecule
+    # is loaded (audit D11: "Change" was one-way).
+    app.collapse_mol_btn = widgets.Button(
+        description="Done",
+        icon="check",
+        layout=layout_fn(width="90px", height="30px", margin="4px 0"),
+        tooltip="Hide the molecule editor and show the compact summary",
+    )
     app.mol_input_collapsed = widgets.HBox(
         [app.mol_summary_compact, app.change_mol_btn],
         layout=layout_fn(align_items="center", gap="12px", padding="6px 0"),
@@ -2061,11 +2095,12 @@ def mol_input_children(
     must stay that way: when the collapse/expand paths each kept their own
     list, Edit Structure fell out of both (UIA.2).
     """
-    head = (
-        [app.mol_input_expanded, app.mol_info_html]
-        if expanded
-        else [app.mol_input_collapsed]
-    )
+    if not expanded:
+        head = [app.mol_input_collapsed]
+    else:
+        head = [app.mol_input_expanded, app.mol_info_html]
+        if getattr(app, "_molecule", None) is not None:
+            head.append(app.collapse_mol_btn)
     children = head + [
         app._mol_calc_png_inbox,
         app.viz_output,
@@ -2391,7 +2426,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._vib_apply_mode_btn = widgets.Button(
         description="Use mode → new Frequency calc",
         icon="share",
-        layout=layout_fn(width="auto", margin="0 0 8px 0"),
+        # Shown only when there are imaginary modes to step off (audit D17);
+        # align_self keeps it button-sized instead of stretching full width.
+        layout=layout_fn(
+            width="auto", margin="0 0 8px 0", align_self="flex-start", display="none"
+        ),
         tooltip=(
             "Displace the structure 75% along the selected normal mode "
             "(same scale as the animation) and switch to a new Frequency run"
@@ -2417,8 +2456,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         description="⬇ Export Animation",
         tooltip=(
             "Save the current vibrational mode as a self-contained HTML "
-            "file (plotlymol3d preferred for export quality; py3Dmol "
-            "fallback if plotlymol3d is not installed)"
+            "file (PlotlyMol preferred for export quality; py3Dmol "
+            "fallback if PlotlyMol is not installed)"
         ),
         layout=layout_fn(width="180px"),
     )
@@ -2473,7 +2512,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._ir_mode_toggle = widgets.ToggleButtons(
         options=["Stick", "Broadened"],
         value="Stick",
-        style={"button_width": "80px"},
+        style={"button_width": "96px"},  # "Broadened" was cut off at 80px
         layout=layout_fn(margin="0 8px 0 0"),
     )
     app._ir_fwhm_slider = widgets.FloatSlider(
@@ -2533,8 +2572,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._raman_mode_toggle = widgets.ToggleButtons(
         options=["Stick", "Broadened"],
         value="Stick",
-        description="Mode:",
-        style={"button_width": "80px"},
+        style={"button_width": "96px"},
         layout=layout_fn(margin="0 8px 0 0"),
     )
     app._raman_fwhm_slider = widgets.FloatSlider(
@@ -2594,9 +2632,9 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         min=4,
         max=200,
         step=2,
-        description="Show N:",
-        layout=layout_fn(width="120px"),
-        style={"description_width": "50px"},
+        # Labelled by the "Levels shown:" text before it; its own "Show N:"
+        # description was truncated to "Show …".
+        layout=layout_fn(width="70px"),
     )
     # D2: core levels (hundreds of eV down) squeezed the valence orbitals into
     # a sliver of the default view; hide them unless asked.
@@ -3065,7 +3103,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._uv_mode_toggle = widgets.ToggleButtons(
         options=["Stick", "Broadened"],
         value="Stick",
-        style={"button_width": "80px"},
+        style={"button_width": "96px"},  # "Broadened" was cut off at 80px
         layout=layout_fn(margin="0 8px 0 0"),
     )
     app._uv_fwhm_slider = widgets.FloatSlider(
@@ -3182,7 +3220,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._mulliken_help_btn = widgets.Button(
         description="?",
         button_style="",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="What are Mulliken charges? — opens Help",
     )
     app._mulliken_color_cb = widgets.Checkbox(
@@ -3206,9 +3244,31 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         step=0.05,
         readout_format=".0%",
         description="Color vividness:",
-        style={"description_width": "96px"},
-        layout=layout_fn(width="260px", margin="0 0 6px 0"),
+        style={"description_width": "112px"},
+        layout=layout_fn(width="300px", margin="0 0 6px 0"),
         continuous_update=False,
+    )
+    # Audit D4: both conventions are in use; say which one is drawn and let
+    # the user switch (remembered in settings).
+    try:
+        _arrow_pref = str(app._user_settings.viz.dipole_arrow)
+    except Exception:  # noqa: BLE001 — settings must never gate widget creation
+        _arrow_pref = "physics"
+    app._mulliken_dipole_dir_dd = widgets.Dropdown(
+        options=[
+            ("− → + (IUPAC / physics)", "physics"),
+            ("+ → − (chemistry)", "chemistry"),
+        ],
+        value=_arrow_pref if _arrow_pref in ("physics", "chemistry") else "physics",
+        description="Arrow:",
+        style={"description_width": "45px"},
+        layout=layout_fn(width="240px", margin="0 0 0 12px"),
+    )
+    from quantui.populations_overlay import dipole_caption_html
+
+    app._mulliken_dipole_caption = widgets.HTML(
+        value=dipole_caption_html(app._mulliken_dipole_dir_dd.value),
+        layout=layout_fn(width="100%", margin="0 0 4px 0"),
     )
     # Dedicated structure viewer for charge colouring — decoupled from the
     # top Analysis-tab viewer used for click-to-measure.
@@ -3236,7 +3296,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(align_items="center", gap="8px", margin="0 0 6px 0"),
     )
     mulliken_overlay_row = widgets.HBox(
-        [app._mulliken_color_cb, app._mulliken_dipole_cb],
+        [
+            app._mulliken_color_cb,
+            app._mulliken_dipole_cb,
+            app._mulliken_dipole_dir_dd,
+        ],
         layout=layout_fn(align_items="center", flex_wrap="wrap", margin="0 0 4px 0"),
     )
     app._mulliken_accordion = widgets.Accordion(
@@ -3246,6 +3310,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                     mulliken_header,
                     app._mulliken_mol_output,
                     mulliken_overlay_row,
+                    app._mulliken_dipole_caption,
                     app._mulliken_vividness_slider,
                     app._mulliken_overlay_note,
                     app._mulliken_summary,
@@ -3389,7 +3454,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._measure_help_btn = widgets.Button(
         description="?",
         button_style="",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="Click-to-measure bond length / angle / dihedral — opens Help tab",
     )
     app._measure_controls = widgets.VBox(
@@ -3552,7 +3617,7 @@ def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) ->
     )
     app.compare_clear_btn = widgets.Button(
         description="Clear",
-        button_style="warning",
+        button_style="",  # neutral: clearing a selection is not a warning (D16)
         icon="times",
         layout=layout_fn(width="90px"),
     )
@@ -3564,7 +3629,7 @@ def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) ->
                 '<h3 style="margin:14px 0 6px">Compare Calculations</h3>'
                 f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:0 0 8px">'
                 "Select two or more saved calculations to compare side-by-side. "
-                "Hold Ctrl (or ⌘) to select multiple entries.</p>"
+                "Hold Ctrl (or ⌘) and click to select several; Shift-click selects a range.</p>"
             ),
             widgets.HBox([app.compare_refresh_btn]),
             app.compare_select,
@@ -3979,12 +4044,28 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._exit_output = widgets.Output(layout=layout_fn(height="0px", overflow="hidden"))
 
+    # Audit D14: the panel could only be closed by finding the Help button
+    # again; give it its own close control.
+    app._help_close_btn = widgets.Button(
+        description="Close",
+        icon="times",
+        tooltip="Close the help panel",
+        layout=layout_fn(width="80px", margin="4px 12px 0 auto"),
+    )
     app.help_tab_panel = widgets.VBox(
         [
-            widgets.HTML(
-                f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:4px 0 12px">'
-                "Browse help topics below. Click <b>?</b> next to the Method or Basis Set "
-                "dropdown in the Calculate tab to jump directly to a relevant topic.</p>"
+            widgets.HBox(
+                [
+                    widgets.HTML(
+                        f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;'
+                        'margin:4px 0 12px">'
+                        "Browse help topics below. Click <b>?</b> next to the Method "
+                        "or Basis Set dropdown in the Calculate tab to jump directly "
+                        "to a relevant topic.</p>"
+                    ),
+                    app._help_close_btn,
+                ],
+                layout=layout_fn(width="100%", align_items="flex-start"),
             ),
             app.help_topic_dd,
             app.help_content_html,
@@ -4029,10 +4110,13 @@ def build_issue_widgets(app: Any, *, layout_fn: Any) -> None:
     app._issue_status_html = widgets.HTML()
     app._issue_overlay = widgets.VBox(
         [
+            # Theme tokens, not fixed light-theme browns: on dark palettes the
+            # panel background follows the theme and #92400e/#78350f text was
+            # nearly unreadable (audit D14).
             widgets.HTML(
-                '<p style="font-size:13px;font-weight:600;margin:0 0 6px;color:#92400e">'
-                "&#9872; Report Issue</p>"
-                '<p style="font-size:12px;color:#78350f;margin:0 0 8px">'
+                '<p style="font-size:13px;font-weight:600;margin:0 0 6px;'
+                f'color:{_theme.css.ACCENT_WARNING}">&#9872; Report Issue</p>'
+                f'<p style="font-size:12px;color:{_theme.css.TEXT_BODY};margin:0 0 8px">'
                 "Your report (and a snapshot of the current session state) will be "
                 "saved to <code>issues.db</code> and the session event log.</p>"
             ),
@@ -4049,6 +4133,5 @@ def build_issue_widgets(app: Any, *, layout_fn: Any) -> None:
             border_radius="6px",
             padding="12px 14px",
             margin="0 0 6px",
-            background_color="#fffbeb",
         ),
     )

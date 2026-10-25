@@ -898,6 +898,19 @@ button.jupyter-button.mod-danger {
 .quantui-result-card table th,
 .quantui-result-card table td {
     background: transparent !important;
+    /* JupyterLab's rendered-HTML CSS right-aligns cells; with a full-width
+       table that put labels mid-card and values ~700 px away (audit D9). */
+    text-align: left !important;
+}
+.quantui-result-card table.quantui-result-card-table {
+    width: auto !important;
+}
+/* Activity indicator: a status chip, not a button (audit D15). */
+.quantui-status-chip {
+    pointer-events: none !important;
+    cursor: default !important;
+    border-radius: 14px !important;
+    box-shadow: none !important;
 }
 .quantui-result-card,
 .quantui-result-card table {
@@ -936,6 +949,11 @@ button.jupyter-button.mod-danger {
 )
 
 _LAYOUT_TRAITS: frozenset[str] = frozenset(widgets.Layout.class_trait_names())
+
+
+# Bordered 500 px canvas plus its Save-PNG row (measured in Voilà). Was 620 px
+# while an info box sat above the canvas (removed, audit D8).
+_CALC_VIEWER_MIN_HEIGHT = "540px"
 
 
 def _layout(**kwargs: Any) -> widgets.Layout:
@@ -1659,6 +1677,8 @@ class QuantUIApp:
         _mulliken_color_cb: Any
         _mulliken_dipole_cb: Any
         _mulliken_vividness_slider: Any
+        _mulliken_dipole_dir_dd: Any
+        _mulliken_dipole_caption: Any
         _mulliken_mol_output: Any
         _mulliken_overlay_note: Any
         _populations_js_bridge: Any
@@ -1772,6 +1792,8 @@ class QuantUIApp:
         method_help_btn: Any
         mol_info_html: Any
         mol_summary_compact: Any
+        collapse_mol_btn: Any
+        _help_close_btn: Any
         mult_si: Any
         _method_card_html: Any
         _basis_card_html: Any
@@ -2135,7 +2157,7 @@ class QuantUIApp:
 
         self._activity_btn.description = "Idle"
         self._activity_btn.icon = "circle-o"
-        self._activity_btn.button_style = "success"
+        self._activity_btn.button_style = ""
         self._activity_btn.tooltip = "No active operations."
 
     def _refresh_activity_indicator(self, message: str = "") -> None:
@@ -2735,6 +2757,7 @@ class QuantUIApp:
             self._safe_cb(self._on_pubchem_candidate_selected), names="value"
         )
         self.change_mol_btn.on_click(self._on_expand_mol_input)
+        self.collapse_mol_btn.on_click(self._on_collapse_mol_input)
         # Calc type
         self.calc_type_dd.observe(
             self._safe_cb(self._on_calc_type_changed), names="value"
@@ -2942,6 +2965,7 @@ class QuantUIApp:
         self._issue_cancel_btn.on_click(self._on_issue_cancel)
         # Help [?] toggle
         self._help_btn.on_click(self._on_help_toggle)
+        self._help_close_btn.on_click(self._on_help_close)
         # Exit
         self._exit_btn.on_click(self._on_exit_clicked)
         self._exit_cancel_btn.on_click(self._on_exit_cancel)
@@ -3046,6 +3070,9 @@ class QuantUIApp:
         )
         self._mulliken_vividness_slider.observe(
             self._safe_cb(self._on_mulliken_overlay_changed), names="value"
+        )
+        self._mulliken_dipole_dir_dd.observe(
+            self._safe_cb(self._on_dipole_arrow_changed), names="value"
         )
         # Persist the grid choice so it survives a relaunch (ORBX.2).
         self._iso_resolution_dd.observe(
@@ -3843,6 +3870,9 @@ class QuantUIApp:
         """
         if self._molecule is None or _render_molecule_html is None:
             return
+        # Reserve the viewer's height only once there is a viewer, so the
+        # empty Calculate tab has no blank block (audit D17).
+        self.viz_output.layout.min_height = _CALC_VIEWER_MIN_HEIGHT
         backend_to_use = backend if backend is not None else self._viz_backend
         from quantui.app_structure_edit import (
             editing_active,
@@ -3859,6 +3889,8 @@ class QuantUIApp:
             bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
             capture_class=_MOL_CALC_PNG_INBOX_CLASS,
             show_atom_indices=show_atom_indices,
+            # D8: the summary card above already states these facts.
+            show_info=False,
         )
         if _editing:
             html = finalize_edit_calc_html(self, html, backend_to_use)
@@ -4076,6 +4108,7 @@ class QuantUIApp:
                     lighting=self._viz_lighting,
                     bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
                     capture_class=_MOL_ANALYSIS_PNG_INBOX_CLASS,
+                    show_info=False,
                 )
                 # M-MEASURE: same wiring as the post-calc render path — a
                 # backend-toggle switch is still a fresh viewer, so stale
@@ -4106,7 +4139,7 @@ class QuantUIApp:
         label = getattr(self, "viz_backend_label_ana", None)
         if label is None:
             return
-        display_name = "py3Dmol" if chosen == VizBackend.PY3DMOL else "plotlymol3d"
+        display_name = "py3Dmol" if chosen == VizBackend.PY3DMOL else "PlotlyMol"
         label.value = (
             f'<span style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};font-style:italic">'
             f"Rendering with: {display_name}</span>"
@@ -4609,6 +4642,28 @@ class QuantUIApp:
 
         threading.Thread(target=_do, daemon=True).start()
 
+    def _on_collapse_mol_input(self, _btn=None) -> None:
+        self.mol_input_container.children = _bld_mol_input_children(
+            self, expanded=False, visualization_available=VISUALIZATION_AVAILABLE
+        )
+
+    def _sync_spin_helper(self, mol: Any) -> None:
+        """Offer the spin-state helper only for transition-metal molecules.
+
+        It used to sit on every Calculate tab (water included) with Fe
+        preselected (audit D17). Now it appears when the molecule contains a
+        metal it supports, with that metal chosen.
+        """
+        from quantui.spin_presets import supported_metals
+
+        metals = [a for a in getattr(mol, "atoms", []) if a in supported_metals()]
+        self.spin_helper_box.layout.display = "" if metals else "none"
+        if metals and metals[0] in self.spin_metal_dd.options:
+            self.spin_metal_dd.value = metals[0]
+
+    def _on_help_close(self, _btn=None) -> None:
+        self.help_tab_panel.layout.display = "none"
+
     def _on_expand_mol_input(self, btn) -> None:
         _run_on_expand_mol_input(
             self,
@@ -4822,6 +4877,21 @@ class QuantUIApp:
         from quantui.populations_overlay import push_populations_overlay
 
         push_populations_overlay(self)
+
+    def _on_dipole_arrow_changed(self, change=None) -> None:
+        """Redraw the dipole arrow in the chosen convention and remember it."""
+        from quantui.populations_overlay import (
+            dipole_arrow_convention,
+            dipole_caption_html,
+            push_populations_overlay,
+        )
+
+        convention = dipole_arrow_convention(self)
+        self._mulliken_dipole_caption.value = dipole_caption_html(convention)
+        push_populations_overlay(self)
+        if convention != self._user_settings.viz.dipole_arrow:
+            self._user_settings.viz.dipole_arrow = convention
+            self._user_settings.save()
 
     def _on_iso_resolution_changed(self, change) -> None:
         """Persist the isosurface grid choice.
@@ -5634,6 +5704,7 @@ class QuantUIApp:
         self._refresh_calc_mol_viewer()
 
         self._update_notes()
+        self._sync_spin_helper(mol)
 
         if self.calc_type_dd.value == "PES Scan":
             _run_refresh_pes_scan_widgets(self)

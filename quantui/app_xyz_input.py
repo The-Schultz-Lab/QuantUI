@@ -14,18 +14,33 @@ from quantui.xyz_input import (
     propose_xyz_cleanup,
 )
 
+# Atom-table column widths, shared by the header and every row.
+_SYM_W = "52px"
+_COORD_W = "92px"
+
 
 def build_xyz_interactive_widgets(app: Any, *, layout_fn: Any) -> None:
     """Create the atom-row builder and cleanup preview widgets on ``app``."""
     app._layout_fn = layout_fn
     app._xyz_table_rows = []
 
-    app.xyz_table_header = widgets.HTML(
-        f'<div style="font-size:12px;color:{_theme.css.TEXT_MUTED};margin:6px 0 2px">'
-        "<b>Element</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
-        "<b>X (Å)</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
-        "<b>Y (Å)</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
-        "<b>Z (Å)</b></div>"
+    # Header cells reuse the row's widths and gap so each title sits over its
+    # column; the old &nbsp;-padded line drifted off Y and Z (audit D11).
+    def _head(text: str, width: str) -> widgets.HTML:
+        return widgets.HTML(
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_MUTED};'
+            f'font-weight:600">{text}</span>',
+            layout=layout_fn(width=width),
+        )
+
+    app.xyz_table_header = widgets.HBox(
+        [
+            _head("Element", _SYM_W),
+            _head("X (Å)", _COORD_W),
+            _head("Y (Å)", _COORD_W),
+            _head("Z (Å)", _COORD_W),
+        ],
+        layout=layout_fn(gap="6px", margin="6px 0 0 0"),
     )
     app.xyz_table_box = widgets.VBox(
         layout=layout_fn(gap="4px", width="440px"),
@@ -105,12 +120,12 @@ def _add_xyz_table_row(
 ) -> None:
     sym_w = widgets.Text(
         value=symbol,
-        layout=layout_fn(width="52px"),
+        layout=layout_fn(width=_SYM_W),
         placeholder="H",
     )
-    x_w = widgets.FloatText(value=x, layout=layout_fn(width="92px"), step=0.01)
-    y_w = widgets.FloatText(value=y, layout=layout_fn(width="92px"), step=0.01)
-    z_w = widgets.FloatText(value=z, layout=layout_fn(width="92px"), step=0.01)
+    x_w = widgets.FloatText(value=x, layout=layout_fn(width=_COORD_W), step=0.01)
+    y_w = widgets.FloatText(value=y, layout=layout_fn(width=_COORD_W), step=0.01)
+    z_w = widgets.FloatText(value=z, layout=layout_fn(width=_COORD_W), step=0.01)
     remove_btn = widgets.Button(
         icon="trash",
         layout=layout_fn(width="36px", height="28px"),

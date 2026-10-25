@@ -67,14 +67,16 @@ def atom_list_html(
             "Load a molecule to see atom numbers.</span>"
         )
     cells = []
-    for i, sym in enumerate(molecule.atoms):
+    # One label per atom: "O1" already carries element and number; the old
+    # "1 O1 (O)" said both twice (audit D10).
+    for i in range(len(molecule.atoms)):
         lbl = atom_label(molecule, i)
         cells.append(
             f'<span style="display:inline-block;margin:0 6px 4px 0;'
             f"padding:2px 7px;border-radius:4px;background:{chip_bg};"
             f"color:{chip_fg};border:1px solid {_theme.css.BORDER};"
             f'font-size:12px;font-family:monospace">'
-            f"<b>{i + 1}</b>&nbsp;{html.escape(lbl)} ({html.escape(sym)})</span>"
+            f"<b>{html.escape(lbl)}</b></span>"
         )
     return (
         '<div style="line-height:1.6;margin:2px 0 4px 0">' + "".join(cells) + "</div>"

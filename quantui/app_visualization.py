@@ -136,6 +136,8 @@ def show_result_3d(
                     lighting=app._viz_lighting,
                     bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
                     capture_class=_MOL_RESULTS_PNG_INBOX_CLASS,
+                    # D8: the result card above already names the molecule.
+                    show_info=False,
                 )
                 app._set_html_output(app.result_viz_output, html)
 
@@ -163,6 +165,7 @@ def show_result_3d(
                     capture_class=(
                         _MOL_ANALYSIS_PNG_INBOX_CLASS if is_analysis_output else ""
                     ),
+                    show_info=False,
                 )
                 if is_analysis_output:
                     # M-MEASURE: wires click-to-measure into the freshly
@@ -678,6 +681,11 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     freqs = freq_result.frequencies_cm1
     if not freqs:
         return False
+    # Stepping along a mode is how you leave a saddle point; with no
+    # imaginary mode there is nothing to step off (audit D17).
+    btn = getattr(app, "_vib_apply_mode_btn", None)
+    if btn is not None:
+        btn.layout.display = "" if any(float(f) < 0 for f in freqs) else "none"
 
     # Optional plotlymol3d data — may be None if plotlymol3d isn't installed.
     # The py3Dmol render path doesn't need this; only the plotlymol path does.

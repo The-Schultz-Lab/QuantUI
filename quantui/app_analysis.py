@@ -49,6 +49,24 @@ def _set_panel_unavailable_message(app: Any, panel_name: str, message: str) -> N
         panel.value = _panel_unavailable_html(message)
 
 
+# Panel titles carry a short "— needs <calc type>" hint while the panel has nothing
+# to show for the current result (audit D17), so a student can see which
+# panels apply without opening each one. Panels stay visible (DEC-009).
+_TITLE_HINT_SEP = " — "
+
+
+def _base_title(acc: Any) -> str:
+    return str(acc.get_title(0) or "").split(_TITLE_HINT_SEP)[0]
+
+
+def _set_panel_title_hint(app: Any, panel_name: str, hint: str) -> None:
+    for name, acc in zip(app._ana_panel_names, app._ana_accordions):
+        if name == panel_name:
+            base = _base_title(acc)
+            acc.set_title(0, f"{base}{_TITLE_HINT_SEP}{hint}" if hint else base)
+            return
+
+
 def _reset_unavailable_messages_for_context(app: Any, ctx: Any) -> None:
     expected_panels = {
         panel_name
@@ -70,6 +88,7 @@ def _reset_unavailable_messages_for_context(app: Any, ctx: Any) -> None:
                     "required data is missing or could not be loaded."
                 ),
             )
+            _set_panel_title_hint(app, panel_name, "not available for this result")
             continue
         when = app._ana_when_map.get(panel_name, "relevant")
         _set_panel_unavailable_message(
@@ -77,13 +96,16 @@ def _reset_unavailable_messages_for_context(app: Any, ctx: Any) -> None:
             panel_name,
             f"Not available - run a {when} calculation first.",
         )
+        _set_panel_title_hint(app, panel_name, f"needs {when}")
 
 
 def _analysis_heading_label(ctx: Any) -> str:
     """Return the analysis heading text aligned with history dropdown labels."""
     badge = _CALC_TYPE_BADGES.get(ctx.calc_type, str(ctx.calc_type or "Unknown"))
     core = f"[{badge}] {ctx.label}"
-    ts = str(getattr(ctx, "timestamp", "") or "").strip()
+    from quantui.app_formatters import friendly_timestamp
+
+    ts = friendly_timestamp(str(getattr(ctx, "timestamp", "") or "").strip())
     return f"{ts}  ·  {core}" if ts else core
 
 
@@ -119,6 +141,7 @@ def build_ana_switcher(app: Any, *, layout_fn: Any) -> None:
         acc.children = (widgets.VBox([unavail, content]),)
         acc.layout.display = ""  # always in the DOM
         acc.selected_index = None  # collapsed until activated
+        acc.set_title(0, f"{_base_title(acc)}{_TITLE_HINT_SEP}needs {when}")
 
     # Re-render Plotly charts when their accordion is expanded by header click.
     app._ir_accordion.observe(
@@ -154,6 +177,7 @@ def select_ana_panel(app: Any, name: str) -> None:
 def activate_ana_panel(app: Any, name: str, auto_select: bool = True) -> None:
     """Mark a panel as available, reveal its content, and expand it."""
     app._ana_available.add(name)
+    _set_panel_title_hint(app, name, "")
     if name in app._ana_unavail_msgs:
         app._ana_unavail_msgs[name].layout.display = "none"
         app._ana_content_boxes[name].layout.display = ""
@@ -980,9 +1004,11 @@ def show_mulliken_populations(
                 "μ<sub>z</sub> — re-run this calculation to enable.</p>"
             )
 
+    from quantui.app_formatters import signed
+
     q_sum = sum(app._last_mulliken_charges)
     summary_bits = [
-        f"Sum of Mulliken charges: <b>{q_sum:+.4f} e</b>"
+        f"Sum of Mulliken charges: <b>{signed(q_sum, 4)} e</b>"
         f' <span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
         "(should match the molecular charge)</span>"
     ]
@@ -993,7 +1019,8 @@ def show_mulliken_populations(
             summary_bits.append(
                 f"Dipole moment: <b>{app._last_mulliken_dipole:.4f} D</b>"
                 f' <span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
-                f"(μ = [{vx:+.3f}, {vy:+.3f}, {vz:+.3f}] D — SCF density)</span>"
+                f"(μ = [{signed(vx, 3)}, {signed(vy, 3)}, {signed(vz, 3)}] D"
+                " — SCF density)</span>"
             )
         else:
             summary_bits.append(

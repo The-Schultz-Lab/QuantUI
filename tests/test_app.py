@@ -3520,7 +3520,8 @@ class TestAnalysisTab:
 
         heading = app._analysis_context_lbl.value
         assert "Analysing:" in heading
-        assert "2026-05-14_10-11-12-123456" in heading
+        # Same readable timestamp as the History label (audit D16).
+        assert "2026-05-14 10:11" in heading
         assert "[Frequency Analysis]" in heading
         assert "H2O  B3LYP/6-31G" in heading
         assert "(from History)" in heading

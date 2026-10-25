@@ -13,6 +13,29 @@ def _converged_color(converged: bool) -> str:
     return _theme.css.ACCENT_SUCCESS if converged else _theme.css.ACCENT_ERROR_ALT
 
 
+def signed(x: Any, ndigits: int) -> str:
+    """``{x:+.nf}`` without a negative zero ("−0.0000" for −1e-6, audit D17)."""
+    return f"{round(float(x), ndigits) + 0.0:+.{ndigits}f}"
+
+
+def friendly_timestamp(ts: Any) -> str:
+    """``"2026-10-25_04-31-58-600504"`` → ``"2026-10-25 04:31"``.
+
+    Result folders are named by a microsecond timestamp; History, Compare and
+    the Analysis heading showed it raw (audit D16). Anything that doesn't
+    parse is returned unchanged.
+    """
+    from datetime import datetime
+
+    text = str(ts or "")
+    for fmt in ("%Y-%m-%d_%H-%M-%S-%f", "%Y-%m-%d_%H-%M-%S"):
+        try:
+            return datetime.strptime(text[:26], fmt).strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            continue
+    return text
+
+
 def _method_basis_label(method: str, basis: str, scf_variant: str | None) -> str:
     """``"{method}/{basis}"``, with an explicit "(RKS)"/"(UKS)" suffix when
     the dispatched SCF variant differs from the plain method name.
@@ -72,7 +95,7 @@ _RESULT_CARD_CLOSE = "</div>"
 def _result_card_table_open() -> str:
     return (
         '<table class="quantui-result-card-table" '
-        'style="margin-top:8px;font-size:14px;border-collapse:collapse;width:100%">'
+        'style="margin-top:8px;font-size:14px;border-collapse:collapse;width:auto">'
     )
 
 
@@ -195,8 +218,8 @@ def _result_extra_rows(get: Any) -> str:
             _dip_str = (
                 f"{_dip:.4f} D"
                 f' <span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
-                f"(μ = [{float(_vec[0]):+.3f}, {float(_vec[1]):+.3f}, "
-                f"{float(_vec[2]):+.3f}] D)</span>"
+                f"(μ = [{signed(_vec[0], 3)}, {signed(_vec[1], 3)}, "
+                f"{signed(_vec[2], 3)}] D)</span>"
             )
         else:
             _dip_str = (
@@ -396,6 +419,52 @@ def saddle_retry_rows(block: Optional[dict]) -> str:
     )
 
 
+def _thermo_card_rows(
+    *,
+    temperature_k: float,
+    pressure_atm: float,
+    zpve_hartree: Optional[float],
+    h_hartree: float,
+    s_jmol: float,
+    g_hartree: float,
+    energy_hartree: Optional[float],
+) -> str:
+    """Thermochemistry rows for the Frequency card, live and History (D6).
+
+    H and G are shown in hartree with their thermal correction relative to the
+    electronic energy in kJ/mol. The old absolute G in kJ/mol (e.g. −200595
+    kJ/mol) is not a meaningful number on its own.
+    """
+    _kj = 2625.4996  # kJ/mol per hartree
+    label = f'style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}"'
+    value = f'style="color:{_theme.css.TEXT_HEADING}"'
+
+    def _corr(x: float) -> str:
+        if energy_hartree is None:
+            return ""
+        return (
+            f'<span style="color:{_theme.css.TEXT_MUTED}"> &nbsp;'
+            f"({(x - float(energy_hartree)) * _kj:+.2f} kJ/mol vs E)</span>"
+        )
+
+    rows = (
+        f'<tr><td colspan="2" style="padding:6px 0 2px 0;color:{_theme.css.TEXT_MUTED};'
+        f'font-size:12px;font-style:italic">'
+        f"&#8212; Thermochemistry at {float(temperature_k):.0f} K / "
+        f"{float(pressure_atm):g} atm &#8212;</td></tr>"
+    )
+    if zpve_hartree is not None:
+        rows += f"<tr><td {label}>ZPVE</td><td {value}>{float(zpve_hartree):.6f} Ha</td></tr>"
+    rows += (
+        f"<tr><td {label}>H</td><td {value}>{float(h_hartree):.6f} Ha"
+        f"{_corr(float(h_hartree))}</td></tr>"
+        f"<tr><td {label}>S</td><td {value}>{float(s_jmol):.2f} J/(mol&middot;K)</td></tr>"
+        f"<tr><td {label}>G</td><td {value}>{float(g_hartree):.6f} Ha"
+        f"{_corr(float(g_hartree))}</td></tr>"
+    )
+    return rows
+
+
 def stationary_point_rows(max_force: Optional[float]) -> str:
     """Result-card rows for the input-geometry force check (D1), live or History.
 
@@ -469,24 +538,18 @@ def format_freq_result(r: Any) -> str:
     _thermo_rows = ""
     _thermo = getattr(r, "thermo", None)
     if _thermo is not None:
-        _kj = 2625.5  # kJ/mol per Hartree
-        _thermo_rows = (
-            f'<tr><td colspan="2" style="padding:6px 0 2px 0;color:{_theme.css.TEXT_MUTED};'
-            f'font-size:12px;font-style:italic">'
-            f"&#8212; Thermochemistry at {_thermo.temperature_k:.0f} K / "
-            f"{getattr(_thermo, 'pressure_atm', 1.0):g} atm &#8212;"
-            f"</td></tr>"
-            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">H (298 K)</td>'
-            f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo.H_hartree:.6f} Ha</td></tr>'
-            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">S (298 K)</td>'
-            f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo.S_jmol:.2f} J/(mol·K)</td></tr>'
-            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">G (298 K)</td>'
-            f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo.G_hartree:.6f} Ha'
-            f" ({_thermo.G_hartree * _kj:.2f} kJ/mol)</td></tr>"
+        _thermo_rows = _thermo_card_rows(
+            temperature_k=_thermo.temperature_k,
+            pressure_atm=getattr(_thermo, "pressure_atm", 1.0),
+            zpve_hartree=None,
+            h_hartree=_thermo.H_hartree,
+            s_jmol=_thermo.S_jmol,
+            g_hartree=_thermo.G_hartree,
+            energy_hartree=r.energy_hartree,
         )
     return (
-        _result_card_open() + f"<b>Frequency Analysis &mdash; {r.formula} "
-        f"({_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))})</b>"
+        _result_card_open() + f"<b>Frequency Analysis &mdash; {r.formula} &middot; "
+        f"{_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))}</b>"
         + _result_card_table_open()
         + f"{_rows}{_thermo_rows}</table>"
         + _RESULT_CARD_CLOSE
@@ -1210,22 +1273,14 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         ) + saddle_retry_rows(_ir_block.get("imaginary_mode_retry"))
         _thermo = ((data.get("spectra") or {}).get("ir") or {}).get("thermo")
         if _thermo:
-            _kj = 2625.5  # kJ/mol per Hartree
-            _thermo_html += (
-                f'<tr><td colspan="2" style="padding:6px 0 2px 0;color:{_theme.css.TEXT_MUTED};'
-                f'font-size:12px;font-style:italic">'
-                f"&#8212; Thermochemistry at {_thermo.get('temperature_k', 298.15):.0f} K"
-                f" / {_thermo.get('pressure_atm', 1.0):.0f} atm &#8212;"
-                f"</td></tr>"
-                f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">ZPVE</td>'
-                f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo["zpve_hartree"]:.6f} Ha</td></tr>'
-                f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">H</td>'
-                f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo["H_hartree"]:.6f} Ha</td></tr>'
-                f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">S</td>'
-                f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo["S_jmol"]:.2f} J/(mol&middot;K)</td></tr>'
-                f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">G</td>'
-                f'<td style="color:{_theme.css.TEXT_HEADING}">{_thermo["G_hartree"]:.6f} Ha'
-                f" ({_thermo['G_hartree'] * _kj:.2f} kJ/mol)</td></tr>"
+            _thermo_html += _thermo_card_rows(
+                temperature_k=_thermo.get("temperature_k", 298.15),
+                pressure_atm=_thermo.get("pressure_atm", 1.0),
+                zpve_hartree=_thermo.get("zpve_hartree"),
+                h_hartree=_thermo["H_hartree"],
+                s_jmol=_thermo["S_jmol"],
+                g_hartree=_thermo["G_hartree"],
+                energy_hartree=data.get("energy_hartree"),
             )
 
     # Reorganization-energy channels (REORG.1). This is the reported bug: the

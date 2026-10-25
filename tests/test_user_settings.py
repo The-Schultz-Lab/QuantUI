@@ -35,6 +35,7 @@ class TestDefaults:
             "vib_framerate_fps": 10,
             "iso_resolution": "medium",
             "ir_axis": "descending",
+            "dipole_arrow": "physics",
         }
 
     def test_ir_axis_round_trips_and_rejects_junk(self, tmp_path):
