@@ -1404,11 +1404,9 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
             info,
             max_orbitals=app._orb_n_orb_input.value,
             font_scale=app._orb_font_scale_slider.value,
+            show_core=_orb_show_core(app),
         )
-        yr = fig.layout.yaxis.range
-        if yr is not None:
-            app._orb_ymin_input.value = round(float(yr[0]), 2)
-            app._orb_ymax_input.value = round(float(yr[1]), 2)
+        _sync_orb_range_inputs(app, fig)
         app._apply_plotly_theme(fig)
         app._last_orb_fig = fig
         html_str = _pio.to_html(
@@ -1637,10 +1635,59 @@ def on_iso_generate(app: Any, btn: Any) -> None:
         _start_daemon(_watchdog)
 
 
+def _orb_show_core(app: Any) -> bool:
+    return bool(getattr(getattr(app, "_orb_show_core_cb", None), "value", False))
+
+
+def _sync_orb_range_inputs(app: Any, fig: Any) -> None:
+    """Copy the figure's auto Y range into Y min/max without re-rendering."""
+    yr = fig.layout.yaxis.range
+    if yr is None:
+        return
+    app._orb_range_syncing = True
+    try:
+        app._orb_ymin_input.value = round(float(yr[0]), 2)
+        app._orb_ymax_input.value = round(float(yr[1]), 2)
+    finally:
+        app._orb_range_syncing = False
+
+
+def on_orb_show_core_changed(app: Any, _change: Any = None) -> None:
+    """Show/hide core orbitals and re-fit the Y range to what is shown."""
+    info = getattr(app, "_last_orb_info", None)
+    if info is None:
+        return
+    try:
+        import plotly.io as _pio
+
+        from quantui.orbital_visualization import plot_orbital_diagram_plotly
+
+        fig = plot_orbital_diagram_plotly(
+            info,
+            max_orbitals=app._orb_n_orb_input.value,
+            font_scale=app._orb_font_scale_slider.value,
+            show_core=_orb_show_core(app),
+        )
+        _sync_orb_range_inputs(app, fig)
+        app._apply_plotly_theme(fig)
+        app._last_orb_fig = fig
+        app._set_html_output(
+            app._orb_diagram_html,
+            _pio.to_html(
+                fig,
+                include_plotlyjs="require",
+                full_html=False,
+                config={"responsive": True},
+            ),
+        )
+    except Exception:
+        app._last_orb_fig = None
+
+
 def on_orb_range_changed(app: Any, _change: Any = None) -> None:
     """Live-update orbital diagram for axis limits or orbital count changes."""
     info = getattr(app, "_last_orb_info", None)
-    if info is None:
+    if info is None or getattr(app, "_orb_range_syncing", False):
         return
     ymin = app._orb_ymin_input.value
     ymax = app._orb_ymax_input.value
@@ -1656,6 +1703,7 @@ def on_orb_range_changed(app: Any, _change: Any = None) -> None:
             max_orbitals=app._orb_n_orb_input.value,
             yrange=(ymin, ymax),
             font_scale=app._orb_font_scale_slider.value,
+            show_core=_orb_show_core(app),
         )
         app._apply_plotly_theme(fig)
         app._last_orb_fig = fig

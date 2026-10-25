@@ -2550,9 +2550,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._raman_accordion.set_title(0, "Raman Spectrum")
     app._raman_accordion.selected_index = None
 
+    # Bounds wide enough for core levels (O 1s ≈ −560 eV, heavier atoms far
+    # lower): at −500 the "Show core orbitals" view was silently clamped.
     app._orb_ymin_input = widgets.BoundedFloatText(
         value=-30.0,
-        min=-500.0,
+        min=-100000.0,
         max=200.0,
         step=1.0,
         description="Y min:",
@@ -2561,7 +2563,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._orb_ymax_input = widgets.BoundedFloatText(
         value=5.0,
-        min=-500.0,
+        min=-100000.0,
         max=500.0,
         step=1.0,
         description="Y max:",
@@ -2576,6 +2578,15 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         description="Show N:",
         layout=layout_fn(width="120px"),
         style={"description_width": "50px"},
+    )
+    # D2: core levels (hundreds of eV down) squeezed the valence orbitals into
+    # a sliver of the default view; hide them unless asked.
+    app._orb_show_core_cb = widgets.Checkbox(
+        value=False,
+        description="Show core orbitals",
+        indent=False,
+        layout=layout_fn(width="auto", margin="0 8px 0 4px"),
+        tooltip="Include inner-shell orbitals (e.g. O 1s) and re-fit the Y range",
     )
     app._orb_font_scale_slider = widgets.FloatSlider(
         value=1.0,
@@ -2600,6 +2611,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 "Levels shown:</span>"
             ),
             app._orb_n_orb_input,
+            app._orb_show_core_cb,
             app._orb_font_scale_slider,
         ],
         layout=layout_fn(

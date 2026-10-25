@@ -478,6 +478,9 @@ from quantui.app_visualization import (
     on_orb_range_changed as _viz_on_orb_range_changed,
 )
 from quantui.app_visualization import (
+    on_orb_show_core_changed as _viz_on_orb_show_core_changed,
+)
+from quantui.app_visualization import (
     on_orbital_gallery as _viz_on_orbital_gallery,
 )
 from quantui.app_visualization import (
@@ -1675,6 +1678,7 @@ class QuantUIApp:
         _orb_iso_controls: Any
         _orb_iso_output: Any
         _orb_n_orb_input: Any
+        _orb_show_core_cb: Any
         _orb_font_scale_slider: Any
         _orb_index_input: Any
         _orb_png_inbox: Any
@@ -2964,6 +2968,9 @@ class QuantUIApp:
         )
         self._orb_font_scale_slider.observe(
             self._safe_cb(self._on_orb_range_changed), names="value"
+        )
+        self._orb_show_core_cb.observe(
+            self._safe_cb(self._on_orb_show_core_changed), names="value"
         )
         # Orbital isosurface generate button
         self._iso_generate_btn.on_click(self._on_iso_generate)
@@ -5894,6 +5901,9 @@ class QuantUIApp:
 
     def _on_orb_range_changed(self, _change=None) -> None:
         _viz_on_orb_range_changed(self, _change)
+
+    def _on_orb_show_core_changed(self, _change=None) -> None:
+        _viz_on_orb_show_core_changed(self, _change)
 
     def _render_orbital_isosurface(
         self, orbital_label: str, render_token: Optional[int] = None

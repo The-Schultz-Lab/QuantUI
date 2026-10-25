@@ -3166,6 +3166,22 @@ class TestShowOrbitalDiagram:
         val = "\n".join(payloads)
         assert "<div" in val or "<img" in val
 
+    def test_core_hidden_by_default_and_checkbox_refits(self):
+        # D2: water's O 1s (−20.56 Ha ≈ −559 eV) no longer sets the default
+        # Y range; ticking Show core orbitals brings it back into view.
+        import numpy as np
+
+        r = self._make_result_with_mo()
+        r.mo_energy_hartree = np.array([-20.56, -1.34, -0.70, -0.57, -0.50, 0.20])
+        r.mo_occ = np.array([2.0, 2.0, 2.0, 2.0, 2.0, 0.0])
+        app = QuantUIApp()
+        app._show_orbital_diagram(r)
+        assert app._orb_show_core_cb.value is False
+        assert app._orb_ymin_input.value > -60
+        app._orb_show_core_cb.value = True
+        assert app._orb_ymin_input.value < -559
+        assert app._last_orb_fig.layout.yaxis.range[0] < -559
+
     def test_isosurface_controls_hidden_when_no_mo_coeff(self):
         app = QuantUIApp()
         app._show_orbital_diagram(self._make_result_with_mo())
