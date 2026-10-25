@@ -871,13 +871,13 @@ def build_shared_widgets(
     # overflow hidden (not auto): the 3D viewer is a fixed-size canvas, so it
     # needs no scrollbar — clipping a few px of margin avoids an internal
     # scrollbar that resets to the top on every backend/palette swap.
-    # min_height, not height: the fragment is the info box (~110px) PLUS the
-    # 500px canvas plus its border, so the old fixed 510px — sized for the
-    # canvas alone — clipped the bottom border off. A minimum still reserves
-    # space so the page doesn't jump when a molecule first renders, but lets
-    # the box grow if the info box wraps to more lines on a narrow window.
+    # min_height, not height: a fixed height sized for the canvas alone
+    # clipped the bottom border off. It starts at 0 so the empty tab has no
+    # blank block; _refresh_calc_mol_viewer reserves the viewer's height once
+    # a molecule renders, so later re-renders (backend/palette swaps) don't
+    # make the page jump.
     app.viz_output = widgets.Output(
-        layout=layout_fn(min_height="620px", overflow="hidden")
+        layout=layout_fn(min_height="0px", overflow="hidden")
     )
     # No .quantui-viewer-frame here: this output renders via
     # render_molecule_html, whose fragment now carries its own border sized

@@ -898,6 +898,12 @@ button.jupyter-button.mod-danger {
 .quantui-result-card table th,
 .quantui-result-card table td {
     background: transparent !important;
+    /* JupyterLab's rendered-HTML CSS right-aligns cells; with a full-width
+       table that put labels mid-card and values ~700 px away (audit D9). */
+    text-align: left !important;
+}
+.quantui-result-card table.quantui-result-card-table {
+    width: auto !important;
 }
 .quantui-result-card,
 .quantui-result-card table {
@@ -936,6 +942,11 @@ button.jupyter-button.mod-danger {
 )
 
 _LAYOUT_TRAITS: frozenset[str] = frozenset(widgets.Layout.class_trait_names())
+
+
+# Bordered 500 px canvas plus its Save-PNG row (measured in Voilà). Was 620 px
+# while an info box sat above the canvas (removed, audit D8).
+_CALC_VIEWER_MIN_HEIGHT = "540px"
 
 
 def _layout(**kwargs: Any) -> widgets.Layout:
@@ -3843,6 +3854,9 @@ class QuantUIApp:
         """
         if self._molecule is None or _render_molecule_html is None:
             return
+        # Reserve the viewer's height only once there is a viewer, so the
+        # empty Calculate tab has no blank block (audit D17).
+        self.viz_output.layout.min_height = _CALC_VIEWER_MIN_HEIGHT
         backend_to_use = backend if backend is not None else self._viz_backend
         from quantui.app_structure_edit import (
             editing_active,
@@ -3859,6 +3873,8 @@ class QuantUIApp:
             bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
             capture_class=_MOL_CALC_PNG_INBOX_CLASS,
             show_atom_indices=show_atom_indices,
+            # D8: the summary card above already states these facts.
+            show_info=False,
         )
         if _editing:
             html = finalize_edit_calc_html(self, html, backend_to_use)
@@ -4076,6 +4092,7 @@ class QuantUIApp:
                     lighting=self._viz_lighting,
                     bgcolor=self._plotly_theme_colors()["scene_bgcolor"],
                     capture_class=_MOL_ANALYSIS_PNG_INBOX_CLASS,
+                    show_info=False,
                 )
                 # M-MEASURE: same wiring as the post-calc render path — a
                 # backend-toggle switch is still a fresh viewer, so stale

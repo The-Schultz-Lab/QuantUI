@@ -72,7 +72,7 @@ _RESULT_CARD_CLOSE = "</div>"
 def _result_card_table_open() -> str:
     return (
         '<table class="quantui-result-card-table" '
-        'style="margin-top:8px;font-size:14px;border-collapse:collapse;width:100%">'
+        'style="margin-top:8px;font-size:14px;border-collapse:collapse;width:auto">'
     )
 
 

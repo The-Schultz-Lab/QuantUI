@@ -136,6 +136,8 @@ def show_result_3d(
                     lighting=app._viz_lighting,
                     bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
                     capture_class=_MOL_RESULTS_PNG_INBOX_CLASS,
+                    # D8: the result card above already names the molecule.
+                    show_info=False,
                 )
                 app._set_html_output(app.result_viz_output, html)
 
@@ -163,6 +165,7 @@ def show_result_3d(
                     capture_class=(
                         _MOL_ANALYSIS_PNG_INBOX_CLASS if is_analysis_output else ""
                     ),
+                    show_info=False,
                 )
                 if is_analysis_output:
                     # M-MEASURE: wires click-to-measure into the freshly

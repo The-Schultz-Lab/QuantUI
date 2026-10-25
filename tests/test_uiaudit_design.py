@@ -41,3 +41,57 @@ class TestD13Copy:
     def test_hero_points_at_the_help_button(self, app):
         assert "Help</b> button" in app._welcome_html.value
         assert "Help</b> tab" not in app._welcome_html.value
+
+
+def _water():
+    from quantui.molecule import Molecule
+
+    return Molecule(
+        ["O", "H", "H"],
+        [[0.0, 0.0, 0.0], [0.757, 0.587, 0.0], [-0.757, 0.587, 0.0]],
+    )
+
+
+def _output_html(out) -> str:
+    return "".join(
+        o.get("data", {}).get("text/html", "")
+        for o in out.outputs
+        if o.get("output_type") == "display_data"
+    )
+
+
+class TestD8DuplicateInfo:
+    def test_calculate_viewer_has_no_info_box(self, app):
+        pytest.importorskip("py3Dmol")
+        app._set_molecule(_water())
+        html = _output_html(app.viz_output)
+        assert "<div" in html  # the viewer rendered
+        assert "Molecule Information" not in html
+        assert "available:" not in html
+
+    def test_viewer_space_is_reserved_only_with_a_molecule(self, app):
+        pytest.importorskip("py3Dmol")
+        assert app.viz_output.layout.min_height == "0px"
+        app._set_molecule(_water())
+        assert app.viz_output.layout.min_height == "540px"
+
+    def test_launcher_notebook_has_no_duplicate_heading(self):
+        import json
+        import pathlib
+
+        nb_path = (
+            pathlib.Path(__file__).resolve().parent.parent
+            / "notebooks"
+            / "molecule_computations.ipynb"
+        )
+        cells = json.loads(nb_path.read_text())["cells"]
+        assert all(c["cell_type"] == "code" for c in cells)
+
+
+class TestD9ResultTable:
+    def test_result_table_hugs_its_content_and_aligns_left(self):
+        from quantui.app import _APP_CSS
+        from quantui.app_formatters import _result_card_table_open
+
+        assert "width:auto" in _result_card_table_open()
+        assert "text-align: left !important" in _APP_CSS
