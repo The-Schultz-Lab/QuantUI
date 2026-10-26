@@ -3004,7 +3004,7 @@ class TestUVVisSpectrumWidgets:
         app = QuantUIApp()
         assert isinstance(app._uv_xmin_input, widgets.BoundedFloatText)
         assert isinstance(app._uv_xmax_input, widgets.BoundedFloatText)
-        assert "drag either end" in app._uv_range_hint.value.lower()
+        assert "drag an end" in app._uv_range_hint.value.lower()
 
     def test_uv_range_change_triggers_figure_update(self):
         app = QuantUIApp()

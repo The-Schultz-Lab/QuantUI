@@ -821,11 +821,13 @@ h1 {
 
 /* Section headers ------------------------------------------------------- */
 h3 {
-    font-size: 11px !important;
-    font-weight: 700 !important;
-    letter-spacing: 0.09em !important;
-    text-transform: uppercase !important;
-    color: var(--q-text-slate) !important;
+    /* 15 px sentence case (M-UIPOLISH T4): the 11-12 px letter-spaced grey
+       capitals barely registered as headings. */
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+    color: var(--q-text-strong) !important;
     margin: 24px 0 10px !important;
     padding-bottom: 5px !important;
     border-bottom: 1px solid var(--q-border) !important;
@@ -904,6 +906,19 @@ button.jupyter-button.mod-danger {
 }
 .quantui-result-card table.quantui-result-card-table {
     width: auto !important;
+}
+/* Label column hugs its text: a long full-width note row (colspan) used to
+   stretch it to ~380 px, leaving a gap before every value (M-UIPOLISH T5). */
+.quantui-result-card-table td:first-child:not([colspan]) {
+    width: 1% !important;
+    white-space: nowrap !important;
+}
+/* Selected row in list boxes (Files, Compare): the browser default was light
+   grey with grey text in Dark theme (M-UIPOLISH V6). */
+.widget-select select option:checked,
+.widget-select-multiple select option:checked {
+    background: var(--q-surface-info-bg) linear-gradient(0deg, var(--q-surface-info-bg), var(--q-surface-info-bg)) !important;
+    color: var(--q-text-strong) !important;
 }
 /* Activity indicator: a status chip, not a button (audit D15). */
 .quantui-status-chip {
@@ -3371,11 +3386,23 @@ class QuantUIApp:
             )
             return
 
-        children.sort(key=lambda p: (not p.is_dir(), p.name.lower()))
+        # Folders first, newest first (result folders, like History); files by
+        # name (M-UIPOLISH V6).
+        def _mtime(p: Path) -> float:
+            try:
+                return p.stat().st_mtime
+            except OSError:
+                return 0.0
+
+        dirs = sorted((c for c in children if c.is_dir()), key=_mtime, reverse=True)
+        files = sorted(
+            (c for c in children if not c.is_dir()), key=lambda p: p.name.lower()
+        )
+        children = dirs + files
         options: list[tuple[str, str]] = []
         for child in children:
             if child.is_dir():
-                options.append((f"[DIR] {child.name}", str(child)))
+                options.append((f"📁 {child.name}", str(child)))
                 continue
             try:
                 size_label = self._format_file_size(child.stat().st_size)
@@ -3555,7 +3582,7 @@ class QuantUIApp:
                 with self._files_preview_output:
                     display(
                         HTML(
-                            f"<p style='font-size:11px;color:{_theme.css.TEXT_SLATE};margin:0 0 4px'>"
+                            f"<p style='font-size:12px;color:{_theme.css.TEXT_SLATE};margin:0 0 4px'>"
                             f"{_html.escape(note)}</p>"
                             "<pre style='white-space:pre-wrap;word-break:break-word;"
                             "font-size:12px;line-height:1.35;margin:0'>"
@@ -3599,7 +3626,7 @@ class QuantUIApp:
                         for r in body
                     )
                     note = (
-                        f'<p style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:4px 0 6px">'
+                        f'<p style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin:4px 0 6px">'
                         f"First {len(rows)} rows shown.</p>"
                         if len(rows) >= 50
                         else ""
@@ -3659,9 +3686,9 @@ class QuantUIApp:
                     "Use the <b>Analysis</b> tab's Orbital Isosurface panel to "
                     "render volumetric data; the raw file is too large to "
                     "preview inline.</p>"
-                    f'<p style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:6px 0 4px">'
+                    f'<p style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin:6px 0 4px">'
                     "Header (first 6 lines):</p>"
-                    '<pre style="white-space:pre-wrap;font-size:11px;'
+                    '<pre style="white-space:pre-wrap;font-size:12px;'
                     f"line-height:1.35;margin:0;background:{_theme.css.BG_PANEL};padding:6px;"
                     'border-radius:4px">'
                     f"{_html.escape(header_text)}</pre>"
@@ -4169,7 +4196,7 @@ class QuantUIApp:
             return
         display_name = "py3Dmol" if chosen == VizBackend.PY3DMOL else "PlotlyMol"
         label.value = (
-            f'<span style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};font-style:italic">'
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};font-style:italic">'
             f"Rendering with: {display_name}</span>"
         )
 
@@ -4370,19 +4397,25 @@ class QuantUIApp:
             resolved_note = f"Automatic resolved to {resolved_note}"
         note = caps.platform_notes
         self.quantum_engine_note.value = (
-            f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
+            f'<div style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
             f"{resolved_note}. {note}</div>"
         )
+        # A small chip, not a full-width banner on every view (M-UIPOLISH C).
+        # The platform note matters only where it bites: native Windows, or an
+        # engine with a reduced feature set (PyFock).
+        import sys as _sys
+
+        show_note = _sys.platform == "win32" or caps.engine_id != "pyscf"
         self.engine_capability_html.value = (
-            f'<div style="background:{_theme.css.SURFACE_MUTED_BG};border-left:3px solid '
-            f'{_theme.css.ACCENT_INFO};padding:7px 10px;margin:2px 0 8px;font-size:12px">'
-            f"<b>Engine: {caps.display_name}</b> — {note}</div>"
+            f'<div style="margin:2px 0 8px;font-size:13px;color:{_theme.css.TEXT_SECONDARY}">'
+            f'<span title="{_html.escape(note, quote=True)}" style="display:inline-block;'
+            f"padding:2px 10px;border-radius:12px;background:{_theme.css.SURFACE_MUTED_BG};"
+            f'color:{_theme.css.TEXT_BODY}">Engine: <b>{caps.display_name}</b>'
+            f"{(' ' + _html.escape(caps.version)) if caps.version else ''}</span>"
+            + (f" &nbsp;{note}" if show_note else "")
+            + "</div>"
         )
-        self._engine_run_intro.value = (
-            f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:0 0 8px">'
-            f"{caps.display_name} runs in this kernel. Output appears live below. "
-            "Large molecules or high-accuracy basis sets may take several minutes.</p>"
-        )
+        self._engine_run_intro.value = ""
 
         is_pyfock = caps.engine_id == "pyfock"
         self.gpu_enabled_cb.disabled = not caps.supports_gpu
@@ -5864,7 +5897,7 @@ class QuantUIApp:
         with self._result_log_output:
             display(
                 HTML(
-                    f'<pre style="font-size:11px;max-height:400px;overflow-y:auto;'
+                    f'<pre style="font-size:12px;max-height:400px;overflow-y:auto;'
                     f'white-space:pre-wrap;word-break:break-all;margin:0;padding:6px">'
                     f"{_html_mod.escape(log_content)}</pre>"
                 )
@@ -7962,7 +7995,7 @@ class QuantUIApp:
             msg = e.get("message", "")
             rows += (
                 "<tr>"
-                f'<td style="padding:1px 10px 1px 0;color:{_theme.css.TEXT_SUBTLE};font-size:11px;white-space:nowrap">{ts}</td>'
+                f'<td style="padding:1px 10px 1px 0;color:{_theme.css.TEXT_SUBTLE};font-size:12px;white-space:nowrap">{ts}</td>'
                 f'<td style="padding:1px 10px 1px 0;color:{_theme.css.TEXT_SLATE_DARK};font-size:12px">{evt}</td>'
                 f'<td style="padding:1px 0;color:{_theme.css.TEXT_BODY};font-size:12px">{msg}</td>'
                 "</tr>"

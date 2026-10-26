@@ -224,3 +224,72 @@ class TestP5SameCard:
         live, past = format_freq_result(r), format_past_result(data)
         for label in ("Total energy", "SCF iterations", "Real modes", "Frequencies"):
             assert label in live and label in past
+
+
+class TestPhase2CopyAndStyle:
+    def test_settings_say_once_that_they_persist(self, app):
+        from quantui.app_builders import build_status_panel  # noqa: F401
+
+        html = "".join(
+            getattr(w, "value", "")
+            for w in app._status_tab_panel.children[1].children
+            if hasattr(w, "value") and isinstance(w.value, str)
+        )
+        assert "persists across launches" not in html
+        assert "saved automatically" in html
+
+    def test_one_line_header(self, app):
+        assert "font-size:44px" not in app._welcome_html.value
+        assert str(app._welcome_logo.width) == "44"
+
+    def test_cancel_is_red_only_while_running(self, app):
+        assert app.cancel_btn.disabled and app.cancel_btn.button_style == ""
+        app.cancel_btn.disabled = False
+        assert app.cancel_btn.button_style == "danger"
+        app.cancel_btn.disabled = True
+        assert app.cancel_btn.button_style == ""
+
+    def test_engine_is_a_chip_without_the_platform_paragraph(self, app):
+        import sys
+
+        html = app.engine_capability_html.value
+        assert "Engine: <b>" in html
+        if sys.platform != "win32" and "PySCF" in html:
+            assert "Native Windows requires" not in html.split("</span>")[-1]
+
+    def test_run_first_text_grammar(self):
+        from quantui.app_analysis import _run_first_text
+
+        assert _run_first_text("NMR Shielding").startswith("Run an NMR")
+        assert _run_first_text("UV-Vis (TD-DFT)").startswith("Run a UV-Vis")
+
+    def test_imaginary_note_only_with_imaginary_modes(self):
+        from types import SimpleNamespace
+
+        from quantui.app_visualization import vib_mode_table_html
+
+        real = SimpleNamespace(frequencies_cm1=[1600.0, 3700.0])
+        imag = SimpleNamespace(frequencies_cm1=[-400.0, 3700.0])
+        assert "Imaginary modes" not in vib_mode_table_html(real)
+        assert "Imaginary modes" in vib_mode_table_html(imag)
+
+    def test_minimal_basis_card_is_filled(self):
+        from quantui import theme
+        from quantui.descriptor_cards import basis_card_html
+
+        assert theme.css.SURFACE_MUTED_BG in basis_card_html("STO-3G")
+
+    def test_history_card_has_no_thumbnail(self, tmp_path):
+        from quantui.app_formatters import format_past_result
+
+        (tmp_path / "thumbnail.png").write_bytes(b"\x89PNG")
+        data = {
+            "calc_type": "single_point",
+            "formula": "H2O",
+            "method": "RHF",
+            "basis": "STO-3G",
+            "energy_hartree": -75.0,
+            "energy_ev": -2040.0,
+            "converged": True,
+        }
+        assert "data:image/png" not in format_past_result(data, tmp_path)

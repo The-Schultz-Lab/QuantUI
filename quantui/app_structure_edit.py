@@ -84,9 +84,8 @@ def build_edit_widgets(app: Any, *, layout_fn: Any) -> None:
     app._edit_picks = []
     hint = (
         f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:12px;margin:0 0 6px">'
-        "Click atoms in the viewer above (py3Dmol; atom numbers are shown while "
-        "this panel is open) or type their numbers. The last picked atom's side "
-        "of the molecule moves. Edits keep charge and multiplicity; optimize "
+        "Click atoms in the viewer (numbers are shown while this is open) or "
+        "type them. The side of the last-picked atom moves; optimize "
         "afterwards.</p>"
     )
     body = widgets.VBox(

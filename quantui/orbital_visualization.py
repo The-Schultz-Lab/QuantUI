@@ -364,8 +364,8 @@ def plot_orbital_diagram_plotly(
     max_orbitals: int = 20,
     yrange: Optional[Tuple[float, float]] = None,
     title: Optional[str] = None,
-    width: int = 380,
-    height: int = 460,
+    width: int = 560,
+    height: int = 520,
     font_scale: float = 1.0,
     show_core: bool = True,
 ):
@@ -400,10 +400,13 @@ def plot_orbital_diagram_plotly(
     import plotly.graph_objects as go
 
     scale = max(0.5, float(font_scale))
-    fs_title = max(9, int(round(13 * scale)))
-    fs_axis = max(8, int(round(12 * scale)))
-    fs_label = max(8, int(round(11 * scale)))
-    fs_gap = max(8, int(round(10 * scale)))
+    # Base sizes raised (M-UIPOLISH T3): at 1.00 the subtitle and gap label
+    # rendered at ~9 px.
+    fs_title = max(9, int(round(15 * scale)))
+    fs_axis = max(8, int(round(13 * scale)))
+    fs_label = max(8, int(round(13 * scale)))
+    fs_gap = max(8, int(round(13 * scale)))
+    fs_sub = max(8, int(round(12 * scale)))
 
     energies = info.mo_energies_ev
     n_occ = info.n_occupied
@@ -525,10 +528,12 @@ def plot_orbital_diagram_plotly(
     fig.update_layout(
         width=width,
         height=height,
-        margin=dict(l=60, r=110, t=50, b=30),
+        margin=dict(l=60, r=110, t=50 + 18 * len(subtitles), b=30),
         title=dict(
             text=(title or f"Orbital Energy Levels — {info.formula}")
-            + "".join(f"<br><sup>{t}</sup>" for t in subtitles),
+            + "".join(
+                f"<br><span style='font-size:{fs_sub}px'>{t}</span>" for t in subtitles
+            ),
             font=dict(size=fs_title, family="Arial"),
         ),
         xaxis=dict(
@@ -2335,7 +2340,7 @@ def build_orbital_gallery_html(
             'flex-direction:column;align-items:center">'
             f'<div style="font-size:12px;font-weight:600;margin:2px 0 0;'
             f'text-align:center">{_html.escape(tile.caption)}</div>'
-            f'<div style="font-size:11px;margin:0 0 2px;text-align:center;'
+            f'<div style="font-size:12px;margin:0 0 2px;text-align:center;'
             f'min-height:14px">{_html.escape(tile.detail)}</div>'
             f"{view_html}<script>{js}</script></div>"
         )
@@ -2345,7 +2350,7 @@ def build_orbital_gallery_html(
         f'{int(tile_px) + 8}px);gap:8px;justify-content:start">'
         + "".join(cells)
         + "</div>"
-        '<p style="font-size:11px;margin:4px 0 0">Drag any tile: all tiles turn '
+        '<p style="font-size:12px;margin:4px 0 0">Drag any tile: all tiles turn '
         "together. Coarse grid for speed; use Generate above for a detailed "
         "view of one orbital.</p>"
     )

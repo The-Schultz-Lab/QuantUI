@@ -134,7 +134,7 @@ class TestTokensAreActuallyUsed:
 
         assert "var(--q-border)" in _APP_CSS
         assert "var(--q-text-strong)" in _APP_CSS
-        assert "var(--q-text-slate)" in _APP_CSS
+        assert "var(--q-text-body)" in _APP_CSS
         assert "var(--q-accent-info)" in _APP_CSS
         assert "var(--q-page-bg)" in _APP_CSS
         assert ".widget-dropdown select" in _APP_CSS

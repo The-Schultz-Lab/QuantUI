@@ -4073,7 +4073,12 @@ def vib_mode_table_html(freq_result: Any, irreps: Any = None) -> str:
         caption
         + '<div style="max-height:240px;overflow-y:auto;margin:6px 0;font-size:12px">'
         f'<table style="border-collapse:collapse"><tr>{head}</tr>{"".join(rows)}</table>'
-        "<small>Imaginary modes (ν shown with i) are in red.</small></div>"
+        + (
+            "<small>Imaginary modes (ν shown with i) are in red.</small>"
+            if any(f <= -10 for f in freqs)
+            else ""
+        )
+        + "</div>"
     )
 
 
@@ -4133,10 +4138,10 @@ def on_thermo_inputs_changed(app: Any, change: Any = None) -> None:
     warning = ""
     if is_stationary(getattr(app, "_thermo_max_force", None)) is False:
         warning = (
-            f'<div style="color:{_theme.css.ACCENT_ERROR_ALT};margin:0 0 6px 0">'
-            "&#9888; Not a stationary point (max force "
-            f"{app._thermo_max_force:.3f} eV/Å): these values are not "
-            "physically meaningful. Optimize the geometry first.</div>"
+            f'<div style="color:{_theme.css.ACCENT_WARNING};margin:0 0 6px 0">'
+            "&#9888; Not a minimum (max force "
+            f"{app._thermo_max_force:.3f} eV/Å), so these values aren't "
+            "meaningful. Optimize the geometry first.</div>"
         )
     out.value = warning + thermo_table_html(td, energy)
 
@@ -4150,7 +4155,7 @@ def thermo_table_html(td: Any, energy_hartree: float) -> str:
         return (
             f"<tr><td style='{cell};color:{_theme.css.TEXT_LABEL}'>{label}</td>"
             f"<td style='{cell}'>{value}</td>"
-            f"<td style='color:{_theme.css.TEXT_MUTED};font-size:11px'>{note}</td></tr>"
+            f"<td style='color:{_theme.css.TEXT_MUTED};font-size:12px'>{note}</td></tr>"
         )
 
     def _corr(value: float) -> str:

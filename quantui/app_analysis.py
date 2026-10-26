@@ -80,23 +80,27 @@ def _reset_unavailable_messages_for_context(app: Any, ctx: Any) -> None:
     )
     for panel_name in app._ana_panel_names:
         if panel_name in expected_panels:
-            _set_panel_unavailable_message(
-                app,
-                panel_name,
-                (
-                    f"Not available for this {calc_label} result: "
-                    "required data is missing or could not be loaded."
-                ),
-            )
+            if panel_name == "Trajectory" and calc_label == "Frequency":
+                # Not an error: a Frequency run has a trajectory only when it
+                # optimized first (M-UIPOLISH C).
+                text = (
+                    "No optimization steps in this run. Tick <b>Geometry "
+                    "optimization before calculation</b> to record a trajectory."
+                )
+            else:
+                text = f"This {calc_label} result has no data for this panel."
+            _set_panel_unavailable_message(app, panel_name, text)
             _set_panel_title_hint(app, panel_name, "not available for this result")
             continue
         when = app._ana_when_map.get(panel_name, "relevant")
-        _set_panel_unavailable_message(
-            app,
-            panel_name,
-            f"Not available - run a {when} calculation first.",
-        )
+        _set_panel_unavailable_message(app, panel_name, _run_first_text(when))
         _set_panel_title_hint(app, panel_name, f"needs {when}")
+
+
+def _run_first_text(when: str) -> str:
+    """'Run an NMR Shielding calculation to fill this panel.'"""
+    article = "an" if when.startswith(("NMR", "A", "E", "I", "O")) else "a"
+    return f"Run {article} {when} calculation to fill this panel."
 
 
 def _analysis_heading_label(ctx: Any) -> str:
@@ -129,9 +133,7 @@ def build_ana_switcher(app: Any, *, layout_fn: Any) -> None:
     app._ana_content_boxes = {}
     for name, acc, when in panel_meta:
         unavail = widgets.HTML(
-            value=_panel_unavailable_html(
-                f"Not available - run a {when} calculation first."
-            ),
+            value=_panel_unavailable_html(_run_first_text(when)),
             layout=layout_fn(display=""),
         )
         content = acc.children[0]

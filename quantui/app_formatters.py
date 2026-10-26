@@ -510,11 +510,10 @@ def stationary_point_rows(max_force: Optional[float]) -> str:
     )
     if not ok:
         rows += (
-            f'<tr><td colspan="2" style="padding:4px 0;color:{_theme.css.ACCENT_ERROR_ALT}">'
-            "&#9888; This geometry is not optimized at this level of theory, so "
-            "the frequencies and thermochemistry below are not physically "
-            "meaningful. Tick <b>Geometry optimization before calculation</b> "
-            "(or optimize first) and re-run.</td></tr>"
+            f'<tr><td colspan="2" style="padding:4px 0;color:{_theme.css.ACCENT_WARNING}">'
+            "&#9888; Not a minimum at this level of theory, so the values below "
+            "aren't meaningful. Tick <b>Geometry optimization before "
+            "calculation</b> and re-run.</td></tr>"
         )
     return rows
 
@@ -1182,7 +1181,7 @@ def reorg_channels_html(channels: list[dict]) -> str:
     # geometries (the relaxations themselves are not solvent-optimized).
     # Both scope notes are stated here, once, rather than left implicit.
     blocks.append(
-        f'<div style="margin-top:6px;font-size:11px;color:{_theme.css.TEXT_MUTED_LIGHT}">'
+        f'<div style="margin-top:6px;font-size:12px;color:{_theme.css.TEXT_MUTED_LIGHT}">'
         "Ion multiplicity is the minimal-spin default from electron-count "
         "parity, not a ground-state determination (relevant for transition-"
         "metal ions). Solvent (if selected) applies only to the single-"
@@ -1290,7 +1289,6 @@ def _slurm_provenance_row(data: dict[str, Any]) -> str:
 
 def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) -> str:
     """Format a saved result.json payload as an HTML result card."""
-    import base64 as _b64
 
     _ct_labels = {
         "single_point": (
@@ -1360,17 +1358,10 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     _extra = _result_extra_rows(lambda k, d=None: data.get(k, d))
     _extra += _slurm_provenance_row(data)
 
-    # Embed thumbnail if saved
+    # The saved thumbnail (a light, tiny copy of this card) was unreadable,
+    # and glaring in Dark theme; the card itself carries the same data
+    # (M-UIPOLISH V5).
     _thumb_html = ""
-    if result_dir is not None:
-        _thumb_path = Path(result_dir) / "thumbnail.png"
-        if _thumb_path.exists():
-            _img_b64 = _b64.b64encode(_thumb_path.read_bytes()).decode()
-            _thumb_html = (
-                f'<img src="data:image/png;base64,{_img_b64}" '
-                f'style="float:right;margin:0 0 6px 14px;border-radius:4px;'
-                f'border:1px solid {_theme.css.BORDER}" width="173" height="108" />'
-            )
 
     # AUDIT F18 — restore persisted frequency thermochemistry into the
     # History card. Older saved results (or a Hessian-only run with no

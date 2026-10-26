@@ -2015,7 +2015,7 @@ def on_cal_run(
         f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK}">Starting…</span>'
         # Reserve a second invisible line so the live-message ticker
         # doesn't jump the accordion height.
-        '<br><span style="font-size:11px;color:transparent">.</span>'
+        '<br><span style="font-size:12px;color:transparent">.</span>'
     )
     app._cal_results_html.value = ""
 
@@ -2092,7 +2092,7 @@ def _cal_table_html(steps_so_far, total: int, *, in_flight_step=None) -> str:
         if len(msg) > 140:
             msg = msg[:137] + "…"
         return (
-            f'<br><span style="color:{_theme.css.TEXT_SUBTLE};font-style:italic;font-size:11px">'
+            f'<br><span style="color:{_theme.css.TEXT_SUBTLE};font-style:italic;font-size:12px">'
             f"{_html_mod.escape(msg)}</span>"
         )
 
@@ -2216,7 +2216,7 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
             f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK}">'
             f"Step {step_n} / {total} — {label} "
             f"[{icon} {elapsed:.1f} s]</span>"
-            f'<br><span style="font-size:11px;color:{live_line_color}">'
+            f'<br><span style="font-size:12px;color:{live_line_color}">'
             f"{live_line_text}</span>"
         )
 
@@ -2253,11 +2253,11 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
     app._cal_step_label.value = (
         f'<span style="font-size:12px;color:{_theme.css.ACCENT_SUCCESS}"><b>Calibration complete.</b> '
         "Time estimates are now active.</span>"
-        '<br><span style="font-size:11px;color:transparent">.</span>'
+        '<br><span style="font-size:12px;color:transparent">.</span>'
         if result.n_completed > 0
         else (
             '<span style="font-size:12px;color:#dc2626">No steps completed.</span>'
-            '<br><span style="font-size:11px;color:transparent">.</span>'
+            '<br><span style="font-size:12px;color:transparent">.</span>'
         )
     )
     app._cal_stop_btn.layout.display = "none"

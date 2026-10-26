@@ -301,13 +301,13 @@ def on_past_dd_changed(app: Any, change: dict[str, Any], *, layout_fn: Any) -> N
             data = load_result(result_dir)
             display(HTML(app._format_past_result(data, result_dir=result_dir)))
             btn_results = widgets.Button(
-                description="-> View Results",
+                description="→ View Results",
                 button_style="success",
                 layout=layout_fn(width="130px"),
                 tooltip="Show this result in the Results tab",
             )
             btn_analysis = widgets.Button(
-                description="-> View Analysis",
+                description="→ View Analysis",
                 button_style="info",
                 layout=layout_fn(width="140px"),
                 tooltip="Load analysis panels and navigate to the Analysis tab",

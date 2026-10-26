@@ -149,7 +149,7 @@ def build_status_panel(
         return (tick if flag else cross) + (" " + extra if extra else "")
 
     env_badge = (
-        f'&nbsp;&nbsp;<code style="font-size:11px;background:{_theme.css.SURFACE_MUTED_BG};'
+        f'&nbsp;&nbsp;<code style="font-size:12px;background:{_theme.css.SURFACE_MUTED_BG};'
         f'padding:1px 5px;border-radius:3px;color:{_theme.css.TEXT_BODY}">{env}</code>'
         if env and env not in ("base", "")
         else ""
@@ -187,7 +187,7 @@ def build_status_panel(
                 # so offload can be slower than the CPU. Warn in place rather
                 # than let it look like free speed.
                 cell += (
-                    f'<div style="color:{_theme.css.ACCENT_WARNING};font-size:11px;margin-top:2px">'
+                    f'<div style="color:{_theme.css.ACCENT_WARNING};font-size:12px;margin-top:2px">'
                     "&#9888; consumer-class GPU &mdash; weak double precision; "
                     "may run <b>slower</b> than CPU. Benchmark before relying "
                     "on it.</div>"
@@ -266,12 +266,13 @@ def build_status_panel(
     settings_html = widgets.HTML(
         f'<div style="font-weight:600;font-size:14px;color:{_theme.css.TEXT_STRONG}">'
         "Settings</div>"
+        f'<div style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin-top:2px">'
+        "Changes are saved automatically and kept for next time.</div>"
     )
     viz_backend_label = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:8px;'
         'margin-bottom:0px">Default 3D backend '
-        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-        "(persists across launches)</span></div>"
+        "</div>"
     )
     engine_options = [
         ("Automatic (PySCF preferred)", "auto"),
@@ -291,8 +292,8 @@ def build_status_panel(
     engine_label = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:8px;'
         'margin-bottom:0px">Quantum engine '
-        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-        "(persists across launches; menus follow engine capabilities)</span></div>"
+        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:12px">'
+        "(menus follow engine capabilities)</span></div>"
     )
     app.quantum_engine_dd = widgets.Dropdown(
         options=engine_options,
@@ -321,8 +322,7 @@ def build_status_panel(
     vib_fps_label = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:10px;'
         'margin-bottom:0px">Vibrational animation framerate '
-        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-        "(persists across launches)</span></div>"
+        "</div>"
     )
 
     # GPU offload toggle (persists across launches). Off is a legitimate choice
@@ -331,8 +331,8 @@ def build_status_panel(
     gpu_toggle_label = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:12px;'
         'margin-bottom:0px">GPU offload '
-        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-        "(persists across launches; only applies when a CUDA device is "
+        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:12px">'
+        "(only applies when a CUDA device is "
         "detected)</span></div>"
     )
     app.gpu_enabled_cb = widgets.Checkbox(
@@ -350,8 +350,8 @@ def build_status_panel(
     df_toggle_label = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:12px;'
         'margin-bottom:0px">Density fitting (RI) '
-        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-        "(persists across launches; faster TD-DFT / large systems, "
+        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:12px">'
+        "(faster TD-DFT / large systems, "
         "~0.008 kcal/mol accuracy cost)</span></div>"
     )
     app.density_fit_enabled_cb = widgets.Checkbox(
@@ -364,8 +364,8 @@ def build_status_panel(
     fp_toggle_label = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:12px;'
         'margin-bottom:0px">Parallel IR/Raman finite differences '
-        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-        "(persists across launches; CPU workers for IR + Raman displacements on "
+        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:12px">'
+        "(CPU workers for IR + Raman displacements on "
         "multi-core hosts — see Help → Parallel IR/Raman finite differences)</span></div>"
     )
     app.freq_parallel_enabled_cb = widgets.Checkbox(
@@ -377,7 +377,7 @@ def build_status_panel(
     )
     if freq_parallel_env_locked:
         fp_env_note = widgets.HTML(
-            f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
+            f'<div style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
             "Controlled by deployment (<code>QUANTUI_FREQ_PARALLEL</code> in the "
             "container or session environment).</div>"
         )
@@ -387,8 +387,7 @@ def build_status_panel(
     exec_backend_label = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:12px;'
         'margin-bottom:0px">Execution backend '
-        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-        "(persists across launches)</span></div>"
+        "</div>"
     )
     exec_options = [("Local (this Jupyter kernel)", "local")]
     if slurm_available:
@@ -403,13 +402,13 @@ def build_status_panel(
     )
     if not slurm_available:
         exec_backend_note = widgets.HTML(
-            f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
+            f'<div style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
             f"{slurm_unavailable_note()}</div>"
         )
     else:
         limit = max_concurrent_jobs()
         exec_backend_note = widgets.HTML(
-            f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
+            f'<div style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
             f"Cluster mode allows up to {limit} concurrent job(s). "
             "Use the Cluster Jobs tab to monitor and cancel runs.</div>"
         )
@@ -436,7 +435,7 @@ def build_status_panel(
             "submissions."
         )
     app.slurm_job_root_note = widgets.HTML(
-        f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
+        f'<div style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
         f"{_root_note_text}</div>"
     )
     slurm_root_rows: list[Any] = []
@@ -444,9 +443,7 @@ def build_status_panel(
         slurm_root_rows = [
             widgets.HTML(
                 f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};'
-                'margin-top:12px;margin-bottom:0px">SLURM job folder '
-                f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-                "(persists across launches)</span></div>"
+                'margin-top:12px;margin-bottom:0px">SLURM job folder</div>'
             ),
             app.slurm_job_root_txt,
             app.slurm_job_root_note,
@@ -1137,7 +1134,7 @@ def build_shared_widgets(
     app.preopt_preview_label = widgets.HTML(
         f'<span style="font-size:13px;color:{_theme.css.TEXT_BODY}">'
         "Classical pre-optimize geometry</span>"
-        f'<span style="font-size:11px;color:{_theme.css.TEXT_SUBTLE}"> &mdash; fast MMFF/UFF '
+        f'<span style="font-size:12px;color:{_theme.css.TEXT_SUBTLE}"> &mdash; fast MMFF/UFF '
         "cleanup of a rough structure</span>"
     )
     # Interactive pre-opt: run the bonded-FF pre-opt on
@@ -1240,7 +1237,7 @@ def build_shared_widgets(
         min=0.001,
         max=1.0,
         step=0.005,
-        description="Force thr. (eV/Å):",
+        description="Force limit (eV/Å):",
         style={"description_width": "130px"},
         layout=layout_fn(width="270px"),
     )
@@ -1269,7 +1266,7 @@ def build_shared_widgets(
         value=10,
         min=1,
         max=50,
-        description="# states:",
+        description="Excited states:",
         style={"description_width": "100px"},
         layout=layout_fn(width="180px"),
     )
@@ -1284,7 +1281,7 @@ def build_shared_widgets(
     # and the existing per-calc-type tests keep working unchanged.
     app._seed_dd = widgets.Dropdown(
         options=[("(use current molecule)", "")],
-        description="Seed geometry:",
+        description="Start from:",
         style={"description_width": "110px"},
         # max_width: long History labels stretched it across the page (D17).
         layout=layout_fn(
@@ -1447,16 +1444,14 @@ def build_shared_widgets(
     app._scan_preopt_note = widgets.HTML(
         value=(
             f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">'
-            "Tip: enable <b>Pre-optimize starting geometry</b> (checkbox just "
-            "above) for best results. Each scan point runs its own constrained "
-            "optimization.</span>"
+            "Each scan point runs its own constrained optimization.</span>"
         )
     )
     app._scan_seed_dd = widgets.Dropdown(
         options=[("(use current molecule)", "")],
         value="",
-        description="Seed:",
-        style={"description_width": "40px"},
+        description="Start from:",
+        style={"description_width": "80px"},
         layout=layout_fn(width="auto", flex="1 1 auto", max_width="620px"),
         tooltip="Optional optimized geometry from history",
     )
@@ -1531,7 +1526,7 @@ def build_shared_widgets(
         min=0.001,
         max=0.2,
         step=0.005,
-        description="Force thr. (eV/Å):",
+        description="Force limit (eV/Å):",
         style={"description_width": "130px"},
         layout=layout_fn(width="250px"),
     )
@@ -1546,18 +1541,15 @@ def build_shared_widgets(
     )
     app._ts_note = widgets.HTML(
         f'<span style="color:{_theme.css.TEXT_SECONDARY};font-size:12px">'
-        "Searches for a <b>first-order saddle point</b> near the current "
-        "geometry (Sella, starting from the analytic Hessian), then runs a "
-        "frequency calculation to check it: a transition state has exactly "
-        "<b>one imaginary frequency</b>. Start close to the barrier top, e.g. "
-        "the highest point of a PES scan." + _ts_avail + "</span>"
+        "Finds a saddle point near this geometry, then checks it has exactly "
+        "<b>one imaginary frequency</b>. Start near the barrier top (e.g. the "
+        "highest PES-scan point)." + _ts_avail + "</span>"
     )
 
     app._reorg_note = widgets.HTML(
         f'<span style="color:{_theme.css.TEXT_SECONDARY};font-size:12px">'
-        "4-point Marcus scheme: optimizes the neutral and ion geometries, then "
-        "evaluates the four single-point energies to obtain λ. Runs 2–3 geometry "
-        "optimizations, so it is slower than a single calculation.</span>"
+        "Four-point scheme for λ: optimizes the neutral and ion, then four "
+        "single points (2–3 optimizations, so slower).</span>"
     )
 
     app.calc_extra_opts = widgets.VBox([])
@@ -1611,7 +1603,7 @@ def build_shared_widgets(
         [
             app._slurm_job_name_txt,
             widgets.HTML(
-                f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};'
+                f'<div style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};'
                 'margin:0 0 6px 84px">Optional. Letters, digits, - and _ are kept; '
                 "other characters become _.</div>"
             ),
@@ -1631,12 +1623,19 @@ def build_shared_widgets(
     # Disabled unless a calc is in flight (toggled by _do_run).
     app.cancel_btn = widgets.Button(
         description="Cancel",
-        button_style="danger",
+        button_style="",
         icon="stop",
         disabled=True,
         layout=layout_fn(width="110px", height="36px"),
         tooltip=("Stop the running calculation at the next SCF cycle / optimizer step"),
     )
+
+    # Red only while there is something to cancel; a disabled "danger" button
+    # still read as live (M-UIPOLISH V2).
+    def _cancel_style(change: Any) -> None:
+        app.cancel_btn.button_style = "" if change["new"] else "danger"
+
+    app.cancel_btn.observe(_cancel_style, names="disabled")
 
     # MET.5: one-click fix shown only when a metal's basis blocks the run.
     # Hidden until the pre-run guard reveals it; sets the basis to def2-SVP.
@@ -1833,23 +1832,23 @@ def build_welcome_header(app: Any, *, layout_fn: Any = None) -> None:
     app._welcome_logo = widgets.Image(
         value=_logo_svg_raw.encode("utf-8"),
         format="svg+xml",
-        width=120,
-        height=120,
+        width=44,
+        height=44,
     )
 
     # Text-only HTML. ``_welcome_html`` is kept as a pure HTML widget so
     # ``app_runflow.on_exit_clicked`` can still ``.value = ...`` it with
     # the shutdown message.
+    # One line (M-UIPOLISH L2): the 44 px title, tagline and a help line used
+    # ~180 px, so at 1024 x 768 the first screen held no controls at all.
     text_html = (
-        "<div>"
-        '<div style="font-size:44px;font-weight:700;letter-spacing:-0.8px;'
-        f'color:{_theme.css.TEXT_STRONG};line-height:1.05">QuantUI</div>'
-        f'<div style="font-size:20px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:7px">'
-        "Free, open, and interactive quantum chemistry</div>"
-        f'<div style="font-size:13px;color:{_theme.css.TEXT_SUBTLE};margin-top:5px">'
-        f"v{quantui.__version__} &nbsp;&middot;&nbsp; "
-        "<b>Help</b> button (top right) for instructions &nbsp;&middot;&nbsp; "
-        "<b>System Settings</b> tab for environment + calibration</div>"
+        '<div style="display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 14px">'
+        '<span style="font-size:26px;font-weight:700;letter-spacing:-0.4px;'
+        f'color:{_theme.css.TEXT_STRONG};line-height:1.1">QuantUI</span>'
+        f'<span style="font-size:15px;color:{_theme.css.TEXT_SLATE_DARK}">'
+        "Free, open, and interactive quantum chemistry</span>"
+        f'<span style="font-size:12px;color:{_theme.css.TEXT_SUBTLE}">'
+        f"v{quantui.__version__}</span>"
         "</div>"
     )
     app._welcome_html = widgets.HTML(value=text_html)
@@ -1864,7 +1863,7 @@ def build_welcome_header(app: Any, *, layout_fn: Any = None) -> None:
         layout=_layout(
             align_items="center",
             justify_content="flex-start",
-            padding="22px 4px 18px",
+            padding="8px 4px 8px",
             margin="0 0 4px",
             border_bottom=f"1px solid {_theme.css.BORDER}",
         ),
@@ -1971,9 +1970,8 @@ def build_molecule_section(
     tab_preset = widgets.VBox(
         [
             widgets.HTML(
-                hint + "Browse the bundled library — filter by category or "
-                "search by name/formula. Includes thousands of small molecules "
-                "for offline use.</p>"
+                hint + "Search by name or formula, or pick a category. "
+                "Works offline.</p>"
             ),
             widgets.HBox([app.lib_category_dd, app.lib_search_txt]),
             app.lib_results_dd,
@@ -1983,9 +1981,8 @@ def build_molecule_section(
     tab_xyz = widgets.VBox(
         [
             widgets.HTML(
-                hint + "Paste XYZ coordinates or use the atom table below. "
-                "Charge and multiplicity are set in Calculation Setup — "
-                "geometry loading does not change them.</p>"
+                hint + "Paste coordinates (symbol x y z, in Å) or edit the table. "
+                "Charge and multiplicity stay as set below.</p>"
             ),
             app.xyz_area,
             widgets.HBox(
@@ -2008,9 +2005,8 @@ def build_molecule_section(
     tab_pubchem = widgets.VBox(
         [
             widgets.HTML(
-                hint + "Search by name, SMILES, CID, or InChI. Tries PubChem "
-                "then NCI CACTUS, and falls back to the bundled library offline."
-                "</p>"
+                hint + "Name, SMILES, PubChem CID or InChI. Searches online "
+                "databases (offline: the bundled library).</p>"
             ),
             widgets.HBox([app.pubchem_txt, app.pubchem_btn]),
             app.pubchem_msg,
@@ -2020,10 +2016,8 @@ def build_molecule_section(
     tab_upload = widgets.VBox(
         [
             widgets.HTML(
-                hint + "Upload a structure file from your computer: XYZ, MOL, "
-                "SDF, MOL2, PDB, CIF, or a Gaussian input (.gjf/.com) or "
-                "output (.log/.out). Charge and multiplicity are taken from "
-                "the file when it records them.</p>"
+                hint + "XYZ, MOL, SDF, MOL2, PDB, CIF, or Gaussian input/output "
+                "(.gjf, .com, .log, .out).</p>"
             ),
             app.structure_upload,
             app.upload_msg,
@@ -2296,9 +2290,9 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
 
     pes_export_row = _plot_export_row("pes")
     app._pes_export_min_btn = widgets.Button(
-        description="Save min geometry",
+        description="Save lowest-energy geometry",
         icon="download",
-        layout=layout_fn(width="150px"),
+        layout=layout_fn(width="auto"),
         tooltip="Export the lowest-energy scan point as XYZ",
     )
     app._pes_plot_hint = widgets.HTML(
@@ -2659,12 +2653,12 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     orb_controls_row = widgets.HBox(
         [
             widgets.HTML(
-                f'<span style="font-size:11px;color:{_theme.css.TEXT_SECONDARY};font-weight:600">Y range:</span>'
+                f'<span style="font-size:13px;color:{_theme.css.TEXT_BODY}">Y range:</span>'
             ),
             app._orb_ymin_input,
             app._orb_ymax_input,
             widgets.HTML(
-                f'<span style="font-size:11px;color:{_theme.css.TEXT_SECONDARY};font-weight:600;margin-left:8px">'
+                f'<span style="font-size:13px;color:{_theme.css.TEXT_BODY};margin-left:8px">'
                 "Levels shown:</span>"
             ),
             app._orb_n_orb_input,
@@ -2911,7 +2905,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     # ── PNG export options (ORBX.1 cont.) ───────────────────────────────
     app._iso_png_name = widgets.Text(
         value="",
-        placeholder="(defaults to the orbital label, e.g. HOMO)",
+        placeholder="default: orbital label",
         description="PNG name:",
         style={"description_width": "70px"},
         layout=layout_fn(width="330px"),
@@ -2976,10 +2970,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         [
             widgets.HTML(
                 f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:12px;margin:0 0 8px">'
-                "Visualise a molecular orbital, the electron or spin density, or an "
-                "electrostatic-potential (ESP) map as a 3D isosurface (Linux / WSL "
-                "only — requires PySCF). Run or load a Single Point or Geometry "
-                "Optimization first, then click <b>Generate</b>.</p>"
+                "Choose a surface and click <b>Generate</b>. Needs PySCF "
+                "(Linux, macOS or WSL).</p>"
             ),
             app._orb_iso_controls,
             widgets.HBox(
@@ -3140,9 +3132,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._uv_range_hint = widgets.HTML(
         value=(
-            f'<p style="font-size:11px;color:{_theme.css.TEXT_SECONDARY};margin:0 0 6px">'
-            "Tip: drag either end of the horizontal axis in the plot to adjust "
-            "the view, or set λ min/max above for exact bounds.</p>"
+            f'<p style="font-size:12px;color:{_theme.css.TEXT_SECONDARY};margin:0 0 6px">'
+            "Drag an end of the λ axis to zoom, or type exact bounds above.</p>"
         )
     )
     # min_height matches the Plotly UV-Vis figure height (320px) so the
@@ -3390,7 +3381,6 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
 
     app.results_tab_panel = widgets.VBox(
         [
-            widgets.HTML('<h3 style="margin:14px 0 6px">Results</h3>'),
             app.result_output,
             app._viz_label,
             app.result_viz_output,
@@ -3441,7 +3431,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         value=(
             f'<div style="font-size:13px;font-weight:600;color:{_theme.css.TEXT_BODY};'
             f'margin:8px 0 2px">Measurement</div>'
-            f'<div style="font-size:11px;color:{_theme.css.TEXT_SECONDARY};margin:0 0 2px">'
+            f'<div style="font-size:12px;color:{_theme.css.TEXT_SECONDARY};margin:0 0 2px">'
             "Click atoms in the viewer — bond, angle, then dihedral</div>"
         )
     )
@@ -3509,7 +3499,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         # backends than the toggle suggests).
         app.viz_backend_label_ana = widgets.HTML(
             value=(
-                f'<span style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};font-style:italic">'
+                f'<span style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};font-style:italic">'
                 "Rendering with: —</span>"
             ),
             layout=layout_fn(margin="0 0 8px 0"),
@@ -3519,7 +3509,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 widgets.HBox(
                     [
                         widgets.HTML(
-                            f'<span style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};'
+                            f'<span style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};'
                             'margin-right:6px;align-self:center">Backend:</span>'
                         ),
                         app.viz_backend_toggle_ana,
@@ -3974,8 +3964,7 @@ def build_files_tab(app: Any, *, layout_fn: Any) -> None:
         [
             widgets.HTML(
                 f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:4px 0 8px">'
-                "Read-only file browser for result artifacts and logs. "
-                "Browsing is limited to approved roots.</p>"
+                "Browse saved results and logs (read-only).</p>"
             ),
             app._files_root_dd,
             app._files_path_html,
@@ -4063,9 +4052,8 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
                     widgets.HTML(
                         f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;'
                         'margin:4px 0 12px">'
-                        "Browse help topics below. Click <b>?</b> next to the Method "
-                        "or Basis Set dropdown in the Calculate tab to jump directly "
-                        "to a relevant topic.</p>"
+                        "Pick a topic. The <b>?</b> buttons in the Calculate tab "
+                        "open the matching one.</p>"
                     ),
                     app._help_close_btn,
                 ],
