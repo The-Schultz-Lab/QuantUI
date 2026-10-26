@@ -1499,6 +1499,7 @@ _ISO_VIEWER_JS = """
     if(WITH_SURFACES){ surfaces(); }
     vw.setBackgroundColor(state.bg);
     vw.zoomTo();
+    __ORIENT__
     // Restore the orientation the previous viewer had, but only for the same
     // scene: carrying a camera onto a different molecule would frame it
     // arbitrarily. SCENE is the atom block, so switching ORBITALS keeps the
@@ -1789,7 +1790,7 @@ def _build_iso_viewer(
 ) -> str:
     import json
 
-    from quantui.viz_assets import make_view
+    from quantui.viz_assets import coords_from_model_text, make_view, orient_js
 
     pos_color, neg_color = orbital_colors(color_scheme)
 
@@ -1818,6 +1819,10 @@ def _build_iso_viewer(
         .replace("__MODE__", json.dumps(mode))
         .replace("__VOL__", json.dumps(voldata_text))
         .replace("__RANGE__", repr(float(vol_range)))
+        .replace(
+            "__ORIENT__",
+            orient_js("vw", coords_from_model_text(data_text, data_format)),
+        )
     )
     busy = (
         f'<div id="orb_busy_{uid}" style="display:none;position:absolute;'
@@ -2235,6 +2240,7 @@ _GALLERY_TILE_JS = """
     vw.addVolumetricData(DATA,"cube",{isoval: -ISO, color: NEG, opacity: 0.85, smoothness: 5});
     vw.setBackgroundColor(BG);
     vw.zoomTo();
+    __ORIENT__
     vw.render();
     // One camera for the whole gallery: link this viewer both ways with
     // every tile already built in the same group.
@@ -2283,7 +2289,7 @@ def build_orbital_gallery_html(
     import json
     import uuid
 
-    from quantui.viz_assets import make_view
+    from quantui.viz_assets import coords_from_model_text, make_view, orient_js
 
     if not tiles:
         return '<p style="padding:8px">No orbitals to show.</p>'
@@ -2319,6 +2325,10 @@ def build_orbital_gallery_html(
             .replace("__POS__", json.dumps(pos))
             .replace("__NEG__", json.dumps(neg))
             .replace("__BG__", json.dumps(bgcolor))
+            .replace(
+                "__ORIENT__",
+                orient_js("vw", coords_from_model_text(tile.cube_text, "cube")),
+            )
         )
         cells.append(
             '<div class="quantui-gallery-tile" style="display:flex;'

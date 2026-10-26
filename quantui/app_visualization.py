@@ -24,6 +24,7 @@ from quantui.app_builders import (
 from quantui.downloads import download_link_html as _download_link_html
 from quantui.orbital_visualization import _GENERIC_CAPTURE_JS, _png_capture_controls
 from quantui.symmetry import html_irrep
+from quantui.viz_assets import orient_js, orient_view
 
 logger = logging.getLogger(__name__)
 
@@ -565,6 +566,7 @@ def render_traj_frame(app: Any, molecule: Any, output_widget: Any) -> None:
         decorate_py3dmol_coordination_bonds(view, molecule.atoms, molecule.coordinates)
         view.setBackgroundColor("white")
         view.zoomTo()
+        orient_view(view, molecule.coordinates)
         output_widget.clear_output()
         with output_widget:
             display(view)
@@ -668,6 +670,19 @@ def build_vib_data_inner(
         source_file="quantui_freq_calc",
         program="pyscf",
     )
+
+
+def _xyz_block_coords(block: str) -> list:
+    """Coordinates from one XYZ block (count line, comment, atom lines)."""
+    coords = []
+    for line in block.strip("\n").splitlines()[2:]:
+        parts = line.split()
+        if len(parts) >= 4:
+            try:
+                coords.append([float(v) for v in parts[1:4]])
+            except ValueError:
+                continue
+    return coords
 
 
 def freq_mode_irreps(freq_result: Any, molecule: Any = None) -> Any:
@@ -2538,7 +2553,7 @@ def _render_vib_mode_py3dmol(
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
         bg = _theme.plotly_colors(app.theme_btn.value)["scene_bgcolor"]
         view.setBackgroundColor(bg)
-        view.zoomTo()
+        view.zoomTo()  # not oriented: the camera hook below may restore a view
         view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
         # Prepend the camera-persistence hook so the user's interactive
         # pan/rotate state survives mode switches. The hook is idempotent
@@ -3289,6 +3304,7 @@ def build_reorg_geometry_viewer_html(
     view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
     view.setBackgroundColor(bgcolor)
     view.zoomTo()
+    orient_view(view, geometries[0]["coordinates"])
     view_html = view._make_html()
 
     m = re.search(r"3dmolviewer_(\w+)", view_html)
@@ -3434,6 +3450,7 @@ def build_reorg_overlay_html(
 
     view.setBackgroundColor(bgcolor)
     view.zoomTo()
+    orient_view(view, ref_c)
     # py3Dmol has no type stubs (ignore_missing_imports); _make_html()
     # genuinely returns str.
     view_html = cast(str, view._make_html())
@@ -3522,6 +3539,7 @@ def build_preopt_preview_html(
     view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
     view.setBackgroundColor(bgcolor)
     view.zoomTo()
+    orient_view(view, frames[0])
     view_html = view._make_html()
 
     n_frames = len(frames)
@@ -3584,6 +3602,7 @@ def build_trajectory_viewer_html(
     view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
     view.setBackgroundColor(bgcolor)
     view.zoomTo()
+    orient_view(view, _xyz_block_coords(xyzblocks[0]))
     view_html = view._make_html()
 
     m = re.search(r"3dmolviewer_(\w+)", view_html)
@@ -3701,7 +3720,7 @@ _VIB_VIEWER_JS = """
       CUR=m;
       drawArrows(v, m);
       v.setBackgroundColor(BG);
-      if(fit) v.zoomTo();   // fit only on first mode; switches keep the camera
+      if(fit){ v.zoomTo(); __ORIENT__ }   // fit + face the camera on the first mode only
       v.animate({"loop":"forward","interval":IV,"reps":0});
       v.render();
     }catch(e){ return false; }
@@ -3810,6 +3829,7 @@ def build_vib_viewer_html(
         .replace("__BG__", json.dumps(bgcolor))
         .replace("__INIT__", str(int(initial_mode)))
         .replace("__ARROWS__", "true" if arrows else "false")
+        .replace("__ORIENT__", orient_js("v", base))
     )
     body = f"{view_html}<script>{js}</script>"
     if capture_class:
@@ -4351,6 +4371,7 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
         view.setBackgroundColor("white")
         view.zoomTo()
+        orient_view(view, base_coords)
         view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
         # Exported HTML is opened outside the app (no page bootstrap), so embed
         # the offline 3Dmol.js loader inline to make the file self-contained.
