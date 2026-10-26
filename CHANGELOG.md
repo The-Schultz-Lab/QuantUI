@@ -78,6 +78,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   facts in a "Molecule Information" box; the launcher notebook drops its
   duplicate "QuantUI" heading; result tables are compact and left-aligned;
   the empty Calculate tab no longer reserves a blank viewer block.
+- **Esc closes the Help panel** (as does its Close button).
 - **Clearer controls** — no more truncated labels or "?.." buttons; PES atom
   chips read "O1"; XYZ table headers line up; a **Done** button closes the
   molecule editor; the Help panel has a **Close** button; System Settings

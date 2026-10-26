@@ -4049,9 +4049,11 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
     app._help_close_btn = widgets.Button(
         description="Close",
         icon="times",
-        tooltip="Close the help panel",
+        tooltip="Close the help panel (Esc)",
         layout=layout_fn(width="80px", margin="4px 12px 0 auto"),
     )
+    # Target for the page-level Esc handler (app._HELP_ESC_JS).
+    app._help_close_btn.add_class("quantui-help-close")
     app.help_tab_panel = widgets.VBox(
         [
             widgets.HBox(
