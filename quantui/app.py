@@ -920,6 +920,35 @@ button.jupyter-button.mod-danger {
     background: var(--q-surface-info-bg) linear-gradient(0deg, var(--q-surface-info-bg), var(--q-surface-info-bg)) !important;
     color: var(--q-text-strong) !important;
 }
+/* Help and Report Issue open as a right-hand drawer over the app, not a
+   block that pushed every tab down (M-UIPOLISH L14). */
+.quantui-drawer {
+    position: fixed !important;
+    top: 0 !important;
+    right: 0 !important;
+    width: min(560px, 100vw) !important;
+    height: 100vh !important;
+    overflow-y: auto !important;
+    z-index: 1000 !important;
+    margin: 0 !important;
+    padding: 14px 16px !important;
+    border-radius: 0 !important;
+    background: var(--q-bg-panel) !important;
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35) !important;
+}
+/* History "Recent" rows: links, not grey buttons. */
+/* Beats the neutral-button rule's (0,6,1) specificity. */
+button.jupyter-button.quantui-history-recent:not(.mod-info):not(.mod-success):not(.mod-warning):not(.mod-danger):not(.mod-primary) {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: var(--q-accent-info) !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+    padding: 2px 4px !important;
+    height: auto !important;
+}
+.quantui-history-recent:hover { text-decoration: underline !important; }
 /* Activity indicator: a status chip, not a button (audit D15). */
 .quantui-status-chip {
     pointer-events: none !important;
@@ -983,6 +1012,24 @@ _HELP_ESC_JS = """
 })();
 """
 
+# Plotly charts drawn while their panel was collapsed measure a zero-width
+# container and fall back to 700 px; `responsive` only reacts to window
+# resizes. Opening a panel or switching tabs now fires one (M-UIPOLISH L4).
+_PLOT_RESIZE_JS = """
+(function(){
+  if (window.__quantuiPlotResize) { return; }
+  window.__quantuiPlotResize = true;
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!t || !t.closest) { return; }
+    if (!t.closest(".jupyter-widget-Collapse-header, .lm-TabBar-tab")) { return; }
+    [120, 450].forEach(function (ms) {
+      setTimeout(function () { window.dispatchEvent(new Event("resize")); }, ms);
+    });
+  }, true);
+})();
+"""
+
 # Bordered 500 px canvas plus its Save-PNG row (measured in Voilà). Was 620 px
 # while an info box sat above the canvas (removed, audit D8).
 _CALC_VIEWER_MIN_HEIGHT = "540px"
@@ -1010,6 +1057,17 @@ _RE_CYCLE = re.compile(
 )
 _RE_CONV = re.compile(r"converged SCF energy\s*=\s*([\-\d\.]+)")
 _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
+# Internal bookkeeping lines hidden from the on-screen log (the saved
+# pyscf.log keeps every line): checkpoint saves are noise to a student, and
+# the status marker reads better as an arrow (M-UIPOLISH L5).
+_RE_LOG_HIDDEN = re.compile(r"^\[checkpoint\] saved.*(?:\n|$)", re.MULTILINE)
+
+
+def _friendly_log_text(text: str) -> str:
+    """Text as shown in the live log: internal markers hidden or softened."""
+    return _RE_LOG_HIDDEN.sub("", text).replace("[QuantUI_STATUS] ", "→ ")
+
+
 # TD-DFT root convergence. PySCF's Davidson solver prints
 # "root %d converged  |r|= ...  e= <excitation energy, Ha>  max|de|= ..." at
 # verbose=5 (DEBUG) — see tddft_calc.py's td.verbose. This is the only
@@ -1223,7 +1281,9 @@ class _LogCapture:
         # Any real output resets the silence timer, so a heartbeat only ever
         # appears in a genuinely quiet stretch.
         self._last_write_t = time.monotonic()
-        self._w.append_stdout(text)
+        shown = _friendly_log_text(text)
+        if shown:
+            self._w.append_stdout(shown)
         self._buf.write(text)
         self._line_buf += text
         while "\n" in self._line_buf:
@@ -1842,6 +1902,7 @@ class QuantUIApp:
         perf_estimate_html: Any
         post_calc_panel: Any
         preopt_preview_label: Any
+        preopt_preview_row: Any
         preopt_preview_btn: Any
         preopt_accept_btn: Any
         preopt_reset_btn: Any
@@ -2102,6 +2163,7 @@ class QuantUIApp:
         app_css = _APP_CSS.removeprefix("<style>").removesuffix("</style>")
         display(HTML(_theme.theme_injection_html(app_css, style_id="quantui-app-css")))
         display(Javascript(_HELP_ESC_JS))
+        display(Javascript(_PLOT_RESIZE_JS))
         # NOTE: 3Dmol.js is loaded offline per-view via py3Dmol's own loader
         # (``viz_assets.make_view`` passes ``js=<vendored data: URI>``), NOT a
         # one-time page bootstrap. A startup-time bootstrap ran py3Dmol's
@@ -2110,18 +2172,35 @@ class QuantUIApp:
         display(
             widgets.VBox(
                 [
-                    self._welcome_header,
+                    # Title and toolbar share one row; the toolbar wraps
+                    # under the title on narrow windows (M-UIPOLISH L2).
                     widgets.HBox(
                         [
-                            self._activity_btn,
-                            self.theme_btn,
-                            self._help_btn,
-                            self._issue_btn,
-                            self._exit_warn_html,
-                            self._exit_cancel_btn,
-                            self._exit_btn,
+                            self._welcome_header,
+                            widgets.HBox(
+                                [
+                                    self._activity_btn,
+                                    self.theme_btn,
+                                    self._help_btn,
+                                    self._issue_btn,
+                                    self._exit_warn_html,
+                                    self._exit_cancel_btn,
+                                    self._exit_btn,
+                                ],
+                                layout=_layout(
+                                    justify_content="flex-end",
+                                    align_items="center",
+                                    flex_wrap="wrap",
+                                    margin="0 0 0 auto",
+                                ),
+                            ),
                         ],
-                        layout=_layout(justify_content="flex-end", margin="0 0 4px"),
+                        layout=_layout(
+                            align_items="center",
+                            flex_wrap="wrap",
+                            margin="0 0 6px",
+                            border_bottom=f"1px solid {_theme.css.BORDER}",
+                        ),
                     ),
                     self._issue_overlay,
                     self._exit_output,
@@ -2694,16 +2773,39 @@ class QuantUIApp:
             self.root_tab.selected_index = order.index(preserve_name)
 
     def _assemble_tabs(self) -> None:
+        # Two columns on wide screens — molecule + viewer | setup + run — so
+        # the right half of the page is no longer empty; they stack below
+        # ~1000 px (M-UIPOLISH L1).
         self._calculate_tab_panel = widgets.VBox(
             [
                 self.step_progress.widget,
-                self.mol_input_container,
-                self.calc_setup_panel,
-                self.run_panel,
-                self._completion_banner,
+                widgets.HBox(
+                    [
+                        widgets.VBox(
+                            [self.mol_input_container],
+                            layout=_layout(flex="1 1 480px", min_width="0"),
+                        ),
+                        widgets.VBox(
+                            [self.calc_setup_panel, self.run_panel],
+                            layout=_layout(flex="1 1 480px", min_width="0"),
+                        ),
+                    ],
+                    layout=_layout(
+                        flex_flow="row wrap", align_items="flex-start", gap="0 28px"
+                    ),
+                ),
             ],
             layout=_layout(padding="8px 0"),
         )
+
+        # "Calculation complete → View Results / Analysis" sits right under the
+        # Run button, not below the log (M-UIPOLISH L5). Built after run_panel.
+        _rp = list(self.run_panel.children)
+        _run_row = next(
+            i for i, c in enumerate(_rp) if self.run_btn in getattr(c, "children", ())
+        )
+        _rp.insert(_run_row + 1, self._completion_banner)
+        self.run_panel.children = tuple(_rp)
 
         # Splice advanced_accordion into results_tab_panel before _to_analysis_btn.
         # It cannot be referenced in _build_results_section because it is built later
@@ -4975,6 +5077,11 @@ class QuantUIApp:
         if getattr(self, "_last_ir_freqs", None):
             self._update_ir_figure(
                 self._ir_mode_toggle.value, self._ir_fwhm_slider.value
+            )
+        # Raman follows, so the two spectra line up (M-UIPOLISH L8).
+        if getattr(self, "_last_raman_acts", None):
+            self._update_raman_figure(
+                self._raman_mode_toggle.value, self._raman_fwhm_slider.value
             )
         if new_val != self._user_settings.viz.ir_axis:
             self._user_settings.viz.ir_axis = str(new_val)

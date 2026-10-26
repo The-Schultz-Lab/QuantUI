@@ -1016,6 +1016,9 @@ def update_raman_figure(app: Any, mode: str, fwhm: float) -> None:
             fwhm=fwhm,
             yaxis_title=y_title,
             labels=getattr(app, "_last_raman_labels", None),
+            # Same direction as the IR panel, so the spectra line up (L8).
+            descending=getattr(getattr(app, "_ir_axis_dd", None), "value", "descending")
+            == "descending",
         )
         app._apply_plotly_theme(fig)
         app._last_raman_fig = fig

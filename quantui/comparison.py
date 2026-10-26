@@ -191,7 +191,11 @@ def comparison_table_html(summaries: Sequence[CalcSummary]) -> str:
         c_str = "✅" if s.converged else ("❌" if s.converged is not None else "—")
         i_str = str(s.n_iterations) if s.n_iterations is not None else "—"
         rows.append(
-            f"<tr>"
+            # Explicit, theme-aware row colours: JupyterLab's rendered-HTML
+            # CSS stripes odd rows white, which left light text unreadable
+            # on every other row in Dark theme (M-UIPOLISH).
+            f"<tr style='background:var(--q-bg-panel, transparent);"
+            f"color:var(--q-text-body, inherit)'>"
             f"<td style='padding:4px 12px;'>{_esc(s.label)}</td>"
             f"<td style='padding:4px 12px;'>{_esc(s.formula)}</td>"
             f"<td style='padding:4px 12px;'>{_esc(s.method)} / {_esc(s.basis)}</td>"
@@ -205,7 +209,8 @@ def comparison_table_html(summaries: Sequence[CalcSummary]) -> str:
     return (
         '<div style="overflow-x:auto;">'
         '<table style="border-collapse:collapse; width:100%; font-size:14px;">'
-        f"<thead style='background:#f0f4f8;'>{header}</thead>"
+        "<thead style='background:var(--q-surface-muted-bg, #f0f4f8);"
+        f"color:var(--q-text-strong, inherit)'>{header}</thead>"
         f"<tbody>{''.join(rows)}</tbody>"
         "</table></div>"
     )

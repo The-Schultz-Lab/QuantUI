@@ -630,7 +630,9 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
                 [app._scan_pick_readout, app._scan_pick_clear_btn],
                 layout=layout_fn(gap="6px", align_items="center"),
             ),
-            app._scan_coord_summary,
+            # The coordinate summary repeated the atom dropdowns; the "± around
+            # current" range tool now sits in a closed section, with Suggest
+            # range beside Start/Stop (M-UIPOLISH L9).
             app._scan_current_value_html,
             widgets.HBox(
                 [
@@ -639,21 +641,11 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
                     app._scan_unit_lbl,  # unit of Start/Stop, not of Points
                     app._scan_steps,
                     app._scan_grid_dd,
+                    app._scan_suggest_btn,
                 ],
-                layout=layout_fn(gap="4px", align_items="center"),
+                layout=layout_fn(gap="4px", align_items="center", flex_wrap="wrap"),
             ),
-            widgets.HBox(
-                [
-                    app._scan_around_margin,
-                    app._scan_around_margin_unit,
-                    app._scan_suggest_around_btn,
-                ],
-                layout=layout_fn(gap="6px", align_items="center"),
-            ),
-            widgets.HBox(
-                [app._scan_suggest_btn],
-                layout=layout_fn(gap="6px"),
-            ),
+            _scan_more_range_options(app, layout_fn),
             widgets.HBox(
                 [app.fmax_fi, app.max_steps_si],
                 layout=layout_fn(gap="8px"),
@@ -852,6 +844,29 @@ def _sync_scan_around_margin_ui(app: Any, scan_type: str | None = None) -> None:
 def refresh_pes_seed_options(app: Any) -> None:
     """Populate the PES seed-geometry dropdown from saved geo opts."""
     _refresh_seed_options(app, app._scan_seed_dd)
+
+
+def _scan_more_range_options(app: Any, layout_fn: Any) -> Any:
+    """Closed "More range options" section holding the ± window tool."""
+    acc = getattr(app, "_scan_more_range_acc", None)
+    if acc is None:
+        acc = widgets.Accordion(
+            children=[
+                widgets.HBox(
+                    [
+                        app._scan_around_margin,
+                        app._scan_around_margin_unit,
+                        app._scan_suggest_around_btn,
+                    ],
+                    layout=layout_fn(gap="6px", align_items="center", flex_wrap="wrap"),
+                )
+            ],
+            layout=layout_fn(margin="4px 0"),
+        )
+        acc.set_title(0, "More range options (± around the current value)")
+        acc.selected_index = None
+        app._scan_more_range_acc = acc
+    return acc
 
 
 def refresh_pes_scan_widgets(
@@ -1685,8 +1700,22 @@ def on_compare(app: Any, btn: Any, *, layout_fn: Any) -> None:
                 import matplotlib.pyplot as plt
 
                 fig = plot_comparison(summaries)
-                display(fig)
+                # As a PNG: display(fig) printed "<Figure size 1000x500 with
+                # 2 Axes>" under Voila, where no inline backend is active.
+                import base64 as _b64
+                import io as _io
+
+                _buf = _io.BytesIO()
+                fig.savefig(_buf, format="png", dpi=100, bbox_inches="tight")
                 plt.close(fig)
+                _png = _b64.b64encode(_buf.getvalue()).decode("ascii")
+                display(
+                    HTML(
+                        f'<img src="data:image/png;base64,{_png}" '
+                        'style="max-width:100%;background:#ffffff;'
+                        'border-radius:6px;margin:10px 0" alt="Comparison chart">'
+                    )
+                )
             except Exception:
                 pass
         if valid_dirs:

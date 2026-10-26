@@ -312,7 +312,10 @@ class TestMoleculeInputCollapse:
         # so the panel vanished as soon as there was a molecule to edit.
         app = QuantUIApp()
         kept = (app._edit_accordion, app._mol_calc_png_inbox, app.viz_output)
-        assert all(w in app.mol_input_container.children for w in kept)
+        # Before a molecule exists only the viewer slots are shown; Edit
+        # Structure appears with the molecule (M-UIPOLISH L11).
+        assert app._mol_calc_png_inbox in app.mol_input_container.children
+        assert app._edit_accordion not in app.mol_input_container.children
         app._set_molecule(_water())
         assert all(w in app.mol_input_container.children for w in kept)
         app._on_expand_mol_input(None)
@@ -3437,7 +3440,14 @@ class TestResultsTab:
 
     def test_results_tab_contains_result_output(self):
         app = QuantUIApp()
-        assert app.result_output in app.results_tab_panel.children
+
+        def _walk(w):
+            yield w
+            for c in getattr(w, "children", ()):
+                yield from _walk(c)
+
+        # Nested in the card | viewer row since M-UIPOLISH L1.
+        assert any(w is app.result_output for w in _walk(app.results_tab_panel))
 
     def test_to_analysis_btn_initially_hidden(self):
         app = QuantUIApp()

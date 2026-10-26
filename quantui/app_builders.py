@@ -91,6 +91,43 @@ def _category_label(cat: str) -> str:
     return _CATEGORY_LABELS.get(cat, cat.replace("-", " ").title())
 
 
+def side_by_side(
+    left: list[Any],
+    right: list[Any],
+    *,
+    layout_fn: Any,
+    left_basis: str = "600px",
+    right_basis: str = "360px",
+) -> Any:
+    """Two columns that wrap into one on narrow screens (M-UIPOLISH L1).
+
+    Viewers sat at ~600 px with everything else stacked underneath, leaving
+    the right half of a wide window empty.
+    """
+    return widgets.HBox(
+        [
+            widgets.VBox(
+                left, layout=layout_fn(flex=f"0 1 {left_basis}", min_width="0")
+            ),
+            widgets.VBox(
+                right, layout=layout_fn(flex=f"1 1 {right_basis}", min_width="0")
+            ),
+        ],
+        layout=layout_fn(flex_flow="row wrap", align_items="flex-start", gap="0 24px"),
+    )
+
+
+def _collapsed(title: str, children: list[Any], *, layout_fn: Any) -> Any:
+    """A closed one-section accordion for rarely used options."""
+    acc = widgets.Accordion(
+        children=[widgets.VBox(children, layout=layout_fn(padding="4px"))],
+        layout=layout_fn(margin="8px 0 0"),
+    )
+    acc.set_title(0, title)
+    acc.selected_index = None
+    return acc
+
+
 def library_result_options(query: str = "", category: str | None = None):
     """Build (label, id) options for the library results dropdown + a count note.
 
@@ -308,7 +345,7 @@ def build_status_panel(
         min=5,
         max=60,
         step=1,
-        description="Vib fps:",
+        description="",
         style={"description_width": "60px"},
         layout=layout_fn(width="320px", margin="6px 0 0 0"),
         readout=True,
@@ -781,26 +818,66 @@ def build_history_section(
                 ],
                 layout=layout_fn(align_items="center", gap="6px"),
             ),
-            widgets.HBox(
-                [_facet_label("Type:"), *app._history_calc_chips.values()],
-                layout=layout_fn(align_items="center", gap="4px", flex_wrap="wrap"),
-            ),
-            widgets.HBox(
-                [app.history_method_dd, app.history_basis_dd],
-                layout=layout_fn(align_items="center", gap="8px"),
-            ),
-            widgets.HBox(
+            # Type / method / date / status facets in a closed section: four
+            # rows of filters sat above the result picker (M-UIPOLISH L13).
+            _collapsed(
+                "More filters (type, method, basis, date, status)",
                 [
-                    app.history_date_from,
-                    app.history_date_to,
-                    _facet_label("Status:", "55px"),
-                    *app._history_status_chips.values(),
+                    widgets.HBox(
+                        [_facet_label("Type:"), *app._history_calc_chips.values()],
+                        layout=layout_fn(
+                            align_items="center", gap="4px", flex_wrap="wrap"
+                        ),
+                    ),
+                    widgets.HBox(
+                        [app.history_method_dd, app.history_basis_dd],
+                        layout=layout_fn(align_items="center", gap="8px"),
+                    ),
+                    widgets.HBox(
+                        [
+                            app.history_date_from,
+                            app.history_date_to,
+                            _facet_label("Status:", "55px"),
+                            *app._history_status_chips.values(),
+                        ],
+                        layout=layout_fn(
+                            align_items="center", gap="6px", flex_wrap="wrap"
+                        ),
+                    ),
                 ],
-                layout=layout_fn(align_items="center", gap="6px", flex_wrap="wrap"),
+                layout_fn=layout_fn,
             ),
         ],
         layout=layout_fn(margin="0 0 8px", gap="4px"),
     )
+
+    # The newest results as one-click buttons above the full picker.
+    app._history_recent_box = widgets.VBox(
+        layout=layout_fn(margin="0 0 8px", align_items="flex-start")
+    )
+
+    def _sync_recent(_change: Any = None) -> None:
+        rows: list[Any] = []
+        for label, value in list(app.past_dd.options)[:8]:
+            if not value:
+                continue
+            btn = widgets.Button(
+                description=str(label),
+                tooltip="Open this result",
+                layout=layout_fn(width="auto", max_width="100%", margin="1px 0"),
+            )
+            btn.add_class("quantui-history-recent")
+            btn.on_click(lambda _b, v=value: setattr(app.past_dd, "value", v))
+            rows.append(btn)
+        if len(rows) > 6:
+            rows = rows[:6]
+        head = widgets.HTML(
+            f'<div style="font-size:13px;color:{_theme.css.TEXT_SECONDARY};margin:2px 0 4px">'
+            "Recent</div>"
+        )
+        app._history_recent_box.children = tuple([head] + rows) if rows else ()
+
+    app.past_dd.observe(_sync_recent, names="options")
 
     # The History tab is now purely the result-browser. Performance stats
     # + Calibrate accordions moved to the System Settings tab — see below —
@@ -809,9 +886,10 @@ def build_history_section(
         [
             widgets.HTML(
                 f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:0 0 8px">'
-                "Calculations are saved automatically. Filter below, then select "
-                "one to view its results.</p>"
+                "Calculations are saved automatically. Pick a recent one, or search "
+                "and choose below.</p>"
             ),
+            app._history_recent_box,
             app._history_filter_box,
             widgets.HBox(
                 [
@@ -996,7 +1074,7 @@ def build_shared_widgets(
     )
 
     app.step_progress = step_progress_cls(
-        ["Choose molecule", "Set method", "Run", "Results"]
+        ["Choose molecule", "Set method", "Run", "Results"], horizontal=True
     )
     app.step_progress.start(0)
 
@@ -1133,9 +1211,9 @@ def build_shared_widgets(
     # calculation" checkbox below, which is a full DFT/HF opt.)
     app.preopt_preview_label = widgets.HTML(
         f'<span style="font-size:13px;color:{_theme.css.TEXT_BODY}">'
-        "Classical pre-optimize geometry</span>"
-        f'<span style="font-size:12px;color:{_theme.css.TEXT_SUBTLE}"> &mdash; fast MMFF/UFF '
-        "cleanup of a rough structure</span>"
+        "Quick clean-up (force field)</span>"
+        f'<span style="font-size:12px;color:{_theme.css.TEXT_SUBTLE}"> &mdash; MMFF/UFF, '
+        "for rough structures</span>"
     )
     # Interactive pre-opt: run the bonded-FF pre-opt on
     # demand, watch it relax in-place, then keep or revert.
@@ -1192,6 +1270,10 @@ def build_shared_widgets(
             app._preopt_actions_box,
         ],
         layout=layout_fn(display="none", margin="6px 0 4px", max_width="480px"),
+    )
+    app.preopt_preview_row = widgets.HBox(
+        [app.preopt_preview_label, app.preopt_preview_btn],
+        layout=layout_fn(align_items="center", gap="10px", margin="6px 0 0"),
     )
 
     from quantui.config import SOLVENT_OPTIONS as _SOLVENT_OPTS
@@ -1864,8 +1946,7 @@ def build_welcome_header(app: Any, *, layout_fn: Any = None) -> None:
             align_items="center",
             justify_content="flex-start",
             padding="8px 4px 8px",
-            margin="0 0 4px",
-            border_bottom=f"1px solid {_theme.css.BORDER}",
+            margin="0",
         ),
     )
 
@@ -2100,11 +2181,18 @@ def mol_input_children(
         app.viz_output,
         app._mol_calc_png_status,
     ]
+    # Viewer controls, Edit Structure and the force-field clean-up act on a
+    # molecule; before one is loaded they were just clutter (M-UIPOLISH L11).
+    if getattr(app, "_molecule", None) is None:
+        return children
     if app.viz_backend_toggle is not None:
         children.append(app.viz_backend_toggle)
     if visualization_available:
         children.append(app.viz_controls_box)
     children.append(app._edit_accordion)
+    # The clean-up changes the geometry, so it lives with the molecule, not
+    # in Calculation Setup (M-UIPOLISH L10).
+    children += [app.preopt_preview_row, app.preopt_preview_box]
     return children
 
 
@@ -2158,11 +2246,6 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
             ),
             app._freq_preopt_cb,
             app.calc_extra_opts,
-            widgets.HBox(
-                [app.preopt_preview_label, app.preopt_preview_btn],
-                layout=layout_fn(align_items="center", gap="10px"),
-            ),
-            app.preopt_preview_box,
             widgets.HBox(
                 [app.solvent_cb, app.solvent_dd],
                 layout=layout_fn(align_items="center", gap="4px"),
@@ -2409,8 +2492,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._thermo_box = widgets.VBox(
         [
             widgets.HTML(
-                f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY};'
-                'font-weight:bold">Thermochemistry</span>'
+                f'<div style="font-size:15px;color:{_theme.css.TEXT_STRONG};'
+                'font-weight:600;margin:4px 0 4px">Thermochemistry</div>'
             ),
             widgets.HBox([app._thermo_T, app._thermo_P]),
             app._thermo_html,
@@ -2484,14 +2567,21 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         children=[
             widgets.VBox(
                 [
-                    vib_mode_row,
-                    vib_appearance_row,
-                    app._vib_apply_mode_btn,
-                    app.vib_output,
-                    vib_export_row,
-                    app._vib_png_status,
-                    app._vib_mode_table,
-                    app._thermo_box,
+                    # Animation on the left; mode table and thermochemistry
+                    # beside it instead of far below (M-UIPOLISH L1, L7).
+                    side_by_side(
+                        [
+                            vib_mode_row,
+                            vib_appearance_row,
+                            app._vib_apply_mode_btn,
+                            app.vib_output,
+                            vib_export_row,
+                            app._vib_png_status,
+                        ],
+                        [app._vib_mode_table, app._thermo_box],
+                        layout_fn=layout_fn,
+                        left_basis="500px",
+                    ),
                     app._vib_js_bridge,
                     app._vib_png_inbox,
                 ],
@@ -2543,7 +2633,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         description="Axis:",
         style={"description_width": "40px"},
         layout=layout_fn(width="270px", margin="0 8px 0 0"),
-        tooltip="Wavenumber direction; 4000 → 400 is the FTIR convention",
+        tooltip="Wavenumber direction for the IR and Raman plots; 4000 → 400 is the FTIR convention",
     )
 
     ir_controls = widgets.HBox(
@@ -2726,10 +2816,6 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._orb_iso_output = widgets.Output()
     app._orb_iso_controls = widgets.VBox(
         [
-            widgets.HTML(
-                f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY};font-weight:bold">'
-                "Isosurface:</span>"
-            ),
             app._iso_surface_dd,
             app._orb_spin_toggle,
             app._orb_toggle,
@@ -2984,27 +3070,42 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 ],
                 layout=layout_fn(align_items="center", gap="6px"),
             ),
-            app._orb_iso_output,
+            # Surface controls beside the viewer; PNG options folded away
+            # (M-UIPOLISH L1).
+            side_by_side(
+                [app._orb_iso_output],
+                [
+                    app._iso_resolution_dd,
+                    widgets.HBox(
+                        [app._iso_isovalue_slider, app._iso_enclosed_label],
+                        layout=layout_fn(align_items="center", flex_wrap="wrap"),
+                    ),
+                    app._iso_esp_range_slider,
+                    app._iso_esp_legend,
+                    app._iso_opacity_slider,
+                    app._iso_wireframe_cb,
+                    app._iso_colors_dd,
+                    _collapsed(
+                        "PNG export options",
+                        [
+                            widgets.HTML(
+                                f'<p style="color:{_theme.css.TEXT_SECONDARY};'
+                                'font-size:12px;margin:0 0 4px">Save PNG (under the '
+                                "viewer) captures the view as you have rotated it.</p>"
+                            ),
+                            app._iso_png_name,
+                            app._iso_png_dpi,
+                            app._iso_png_transparent,
+                        ],
+                        layout_fn=layout_fn,
+                    ),
+                ],
+                layout_fn=layout_fn,
+                left_basis="760px",
+                right_basis="320px",
+            ),
             app._orb_gallery_box,
             app._orb_gallery_output,
-            app._iso_resolution_dd,
-            widgets.HBox(
-                [app._iso_isovalue_slider, app._iso_enclosed_label],
-                layout=layout_fn(align_items="center"),
-            ),
-            app._iso_esp_range_slider,
-            app._iso_esp_legend,
-            app._iso_opacity_slider,
-            app._iso_wireframe_cb,
-            app._iso_colors_dd,
-            widgets.HTML(
-                f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:12px;margin:8px 0 2px">'
-                "<b>PNG export</b> — the Save PNG button under the viewer "
-                "captures the view exactly as you have rotated it.</p>"
-            ),
-            app._iso_png_name,
-            app._iso_png_dpi,
-            app._iso_png_transparent,
             app._orb_png_inbox,
             app._iso_js_bridge,
         ],
@@ -3294,18 +3395,26 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         ],
         layout=layout_fn(align_items="center", flex_wrap="wrap", margin="0 0 4px 0"),
     )
+    # Viewer beside its controls and the charge table; the bar chart below
+    # is capped so 3 atoms no longer get 1300 px (M-UIPOLISH L1, L6).
+    app._mulliken_fig.layout.max_width = "720px"
     app._mulliken_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
                 [
                     mulliken_header,
-                    app._mulliken_mol_output,
-                    mulliken_overlay_row,
-                    app._mulliken_dipole_caption,
-                    app._mulliken_vividness_slider,
-                    app._mulliken_overlay_note,
-                    app._mulliken_summary,
-                    app._mulliken_table,
+                    side_by_side(
+                        [app._mulliken_mol_output],
+                        [
+                            mulliken_overlay_row,
+                            app._mulliken_dipole_caption,
+                            app._mulliken_vividness_slider,
+                            app._mulliken_overlay_note,
+                            app._mulliken_summary,
+                            app._mulliken_table,
+                        ],
+                        layout_fn=layout_fn,
+                    ),
                     app._mulliken_fig,
                     app._populations_js_bridge,
                 ],
@@ -3379,14 +3488,29 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._mol_results_png_inbox.add_class(_MOL_RESULTS_PNG_INBOX_CLASS)
     app._mol_results_png_status = widgets.HTML(value="")
 
+    # Result card beside the structure (M-UIPOLISH L1); stacks when narrow.
     app.results_tab_panel = widgets.VBox(
         [
-            app.result_output,
-            app._viz_label,
-            app.result_viz_output,
-            app._mol_results_png_status,
-            app._mol_results_png_inbox,
-            app._result_dir_label,
+            widgets.HBox(
+                [
+                    widgets.VBox(
+                        [app.result_output, app._result_dir_label],
+                        layout=layout_fn(flex="1 1 460px", min_width="0"),
+                    ),
+                    widgets.VBox(
+                        [
+                            app._viz_label,
+                            app.result_viz_output,
+                            app._mol_results_png_status,
+                            app._mol_results_png_inbox,
+                        ],
+                        layout=layout_fn(flex="0 1 620px", min_width="0"),
+                    ),
+                ],
+                layout=layout_fn(
+                    flex_flow="row wrap", align_items="flex-start", gap="0 24px"
+                ),
+            ),
             app._to_analysis_btn,
         ],
         layout=layout_fn(padding="8px 0"),
@@ -3502,7 +3626,9 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 f'<span style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};font-style:italic">'
                 "Rendering with: —</span>"
             ),
-            layout=layout_fn(margin="0 0 8px 0"),
+            # Hidden: it repeated the backend toggle right above it (the
+            # widget is still kept up to date for diagnostics).
+            layout=layout_fn(margin="0 0 8px 0", display="none"),
         )
         ana_backend_row = widgets.VBox(
             [
@@ -3545,16 +3671,23 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._build_ana_switcher()
 
+    # Viewer beside Measurement (M-UIPOLISH L1).
+    ana_right: list[Any] = [app._measure_panel]
+    if ana_backend_row is not None:
+        ana_right.append(ana_backend_row)
     ana_children = [
         app._analysis_scroll_bridge,
         app._analysis_context_lbl,
-        app._analysis_mol_output,
-        app._mol_analysis_png_status,
-        app._mol_analysis_png_inbox,
-        app._measure_panel,
+        side_by_side(
+            [
+                app._analysis_mol_output,
+                app._mol_analysis_png_status,
+                app._mol_analysis_png_inbox,
+            ],
+            ana_right,
+            layout_fn=layout_fn,
+        ),
     ]
-    if ana_backend_row is not None:
-        ana_children.append(ana_backend_row)
     ana_children.extend(
         [
             app._analysis_empty_html,
@@ -3586,12 +3719,10 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
 
 def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) -> None:
     """Build compare tab widgets and export accordion."""
-    app.compare_select = widgets.SelectMultiple(
-        options=[("(no saved results)", "")],
-        rows=8,
-        description="",
-        layout=layout_fn(width="100%"),
-    )
+    from quantui.checklist_widget import CheckList
+
+    # Checkboxes, not a Ctrl/Shift-click list box (M-UIPOLISH L12).
+    app.compare_select = CheckList(options=[("(no saved results)", "")])
     app.compare_refresh_btn = widgets.Button(
         description="Refresh",
         button_style="",
@@ -3616,10 +3747,8 @@ def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) ->
     app.compare_panel = widgets.VBox(
         [
             widgets.HTML(
-                '<h3 style="margin:14px 0 6px">Compare Calculations</h3>'
-                f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:0 0 8px">'
-                "Select two or more saved calculations to compare side-by-side. "
-                "Hold Ctrl (or ⌘) and click to select several; Shift-click selects a range.</p>"
+                f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:4px 0 8px">'
+                "Tick two or more saved calculations to compare them side by side.</p>"
             ),
             widgets.HBox([app.compare_refresh_btn]),
             app.compare_select,
@@ -4071,6 +4200,9 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
             margin="0 0 8px",
         ),
     )
+    # A side drawer over the app instead of a block that pushed every tab
+    # down (M-UIPOLISH L14); see .quantui-drawer in app._APP_CSS.
+    app.help_tab_panel.add_class("quantui-drawer")
 
 
 def build_issue_widgets(app: Any, *, layout_fn: Any) -> None:
@@ -4131,3 +4263,4 @@ def build_issue_widgets(app: Any, *, layout_fn: Any) -> None:
             margin="0 0 6px",
         ),
     )
+    app._issue_overlay.add_class("quantui-drawer")

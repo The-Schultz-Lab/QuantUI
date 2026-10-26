@@ -33,11 +33,13 @@ def plot_raman_spectrum(
     mode: str = "stick",
     yaxis_title: str = "Raman Activity (Å⁴/amu)",
     labels: Optional[Sequence[Optional[str]]] = None,
+    descending: bool = False,
 ) -> go.Figure:
     """Return a Plotly figure for the Raman scattering spectrum.
 
     *labels* (optional, aligned with *frequencies*) adds each mode's
-    symmetry to the stick hover, as in :func:`~quantui.ir_plot.plot_ir_spectrum`.
+    symmetry to the stick hover, and *descending* draws the axis high → low,
+    both as in :func:`~quantui.ir_plot.plot_ir_spectrum`.
     """
     real_pairs = [(f, a) for f, a in zip(frequencies, activities) if f > 0]
     sym = _peak_labels(frequencies, labels)
@@ -50,7 +52,7 @@ def plot_raman_spectrum(
     _base_layout = dict(
         xaxis=dict(
             title="Wavenumber (cm⁻¹)",
-            range=xrange,
+            range=xrange[::-1] if descending else xrange,
             showgrid=True,
             gridcolor="#e5e7eb",
         ),

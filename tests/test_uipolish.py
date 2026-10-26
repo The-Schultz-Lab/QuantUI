@@ -293,3 +293,119 @@ class TestPhase2CopyAndStyle:
             "converged": True,
         }
         assert "data:image/png" not in format_past_result(data, tmp_path)
+
+
+def _walk(w):
+    yield w
+    for c in getattr(w, "children", ()):
+        yield from _walk(c)
+
+
+class TestPhase3Layout:
+    def test_one_line_stepper(self, app):
+        html = app.step_progress.widget.value
+        assert "Step 1:" not in html and "›" in html
+
+    def test_calculate_tab_has_two_columns(self, app):
+        row = app._calculate_tab_panel.children[1]
+        left, right = row.children
+        assert app.mol_input_container in left.children
+        assert app.calc_setup_panel in right.children
+        assert row.layout.flex_flow == "row wrap"
+
+    def test_completion_banner_sits_under_run(self, app):
+        kids = list(app.run_panel.children)
+        run_row = next(
+            i for i, c in enumerate(kids) if app.run_btn in getattr(c, "children", ())
+        )
+        assert kids[run_row + 1] is app._completion_banner
+
+    def test_molecule_tools_appear_with_a_molecule(self, app):
+        from quantui.molecule import Molecule
+
+        kids = app.mol_input_container.children
+        assert app._edit_accordion not in kids
+        assert app.preopt_preview_row not in kids
+        app._set_molecule(Molecule(["O", "H", "H"], WATER_YZ))
+        kids = app.mol_input_container.children
+        assert app._edit_accordion in kids and app.preopt_preview_row in kids
+        assert all(app.preopt_preview_row is not w for w in _walk(app.calc_setup_panel))
+
+    def test_available_panels_listed_first(self, app):
+        from quantui.app_analysis import order_analysis_panels
+
+        app._ana_available = {"IR Spectrum"}
+        order_analysis_panels(app)
+        kids = list(app.analysis_tab_panel.children)
+        assert kids.index(app._ir_accordion) < kids.index(app._orb_accordion)
+        assert app._ana_unavail_divider.layout.display == ""
+
+    def test_compare_uses_checkboxes(self, app):
+        from quantui.checklist_widget import CheckList
+
+        sel = app.compare_select
+        assert isinstance(sel, CheckList)
+        sel.options = [("a", "/a"), ("b", "/b"), ("(note)", "")]
+        sel.children[1].value = True
+        assert sel.value == ("/b",)
+        sel.value = ()
+        assert sel.value == ()
+
+    def test_history_recent_buttons_follow_the_picker(self, app):
+        app.past_dd.options = [("(select)", ""), ("first", "/r1"), ("second", "/r2")]
+        btns = [c for c in app._history_recent_box.children if hasattr(c, "on_click")]
+        assert [b.description for b in btns] == ["first", "second"]
+
+    def test_help_and_report_are_drawers(self, app):
+        assert "quantui-drawer" in app.help_tab_panel._dom_classes
+        assert "quantui-drawer" in app._issue_overlay._dom_classes
+
+    def test_raman_follows_ir_axis(self):
+        from quantui.raman_plot import plot_raman_spectrum
+
+        fig = plot_raman_spectrum([1000.0, 2000.0], [1.0, 2.0], descending=True)
+        lo, hi = fig.layout.xaxis.range
+        assert lo > hi
+
+    def test_live_log_hides_bookkeeping(self):
+        from quantui.app import _friendly_log_text
+
+        text = "[checkpoint] saved — status=complete\n[QuantUI_STATUS] Hessian\nE=1\n"
+        assert _friendly_log_text(text) == "→ Hessian\nE=1\n"
+
+    def test_plots_resize_when_panels_open(self):
+        from quantui.app import _PLOT_RESIZE_JS
+
+        assert "jupyter-widget-Collapse-header" in _PLOT_RESIZE_JS
+        assert 'new Event("resize")' in _PLOT_RESIZE_JS
+
+    def test_compare_table_rows_are_theme_coloured(self):
+        from types import SimpleNamespace
+
+        from quantui.comparison import comparison_table_html
+
+        s = SimpleNamespace(
+            label="A",
+            formula="H2O",
+            method="RHF",
+            basis="STO-3G",
+            energy_hartree=-75.0,
+            homo_lumo_gap_ev=1.0,
+            converged=True,
+            n_iterations=5,
+        )
+        assert "var(--q-bg-panel" in comparison_table_html([s])
+
+    def test_side_by_side_viewers(self, app):
+        for widget in (app._mulliken_mol_output, app.vib_output, app._orb_iso_output):
+            parents = [
+                w
+                for w in _walk(app.analysis_tab_panel)
+                if widget in getattr(w, "children", ())
+            ]
+            row = [
+                w
+                for w in _walk(app.analysis_tab_panel)
+                if parents[0] in getattr(w, "children", ())
+            ][0]
+            assert row.layout.flex_flow == "row wrap"

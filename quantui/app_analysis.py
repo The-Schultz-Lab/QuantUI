@@ -353,12 +353,42 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     source_suffix = " (from History)" if ctx.source == "history" else ""
     heading = _analysis_heading_label(ctx)
     app._analysis_context_lbl.value = (
-        f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:4px 0 12px">'
-        f"Analysing: {_html_mod.escape(heading)}{source_suffix}</p>"
+        f'<p style="color:{_theme.css.TEXT_STRONG};font-size:15px;font-weight:600;'
+        f'margin:4px 0 12px">Analysing: {_html_mod.escape(heading)}'
+        f'<span style="font-weight:400;color:{_theme.css.TEXT_SECONDARY}">'
+        f"{source_suffix}</span></p>"
     )
+    order_analysis_panels(app)
     has_any = bool(app._ana_available)
     app._to_analysis_btn.layout.display = "" if has_any else "none"
     app._analysis_empty_html.layout.display = "none" if has_any else ""
+
+
+def order_analysis_panels(app: Any) -> None:
+    """Panels with data first; the rest after a "Not available" divider.
+
+    Unavailable panels used to sit in fixed order among the useful ones, so a
+    Frequency result showed "needs PES Scan" between Populations and the
+    vibrations (M-UIPOLISH L3).
+    """
+    panel = getattr(app, "analysis_tab_panel", None)
+    accordions = list(getattr(app, "_ana_accordions", []) or [])
+    if panel is None or not accordions:
+        return
+    divider = getattr(app, "_ana_unavail_divider", None)
+    if divider is None:
+        divider = widgets.HTML(
+            f'<div style="margin:18px 0 6px;font-size:13px;color:{_theme.css.TEXT_MUTED}">'
+            "Not available for this result</div>"
+        )
+        app._ana_unavail_divider = divider
+    available: set = getattr(app, "_ana_available", set())
+    names = list(app._ana_panel_names)
+    have = [a for n, a in zip(names, accordions) if n in available]
+    lack = [a for n, a in zip(names, accordions) if n not in available]
+    keep = [c for c in panel.children if c not in accordions and c is not divider]
+    divider.layout.display = "" if (have and lack) else "none"
+    panel.children = tuple(keep + have + [divider] + lack)
 
 
 def pop_energies(app: Any, ctx: Any) -> bool:
