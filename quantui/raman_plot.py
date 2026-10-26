@@ -17,12 +17,12 @@ not a bug.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 import numpy as np
 import plotly.graph_objects as go
 
-from quantui.ir_plot import _default_xrange, _grid_for_range
+from quantui.ir_plot import _default_xrange, _grid_for_range, _peak_labels
 
 
 def plot_raman_spectrum(
@@ -32,9 +32,15 @@ def plot_raman_spectrum(
     fwhm: float = 20.0,
     mode: str = "stick",
     yaxis_title: str = "Raman Activity (Å⁴/amu)",
+    labels: Optional[Sequence[Optional[str]]] = None,
 ) -> go.Figure:
-    """Return a Plotly figure for the Raman scattering spectrum."""
+    """Return a Plotly figure for the Raman scattering spectrum.
+
+    *labels* (optional, aligned with *frequencies*) adds each mode's
+    symmetry to the stick hover, as in :func:`~quantui.ir_plot.plot_ir_spectrum`.
+    """
     real_pairs = [(f, a) for f, a in zip(frequencies, activities) if f > 0]
+    sym = _peak_labels(frequencies, labels)
     # AUDIT additional-concerns — see ir_plot.py: the x-range must cover
     # every real (positive) frequency present, not just the fixed
     # 400-4000 cm⁻¹ default, or a real high-frequency mode (O-H stretches
@@ -111,9 +117,12 @@ def plot_raman_spectrum(
                 marker=dict(color="#047857", size=6),
                 name="Raman (peaks)",
                 showlegend=False,
+                customdata=sym,
                 hovertemplate=(
                     "Wavenumber: %{x:.1f} cm⁻¹"
-                    "<br>Activity: %{y:.2f} Å⁴/amu<extra></extra>"
+                    "<br>Activity: %{y:.2f} Å⁴/amu"
+                    + ("%{customdata}" if sym else "")
+                    + "<extra></extra>"
                 ),
             )
         )

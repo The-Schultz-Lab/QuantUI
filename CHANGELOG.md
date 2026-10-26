@@ -9,6 +9,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Vibrational-mode symmetry labels** (M-SPECTRA2 SPC2.4) — after a Frequency
+  calculation each normal mode gets its irreducible representation: a *Sym.*
+  column and a Γvib caption in the Vibrational mode table (NH₃: 2A₁ + 2E), the
+  label in the mode dropdown, and a *Symmetry* line in the IR and Raman stick
+  hovers. Works for live results and History reloads (computed from the saved
+  displacements). Full-group labels for abelian groups, C3v, D3h, D3, D3d, D6h,
+  Td, Oh and linear molecules (σ/π); other groups (e.g. D4h) show labels in
+  PySCF's computational subgroup, said so in the caption.
+  `quantui.symmetry.label_mode_irreps()`.
 - **Diffuse basis sets** — `6-31+G*`, `6-31++G**`, `aug-cc-pVDZ` and
   `def2-SVPD` join the basis menu (each next to the set it extends), for
   anions, radical anions and weakly bound species. Available with PySCF in the

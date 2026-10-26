@@ -29,7 +29,7 @@ is what students and most external QM software display by default.
 
 from __future__ import annotations
 
-from typing import List, Optional, cast
+from typing import List, Optional, Sequence, cast
 
 import numpy as np
 import plotly.graph_objects as go
@@ -72,6 +72,21 @@ def _grid_for_range(xrange: List[float]) -> np.ndarray:
     return cast(np.ndarray, np.arange(xrange[0], xrange[1] + 1.0, 1.0))
 
 
+def _peak_labels(
+    frequencies: Sequence[float], labels: Optional[Sequence[Optional[str]]]
+) -> Optional[List[str]]:
+    """Hover suffix per plotted (positive-frequency) peak, or ``None``."""
+    if labels is None or len(labels) != len(frequencies) or not any(labels):
+        return None
+    from quantui.symmetry import html_irrep
+
+    return [
+        f"<br>Symmetry: {html_irrep(lbl)}" if lbl else ""
+        for f, lbl in zip(frequencies, labels)
+        if f > 0
+    ]
+
+
 def plot_ir_spectrum(
     frequencies: List[float],
     intensities: List[float],
@@ -80,6 +95,7 @@ def plot_ir_spectrum(
     mode: str = "stick",
     yaxis_title: str = "IR Intensity (km/mol)",
     descending: bool = False,
+    labels: Optional[Sequence[Optional[str]]] = None,
 ) -> go.Figure:
     """Return a Plotly figure for the IR absorption spectrum.
 
@@ -94,12 +110,16 @@ def plot_ir_spectrum(
             ``"broadened"`` — Lorentzian convolution of all peaks.
         descending: Draw the wavenumber axis high → low (4000 → 400 cm⁻¹),
             the FTIR convention. Default ``False`` (low → high).
+        labels: Optional symmetry label per mode, aligned with
+            *frequencies* (``None`` entries allowed); shown in the stick
+            hover (SPC2.4).
 
     Returns:
         :class:`plotly.graph_objects.Figure` ready for display or wrapping
         in a :class:`~plotly.graph_objects.FigureWidget`.
     """
     real_pairs = [(f, i) for f, i in zip(frequencies, intensities) if f > 0]
+    sym = _peak_labels(frequencies, labels)
     freqs_real_for_range = tuple(f for f, _ in real_pairs)
     xrange = _default_xrange(freqs_real_for_range)
 
@@ -176,9 +196,12 @@ def plot_ir_spectrum(
                 marker=dict(color="#1d4ed8", size=6),
                 name="IR (peaks)",
                 showlegend=False,
+                customdata=sym,
                 hovertemplate=(
                     "Wavenumber: %{x:.1f} cm⁻¹"
-                    "<br>Intensity: %{y:.2f} km/mol<extra></extra>"
+                    "<br>Intensity: %{y:.2f} km/mol"
+                    + ("%{customdata}" if sym else "")
+                    + "<extra></extra>"
                 ),
             )
         )

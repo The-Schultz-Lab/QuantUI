@@ -731,6 +731,19 @@ def _show_thermochemistry(app: Any, ctx: Any, freq_stub: Any, mol: Any) -> None:
         pass
 
 
+def _mode_symmetry_inputs(ctx: Any) -> dict:
+    """Saved displacements + geometry, for mode symmetry labels (SPC2.4)."""
+    ir = ctx.spectra_data.get("ir", {})
+    mol = ctx.spectra_data.get("molecule", {})
+    atoms, coords = mol.get("atoms"), mol.get("coords")
+    if not ir.get("displacements") or not atoms or not coords:
+        return {}
+    return {
+        "displacements": ir["displacements"],
+        "pyscf_mol_atom": list(zip(atoms, coords)),
+    }
+
+
 def pop_ir_spectrum(app: Any, ctx: Any) -> bool:
     """Populate IR panel from live or history frequency data."""
     if ctx.live_result is not None:
@@ -743,6 +756,7 @@ def pop_ir_spectrum(app: Any, ctx: Any) -> bool:
         freq_stub = _types_mod.SimpleNamespace(
             frequencies_cm1=freqs,
             ir_intensities=ir.get("ir_intensities") or [],
+            **_mode_symmetry_inputs(ctx),
         )
     return bool(app._show_ir_spectrum(freq_stub))
 
@@ -768,6 +782,7 @@ def pop_raman_spectrum(app: Any, ctx: Any) -> bool:
             frequencies_cm1=freqs,
             raman_activities=ir.get("raman_activities") or [],
             solvent=solvent,
+            **_mode_symmetry_inputs(ctx),
         )
     return bool(app._show_raman_spectrum(freq_stub))
 
