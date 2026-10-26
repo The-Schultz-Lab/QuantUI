@@ -1,7 +1,7 @@
 [
   {
     "id": "H2",
-    "name": "H2",
+    "name": "Hydrogen",
     "formula": "H2",
     "category": "diatomic",
     "source": "preset",
@@ -23,11 +23,12 @@
         0.0,
         0.74
       ]
-    ]
+    ],
+    "synonyms": "dihydrogen;H2"
   },
   {
     "id": "O2",
-    "name": "O2",
+    "name": "Oxygen",
     "formula": "O2",
     "category": "diatomic",
     "source": "preset",
@@ -49,11 +50,12 @@
         0.0,
         1.21
       ]
-    ]
+    ],
+    "synonyms": "dioxygen;O2"
   },
   {
     "id": "N2",
-    "name": "N2",
+    "name": "Nitrogen",
     "formula": "N2",
     "category": "diatomic",
     "source": "preset",
@@ -75,11 +77,12 @@
         0.0,
         1.1
       ]
-    ]
+    ],
+    "synonyms": "dinitrogen;N2"
   },
   {
     "id": "CO",
-    "name": "CO",
+    "name": "Carbon monoxide",
     "formula": "CO",
     "category": "diatomic",
     "source": "preset",
@@ -101,11 +104,12 @@
         0.0,
         1.13
       ]
-    ]
+    ],
+    "synonyms": "CO"
   },
   {
     "id": "HF",
-    "name": "HF",
+    "name": "Hydrogen fluoride",
     "formula": "HF",
     "category": "diatomic",
     "source": "preset",
@@ -127,11 +131,12 @@
         0.0,
         0.92
       ]
-    ]
+    ],
+    "synonyms": "hydrofluoric acid"
   },
   {
     "id": "HCl",
-    "name": "HCl",
+    "name": "Hydrogen chloride",
     "formula": "HCl",
     "category": "diatomic",
     "source": "preset",
@@ -153,11 +158,12 @@
         0.0,
         1.27
       ]
-    ]
+    ],
+    "synonyms": "hydrochloric acid"
   },
   {
     "id": "H2O",
-    "name": "H2O",
+    "name": "Water",
     "formula": "H2O",
     "category": "triatomic",
     "source": "preset",
@@ -185,11 +191,12 @@
         -0.757,
         0.587
       ]
-    ]
+    ],
+    "synonyms": "H2O;dihydrogen monoxide"
   },
   {
     "id": "CO2",
-    "name": "CO2",
+    "name": "Carbon dioxide",
     "formula": "CO2",
     "category": "triatomic",
     "source": "preset",
@@ -217,11 +224,12 @@
         0.0,
         -1.16
       ]
-    ]
+    ],
+    "synonyms": "CO2"
   },
   {
     "id": "O3",
-    "name": "O3",
+    "name": "Ozone",
     "formula": "O3",
     "category": "triatomic",
     "source": "preset",
@@ -249,11 +257,12 @@
         0.65,
         0.0
       ]
-    ]
+    ],
+    "synonyms": "trioxygen"
   },
   {
     "id": "H2O2",
-    "name": "H2O2",
+    "name": "Hydrogen peroxide",
     "formula": "H2O2",
     "category": "triatomic",
     "source": "preset",
@@ -287,11 +296,12 @@
         -0.54,
         1.93
       ]
-    ]
+    ],
+    "synonyms": "H2O2"
   },
   {
     "id": "CH4",
-    "name": "CH4",
+    "name": "Methane",
     "formula": "CH4",
     "category": "small-organic",
     "source": "preset",
@@ -331,11 +341,12 @@
         -0.63,
         -0.63
       ]
-    ]
+    ],
+    "synonyms": "CH4"
   },
   {
     "id": "NH3",
-    "name": "NH3",
+    "name": "Ammonia",
     "formula": "NH3",
     "category": "small-organic",
     "source": "preset",
@@ -369,11 +380,12 @@
         -0.47,
         0.33
       ]
-    ]
+    ],
+    "synonyms": "NH3;azane"
   },
   {
     "id": "C2H6",
-    "name": "C2H6",
+    "name": "Ethane",
     "formula": "C2H6",
     "category": "small-organic",
     "source": "preset",
@@ -431,11 +443,12 @@
         -0.44,
         -0.89
       ]
-    ]
+    ],
+    "synonyms": "C2H6"
   },
   {
     "id": "C2H4",
-    "name": "C2H4",
+    "name": "Ethylene",
     "formula": "C2H4",
     "category": "small-organic",
     "source": "preset",
@@ -481,11 +494,12 @@
         -0.93,
         0.0
       ]
-    ]
+    ],
+    "synonyms": "ethene;C2H4"
   },
   {
     "id": "C2H2",
-    "name": "C2H2",
+    "name": "Acetylene",
     "formula": "C2H2",
     "category": "small-organic",
     "source": "preset",
@@ -519,11 +533,12 @@
         0.0,
         0.0
       ]
-    ]
+    ],
+    "synonyms": "ethyne;C2H2"
   },
   {
     "id": "CH3OH",
-    "name": "CH3OH",
+    "name": "Methanol",
     "formula": "CH3OH",
     "category": "small-organic",
     "source": "preset",
@@ -569,11 +584,12 @@
         -0.83,
         0.0
       ]
-    ]
+    ],
+    "synonyms": "methyl alcohol;CH3OH"
   },
   {
     "id": "CH2O",
-    "name": "CH2O",
+    "name": "Formaldehyde",
     "formula": "CH2O",
     "category": "small-organic",
     "source": "preset",
@@ -607,11 +623,12 @@
         0.0,
         -0.59
       ]
-    ]
+    ],
+    "synonyms": "methanal;CH2O"
   },
   {
     "id": "CH3CHO",
-    "name": "CH3CHO",
+    "name": "Acetaldehyde",
     "formula": "CH3CHO",
     "category": "small-organic",
     "source": "preset",
@@ -663,11 +680,12 @@
         -1.02,
         0.0
       ]
-    ]
+    ],
+    "synonyms": "ethanal;CH3CHO"
   },
   {
     "id": "CH3COOH",
-    "name": "CH3COOH",
+    "name": "Acetic acid",
     "formula": "CH3COOH",
     "category": "small-organic",
     "source": "preset",
@@ -725,11 +743,12 @@
         -1.09,
         0.0
       ]
-    ]
+    ],
+    "synonyms": "ethanoic acid;CH3COOH"
   },
   {
     "id": "C6H6",
-    "name": "C6H6",
+    "name": "Benzene",
     "formula": "C6H6",
     "category": "aromatic",
     "source": "preset",
@@ -811,6 +830,7 @@
         1.24,
         0.0
       ]
-    ]
+    ],
+    "synonyms": "C6H6"
   }
 ]
