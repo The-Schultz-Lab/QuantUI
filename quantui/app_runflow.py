@@ -2768,7 +2768,11 @@ def refresh_results_browser(app: Any) -> None:
         from quantui import list_results, load_result
     except ImportError:
         return
-    from quantui.app_formatters import friendly_timestamp, slurm_history_marker
+    from quantui.app_formatters import (
+        display_formula,
+        friendly_timestamp,
+        slurm_history_marker,
+    )
     from quantui.app_history import (
         apply_history_filter,
         entry_date,
@@ -2800,7 +2804,7 @@ def refresh_results_browser(app: Any) -> None:
             calib_marker = "🔧 " if data.get("calibration_run_id") else ""
             # SLURM batch results carry job id + attempt (M-JOBDIRS JD.6).
             slurm_marker = slurm_history_marker(data)
-            formula = data.get("formula", "?")
+            formula = display_formula(data.get("formula", "?"))
             method = data.get("method", "?")
             basis = data.get("basis", "?")
             label = (
@@ -2864,7 +2868,7 @@ def refresh_comparison(app: Any) -> None:
 
 def populate_compare_list(app: Any) -> None:
     """Populate the Compare tab selector with saved result entries."""
-    from quantui.app_formatters import friendly_timestamp
+    from quantui.app_formatters import display_formula, friendly_timestamp
     from quantui.results_storage import list_results, load_result
 
     dirs = list_results()
@@ -2880,7 +2884,7 @@ def populate_compare_list(app: Any) -> None:
             calc_badge = _calc_type_badge(data.get("calc_type", ""))
             label = (
                 f"{friendly_timestamp(ts)}  ·  [{calc_badge}]  "
-                f"{data.get('formula', '?')}  "
+                f"{display_formula(data.get('formula', '?'))}  "
                 f"{data.get('method', '?')}/{data.get('basis', '?')}"
             )
             options.append((label, str(d)))

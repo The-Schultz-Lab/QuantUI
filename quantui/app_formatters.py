@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -16,6 +17,29 @@ def _converged_color(converged: bool) -> str:
 def signed(x: Any, ndigits: int) -> str:
     """``{x:+.nf}`` without a negative zero ("−0.0000" for −1e-6, audit D17)."""
     return f"{round(float(x), ndigits) + 0.0:+.{ndigits}f}"
+
+
+# Elements written before H in a binary hydride: NH3, PH3, SiH4, BH3 (Hill
+# order gives H3N, H3P, H4Si). Groups 16/17 keep H first: H2O, H2S, HCl.
+_HYDRIDE_ELEMENT_FIRST = frozenset(
+    {"B", "Al", "Ga", "C", "Si", "Ge", "Sn", "N", "P", "As", "Sb", "Bi"}
+)
+
+
+def display_formula(formula: Any) -> str:
+    """Hill formula → the way chemists write it (``"H3N"`` → ``"NH3"``).
+
+    Only binary hydrides of groups 13–15 are reordered; everything else keeps
+    Hill order, which is already conventional (CH4, H2O, C6H6).
+    """
+    text = str(formula or "")
+    parts = re.findall(r"([A-Z][a-z]?)(\d*)", text)
+    if "".join(e + n for e, n in parts) != text or len(parts) != 2:
+        return text
+    (e1, n1), (e2, n2) = parts
+    if e1 == "H" and e2 in _HYDRIDE_ELEMENT_FIRST:
+        return f"{e2}{n2}H{n1}"
+    return text
 
 
 def friendly_timestamp(ts: Any) -> str:
@@ -283,7 +307,7 @@ def format_result(r: Any) -> str:
     )
     _extra = _result_extra_rows(lambda k, d=None: getattr(r, k, d))
     return (
-        _result_card_open() + f"<b>{r.formula} &mdash; "
+        _result_card_open() + f"<b>{display_formula(r.formula)} &mdash; "
         f"{_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))}</b>"
         + _result_card_table_open()
         + f"{_rows}{_extra}</table>"
@@ -314,7 +338,7 @@ def format_opt_result(r: Any) -> str:
     )
     return (
         _result_card_open()
-        + f"<b>Geometry Optimisation &mdash; {r.formula} ({r.method}/{r.basis})</b>"
+        + f"<b>Geometry Optimisation &mdash; {display_formula(r.formula)} ({r.method}/{r.basis})</b>"
         + _result_card_table_open()
         + f"{_rows}"
         + _solvent_row(getattr(r, "solvent", None), "optimized in solvent")
@@ -495,60 +519,177 @@ def stationary_point_rows(max_force: Optional[float]) -> str:
     return rows
 
 
+def _freq_section_rows(get: Any) -> str:
+    """Real/imaginary mode counts and the frequency list (live and History).
+
+    ``get`` reads ``frequencies_cm1`` / ``displacements`` / ``pyscf_mol_atom``
+    from a live result or from a saved result's ``spectra`` blocks.
+    """
+    from types import SimpleNamespace
+
+    freqs = [float(f) for f in (get("frequencies_cm1") or [])]
+    if not freqs:
+        return ""
+    n_real = sum(1 for f in freqs if f > 0)
+    n_imag = sum(1 for f in freqs if f < 0)
+    lbl = f'style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}"'
+    val = f'style="color:{_theme.css.TEXT_HEADING}"'
+    rows = f"<tr><td {lbl}>Real modes</td><td {val}>{n_real}</td></tr>"
+    if n_imag:
+        rows += (
+            f"<tr><td {lbl}>Imaginary modes</td>"
+            f'<td style="color:{_theme.css.ACCENT_ERROR_ALT}">{n_imag} — geometry may '
+            "not be a minimum</td></tr>"
+        )
+    listing = _frequency_list_html(
+        SimpleNamespace(
+            frequencies_cm1=freqs,
+            displacements=get("displacements"),
+            pyscf_mol_atom=get("pyscf_mol_atom"),
+        )
+    )
+    if listing:
+        rows += f"<tr><td {lbl}>Frequencies (cm⁻¹)</td><td {val}>{listing}</td></tr>"
+    return rows
+
+
+def _saved_freq_accessor(data: dict[str, Any]) -> Any:
+    """``get`` for :func:`_freq_section_rows` over a saved result.json."""
+    spectra = data.get("spectra") or {}
+    ir = spectra.get("ir") or {}
+    mol = spectra.get("molecule") or {}
+    mol_atom = (
+        list(zip(mol.get("atoms") or [], mol.get("coords") or []))
+        if mol.get("atoms")
+        else None
+    )
+    values = {
+        "frequencies_cm1": ir.get("frequencies_cm1"),
+        "displacements": ir.get("displacements"),
+        "pyscf_mol_atom": mol_atom,
+    }
+    return lambda k, d=None: values.get(k, d)
+
+
+def _basic_rows(get: Any, conv_label: str, conv_text: str, conv_color: str) -> str:
+    """Energy / gap / convergence / iterations — first rows of every card."""
+    energy = get("energy_hartree")
+    gap = get("homo_lumo_gap_ev")
+    n_iter = get("n_iterations")
+    rows = [
+        (
+            "Total energy",
+            f"{energy:.8f} Ha &ensp;({energy * 27.211386245988:.4f} eV)",
+            _theme.css.TEXT_HEADING,
+        ),
+        (
+            _homo_lumo_gap_label(get("scf_variant")),
+            f"{gap:.4f} eV" if gap is not None else "N/A",
+            _theme.css.TEXT_HEADING,
+        ),
+        (conv_label, conv_text, conv_color),
+        (
+            "SCF iterations",
+            "—" if n_iter in (None, -1) else str(n_iter),
+            _theme.css.TEXT_HEADING,
+        ),
+    ]
+    return "".join(
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">{k}</td>'
+        f'<td style="color:{vc}">{v}</td></tr>'
+        for k, v, vc in rows
+    )
+
+
+def _frequency_list_html(r: Any, *, limit: int = 9) -> str:
+    """``1797 (a<sub>1</sub>), 4349 (a<sub>1</sub>), 4673 (b<sub>2</sub>)``.
+
+    Real modes in ascending order, each with its symmetry label (SPC2.4)
+    when the displacements and geometry are on the result.
+    """
+    freqs = [float(f) for f in (getattr(r, "frequencies_cm1", None) or [])]
+    labels: list = [None] * len(freqs)
+    disps = getattr(r, "displacements", None)
+    mol_atom = getattr(r, "pyscf_mol_atom", None)
+    if disps is not None and mol_atom:
+        try:
+            from quantui.symmetry import label_mode_irreps
+
+            irreps = label_mode_irreps(mol_atom, freqs, disps)
+            if irreps is not None:
+                labels = list(irreps.labels)
+        except Exception:  # noqa: BLE001 — labels are optional
+            pass
+    real = sorted((f, lbl) for f, lbl in zip(freqs, labels) if f > 0)
+    if not real:
+        return ""
+    from quantui.symmetry import html_irrep
+
+    # A degenerate set is listed once: "2020 (e) ×2".
+    groups: list = []
+    for f, lbl in real:
+        if groups and lbl and groups[-1][1] == lbl and abs(groups[-1][0] - f) < 1.0:
+            groups[-1][2] += 1
+        else:
+            groups.append([f, lbl, 1])
+    items = [
+        f"{f:.0f}"
+        + (f" ({html_irrep(lbl)})" if lbl else "")
+        + (f" &times;{n}" if n > 1 else "")
+        for f, lbl, n in groups[:limit]
+    ]
+    more = sum(n for _, _, n in groups[limit:])
+    tail = (
+        f' <span style="color:{_theme.css.TEXT_MUTED}">+{more} more in the mode table</span>'
+        if more > 0
+        else ""
+    )
+    return ", ".join(items) + tail
+
+
 def format_freq_result(r: Any) -> str:
-    """Format a frequency-analysis result card."""
+    """Format a frequency-analysis result card.
+
+    Same rows, in the same order, as the History card for the result
+    (:func:`format_past_result`) — they used to show different fields
+    (M-UIPOLISH P5).
+    """
     # AUDIT F15 — r.converged now also requires the Hessian/harmonic-
     # analysis step to have completed, not just the reference SCF, so the
     # row is labeled/colored on overall status rather than "SCF converged".
     _conv = "Yes" if r.converged else "No (treat with caution)"
     _cc = _converged_color(r.converged)
-    n_real = r.n_real_modes()
-    n_imag = r.n_imaginary_modes()
-    real_freqs = sorted(f for f in r.frequencies_cm1 if f > 0)[:6]
-    freq_str = "  ".join(f"{f:.1f}" for f in real_freqs)
-    if len([f for f in r.frequencies_cm1 if f > 0]) > 6:
-        freq_str += " …"
-    imag_note = ""
-    if n_imag > 0:
-        imag_note = (
-            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Imaginary modes</td>'
-            f'<td style="color:{_theme.css.ACCENT_ERROR_ALT}">{n_imag} — geometry may not be a minimum</td></tr>'
-        )
-    imag_note += saddle_retry_rows(getattr(r, "imaginary_mode_retry", None))
-    _rows = stationary_point_rows(getattr(r, "max_force_ev_per_ang", None)) + (
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF energy</td>'
-        f'<td style="color:{_theme.css.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Converged</td>'
-        f'<td style="color:{_cc}">{_conv}</td></tr>'
-        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Real modes</td>'
-        f'<td style="color:{_theme.css.TEXT_HEADING}">{n_real}</td></tr>'
-        + imag_note
-        + (
-            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Frequencies (cm⁻¹)</td>'
-            f'<td style="color:{_theme.css.TEXT_HEADING};font-family:monospace">{freq_str or "none"}</td></tr>'
-            if real_freqs
-            else ""
-        )
-        + f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">ZPVE</td>'
-        f'<td style="color:{_theme.css.TEXT_HEADING}">{r.zpve_hartree:.6f} Ha '
-        f"({r.zpve_hartree * 27.211386245988:.4f} eV)</td></tr>"
-        + _solvent_row(getattr(r, "solvent", None), "Raman not computed in solvent")
-        + _point_group_row(_point_group_html(lambda k, d=None: getattr(r, k, d)))
+
+    def get(k: str, d: Any = None) -> Any:
+        return getattr(r, k, d)
+
+    _rows = (
+        stationary_point_rows(get("max_force_ev_per_ang"))
+        + _basic_rows(get, "Converged", _conv, _cc)
+        + _freq_section_rows(get)
+        + saddle_retry_rows(get("imaginary_mode_retry"))
+        + _result_extra_rows(get)
     )
     _thermo_rows = ""
     _thermo = getattr(r, "thermo", None)
-    if _thermo is not None:
+    if _thermo is None:
+        _thermo_rows = (
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">ZPVE</td>'
+            f'<td style="color:{_theme.css.TEXT_HEADING}">{r.zpve_hartree:.6f} Ha</td></tr>'
+        )
+    else:
         _thermo_rows = _thermo_card_rows(
             temperature_k=_thermo.temperature_k,
             pressure_atm=getattr(_thermo, "pressure_atm", 1.0),
-            zpve_hartree=None,
+            zpve_hartree=r.zpve_hartree,
             h_hartree=_thermo.H_hartree,
             s_jmol=_thermo.S_jmol,
             g_hartree=_thermo.G_hartree,
             energy_hartree=r.energy_hartree,
         )
     return (
-        _result_card_open() + f"<b>Frequency Analysis &mdash; {r.formula} &middot; "
+        _result_card_open()
+        + f"<b>Frequency Analysis &mdash; {display_formula(r.formula)} &middot; "
         f"{_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))}</b>"
         + _result_card_table_open()
         + f"{_rows}{_thermo_rows}</table>"
@@ -603,7 +744,8 @@ def format_ts_result(r: Any) -> str:
         _point_group_html(lambda k, d=None: getattr(r, k, d))
     )
     return (
-        _result_card_open() + f"<b>Transition State &mdash; {r.formula} "
+        _result_card_open()
+        + f"<b>Transition State &mdash; {display_formula(r.formula)} "
         f"({_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))})</b>"
         + _result_card_table_open()
         + f"{_rows}</table>"
@@ -662,7 +804,8 @@ def format_tddft_result(r: Any) -> str:
             + "".join(exc_rows)
         )
     return (
-        _result_card_open() + f"<b>TD-DFT / UV-Vis &mdash; {r.formula} "
+        _result_card_open()
+        + f"<b>TD-DFT / UV-Vis &mdash; {display_formula(r.formula)} "
         f"({_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))})</b>"
         + _result_card_table_open()
         + f"{header_rows}{exc_table}</table>"
@@ -746,7 +889,7 @@ def format_nmr_result(r: Any) -> str:
         )
 
     return (
-        _result_card_open() + f"<b>NMR Shielding &mdash; {r.formula} "
+        _result_card_open() + f"<b>NMR Shielding &mdash; {display_formula(r.formula)} "
         f"({_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))})</b>"
         + _result_card_table_open()
         + f"{header_rows}{h_table}{c_table}{_empty}{_basis_warn}{_ref_warn}</table>"
@@ -792,7 +935,7 @@ def format_pes_scan_result(r: Any) -> str:
 
     return (
         _result_card_open()
-        + f"<b>PES Scan &mdash; {r.formula} ({r.method}/{r.basis})</b>"
+        + f"<b>PES Scan &mdash; {display_formula(r.formula)} ({r.method}/{r.basis})</b>"
         + _result_card_table_open()
         + f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Scan type</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.scan_type.capitalize()} ({_idx_str})</td></tr>'
@@ -1090,7 +1233,7 @@ def format_reorg_result(r: Any) -> str:
     _channels_html = reorg_channels_html(_payload)
     return (
         _result_card_open() + f"<b>Reorganization Energy (Marcus 4-point) &mdash; "
-        f"{r.formula} ({r.method}/{r.basis})</b>"
+        f"{display_formula(r.formula)} ({r.method}/{r.basis})</b>"
         + _result_card_table_open()
         + f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Neutral energy</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.neutral_energy_hartree:.8f} Ha</td></tr>'
@@ -1209,39 +1352,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         _conv_label = "Converged"
     else:
         _conv_label = "SCF converged"
-    _gap = (
-        f"{data['homo_lumo_gap_ev']:.4f} eV"
-        if data.get("homo_lumo_gap_ev") is not None
-        else "N/A"
-    )
-    _rows = "".join(
-        f"<tr>"
-        f'<td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">{k}</td>'
-        f'<td style="color:{vc}">{v}</td>'
-        f"</tr>"
-        for k, v, vc in [
-            (
-                "Total energy",
-                f"{data['energy_hartree']:.8f} Ha &ensp;({data['energy_ev']:.4f} eV)",
-                _theme.css.TEXT_HEADING,
-            ),
-            (
-                _homo_lumo_gap_label(data.get("scf_variant")),
-                _gap,
-                _theme.css.TEXT_HEADING,
-            ),
-            (_conv_label, _conv, _cc),
-            (
-                "SCF iterations",
-                (
-                    "—"
-                    if data.get("n_iterations") in (None, -1)
-                    else str(data.get("n_iterations"))
-                ),
-                _theme.css.TEXT_HEADING,
-            ),
-        ]
-    )
+    _rows = _basic_rows(lambda k, d=None: data.get(k, d), _conv_label, _conv, _cc)
     ts = data.get("timestamp", "")
 
     # Shared 'extra' rows (correlation breakdown / solvent / device / dipole /
@@ -1267,10 +1378,15 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     # not an error.
     _thermo_html = ""
     if ct == "frequency":
+        # Same order as the live card (format_freq_result): warning, basics,
+        # modes, extras, thermochemistry (M-UIPOLISH P5).
         _ir_block = (data.get("spectra") or {}).get("ir") or {}
-        _thermo_html = stationary_point_rows(
-            _ir_block.get("max_force_ev_per_ang")
-        ) + saddle_retry_rows(_ir_block.get("imaginary_mode_retry"))
+        _rows = (
+            stationary_point_rows(_ir_block.get("max_force_ev_per_ang"))
+            + _rows
+            + _freq_section_rows(_saved_freq_accessor(data))
+            + saddle_retry_rows(_ir_block.get("imaginary_mode_retry"))
+        )
         _thermo = ((data.get("spectra") or {}).get("ir") or {}).get("thermo")
         if _thermo:
             _thermo_html += _thermo_card_rows(
@@ -1304,7 +1420,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         _result_card_open(extra_style="overflow:hidden")
         + f"{_thumb_html}"
         + f"{_ct_badge}<br>"
-        + f'<b>{data["formula"]} &mdash; '
+        + f'<b>{display_formula(data["formula"])} &mdash; '
         f'{_method_basis_label(data["method"], data["basis"], data.get("scf_variant"))}</b>'
         f'&ensp;<small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{ts}</small>'
         + _result_card_table_open()
