@@ -8,7 +8,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, List, cast
+from typing import Any, List, Optional, cast
 
 import ipywidgets as widgets
 from IPython.display import HTML, display
@@ -1049,8 +1049,9 @@ def show_uv_vis_spectrum(
     if not wl:
         wl = [1240.0 / e for e in energies_ev if e and e > 0]
 
-    peaks: list[tuple[float, float]] = []
-    for x0, amp in zip(wl, oscillator_strengths):
+    energies = list(energies_ev or [])
+    peaks: list[tuple[float, float, Optional[float]]] = []
+    for i, (x0, amp) in enumerate(zip(wl, oscillator_strengths)):
         try:
             x_val = float(x0)
             a_val = float(amp)
@@ -1058,7 +1059,8 @@ def show_uv_vis_spectrum(
             continue
         if x_val <= 0:
             continue
-        peaks.append((x_val, max(a_val, 0.0)))
+        e_val = float(energies[i]) if i < len(energies) else 1239.84198 / x_val
+        peaks.append((x_val, max(a_val, 0.0), e_val))
 
     if not peaks:
         return False
@@ -1066,6 +1068,7 @@ def show_uv_vis_spectrum(
     peaks.sort(key=lambda p: p[0])
     app._last_uv_wavelengths_nm = [p[0] for p in peaks]
     app._last_uv_oscillator_strengths = [p[1] for p in peaks]
+    app._last_uv_energies_ev = [p[2] for p in peaks]
 
     app._update_uv_vis_figure("Stick", 20.0)
 
@@ -1084,9 +1087,60 @@ def wire_uv_controls(app: Any) -> None:
     wl = list(getattr(app, "_last_uv_wavelengths_nm", []) or [])
     if wl:
         gamma = max(float(app._uv_fwhm_slider.value), 1.0) / 2.0
-        pad = max(80.0, 3.0 * gamma)
-        app._uv_xmin_input.value = round(max(100.0, min(wl) - pad), 1)
-        app._uv_xmax_input.value = round(max(wl) + pad, 1)
+        lo, hi = uv_default_range(wl, gamma)
+        app._uv_xmin_input.value = round(lo, 1)
+        app._uv_xmax_input.value = round(hi, 1)
+
+
+# Below this the "transition" is a core or basis-artefact state (> 124 eV);
+# it would stretch the default axis to ~0 nm and squash the real bands.
+_UV_MIN_DEFAULT_NM = 10.0
+
+
+def uv_default_range(wl: List[float], gamma: float) -> tuple[float, float]:
+    """Default λ window: every transition above 10 nm, with room for wings.
+
+    It used to start at 100 nm or more, which hid the vacuum-UV bands of
+    small molecules entirely (water's are at 57–106 nm), leaving an empty
+    plot (M-UIPOLISH P3).
+    """
+    shown = [w for w in wl if w >= _UV_MIN_DEFAULT_NM] or list(wl)
+    pad = max(20.0, 0.15 * (max(shown) - min(shown)), 3.0 * gamma)
+    return max(0.0, min(shown) - pad), max(shown) + pad
+
+
+def uv_excitation_table_html(
+    wavelengths_nm: List[float],
+    strengths: List[float],
+    energies_ev: List[float],
+    x_range: Optional[tuple[float, float]] = None,
+) -> str:
+    """Excited states by energy: state, E (eV), λ (nm), f."""
+    rows = sorted(zip(energies_ev, wavelengths_nm, strengths))
+    if not rows:
+        return ""
+    cell = "padding:2px 12px;text-align:right"
+    body = "".join(
+        f"<tr><td style='{cell}'>S{i}</td><td style='{cell}'>{e:.3f}</td>"
+        f"<td style='{cell}'>{w:.1f}</td><td style='{cell}'>{f:.4f}</td></tr>"
+        for i, (e, w, f) in enumerate(rows, start=1)
+    )
+    note = ""
+    if x_range is not None:
+        n_out = sum(1 for _, w, _ in rows if not x_range[0] <= w <= x_range[1])
+        if n_out:
+            note = (
+                f"<div style='color:{_theme.css.TEXT_MUTED};margin-top:4px'>"
+                f"{n_out} state{'s' if n_out != 1 else ''} outside the plotted "
+                "λ range.</div>"
+            )
+    return (
+        '<div style="margin:6px 0 0 4px;font-size:12px;max-height:220px;'
+        'overflow-y:auto"><table style="border-collapse:collapse"><tr>'
+        f"<th style='{cell}'>State</th><th style='{cell}'>E (eV)</th>"
+        f"<th style='{cell}'>λ (nm)</th><th style='{cell}'>f</th></tr>"
+        f"{body}</table>{note}</div>"
+    )
 
 
 def on_uv_range_changed(app: Any, _change: dict[str, Any] | None = None) -> None:
@@ -1132,9 +1186,7 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
         # of headroom to show the full Lorentzian tail; padding by the same
         # amount in Stick keeps the layout identical.
         gamma = max(float(fwhm), 1.0) / 2.0
-        pad = max(80.0, 3.0 * gamma)
-        x_min_default = max(100.0, min(wl) - pad)
-        x_max_default = max(wl) + pad
+        x_min_default, x_max_default = uv_default_range(wl, gamma)
         xmin_w = getattr(app, "_uv_xmin_input", None)
         xmax_w = getattr(app, "_uv_xmax_input", None)
         x_min = float(xmin_w.value if xmin_w is not None else x_min_default)
@@ -1215,6 +1267,13 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
 
         app._apply_plotly_theme(fig)
         app._last_uv_fig = fig
+        table = uv_excitation_table_html(
+            wl,
+            osc,
+            list(getattr(app, "_last_uv_energies_ev", []) or [])
+            or [1239.84198 / w for w in wl],
+            (x_min, x_max),
+        )
         app._set_html_output(
             app._tddft_fig,
             _pio.to_html(
@@ -1222,7 +1281,8 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
                 include_plotlyjs="require",
                 full_html=False,
                 config={"responsive": True},
-            ),
+            )
+            + table,
         )
     except Exception as exc:
         app._last_uv_fig = None
@@ -1284,39 +1344,34 @@ def _nmr_summary_html(
     c_shifts: List[tuple[int, float]],
     reference: str,
 ) -> str:
+    """One table, Atom | σ | δ, numbered like the viewer (O1, H2, H3).
+
+    There used to be a σ table (H2, H3) and a separate shift table that
+    renumbered the same atoms H-1, H-2 (M-UIPOLISH P4).
+    """
     from . import theme as _theme
 
-    def _shift_table(label: str, shifts: list, sym: str) -> str:
-        if not shifts:
-            return ""
-        rows = "".join(
-            f'<tr><td style="padding:2px 14px 2px 0;color:{_theme.css.TEXT_SECONDARY}">{sym}-{n}</td>'
-            f'<td style="color:{_theme.css.TEXT_HEADING}">{d:.2f} ppm</td></tr>'
-            for n, (_i, d) in enumerate(sorted(shifts, key=lambda x: x[0]), 1)
-        )
-        return (
-            f'<tr><td colspan="2" style="padding:8px 0 2px;font-weight:600">'
-            f"{label} shifts (vs. {reference}):</td></tr>"
-            f'<tr><th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px;padding:2px 14px 2px 0">Atom</th>'
-            f'<th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px">δ (ppm)</th></tr>'
-            + rows
-        )
-
-    shielding_rows = "".join(
-        f'<tr><td style="padding:2px 10px 2px 0;color:{_theme.css.TEXT_SECONDARY}">{sym}{i + 1}</td>'
-        f'<td style="color:{_theme.css.TEXT_HEADING}">{s:.2f}</td></tr>'
+    delta = {int(i): float(d) for i, d in list(h_shifts) + list(c_shifts)}
+    th = (
+        f'style="text-align:right;color:{_theme.css.TEXT_SECONDARY};'
+        'font-size:12px;padding:2px 14px 2px 0"'
+    )
+    td = f'style="text-align:right;padding:2px 14px 2px 0;color:{_theme.css.TEXT_HEADING}"'
+    rows = "".join(
+        f'<tr><td style="padding:2px 14px 2px 0;color:{_theme.css.TEXT_SECONDARY}">'
+        f"{sym}{i + 1}</td><td {td}>{s:.2f}</td>"
+        f"<td {td}>{(f'{delta[i]:.2f}' if i in delta else '—')}</td></tr>"
         for i, (sym, s) in enumerate(zip(atom_symbols, shielding))
     )
     return (
-        f'<div style="font-size:13px;margin-top:10px">'
-        f'<table style="border-collapse:collapse;margin-bottom:8px">'
-        f'<tr><th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px;padding:2px 10px 2px 0">Atom</th>'
-        f'<th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px">σ (ppm)</th></tr>'
-        f"{shielding_rows}</table>"
-        f'<table style="border-collapse:collapse">'
-        f"{_shift_table('¹H', h_shifts, 'H')}"
-        f"{_shift_table('¹³C', c_shifts, 'C')}"
-        f"</table></div>"
+        '<div style="font-size:13px;margin-top:10px">'
+        '<table style="border-collapse:collapse">'
+        f'<tr><th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};'
+        'font-size:12px;padding:2px 14px 2px 0">Atom</th>'
+        f"<th {th}>σ (ppm)</th><th {th}>δ vs. {html.escape(reference)} (ppm)</th></tr>"
+        f"{rows}</table>"
+        f'<div style="font-size:12px;color:{_theme.css.TEXT_MUTED};margin-top:4px">'
+        "δ is given for ¹H and ¹³C only.</div></div>"
     )
 
 
