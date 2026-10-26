@@ -1801,7 +1801,10 @@ def on_help_topic_changed(app: Any, change: Any = None) -> None:
 
 
 def on_issue_btn(app: Any, _unused: Any = None) -> None:
-    """Open the issue-report overlay and reset transient form status."""
+    """Toggle the issue-report overlay; opening resets the form."""
+    if app._issue_overlay.layout.display != "none":
+        app._issue_overlay.layout.display = "none"
+        return
     app._issue_textarea.value = ""
     app._issue_status_html.value = ""
     app._issue_overlay.layout.display = ""
@@ -1925,8 +1928,9 @@ def _disarm_exit(app: Any) -> None:
     app._exit_armed = False
     app._exit_arm_token = None
     app._exit_btn.description = "Exit"
+    app._exit_btn.button_style = ""
     app._exit_btn.tooltip = "Shut down the QuantUI server and end this session"
-    app._exit_btn.layout.width = "64px"
+    app._exit_btn.layout.width = "80px"
     app._exit_warn_html.layout.display = "none"
     app._exit_warn_html.value = ""
     app._exit_cancel_btn.layout.display = "none"

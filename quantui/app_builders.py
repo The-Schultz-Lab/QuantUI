@@ -4026,9 +4026,11 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
 
     app._exit_btn = widgets.Button(
         description="Exit",
-        button_style="danger",
+        # Neutral until armed; the confirm step turns it red (M-UIPOLISH V1).
+        button_style="",
+        icon="power-off",
         tooltip="Shut down the QuantUI server and end this session",
-        layout=layout_fn(width="64px", margin="0 0 0 8px"),
+        layout=layout_fn(width="80px", margin="0 0 0 8px"),
     )
     # Two-stage exit confirm: the first Exit click reveals this warning + the
     # Cancel button and re-labels Exit to "Confirm shutdown"; only a second
@@ -4087,7 +4089,9 @@ def build_issue_widgets(app: Any, *, layout_fn: Any) -> None:
     """Build issue-report widgets shown from the top toolbar."""
     app._issue_btn = widgets.Button(
         description="Report Issue",
-        button_style="warning",
+        # Neutral, not "warning" yellow: it was the most eye-catching control
+        # on every screen (M-UIPOLISH V1).
+        button_style="",
         icon="flag",
         tooltip="Report a bug or unexpected behaviour observed in this session",
         layout=layout_fn(width="140px", margin="0 0 0 8px"),
@@ -4107,8 +4111,10 @@ def build_issue_widgets(app: Any, *, layout_fn: Any) -> None:
     app._issue_cancel_btn = widgets.Button(
         description="Cancel",
         button_style="",
+        tooltip="Close without saving (Esc)",
         layout=layout_fn(width="80px"),
     )
+    app._issue_cancel_btn.add_class("quantui-issue-cancel")  # Esc target
     app._issue_status_html = widgets.HTML()
     app._issue_overlay = widgets.VBox(
         [
@@ -4119,8 +4125,8 @@ def build_issue_widgets(app: Any, *, layout_fn: Any) -> None:
                 '<p style="font-size:13px;font-weight:600;margin:0 0 6px;'
                 f'color:{_theme.css.ACCENT_WARNING}">&#9872; Report Issue</p>'
                 f'<p style="font-size:12px;color:{_theme.css.TEXT_BODY};margin:0 0 8px">'
-                "Your report (and a snapshot of the current session state) will be "
-                "saved to <code>issues.db</code> and the session event log.</p>"
+                "Saved on this computer with a snapshot of the session, for the "
+                "developers.</p>"
             ),
             app._issue_textarea,
             widgets.HBox(

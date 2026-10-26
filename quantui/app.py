@@ -960,8 +960,10 @@ _HELP_ESC_JS = """
   window.__quantuiHelpEsc = true;
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Escape" || e.defaultPrevented) { return; }
-    var btn = document.querySelector(".quantui-help-close");
-    if (btn && btn.offsetParent !== null) { btn.click(); }
+    [".quantui-help-close", ".quantui-issue-cancel"].forEach(function (sel) {
+      var btn = document.querySelector(sel);
+      if (btn && btn.offsetParent !== null) { btn.click(); }
+    });
   });
 })();
 """
@@ -2233,6 +2235,16 @@ class QuantUIApp:
         # the current folder.
         if change.get("new") == self._tab_index("files"):
             self._refresh_file_browser()
+        # The GPU badge is filled in by a background probe; when it finishes
+        # before the browser's widgets connect (instantly, without gpu4pyscf)
+        # the update is lost and the row says "checking…" forever. Re-send it.
+        if change.get("new") == self._tab_index("settings"):
+            badge = getattr(self, "_status_html", None)
+            if badge is not None:
+                try:
+                    badge.send_state("value")
+                except Exception:  # noqa: BLE001 — cosmetic refresh
+                    pass
 
     def _go_to_calculate_tab(self) -> None:
         """Navigate to the Calculate tab."""
