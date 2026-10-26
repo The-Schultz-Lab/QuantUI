@@ -9,6 +9,30 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Clarity and layout pass** (M-UIPOLISH, from a rendered-UI walk-through):
+  - Molecules open facing the camera in every viewer (principal axes), so
+    water no longer looks linear and the dipole arrow is visible.
+  - The library finds common names ("water", "ammonia", "benzene"); QM9
+    entries come after the curated ones and duplicates are listed once.
+  - Two-column layouts on wide screens: Calculate (molecule | setup + run),
+    Results (card | structure), and the Analysis viewer, Mulliken,
+    Vibrational and Orbital panels; they stack on narrow windows.
+  - One-line header with the toolbar, a one-line step indicator, the
+    "Calculation complete" links right under Run, and a shorter, resizable
+    log that hides internal bookkeeping lines.
+  - Analysis lists the panels that have data first; plots opened from a
+    collapsed panel fill their width; Raman follows the IR axis direction.
+  - UV-Vis shows vacuum-UV bands (the window started at 100 nm) and lists
+    the excited states; NMR groups equivalent nuclei and uses one
+    Atom | σ | δ table.
+  - Live and History result cards show the same rows; frequencies are
+    listed with their symmetry labels; formulas read NH3, not H3N.
+  - Compare uses checkboxes and renders its chart; History offers recent
+    results as links with the other filters folded away; Help and Report
+    Issue open as side drawers (Esc closes both).
+  - Shorter copy throughout, a 12 px minimum text size, clearer section
+    headings, neutral Report Issue / Exit / idle Cancel buttons.
+  - Fixed: the System Settings GPU row could stay at "checking…" forever.
 - **Vibrational-mode symmetry labels** (M-SPECTRA2 SPC2.4) — after a Frequency
   calculation each normal mode gets its irreducible representation: a *Sym.*
   column and a Γvib caption in the Vibrational mode table (NH₃: 2A₁ + 2E), the

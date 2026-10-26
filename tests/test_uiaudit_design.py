@@ -38,8 +38,8 @@ class TestD7Truncation:
 
 
 class TestD13Copy:
-    def test_hero_points_at_the_help_button(self, app):
-        assert "Help</b> button" in app._welcome_html.value
+    def test_hero_has_no_stale_help_tab_copy(self, app):
+        # The help line itself went with the one-line header (M-UIPOLISH L2).
         assert "Help</b> tab" not in app._welcome_html.value
 
 

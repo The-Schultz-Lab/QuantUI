@@ -821,11 +821,13 @@ h1 {
 
 /* Section headers ------------------------------------------------------- */
 h3 {
-    font-size: 11px !important;
-    font-weight: 700 !important;
-    letter-spacing: 0.09em !important;
-    text-transform: uppercase !important;
-    color: var(--q-text-slate) !important;
+    /* 15 px sentence case (M-UIPOLISH T4): the 11-12 px letter-spaced grey
+       capitals barely registered as headings. */
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+    color: var(--q-text-strong) !important;
     margin: 24px 0 10px !important;
     padding-bottom: 5px !important;
     border-bottom: 1px solid var(--q-border) !important;
@@ -905,6 +907,48 @@ button.jupyter-button.mod-danger {
 .quantui-result-card table.quantui-result-card-table {
     width: auto !important;
 }
+/* Label column hugs its text: a long full-width note row (colspan) used to
+   stretch it to ~380 px, leaving a gap before every value (M-UIPOLISH T5). */
+.quantui-result-card-table td:first-child:not([colspan]) {
+    width: 1% !important;
+    white-space: nowrap !important;
+}
+/* Selected row in list boxes (Files, Compare): the browser default was light
+   grey with grey text in Dark theme (M-UIPOLISH V6). */
+.widget-select select option:checked,
+.widget-select-multiple select option:checked {
+    background: var(--q-surface-info-bg) linear-gradient(0deg, var(--q-surface-info-bg), var(--q-surface-info-bg)) !important;
+    color: var(--q-text-strong) !important;
+}
+/* Help and Report Issue open as a right-hand drawer over the app, not a
+   block that pushed every tab down (M-UIPOLISH L14). */
+.quantui-drawer {
+    position: fixed !important;
+    top: 0 !important;
+    right: 0 !important;
+    width: min(560px, 100vw) !important;
+    height: 100vh !important;
+    overflow-y: auto !important;
+    z-index: 1000 !important;
+    margin: 0 !important;
+    padding: 14px 16px !important;
+    border-radius: 0 !important;
+    background: var(--q-bg-panel) !important;
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35) !important;
+}
+/* History "Recent" rows: links, not grey buttons. */
+/* Beats the neutral-button rule's (0,6,1) specificity. */
+button.jupyter-button.quantui-history-recent:not(.mod-info):not(.mod-success):not(.mod-warning):not(.mod-danger):not(.mod-primary) {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: var(--q-accent-info) !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+    padding: 2px 4px !important;
+    height: auto !important;
+}
+.quantui-history-recent:hover { text-decoration: underline !important; }
 /* Activity indicator: a status chip, not a button (audit D15). */
 .quantui-status-chip {
     pointer-events: none !important;
@@ -960,9 +1004,29 @@ _HELP_ESC_JS = """
   window.__quantuiHelpEsc = true;
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Escape" || e.defaultPrevented) { return; }
-    var btn = document.querySelector(".quantui-help-close");
-    if (btn && btn.offsetParent !== null) { btn.click(); }
+    [".quantui-help-close", ".quantui-issue-cancel"].forEach(function (sel) {
+      var btn = document.querySelector(sel);
+      if (btn && btn.offsetParent !== null) { btn.click(); }
+    });
   });
+})();
+"""
+
+# Plotly charts drawn while their panel was collapsed measure a zero-width
+# container and fall back to 700 px; `responsive` only reacts to window
+# resizes. Opening a panel or switching tabs now fires one (M-UIPOLISH L4).
+_PLOT_RESIZE_JS = """
+(function(){
+  if (window.__quantuiPlotResize) { return; }
+  window.__quantuiPlotResize = true;
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!t || !t.closest) { return; }
+    if (!t.closest(".jupyter-widget-Collapse-header, .lm-TabBar-tab")) { return; }
+    [120, 450].forEach(function (ms) {
+      setTimeout(function () { window.dispatchEvent(new Event("resize")); }, ms);
+    });
+  }, true);
 })();
 """
 
@@ -993,6 +1057,17 @@ _RE_CYCLE = re.compile(
 )
 _RE_CONV = re.compile(r"converged SCF energy\s*=\s*([\-\d\.]+)")
 _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
+# Internal bookkeeping lines hidden from the on-screen log (the saved
+# pyscf.log keeps every line): checkpoint saves are noise to a student, and
+# the status marker reads better as an arrow (M-UIPOLISH L5).
+_RE_LOG_HIDDEN = re.compile(r"^\[checkpoint\] saved.*(?:\n|$)", re.MULTILINE)
+
+
+def _friendly_log_text(text: str) -> str:
+    """Text as shown in the live log: internal markers hidden or softened."""
+    return _RE_LOG_HIDDEN.sub("", text).replace("[QuantUI_STATUS] ", "→ ")
+
+
 # TD-DFT root convergence. PySCF's Davidson solver prints
 # "root %d converged  |r|= ...  e= <excitation energy, Ha>  max|de|= ..." at
 # verbose=5 (DEBUG) — see tddft_calc.py's td.verbose. This is the only
@@ -1206,7 +1281,9 @@ class _LogCapture:
         # Any real output resets the silence timer, so a heartbeat only ever
         # appears in a genuinely quiet stretch.
         self._last_write_t = time.monotonic()
-        self._w.append_stdout(text)
+        shown = _friendly_log_text(text)
+        if shown:
+            self._w.append_stdout(shown)
         self._buf.write(text)
         self._line_buf += text
         while "\n" in self._line_buf:
@@ -1825,6 +1902,7 @@ class QuantUIApp:
         perf_estimate_html: Any
         post_calc_panel: Any
         preopt_preview_label: Any
+        preopt_preview_row: Any
         preopt_preview_btn: Any
         preopt_accept_btn: Any
         preopt_reset_btn: Any
@@ -2085,6 +2163,7 @@ class QuantUIApp:
         app_css = _APP_CSS.removeprefix("<style>").removesuffix("</style>")
         display(HTML(_theme.theme_injection_html(app_css, style_id="quantui-app-css")))
         display(Javascript(_HELP_ESC_JS))
+        display(Javascript(_PLOT_RESIZE_JS))
         # NOTE: 3Dmol.js is loaded offline per-view via py3Dmol's own loader
         # (``viz_assets.make_view`` passes ``js=<vendored data: URI>``), NOT a
         # one-time page bootstrap. A startup-time bootstrap ran py3Dmol's
@@ -2093,18 +2172,35 @@ class QuantUIApp:
         display(
             widgets.VBox(
                 [
-                    self._welcome_header,
+                    # Title and toolbar share one row; the toolbar wraps
+                    # under the title on narrow windows (M-UIPOLISH L2).
                     widgets.HBox(
                         [
-                            self._activity_btn,
-                            self.theme_btn,
-                            self._help_btn,
-                            self._issue_btn,
-                            self._exit_warn_html,
-                            self._exit_cancel_btn,
-                            self._exit_btn,
+                            self._welcome_header,
+                            widgets.HBox(
+                                [
+                                    self._activity_btn,
+                                    self.theme_btn,
+                                    self._help_btn,
+                                    self._issue_btn,
+                                    self._exit_warn_html,
+                                    self._exit_cancel_btn,
+                                    self._exit_btn,
+                                ],
+                                layout=_layout(
+                                    justify_content="flex-end",
+                                    align_items="center",
+                                    flex_wrap="wrap",
+                                    margin="0 0 0 auto",
+                                ),
+                            ),
                         ],
-                        layout=_layout(justify_content="flex-end", margin="0 0 4px"),
+                        layout=_layout(
+                            align_items="center",
+                            flex_wrap="wrap",
+                            margin="0 0 6px",
+                            border_bottom=f"1px solid {_theme.css.BORDER}",
+                        ),
                     ),
                     self._issue_overlay,
                     self._exit_output,
@@ -2233,6 +2329,16 @@ class QuantUIApp:
         # the current folder.
         if change.get("new") == self._tab_index("files"):
             self._refresh_file_browser()
+        # The GPU badge is filled in by a background probe; when it finishes
+        # before the browser's widgets connect (instantly, without gpu4pyscf)
+        # the update is lost and the row says "checking…" forever. Re-send it.
+        if change.get("new") == self._tab_index("settings"):
+            badge = getattr(self, "_status_html", None)
+            if badge is not None:
+                try:
+                    badge.send_state("value")
+                except Exception:  # noqa: BLE001 — cosmetic refresh
+                    pass
 
     def _go_to_calculate_tab(self) -> None:
         """Navigate to the Calculate tab."""
@@ -2667,16 +2773,39 @@ class QuantUIApp:
             self.root_tab.selected_index = order.index(preserve_name)
 
     def _assemble_tabs(self) -> None:
+        # Two columns on wide screens — molecule + viewer | setup + run — so
+        # the right half of the page is no longer empty; they stack below
+        # ~1000 px (M-UIPOLISH L1).
         self._calculate_tab_panel = widgets.VBox(
             [
                 self.step_progress.widget,
-                self.mol_input_container,
-                self.calc_setup_panel,
-                self.run_panel,
-                self._completion_banner,
+                widgets.HBox(
+                    [
+                        widgets.VBox(
+                            [self.mol_input_container],
+                            layout=_layout(flex="1 1 480px", min_width="0"),
+                        ),
+                        widgets.VBox(
+                            [self.calc_setup_panel, self.run_panel],
+                            layout=_layout(flex="1 1 480px", min_width="0"),
+                        ),
+                    ],
+                    layout=_layout(
+                        flex_flow="row wrap", align_items="flex-start", gap="0 28px"
+                    ),
+                ),
             ],
             layout=_layout(padding="8px 0"),
         )
+
+        # "Calculation complete → View Results / Analysis" sits right under the
+        # Run button, not below the log (M-UIPOLISH L5). Built after run_panel.
+        _rp = list(self.run_panel.children)
+        _run_row = next(
+            i for i, c in enumerate(_rp) if self.run_btn in getattr(c, "children", ())
+        )
+        _rp.insert(_run_row + 1, self._completion_banner)
+        self.run_panel.children = tuple(_rp)
 
         # Splice advanced_accordion into results_tab_panel before _to_analysis_btn.
         # It cannot be referenced in _build_results_section because it is built later
@@ -3359,11 +3488,23 @@ class QuantUIApp:
             )
             return
 
-        children.sort(key=lambda p: (not p.is_dir(), p.name.lower()))
+        # Folders first, newest first (result folders, like History); files by
+        # name (M-UIPOLISH V6).
+        def _mtime(p: Path) -> float:
+            try:
+                return p.stat().st_mtime
+            except OSError:
+                return 0.0
+
+        dirs = sorted((c for c in children if c.is_dir()), key=_mtime, reverse=True)
+        files = sorted(
+            (c for c in children if not c.is_dir()), key=lambda p: p.name.lower()
+        )
+        children = dirs + files
         options: list[tuple[str, str]] = []
         for child in children:
             if child.is_dir():
-                options.append((f"[DIR] {child.name}", str(child)))
+                options.append((f"📁 {child.name}", str(child)))
                 continue
             try:
                 size_label = self._format_file_size(child.stat().st_size)
@@ -3543,7 +3684,7 @@ class QuantUIApp:
                 with self._files_preview_output:
                     display(
                         HTML(
-                            f"<p style='font-size:11px;color:{_theme.css.TEXT_SLATE};margin:0 0 4px'>"
+                            f"<p style='font-size:12px;color:{_theme.css.TEXT_SLATE};margin:0 0 4px'>"
                             f"{_html.escape(note)}</p>"
                             "<pre style='white-space:pre-wrap;word-break:break-word;"
                             "font-size:12px;line-height:1.35;margin:0'>"
@@ -3587,7 +3728,7 @@ class QuantUIApp:
                         for r in body
                     )
                     note = (
-                        f'<p style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:4px 0 6px">'
+                        f'<p style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin:4px 0 6px">'
                         f"First {len(rows)} rows shown.</p>"
                         if len(rows) >= 50
                         else ""
@@ -3647,9 +3788,9 @@ class QuantUIApp:
                     "Use the <b>Analysis</b> tab's Orbital Isosurface panel to "
                     "render volumetric data; the raw file is too large to "
                     "preview inline.</p>"
-                    f'<p style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:6px 0 4px">'
+                    f'<p style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin:6px 0 4px">'
                     "Header (first 6 lines):</p>"
-                    '<pre style="white-space:pre-wrap;font-size:11px;'
+                    '<pre style="white-space:pre-wrap;font-size:12px;'
                     f"line-height:1.35;margin:0;background:{_theme.css.BG_PANEL};padding:6px;"
                     'border-radius:4px">'
                     f"{_html.escape(header_text)}</pre>"
@@ -4157,7 +4298,7 @@ class QuantUIApp:
             return
         display_name = "py3Dmol" if chosen == VizBackend.PY3DMOL else "PlotlyMol"
         label.value = (
-            f'<span style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};font-style:italic">'
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};font-style:italic">'
             f"Rendering with: {display_name}</span>"
         )
 
@@ -4358,19 +4499,25 @@ class QuantUIApp:
             resolved_note = f"Automatic resolved to {resolved_note}"
         note = caps.platform_notes
         self.quantum_engine_note.value = (
-            f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
+            f'<div style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
             f"{resolved_note}. {note}</div>"
         )
+        # A small chip, not a full-width banner on every view (M-UIPOLISH C).
+        # The platform note matters only where it bites: native Windows, or an
+        # engine with a reduced feature set (PyFock).
+        import sys as _sys
+
+        show_note = _sys.platform == "win32" or caps.engine_id != "pyscf"
         self.engine_capability_html.value = (
-            f'<div style="background:{_theme.css.SURFACE_MUTED_BG};border-left:3px solid '
-            f'{_theme.css.ACCENT_INFO};padding:7px 10px;margin:2px 0 8px;font-size:12px">'
-            f"<b>Engine: {caps.display_name}</b> — {note}</div>"
+            f'<div style="margin:2px 0 8px;font-size:13px;color:{_theme.css.TEXT_SECONDARY}">'
+            f'<span title="{_html.escape(note, quote=True)}" style="display:inline-block;'
+            f"padding:2px 10px;border-radius:12px;background:{_theme.css.SURFACE_MUTED_BG};"
+            f'color:{_theme.css.TEXT_BODY}">Engine: <b>{caps.display_name}</b>'
+            f"{(' ' + _html.escape(caps.version)) if caps.version else ''}</span>"
+            + (f" &nbsp;{note}" if show_note else "")
+            + "</div>"
         )
-        self._engine_run_intro.value = (
-            f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:0 0 8px">'
-            f"{caps.display_name} runs in this kernel. Output appears live below. "
-            "Large molecules or high-accuracy basis sets may take several minutes.</p>"
-        )
+        self._engine_run_intro.value = ""
 
         is_pyfock = caps.engine_id == "pyfock"
         self.gpu_enabled_cb.disabled = not caps.supports_gpu
@@ -4930,6 +5077,11 @@ class QuantUIApp:
         if getattr(self, "_last_ir_freqs", None):
             self._update_ir_figure(
                 self._ir_mode_toggle.value, self._ir_fwhm_slider.value
+            )
+        # Raman follows, so the two spectra line up (M-UIPOLISH L8).
+        if getattr(self, "_last_raman_acts", None):
+            self._update_raman_figure(
+                self._raman_mode_toggle.value, self._raman_fwhm_slider.value
             )
         if new_val != self._user_settings.viz.ir_axis:
             self._user_settings.viz.ir_axis = str(new_val)
@@ -5852,7 +6004,7 @@ class QuantUIApp:
         with self._result_log_output:
             display(
                 HTML(
-                    f'<pre style="font-size:11px;max-height:400px;overflow-y:auto;'
+                    f'<pre style="font-size:12px;max-height:400px;overflow-y:auto;'
                     f'white-space:pre-wrap;word-break:break-all;margin:0;padding:6px">'
                     f"{_html_mod.escape(log_content)}</pre>"
                 )
@@ -7950,7 +8102,7 @@ class QuantUIApp:
             msg = e.get("message", "")
             rows += (
                 "<tr>"
-                f'<td style="padding:1px 10px 1px 0;color:{_theme.css.TEXT_SUBTLE};font-size:11px;white-space:nowrap">{ts}</td>'
+                f'<td style="padding:1px 10px 1px 0;color:{_theme.css.TEXT_SUBTLE};font-size:12px;white-space:nowrap">{ts}</td>'
                 f'<td style="padding:1px 10px 1px 0;color:{_theme.css.TEXT_SLATE_DARK};font-size:12px">{evt}</td>'
                 f'<td style="padding:1px 0;color:{_theme.css.TEXT_BODY};font-size:12px">{msg}</td>'
                 "</tr>"

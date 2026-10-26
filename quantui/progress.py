@@ -54,7 +54,8 @@ class StepProgress:
         "fail": "❌",
     }
 
-    def __init__(self, step_labels: List[str]) -> None:
+    def __init__(self, step_labels: List[str], *, horizontal: bool = False) -> None:
+        self._horizontal = horizontal
         self._labels = list(step_labels)
         self._states: List[str] = ["pending"] * len(self._labels)
         self._messages: List[Optional[str]] = [None] * len(self._labels)
@@ -91,6 +92,9 @@ class StepProgress:
         self._render()
 
     def _render(self) -> None:
+        if self._horizontal:
+            self._render_horizontal()
+            return
         lines = []
         for i, (label, state) in enumerate(zip(self._labels, self._states)):
             icon = self._ICONS[state]
@@ -111,4 +115,36 @@ class StepProgress:
             f'<div style="border:1px solid {_theme.css.BORDER}; border-radius:6px; '
             f"padding:8px 12px; margin:6px 0; background:{_theme.css.BG_PANEL}; "
             'max-width:600px;">' + "\n".join(lines) + "</div>"
+        )
+
+    _NUMBERS = "①②③④⑤⑥⑦⑧⑨"
+
+    def _render_horizontal(self) -> None:
+        """One line: ✓ Molecule › ② Method › ③ Run › ④ Results.
+
+        The four-row box took ~150 px above every Calculate view.
+        """
+        parts = []
+        for i, (label, state) in enumerate(zip(self._labels, self._states)):
+            mark = (
+                "✓"
+                if state == "done"
+                else "✗" if state == "fail" else self._NUMBERS[i % len(self._NUMBERS)]
+            )
+            if state == "active":
+                style = f"color:{_theme.css.TEXT_STRONG};font-weight:600"
+            elif state == "done":
+                style = f"color:{_theme.css.ACCENT_SUCCESS}"
+            elif state == "fail":
+                style = f"color:{_theme.css.ACCENT_ERROR}"
+            else:
+                style = f"color:{_theme.css.TEXT_MUTED}"
+            text = f"{mark} {html.escape(label)}"
+            message = self._messages[i]
+            if message and state == "fail":
+                text += f" — {html.escape(message)}"
+            parts.append(f'<span style="{style}">{text}</span>')
+        sep = f'<span style="color:{_theme.css.TEXT_MUTED};margin:0 8px">›</span>'
+        self._html.value = (
+            '<div style="font-size:14px;margin:4px 0 8px">' + sep.join(parts) + "</div>"
         )

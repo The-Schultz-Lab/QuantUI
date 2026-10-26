@@ -364,8 +364,8 @@ def plot_orbital_diagram_plotly(
     max_orbitals: int = 20,
     yrange: Optional[Tuple[float, float]] = None,
     title: Optional[str] = None,
-    width: int = 380,
-    height: int = 460,
+    width: int = 560,
+    height: int = 520,
     font_scale: float = 1.0,
     show_core: bool = True,
 ):
@@ -400,10 +400,13 @@ def plot_orbital_diagram_plotly(
     import plotly.graph_objects as go
 
     scale = max(0.5, float(font_scale))
-    fs_title = max(9, int(round(13 * scale)))
-    fs_axis = max(8, int(round(12 * scale)))
-    fs_label = max(8, int(round(11 * scale)))
-    fs_gap = max(8, int(round(10 * scale)))
+    # Base sizes raised (M-UIPOLISH T3): at 1.00 the subtitle and gap label
+    # rendered at ~9 px.
+    fs_title = max(9, int(round(15 * scale)))
+    fs_axis = max(8, int(round(13 * scale)))
+    fs_label = max(8, int(round(13 * scale)))
+    fs_gap = max(8, int(round(13 * scale)))
+    fs_sub = max(8, int(round(12 * scale)))
 
     energies = info.mo_energies_ev
     n_occ = info.n_occupied
@@ -525,10 +528,12 @@ def plot_orbital_diagram_plotly(
     fig.update_layout(
         width=width,
         height=height,
-        margin=dict(l=60, r=110, t=50, b=30),
+        margin=dict(l=60, r=110, t=50 + 18 * len(subtitles), b=30),
         title=dict(
             text=(title or f"Orbital Energy Levels — {info.formula}")
-            + "".join(f"<br><sup>{t}</sup>" for t in subtitles),
+            + "".join(
+                f"<br><span style='font-size:{fs_sub}px'>{t}</span>" for t in subtitles
+            ),
             font=dict(size=fs_title, family="Arial"),
         ),
         xaxis=dict(
@@ -1499,6 +1504,7 @@ _ISO_VIEWER_JS = """
     if(WITH_SURFACES){ surfaces(); }
     vw.setBackgroundColor(state.bg);
     vw.zoomTo();
+    __ORIENT__
     // Restore the orientation the previous viewer had, but only for the same
     // scene: carrying a camera onto a different molecule would frame it
     // arbitrarily. SCENE is the atom block, so switching ORBITALS keeps the
@@ -1789,7 +1795,7 @@ def _build_iso_viewer(
 ) -> str:
     import json
 
-    from quantui.viz_assets import make_view
+    from quantui.viz_assets import coords_from_model_text, make_view, orient_js
 
     pos_color, neg_color = orbital_colors(color_scheme)
 
@@ -1818,6 +1824,10 @@ def _build_iso_viewer(
         .replace("__MODE__", json.dumps(mode))
         .replace("__VOL__", json.dumps(voldata_text))
         .replace("__RANGE__", repr(float(vol_range)))
+        .replace(
+            "__ORIENT__",
+            orient_js("vw", coords_from_model_text(data_text, data_format)),
+        )
     )
     busy = (
         f'<div id="orb_busy_{uid}" style="display:none;position:absolute;'
@@ -2235,6 +2245,7 @@ _GALLERY_TILE_JS = """
     vw.addVolumetricData(DATA,"cube",{isoval: -ISO, color: NEG, opacity: 0.85, smoothness: 5});
     vw.setBackgroundColor(BG);
     vw.zoomTo();
+    __ORIENT__
     vw.render();
     // One camera for the whole gallery: link this viewer both ways with
     // every tile already built in the same group.
@@ -2283,7 +2294,7 @@ def build_orbital_gallery_html(
     import json
     import uuid
 
-    from quantui.viz_assets import make_view
+    from quantui.viz_assets import coords_from_model_text, make_view, orient_js
 
     if not tiles:
         return '<p style="padding:8px">No orbitals to show.</p>'
@@ -2319,13 +2330,17 @@ def build_orbital_gallery_html(
             .replace("__POS__", json.dumps(pos))
             .replace("__NEG__", json.dumps(neg))
             .replace("__BG__", json.dumps(bgcolor))
+            .replace(
+                "__ORIENT__",
+                orient_js("vw", coords_from_model_text(tile.cube_text, "cube")),
+            )
         )
         cells.append(
             '<div class="quantui-gallery-tile" style="display:flex;'
             'flex-direction:column;align-items:center">'
             f'<div style="font-size:12px;font-weight:600;margin:2px 0 0;'
             f'text-align:center">{_html.escape(tile.caption)}</div>'
-            f'<div style="font-size:11px;margin:0 0 2px;text-align:center;'
+            f'<div style="font-size:12px;margin:0 0 2px;text-align:center;'
             f'min-height:14px">{_html.escape(tile.detail)}</div>'
             f"{view_html}<script>{js}</script></div>"
         )
@@ -2335,7 +2350,7 @@ def build_orbital_gallery_html(
         f'{int(tile_px) + 8}px);gap:8px;justify-content:start">'
         + "".join(cells)
         + "</div>"
-        '<p style="font-size:11px;margin:4px 0 0">Drag any tile: all tiles turn '
+        '<p style="font-size:12px;margin:4px 0 0">Drag any tile: all tiles turn '
         "together. Coarse grid for speed; use Generate above for a detailed "
         "view of one orbital.</p>"
     )

@@ -80,23 +80,27 @@ def _reset_unavailable_messages_for_context(app: Any, ctx: Any) -> None:
     )
     for panel_name in app._ana_panel_names:
         if panel_name in expected_panels:
-            _set_panel_unavailable_message(
-                app,
-                panel_name,
-                (
-                    f"Not available for this {calc_label} result: "
-                    "required data is missing or could not be loaded."
-                ),
-            )
+            if panel_name == "Trajectory" and calc_label == "Frequency":
+                # Not an error: a Frequency run has a trajectory only when it
+                # optimized first (M-UIPOLISH C).
+                text = (
+                    "No optimization steps in this run. Tick <b>Geometry "
+                    "optimization before calculation</b> to record a trajectory."
+                )
+            else:
+                text = f"This {calc_label} result has no data for this panel."
+            _set_panel_unavailable_message(app, panel_name, text)
             _set_panel_title_hint(app, panel_name, "not available for this result")
             continue
         when = app._ana_when_map.get(panel_name, "relevant")
-        _set_panel_unavailable_message(
-            app,
-            panel_name,
-            f"Not available - run a {when} calculation first.",
-        )
+        _set_panel_unavailable_message(app, panel_name, _run_first_text(when))
         _set_panel_title_hint(app, panel_name, f"needs {when}")
+
+
+def _run_first_text(when: str) -> str:
+    """'Run an NMR Shielding calculation to fill this panel.'"""
+    article = "an" if when.startswith(("NMR", "A", "E", "I", "O")) else "a"
+    return f"Run {article} {when} calculation to fill this panel."
 
 
 def _analysis_heading_label(ctx: Any) -> str:
@@ -129,9 +133,7 @@ def build_ana_switcher(app: Any, *, layout_fn: Any) -> None:
     app._ana_content_boxes = {}
     for name, acc, when in panel_meta:
         unavail = widgets.HTML(
-            value=_panel_unavailable_html(
-                f"Not available - run a {when} calculation first."
-            ),
+            value=_panel_unavailable_html(_run_first_text(when)),
             layout=layout_fn(display=""),
         )
         content = acc.children[0]
@@ -351,12 +353,42 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     source_suffix = " (from History)" if ctx.source == "history" else ""
     heading = _analysis_heading_label(ctx)
     app._analysis_context_lbl.value = (
-        f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:4px 0 12px">'
-        f"Analysing: {_html_mod.escape(heading)}{source_suffix}</p>"
+        f'<p style="color:{_theme.css.TEXT_STRONG};font-size:15px;font-weight:600;'
+        f'margin:4px 0 12px">Analysing: {_html_mod.escape(heading)}'
+        f'<span style="font-weight:400;color:{_theme.css.TEXT_SECONDARY}">'
+        f"{source_suffix}</span></p>"
     )
+    order_analysis_panels(app)
     has_any = bool(app._ana_available)
     app._to_analysis_btn.layout.display = "" if has_any else "none"
     app._analysis_empty_html.layout.display = "none" if has_any else ""
+
+
+def order_analysis_panels(app: Any) -> None:
+    """Panels with data first; the rest after a "Not available" divider.
+
+    Unavailable panels used to sit in fixed order among the useful ones, so a
+    Frequency result showed "needs PES Scan" between Populations and the
+    vibrations (M-UIPOLISH L3).
+    """
+    panel = getattr(app, "analysis_tab_panel", None)
+    accordions = list(getattr(app, "_ana_accordions", []) or [])
+    if panel is None or not accordions:
+        return
+    divider = getattr(app, "_ana_unavail_divider", None)
+    if divider is None:
+        divider = widgets.HTML(
+            f'<div style="margin:18px 0 6px;font-size:13px;color:{_theme.css.TEXT_MUTED}">'
+            "Not available for this result</div>"
+        )
+        app._ana_unavail_divider = divider
+    available: set = getattr(app, "_ana_available", set())
+    names = list(app._ana_panel_names)
+    have = [a for n, a in zip(names, accordions) if n in available]
+    lack = [a for n, a in zip(names, accordions) if n not in available]
+    keep = [c for c in panel.children if c not in accordions and c is not divider]
+    divider.layout.display = "" if (have and lack) else "none"
+    panel.children = tuple(keep + have + [divider] + lack)
 
 
 def pop_energies(app: Any, ctx: Any) -> bool:

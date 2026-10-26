@@ -213,6 +213,10 @@ def visualize_molecule_py3dmol(
 
     # Zoom to fit — includes the (now bonded) metal, so it is never off-screen.
     view.zoomTo()
+    # Face the camera (a planar molecule in the xz/yz plane was seen edge-on).
+    from quantui.viz_assets import orient_view
+
+    orient_view(view, molecule.coordinates)
 
     return view
 
@@ -389,6 +393,11 @@ def visualize_molecule_plotlymol(
         paper_bgcolor=bgcolor,
         scene=dict(bgcolor=bgcolor),
     )
+    from quantui.viz_assets import plotly_camera
+
+    camera = plotly_camera(molecule.coordinates)
+    if camera is not None:
+        fig.update_layout(scene_camera=camera)
     if show_atom_indices:
         import plotly.graph_objects as go
 

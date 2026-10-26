@@ -630,7 +630,9 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
                 [app._scan_pick_readout, app._scan_pick_clear_btn],
                 layout=layout_fn(gap="6px", align_items="center"),
             ),
-            app._scan_coord_summary,
+            # The coordinate summary repeated the atom dropdowns; the "± around
+            # current" range tool now sits in a closed section, with Suggest
+            # range beside Start/Stop (M-UIPOLISH L9).
             app._scan_current_value_html,
             widgets.HBox(
                 [
@@ -639,21 +641,11 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
                     app._scan_unit_lbl,  # unit of Start/Stop, not of Points
                     app._scan_steps,
                     app._scan_grid_dd,
+                    app._scan_suggest_btn,
                 ],
-                layout=layout_fn(gap="4px", align_items="center"),
+                layout=layout_fn(gap="4px", align_items="center", flex_wrap="wrap"),
             ),
-            widgets.HBox(
-                [
-                    app._scan_around_margin,
-                    app._scan_around_margin_unit,
-                    app._scan_suggest_around_btn,
-                ],
-                layout=layout_fn(gap="6px", align_items="center"),
-            ),
-            widgets.HBox(
-                [app._scan_suggest_btn],
-                layout=layout_fn(gap="6px"),
-            ),
+            _scan_more_range_options(app, layout_fn),
             widgets.HBox(
                 [app.fmax_fi, app.max_steps_si],
                 layout=layout_fn(gap="8px"),
@@ -852,6 +844,29 @@ def _sync_scan_around_margin_ui(app: Any, scan_type: str | None = None) -> None:
 def refresh_pes_seed_options(app: Any) -> None:
     """Populate the PES seed-geometry dropdown from saved geo opts."""
     _refresh_seed_options(app, app._scan_seed_dd)
+
+
+def _scan_more_range_options(app: Any, layout_fn: Any) -> Any:
+    """Closed "More range options" section holding the ± window tool."""
+    acc = getattr(app, "_scan_more_range_acc", None)
+    if acc is None:
+        acc = widgets.Accordion(
+            children=[
+                widgets.HBox(
+                    [
+                        app._scan_around_margin,
+                        app._scan_around_margin_unit,
+                        app._scan_suggest_around_btn,
+                    ],
+                    layout=layout_fn(gap="6px", align_items="center", flex_wrap="wrap"),
+                )
+            ],
+            layout=layout_fn(margin="4px 0"),
+        )
+        acc.set_title(0, "More range options (± around the current value)")
+        acc.selected_index = None
+        app._scan_more_range_acc = acc
+    return acc
 
 
 def refresh_pes_scan_widgets(
@@ -1685,8 +1700,22 @@ def on_compare(app: Any, btn: Any, *, layout_fn: Any) -> None:
                 import matplotlib.pyplot as plt
 
                 fig = plot_comparison(summaries)
-                display(fig)
+                # As a PNG: display(fig) printed "<Figure size 1000x500 with
+                # 2 Axes>" under Voila, where no inline backend is active.
+                import base64 as _b64
+                import io as _io
+
+                _buf = _io.BytesIO()
+                fig.savefig(_buf, format="png", dpi=100, bbox_inches="tight")
                 plt.close(fig)
+                _png = _b64.b64encode(_buf.getvalue()).decode("ascii")
+                display(
+                    HTML(
+                        f'<img src="data:image/png;base64,{_png}" '
+                        'style="max-width:100%;background:#ffffff;'
+                        'border-radius:6px;margin:10px 0" alt="Comparison chart">'
+                    )
+                )
             except Exception:
                 pass
         if valid_dirs:
@@ -1801,7 +1830,10 @@ def on_help_topic_changed(app: Any, change: Any = None) -> None:
 
 
 def on_issue_btn(app: Any, _unused: Any = None) -> None:
-    """Open the issue-report overlay and reset transient form status."""
+    """Toggle the issue-report overlay; opening resets the form."""
+    if app._issue_overlay.layout.display != "none":
+        app._issue_overlay.layout.display = "none"
+        return
     app._issue_textarea.value = ""
     app._issue_status_html.value = ""
     app._issue_overlay.layout.display = ""
@@ -1925,8 +1957,9 @@ def _disarm_exit(app: Any) -> None:
     app._exit_armed = False
     app._exit_arm_token = None
     app._exit_btn.description = "Exit"
+    app._exit_btn.button_style = ""
     app._exit_btn.tooltip = "Shut down the QuantUI server and end this session"
-    app._exit_btn.layout.width = "64px"
+    app._exit_btn.layout.width = "80px"
     app._exit_warn_html.layout.display = "none"
     app._exit_warn_html.value = ""
     app._exit_cancel_btn.layout.display = "none"
@@ -2011,7 +2044,7 @@ def on_cal_run(
         f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK}">Starting…</span>'
         # Reserve a second invisible line so the live-message ticker
         # doesn't jump the accordion height.
-        '<br><span style="font-size:11px;color:transparent">.</span>'
+        '<br><span style="font-size:12px;color:transparent">.</span>'
     )
     app._cal_results_html.value = ""
 
@@ -2088,7 +2121,7 @@ def _cal_table_html(steps_so_far, total: int, *, in_flight_step=None) -> str:
         if len(msg) > 140:
             msg = msg[:137] + "…"
         return (
-            f'<br><span style="color:{_theme.css.TEXT_SUBTLE};font-style:italic;font-size:11px">'
+            f'<br><span style="color:{_theme.css.TEXT_SUBTLE};font-style:italic;font-size:12px">'
             f"{_html_mod.escape(msg)}</span>"
         )
 
@@ -2212,7 +2245,7 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
             f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK}">'
             f"Step {step_n} / {total} — {label} "
             f"[{icon} {elapsed:.1f} s]</span>"
-            f'<br><span style="font-size:11px;color:{live_line_color}">'
+            f'<br><span style="font-size:12px;color:{live_line_color}">'
             f"{live_line_text}</span>"
         )
 
@@ -2249,11 +2282,11 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
     app._cal_step_label.value = (
         f'<span style="font-size:12px;color:{_theme.css.ACCENT_SUCCESS}"><b>Calibration complete.</b> '
         "Time estimates are now active.</span>"
-        '<br><span style="font-size:11px;color:transparent">.</span>'
+        '<br><span style="font-size:12px;color:transparent">.</span>'
         if result.n_completed > 0
         else (
             '<span style="font-size:12px;color:#dc2626">No steps completed.</span>'
-            '<br><span style="font-size:11px;color:transparent">.</span>'
+            '<br><span style="font-size:12px;color:transparent">.</span>'
         )
     )
     app._cal_stop_btn.layout.display = "none"
@@ -2764,7 +2797,11 @@ def refresh_results_browser(app: Any) -> None:
         from quantui import list_results, load_result
     except ImportError:
         return
-    from quantui.app_formatters import friendly_timestamp, slurm_history_marker
+    from quantui.app_formatters import (
+        display_formula,
+        friendly_timestamp,
+        slurm_history_marker,
+    )
     from quantui.app_history import (
         apply_history_filter,
         entry_date,
@@ -2796,7 +2833,7 @@ def refresh_results_browser(app: Any) -> None:
             calib_marker = "🔧 " if data.get("calibration_run_id") else ""
             # SLURM batch results carry job id + attempt (M-JOBDIRS JD.6).
             slurm_marker = slurm_history_marker(data)
-            formula = data.get("formula", "?")
+            formula = display_formula(data.get("formula", "?"))
             method = data.get("method", "?")
             basis = data.get("basis", "?")
             label = (
@@ -2860,7 +2897,7 @@ def refresh_comparison(app: Any) -> None:
 
 def populate_compare_list(app: Any) -> None:
     """Populate the Compare tab selector with saved result entries."""
-    from quantui.app_formatters import friendly_timestamp
+    from quantui.app_formatters import display_formula, friendly_timestamp
     from quantui.results_storage import list_results, load_result
 
     dirs = list_results()
@@ -2876,7 +2913,7 @@ def populate_compare_list(app: Any) -> None:
             calc_badge = _calc_type_badge(data.get("calc_type", ""))
             label = (
                 f"{friendly_timestamp(ts)}  ·  [{calc_badge}]  "
-                f"{data.get('formula', '?')}  "
+                f"{display_formula(data.get('formula', '?'))}  "
                 f"{data.get('method', '?')}/{data.get('basis', '?')}"
             )
             options.append((label, str(d)))

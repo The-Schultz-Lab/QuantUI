@@ -119,9 +119,9 @@ class TestThermoPanel:
         )
         freqs = [1680.6, 3862.7, 3991.8]
         show_thermo_box(app, water, -76.4, freqs, max_force_ev_per_ang=0.671)
-        assert "Not a stationary point" in app._thermo_html.value
+        assert "Not a minimum" in app._thermo_html.value
         show_thermo_box(app, water, -76.4, freqs, max_force_ev_per_ang=0.004)
-        assert "Not a stationary point" not in app._thermo_html.value
+        assert "Not a minimum" not in app._thermo_html.value
 
 
 @pyscf_only
