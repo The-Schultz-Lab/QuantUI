@@ -344,15 +344,30 @@ def plot_orbital_diagram(
 # ============================================================================
 
 
+# Occupied MOs more than this far below the HOMO are treated as core (D2).
+# Valence levels sit well inside it (F 2s is ~30 eV below the HOMO in
+# fluorocarbons); 1s/2p core levels are hundreds of eV down. Defined on
+# energies rather than per-element shell counts so it stays right for ECP
+# bases, whose MO list has no core orbitals to begin with.
+CORE_ORBITAL_GAP_EV = 50.0
+
+
+def count_core_orbitals(info: OrbitalInfo) -> int:
+    """Number of occupied MOs lying more than CORE_ORBITAL_GAP_EV below the HOMO."""
+    cutoff = float(info.homo_energy_ev) - CORE_ORBITAL_GAP_EV
+    return int(sum(1 for e in info.mo_energies_ev[: info.n_occupied] if e < cutoff))
+
+
 def plot_orbital_diagram_plotly(
     info: OrbitalInfo,
     *,
     max_orbitals: int = 20,
     yrange: Optional[Tuple[float, float]] = None,
     title: Optional[str] = None,
-    width: int = 380,
-    height: int = 460,
+    width: int = 560,
+    height: int = 520,
     font_scale: float = 1.0,
+    show_core: bool = True,
 ):
     """Interactive Plotly orbital energy-level diagram.
 
@@ -373,6 +388,10 @@ def plot_orbital_diagram_plotly(
         Custom plot title; defaults to ``"Orbital Energy Levels — {formula}"``.
     width, height:
         Figure dimensions in pixels.
+    show_core:
+        When ``False``, leave out core orbitals (:func:`count_core_orbitals`)
+        so the auto Y range frames the valence levels; the subtitle says how
+        many were hidden.
 
     Returns
     -------
@@ -381,10 +400,13 @@ def plot_orbital_diagram_plotly(
     import plotly.graph_objects as go
 
     scale = max(0.5, float(font_scale))
-    fs_title = max(9, int(round(13 * scale)))
-    fs_axis = max(8, int(round(12 * scale)))
-    fs_label = max(8, int(round(11 * scale)))
-    fs_gap = max(8, int(round(10 * scale)))
+    # Base sizes raised (M-UIPOLISH T3): at 1.00 the subtitle and gap label
+    # rendered at ~9 px.
+    fs_title = max(9, int(round(15 * scale)))
+    fs_axis = max(8, int(round(13 * scale)))
+    fs_label = max(8, int(round(13 * scale)))
+    fs_gap = max(8, int(round(13 * scale)))
+    fs_sub = max(8, int(round(12 * scale)))
 
     energies = info.mo_energies_ev
     n_occ = info.n_occupied
@@ -393,6 +415,11 @@ def plot_orbital_diagram_plotly(
     half = max_orbitals // 2
     start = max(0, n_occ - half)
     end = min(n_total, n_occ + half)
+    n_core_hidden = 0
+    if not show_core:
+        n_core = count_core_orbitals(info)
+        n_core_hidden = max(0, n_core - start)
+        start = max(start, n_core)
 
     LHW = 0.3  # half-width of each horizontal line in x
 
@@ -488,22 +515,31 @@ def plot_orbital_diagram_plotly(
     else:
         y_min, y_max = yrange
 
+    subtitles = []
+    if irreps and info.irrep_caption:
+        subtitles.append(info.irrep_caption)
+    if n_core_hidden:
+        s_ = "s" if n_core_hidden > 1 else ""
+        subtitles.append(
+            f"{n_core_hidden} core orbital{s_} hidden (tick Show core orbitals)"
+        )
+
     fig = go.Figure(data=traces)
     fig.update_layout(
         width=width,
         height=height,
-        margin=dict(l=60, r=110, t=50, b=30),
+        margin=dict(l=60, r=110, t=50 + 18 * len(subtitles), b=30),
         title=dict(
             text=(title or f"Orbital Energy Levels — {info.formula}")
-            + (
-                f"<br><sup>{info.irrep_caption}</sup>"
-                if irreps and info.irrep_caption
-                else ""
+            + "".join(
+                f"<br><span style='font-size:{fs_sub}px'>{t}</span>" for t in subtitles
             ),
             font=dict(size=fs_title, family="Arial"),
         ),
         xaxis=dict(
-            range=[-0.9, 0.9],
+            # Room left of the gap arrow for its label, which is right-anchored
+            # at the arrow; at [-0.9, 0.9] it ran over the Y tick labels.
+            range=[-1.2 - 0.3 * (scale - 1.0), 0.9],
             showticklabels=False,
             showgrid=False,
             zeroline=False,
@@ -1468,6 +1504,7 @@ _ISO_VIEWER_JS = """
     if(WITH_SURFACES){ surfaces(); }
     vw.setBackgroundColor(state.bg);
     vw.zoomTo();
+    __ORIENT__
     // Restore the orientation the previous viewer had, but only for the same
     // scene: carrying a camera onto a different molecule would frame it
     // arbitrarily. SCENE is the atom block, so switching ORBITALS keeps the
@@ -1758,7 +1795,7 @@ def _build_iso_viewer(
 ) -> str:
     import json
 
-    from quantui.viz_assets import make_view
+    from quantui.viz_assets import coords_from_model_text, make_view, orient_js
 
     pos_color, neg_color = orbital_colors(color_scheme)
 
@@ -1787,6 +1824,10 @@ def _build_iso_viewer(
         .replace("__MODE__", json.dumps(mode))
         .replace("__VOL__", json.dumps(voldata_text))
         .replace("__RANGE__", repr(float(vol_range)))
+        .replace(
+            "__ORIENT__",
+            orient_js("vw", coords_from_model_text(data_text, data_format)),
+        )
     )
     busy = (
         f'<div id="orb_busy_{uid}" style="display:none;position:absolute;'
@@ -2204,6 +2245,7 @@ _GALLERY_TILE_JS = """
     vw.addVolumetricData(DATA,"cube",{isoval: -ISO, color: NEG, opacity: 0.85, smoothness: 5});
     vw.setBackgroundColor(BG);
     vw.zoomTo();
+    __ORIENT__
     vw.render();
     // One camera for the whole gallery: link this viewer both ways with
     // every tile already built in the same group.
@@ -2252,7 +2294,7 @@ def build_orbital_gallery_html(
     import json
     import uuid
 
-    from quantui.viz_assets import make_view
+    from quantui.viz_assets import coords_from_model_text, make_view, orient_js
 
     if not tiles:
         return '<p style="padding:8px">No orbitals to show.</p>'
@@ -2288,13 +2330,17 @@ def build_orbital_gallery_html(
             .replace("__POS__", json.dumps(pos))
             .replace("__NEG__", json.dumps(neg))
             .replace("__BG__", json.dumps(bgcolor))
+            .replace(
+                "__ORIENT__",
+                orient_js("vw", coords_from_model_text(tile.cube_text, "cube")),
+            )
         )
         cells.append(
             '<div class="quantui-gallery-tile" style="display:flex;'
             'flex-direction:column;align-items:center">'
             f'<div style="font-size:12px;font-weight:600;margin:2px 0 0;'
             f'text-align:center">{_html.escape(tile.caption)}</div>'
-            f'<div style="font-size:11px;margin:0 0 2px;text-align:center;'
+            f'<div style="font-size:12px;margin:0 0 2px;text-align:center;'
             f'min-height:14px">{_html.escape(tile.detail)}</div>'
             f"{view_html}<script>{js}</script></div>"
         )
@@ -2304,7 +2350,7 @@ def build_orbital_gallery_html(
         f'{int(tile_px) + 8}px);gap:8px;justify-content:start">'
         + "".join(cells)
         + "</div>"
-        '<p style="font-size:11px;margin:4px 0 0">Drag any tile: all tiles turn '
+        '<p style="font-size:12px;margin:4px 0 0">Drag any tile: all tiles turn '
         "together. Coarse grid for speed; use Generate above for a detailed "
         "view of one orbital.</p>"
     )

@@ -244,6 +244,20 @@ class TestFilesTab:
         app = QuantUIApp()
         assert len(app._files_root_dd.options) >= 1
 
+    def test_entering_files_tab_lists_results_saved_since_startup(
+        self, tmp_path, monkeypatch
+    ):
+        # UIA.6: a run saved its result folder while Files was out of view and
+        # Files kept showing "(empty directory)" until Refresh was clicked.
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        app._refresh_file_browser()
+        (tmp_path / "2026-10-25_H2O_RHF_6-31G").mkdir()
+        app.root_tab.selected_index = app._tab_index("calculate")
+        app.root_tab.selected_index = app._tab_index("files")
+        labels = [label for label, _ in app._files_entries.options]
+        assert any("2026-10-25_H2O_RHF_6-31G" in label for label in labels)
+
 
 # ---------------------------------------------------------------------------
 # Molecule input — collapse / expand pattern
@@ -291,6 +305,21 @@ class TestMoleculeInputCollapse:
         # Simulate clicking "Change molecule"
         app._on_expand_mol_input(None)
         assert app.mol_input_container.children[0] is app.mol_input_expanded
+
+    def test_edit_structure_and_png_inbox_survive_collapse_and_expand(self):
+        # UIA.2: the collapse and expand paths each rebuilt the children by
+        # hand and dropped Edit Structure (and the viewer's Save-PNG inbox),
+        # so the panel vanished as soon as there was a molecule to edit.
+        app = QuantUIApp()
+        kept = (app._edit_accordion, app._mol_calc_png_inbox, app.viz_output)
+        # Before a molecule exists only the viewer slots are shown; Edit
+        # Structure appears with the molecule (M-UIPOLISH L11).
+        assert app._mol_calc_png_inbox in app.mol_input_container.children
+        assert app._edit_accordion not in app.mol_input_container.children
+        app._set_molecule(_water())
+        assert all(w in app.mol_input_container.children for w in kept)
+        app._on_expand_mol_input(None)
+        assert all(w in app.mol_input_container.children for w in kept)
 
     def test_multiplicity_above_one_switches_to_uhf(self):
         app = QuantUIApp()
@@ -641,6 +670,9 @@ class TestQuantumEngineGating:
         assert "Geometry Opt" in app.calc_type_dd.options
         assert "B3LYP" in app.method_dd.options
         assert "6-31G" in app.basis_dd.options
+        # Diffuse sets come back with PySCF (PyFock's subset has none).
+        for basis in ("6-31+G*", "6-31++G**", "aug-cc-pVDZ", "def2-SVPD"):
+            assert basis in app.basis_dd.options
         assert app.density_fit_enabled_cb.disabled is False
         assert app.execution_backend_dd.disabled is False
 
@@ -1519,6 +1551,19 @@ class TestReorganizationEnergyUI:
         app.calc_type_dd.value = "Reorganization Energy"
         assert app._freq_preopt_cb.layout.display == "none"
 
+    def test_pes_preopt_label_does_not_leak_into_other_types(self):
+        # UIA.4: the PES label was only restored when leaving PES straight for
+        # a plain type, so PES -> Reorg -> Single Point -> Frequency kept
+        # "...before scan" on the Frequency checkbox.
+        app = QuantUIApp()
+        app._set_molecule(_water())
+        app.calc_type_dd.value = "PES Scan"
+        assert "before scan" in app._freq_preopt_cb.description
+        for ct in ("Reorganization Energy", "Single Point", "Frequency"):
+            app.calc_type_dd.value = ct
+            assert "before scan" not in app._freq_preopt_cb.description, ct
+        assert app._freq_preopt_cb.description.startswith("Geometry optimization")
+
     def test_reorg_calc_type_sets_up_mode(self):
         app = QuantUIApp()
         mol = Molecule(["H", "H"], [[0, 0, 0], [0, 0, 0.74]])
@@ -1776,6 +1821,21 @@ class TestShowIRSpectrum:
         with patch.object(app, "_update_ir_figure") as mock_update:
             app._ir_mode_toggle.value = "Broadened"
         mock_update.assert_called_once_with("Broadened", app._ir_fwhm_slider.value)
+
+    def test_axis_defaults_to_ftir_direction_and_is_remembered(
+        self, tmp_path, monkeypatch
+    ):
+        # D3: 4000 → 400 by default, 400 → 4000 one click away, and the choice
+        # persists to the next launch.
+        monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(tmp_path / "s.json"))
+        app = QuantUIApp()
+        app._show_ir_spectrum(self._make_freq_result())
+        r = list(app._last_ir_fig.layout.xaxis.range)
+        assert app._ir_axis_dd.value == "descending" and r[0] > r[1]
+        app._ir_axis_dd.value = "ascending"
+        r = list(app._last_ir_fig.layout.xaxis.range)
+        assert r[0] < r[1]
+        assert QuantUIApp()._ir_axis_dd.value == "ascending"
 
 
 # ---------------------------------------------------------------------------
@@ -2947,7 +3007,7 @@ class TestUVVisSpectrumWidgets:
         app = QuantUIApp()
         assert isinstance(app._uv_xmin_input, widgets.BoundedFloatText)
         assert isinstance(app._uv_xmax_input, widgets.BoundedFloatText)
-        assert "drag either end" in app._uv_range_hint.value.lower()
+        assert "drag an end" in app._uv_range_hint.value.lower()
 
     def test_uv_range_change_triggers_figure_update(self):
         app = QuantUIApp()
@@ -3148,6 +3208,22 @@ class TestShowOrbitalDiagram:
         val = "\n".join(payloads)
         assert "<div" in val or "<img" in val
 
+    def test_core_hidden_by_default_and_checkbox_refits(self):
+        # D2: water's O 1s (−20.56 Ha ≈ −559 eV) no longer sets the default
+        # Y range; ticking Show core orbitals brings it back into view.
+        import numpy as np
+
+        r = self._make_result_with_mo()
+        r.mo_energy_hartree = np.array([-20.56, -1.34, -0.70, -0.57, -0.50, 0.20])
+        r.mo_occ = np.array([2.0, 2.0, 2.0, 2.0, 2.0, 0.0])
+        app = QuantUIApp()
+        app._show_orbital_diagram(r)
+        assert app._orb_show_core_cb.value is False
+        assert app._orb_ymin_input.value > -60
+        app._orb_show_core_cb.value = True
+        assert app._orb_ymin_input.value < -559
+        assert app._last_orb_fig.layout.yaxis.range[0] < -559
+
     def test_isosurface_controls_hidden_when_no_mo_coeff(self):
         app = QuantUIApp()
         app._show_orbital_diagram(self._make_result_with_mo())
@@ -3323,8 +3399,11 @@ class TestIsosurfacePersistence:
                 "quantui.orbital_visualization.generate_cube_from_arrays",
                 side_effect=_fake_generate,
             ) as mock_gen,
+            # autospec: the mock enforces the real signature, so an option the
+            # renderer does not accept (e.g. ``esp_range``) fails here.
             patch(
                 "quantui.orbital_visualization.render_orbital_isosurface_py3dmol",
+                autospec=True,
                 return_value="<div>py3dmol iso</div>",
             ) as mock_py3dmol,
             patch(
@@ -3361,7 +3440,14 @@ class TestResultsTab:
 
     def test_results_tab_contains_result_output(self):
         app = QuantUIApp()
-        assert app.result_output in app.results_tab_panel.children
+
+        def _walk(w):
+            yield w
+            for c in getattr(w, "children", ()):
+                yield from _walk(c)
+
+        # Nested in the card | viewer row since M-UIPOLISH L1.
+        assert any(w is app.result_output for w in _walk(app.results_tab_panel))
 
     def test_to_analysis_btn_initially_hidden(self):
         app = QuantUIApp()
@@ -3444,7 +3530,8 @@ class TestAnalysisTab:
 
         heading = app._analysis_context_lbl.value
         assert "Analysing:" in heading
-        assert "2026-05-14_10-11-12-123456" in heading
+        # Same readable timestamp as the History label (audit D16).
+        assert "2026-05-14 10:11" in heading
         assert "[Frequency Analysis]" in heading
         assert "H2O  B3LYP/6-31G" in heading
         assert "(from History)" in heading

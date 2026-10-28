@@ -89,7 +89,9 @@ _MAIL_CLASS = "quantui-live-mail"
 # so a wrapper span would be forced back to a proportional font and re-break the
 # ASCII header exactly as .jp-OutputArea-output did (see GOTCHAS).
 _CONTAINER_STYLE = (
-    "height:300px;overflow-y:auto;overflow-anchor:auto;"
+    # 220 px and drag-to-resize: a 300 px empty box dominated the run area
+    # (M-UIPOLISH L5).
+    "height:220px;resize:vertical;overflow-y:auto;overflow-anchor:auto;"
     f"border:1px solid {_theme.css.BORDER};border-radius:2px;padding:8px;"
     "font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,"
     "'Liberation Mono','Courier New',monospace;"
@@ -97,7 +99,7 @@ _CONTAINER_STYLE = (
     "word-break:break-word;"
 )
 
-_PLACEHOLDER = "No calculation run yet. PySCF output and any errors will appear here."
+_PLACEHOLDER = "Output and any errors appear here when you run a calculation."
 
 
 def _bridge_js(log_cls: str, mail_cls: str) -> str:

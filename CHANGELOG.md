@@ -9,6 +9,49 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Clarity and layout pass** (M-UIPOLISH, from a rendered-UI walk-through):
+  - Molecules open facing the camera in every viewer (principal axes), so
+    water no longer looks linear and the dipole arrow is visible.
+  - The library finds common names ("water", "ammonia", "benzene"); QM9
+    entries come after the curated ones and duplicates are listed once.
+  - Two-column layouts on wide screens: Calculate (molecule | setup + run),
+    Results (card | structure), and the Analysis viewer, Mulliken,
+    Vibrational and Orbital panels; they stack on narrow windows.
+  - One-line header with the toolbar, a one-line step indicator, the
+    "Calculation complete" links right under Run, and a shorter, resizable
+    log that hides internal bookkeeping lines.
+  - Analysis lists the panels that have data first; plots opened from a
+    collapsed panel fill their width; Raman follows the IR axis direction.
+  - UV-Vis shows vacuum-UV bands (the window started at 100 nm) and lists
+    the excited states; NMR groups equivalent nuclei and uses one
+    Atom | σ | δ table.
+  - Live and History result cards show the same rows; frequencies are
+    listed with their symmetry labels; formulas read NH3, not H3N.
+  - Compare uses checkboxes and renders its chart; History offers recent
+    results as links with the other filters folded away; Help and Report
+    Issue open as side drawers (Esc closes both).
+  - Shorter copy throughout, a 12 px minimum text size, clearer section
+    headings, neutral Report Issue / Exit / idle Cancel buttons.
+  - Fixed: the System Settings GPU row could stay at "checking…" forever.
+- **Vibrational-mode symmetry labels** (M-SPECTRA2 SPC2.4) — after a Frequency
+  calculation each normal mode gets its irreducible representation: a *Sym.*
+  column and a Γvib caption in the Vibrational mode table (NH₃: 2A₁ + 2E), the
+  label in the mode dropdown, and a *Symmetry* line in the IR and Raman stick
+  hovers. Works for live results and History reloads (computed from the saved
+  displacements). Full-group labels for abelian groups, C3v, D3h, D3, D3d, D6h,
+  Td, Oh and linear molecules (σ/π); other groups (e.g. D4h) show labels in
+  PySCF's computational subgroup, said so in the caption.
+  `quantui.symmetry.label_mode_irreps()`.
+- **Diffuse basis sets** — `6-31+G*`, `6-31++G**`, `aug-cc-pVDZ` and
+  `def2-SVPD` join the basis menu (each next to the set it extends), for
+  anions, radical anions and weakly bound species. Available with PySCF in the
+  app, `quantui submit` and `quantui-batch`; PyFock's menu is unchanged.
+  `6-31+G(d)` / `6-31++G(d,p)` are accepted as the same sets. The basis card
+  marks them *Diffuse*, the educational notes explain them and nudge an anion
+  on a non-diffuse basis toward one, and the basis-set help topic has a new
+  *Anions need diffuse functions* paragraph. SLURM memory factors and the time
+  estimator's basis-function table cover the new sets.
+  `config.DIFFUSE_BASIS_SETS` / `config.is_diffuse_basis()` list them.
 - **`quantui results JOB_DIR`** — the `quantui-batch results` summary
   (convergence, energy, imaginary modes, strongest IR bands, excited states,
   NMR shifts) from inside the image. Both now also note a saddle-point
@@ -42,6 +85,44 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- **Frequency results check the geometry** — every Frequency run now
+  computes the forces at the input geometry. When the largest force is above
+  the Geometry Opt threshold (0.05 eV/Å) the result card (live and History)
+  and the Analysis thermochemistry box warn that the geometry is not a
+  stationary point, so its frequencies and thermochemistry are not
+  meaningful, and say how to fix it. `FreqResult.max_force_ev_per_ang`;
+  saved as `spectra.ir.max_force_ev_per_ang`.
+- **IR spectra run 4000 → 400 cm⁻¹ by default** (FTIR convention). An
+  **Axis** dropdown on the IR panel switches back to 400 → 4000; the choice
+  is remembered (`viz.ir_axis` in user settings). `plot_ir_spectrum()` gains
+  `descending=`.
+- **Energy-level diagram hides core orbitals by default** — occupied
+  orbitals more than 50 eV below the HOMO (e.g. water's O 1s) no longer set
+  the Y range and squeeze the valence levels into a sliver; the subtitle says
+  how many are hidden and a **Show core orbitals** checkbox restores them.
+  The HOMO–LUMO gap label no longer overlaps the axis labels.
+- **Dipole arrow convention** — the Mulliken panel says which end the arrow
+  head marks and offers both conventions (− → +, IUPAC/physics, default; or
+  + → −, the chemistry crossed arrow), remembered as `viz.dipole_arrow`.
+- **Frequency card** — title reads "H2O · B3LYP/6-31G* (RKS)"; H and G are
+  shown with their thermal correction vs E in kJ/mol instead of an absolute
+  kJ/mol value.
+- **Less duplication, tidier layout** — viewers no longer repeat the molecule
+  facts in a "Molecule Information" box; the launcher notebook drops its
+  duplicate "QuantUI" heading; result tables are compact and left-aligned;
+  the empty Calculate tab no longer reserves a blank viewer block.
+- **Esc closes the Help panel** (as does its Close button).
+- **Clearer controls** — no more truncated labels or "?.." buttons; PES atom
+  chips read "O1"; XYZ table headers line up; a **Done** button closes the
+  molecule editor; the Help panel has a **Close** button; System Settings
+  groups all settings in one card and says PlotlyMol; the activity indicator
+  is a neutral status chip; History, Compare and the Analysis heading show
+  readable times ("2026-10-25 04:31").
+- **Context-aware extras** — the spin-state helper appears only for molecules
+  with a transition metal; "Use mode → new Frequency calc" only when there
+  are imaginary modes; Analysis panels that don't apply say what they need in
+  their title; dark themes give 3D viewers the panel colour (also in PNG
+  exports) instead of black.
 - `import quantui` no longer loads numpy, RDKit, ASE, Plotly, IPython or
   requests; every public name is resolved when first used. `quantui`
   command-line tools and the batch worker start in a fraction of the time,
@@ -50,6 +131,29 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- **Generate Isosurface works again for molecular orbitals** — it failed for
+  every MO with `unexpected keyword argument 'esp_range'` since the ESP-map
+  release. The orbital gallery was not affected.
+- **Edit Structure stays available after a molecule loads** — loading or
+  changing a molecule rebuilt the Calculate panel without it.
+- **Mulliken viewer** opens charge-coloured with the dipole arrow when those
+  boxes are ticked, instead of only after a box was toggled.
+- **Sliders are visible on every theme** (ipywidgets 8 sliders were unstyled:
+  no visible track, and a white handle on the Light theme), and the selected
+  option of toggle-button groups and History filter chips is now highlighted.
+- The QM pre-optimization checkbox no longer keeps the PES Scan wording
+  ("…before scan") after switching to another calculation type.
+- The Files tab re-lists its folder when opened, so newly saved results show
+  without clicking Refresh.
+- PES Scan: suggested Start/Stop values are rounded (0.001 Å / 0.1°) and the
+  unit label sits after Stop rather than after Points.
+- **Time-estimate basis-function counts** — the per-element table behind
+  `calc_log.count_basis_functions` had drifted from PySCF for 75 entries
+  (every element in def2-TZVP, e.g. H 14 instead of 6; Li/Be and Na–Ar in
+  the 6-31G*, cc-pV*Z and def2-SVP rows; Al–Ar in 3-21G/6-31G). It is now
+  generated from PySCF's AO counts and a test checks every entry. History
+  records logged before this keep their old `n_basis`, so estimates for
+  def2-TZVP and second-row/heavier molecules settle as new runs are logged.
 - **CPU image no longer overrides a caller's `QUANTUI_RESULTS_DIR` /
   `QUANTUI_FREQ_PARALLEL`** (M-BATCH2 B2.12). `apptainer/quantui.def`
   hard-exported both, so a site module or job script setting either was

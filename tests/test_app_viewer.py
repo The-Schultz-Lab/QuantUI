@@ -101,7 +101,7 @@ class TestViewerLauncher:
         src = "".join(nb["cells"][1]["source"])
         assert "QuantUIApp(viewer=True).display()" in src
         # The student app notebook is untouched.
-        assert "viewer" not in "".join(app_launcher._APP_NOTEBOOK["cells"][1]["source"])
+        assert "viewer" not in "".join(app_launcher._APP_NOTEBOOK["cells"][0]["source"])
 
     def test_find_free_port(self):
         assert 0 < app_launcher.find_free_port() < 65536

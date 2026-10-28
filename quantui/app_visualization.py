@@ -8,7 +8,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, List, cast
+from typing import Any, List, Optional, cast
 
 import ipywidgets as widgets
 from IPython.display import HTML, display
@@ -23,6 +23,8 @@ from quantui.app_builders import (
 )
 from quantui.downloads import download_link_html as _download_link_html
 from quantui.orbital_visualization import _GENERIC_CAPTURE_JS, _png_capture_controls
+from quantui.symmetry import html_irrep
+from quantui.viz_assets import orient_js, orient_view
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +138,8 @@ def show_result_3d(
                     lighting=app._viz_lighting,
                     bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
                     capture_class=_MOL_RESULTS_PNG_INBOX_CLASS,
+                    # D8: the result card above already names the molecule.
+                    show_info=False,
                 )
                 app._set_html_output(app.result_viz_output, html)
 
@@ -163,6 +167,7 @@ def show_result_3d(
                     capture_class=(
                         _MOL_ANALYSIS_PNG_INBOX_CLASS if is_analysis_output else ""
                     ),
+                    show_info=False,
                 )
                 if is_analysis_output:
                     # M-MEASURE: wires click-to-measure into the freshly
@@ -561,6 +566,7 @@ def render_traj_frame(app: Any, molecule: Any, output_widget: Any) -> None:
         decorate_py3dmol_coordination_bonds(view, molecule.atoms, molecule.coordinates)
         view.setBackgroundColor("white")
         view.zoomTo()
+        orient_view(view, molecule.coordinates)
         output_widget.clear_output()
         with output_widget:
             display(view)
@@ -666,6 +672,42 @@ def build_vib_data_inner(
     )
 
 
+def _xyz_block_coords(block: str) -> list:
+    """Coordinates from one XYZ block (count line, comment, atom lines)."""
+    coords = []
+    for line in block.strip("\n").splitlines()[2:]:
+        parts = line.split()
+        if len(parts) >= 4:
+            try:
+                coords.append([float(v) for v in parts[1:4]])
+            except ValueError:
+                continue
+    return coords
+
+
+def freq_mode_irreps(freq_result: Any, molecule: Any = None) -> Any:
+    """Symmetry labels of a Frequency result's modes (SPC2.4), or ``None``.
+
+    Needs the normal-mode displacements and the geometry they belong to:
+    ``pyscf_mol_atom`` on a live result, else *molecule* (History).
+    """
+    freqs = getattr(freq_result, "frequencies_cm1", None)
+    disps = getattr(freq_result, "displacements", None)
+    if freqs is None or disps is None or len(freqs) == 0 or len(disps) == 0:
+        return None
+    mol_atom = getattr(freq_result, "pyscf_mol_atom", None)
+    if not mol_atom and molecule is not None:
+        mol_atom = list(zip(molecule.atoms, molecule.coordinates))
+    if not mol_atom:
+        return None
+    try:
+        from quantui.symmetry import label_mode_irreps
+
+        return label_mode_irreps(mol_atom, list(freqs), disps)
+    except Exception:  # noqa: BLE001 — labels are informational
+        return None
+
+
 def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     """Populate vibrational animation accordion after a Frequency result.
 
@@ -678,6 +720,11 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     freqs = freq_result.frequencies_cm1
     if not freqs:
         return False
+    # Stepping along a mode is how you leave a saddle point; with no
+    # imaginary mode there is nothing to step off (audit D17).
+    btn = getattr(app, "_vib_apply_mode_btn", None)
+    if btn is not None:
+        btn.layout.display = "" if any(float(f) < 0 for f in freqs) else "none"
 
     # Optional plotlymol3d data — may be None if plotlymol3d isn't installed.
     # The py3Dmol render path doesn't need this; only the plotlymol path does.
@@ -686,6 +733,7 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     # Build dropdown options from raw freq_result; skip near-zero translation
     # / rotation modes. Mode numbers are 1-indexed positions in
     # frequencies_cm1.
+    irreps = freq_mode_irreps(freq_result, molecule)
     options = []
     for i, freq_val in enumerate(freqs, start=1):
         if abs(freq_val) < 10:
@@ -695,7 +743,8 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
             if freq_val >= 0
             else f"Mode {i}: {freq_val:.1f} cm⁻¹ (imaginary, TS?)"
         )
-        options.append((label, i))
+        sym = irreps.labels[i - 1] if irreps is not None else None
+        options.append((f"{label} · {sym}" if sym else label, i))
 
     if not options:
         return False
@@ -705,7 +754,7 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     app._last_vib_freq_result = freq_result
     _table = getattr(app, "_vib_mode_table", None)
     if _table is not None:
-        _table.value = vib_mode_table_html(freq_result)
+        _table.value = vib_mode_table_html(freq_result, irreps)
 
     first_label, first_mode = options[0]
 
@@ -774,6 +823,8 @@ def show_ir_spectrum(app: Any, freq_result: Any) -> bool:
 
     app._last_ir_freqs = freqs
     app._last_ir_ints = ints
+    irreps = freq_mode_irreps(freq_result)
+    app._last_ir_labels = irreps.labels if irreps is not None else None
 
     app._update_ir_figure("Stick", 20.0)
 
@@ -834,6 +885,9 @@ def update_ir_figure(app: Any, mode: str, fwhm: float) -> None:
             mode=mode.lower(),
             fwhm=fwhm,
             yaxis_title=y_title,
+            descending=getattr(getattr(app, "_ir_axis_dd", None), "value", "descending")
+            == "descending",
+            labels=getattr(app, "_last_ir_labels", None),
         )
         app._apply_plotly_theme(fig)
         app._last_ir_fig = fig
@@ -866,6 +920,8 @@ def show_raman_spectrum(app: Any, freq_result: Any) -> bool:
     app._raman_activities_real = bool(acts)
     app._last_raman_freqs = freqs
     app._last_raman_acts = acts
+    irreps = freq_mode_irreps(freq_result) if acts else None
+    app._last_raman_labels = irreps.labels if irreps is not None else None
     if not acts:
         # ISSUE.19 #5 — this used to plot every mode at the same height,
         # which reads as a real spectrum in class. Say why there is none.
@@ -959,6 +1015,10 @@ def update_raman_figure(app: Any, mode: str, fwhm: float) -> None:
             mode=mode.lower(),
             fwhm=fwhm,
             yaxis_title=y_title,
+            labels=getattr(app, "_last_raman_labels", None),
+            # Same direction as the IR panel, so the spectra line up (L8).
+            descending=getattr(getattr(app, "_ir_axis_dd", None), "value", "descending")
+            == "descending",
         )
         app._apply_plotly_theme(fig)
         app._last_raman_fig = fig
@@ -992,8 +1052,9 @@ def show_uv_vis_spectrum(
     if not wl:
         wl = [1240.0 / e for e in energies_ev if e and e > 0]
 
-    peaks: list[tuple[float, float]] = []
-    for x0, amp in zip(wl, oscillator_strengths):
+    energies = list(energies_ev or [])
+    peaks: list[tuple[float, float, Optional[float]]] = []
+    for i, (x0, amp) in enumerate(zip(wl, oscillator_strengths)):
         try:
             x_val = float(x0)
             a_val = float(amp)
@@ -1001,7 +1062,8 @@ def show_uv_vis_spectrum(
             continue
         if x_val <= 0:
             continue
-        peaks.append((x_val, max(a_val, 0.0)))
+        e_val = float(energies[i]) if i < len(energies) else 1239.84198 / x_val
+        peaks.append((x_val, max(a_val, 0.0), e_val))
 
     if not peaks:
         return False
@@ -1009,6 +1071,7 @@ def show_uv_vis_spectrum(
     peaks.sort(key=lambda p: p[0])
     app._last_uv_wavelengths_nm = [p[0] for p in peaks]
     app._last_uv_oscillator_strengths = [p[1] for p in peaks]
+    app._last_uv_energies_ev = [p[2] for p in peaks]
 
     app._update_uv_vis_figure("Stick", 20.0)
 
@@ -1027,9 +1090,60 @@ def wire_uv_controls(app: Any) -> None:
     wl = list(getattr(app, "_last_uv_wavelengths_nm", []) or [])
     if wl:
         gamma = max(float(app._uv_fwhm_slider.value), 1.0) / 2.0
-        pad = max(80.0, 3.0 * gamma)
-        app._uv_xmin_input.value = round(max(100.0, min(wl) - pad), 1)
-        app._uv_xmax_input.value = round(max(wl) + pad, 1)
+        lo, hi = uv_default_range(wl, gamma)
+        app._uv_xmin_input.value = round(lo, 1)
+        app._uv_xmax_input.value = round(hi, 1)
+
+
+# Below this the "transition" is a core or basis-artefact state (> 124 eV);
+# it would stretch the default axis to ~0 nm and squash the real bands.
+_UV_MIN_DEFAULT_NM = 10.0
+
+
+def uv_default_range(wl: List[float], gamma: float) -> tuple[float, float]:
+    """Default λ window: every transition above 10 nm, with room for wings.
+
+    It used to start at 100 nm or more, which hid the vacuum-UV bands of
+    small molecules entirely (water's are at 57–106 nm), leaving an empty
+    plot (M-UIPOLISH P3).
+    """
+    shown = [w for w in wl if w >= _UV_MIN_DEFAULT_NM] or list(wl)
+    pad = max(20.0, 0.15 * (max(shown) - min(shown)), 3.0 * gamma)
+    return max(0.0, min(shown) - pad), max(shown) + pad
+
+
+def uv_excitation_table_html(
+    wavelengths_nm: List[float],
+    strengths: List[float],
+    energies_ev: List[float],
+    x_range: Optional[tuple[float, float]] = None,
+) -> str:
+    """Excited states by energy: state, E (eV), λ (nm), f."""
+    rows = sorted(zip(energies_ev, wavelengths_nm, strengths))
+    if not rows:
+        return ""
+    cell = "padding:2px 12px;text-align:right"
+    body = "".join(
+        f"<tr><td style='{cell}'>S{i}</td><td style='{cell}'>{e:.3f}</td>"
+        f"<td style='{cell}'>{w:.1f}</td><td style='{cell}'>{f:.4f}</td></tr>"
+        for i, (e, w, f) in enumerate(rows, start=1)
+    )
+    note = ""
+    if x_range is not None:
+        n_out = sum(1 for _, w, _ in rows if not x_range[0] <= w <= x_range[1])
+        if n_out:
+            note = (
+                f"<div style='color:{_theme.css.TEXT_MUTED};margin-top:4px'>"
+                f"{n_out} state{'s' if n_out != 1 else ''} outside the plotted "
+                "λ range.</div>"
+            )
+    return (
+        '<div style="margin:6px 0 0 4px;font-size:12px;max-height:220px;'
+        'overflow-y:auto"><table style="border-collapse:collapse"><tr>'
+        f"<th style='{cell}'>State</th><th style='{cell}'>E (eV)</th>"
+        f"<th style='{cell}'>λ (nm)</th><th style='{cell}'>f</th></tr>"
+        f"{body}</table>{note}</div>"
+    )
 
 
 def on_uv_range_changed(app: Any, _change: dict[str, Any] | None = None) -> None:
@@ -1075,9 +1189,7 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
         # of headroom to show the full Lorentzian tail; padding by the same
         # amount in Stick keeps the layout identical.
         gamma = max(float(fwhm), 1.0) / 2.0
-        pad = max(80.0, 3.0 * gamma)
-        x_min_default = max(100.0, min(wl) - pad)
-        x_max_default = max(wl) + pad
+        x_min_default, x_max_default = uv_default_range(wl, gamma)
         xmin_w = getattr(app, "_uv_xmin_input", None)
         xmax_w = getattr(app, "_uv_xmax_input", None)
         x_min = float(xmin_w.value if xmin_w is not None else x_min_default)
@@ -1158,6 +1270,13 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
 
         app._apply_plotly_theme(fig)
         app._last_uv_fig = fig
+        table = uv_excitation_table_html(
+            wl,
+            osc,
+            list(getattr(app, "_last_uv_energies_ev", []) or [])
+            or [1239.84198 / w for w in wl],
+            (x_min, x_max),
+        )
         app._set_html_output(
             app._tddft_fig,
             _pio.to_html(
@@ -1165,7 +1284,8 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
                 include_plotlyjs="require",
                 full_html=False,
                 config={"responsive": True},
-            ),
+            )
+            + table,
         )
     except Exception as exc:
         app._last_uv_fig = None
@@ -1227,39 +1347,34 @@ def _nmr_summary_html(
     c_shifts: List[tuple[int, float]],
     reference: str,
 ) -> str:
+    """One table, Atom | σ | δ, numbered like the viewer (O1, H2, H3).
+
+    There used to be a σ table (H2, H3) and a separate shift table that
+    renumbered the same atoms H-1, H-2 (M-UIPOLISH P4).
+    """
     from . import theme as _theme
 
-    def _shift_table(label: str, shifts: list, sym: str) -> str:
-        if not shifts:
-            return ""
-        rows = "".join(
-            f'<tr><td style="padding:2px 14px 2px 0;color:{_theme.css.TEXT_SECONDARY}">{sym}-{n}</td>'
-            f'<td style="color:{_theme.css.TEXT_HEADING}">{d:.2f} ppm</td></tr>'
-            for n, (_i, d) in enumerate(sorted(shifts, key=lambda x: x[0]), 1)
-        )
-        return (
-            f'<tr><td colspan="2" style="padding:8px 0 2px;font-weight:600">'
-            f"{label} shifts (vs. {reference}):</td></tr>"
-            f'<tr><th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px;padding:2px 14px 2px 0">Atom</th>'
-            f'<th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px">δ (ppm)</th></tr>'
-            + rows
-        )
-
-    shielding_rows = "".join(
-        f'<tr><td style="padding:2px 10px 2px 0;color:{_theme.css.TEXT_SECONDARY}">{sym}{i + 1}</td>'
-        f'<td style="color:{_theme.css.TEXT_HEADING}">{s:.2f}</td></tr>'
+    delta = {int(i): float(d) for i, d in list(h_shifts) + list(c_shifts)}
+    th = (
+        f'style="text-align:right;color:{_theme.css.TEXT_SECONDARY};'
+        'font-size:12px;padding:2px 14px 2px 0"'
+    )
+    td = f'style="text-align:right;padding:2px 14px 2px 0;color:{_theme.css.TEXT_HEADING}"'
+    rows = "".join(
+        f'<tr><td style="padding:2px 14px 2px 0;color:{_theme.css.TEXT_SECONDARY}">'
+        f"{sym}{i + 1}</td><td {td}>{s:.2f}</td>"
+        f"<td {td}>{(f'{delta[i]:.2f}' if i in delta else '—')}</td></tr>"
         for i, (sym, s) in enumerate(zip(atom_symbols, shielding))
     )
     return (
-        f'<div style="font-size:13px;margin-top:10px">'
-        f'<table style="border-collapse:collapse;margin-bottom:8px">'
-        f'<tr><th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px;padding:2px 10px 2px 0">Atom</th>'
-        f'<th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};font-size:12px">σ (ppm)</th></tr>'
-        f"{shielding_rows}</table>"
-        f'<table style="border-collapse:collapse">'
-        f"{_shift_table('¹H', h_shifts, 'H')}"
-        f"{_shift_table('¹³C', c_shifts, 'C')}"
-        f"</table></div>"
+        '<div style="font-size:13px;margin-top:10px">'
+        '<table style="border-collapse:collapse">'
+        f'<tr><th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};'
+        'font-size:12px;padding:2px 14px 2px 0">Atom</th>'
+        f"<th {th}>σ (ppm)</th><th {th}>δ vs. {html.escape(reference)} (ppm)</th></tr>"
+        f"{rows}</table>"
+        f'<div style="font-size:12px;color:{_theme.css.TEXT_MUTED};margin-top:4px">'
+        "δ is given for ¹H and ¹³C only.</div></div>"
     )
 
 
@@ -1402,11 +1517,9 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
             info,
             max_orbitals=app._orb_n_orb_input.value,
             font_scale=app._orb_font_scale_slider.value,
+            show_core=_orb_show_core(app),
         )
-        yr = fig.layout.yaxis.range
-        if yr is not None:
-            app._orb_ymin_input.value = round(float(yr[0]), 2)
-            app._orb_ymax_input.value = round(float(yr[1]), 2)
+        _sync_orb_range_inputs(app, fig)
         app._apply_plotly_theme(fig)
         app._last_orb_fig = fig
         html_str = _pio.to_html(
@@ -1635,10 +1748,59 @@ def on_iso_generate(app: Any, btn: Any) -> None:
         _start_daemon(_watchdog)
 
 
+def _orb_show_core(app: Any) -> bool:
+    return bool(getattr(getattr(app, "_orb_show_core_cb", None), "value", False))
+
+
+def _sync_orb_range_inputs(app: Any, fig: Any) -> None:
+    """Copy the figure's auto Y range into Y min/max without re-rendering."""
+    yr = fig.layout.yaxis.range
+    if yr is None:
+        return
+    app._orb_range_syncing = True
+    try:
+        app._orb_ymin_input.value = round(float(yr[0]), 2)
+        app._orb_ymax_input.value = round(float(yr[1]), 2)
+    finally:
+        app._orb_range_syncing = False
+
+
+def on_orb_show_core_changed(app: Any, _change: Any = None) -> None:
+    """Show/hide core orbitals and re-fit the Y range to what is shown."""
+    info = getattr(app, "_last_orb_info", None)
+    if info is None:
+        return
+    try:
+        import plotly.io as _pio
+
+        from quantui.orbital_visualization import plot_orbital_diagram_plotly
+
+        fig = plot_orbital_diagram_plotly(
+            info,
+            max_orbitals=app._orb_n_orb_input.value,
+            font_scale=app._orb_font_scale_slider.value,
+            show_core=_orb_show_core(app),
+        )
+        _sync_orb_range_inputs(app, fig)
+        app._apply_plotly_theme(fig)
+        app._last_orb_fig = fig
+        app._set_html_output(
+            app._orb_diagram_html,
+            _pio.to_html(
+                fig,
+                include_plotlyjs="require",
+                full_html=False,
+                config={"responsive": True},
+            ),
+        )
+    except Exception:
+        app._last_orb_fig = None
+
+
 def on_orb_range_changed(app: Any, _change: Any = None) -> None:
     """Live-update orbital diagram for axis limits or orbital count changes."""
     info = getattr(app, "_last_orb_info", None)
-    if info is None:
+    if info is None or getattr(app, "_orb_range_syncing", False):
         return
     ymin = app._orb_ymin_input.value
     ymax = app._orb_ymax_input.value
@@ -1654,6 +1816,7 @@ def on_orb_range_changed(app: Any, _change: Any = None) -> None:
             max_orbitals=app._orb_n_orb_input.value,
             yrange=(ymin, ymax),
             font_scale=app._orb_font_scale_slider.value,
+            show_core=_orb_show_core(app),
         )
         app._apply_plotly_theme(fig)
         app._last_orb_fig = fig
@@ -1851,9 +2014,11 @@ def render_orbital_isosurface(
             if use_py3dmol:
                 # Same options the sliders and the theme path use, so a fresh
                 # render cannot disagree with a redraw of the same orbital.
-                html_str = render_orbital_isosurface_py3dmol(
-                    cube_path, **iso_render_options(app)
-                )
+                # ``esp_range`` only colours ESP surfaces; the orbital renderer
+                # does not take it.
+                _orb_opts = iso_render_options(app)
+                _orb_opts.pop("esp_range", None)
+                html_str = render_orbital_isosurface_py3dmol(cube_path, **_orb_opts)
             else:
                 is_dark = _theme.get_palette(app.theme_btn.value).is_dark
                 axis_color = "#dbeafe" if is_dark else "#1f2937"
@@ -2446,7 +2611,7 @@ def _render_vib_mode_py3dmol(
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
         bg = _theme.plotly_colors(app.theme_btn.value)["scene_bgcolor"]
         view.setBackgroundColor(bg)
-        view.zoomTo()
+        view.zoomTo()  # not oriented: the camera hook below may restore a view
         view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
         # Prepend the camera-persistence hook so the user's interactive
         # pan/rotate state survives mode switches. The hook is idempotent
@@ -3197,6 +3362,7 @@ def build_reorg_geometry_viewer_html(
     view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
     view.setBackgroundColor(bgcolor)
     view.zoomTo()
+    orient_view(view, geometries[0]["coordinates"])
     view_html = view._make_html()
 
     m = re.search(r"3dmolviewer_(\w+)", view_html)
@@ -3342,6 +3508,7 @@ def build_reorg_overlay_html(
 
     view.setBackgroundColor(bgcolor)
     view.zoomTo()
+    orient_view(view, ref_c)
     # py3Dmol has no type stubs (ignore_missing_imports); _make_html()
     # genuinely returns str.
     view_html = cast(str, view._make_html())
@@ -3430,6 +3597,7 @@ def build_preopt_preview_html(
     view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
     view.setBackgroundColor(bgcolor)
     view.zoomTo()
+    orient_view(view, frames[0])
     view_html = view._make_html()
 
     n_frames = len(frames)
@@ -3492,6 +3660,7 @@ def build_trajectory_viewer_html(
     view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
     view.setBackgroundColor(bgcolor)
     view.zoomTo()
+    orient_view(view, _xyz_block_coords(xyzblocks[0]))
     view_html = view._make_html()
 
     m = re.search(r"3dmolviewer_(\w+)", view_html)
@@ -3609,7 +3778,7 @@ _VIB_VIEWER_JS = """
       CUR=m;
       drawArrows(v, m);
       v.setBackgroundColor(BG);
-      if(fit) v.zoomTo();   // fit only on first mode; switches keep the camera
+      if(fit){ v.zoomTo(); __ORIENT__ }   // fit + face the camera on the first mode only
       v.animate({"loop":"forward","interval":IV,"reps":0});
       v.render();
     }catch(e){ return false; }
@@ -3718,6 +3887,7 @@ def build_vib_viewer_html(
         .replace("__BG__", json.dumps(bgcolor))
         .replace("__INIT__", str(int(initial_mode)))
         .replace("__ARROWS__", "true" if arrows else "false")
+        .replace("__ORIENT__", orient_js("v", base))
     )
     body = f"{view_html}<script>{js}</script>"
     if capture_class:
@@ -3856,8 +4026,12 @@ def on_vib_arrows_changed(app: Any, change: Any = None) -> None:
     _vib_bridge_call(app, "__quantuiVibSetArrows", "true" if on else "false")
 
 
-def vib_mode_table_html(freq_result: Any) -> str:
-    """Every normal mode with its frequency, IR intensity and Raman activity."""
+def vib_mode_table_html(freq_result: Any, irreps: Any = None) -> str:
+    """Every normal mode with its frequency, IR intensity and Raman activity.
+
+    With *irreps* (:class:`~quantui.symmetry.ModeIrreps`), a symmetry column
+    and the molecule's Γvib caption (SPC2.4).
+    """
     freqs = list(getattr(freq_result, "frequencies_cm1", None) or [])
     ir = list(getattr(freq_result, "ir_intensities", None) or [])
     raman = list(getattr(freq_result, "raman_activities", None) or [])
@@ -3865,9 +4039,12 @@ def vib_mode_table_html(freq_result: Any) -> str:
         return ""
     has_ir = len(ir) == len(freqs)
     has_raman = len(raman) == len(freqs)
+    has_sym = irreps is not None and len(irreps.labels) == len(freqs)
     cell = "padding:2px 10px;text-align:right"
+    sym_cell = "padding:2px 10px;text-align:left"
     head = (
         f'<th style="{cell}">Mode</th><th style="{cell}">ν (cm⁻¹)</th>'
+        + (f'<th style="{sym_cell}">Sym.</th>' if has_sym else "")
         + (f'<th style="{cell}">IR (km/mol)</th>' if has_ir else "")
         + (f'<th style="{cell}">Raman (Å⁴/amu)</th>' if has_raman else "")
     )
@@ -3877,24 +4054,52 @@ def vib_mode_table_html(freq_result: Any) -> str:
             continue
         nu = f"{abs(f):.1f}i" if f < 0 else f"{f:.1f}"
         style = f' style="color:{_theme.css.ACCENT_ERROR_ALT}"' if f < 0 else ""
+        sym = irreps.labels[i - 1] if has_sym else None
         rows.append(
             f"<tr{style}><td style='{cell}'>{i}</td><td style='{cell}'>{nu}</td>"
+            + (
+                f"<td style='{sym_cell}'>{html_irrep(sym or '')}</td>"
+                if has_sym
+                else ""
+            )
             + (f"<td style='{cell}'>{ir[i - 1]:.1f}</td>" if has_ir else "")
             + (f"<td style='{cell}'>{raman[i - 1]:.2f}</td>" if has_raman else "")
             + "</tr>"
         )
+    # Γvib sits above the scrolling table so it is always in view.
+    caption = (
+        f'<div style="margin:6px 0 0;font-size:12px">{irreps.caption_html()}</div>'
+        if has_sym
+        else ""
+    )
     return (
-        '<div style="max-height:240px;overflow-y:auto;margin:6px 0;font-size:12px">'
+        caption
+        + '<div style="max-height:240px;overflow-y:auto;margin:6px 0;font-size:12px">'
         f'<table style="border-collapse:collapse"><tr>{head}</tr>{"".join(rows)}</table>'
-        "<small>Imaginary modes (ν shown with i) are in red.</small></div>"
+        + (
+            "<small>Imaginary modes (ν shown with i) are in red.</small>"
+            if any(f <= -10 for f in freqs)
+            else ""
+        )
+        + "</div>"
     )
 
 
 def show_thermo_box(
-    app: Any, molecule: Any, energy_hartree: Any, frequencies_cm1: Any
+    app: Any,
+    molecule: Any,
+    energy_hartree: Any,
+    frequencies_cm1: Any,
+    *,
+    max_force_ev_per_ang: float | None = None,
 ) -> None:
-    """Remember what thermochemistry needs and show it at the current T/P."""
+    """Remember what thermochemistry needs and show it at the current T/P.
+
+    *max_force_ev_per_ang* (D1) puts the not-a-stationary-point warning above
+    the table, as on the result card.
+    """
     box = getattr(app, "_thermo_box", None)
+    app._thermo_max_force = max_force_ev_per_ang
     if molecule is None or energy_hartree is None or not frequencies_cm1:
         app._thermo_source = None
         if box is not None:
@@ -3931,7 +4136,17 @@ def on_thermo_inputs_changed(app: Any, change: Any = None) -> None:
     except Exception as exc:  # noqa: BLE001 — show, never raise from an input
         out.value = f'<span style="color:#b91c1c">Thermochemistry failed: {exc}</span>'
         return
-    out.value = thermo_table_html(td, energy)
+    from quantui.freq_calc import is_stationary
+
+    warning = ""
+    if is_stationary(getattr(app, "_thermo_max_force", None)) is False:
+        warning = (
+            f'<div style="color:{_theme.css.ACCENT_WARNING};margin:0 0 6px 0">'
+            "&#9888; Not a minimum (max force "
+            f"{app._thermo_max_force:.3f} eV/Å), so these values aren't "
+            "meaningful. Optimize the geometry first.</div>"
+        )
+    out.value = warning + thermo_table_html(td, energy)
 
 
 def thermo_table_html(td: Any, energy_hartree: float) -> str:
@@ -3943,7 +4158,7 @@ def thermo_table_html(td: Any, energy_hartree: float) -> str:
         return (
             f"<tr><td style='{cell};color:{_theme.css.TEXT_LABEL}'>{label}</td>"
             f"<td style='{cell}'>{value}</td>"
-            f"<td style='color:{_theme.css.TEXT_MUTED};font-size:11px'>{note}</td></tr>"
+            f"<td style='color:{_theme.css.TEXT_MUTED};font-size:12px'>{note}</td></tr>"
         )
 
     def _corr(value: float) -> str:
@@ -4219,6 +4434,7 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
         view.setBackgroundColor("white")
         view.zoomTo()
+        orient_view(view, base_coords)
         view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
         # Exported HTML is opened outside the app (no page bootstrap), so embed
         # the offline 3Dmol.js loader inline to make the file self-contained.

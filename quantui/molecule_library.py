@@ -356,9 +356,13 @@ def search(
             if category:
                 sql += " AND category = ?"
                 params.append(category)
-            sql += " ORDER BY n_atoms, id LIMIT ?"
-            params.append(limit)
-            return [dict(r) for r in con.execute(sql, params).fetchall()]
+            # Curated entries before bulk (QM9) ones, so "water" or "C6H6"
+            # leads with the teaching molecule, not dozens of QM9 isomers.
+            bulk = ",".join("?" * len(_BULK_CATEGORIES))
+            sql += f" ORDER BY (category IN ({bulk})), n_atoms, id LIMIT ?"
+            params += list(_BULK_CATEGORIES) + [limit * 2]
+            rows = [dict(r) for r in con.execute(sql, params).fetchall()]
+            return _dedupe(rows)[:limit]
         finally:
             con.close()
     # JSON fallback (linear scan).
@@ -384,8 +388,27 @@ def search(
                     )
                 }
             )
-    results.sort(key=lambda r: (r["n_atoms"], r["id"]))
-    return results[:limit]
+    results.sort(
+        key=lambda r: (r["category"] in _BULK_CATEGORIES, r["n_atoms"], r["id"])
+    )
+    return _dedupe(results)[:limit]
+
+
+def _dedupe(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Drop repeats of the same named molecule (presets vs curated set).
+
+    "Methanol" is both a preset and a curated entry; listing it twice reads
+    as a mistake. Keeps the first (curated before bulk, then smallest).
+    """
+    seen = set()
+    out = []
+    for r in rows:
+        key = (str(r.get("name", "")).lower(), r.get("n_atoms"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+    return out
 
 
 def categories() -> List[str]:

@@ -76,20 +76,33 @@ def plot_nmr_spectrum(
     if not pairs:
         return fig
 
+    # Equivalent nuclei (same δ within 0.05 ppm) share one stick, labelled
+    # with every atom and as tall as their count — the integration a student
+    # reads off a real spectrum. Separate labels used to print on top of
+    # each other (M-UIPOLISH P4).
+    groups: List[List[Tuple[int, float]]] = []
+    for idx, delta in pairs:
+        if groups and abs(groups[-1][-1][1] - delta) < 0.05:
+            groups[-1].append((idx, delta))
+        else:
+            groups.append([(idx, delta)])
+
     stick_x: List[Optional[float]] = []
     stick_y: List[Optional[float]] = []
     markers_x: List[float] = []
     markers_y: List[float] = []
     hover_labels: List[str] = []
 
-    for idx, delta in pairs:
-        sym = atom_symbols[idx]
-        label = f"{sym}{idx + 1}"
+    for group in groups:
+        delta = sum(d for _, d in group) / len(group)
+        height = float(len(group))
+        label = ", ".join(f"{atom_symbols[i]}{i + 1}" for i, _ in group)
         stick_x.extend([delta, delta, None])
-        stick_y.extend([0.0, 1.0, None])
+        stick_y.extend([0.0, height, None])
         markers_x.append(delta)
-        markers_y.append(1.0)
+        markers_y.append(height)
         hover_labels.append(label)
+    fig.update_yaxes(range=[0.0, max(markers_y) * 1.25])
 
     fig.add_trace(
         go.Scatter(
@@ -111,7 +124,8 @@ def plot_nmr_spectrum(
             marker=dict(color="#0f766e", size=7),
             showlegend=False,
             hovertemplate=(
-                "%{text}<br>δ = %{x:.2f} ppm (vs. reference)<extra></extra>"
+                "%{text}<br>δ = %{x:.2f} ppm (vs. reference)"
+                "<br>%{y:.0f} nucleus/nuclei<extra></extra>"
             ),
         )
     )

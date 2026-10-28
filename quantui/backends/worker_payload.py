@@ -209,6 +209,8 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
                 "thermo": _thermo_payload,
                 # B2.5 — set when the job stepped off a saddle point.
                 "imaginary_mode_retry": getattr(result, "imaginary_mode_retry", None),
+                # D1 — force check at the Hessian geometry.
+                "max_force_ev_per_ang": getattr(result, "max_force_ev_per_ang", None),
             },
             "molecule": {
                 "atoms": list(molecule.atoms),

@@ -28,6 +28,10 @@ _POPULATIONS_JS = """
   function v(){ return window["viewer_"+UID]; }
   var arrowShapes=[];
   var colored=false;
+  // 3Dmol creates the viewer asynchronously, so an update can arrive before
+  // it exists. Keep the latest payload and retry instead of dropping it
+  // (dropping it left the first render uncoloured, UIA.3).
+  var pending=null, retries=0;
 
   function clearArrow(){
     var vw=v(); if(!vw){ return; }
@@ -46,8 +50,15 @@ _POPULATIONS_JS = """
     colored=false;
   }
 
-  window["__quantuiPopulationsUpdate_"+UID] = function(payload){
-    var vw=v(); if(!vw){ return false; }
+  function update(payload){
+    var vw=v();
+    if(!vw){
+      var first=(pending===null);
+      pending=payload;
+      if(first){ retries=0; setTimeout(retry, 100); }
+      return false;
+    }
+    pending=null;
     clearArrow();
     resetAtomColors();
 
@@ -80,8 +91,18 @@ _POPULATIONS_JS = """
     }
     vw.render();
     return true;
-  };
-  window.__quantuiPopulationsUpdate = window["__quantuiPopulationsUpdate_"+UID];
+  }
+
+  function retry(){
+    if(pending===null){ return; }
+    if(v()){ update(pending); return; }
+    if(++retries < 100){ setTimeout(retry, 100); } else { pending=null; }
+  }
+
+  window["__quantuiPopulationsUpdate_"+UID] = update;
+  window.__quantuiPopulationsUpdate = update;
+  var initial = __INITIAL__;
+  if(initial){ update(initial); }
 })();
 """
 
@@ -178,8 +199,13 @@ def dipole_arrow_endpoints(
     }
 
 
-def inject_populations_js(html: str) -> str:
-    """Append the populations overlay bridge to py3Dmol Analysis HTML."""
+def inject_populations_js(html: str, initial_payload: Optional[dict] = None) -> str:
+    """Append the populations overlay bridge to py3Dmol Analysis HTML.
+
+    *initial_payload* (from :func:`overlay_payload`) is applied as soon as the
+    viewer exists, so the first render already matches the checkboxes rather
+    than depending on a later bridge push arriving after the viewer is built.
+    """
     m = re.search(r"3dmolviewer_(\w+)", html)
     if m is None:
         logger.warning(
@@ -187,7 +213,9 @@ def inject_populations_js(html: str) -> str:
         )
         return html
     uid = m.group(1)
-    js = _POPULATIONS_JS.replace("__UID__", uid)
+    js = _POPULATIONS_JS.replace("__UID__", uid).replace(
+        "__INITIAL__", json.dumps(initial_payload)
+    )
     return f"{html}<script>{js}</script>"
 
 
@@ -200,8 +228,14 @@ def build_overlay_payload(
     symbols: Optional[Sequence[str]],
     coordinates: Optional[Sequence[Sequence[float]]],
     vividness: float = 1.0,
+    arrow_convention: str = "physics",
 ) -> dict:
-    """Assemble the JSON payload for ``__quantuiPopulationsUpdate``."""
+    """Assemble the JSON payload for ``__quantuiPopulationsUpdate``.
+
+    *arrow_convention* ``"physics"`` points the arrow head at the positive
+    end (the IUPAC dipole vector, − → +); ``"chemistry"`` reverses it to the
+    crossed-arrow convention (+ → −). Only the drawing changes.
+    """
     payload: dict = {"colors": None, "arrow": None}
     if color_enabled and charges:
         payload["colors"] = charge_colors(charges, vividness=vividness)
@@ -214,7 +248,10 @@ def build_overlay_payload(
         and len(symbols) == len(coordinates)
     ):
         com = center_of_mass(symbols, coordinates)
-        payload["arrow"] = dipole_arrow_endpoints(com, dipole_vector)
+        vec = [float(v) for v in dipole_vector[:3]]
+        if arrow_convention == "chemistry":
+            vec = [-v for v in vec]
+        payload["arrow"] = dipole_arrow_endpoints(com, vec)
     return payload
 
 
@@ -262,7 +299,7 @@ def render_mulliken_viewer_html(app: Any, molecule: Any, *, render_html_fn: Any)
             bgcolor=bgcolor,
             show_info=False,
         )
-        return inject_populations_js(html)
+        return inject_populations_js(html, overlay_payload(app, molecule))
     html = render_html_fn(
         molecule,
         backend="plotlymol",
@@ -299,12 +336,8 @@ def show_mulliken_viewer(
         app._set_html_output(out, _mulliken_viewer_unavailable_html())
 
 
-def push_populations_overlay(app: Any) -> None:
-    """Push Mulliken/dipole overlay state to the Mulliken panel viewer."""
-    bridge = getattr(app, "_populations_js_bridge", None)
-    if bridge is None:
-        return
-    mol = getattr(app, "_mulliken_displayed_molecule", None)
+def overlay_payload(app: Any, mol: Any) -> dict:
+    """Overlay payload for *mol* from the app's charges, dipole and checkboxes."""
     symbols = list(getattr(app, "_last_mulliken_symbols", None) or [])
     charges = list(getattr(app, "_last_mulliken_charges", None) or [])
     dip_vec = getattr(app, "_last_mulliken_dipole_vector", None)
@@ -313,7 +346,7 @@ def push_populations_overlay(app: Any) -> None:
     coords = list(getattr(mol, "coordinates", None) or []) if mol is not None else []
     if mol is not None and not symbols:
         symbols = list(getattr(mol, "atoms", None) or [])
-    payload = build_overlay_payload(
+    return build_overlay_payload(
         charges=charges or None,
         color_enabled=color_on,
         dipole_vector=dip_vec,
@@ -321,7 +354,37 @@ def push_populations_overlay(app: Any) -> None:
         symbols=symbols or None,
         coordinates=coords or None,
         vividness=_mulliken_vividness(app),
+        arrow_convention=dipole_arrow_convention(app),
     )
+
+
+def dipole_arrow_convention(app: Any) -> str:
+    """The Mulliken panel's arrow-direction choice ("physics"/"chemistry")."""
+    value = getattr(getattr(app, "_mulliken_dipole_dir_dd", None), "value", None)
+    return "chemistry" if value == "chemistry" else "physics"
+
+
+def dipole_caption_html(convention: str) -> str:
+    """One line saying which way the drawn arrow points (audit D4)."""
+    if convention == "chemistry":
+        text = (
+            "Arrow head at the <b>negative</b> end (+ → −, chemistry crossed-arrow "
+            "convention); the dipole vector μ itself points the other way."
+        )
+    else:
+        text = (
+            "Arrow head at the <b>positive</b> end (− → +): the dipole vector μ "
+            "(IUPAC / physics convention). Many chemistry texts draw + → −."
+        )
+    return f'<span style="font-size:12px">{text}</span>'
+
+
+def push_populations_overlay(app: Any) -> None:
+    """Push Mulliken/dipole overlay state to the Mulliken panel viewer."""
+    bridge = getattr(app, "_populations_js_bridge", None)
+    if bridge is None:
+        return
+    payload = overlay_payload(app, getattr(app, "_mulliken_displayed_molecule", None))
     try:
         from IPython.display import Javascript, display
 

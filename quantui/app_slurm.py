@@ -806,7 +806,7 @@ def on_slurm_job_root_changed(app: Any, value: str) -> None:
             return
         color = _theme.css.ACCENT_ERROR if error else _theme.css.TEXT_SUBTLE
         note.value = (
-            f'<div style="font-size:11px;color:{color};margin:2px 0 0 0">'
+            f'<div style="font-size:12px;color:{color};margin:2px 0 0 0">'
             f"{html.escape(message)}</div>"
         )
 

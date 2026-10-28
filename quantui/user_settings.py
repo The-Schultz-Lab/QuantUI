@@ -55,6 +55,14 @@ _VIB_FPS_DEFAULT = 10
 # zero-dependency reason as _VALID_VIZ_BACKENDS above.
 _VALID_ISO_RESOLUTIONS = ("coarse", "medium", "fine", "very fine")
 
+# Valid values for VizSettings.ir_axis: wavenumber direction of the IR plot.
+_VALID_IR_AXES = ("descending", "ascending")
+
+# Valid values for VizSettings.dipole_arrow: which end the dipole arrow's head
+# points at. "physics" (− → +, the IUPAC dipole vector) or "chemistry" (the
+# crossed arrow, + → −).
+_VALID_DIPOLE_ARROWS = ("physics", "chemistry")
+
 _VALID_EXECUTION_BACKENDS = ("local", "slurm")
 
 _VALID_QUANTUM_ENGINES = ("auto", "pyscf", "pyfock")
@@ -83,6 +91,10 @@ class VizSettings:
     # sizes, and so a settings file written by a future version with more
     # presets degrades to the default instead of a nonsense number.
     iso_resolution: str = "medium"  # one of _VALID_ISO_RESOLUTIONS
+    # IR spectrum x-axis direction. "descending" (4000 → 400 cm⁻¹) is the
+    # FTIR / textbook convention; "ascending" was QuantUI's original layout.
+    ir_axis: str = "descending"  # one of _VALID_IR_AXES
+    dipole_arrow: str = "physics"  # one of _VALID_DIPOLE_ARROWS
 
 
 @dataclass
@@ -227,6 +239,26 @@ class UserSettings:
                 "Invalid viz.iso_resolution %r; using %r",
                 candidate_iso,
                 viz.iso_resolution,
+            )
+
+        candidate_axis = viz_section.get("ir_axis", viz.ir_axis)
+        if isinstance(candidate_axis, str) and candidate_axis in _VALID_IR_AXES:
+            viz.ir_axis = candidate_axis
+        else:
+            _LOG.warning(
+                "Invalid viz.ir_axis %r; using %r",
+                candidate_axis,
+                viz.ir_axis,
+            )
+
+        candidate_arrow = viz_section.get("dipole_arrow", viz.dipole_arrow)
+        if isinstance(candidate_arrow, str) and candidate_arrow in _VALID_DIPOLE_ARROWS:
+            viz.dipole_arrow = candidate_arrow
+        else:
+            _LOG.warning(
+                "Invalid viz.dipole_arrow %r; using %r",
+                candidate_arrow,
+                viz.dipole_arrow,
             )
 
         compute_section = data.get("compute", {})

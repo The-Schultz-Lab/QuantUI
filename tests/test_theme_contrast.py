@@ -134,7 +134,7 @@ class TestTokensAreActuallyUsed:
 
         assert "var(--q-border)" in _APP_CSS
         assert "var(--q-text-strong)" in _APP_CSS
-        assert "var(--q-text-slate)" in _APP_CSS
+        assert "var(--q-text-body)" in _APP_CSS
         assert "var(--q-accent-info)" in _APP_CSS
         assert "var(--q-page-bg)" in _APP_CSS
         assert ".widget-dropdown select" in _APP_CSS
@@ -154,6 +154,23 @@ class TestTokensAreActuallyUsed:
         assert "-webkit-slider-runnable-track" in block
         assert "quantui-range" in block
         assert "var(--q-accent-info)" in block
+
+    def test_selected_toggle_is_styled_after_the_neutral_rule(self):
+        # UIA.8: the neutral-button rule (!important) flattened .mod-active,
+        # so the selected ToggleButtons option was indistinguishable.
+        block = theme.theme_css_block("Dark")
+        neutral = block.index(".jupyter-button:not(.mod-info)")
+        active = block.index(".jupyter-button.mod-active:not(.mod-info)")
+        assert active > neutral
+
+    def test_theme_css_styles_ipywidgets8_nouislider(self):
+        # UIA.5: ipywidgets 8 sliders are noUiSlider divs; the native-range
+        # rules never reached them, so the track and handle went unthemed.
+        from quantui.app import _APP_CSS
+
+        for css in (theme.theme_css_block("Dark"), _APP_CSS):
+            assert ".widget-slider .noUi-connects" in css
+            assert ".widget-slider .noUi-handle" in css
 
     def test_app_css_preserves_accent_buttons(self):
         from quantui.app import _APP_CSS

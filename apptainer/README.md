@@ -292,10 +292,14 @@ implicit solvent (Water, Ethanol, THF, DMSO, Acetonitrile) is a single checkbox.
 | `3-21G` | Small | Slightly better than STO-3G |
 | `6-31G` | Medium | Good default for HF |
 | `6-31G*` | Medium+ | Adds polarization functions |
+| `6-31+G*` | Medium+ | 6-31G* plus diffuse functions on heavy atoms; anions |
 | `6-31G**` | Medium+ | Polarization on H too |
+| `6-31++G**` | Medium+ | 6-31G** plus diffuse functions on all atoms; anions |
 | `cc-pVDZ` | High | Correlation-consistent double-zeta |
+| `aug-cc-pVDZ` | High | cc-pVDZ plus diffuse functions; anions |
 | `cc-pVTZ` | High | Triple-zeta; near-CBS for small molecules |
 | `def2-SVP` | Medium | Good default for DFT |
+| `def2-SVPD` | Medium | def2-SVP plus diffuse functions; anions, heavy elements |
 | `def2-TZVP` | High | Near-complete-basis for DFT |
 
 ---

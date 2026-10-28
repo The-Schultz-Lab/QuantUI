@@ -42,6 +42,7 @@ import base64
 import logging
 from functools import lru_cache
 from pathlib import Path
+from typing import Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -114,3 +115,111 @@ def standalone_html(view_html: str, *, title: str = "QuantUI animation") -> str:
         "font-family:system-ui,-apple-system,'Segoe UI',sans-serif}</style>\n"
         "</head>\n<body>\n" + view_html + "\n</body>\n</html>\n"
     )
+
+
+def principal_view_rotation(
+    coords: Any,
+) -> Optional[Tuple[float, Tuple[float, float, float]]]:
+    """Axis–angle that turns a molecule to face the camera (M-UIPOLISH P1).
+
+    3Dmol looks down −z, so a molecule whose plane happens to contain z is
+    seen edge-on: water looks linear and a dipole along z is invisible. This
+    rotates the principal axes of the (unweighted) atom positions onto the
+    screen axes — longest extent horizontal, second vertical, flattest
+    direction toward the viewer. Returns ``(angle_deg, axis)`` for 3Dmol's
+    ``rotate``, or ``None`` when no rotation is needed or possible.
+    """
+    import numpy as np
+
+    try:
+        xyz = np.asarray(coords, dtype=float).reshape(-1, 3)
+    except Exception:  # noqa: BLE001 — orientation is cosmetic
+        return None
+    if len(xyz) < 2:
+        return None
+    centered = xyz - xyz.mean(axis=0)
+    _, vecs = np.linalg.eigh(centered.T @ centered)
+    axes = vecs[:, ::-1].T  # rows: largest, middle, smallest spread
+    for k in range(3):  # deterministic signs
+        if axes[k][np.argmax(np.abs(axes[k]))] < 0:
+            axes[k] = -axes[k]
+    if np.linalg.det(axes) < 0:
+        axes[2] = -axes[2]
+    # ``axes`` maps molecule coordinates to screen coordinates (x, y, z).
+    rot = axes
+    cos_a = float(np.clip((np.trace(rot) - 1.0) / 2.0, -1.0, 1.0))
+    angle = float(np.degrees(np.arccos(cos_a)))
+    if angle < 1e-3:
+        return None
+    if abs(angle - 180.0) < 1e-3:
+        # Axis from the symmetric part: R = 2 n nᵀ − I.
+        n = np.sqrt(np.clip((np.diag(rot) + 1.0) / 2.0, 0.0, None))
+        i = int(np.argmax(n))
+        for j in range(3):
+            if j != i and (rot[i, j] + rot[j, i]) < 0:
+                n[j] = -n[j]
+    else:
+        n = np.array(
+            [rot[2, 1] - rot[1, 2], rot[0, 2] - rot[2, 0], rot[1, 0] - rot[0, 1]]
+        )
+        n = n / np.linalg.norm(n)
+    return angle, (float(n[0]), float(n[1]), float(n[2]))
+
+
+def orient_view(view: Any, coords: Any) -> None:
+    """Apply :func:`principal_view_rotation` to a ``py3Dmol`` view (after zoomTo)."""
+    rot = principal_view_rotation(coords)
+    if rot is not None:
+        angle, (x, y, z) = rot
+        view.rotate(angle, {"x": x, "y": y, "z": z})
+
+
+def orient_js(var: str, coords: Any) -> str:
+    """Same as :func:`orient_view`, as a JS statement for hand-built viewers."""
+    rot = principal_view_rotation(coords)
+    if rot is None:
+        return ""
+    angle, (x, y, z) = rot
+    return f"{var}.rotate({angle:.4f},{{x:{x:.6f},y:{y:.6f},z:{z:.6f}}});"
+
+
+def coords_from_model_text(text: str, fmt: str) -> list:
+    """Atom positions from XYZ or Gaussian-cube text (units as in the file).
+
+    Orientation only needs directions, so Bohr (cube) vs Å (XYZ) is moot.
+    """
+    lines = (text or "").splitlines()
+    coords = []
+    try:
+        if fmt == "cube":
+            n_atoms = abs(int(lines[2].split()[0]))
+            rows = lines[6 : 6 + n_atoms]
+            coords = [[float(v) for v in r.split()[2:5]] for r in rows]
+        else:
+            for line in lines[2:]:
+                parts = line.split()
+                if len(parts) >= 4:
+                    coords.append([float(v) for v in parts[1:4]])
+    except (IndexError, ValueError):
+        return []
+    return coords
+
+
+def plotly_camera(coords: Any, distance: float = 1.8) -> Optional[dict]:
+    """Plotly ``scene.camera`` with the same framing as :func:`orient_view`."""
+    import numpy as np
+
+    rot = principal_view_rotation(coords)
+    if rot is None:
+        return None
+    try:
+        xyz = np.asarray(coords, dtype=float).reshape(-1, 3)
+        centered = xyz - xyz.mean(axis=0)
+        _, vecs = np.linalg.eigh(centered.T @ centered)
+    except Exception:  # noqa: BLE001
+        return None
+    up, toward = vecs[:, 1], vecs[:, 0]  # middle spread up, flattest at camera
+    return {
+        "eye": {k: float(v) * distance for k, v in zip("xyz", toward)},
+        "up": {k: float(v) for k, v in zip("xyz", up)},
+    }

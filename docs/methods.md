@@ -29,12 +29,24 @@ dispatched through a single Calculate tab.
 
 From fast iteration to higher accuracy:
 
-`STO-3G` → `3-21G` → `6-31G` → `6-31G*` → `6-31G**` → `cc-pVDZ` → `cc-pVTZ` → `def2-SVP` → `def2-TZVP` → `LANL2DZ`
+`STO-3G` → `3-21G` → `6-31G` → `6-31G*` → `6-31+G*` → `6-31G**` → `6-31++G**` → `cc-pVDZ` → `aug-cc-pVDZ` → `cc-pVTZ` → `def2-SVP` → `def2-SVPD` → `def2-TZVP` → `LANL2DZ`
 
 !!! tip "Choosing a basis"
     - **STO-3G** — fast iteration and classroom demos
     - **cc-pVDZ** — common research default
     - **def2-TZVP** — higher accuracy when cost allows
+    - **Anions** (including radical anions) — use a diffuse set: `6-31+G*`, `6-31++G**`, `aug-cc-pVDZ` or `def2-SVPD`
+
+!!! note "Diffuse basis sets"
+    The `+` / `++` (Pople), `aug-` (Dunning) and trailing `D` (Karlsruhe) markers add
+    diffuse functions — widely spread functions that describe an anion's loosely held
+    extra electron, lone pairs and weak interactions. They work with every calculation
+    type, open-shell (UHF/UKS) included, and with PCM. They are slower than the parent
+    set and SCF can need more cycles. `6-31+G*` and `6-31++G**` can also be typed as
+    `6-31+G(d)` and `6-31++G(d,p)`. Coverage: `6-31+G*` stops at Ca (no transition
+    metals); `6-31++G**` and `aug-cc-pVDZ` have no iodine; `def2-SVPD` carries ECPs and
+    covers heavy elements too (lanthanides aside). The pre-run guard flags an element the
+    chosen basis lacks.
 
 For transition-metal complexes, the in-app guard nudges toward **def2-SVP** or **LANL2DZ**
 when a metal is paired with an incompatible all-electron basis.

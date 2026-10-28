@@ -91,7 +91,12 @@ _METHOD_FAMILY_STYLE = {
 _METHOD_FALLBACK_STYLE = (_theme.css.TEXT_SLATE_DARK, _theme.css.BG_PANEL, _ICON_HF)
 
 _BASIS_FAMILY_STYLE = {
-    "minimal": (_theme.css.TEXT_SLATE, _theme.css.BG_PANEL, _ICON_BASIS_MINIMAL),
+    # A filled card like the others; BG_PANEL made it read as disabled (V4).
+    "minimal": (
+        _theme.css.TEXT_SLATE,
+        _theme.css.SURFACE_MUTED_BG,
+        _ICON_BASIS_MINIMAL,
+    ),
     "pople": (_theme.css.ACCENT_TEAL, _theme.css.SURFACE_TEAL_BG, _ICON_BASIS_POPLE),
     "cc": (_theme.css.ACCENT_SUCCESS, _theme.css.SURFACE_GREEN_BG, _ICON_BASIS_CC),
     "def2": (_theme.css.ACCENT_WARNING, _theme.css.SURFACE_ORANGE_BG, _ICON_BASIS_DEF2),
@@ -157,7 +162,7 @@ def _card_html(*, fg: str, bg: str, icon: str, title: str, body: str) -> str:
         f'<div style="min-width:0">'
         f'<div style="font-weight:700;font-size:12px;color:{fg};'
         f'letter-spacing:0.01em">{title}</div>'
-        f'<div style="font-size:11.5px;color:{_theme.css.TEXT_SLATE_DARK};line-height:1.35;'
+        f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};line-height:1.35;'
         f'margin-top:2px">{body}</div>'
         f"</div></div>"
     )
@@ -196,4 +201,10 @@ def basis_card_html(basis: str) -> str:
     alias = config.pople_notation_alias(basis)
     if alias:
         body += f' <span style="color:{_theme.css.TEXT_SLATE}">Also written <b>{alias}</b>.</span>'
+    # Same one-line budget: say what the +/aug-/D marker buys and who needs it.
+    if config.is_diffuse_basis(basis):
+        body += (
+            f' <span style="color:{_theme.css.TEXT_SLATE}"><b>Diffuse</b> — '
+            "for anions &amp; weak binding.</span>"
+        )
     return _card_html(fg=fg, bg=bg, icon=icon, title=title, body=body)

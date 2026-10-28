@@ -91,6 +91,43 @@ def _category_label(cat: str) -> str:
     return _CATEGORY_LABELS.get(cat, cat.replace("-", " ").title())
 
 
+def side_by_side(
+    left: list[Any],
+    right: list[Any],
+    *,
+    layout_fn: Any,
+    left_basis: str = "600px",
+    right_basis: str = "360px",
+) -> Any:
+    """Two columns that wrap into one on narrow screens (M-UIPOLISH L1).
+
+    Viewers sat at ~600 px with everything else stacked underneath, leaving
+    the right half of a wide window empty.
+    """
+    return widgets.HBox(
+        [
+            widgets.VBox(
+                left, layout=layout_fn(flex=f"0 1 {left_basis}", min_width="0")
+            ),
+            widgets.VBox(
+                right, layout=layout_fn(flex=f"1 1 {right_basis}", min_width="0")
+            ),
+        ],
+        layout=layout_fn(flex_flow="row wrap", align_items="flex-start", gap="0 24px"),
+    )
+
+
+def _collapsed(title: str, children: list[Any], *, layout_fn: Any) -> Any:
+    """A closed one-section accordion for rarely used options."""
+    acc = widgets.Accordion(
+        children=[widgets.VBox(children, layout=layout_fn(padding="4px"))],
+        layout=layout_fn(margin="8px 0 0"),
+    )
+    acc.set_title(0, title)
+    acc.selected_index = None
+    return acc
+
+
 def library_result_options(query: str = "", category: str | None = None):
     """Build (label, id) options for the library results dropdown + a count note.
 
@@ -149,7 +186,7 @@ def build_status_panel(
         return (tick if flag else cross) + (" " + extra if extra else "")
 
     env_badge = (
-        f'&nbsp;&nbsp;<code style="font-size:11px;background:{_theme.css.SURFACE_MUTED_BG};'
+        f'&nbsp;&nbsp;<code style="font-size:12px;background:{_theme.css.SURFACE_MUTED_BG};'
         f'padding:1px 5px;border-radius:3px;color:{_theme.css.TEXT_BODY}">{env}</code>'
         if env and env not in ("base", "")
         else ""
@@ -159,7 +196,7 @@ def build_status_panel(
         f"Timing calibration: {cal_label}</div>"
         if cal_label
         else f'<div style="margin-top:6px;font-size:12px;color:{_theme.css.TEXT_SUBTLE}">'
-        "Timing calibration: not yet run &mdash; use the Calibrate panel in History</div>"
+        "Timing calibration: not yet run &mdash; use <b>Calibrate time estimates</b> below</div>"
     )
 
     # GPU offload indicator. Detecting GPUs imports gpu4pyscf +
@@ -187,7 +224,7 @@ def build_status_panel(
                 # so offload can be slower than the CPU. Warn in place rather
                 # than let it look like free speed.
                 cell += (
-                    f'<div style="color:{_theme.css.ACCENT_WARNING};font-size:11px;margin-top:2px">'
+                    f'<div style="color:{_theme.css.ACCENT_WARNING};font-size:12px;margin-top:2px">'
                     "&#9888; consumer-class GPU &mdash; weak double precision; "
                     "may run <b>slower</b> than CPU. Benchmark before relying "
                     "on it.</div>"
@@ -248,25 +285,30 @@ def build_status_panel(
         options=[
             ("Auto", "auto"),
             ("py3Dmol", "py3dmol"),
-            ("plotlymol3d", "plotlymol"),
+            # Same name as the Calculate-tab toggle ("plotlymol3d" here before).
+            ("PlotlyMol", "plotlymol"),
         ],
         value=viz_default_backend,
         style={"button_width": "110px"},
         tooltips=[
             "Use the recommended backend per task (py3Dmol-first where supported).",
             "Always prefer py3Dmol when available.",
-            "Always prefer plotlymol3d when available.",
+            "Always prefer PlotlyMol when available.",
         ],
     )
+    # Audit D12: the "Settings" card used to be a self-contained HTML box that
+    # wrapped only the title and the first label, leaving the backend toggle
+    # (and everything else) outside it. Now the whole settings column is the
+    # card (see settings_box below) and each label sits above its control.
     settings_html = widgets.HTML(
-        f'<div style="background:{_theme.css.BG_PANEL};border:1px solid {_theme.css.BORDER};'
-        f"border-left:4px solid {_theme.css.TEXT_SUBTLE};padding:12px 16px;border-radius:6px;"
-        'margin:8px 0 4px">'
-        f'<div style="font-weight:600;font-size:14px;color:{_theme.css.TEXT_STRONG}">Settings</div>'
-        f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:8px;margin-bottom:4px">'
-        "Default 3D backend "
-        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-        "(persists across launches)</span></div>"
+        f'<div style="font-weight:600;font-size:14px;color:{_theme.css.TEXT_STRONG}">'
+        "Settings</div>"
+        f'<div style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin-top:2px">'
+        "Changes are saved automatically and kept for next time.</div>"
+    )
+    viz_backend_label = widgets.HTML(
+        f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:8px;'
+        'margin-bottom:0px">Default 3D backend '
         "</div>"
     )
     engine_options = [
@@ -287,8 +329,8 @@ def build_status_panel(
     engine_label = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:8px;'
         'margin-bottom:0px">Quantum engine '
-        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-        "(persists across launches; menus follow engine capabilities)</span></div>"
+        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:12px">'
+        "(menus follow engine capabilities)</span></div>"
     )
     app.quantum_engine_dd = widgets.Dropdown(
         options=engine_options,
@@ -303,7 +345,7 @@ def build_status_panel(
         min=5,
         max=60,
         step=1,
-        description="Vib fps:",
+        description="",
         style={"description_width": "60px"},
         layout=layout_fn(width="320px", margin="6px 0 0 0"),
         readout=True,
@@ -317,8 +359,7 @@ def build_status_panel(
     vib_fps_label = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:10px;'
         'margin-bottom:0px">Vibrational animation framerate '
-        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-        "(persists across launches)</span></div>"
+        "</div>"
     )
 
     # GPU offload toggle (persists across launches). Off is a legitimate choice
@@ -327,8 +368,8 @@ def build_status_panel(
     gpu_toggle_label = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:12px;'
         'margin-bottom:0px">GPU offload '
-        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-        "(persists across launches; only applies when a CUDA device is "
+        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:12px">'
+        "(only applies when a CUDA device is "
         "detected)</span></div>"
     )
     app.gpu_enabled_cb = widgets.Checkbox(
@@ -346,8 +387,8 @@ def build_status_panel(
     df_toggle_label = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:12px;'
         'margin-bottom:0px">Density fitting (RI) '
-        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-        "(persists across launches; faster TD-DFT / large systems, "
+        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:12px">'
+        "(faster TD-DFT / large systems, "
         "~0.008 kcal/mol accuracy cost)</span></div>"
     )
     app.density_fit_enabled_cb = widgets.Checkbox(
@@ -360,8 +401,8 @@ def build_status_panel(
     fp_toggle_label = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:12px;'
         'margin-bottom:0px">Parallel IR/Raman finite differences '
-        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-        "(persists across launches; CPU workers for IR + Raman displacements on "
+        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:12px">'
+        "(CPU workers for IR + Raman displacements on "
         "multi-core hosts — see Help → Parallel IR/Raman finite differences)</span></div>"
     )
     app.freq_parallel_enabled_cb = widgets.Checkbox(
@@ -373,7 +414,7 @@ def build_status_panel(
     )
     if freq_parallel_env_locked:
         fp_env_note = widgets.HTML(
-            f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
+            f'<div style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
             "Controlled by deployment (<code>QUANTUI_FREQ_PARALLEL</code> in the "
             "container or session environment).</div>"
         )
@@ -383,8 +424,7 @@ def build_status_panel(
     exec_backend_label = widgets.HTML(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:12px;'
         'margin-bottom:0px">Execution backend '
-        f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-        "(persists across launches)</span></div>"
+        "</div>"
     )
     exec_options = [("Local (this Jupyter kernel)", "local")]
     if slurm_available:
@@ -399,13 +439,13 @@ def build_status_panel(
     )
     if not slurm_available:
         exec_backend_note = widgets.HTML(
-            f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
+            f'<div style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
             f"{slurm_unavailable_note()}</div>"
         )
     else:
         limit = max_concurrent_jobs()
         exec_backend_note = widgets.HTML(
-            f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
+            f'<div style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
             f"Cluster mode allows up to {limit} concurrent job(s). "
             "Use the Cluster Jobs tab to monitor and cancel runs.</div>"
         )
@@ -432,7 +472,7 @@ def build_status_panel(
             "submissions."
         )
     app.slurm_job_root_note = widgets.HTML(
-        f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
+        f'<div style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
         f"{_root_note_text}</div>"
     )
     slurm_root_rows: list[Any] = []
@@ -440,9 +480,7 @@ def build_status_panel(
         slurm_root_rows = [
             widgets.HTML(
                 f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};'
-                'margin-top:12px;margin-bottom:0px">SLURM job folder '
-                f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:11px">'
-                "(persists across launches)</span></div>"
+                'margin-top:12px;margin-bottom:0px">SLURM job folder</div>'
             ),
             app.slurm_job_root_txt,
             app.slurm_job_root_note,
@@ -458,10 +496,11 @@ def build_status_panel(
     settings_box = widgets.VBox(
         [
             settings_html,
+            viz_backend_label,
+            app.viz_default_backend_dd,
             engine_label,
             app.quantum_engine_dd,
             app.quantum_engine_note,
-            app.viz_default_backend_dd,
             vib_fps_label,
             app.vib_framerate_si,
             gpu_toggle_label,
@@ -474,7 +513,14 @@ def build_status_panel(
             exec_backend_note,
             *slurm_root_rows,
         ],
-        layout=layout_fn(margin="0 0 8px 0"),
+        layout=layout_fn(
+            margin="8px 0 8px 0",
+            padding="12px 16px",
+            border_top=f"1px solid {_theme.css.BORDER}",
+            border_right=f"1px solid {_theme.css.BORDER}",
+            border_bottom=f"1px solid {_theme.css.BORDER}",
+            border_left=f"4px solid {_theme.css.TEXT_SUBTLE}",
+        ),
     )
 
     app._status_tab_panel = widgets.VBox(
@@ -772,26 +818,66 @@ def build_history_section(
                 ],
                 layout=layout_fn(align_items="center", gap="6px"),
             ),
-            widgets.HBox(
-                [_facet_label("Type:"), *app._history_calc_chips.values()],
-                layout=layout_fn(align_items="center", gap="4px", flex_wrap="wrap"),
-            ),
-            widgets.HBox(
-                [app.history_method_dd, app.history_basis_dd],
-                layout=layout_fn(align_items="center", gap="8px"),
-            ),
-            widgets.HBox(
+            # Type / method / date / status facets in a closed section: four
+            # rows of filters sat above the result picker (M-UIPOLISH L13).
+            _collapsed(
+                "More filters (type, method, basis, date, status)",
                 [
-                    app.history_date_from,
-                    app.history_date_to,
-                    _facet_label("Status:", "55px"),
-                    *app._history_status_chips.values(),
+                    widgets.HBox(
+                        [_facet_label("Type:"), *app._history_calc_chips.values()],
+                        layout=layout_fn(
+                            align_items="center", gap="4px", flex_wrap="wrap"
+                        ),
+                    ),
+                    widgets.HBox(
+                        [app.history_method_dd, app.history_basis_dd],
+                        layout=layout_fn(align_items="center", gap="8px"),
+                    ),
+                    widgets.HBox(
+                        [
+                            app.history_date_from,
+                            app.history_date_to,
+                            _facet_label("Status:", "55px"),
+                            *app._history_status_chips.values(),
+                        ],
+                        layout=layout_fn(
+                            align_items="center", gap="6px", flex_wrap="wrap"
+                        ),
+                    ),
                 ],
-                layout=layout_fn(align_items="center", gap="6px", flex_wrap="wrap"),
+                layout_fn=layout_fn,
             ),
         ],
         layout=layout_fn(margin="0 0 8px", gap="4px"),
     )
+
+    # The newest results as one-click buttons above the full picker.
+    app._history_recent_box = widgets.VBox(
+        layout=layout_fn(margin="0 0 8px", align_items="flex-start")
+    )
+
+    def _sync_recent(_change: Any = None) -> None:
+        rows: list[Any] = []
+        for label, value in list(app.past_dd.options)[:8]:
+            if not value:
+                continue
+            btn = widgets.Button(
+                description=str(label),
+                tooltip="Open this result",
+                layout=layout_fn(width="auto", max_width="100%", margin="1px 0"),
+            )
+            btn.add_class("quantui-history-recent")
+            btn.on_click(lambda _b, v=value: setattr(app.past_dd, "value", v))
+            rows.append(btn)
+        if len(rows) > 6:
+            rows = rows[:6]
+        head = widgets.HTML(
+            f'<div style="font-size:13px;color:{_theme.css.TEXT_SECONDARY};margin:2px 0 4px">'
+            "Recent</div>"
+        )
+        app._history_recent_box.children = tuple([head] + rows) if rows else ()
+
+    app.past_dd.observe(_sync_recent, names="options")
 
     # The History tab is now purely the result-browser. Performance stats
     # + Calibrate accordions moved to the System Settings tab — see below —
@@ -800,9 +886,10 @@ def build_history_section(
         [
             widgets.HTML(
                 f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:0 0 8px">'
-                "Calculations are saved automatically. Filter below, then select "
-                "one to view its results.</p>"
+                "Calculations are saved automatically. Pick a recent one, or search "
+                "and choose below.</p>"
             ),
+            app._history_recent_box,
             app._history_filter_box,
             widgets.HBox(
                 [
@@ -871,13 +958,13 @@ def build_shared_widgets(
     # overflow hidden (not auto): the 3D viewer is a fixed-size canvas, so it
     # needs no scrollbar — clipping a few px of margin avoids an internal
     # scrollbar that resets to the top on every backend/palette swap.
-    # min_height, not height: the fragment is the info box (~110px) PLUS the
-    # 500px canvas plus its border, so the old fixed 510px — sized for the
-    # canvas alone — clipped the bottom border off. A minimum still reserves
-    # space so the page doesn't jump when a molecule first renders, but lets
-    # the box grow if the info box wraps to more lines on a narrow window.
+    # min_height, not height: a fixed height sized for the canvas alone
+    # clipped the bottom border off. It starts at 0 so the empty tab has no
+    # blank block; _refresh_calc_mol_viewer reserves the viewer's height once
+    # a molecule renders, so later re-renders (backend/palette swaps) don't
+    # make the page jump.
     app.viz_output = widgets.Output(
-        layout=layout_fn(min_height="620px", overflow="hidden")
+        layout=layout_fn(min_height="0px", overflow="hidden")
     )
     # No .quantui-viewer-frame here: this output renders via
     # render_molecule_html, whose fragment now carries its own border sized
@@ -987,7 +1074,7 @@ def build_shared_widgets(
     )
 
     app.step_progress = step_progress_cls(
-        ["Choose molecule", "Set method", "Run", "Results"]
+        ["Choose molecule", "Set method", "Run", "Results"], horizontal=True
     )
     app.step_progress.start(0)
 
@@ -1109,7 +1196,10 @@ def build_shared_widgets(
                 ],
                 layout=layout_fn(gap="6px"),
             )
-        ]
+        ],
+        # Hidden until a molecule with a supported transition metal is loaded
+        # (audit D17); _sync_spin_helper shows it and preselects the metal.
+        layout=layout_fn(display="none"),
     )
     app.spin_helper_box.set_title(0, "🧲 Spin-state helper (metal complexes)")
     app.spin_helper_box.selected_index = None  # collapsed by default
@@ -1121,9 +1211,9 @@ def build_shared_widgets(
     # calculation" checkbox below, which is a full DFT/HF opt.)
     app.preopt_preview_label = widgets.HTML(
         f'<span style="font-size:13px;color:{_theme.css.TEXT_BODY}">'
-        "Classical pre-optimize geometry</span>"
-        f'<span style="font-size:11px;color:{_theme.css.TEXT_SUBTLE}"> &mdash; fast MMFF/UFF '
-        "cleanup of a rough structure</span>"
+        "Quick clean-up (force field)</span>"
+        f'<span style="font-size:12px;color:{_theme.css.TEXT_SUBTLE}"> &mdash; MMFF/UFF, '
+        "for rough structures</span>"
     )
     # Interactive pre-opt: run the bonded-FF pre-opt on
     # demand, watch it relax in-place, then keep or revert.
@@ -1181,6 +1271,10 @@ def build_shared_widgets(
         ],
         layout=layout_fn(display="none", margin="6px 0 4px", max_width="480px"),
     )
+    app.preopt_preview_row = widgets.HBox(
+        [app.preopt_preview_label, app.preopt_preview_btn],
+        layout=layout_fn(align_items="center", gap="10px", margin="6px 0 0"),
+    )
 
     from quantui.config import SOLVENT_OPTIONS as _SOLVENT_OPTS
 
@@ -1192,6 +1286,9 @@ def build_shared_widgets(
         description="Implicit solvent (PCM)",
         style={"description_width": "initial"},
         indent=False,
+        # Size to the label: per-type reasons ("— Raman is not computed in
+        # solvent") were cut off at ipywidgets' 300 px default.
+        layout=layout_fn(width="auto"),
     )
     app.solvent_dd = widgets.Dropdown(
         options=list(_SOLVENT_OPTS.keys()),
@@ -1222,7 +1319,7 @@ def build_shared_widgets(
         min=0.001,
         max=1.0,
         step=0.005,
-        description="Force thr. (eV/Å):",
+        description="Force limit (eV/Å):",
         style={"description_width": "130px"},
         layout=layout_fn(width="270px"),
     )
@@ -1251,7 +1348,7 @@ def build_shared_widgets(
         value=10,
         min=1,
         max=50,
-        description="# states:",
+        description="Excited states:",
         style={"description_width": "100px"},
         layout=layout_fn(width="180px"),
     )
@@ -1266,9 +1363,12 @@ def build_shared_widgets(
     # and the existing per-calc-type tests keep working unchanged.
     app._seed_dd = widgets.Dropdown(
         options=[("(use current molecule)", "")],
-        description="Seed geometry:",
+        description="Start from:",
         style={"description_width": "110px"},
-        layout=layout_fn(width="auto", flex="1 1 auto", min_width="260px"),
+        # max_width: long History labels stretched it across the page (D17).
+        layout=layout_fn(
+            width="auto", flex="1 1 auto", min_width="260px", max_width="620px"
+        ),
         tooltip=(
             "Optionally start from a previous result: Geo Opt final geometry, "
             "or a Frequency result perturbed along a normal mode (imaginary "
@@ -1307,7 +1407,7 @@ def build_shared_widgets(
     app._seed_refresh_btn = widgets.Button(
         description="",
         icon="refresh",
-        layout=layout_fn(width="32px", height="32px"),
+        layout=layout_fn(width="32px", height="32px", padding="0"),
         tooltip="Refresh the list of saved geometry optimisations",
     )
     app._seed_note = widgets.HTML("")
@@ -1322,6 +1422,7 @@ def build_shared_widgets(
         description="Geometry optimization before calculation (QM, slower)",
         style={"description_width": "initial"},
         indent=False,
+        layout=layout_fn(width="auto"),
     )
 
     app._scan_type_dd = widgets.Dropdown(
@@ -1419,29 +1520,27 @@ def build_shared_widgets(
     )
     app._scan_help_btn = widgets.Button(
         description="?",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="PES Scan setup help",
     )
     app._scan_preopt_note = widgets.HTML(
         value=(
             f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">'
-            "Tip: enable <b>Pre-optimize starting geometry</b> (checkbox just "
-            "above) for best results. Each scan point runs its own constrained "
-            "optimization.</span>"
+            "Each scan point runs its own constrained optimization.</span>"
         )
     )
     app._scan_seed_dd = widgets.Dropdown(
         options=[("(use current molecule)", "")],
         value="",
-        description="Seed:",
-        style={"description_width": "40px"},
-        layout=layout_fn(width="100%"),
+        description="Start from:",
+        style={"description_width": "80px"},
+        layout=layout_fn(width="auto", flex="1 1 auto", max_width="620px"),
         tooltip="Optional optimized geometry from history",
     )
     app._scan_seed_refresh_btn = widgets.Button(
         description="",
         icon="refresh",
-        layout=layout_fn(width="32px", height="28px"),
+        layout=layout_fn(width="32px", height="28px", padding="0"),
         tooltip="Refresh seed geometry list",
     )
     app._scan_suggest_around_btn = widgets.Button(
@@ -1509,7 +1608,7 @@ def build_shared_widgets(
         min=0.001,
         max=0.2,
         step=0.005,
-        description="Force thr. (eV/Å):",
+        description="Force limit (eV/Å):",
         style={"description_width": "130px"},
         layout=layout_fn(width="250px"),
     )
@@ -1524,18 +1623,15 @@ def build_shared_widgets(
     )
     app._ts_note = widgets.HTML(
         f'<span style="color:{_theme.css.TEXT_SECONDARY};font-size:12px">'
-        "Searches for a <b>first-order saddle point</b> near the current "
-        "geometry (Sella, starting from the analytic Hessian), then runs a "
-        "frequency calculation to check it: a transition state has exactly "
-        "<b>one imaginary frequency</b>. Start close to the barrier top, e.g. "
-        "the highest point of a PES scan." + _ts_avail + "</span>"
+        "Finds a saddle point near this geometry, then checks it has exactly "
+        "<b>one imaginary frequency</b>. Start near the barrier top (e.g. the "
+        "highest PES-scan point)." + _ts_avail + "</span>"
     )
 
     app._reorg_note = widgets.HTML(
         f'<span style="color:{_theme.css.TEXT_SECONDARY};font-size:12px">'
-        "4-point Marcus scheme: optimizes the neutral and ion geometries, then "
-        "evaluates the four single-point energies to obtain λ. Runs 2–3 geometry "
-        "optimizations, so it is slower than a single calculation.</span>"
+        "Four-point scheme for λ: optimizes the neutral and ion, then four "
+        "single points (2–3 optimizations, so slower).</span>"
     )
 
     app.calc_extra_opts = widgets.VBox([])
@@ -1543,19 +1639,19 @@ def build_shared_widgets(
     app.method_help_btn = widgets.Button(
         description="?",
         button_style="",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="RHF vs UHF — opens Help tab",
     )
     app.basis_help_btn = widgets.Button(
         description="?",
         button_style="",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="Choosing a basis set — opens Help tab",
     )
     app.calc_type_help_btn = widgets.Button(
         description="?",
         button_style="",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="What each calculation type computes — opens Help tab",
     )
 
@@ -1589,7 +1685,7 @@ def build_shared_widgets(
         [
             app._slurm_job_name_txt,
             widgets.HTML(
-                f'<div style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};'
+                f'<div style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};'
                 'margin:0 0 6px 84px">Optional. Letters, digits, - and _ are kept; '
                 "other characters become _.</div>"
             ),
@@ -1609,12 +1705,19 @@ def build_shared_widgets(
     # Disabled unless a calc is in flight (toggled by _do_run).
     app.cancel_btn = widgets.Button(
         description="Cancel",
-        button_style="danger",
+        button_style="",
         icon="stop",
         disabled=True,
         layout=layout_fn(width="110px", height="36px"),
         tooltip=("Stop the running calculation at the next SCF cycle / optimizer step"),
     )
+
+    # Red only while there is something to cancel; a disabled "danger" button
+    # still read as live (M-UIPOLISH V2).
+    def _cancel_style(change: Any) -> None:
+        app.cancel_btn.button_style = "" if change["new"] else "danger"
+
+    app.cancel_btn.observe(_cancel_style, names="disabled")
 
     # MET.5: one-click fix shown only when a metal's basis blocks the run.
     # Hidden until the pre-run guard reveals it; sets the basis to def2-SVP.
@@ -1700,13 +1803,17 @@ def build_theme_selector(app: Any, *, layout_fn: Any) -> None:
     app._theme_style = widgets.Output(
         layout=layout_fn(height="0px", overflow="hidden", margin="0", padding="0")
     )
+    # A status indicator, not a control (audit D15): neutral while idle,
+    # coloured only while busy, and styled as a non-clickable chip
+    # (.quantui-status-chip in the app CSS).
     app._activity_btn = widgets.Button(
         description="Idle",
         icon="circle-o",
         tooltip="No active operations.",
-        button_style="success",
+        button_style="",
         layout=layout_fn(width="118px", margin="0 8px 0 0"),
     )
+    app._activity_btn.add_class("quantui-status-chip")
     default_palette = getattr(app, "_user_settings", None)
     initial = (
         default_palette.theme.palette
@@ -1807,23 +1914,23 @@ def build_welcome_header(app: Any, *, layout_fn: Any = None) -> None:
     app._welcome_logo = widgets.Image(
         value=_logo_svg_raw.encode("utf-8"),
         format="svg+xml",
-        width=120,
-        height=120,
+        width=44,
+        height=44,
     )
 
     # Text-only HTML. ``_welcome_html`` is kept as a pure HTML widget so
     # ``app_runflow.on_exit_clicked`` can still ``.value = ...`` it with
     # the shutdown message.
+    # One line (M-UIPOLISH L2): the 44 px title, tagline and a help line used
+    # ~180 px, so at 1024 x 768 the first screen held no controls at all.
     text_html = (
-        "<div>"
-        '<div style="font-size:44px;font-weight:700;letter-spacing:-0.8px;'
-        f'color:{_theme.css.TEXT_STRONG};line-height:1.05">QuantUI</div>'
-        f'<div style="font-size:20px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:7px">'
-        "Free, open, and interactive quantum chemistry</div>"
-        f'<div style="font-size:13px;color:{_theme.css.TEXT_SUBTLE};margin-top:5px">'
-        f"v{quantui.__version__} &nbsp;&middot;&nbsp; "
-        "<b>Help</b> tab for instructions &nbsp;&middot;&nbsp; "
-        "<b>System Settings</b> tab for environment + calibration</div>"
+        '<div style="display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 14px">'
+        '<span style="font-size:26px;font-weight:700;letter-spacing:-0.4px;'
+        f'color:{_theme.css.TEXT_STRONG};line-height:1.1">QuantUI</span>'
+        f'<span style="font-size:15px;color:{_theme.css.TEXT_SLATE_DARK}">'
+        "Free, open, and interactive quantum chemistry</span>"
+        f'<span style="font-size:12px;color:{_theme.css.TEXT_SUBTLE}">'
+        f"v{quantui.__version__}</span>"
         "</div>"
     )
     app._welcome_html = widgets.HTML(value=text_html)
@@ -1838,9 +1945,8 @@ def build_welcome_header(app: Any, *, layout_fn: Any = None) -> None:
         layout=_layout(
             align_items="center",
             justify_content="flex-start",
-            padding="22px 4px 18px",
-            margin="0 0 4px",
-            border_bottom=f"1px solid {_theme.css.BORDER}",
+            padding="8px 4px 8px",
+            margin="0",
         ),
     )
 
@@ -1945,9 +2051,8 @@ def build_molecule_section(
     tab_preset = widgets.VBox(
         [
             widgets.HTML(
-                hint + "Browse the bundled library — filter by category or "
-                "search by name/formula. Includes thousands of small molecules "
-                "for offline use.</p>"
+                hint + "Search by name or formula, or pick a category. "
+                "Works offline.</p>"
             ),
             widgets.HBox([app.lib_category_dd, app.lib_search_txt]),
             app.lib_results_dd,
@@ -1957,9 +2062,8 @@ def build_molecule_section(
     tab_xyz = widgets.VBox(
         [
             widgets.HTML(
-                hint + "Paste XYZ coordinates or use the atom table below. "
-                "Charge and multiplicity are set in Calculation Setup — "
-                "geometry loading does not change them.</p>"
+                hint + "Paste coordinates (symbol x y z, in Å) or edit the table. "
+                "Charge and multiplicity stay as set below.</p>"
             ),
             app.xyz_area,
             widgets.HBox(
@@ -1982,9 +2086,8 @@ def build_molecule_section(
     tab_pubchem = widgets.VBox(
         [
             widgets.HTML(
-                hint + "Search by name, SMILES, CID, or InChI. Tries PubChem "
-                "then NCI CACTUS, and falls back to the bundled library offline."
-                "</p>"
+                hint + "Name, SMILES, PubChem CID or InChI. Searches online "
+                "databases (offline: the bundled library).</p>"
             ),
             widgets.HBox([app.pubchem_txt, app.pubchem_btn]),
             app.pubchem_msg,
@@ -1994,10 +2097,8 @@ def build_molecule_section(
     tab_upload = widgets.VBox(
         [
             widgets.HTML(
-                hint + "Upload a structure file from your computer: XYZ, MOL, "
-                "SDF, MOL2, PDB, CIF, or a Gaussian input (.gjf/.com) or "
-                "output (.log/.out). Charge and multiplicity are taken from "
-                "the file when it records them.</p>"
+                hint + "XYZ, MOL, SDF, MOL2, PDB, CIF, or Gaussian input/output "
+                "(.gjf, .com, .log, .out).</p>"
             ),
             app.structure_upload,
             app.upload_msg,
@@ -2020,6 +2121,14 @@ def build_molecule_section(
         layout=layout_fn(width="100px", height="32px"),
         tooltip="Re-expand the molecule input panel",
     )
+    # Way back from the expanded editor to the compact summary once a molecule
+    # is loaded (audit D11: "Change" was one-way).
+    app.collapse_mol_btn = widgets.Button(
+        description="Done",
+        icon="check",
+        layout=layout_fn(width="90px", height="30px", margin="4px 0"),
+        tooltip="Hide the molecule editor and show the compact summary",
+    )
     app.mol_input_collapsed = widgets.HBox(
         [app.mol_summary_compact, app.change_mol_btn],
         layout=layout_fn(align_items="center", gap="12px", padding="6px 0"),
@@ -2037,27 +2146,54 @@ def build_molecule_section(
     app._mol_calc_png_inbox.add_class(_MOL_CALC_PNG_INBOX_CLASS)
     app._mol_calc_png_status = widgets.HTML(value="")
 
-    mol_container_children = [
-        app.mol_input_expanded,
-        app.mol_info_html,
-        app._mol_calc_png_inbox,
-        app.viz_output,
-        app._mol_calc_png_status,
-    ]
-    if app.viz_backend_toggle is not None:
-        mol_container_children.append(app.viz_backend_toggle)
-    if visualization_available:
-        mol_container_children.append(app.viz_controls_box)
     # Edit Structure (M-INTERACT INT.8): works on typed atom numbers even
     # without a viewer; clicking atoms needs py3Dmol.
     from quantui.app_structure_edit import build_edit_widgets
 
     build_edit_widgets(app, layout_fn=layout_fn)
-    mol_container_children.append(app._edit_accordion)
     app.mol_input_container = widgets.VBox(
-        mol_container_children,
+        mol_input_children(
+            app, expanded=True, visualization_available=visualization_available
+        ),
         layout=layout_fn(margin="0 0 4px 0"),
     )
+
+
+def mol_input_children(
+    app: Any, *, expanded: bool, visualization_available: bool
+) -> list[Any]:
+    """Children of ``mol_input_container`` for the expanded or compact view.
+
+    Only the header differs between the two views (full input editor vs the
+    one-line summary + Change button). Everything below it — viewer, its PNG
+    inbox, backend toggle, style controls, Edit Structure — is shared, and
+    must stay that way: when the collapse/expand paths each kept their own
+    list, Edit Structure fell out of both (UIA.2).
+    """
+    if not expanded:
+        head = [app.mol_input_collapsed]
+    else:
+        head = [app.mol_input_expanded, app.mol_info_html]
+        if getattr(app, "_molecule", None) is not None:
+            head.append(app.collapse_mol_btn)
+    children = head + [
+        app._mol_calc_png_inbox,
+        app.viz_output,
+        app._mol_calc_png_status,
+    ]
+    # Viewer controls, Edit Structure and the force-field clean-up act on a
+    # molecule; before one is loaded they were just clutter (M-UIPOLISH L11).
+    if getattr(app, "_molecule", None) is None:
+        return children
+    if app.viz_backend_toggle is not None:
+        children.append(app.viz_backend_toggle)
+    if visualization_available:
+        children.append(app.viz_controls_box)
+    children.append(app._edit_accordion)
+    # The clean-up changes the geometry, so it lives with the molecule, not
+    # in Calculation Setup (M-UIPOLISH L10).
+    children += [app.preopt_preview_row, app.preopt_preview_box]
+    return children
 
 
 def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
@@ -2110,11 +2246,6 @@ def build_calc_setup(app: Any, *, layout_fn: Any) -> None:
             ),
             app._freq_preopt_cb,
             app.calc_extra_opts,
-            widgets.HBox(
-                [app.preopt_preview_label, app.preopt_preview_btn],
-                layout=layout_fn(align_items="center", gap="10px"),
-            ),
-            app.preopt_preview_box,
             widgets.HBox(
                 [app.solvent_cb, app.solvent_dd],
                 layout=layout_fn(align_items="center", gap="4px"),
@@ -2191,6 +2322,14 @@ def _persisted_iso_resolution(app: Any) -> str:
         return "medium"
 
 
+def _persisted_ir_axis(app: Any) -> str:
+    """The saved IR axis direction, or the default; same contract as above."""
+    try:
+        return str(app._user_settings.viz.ir_axis)
+    except Exception:  # noqa: BLE001 — settings must never gate widget creation
+        return "descending"
+
+
 def build_results_section(app: Any, *, layout_fn: Any) -> None:
     """Build results and analysis tab panels/widgets."""
 
@@ -2234,9 +2373,9 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
 
     pes_export_row = _plot_export_row("pes")
     app._pes_export_min_btn = widgets.Button(
-        description="Save min geometry",
+        description="Save lowest-energy geometry",
         icon="download",
-        layout=layout_fn(width="150px"),
+        layout=layout_fn(width="auto"),
         tooltip="Export the lowest-energy scan point as XYZ",
     )
     app._pes_plot_hint = widgets.HTML(
@@ -2353,8 +2492,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._thermo_box = widgets.VBox(
         [
             widgets.HTML(
-                f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY};'
-                'font-weight:bold">Thermochemistry</span>'
+                f'<div style="font-size:15px;color:{_theme.css.TEXT_STRONG};'
+                'font-weight:600;margin:4px 0 4px">Thermochemistry</div>'
             ),
             widgets.HBox([app._thermo_T, app._thermo_P]),
             app._thermo_html,
@@ -2364,7 +2503,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._vib_apply_mode_btn = widgets.Button(
         description="Use mode → new Frequency calc",
         icon="share",
-        layout=layout_fn(width="auto", margin="0 0 8px 0"),
+        # Shown only when there are imaginary modes to step off (audit D17);
+        # align_self keeps it button-sized instead of stretching full width.
+        layout=layout_fn(
+            width="auto", margin="0 0 8px 0", align_self="flex-start", display="none"
+        ),
         tooltip=(
             "Displace the structure 75% along the selected normal mode "
             "(same scale as the animation) and switch to a new Frequency run"
@@ -2390,8 +2533,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         description="⬇ Export Animation",
         tooltip=(
             "Save the current vibrational mode as a self-contained HTML "
-            "file (plotlymol3d preferred for export quality; py3Dmol "
-            "fallback if plotlymol3d is not installed)"
+            "file (PlotlyMol preferred for export quality; py3Dmol "
+            "fallback if PlotlyMol is not installed)"
         ),
         layout=layout_fn(width="180px"),
     )
@@ -2424,14 +2567,21 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         children=[
             widgets.VBox(
                 [
-                    vib_mode_row,
-                    vib_appearance_row,
-                    app._vib_apply_mode_btn,
-                    app.vib_output,
-                    vib_export_row,
-                    app._vib_png_status,
-                    app._vib_mode_table,
-                    app._thermo_box,
+                    # Animation on the left; mode table and thermochemistry
+                    # beside it instead of far below (M-UIPOLISH L1, L7).
+                    side_by_side(
+                        [
+                            vib_mode_row,
+                            vib_appearance_row,
+                            app._vib_apply_mode_btn,
+                            app.vib_output,
+                            vib_export_row,
+                            app._vib_png_status,
+                        ],
+                        [app._vib_mode_table, app._thermo_box],
+                        layout_fn=layout_fn,
+                        left_basis="500px",
+                    ),
                     app._vib_js_bridge,
                     app._vib_png_inbox,
                 ],
@@ -2446,7 +2596,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._ir_mode_toggle = widgets.ToggleButtons(
         options=["Stick", "Broadened"],
         value="Stick",
-        style={"button_width": "80px"},
+        style={"button_width": "96px"},  # "Broadened" was cut off at 80px
         layout=layout_fn(margin="0 8px 0 0"),
     )
     app._ir_fwhm_slider = widgets.FloatSlider(
@@ -2472,9 +2622,22 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="100%", min_height="300px"),
     )
     ir_export_row = _plot_export_row("ir")
+    # Both directions stay available (instructor, 2026-10-25); the choice is
+    # saved in user settings.
+    app._ir_axis_dd = widgets.Dropdown(
+        options=[
+            ("4000 → 400 cm⁻¹ (high → low)", "descending"),
+            ("400 → 4000 cm⁻¹ (low → high)", "ascending"),
+        ],
+        value=_persisted_ir_axis(app),
+        description="Axis:",
+        style={"description_width": "40px"},
+        layout=layout_fn(width="270px", margin="0 8px 0 0"),
+        tooltip="Wavenumber direction for the IR and Raman plots; 4000 → 400 is the FTIR convention",
+    )
 
     ir_controls = widgets.HBox(
-        [app._ir_mode_toggle, app._ir_fwhm_slider],
+        [app._ir_mode_toggle, app._ir_axis_dd, app._ir_fwhm_slider],
         layout=layout_fn(align_items="center", margin="0 0 6px 0"),
     )
     ir_body_children = [ir_controls, ir_export_row, app._ir_fig]
@@ -2493,8 +2656,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._raman_mode_toggle = widgets.ToggleButtons(
         options=["Stick", "Broadened"],
         value="Stick",
-        description="Mode:",
-        style={"button_width": "80px"},
+        style={"button_width": "96px"},
         layout=layout_fn(margin="0 8px 0 0"),
     )
     app._raman_fwhm_slider = widgets.FloatSlider(
@@ -2529,9 +2691,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._raman_accordion.set_title(0, "Raman Spectrum")
     app._raman_accordion.selected_index = None
 
+    # Bounds wide enough for core levels (O 1s ≈ −560 eV, heavier atoms far
+    # lower): at −500 the "Show core orbitals" view was silently clamped.
     app._orb_ymin_input = widgets.BoundedFloatText(
         value=-30.0,
-        min=-500.0,
+        min=-100000.0,
         max=200.0,
         step=1.0,
         description="Y min:",
@@ -2540,7 +2704,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._orb_ymax_input = widgets.BoundedFloatText(
         value=5.0,
-        min=-500.0,
+        min=-100000.0,
         max=500.0,
         step=1.0,
         description="Y max:",
@@ -2552,9 +2716,18 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         min=4,
         max=200,
         step=2,
-        description="Show N:",
-        layout=layout_fn(width="120px"),
-        style={"description_width": "50px"},
+        # Labelled by the "Levels shown:" text before it; its own "Show N:"
+        # description was truncated to "Show …".
+        layout=layout_fn(width="70px"),
+    )
+    # D2: core levels (hundreds of eV down) squeezed the valence orbitals into
+    # a sliver of the default view; hide them unless asked.
+    app._orb_show_core_cb = widgets.Checkbox(
+        value=False,
+        description="Show core orbitals",
+        indent=False,
+        layout=layout_fn(width="auto", margin="0 8px 0 4px"),
+        tooltip="Include inner-shell orbitals (e.g. O 1s) and re-fit the Y range",
     )
     app._orb_font_scale_slider = widgets.FloatSlider(
         value=1.0,
@@ -2570,15 +2743,16 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     orb_controls_row = widgets.HBox(
         [
             widgets.HTML(
-                f'<span style="font-size:11px;color:{_theme.css.TEXT_SECONDARY};font-weight:600">Y range:</span>'
+                f'<span style="font-size:13px;color:{_theme.css.TEXT_BODY}">Y range:</span>'
             ),
             app._orb_ymin_input,
             app._orb_ymax_input,
             widgets.HTML(
-                f'<span style="font-size:11px;color:{_theme.css.TEXT_SECONDARY};font-weight:600;margin-left:8px">'
+                f'<span style="font-size:13px;color:{_theme.css.TEXT_BODY};margin-left:8px">'
                 "Levels shown:</span>"
             ),
             app._orb_n_orb_input,
+            app._orb_show_core_cb,
             app._orb_font_scale_slider,
         ],
         layout=layout_fn(
@@ -2642,10 +2816,6 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._orb_iso_output = widgets.Output()
     app._orb_iso_controls = widgets.VBox(
         [
-            widgets.HTML(
-                f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY};font-weight:bold">'
-                "Isosurface:</span>"
-            ),
             app._iso_surface_dd,
             app._orb_spin_toggle,
             app._orb_toggle,
@@ -2821,7 +2991,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     # ── PNG export options (ORBX.1 cont.) ───────────────────────────────
     app._iso_png_name = widgets.Text(
         value="",
-        placeholder="(defaults to the orbital label, e.g. HOMO)",
+        placeholder="default: orbital label",
         description="PNG name:",
         style={"description_width": "70px"},
         layout=layout_fn(width="330px"),
@@ -2886,10 +3056,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         [
             widgets.HTML(
                 f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:12px;margin:0 0 8px">'
-                "Visualise a molecular orbital, the electron or spin density, or an "
-                "electrostatic-potential (ESP) map as a 3D isosurface (Linux / WSL "
-                "only — requires PySCF). Run or load a Single Point or Geometry "
-                "Optimization first, then click <b>Generate</b>.</p>"
+                "Choose a surface and click <b>Generate</b>. Needs PySCF "
+                "(Linux, macOS or WSL).</p>"
             ),
             app._orb_iso_controls,
             widgets.HBox(
@@ -2902,27 +3070,42 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 ],
                 layout=layout_fn(align_items="center", gap="6px"),
             ),
-            app._orb_iso_output,
+            # Surface controls beside the viewer; PNG options folded away
+            # (M-UIPOLISH L1).
+            side_by_side(
+                [app._orb_iso_output],
+                [
+                    app._iso_resolution_dd,
+                    widgets.HBox(
+                        [app._iso_isovalue_slider, app._iso_enclosed_label],
+                        layout=layout_fn(align_items="center", flex_wrap="wrap"),
+                    ),
+                    app._iso_esp_range_slider,
+                    app._iso_esp_legend,
+                    app._iso_opacity_slider,
+                    app._iso_wireframe_cb,
+                    app._iso_colors_dd,
+                    _collapsed(
+                        "PNG export options",
+                        [
+                            widgets.HTML(
+                                f'<p style="color:{_theme.css.TEXT_SECONDARY};'
+                                'font-size:12px;margin:0 0 4px">Save PNG (under the '
+                                "viewer) captures the view as you have rotated it.</p>"
+                            ),
+                            app._iso_png_name,
+                            app._iso_png_dpi,
+                            app._iso_png_transparent,
+                        ],
+                        layout_fn=layout_fn,
+                    ),
+                ],
+                layout_fn=layout_fn,
+                left_basis="760px",
+                right_basis="320px",
+            ),
             app._orb_gallery_box,
             app._orb_gallery_output,
-            app._iso_resolution_dd,
-            widgets.HBox(
-                [app._iso_isovalue_slider, app._iso_enclosed_label],
-                layout=layout_fn(align_items="center"),
-            ),
-            app._iso_esp_range_slider,
-            app._iso_esp_legend,
-            app._iso_opacity_slider,
-            app._iso_wireframe_cb,
-            app._iso_colors_dd,
-            widgets.HTML(
-                f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:12px;margin:8px 0 2px">'
-                "<b>PNG export</b> — the Save PNG button under the viewer "
-                "captures the view exactly as you have rotated it.</p>"
-            ),
-            app._iso_png_name,
-            app._iso_png_dpi,
-            app._iso_png_transparent,
             app._orb_png_inbox,
             app._iso_js_bridge,
         ],
@@ -3013,7 +3196,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._uv_mode_toggle = widgets.ToggleButtons(
         options=["Stick", "Broadened"],
         value="Stick",
-        style={"button_width": "80px"},
+        style={"button_width": "96px"},  # "Broadened" was cut off at 80px
         layout=layout_fn(margin="0 8px 0 0"),
     )
     app._uv_fwhm_slider = widgets.FloatSlider(
@@ -3050,9 +3233,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._uv_range_hint = widgets.HTML(
         value=(
-            f'<p style="font-size:11px;color:{_theme.css.TEXT_SECONDARY};margin:0 0 6px">'
-            "Tip: drag either end of the horizontal axis in the plot to adjust "
-            "the view, or set λ min/max above for exact bounds.</p>"
+            f'<p style="font-size:12px;color:{_theme.css.TEXT_SECONDARY};margin:0 0 6px">'
+            "Drag an end of the λ axis to zoom, or type exact bounds above.</p>"
         )
     )
     # min_height matches the Plotly UV-Vis figure height (320px) so the
@@ -3130,7 +3312,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._mulliken_help_btn = widgets.Button(
         description="?",
         button_style="",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="What are Mulliken charges? — opens Help",
     )
     app._mulliken_color_cb = widgets.Checkbox(
@@ -3154,9 +3336,31 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         step=0.05,
         readout_format=".0%",
         description="Color vividness:",
-        style={"description_width": "96px"},
-        layout=layout_fn(width="260px", margin="0 0 6px 0"),
+        style={"description_width": "112px"},
+        layout=layout_fn(width="300px", margin="0 0 6px 0"),
         continuous_update=False,
+    )
+    # Audit D4: both conventions are in use; say which one is drawn and let
+    # the user switch (remembered in settings).
+    try:
+        _arrow_pref = str(app._user_settings.viz.dipole_arrow)
+    except Exception:  # noqa: BLE001 — settings must never gate widget creation
+        _arrow_pref = "physics"
+    app._mulliken_dipole_dir_dd = widgets.Dropdown(
+        options=[
+            ("− → + (IUPAC / physics)", "physics"),
+            ("+ → − (chemistry)", "chemistry"),
+        ],
+        value=_arrow_pref if _arrow_pref in ("physics", "chemistry") else "physics",
+        description="Arrow:",
+        style={"description_width": "45px"},
+        layout=layout_fn(width="240px", margin="0 0 0 12px"),
+    )
+    from quantui.populations_overlay import dipole_caption_html
+
+    app._mulliken_dipole_caption = widgets.HTML(
+        value=dipole_caption_html(app._mulliken_dipole_dir_dd.value),
+        layout=layout_fn(width="100%", margin="0 0 4px 0"),
     )
     # Dedicated structure viewer for charge colouring — decoupled from the
     # top Analysis-tab viewer used for click-to-measure.
@@ -3184,20 +3388,33 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(align_items="center", gap="8px", margin="0 0 6px 0"),
     )
     mulliken_overlay_row = widgets.HBox(
-        [app._mulliken_color_cb, app._mulliken_dipole_cb],
+        [
+            app._mulliken_color_cb,
+            app._mulliken_dipole_cb,
+            app._mulliken_dipole_dir_dd,
+        ],
         layout=layout_fn(align_items="center", flex_wrap="wrap", margin="0 0 4px 0"),
     )
+    # Viewer beside its controls and the charge table; the bar chart below
+    # is capped so 3 atoms no longer get 1300 px (M-UIPOLISH L1, L6).
+    app._mulliken_fig.layout.max_width = "720px"
     app._mulliken_accordion = widgets.Accordion(
         children=[
             widgets.VBox(
                 [
                     mulliken_header,
-                    app._mulliken_mol_output,
-                    mulliken_overlay_row,
-                    app._mulliken_vividness_slider,
-                    app._mulliken_overlay_note,
-                    app._mulliken_summary,
-                    app._mulliken_table,
+                    side_by_side(
+                        [app._mulliken_mol_output],
+                        [
+                            mulliken_overlay_row,
+                            app._mulliken_dipole_caption,
+                            app._mulliken_vividness_slider,
+                            app._mulliken_overlay_note,
+                            app._mulliken_summary,
+                            app._mulliken_table,
+                        ],
+                        layout_fn=layout_fn,
+                    ),
                     app._mulliken_fig,
                     app._populations_js_bridge,
                 ],
@@ -3271,15 +3488,29 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._mol_results_png_inbox.add_class(_MOL_RESULTS_PNG_INBOX_CLASS)
     app._mol_results_png_status = widgets.HTML(value="")
 
+    # Result card beside the structure (M-UIPOLISH L1); stacks when narrow.
     app.results_tab_panel = widgets.VBox(
         [
-            widgets.HTML('<h3 style="margin:14px 0 6px">Results</h3>'),
-            app.result_output,
-            app._viz_label,
-            app.result_viz_output,
-            app._mol_results_png_status,
-            app._mol_results_png_inbox,
-            app._result_dir_label,
+            widgets.HBox(
+                [
+                    widgets.VBox(
+                        [app.result_output, app._result_dir_label],
+                        layout=layout_fn(flex="1 1 460px", min_width="0"),
+                    ),
+                    widgets.VBox(
+                        [
+                            app._viz_label,
+                            app.result_viz_output,
+                            app._mol_results_png_status,
+                            app._mol_results_png_inbox,
+                        ],
+                        layout=layout_fn(flex="0 1 620px", min_width="0"),
+                    ),
+                ],
+                layout=layout_fn(
+                    flex_flow="row wrap", align_items="flex-start", gap="0 24px"
+                ),
+            ),
             app._to_analysis_btn,
         ],
         layout=layout_fn(padding="8px 0"),
@@ -3324,7 +3555,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         value=(
             f'<div style="font-size:13px;font-weight:600;color:{_theme.css.TEXT_BODY};'
             f'margin:8px 0 2px">Measurement</div>'
-            f'<div style="font-size:11px;color:{_theme.css.TEXT_SECONDARY};margin:0 0 2px">'
+            f'<div style="font-size:12px;color:{_theme.css.TEXT_SECONDARY};margin:0 0 2px">'
             "Click atoms in the viewer — bond, angle, then dihedral</div>"
         )
     )
@@ -3337,7 +3568,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._measure_help_btn = widgets.Button(
         description="?",
         button_style="",
-        layout=layout_fn(width="28px", height="28px"),
+        layout=layout_fn(width="28px", height="28px", padding="0"),
         tooltip="Click-to-measure bond length / angle / dihedral — opens Help tab",
     )
     app._measure_controls = widgets.VBox(
@@ -3392,17 +3623,19 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         # backends than the toggle suggests).
         app.viz_backend_label_ana = widgets.HTML(
             value=(
-                f'<span style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};font-style:italic">'
+                f'<span style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};font-style:italic">'
                 "Rendering with: —</span>"
             ),
-            layout=layout_fn(margin="0 0 8px 0"),
+            # Hidden: it repeated the backend toggle right above it (the
+            # widget is still kept up to date for diagnostics).
+            layout=layout_fn(margin="0 0 8px 0", display="none"),
         )
         ana_backend_row = widgets.VBox(
             [
                 widgets.HBox(
                     [
                         widgets.HTML(
-                            f'<span style="font-size:11px;color:{_theme.css.TEXT_SUBTLE};'
+                            f'<span style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};'
                             'margin-right:6px;align-self:center">Backend:</span>'
                         ),
                         app.viz_backend_toggle_ana,
@@ -3438,16 +3671,23 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._build_ana_switcher()
 
+    # Viewer beside Measurement (M-UIPOLISH L1).
+    ana_right: list[Any] = [app._measure_panel]
+    if ana_backend_row is not None:
+        ana_right.append(ana_backend_row)
     ana_children = [
         app._analysis_scroll_bridge,
         app._analysis_context_lbl,
-        app._analysis_mol_output,
-        app._mol_analysis_png_status,
-        app._mol_analysis_png_inbox,
-        app._measure_panel,
+        side_by_side(
+            [
+                app._analysis_mol_output,
+                app._mol_analysis_png_status,
+                app._mol_analysis_png_inbox,
+            ],
+            ana_right,
+            layout_fn=layout_fn,
+        ),
     ]
-    if ana_backend_row is not None:
-        ana_children.append(ana_backend_row)
     ana_children.extend(
         [
             app._analysis_empty_html,
@@ -3479,12 +3719,10 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
 
 def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) -> None:
     """Build compare tab widgets and export accordion."""
-    app.compare_select = widgets.SelectMultiple(
-        options=[("(no saved results)", "")],
-        rows=8,
-        description="",
-        layout=layout_fn(width="100%"),
-    )
+    from quantui.checklist_widget import CheckList
+
+    # Checkboxes, not a Ctrl/Shift-click list box (M-UIPOLISH L12).
+    app.compare_select = CheckList(options=[("(no saved results)", "")])
     app.compare_refresh_btn = widgets.Button(
         description="Refresh",
         button_style="",
@@ -3500,7 +3738,7 @@ def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) ->
     )
     app.compare_clear_btn = widgets.Button(
         description="Clear",
-        button_style="warning",
+        button_style="",  # neutral: clearing a selection is not a warning (D16)
         icon="times",
         layout=layout_fn(width="90px"),
     )
@@ -3509,10 +3747,8 @@ def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) ->
     app.compare_panel = widgets.VBox(
         [
             widgets.HTML(
-                '<h3 style="margin:14px 0 6px">Compare Calculations</h3>'
-                f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:0 0 8px">'
-                "Select two or more saved calculations to compare side-by-side. "
-                "Hold Ctrl (or ⌘) to select multiple entries.</p>"
+                f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:4px 0 8px">'
+                "Tick two or more saved calculations to compare them side by side.</p>"
             ),
             widgets.HBox([app.compare_refresh_btn]),
             app.compare_select,
@@ -3857,8 +4093,7 @@ def build_files_tab(app: Any, *, layout_fn: Any) -> None:
         [
             widgets.HTML(
                 f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:4px 0 8px">'
-                "Read-only file browser for result artifacts and logs. "
-                "Browsing is limited to approved roots.</p>"
+                "Browse saved results and logs (read-only).</p>"
             ),
             app._files_root_dd,
             app._files_path_html,
@@ -3909,9 +4144,11 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
 
     app._exit_btn = widgets.Button(
         description="Exit",
-        button_style="danger",
+        # Neutral until armed; the confirm step turns it red (M-UIPOLISH V1).
+        button_style="",
+        icon="power-off",
         tooltip="Shut down the QuantUI server and end this session",
-        layout=layout_fn(width="64px", margin="0 0 0 8px"),
+        layout=layout_fn(width="80px", margin="0 0 0 8px"),
     )
     # Two-stage exit confirm: the first Exit click reveals this warning + the
     # Cancel button and re-labels Exit to "Confirm shutdown"; only a second
@@ -3927,12 +4164,29 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._exit_output = widgets.Output(layout=layout_fn(height="0px", overflow="hidden"))
 
+    # Audit D14: the panel could only be closed by finding the Help button
+    # again; give it its own close control.
+    app._help_close_btn = widgets.Button(
+        description="Close",
+        icon="times",
+        tooltip="Close the help panel (Esc)",
+        layout=layout_fn(width="80px", margin="4px 12px 0 auto"),
+    )
+    # Target for the page-level Esc handler (app._HELP_ESC_JS).
+    app._help_close_btn.add_class("quantui-help-close")
     app.help_tab_panel = widgets.VBox(
         [
-            widgets.HTML(
-                f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;margin:4px 0 12px">'
-                "Browse help topics below. Click <b>?</b> next to the Method or Basis Set "
-                "dropdown in the Calculate tab to jump directly to a relevant topic.</p>"
+            widgets.HBox(
+                [
+                    widgets.HTML(
+                        f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;'
+                        'margin:4px 0 12px">'
+                        "Pick a topic. The <b>?</b> buttons in the Calculate tab "
+                        "open the matching one.</p>"
+                    ),
+                    app._help_close_btn,
+                ],
+                layout=layout_fn(width="100%", align_items="flex-start"),
             ),
             app.help_topic_dd,
             app.help_content_html,
@@ -3946,13 +4200,18 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
             margin="0 0 8px",
         ),
     )
+    # A side drawer over the app instead of a block that pushed every tab
+    # down (M-UIPOLISH L14); see .quantui-drawer in app._APP_CSS.
+    app.help_tab_panel.add_class("quantui-drawer")
 
 
 def build_issue_widgets(app: Any, *, layout_fn: Any) -> None:
     """Build issue-report widgets shown from the top toolbar."""
     app._issue_btn = widgets.Button(
         description="Report Issue",
-        button_style="warning",
+        # Neutral, not "warning" yellow: it was the most eye-catching control
+        # on every screen (M-UIPOLISH V1).
+        button_style="",
         icon="flag",
         tooltip="Report a bug or unexpected behaviour observed in this session",
         layout=layout_fn(width="140px", margin="0 0 0 8px"),
@@ -3972,17 +4231,22 @@ def build_issue_widgets(app: Any, *, layout_fn: Any) -> None:
     app._issue_cancel_btn = widgets.Button(
         description="Cancel",
         button_style="",
+        tooltip="Close without saving (Esc)",
         layout=layout_fn(width="80px"),
     )
+    app._issue_cancel_btn.add_class("quantui-issue-cancel")  # Esc target
     app._issue_status_html = widgets.HTML()
     app._issue_overlay = widgets.VBox(
         [
+            # Theme tokens, not fixed light-theme browns: on dark palettes the
+            # panel background follows the theme and #92400e/#78350f text was
+            # nearly unreadable (audit D14).
             widgets.HTML(
-                '<p style="font-size:13px;font-weight:600;margin:0 0 6px;color:#92400e">'
-                "&#9872; Report Issue</p>"
-                '<p style="font-size:12px;color:#78350f;margin:0 0 8px">'
-                "Your report (and a snapshot of the current session state) will be "
-                "saved to <code>issues.db</code> and the session event log.</p>"
+                '<p style="font-size:13px;font-weight:600;margin:0 0 6px;'
+                f'color:{_theme.css.ACCENT_WARNING}">&#9872; Report Issue</p>'
+                f'<p style="font-size:12px;color:{_theme.css.TEXT_BODY};margin:0 0 8px">'
+                "Saved on this computer with a snapshot of the session, for the "
+                "developers.</p>"
             ),
             app._issue_textarea,
             widgets.HBox(
@@ -3997,6 +4261,6 @@ def build_issue_widgets(app: Any, *, layout_fn: Any) -> None:
             border_radius="6px",
             padding="12px 14px",
             margin="0 0 6px",
-            background_color="#fffbeb",
         ),
     )
+    app._issue_overlay.add_class("quantui-drawer")

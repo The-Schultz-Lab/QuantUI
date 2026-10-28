@@ -153,6 +153,13 @@ BASIS_FACTORS = {
     "def2-SVP": 3.0,
     "def2-TZVP": 4.5,
     "LANL2DZ": 1.5,
+    # Diffuse sets: more functions than the parent set (on C, aug-cc-pVDZ has
+    # 23 vs 14, def2-SVPD 20 vs 14) and less integral screening, so each sits
+    # above its parent. def2-SVPD is placed against def2-SVP ~ cc-pVDZ (3.0).
+    "6-31+G*": 2.5,
+    "6-31++G**": 3.0,
+    "aug-cc-pVDZ": 4.0,
+    "def2-SVPD": 3.5,
 }
 DEFAULT_BASIS_FACTOR = 2.0
 

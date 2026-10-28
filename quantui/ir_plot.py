@@ -29,12 +29,13 @@ is what students and most external QM software display by default.
 
 from __future__ import annotations
 
-from typing import List, Optional, cast
+from typing import List, Optional, Sequence, cast
 
 import numpy as np
 import plotly.graph_objects as go
 
-# x-axis range is low → high wavenumber (user-facing convention in QuantUI).
+# x-axis range is low → high wavenumber; ``plot_ir_spectrum(descending=True)``
+# flips it to the FTIR convention (high → low), which the app uses by default.
 # AUDIT additional-concerns — this used to be the FIXED plot range/grid
 # regardless of the actual data: a real water/STO-3G calculation has O-H
 # stretches at 4486.7/4788.3 cm⁻¹, which used to be clipped off the right
@@ -71,6 +72,21 @@ def _grid_for_range(xrange: List[float]) -> np.ndarray:
     return cast(np.ndarray, np.arange(xrange[0], xrange[1] + 1.0, 1.0))
 
 
+def _peak_labels(
+    frequencies: Sequence[float], labels: Optional[Sequence[Optional[str]]]
+) -> Optional[List[str]]:
+    """Hover suffix per plotted (positive-frequency) peak, or ``None``."""
+    if labels is None or len(labels) != len(frequencies) or not any(labels):
+        return None
+    from quantui.symmetry import html_irrep
+
+    return [
+        f"<br>Symmetry: {html_irrep(lbl)}" if lbl else ""
+        for f, lbl in zip(frequencies, labels)
+        if f > 0
+    ]
+
+
 def plot_ir_spectrum(
     frequencies: List[float],
     intensities: List[float],
@@ -78,6 +94,8 @@ def plot_ir_spectrum(
     fwhm: float = 20.0,
     mode: str = "stick",
     yaxis_title: str = "IR Intensity (km/mol)",
+    descending: bool = False,
+    labels: Optional[Sequence[Optional[str]]] = None,
 ) -> go.Figure:
     """Return a Plotly figure for the IR absorption spectrum.
 
@@ -90,19 +108,25 @@ def plot_ir_spectrum(
         mode: Display mode.
             ``"stick"`` — vertical bars at each active frequency.
             ``"broadened"`` — Lorentzian convolution of all peaks.
+        descending: Draw the wavenumber axis high → low (4000 → 400 cm⁻¹),
+            the FTIR convention. Default ``False`` (low → high).
+        labels: Optional symmetry label per mode, aligned with
+            *frequencies* (``None`` entries allowed); shown in the stick
+            hover (SPC2.4).
 
     Returns:
         :class:`plotly.graph_objects.Figure` ready for display or wrapping
         in a :class:`~plotly.graph_objects.FigureWidget`.
     """
     real_pairs = [(f, i) for f, i in zip(frequencies, intensities) if f > 0]
+    sym = _peak_labels(frequencies, labels)
     freqs_real_for_range = tuple(f for f, _ in real_pairs)
     xrange = _default_xrange(freqs_real_for_range)
 
     _base_layout = dict(
         xaxis=dict(
             title="Wavenumber (cm⁻¹)",
-            range=xrange,
+            range=xrange[::-1] if descending else xrange,
             showgrid=True,
             gridcolor="#e5e7eb",
         ),
@@ -172,9 +196,12 @@ def plot_ir_spectrum(
                 marker=dict(color="#1d4ed8", size=6),
                 name="IR (peaks)",
                 showlegend=False,
+                customdata=sym,
                 hovertemplate=(
                     "Wavenumber: %{x:.1f} cm⁻¹"
-                    "<br>Intensity: %{y:.2f} km/mol<extra></extra>"
+                    "<br>Intensity: %{y:.2f} km/mol"
+                    + ("%{customdata}" if sym else "")
+                    + "<extra></extra>"
                 ),
             )
         )

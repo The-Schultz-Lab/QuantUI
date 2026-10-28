@@ -123,6 +123,40 @@ class TestInjectPopulationsJS:
         assert "addArrow" in out
         assert "setStyle" in out
 
+    def test_initial_payload_is_embedded(self):
+        # UIA.3: the first render must already carry the overlay; a bridge
+        # push that lands before 3Dmol has built the viewer used to be lost.
+        html = '<div id="3dmolviewer_abc"></div>'
+        payload = {"colors": ["#dc2626"], "arrow": None}
+        out = inject_populations_js(html, payload)
+        assert 'var initial = {"colors": ["#dc2626"], "arrow": null};' in out
+        assert "var initial = null;" in inject_populations_js(html)
+
+    def test_update_waits_for_the_viewer_instead_of_dropping(self):
+        out = inject_populations_js('<div id="3dmolviewer_abc"></div>')
+        assert "pending=payload" in out
+        assert "setTimeout(retry" in out
+
+    def test_mulliken_viewer_html_carries_checkbox_state(self, app):
+        from quantui.populations_overlay import render_mulliken_viewer_html
+        from quantui.visualization_py3dmol import (
+            PY3DMOL_AVAILABLE,
+            render_molecule_html,
+        )
+
+        if not PY3DMOL_AVAILABLE:
+            pytest.skip("py3dmol not installed")
+        app._last_mulliken_charges = [-0.79, 0.40, 0.40]
+        app._last_mulliken_dipole_vector = [0.0, 2.6, 0.0]
+        app._mulliken_color_cb.value = True
+        app._mulliken_dipole_cb.value = True
+        html = render_mulliken_viewer_html(
+            app, _water(), render_html_fn=render_molecule_html
+        )
+        initial = html[html.index("var initial = ") :]
+        assert '"colors": ["#' in initial
+        assert '"arrow": {"start"' in initial
+
     def test_finalize_injects_measure_only(self, app):
         from quantui.visualization_py3dmol import (
             PY3DMOL_AVAILABLE,

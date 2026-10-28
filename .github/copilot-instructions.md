@@ -450,8 +450,9 @@ Unavailable panels show a "Not available — run a X calculation first" placehol
 **Supported methods:** RHF, UHF, B3LYP, PBE, PBE0, M06-2X, wB97X-D, CAM-B3LYP,
 M06-L, HSE06, PBE-D3, MP2 (defined in `config.SUPPORTED_METHODS`).
 
-**Supported basis sets:** STO-3G, 3-21G, 6-31G, 6-31G\*, 6-31G\*\*, cc-pVDZ,
-cc-pVTZ, def2-SVP, def2-TZVP (defined in `config.SUPPORTED_BASIS_SETS`).
+**Supported basis sets:** STO-3G, 3-21G, 6-31G, 6-31G\*, 6-31+G\*, 6-31G\*\*,
+6-31++G\*\*, cc-pVDZ, aug-cc-pVDZ, cc-pVTZ, def2-SVP, def2-SVPD, def2-TZVP, LANL2DZ
+(defined in `config.SUPPORTED_BASIS_SETS`; diffuse subset in `config.DIFFUSE_BASIS_SETS`).
 
 ---
 

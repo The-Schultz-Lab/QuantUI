@@ -30,12 +30,9 @@ LAUNCHER_SCRIPT_NAME = "quantui-app"
 # Minimal nbformat v4 notebook — mirrors notebooks/molecule_computations.ipynb
 # (display cell only; no repo-root sys.path hack needed for installed packages).
 _APP_NOTEBOOK: dict = {
+    # No "# QuantUI" heading cell: the app's own banner already shows the
+    # name, so the heading only duplicated it (rendered-UI audit D8).
     "cells": [
-        {
-            "cell_type": "markdown",
-            "metadata": {},
-            "source": ["# QuantUI\n"],
-        },
         {
             "cell_type": "code",
             "execution_count": None,
@@ -75,12 +72,15 @@ def quantui_home() -> Path:
 def _viewer_notebook() -> dict:
     """The app notebook with the display cell switched to viewer mode."""
     nb: dict = json.loads(json.dumps(_APP_NOTEBOOK))
-    nb["cells"][0]["source"] = ["# QuantUI Viewer\n"]
-    nb["cells"][1]["source"] = [
+    nb["cells"][0]["source"] = [
         "from quantui.app import QuantUIApp\n",
         "\n",
         "QuantUIApp(viewer=True).display()\n",
     ]
+    # Viewer mode keeps a heading: nothing else on the page names the mode.
+    nb["cells"].insert(
+        0, {"cell_type": "markdown", "metadata": {}, "source": ["# QuantUI Viewer\n"]}
+    )
     return nb
 
 
