@@ -776,13 +776,14 @@ def _mode_symmetry_inputs(ctx: Any) -> dict:
     ir = ctx.spectra_data.get("ir", {})
     mol = ctx.spectra_data.get("molecule", {})
     atoms, coords = mol.get("atoms"), mol.get("coords")
+    # Saved at calc time, so labels show without PySCF (viewer VA.9).
+    saved = {"mode_irreps": ir["mode_irreps"]} if ir.get("mode_irreps") else {}
     if not ir.get("displacements") or not atoms or not coords:
-        return {"mode_irreps": ir.get("mode_irreps")}
+        return saved
     return {
         "displacements": ir["displacements"],
         "pyscf_mol_atom": list(zip(atoms, coords)),
-        # Saved at calc time, so labels show without PySCF (viewer VA.9).
-        "mode_irreps": ir.get("mode_irreps"),
+        **saved,
     }
 
 
