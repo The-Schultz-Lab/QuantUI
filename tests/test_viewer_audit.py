@@ -162,9 +162,7 @@ class TestThermoWithoutPySCF:
 
         app = self._app()
         saved = {"G_hartree": -74.96, "H_hartree": -74.94, "S_jmol": 188.7}
-        show_thermo_box(
-            app, _water(), -74.9659, [2170.0], saved_thermo=saved
-        )
+        show_thermo_box(app, _water(), -74.9659, [2170.0], saved_thermo=saved)
         html = app._thermo_html.value
         assert "Gibbs energy G" in html and "Saved with the result" in html
         assert "failed" not in html

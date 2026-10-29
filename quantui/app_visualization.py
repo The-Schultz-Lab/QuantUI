@@ -1514,7 +1514,6 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
 
     plotly_rendered = False
     try:
-        import plotly.io as _pio
 
         from quantui.orbital_visualization import plot_orbital_diagram_plotly
 
@@ -1527,13 +1526,7 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
         _sync_orb_range_inputs(app, fig)
         app._apply_plotly_theme(fig)
         app._last_orb_fig = fig
-        html_str = _pio.to_html(
-            fig,
-            include_plotlyjs="require",
-            full_html=False,
-            config={"responsive": True},
-        )
-        app._set_html_output(app._orb_diagram_html, html_str)
+        app._set_html_output(app._orb_diagram_html, _orb_screen_html(fig))
         plotly_rendered = True
     except Exception:
         pass
@@ -1771,13 +1764,26 @@ def _sync_orb_range_inputs(app: Any, fig: Any) -> None:
         app._orb_range_syncing = False
 
 
+def _orb_screen_html(fig: Any) -> str:
+    """Energy diagram HTML for the panel (fixed width; the panel scrolls
+    sideways on a narrow window rather than clipping the levels)."""
+    import plotly.io as _pio
+
+    html_str = _pio.to_html(
+        fig,
+        include_plotlyjs="require",
+        full_html=False,
+        config={"responsive": True},
+    )
+    return f'<div style="overflow-x:auto;max-width:100%">{html_str}</div>'
+
+
 def on_orb_show_core_changed(app: Any, _change: Any = None) -> None:
     """Show/hide core orbitals and re-fit the Y range to what is shown."""
     info = getattr(app, "_last_orb_info", None)
     if info is None:
         return
     try:
-        import plotly.io as _pio
 
         from quantui.orbital_visualization import plot_orbital_diagram_plotly
 
@@ -1790,15 +1796,7 @@ def on_orb_show_core_changed(app: Any, _change: Any = None) -> None:
         _sync_orb_range_inputs(app, fig)
         app._apply_plotly_theme(fig)
         app._last_orb_fig = fig
-        app._set_html_output(
-            app._orb_diagram_html,
-            _pio.to_html(
-                fig,
-                include_plotlyjs="require",
-                full_html=False,
-                config={"responsive": True},
-            ),
-        )
+        app._set_html_output(app._orb_diagram_html, _orb_screen_html(fig))
     except Exception:
         app._last_orb_fig = None
 
@@ -1813,7 +1811,6 @@ def on_orb_range_changed(app: Any, _change: Any = None) -> None:
     if ymin >= ymax:
         return
     try:
-        import plotly.io as _pio
 
         from quantui.orbital_visualization import plot_orbital_diagram_plotly
 
@@ -1826,15 +1823,7 @@ def on_orb_range_changed(app: Any, _change: Any = None) -> None:
         )
         app._apply_plotly_theme(fig)
         app._last_orb_fig = fig
-        app._set_html_output(
-            app._orb_diagram_html,
-            _pio.to_html(
-                fig,
-                include_plotlyjs="require",
-                full_html=False,
-                config={"responsive": True},
-            ),
-        )
+        app._set_html_output(app._orb_diagram_html, _orb_screen_html(fig))
     except Exception:
         app._last_orb_fig = None
         pass

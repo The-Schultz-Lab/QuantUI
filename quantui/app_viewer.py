@@ -152,8 +152,9 @@ def _browser_issue_panel(app: Any, *, layout_fn: Any) -> None:
             f'<p style="font-size:12px;color:{_theme.css.TEXT_BODY};margin:0 0 8px">'
             "The browser Viewer can't keep a report: everything in it is gone "
             "when the tab closes. Tell your instructor, or describe the problem "
-            f'on <a href="{ISSUES_URL}" target="_blank" rel="noopener">QuantUI\'s '
-            "GitHub issues page</a>.</p>"
+            f'on <a href="{ISSUES_URL}" target="_blank" rel="noopener" '
+            f'style="color:{_theme.css.ACCENT_INFO};text-decoration:underline">'
+            "QuantUI's GitHub issues page</a>.</p>"
         ),
         widgets.HBox([app._issue_cancel_btn], layout=layout_fn(margin="6px 0 0")),
     )
