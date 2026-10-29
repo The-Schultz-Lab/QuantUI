@@ -692,6 +692,11 @@ def freq_mode_irreps(freq_result: Any, molecule: Any = None) -> Any:
     ``pyscf_mol_atom`` on a live result, else *molecule* (History).
     """
     freqs = getattr(freq_result, "frequencies_cm1", None)
+    from quantui.symmetry import mode_irreps_from_saved
+
+    saved = mode_irreps_from_saved(getattr(freq_result, "mode_irreps", None))
+    if saved is not None and freqs is not None and len(saved.labels) == len(freqs):
+        return saved
     disps = getattr(freq_result, "displacements", None)
     if freqs is None or disps is None or len(freqs) == 0 or len(disps) == 0:
         return None
@@ -1565,6 +1570,7 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
         app._last_orb_mo_coeff is not None
         and app._last_orb_mol_atom is not None
         and app._last_orb_mol_basis is not None
+        and _pyscf_available()  # cubegen makes every surface
     ):
         app._orb_toggle.value = "HOMO"
         app._orb_iso_controls.layout.display = ""
@@ -4092,14 +4098,18 @@ def show_thermo_box(
     frequencies_cm1: Any,
     *,
     max_force_ev_per_ang: float | None = None,
+    saved_thermo: Any = None,
 ) -> None:
     """Remember what thermochemistry needs and show it at the current T/P.
 
     *max_force_ev_per_ang* (D1) puts the not-a-stationary-point warning above
-    the table, as on the result card.
+    the table, as on the result card. *saved_thermo* (the result's own
+    values, a dict from result.json or a live ``ThermoData``) is what is shown
+    when PySCF is not installed (the Viewer) and nothing can be recomputed.
     """
     box = getattr(app, "_thermo_box", None)
     app._thermo_max_force = max_force_ev_per_ang
+    app._thermo_saved = _thermo_from_saved(saved_thermo)
     if molecule is None or energy_hartree is None or not frequencies_cm1:
         app._thermo_source = None
         if box is not None:
@@ -4108,7 +4118,73 @@ def show_thermo_box(
     app._thermo_source = (molecule, float(energy_hartree), list(frequencies_cm1))
     if box is not None:
         box.layout.display = ""
+    if not _pyscf_available():
+        # T and P only change anything when they can be recomputed.
+        saved = app._thermo_saved
+        for name, attr in (
+            ("_thermo_T", "temperature_k"),
+            ("_thermo_P", "pressure_atm"),
+        ):
+            widget = getattr(app, name, None)
+            if widget is None:
+                continue
+            value = getattr(saved, attr, None) if saved is not None else None
+            if value is not None:
+                widget.value = float(value)
+            widget.disabled = True
     on_thermo_inputs_changed(app)
+
+
+def _pyscf_available() -> bool:
+    try:
+        from quantui.engines import is_pyscf_available
+
+        return bool(is_pyscf_available())
+    except Exception:  # noqa: BLE001 — treat as unavailable
+        return False
+
+
+def _thermo_from_saved(saved: Any) -> Any:
+    """result.json ``thermo`` dict (or a live ThermoData) → attribute object."""
+    if saved is None:
+        return None
+    if not isinstance(saved, dict):
+        return saved if getattr(saved, "G_hartree", None) is not None else None
+    if saved.get("G_hartree") is None or saved.get("H_hartree") is None:
+        return None
+    from types import SimpleNamespace
+
+    fields = (
+        "zpve_hartree",
+        "E_thermal_hartree",
+        "H_hartree",
+        "S_jmol",
+        "G_hartree",
+        "Cv_jmolk",
+        "Cp_jmolk",
+        "symmetry_number",
+        "temperature_k",
+    )
+    ns = SimpleNamespace(**{f: saved.get(f) for f in fields})
+    ns.pressure_atm = saved.get("pressure_atm") or 1.0
+    if ns.temperature_k is None:
+        ns.temperature_k = 298.15
+    if ns.zpve_hartree is None:
+        ns.zpve_hartree = 0.0
+    return ns
+
+
+def _not_minimum_warning(app: Any) -> str:
+    from quantui.freq_calc import is_stationary
+
+    max_force = getattr(app, "_thermo_max_force", None)
+    if is_stationary(max_force) is not False:
+        return ""
+    return (
+        f'<div style="color:{_theme.css.ACCENT_WARNING};margin:0 0 6px 0">'
+        f"&#9888; Not a minimum (max force {max_force:.3f} eV/Å), so these "
+        "values aren't meaningful. Optimize the geometry first.</div>"
+    )
 
 
 def on_thermo_inputs_changed(app: Any, change: Any = None) -> None:
@@ -4118,6 +4194,25 @@ def on_thermo_inputs_changed(app: Any, change: Any = None) -> None:
     if out is None or src is None:
         return
     molecule, energy, freqs = src
+    warning = _not_minimum_warning(app)
+    if not _pyscf_available():
+        saved = getattr(app, "_thermo_saved", None)
+        if saved is None:
+            out.value = warning + (
+                f'<div style="color:{_theme.css.TEXT_MUTED};font-size:12px">'
+                "Thermochemistry is computed with PySCF, which this copy of "
+                "QuantUI doesn't include, and this result has no saved values."
+                "</div>"
+            )
+            return
+        out.value = (
+            warning
+            + thermo_table_html(saved, energy)
+            + f'<div style="color:{_theme.css.TEXT_MUTED};font-size:12px">'
+            "Saved with the result. Other temperatures or pressures need "
+            "PySCF (the full QuantUI).</div>"
+        )
+        return
     try:
         temp = float(app._thermo_T.value)
         pres = float(app._thermo_P.value)
@@ -4134,18 +4229,11 @@ def on_thermo_inputs_changed(app: Any, change: Any = None) -> None:
             pressure_atm=pres,
         )
     except Exception as exc:  # noqa: BLE001 — show, never raise from an input
-        out.value = f'<span style="color:#b91c1c">Thermochemistry failed: {exc}</span>'
-        return
-    from quantui.freq_calc import is_stationary
-
-    warning = ""
-    if is_stationary(getattr(app, "_thermo_max_force", None)) is False:
-        warning = (
-            f'<div style="color:{_theme.css.ACCENT_WARNING};margin:0 0 6px 0">'
-            "&#9888; Not a minimum (max force "
-            f"{app._thermo_max_force:.3f} eV/Å), so these values aren't "
-            "meaningful. Optimize the geometry first.</div>"
+        out.value = warning + (
+            f'<span style="color:{_theme.css.ACCENT_ERROR}">'
+            f"Thermochemistry failed: {html.escape(str(exc))}</span>"
         )
+        return
     out.value = warning + thermo_table_html(td, energy)
 
 

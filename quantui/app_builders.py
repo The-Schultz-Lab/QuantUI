@@ -539,24 +539,27 @@ def build_history_section(
     load_last_calibration_label_fn: Any,
 ) -> None:
     """Build the History tab panel including calibration and perf widgets."""
+    # The Load row wraps on narrow windows instead of squeezing the buttons
+    # to nothing (viewer audit VA.8): the dropdown shrinks to a floor and
+    # the buttons keep their size.
     app.past_dd = widgets.Dropdown(
         description="Load:",
         options=[("(no saved results)", "")],
         style={"description_width": "50px"},
-        layout=layout_fn(width="500px"),
+        layout=layout_fn(width="500px", flex="0 1 500px", min_width="240px"),
     )
     app.past_refresh_btn = widgets.Button(
         description="Refresh",
         button_style="",
         icon="refresh",
-        layout=layout_fn(width="100px"),
+        layout=layout_fn(width="100px", flex="0 0 auto"),
         tooltip="Rescan the results directory",
     )
     app.copy_path_btn = widgets.Button(
         description="Copy path",
         button_style="",
         icon="clipboard",
-        layout=layout_fn(width="120px"),
+        layout=layout_fn(width="120px", flex="0 0 auto"),
         tooltip="Copy the results directory path to clipboard",
     )
     app.results_path_lbl = widgets.HTML()
@@ -565,7 +568,7 @@ def build_history_section(
         description="View log",
         button_style="",
         icon="file-text-o",
-        layout=layout_fn(width="110px"),
+        layout=layout_fn(width="110px", flex="0 0 auto"),
         tooltip="Open the full PySCF output log in the Output tab",
     )
 
@@ -898,7 +901,7 @@ def build_history_section(
                     app.copy_path_btn,
                     app.view_log_btn,
                 ],
-                layout=layout_fn(align_items="center", gap="8px"),
+                layout=layout_fn(align_items="center", gap="8px", flex_wrap="wrap"),
             ),
             app.results_path_lbl,
             app.past_output,
@@ -1949,6 +1952,16 @@ def build_welcome_header(app: Any, *, layout_fn: Any = None) -> None:
             margin="0",
         ),
     )
+
+
+def _isosurfaces_available() -> bool:
+    """True when PySCF (which computes every cube file) is installed."""
+    try:
+        from quantui.engines import is_pyscf_available
+
+        return bool(is_pyscf_available())
+    except Exception:  # noqa: BLE001 — treat as unavailable
+        return False
 
 
 def build_molecule_section(
@@ -3111,6 +3124,19 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         ],
         layout=layout_fn(padding="8px"),
     )
+    if not _isosurfaces_available():
+        # Surfaces are computed by PySCF's cubegen. Without it (the Viewer,
+        # a PyFock-only Windows install) every button here could only fail,
+        # so the panel says so instead (viewer audit VA.2).
+        iso_body.children = (
+            widgets.HTML(
+                f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:12px;margin:0">'
+                "Orbital, density and ESP surfaces and the orbital gallery are "
+                "computed with PySCF, which this copy of QuantUI doesn't "
+                "include. Open the result in the full QuantUI (Linux, macOS "
+                "or WSL) to see them.</p>"
+            ),
+        )
     app._iso_accordion = widgets.Accordion(
         children=[iso_body],
         layout=layout_fn(display="none", margin="8px 0"),
@@ -4174,16 +4200,17 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
     )
     # Target for the page-level Esc handler (app._HELP_ESC_JS).
     app._help_close_btn.add_class("quantui-help-close")
+    app._help_intro_html = widgets.HTML(
+        f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;'
+        'margin:4px 0 12px">'
+        "Pick a topic. The <b>?</b> buttons in the Calculate tab "
+        "open the matching one.</p>"
+    )
     app.help_tab_panel = widgets.VBox(
         [
             widgets.HBox(
                 [
-                    widgets.HTML(
-                        f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:13px;'
-                        'margin:4px 0 12px">'
-                        "Pick a topic. The <b>?</b> buttons in the Calculate tab "
-                        "open the matching one.</p>"
-                    ),
+                    app._help_intro_html,
                     app._help_close_btn,
                 ],
                 layout=layout_fn(width="100%", align_items="flex-start"),

@@ -880,6 +880,46 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
     },
 }
 
+
+# Viewer mode (History + Analysis only, ``QuantUIApp(viewer=True)``): its own
+# Getting Started and the topics about reading results. The full app's
+# Getting Started is about running calculations (viewer audit VA.11).
+VIEWER_HELP_TOPICS: Dict[str, Dict[str, str]] = {
+    "viewer_getting_started": {
+        "title": "Getting Started (Viewer)",
+        "body": (
+            "<p>The Viewer shows calculations that were already run. It cannot "
+            "run new ones.</p>"
+            "<ol>"
+            "<li>Open your results: type the folder's path under <b>Results "
+            "folder</b> and click <b>Open</b> (desktop app), or zip the folder "
+            "and click <b>Upload .zip</b> (browser).</li>"
+            "<li>In <b>History</b>, pick a calculation under <i>Recent</i> or in "
+            "the <b>Load</b> list, or search by name or formula.</li>"
+            "<li>Click <b>&rarr; View Analysis</b> for the structure, energy "
+            "levels, charges, spectra, vibrations and optimization steps.</li>"
+            "</ol>"
+            "<p>Orbital and density surfaces, and thermochemistry at other "
+            "temperatures, are computed with PySCF, so they need the full "
+            "QuantUI.</p>"
+        ),
+    },
+    **{
+        key: HELP_TOPICS[key]
+        for key in (
+            "reading_results",
+            "homo_lumo",
+            "mulliken",
+            "symmetry",
+            "measure",
+            "charge",
+            "multiplicity",
+            "external_tools",
+            "citing_pyscf",
+        )
+    },
+}
+
 # All valid topic keys (for testing / discovery)
 VALID_TOPICS = frozenset(HELP_TOPICS.keys())
 

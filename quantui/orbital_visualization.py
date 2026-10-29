@@ -467,9 +467,12 @@ def plot_orbital_diagram_plotly(
 
     annotations = [
         dict(
-            x=LHW + 0.04,
+            # In the right margin, just past the line end: inside the plot a
+            # y gridline at the same energy ran through the label.
+            x=1.0,
+            xshift=4,
             y=homo_e,
-            xref="x",
+            xref="paper",
             yref="y",
             text=f"<b>HOMO</b>{_sym(n_occ - 1)}",
             showarrow=False,
@@ -478,9 +481,12 @@ def plot_orbital_diagram_plotly(
             yanchor="middle",
         ),
         dict(
-            x=LHW + 0.04,
+            # In the right margin, just past the line end: inside the plot a
+            # y gridline at the same energy ran through the label.
+            x=1.0,
+            xshift=4,
             y=lumo_e,
-            xref="x",
+            xref="paper",
             yref="y",
             text=f"<b>LUMO</b>{_sym(n_occ)}",
             showarrow=False,
@@ -539,7 +545,9 @@ def plot_orbital_diagram_plotly(
         xaxis=dict(
             # Room left of the gap arrow for its label, which is right-anchored
             # at the arrow; at [-0.9, 0.9] it ran over the Y tick labels.
-            range=[-1.2 - 0.3 * (scale - 1.0), 0.9],
+            # Ends just past the level lines; HOMO/LUMO labels sit in the
+            # right margin beyond it.
+            range=[-1.2 - 0.3 * (scale - 1.0), LHW + 0.05],
             showticklabels=False,
             showgrid=False,
             zeroline=False,

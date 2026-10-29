@@ -341,6 +341,18 @@ def _widget_chrome_css() -> str:
         ".jupyter-widgets, .lm-Widget, .widget-tab-contents "
         f"{{ background-color: {surface} !important; "
         "color: var(--q-text-body) !important; }\n"
+        # JupyterLab zebra-stripes tables shown through an Output with its
+        # light-theme row colour (#f5f5f5): near-white rows under light text
+        # on dark palettes (viewer audit VA.3, UV-Vis state table).
+        ".jp-RenderedHTMLCommon tbody tr:nth-child(odd), "
+        ".jp-RenderedHTMLCommon tbody tr:nth-child(even), "
+        ".jp-RenderedHTMLCommon tbody tr:hover "
+        "{ background: transparent !important; "
+        "color: var(--q-text-body) !important; }\n"
+        # py3Dmol viewers have a fixed pixel width; on a narrow window that
+        # spilled past their panel. 3Dmol sizes its canvas from the
+        # container, so capping the container is enough (viewer audit VA.8).
+        'div[id^="3dmolviewer_"] { max-width: 100% !important; }\n'
         ".lm-TabBar, .p-TabBar, .lm-TabBar-content, .p-TabBar-content "
         f"{{ background: {surface} !important; "
         "border-color: var(--q-border) !important; }}\n"

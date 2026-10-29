@@ -92,7 +92,12 @@ load under `voici` 0.10.0 (built against a newer JupyterLab); 0.7.0 does.
 ## Known gaps
 
 - Orbital isosurfaces need PySCF to compute the cube file, so they are not
-  available in either build yet. Fix: have the full app save HOMO/LUMO cubes at
-  calculation time, or evaluate orbitals on a grid with numpy alone.
+  available in either build yet (the panel says so). Fix: have the full app
+  save HOMO/LUMO cubes at calculation time, or evaluate orbitals on a grid
+  with numpy alone.
+- Thermochemistry is shown as saved with the result; recomputing at another
+  T / P needs PySCF. Mode symmetry labels are likewise saved at calc time.
+- The **Upload .zip** button shows a file count, e.g. "(0)": ipywidgets'
+  `FileUpload` draws it, and it has no option to turn it off.
 - Voilà's page template loads Font Awesome icons from a CDN; offline, the
   button icons are missing (labels still show).

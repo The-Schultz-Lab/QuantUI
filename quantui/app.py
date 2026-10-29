@@ -632,7 +632,7 @@ from quantui.freq_ir_workers import (
     freq_parallel_env_configured,
     freq_parallel_opt_in,
 )
-from quantui.help_content import HELP_TOPICS
+from quantui.help_content import HELP_TOPICS, VIEWER_HELP_TOPICS
 from quantui.molecule import Molecule, parse_xyz_input
 from quantui.progress import StepProgress
 from quantui.user_settings import UserSettings
@@ -1886,6 +1886,7 @@ class QuantUIApp:
         mol_summary_compact: Any
         collapse_mol_btn: Any
         _help_close_btn: Any
+        _help_intro_html: Any
         mult_si: Any
         _method_card_html: Any
         _basis_card_html: Any
@@ -2318,21 +2319,20 @@ class QuantUIApp:
     def _on_root_tab_changed(self, change) -> None:
         """Pulse the activity light on tab navigation actions."""
         self._activity_pulse("Switching tabs...", hold_s=0.16, kind="ui")
-        if change.get("new") == self._tab_index("analysis"):
+        new = change.get("new")
+        if self._is_tab(new, "analysis"):
             _ana_scroll_analysis_tab_to_top(self)
-        if _slurm_jobs_tab_visible(self) and change.get("new") == self._tab_index(
-            "slurm_jobs"
-        ):
+        if _slurm_jobs_tab_visible(self) and self._is_tab(new, "slurm_jobs"):
             _slurm_refresh_jobs_tab(self)
         # Runs save new result folders while Files is out of view; re-list on
         # entry so it never shows a stale "(empty directory)" (UIA.6). Keeps
         # the current folder.
-        if change.get("new") == self._tab_index("files"):
+        if self._is_tab(new, "files"):
             self._refresh_file_browser()
         # The GPU badge is filled in by a background probe; when it finishes
         # before the browser's widgets connect (instantly, without gpu4pyscf)
         # the update is lost and the row says "checking…" forever. Re-send it.
-        if change.get("new") == self._tab_index("settings"):
+        if self._is_tab(new, "settings"):
             badge = getattr(self, "_status_html", None)
             if badge is not None:
                 try:
@@ -2715,6 +2715,12 @@ class QuantUIApp:
 
     def _tab_index(self, name: str) -> int:
         return self._root_tab_order().index(name)
+
+    def _is_tab(self, index: Any, name: str) -> bool:
+        """True when *index* is the *name* tab; False if this app has no such
+        tab (viewer mode has only History and Analysis — viewer audit VA.5)."""
+        order = self._root_tab_order()
+        return name in order and index == order.index(name)
 
     def _tab_panel_for(self, name: str) -> Any:
         panels = {
@@ -6786,64 +6792,11 @@ class QuantUIApp:
                             # the frequencies were computed.
                             _pre_opt = join_optimizations(_pre_opt, _retry_opt)
                 result_html = self._format_freq_result(result)
-                _displacements_serialized = None
-                if result.displacements is not None:
-                    try:
-                        import numpy as _np_d
+                # One payload for the app, batch jobs and calibration runs, so
+                # the three saves cannot drift apart (viewer audit VA.12).
+                from quantui.backends.worker_payload import freq_result_payload
 
-                        _displacements_serialized = _np_d.asarray(
-                            result.displacements
-                        ).tolist()
-                    except Exception:
-                        pass
-                _thermo = getattr(result, "thermo", None)
-                _thermo_serialized = (
-                    {
-                        "zpve_hartree": _thermo.zpve_hartree,
-                        "H_hartree": _thermo.H_hartree,
-                        "S_jmol": _thermo.S_jmol,
-                        "G_hartree": _thermo.G_hartree,
-                        "temperature_k": _thermo.temperature_k,
-                        "E_thermal_hartree": getattr(
-                            _thermo, "E_thermal_hartree", None
-                        ),
-                        "Cv_jmolk": getattr(_thermo, "Cv_jmolk", None),
-                        "Cp_jmolk": getattr(_thermo, "Cp_jmolk", None),
-                        "symmetry_number": getattr(_thermo, "symmetry_number", None),
-                        # AUDIT F18 — the temperature was already tracked on
-                        # ThermoData; pressure and the model itself were not,
-                        # and neither survived a save. Both are fixed by the
-                        # harmonic-oscillator/rigid-rotor/ideal-gas model at
-                        # 1 atm used throughout freq_calc.py's thermo block.
-                        "pressure_atm": getattr(_thermo, "pressure_atm", 1.0),
-                        "approximation": "ideal_gas_rigid_rotor_harmonic_oscillator",
-                    }
-                    if _thermo is not None
-                    else None
-                )
-                save_spectra = {
-                    "ir": {
-                        "frequencies_cm1": result.frequencies_cm1,
-                        "ir_intensities": result.ir_intensities,
-                        "raman_activities": result.raman_activities,
-                        "zpve_hartree": result.zpve_hartree,
-                        "displacements": _displacements_serialized,
-                        # AUDIT F18 — thermo (H, S, G) was computed and shown
-                        # live but never made it into the saved result.json.
-                        "thermo": _thermo_serialized,
-                        "imaginary_mode_retry": result.imaginary_mode_retry,
-                        # D1 — force check at the Hessian geometry.
-                        "max_force_ev_per_ang": result.max_force_ev_per_ang,
-                    },
-                    "molecule": {
-                        "atoms": list(calc_mol.atoms),
-                        "coords": [
-                            list(map(float, row)) for row in calc_mol.coordinates
-                        ],
-                        "charge": calc_mol.charge,
-                        "multiplicity": calc_mol.multiplicity,
-                    },
-                }
+                save_spectra = freq_result_payload(result, calc_mol)["spectra"]
                 save_type = "frequency"
             elif ct == "UV-Vis (TD-DFT)":
                 from quantui.tddft_calc import run_tddft_calc
@@ -8026,8 +7979,8 @@ class QuantUIApp:
 
     def _render_help_topic(self, change=None) -> None:
         key = self.help_topic_dd.value
-        if key and key in HELP_TOPICS:
-            entry = HELP_TOPICS[key]
+        entry = (HELP_TOPICS.get(key) or VIEWER_HELP_TOPICS.get(key)) if key else None
+        if entry:
             self.help_content_html.value = (
                 f'<div style="border:1px solid {_theme.css.BORDER};border-radius:6px;'
                 f'padding:14px 18px;margin:8px 0;background:{_theme.css.BG_PANEL};max-width:700px">'

@@ -1773,7 +1773,10 @@ def on_copy_results_path(app: Any, btn: Any) -> None:
             f'<span style="font-size:13px;color:{_theme.css.TEXT_SLATE}">{p}</span>'
         )
 
-    threading.Thread(target=_reset, daemon=True).start()
+    try:
+        threading.Thread(target=_reset, daemon=True).start()
+    except RuntimeError:  # no threads (browser/Pyodide viewer build): keep label
+        pass
 
 
 def on_reset_click(app: Any, btn: Any) -> None:

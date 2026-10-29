@@ -570,6 +570,27 @@ class ModeIrreps:
         return f"Mode symmetry in {where}: Γ<sub>vib</sub> = {html_gamma(self.gamma)}"
 
 
+def mode_irreps_from_saved(saved: Any) -> Optional[ModeIrreps]:
+    """A :class:`ModeIrreps` from the dict saved with a Frequency result.
+
+    The labels are computed when the result is saved (PySCF at hand), so a
+    reader without PySCF (History on Windows, the Viewer) can show them.
+    """
+    if isinstance(saved, ModeIrreps):
+        return saved
+    if not isinstance(saved, dict) or not isinstance(saved.get("labels"), list):
+        return None
+    try:
+        return ModeIrreps(
+            labels=[None if lbl is None else str(lbl) for lbl in saved["labels"]],
+            group=str(saved["group"]),
+            top_group=str(saved.get("top_group") or saved["group"]),
+            gamma=str(saved.get("gamma") or ""),
+        )
+    except (KeyError, TypeError):
+        return None
+
+
 def _mode_label(irrep: str) -> str:
     """``"A1"`` → ``"a1"``, ``"Πu"`` → ``"πu"``, ``"B1+B2"`` → ``"b1+b2"``."""
     return "+".join(p[:1].lower() + p[1:] for p in irrep.split("+"))

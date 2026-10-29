@@ -61,8 +61,13 @@ def resolve_results_folder(text: str) -> tuple[Optional[Path], str]:
     return path, ""
 
 
+ISSUES_URL = "https://github.com/The-Schultz-Lab/QuantUI/issues"
+
+
 def build_viewer_folder_bar(app: Any, *, layout_fn: Any) -> None:
-    """Build the results-folder picker shown above the tabs in viewer mode."""
+    """Build the results-folder picker shown above the tabs in viewer mode,
+    and trim the full app's chrome to what a viewer can use."""
+    from quantui.help_content import VIEWER_HELP_TOPICS
     from quantui.results_storage import _default_results_dir
 
     app._viewer_folder_txt = widgets.Text(
@@ -70,14 +75,15 @@ def build_viewer_folder_bar(app: Any, *, layout_fn: Any) -> None:
         placeholder="Path to a QuantUI results folder",
         description="Results folder:",
         style={"description_width": "110px"},
-        layout=layout_fn(width="640px"),
+        # Shrinks with the window down to a floor, then the bar wraps.
+        layout=layout_fn(width="640px", flex="0 1 640px", min_width="240px"),
     )
     app._viewer_open_btn = widgets.Button(
         description="Open",
         icon="folder-open",
         button_style="primary",
         tooltip="Load the calculations saved in this folder",
-        layout=layout_fn(width="90px"),
+        layout=layout_fn(width="90px", flex="0 0 auto"),
     )
     app._viewer_status_html = widgets.HTML("")
     app._viewer_open_btn.on_click(lambda _btn: on_open_folder(app))
@@ -88,23 +94,68 @@ def build_viewer_folder_bar(app: Any, *, layout_fn: Any) -> None:
             multiple=False,
             description="Upload .zip",
             tooltip="Upload a zipped QuantUI results folder",
-            layout=layout_fn(width="130px"),
+            layout=layout_fn(width="150px", flex="0 0 auto"),
         )
         app._viewer_upload.observe(
             lambda change: on_upload_zip(app, change["new"]), names="value"
         )
         children.append(app._viewer_upload)
+        # There is no disk to type a path for: the box only names the folder
+        # being shown (the demo results or the last upload).
+        app._viewer_folder_txt.disabled = True
+        app._viewer_folder_txt.description = "Showing:"
+        app._viewer_open_btn.layout.display = "none"
         # No local server to stop — Exit would only kill the browser kernel.
         app._exit_btn.layout.display = "none"
+        # The path is inside the browser tab's memory; copying it is useless.
+        app.copy_path_btn.layout.display = "none"
+        _browser_issue_panel(app, layout_fn=layout_fn)
     children.append(app._viewer_status_html)
-    # The header advertises a System Settings tab the viewer does not have.
-    app._welcome_html.value = app._welcome_html.value.replace(
-        "<b>System Settings</b> tab for environment + calibration",
-        "<b>Viewer</b> &mdash; browse saved results",
+    # A viewer never computes, so the activity light would only ever say Idle.
+    app._activity_btn.layout.display = "none"
+    _mark_header_as_viewer(app)
+    app.help_topic_dd.options = [
+        (entry["title"], key) for key, entry in VIEWER_HELP_TOPICS.items()
+    ]
+    app.help_topic_dd.value = "viewer_getting_started"
+    app._render_help_topic()  # the dropdown observer is wired after this
+    app._help_intro_html.value = app._help_intro_html.value.replace(
+        " The <b>?</b> buttons in the Calculate tab open the matching one.", ""
     )
     app._viewer_folder_bar = widgets.HBox(
         children,
-        layout=layout_fn(align_items="center", gap="8px", margin="0 0 8px"),
+        layout=layout_fn(
+            align_items="center", gap="8px", margin="0 0 8px", flex_wrap="wrap"
+        ),
+    )
+
+
+def _mark_header_as_viewer(app: Any) -> None:
+    """Add a "Viewer" tag after the version in the one-line header."""
+    tag = (
+        f'<span style="font-size:12px;font-weight:600;color:{_theme.css.ACCENT_INFO};'
+        f"border:1px solid {_theme.css.ACCENT_INFO};border-radius:10px;"
+        'padding:1px 8px">Viewer</span>'
+    )
+    value = app._welcome_html.value
+    cut = value.rfind("</div>")
+    if cut != -1 and ">Viewer</span>" not in value:
+        app._welcome_html.value = value[:cut] + tag + value[cut:]
+
+
+def _browser_issue_panel(app: Any, *, layout_fn: Any) -> None:
+    """Report Issue in the browser: nothing saved there outlives the tab."""
+    app._issue_overlay.children = (
+        widgets.HTML(
+            '<p style="font-size:13px;font-weight:600;margin:0 0 6px;'
+            f'color:{_theme.css.ACCENT_WARNING}">&#9872; Report Issue</p>'
+            f'<p style="font-size:12px;color:{_theme.css.TEXT_BODY};margin:0 0 8px">'
+            "The browser Viewer can't keep a report: everything in it is gone "
+            "when the tab closes. Tell your instructor, or describe the problem "
+            f'on <a href="{ISSUES_URL}" target="_blank" rel="noopener">QuantUI\'s '
+            "GitHub issues page</a>.</p>"
+        ),
+        widgets.HBox([app._issue_cancel_btn], layout=layout_fn(margin="6px 0 0")),
     )
 
 

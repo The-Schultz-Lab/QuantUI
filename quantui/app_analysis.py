@@ -300,7 +300,12 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
         note.value = ""
     app._last_orb_mol_atom = None
     app._last_orb_mol_basis = None
-    app.traj_accordion.set_title(0, "Trajectory Viewer")
+    # Back to the default name (a populate step may have renamed it), keeping
+    # the "— needs …" hint set above; resetting the whole title dropped it.
+    _hint = str(app.traj_accordion.get_title(0) or "").partition(_TITLE_HINT_SEP)[2]
+    app.traj_accordion.set_title(
+        0, "Trajectory Viewer" + (_TITLE_HINT_SEP + _hint if _hint else "")
+    )
     # traj_output is a VBox (see app_builders.py traj_output construction);
     # clear children instead of clear_output.
     app.traj_output.children = ()
@@ -727,6 +732,7 @@ def pop_vibrational(app: Any, ctx: Any) -> bool:
             ir_intensities=ints,
             displacements=disps,
             raman_activities=ir.get("raman_activities") or [],
+            mode_irreps=ir.get("mode_irreps"),
         )
     shown = bool(app._show_vib_animation(freq_stub, mol))
     if shown:
@@ -740,15 +746,16 @@ def _show_thermochemistry(app: Any, ctx: Any, freq_stub: Any, mol: Any) -> None:
 
     energy = getattr(ctx.live_result, "energy_hartree", None)
     max_force = getattr(ctx.live_result, "max_force_ev_per_ang", None)
+    saved_thermo = getattr(ctx.live_result, "thermo", None)
     if energy is None and ctx.result_dir is not None:
         try:
             import json as _json
 
             data = _json.loads((Path(ctx.result_dir) / "result.json").read_text())
             energy = data.get("energy_hartree")
-            max_force = ((data.get("spectra") or {}).get("ir") or {}).get(
-                "max_force_ev_per_ang"
-            )
+            ir = (data.get("spectra") or {}).get("ir") or {}
+            max_force = ir.get("max_force_ev_per_ang")
+            saved_thermo = ir.get("thermo")
         except Exception:  # noqa: BLE001 — the box just stays hidden
             energy = None
     try:
@@ -758,6 +765,7 @@ def _show_thermochemistry(app: Any, ctx: Any, freq_stub: Any, mol: Any) -> None:
             energy,
             getattr(freq_stub, "frequencies_cm1", None),
             max_force_ev_per_ang=max_force,
+            saved_thermo=saved_thermo,
         )
     except Exception:  # noqa: BLE001 — informational panel
         pass
@@ -769,10 +777,12 @@ def _mode_symmetry_inputs(ctx: Any) -> dict:
     mol = ctx.spectra_data.get("molecule", {})
     atoms, coords = mol.get("atoms"), mol.get("coords")
     if not ir.get("displacements") or not atoms or not coords:
-        return {}
+        return {"mode_irreps": ir.get("mode_irreps")}
     return {
         "displacements": ir["displacements"],
         "pyscf_mol_atom": list(zip(atoms, coords)),
+        # Saved at calc time, so labels show without PySCF (viewer VA.9).
+        "mode_irreps": ir.get("mode_irreps"),
     }
 
 

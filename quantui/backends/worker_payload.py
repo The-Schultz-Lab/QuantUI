@@ -149,6 +149,37 @@ def _ground_state_fields(result) -> Dict[str, Any]:
     }
 
 
+def mode_irreps_payload(result, molecule) -> Any:
+    """Mode symmetry labels (SPC2.4) to save with a Frequency result.
+
+    Computed once while PySCF is at hand, so History and the Viewer (no
+    PySCF) can show them. ``None`` when there is nothing to label.
+    """
+    freqs = getattr(result, "frequencies_cm1", None)
+    disps = getattr(result, "displacements", None)
+    if freqs is None or disps is None or len(freqs) == 0 or len(disps) == 0:
+        return None
+    mol_atom = getattr(result, "pyscf_mol_atom", None)
+    if not mol_atom and molecule is not None:
+        mol_atom = list(zip(molecule.atoms, molecule.coordinates))
+    if not mol_atom:
+        return None
+    try:
+        from quantui.symmetry import label_mode_irreps
+
+        irreps = label_mode_irreps(mol_atom, list(freqs), disps)
+    except Exception:  # noqa: BLE001 — labels are informational
+        return None
+    if irreps is None:
+        return None
+    return {
+        "labels": list(irreps.labels),
+        "group": irreps.group,
+        "top_group": irreps.top_group,
+        "gamma": irreps.gamma,
+    }
+
+
 def freq_result_payload(result, molecule) -> Dict[str, Any]:
     displacements = None
     if result.displacements is not None:
@@ -211,6 +242,8 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
                 "imaginary_mode_retry": getattr(result, "imaginary_mode_retry", None),
                 # D1 — force check at the Hessian geometry.
                 "max_force_ev_per_ang": getattr(result, "max_force_ev_per_ang", None),
+                # SPC2.4 — saved so a reader without PySCF can label modes.
+                "mode_irreps": mode_irreps_payload(result, molecule),
             },
             "molecule": {
                 "atoms": list(molecule.atoms),
