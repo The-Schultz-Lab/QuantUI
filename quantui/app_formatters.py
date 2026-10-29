@@ -545,6 +545,7 @@ def _freq_section_rows(get: Any) -> str:
             frequencies_cm1=freqs,
             displacements=get("displacements"),
             pyscf_mol_atom=get("pyscf_mol_atom"),
+            mode_irreps=get("mode_irreps"),
         )
     )
     if listing:
@@ -566,6 +567,7 @@ def _saved_freq_accessor(data: dict[str, Any]) -> Any:
         "frequencies_cm1": ir.get("frequencies_cm1"),
         "displacements": ir.get("displacements"),
         "pyscf_mol_atom": mol_atom,
+        "mode_irreps": ir.get("mode_irreps"),
     }
     return lambda k, d=None: values.get(k, d)
 
@@ -610,7 +612,12 @@ def _frequency_list_html(r: Any, *, limit: int = 9) -> str:
     labels: list = [None] * len(freqs)
     disps = getattr(r, "displacements", None)
     mol_atom = getattr(r, "pyscf_mol_atom", None)
-    if disps is not None and mol_atom:
+    from quantui.symmetry import mode_irreps_from_saved
+
+    saved = mode_irreps_from_saved(getattr(r, "mode_irreps", None))
+    if saved is not None and len(saved.labels) == len(freqs):
+        labels = list(saved.labels)
+    elif disps is not None and mol_atom:
         try:
             from quantui.symmetry import label_mode_irreps
 

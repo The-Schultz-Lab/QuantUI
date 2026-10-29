@@ -42,4 +42,9 @@ See [`quantui view`](CLI.md#quantui-view) for the options.
 
 ## Needs the full app
 
-- Other orbitals, density and ESP surfaces (they need PySCF).
+- **Orbital surfaces other than the HOMO and LUMO, density and ESP surfaces**
+  need PySCF to compute, which the Viewer does not include.
+- **Thermochemistry** is shown as saved with each Frequency result (at its
+  temperature and pressure); other temperatures or pressures need the full
+  QuantUI. Results from older QuantUI versions may have none saved.
+- The browser Viewer shows molecules with py3Dmol only.

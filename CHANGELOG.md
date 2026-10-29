@@ -17,6 +17,39 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- **Results Viewer (pre-release audit, VA.1–VA.12)** — the History + Analysis
+  viewer (desktop installer and browser build, neither of which has PySCF):
+  - Frequency results show their saved thermochemistry instead of a red
+    "No module named 'pyscf'" error; T and P are locked, with a note, when
+    nothing can be recomputed. The not-a-minimum warning always shows.
+  - The Orbital Isosurface panel draws the saved HOMO and LUMO as before and
+    says other orbitals, density and ESP need the full QuantUI, instead of
+    offering buttons that failed with a "conda install pyscf" error.
+  - Mode symmetry labels are saved with each Frequency result, so History and
+    the Viewer show them without PySCF.
+  - Switching tabs no longer raises an error; the header says "Viewer"; Help
+    has a Viewer "Getting Started" and only topics that apply; the activity
+    light (always "Idle") is hidden.
+  - Browser build: the editable folder box is hidden (the files live in the
+    tab's memory), and Report Issue explains that nothing is kept once the
+    tab closes and links to the issue tracker.
+  - Narrow windows: the folder bar and History's Load row wrap instead of
+    pushing buttons off-screen; 3D viewers no longer overflow their panel;
+    the energy-level diagram scrolls sideways instead of being clipped.
+- **UV-Vis excited-state table readable on dark themes** — alternate rows were
+  near-white (JupyterLab's table striping) under light text.
+- **Analysis structure viewer filled for NMR, PES Scan and reorganization
+  results** opened from History; it stayed blank when the geometry was saved
+  only at the top level of `result.json`.
+- **Calibration runs save complete results** — Frequency entries now include
+  thermochemistry, the max-force check and the saddle-point retry (one payload
+  shared with the app and batch jobs), and Geometry Opt entries keep their
+  Mulliken charges and dipole.
+- **Energy-level diagram** — HOMO/LUMO labels sit beside the plot, so a
+  gridline at the same energy no longer runs through them.
+- **Viewer demo results** — the Frequency sample is computed at the optimized
+  geometry (it was at the input geometry: max force 3.2 eV/Å, so its
+  frequencies were not meaningful), and the TD-DFT sample keeps its orbitals.
 - **Pasted XYZ coordinates no longer lose their first atom** when a count
   line is followed directly by the atoms with no title line
   (`3`, `O …`, `H …`, `H …`): water used to load as H₂, with only a log
