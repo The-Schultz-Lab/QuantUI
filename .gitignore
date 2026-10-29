@@ -33,6 +33,7 @@ results/
 
 # Test / coverage output
 .coverage
+.coverage.*
 coverage.xml
 htmlcov/
 .pytest_cache/
