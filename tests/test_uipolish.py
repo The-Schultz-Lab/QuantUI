@@ -409,7 +409,11 @@ class TestPhase3Layout:
         assert "var(--q-bg-panel" in comparison_table_html([s])
 
     def test_side_by_side_viewers(self, app):
-        for widget in (app._mulliken_mol_output, app.vib_output, app._orb_iso_output):
+        # Without PySCF the isosurface panel is a note, not a viewer (VA.2).
+        viewers = [app._mulliken_mol_output, app.vib_output]
+        if _PYSCF:
+            viewers.append(app._orb_iso_output)
+        for widget in viewers:
             parents = [
                 w
                 for w in _walk(app.analysis_tab_panel)
