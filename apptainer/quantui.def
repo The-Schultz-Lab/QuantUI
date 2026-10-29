@@ -47,13 +47,15 @@ FROM: condaforge/miniforge3:26.1.1-3
 
   # Save calculation results to the user's home directory so they persist
   # across kernel restarts. The home dir is bind-mounted by Apptainer.
-  export QUANTUI_RESULTS_DIR="${HOME}/.quantui/results"
+  # Defaults only: a value the caller already set (site module, job script,
+  # host environment) wins, as in quantui-gpu.def.
+  export QUANTUI_RESULTS_DIR="${QUANTUI_RESULTS_DIR:-${HOME}/.quantui/results}"
 
   # Parallel CPU workers for IR-intensity finite-difference SCFs (6N displacements)
   # on multi-core hosts. Reference SCF + Hessian stay in-kernel. Students can still
   # see the preference in Settings; when this variable is set it overrides the
   # saved checkbox (set QUANTUI_FREQ_PARALLEL=0 to force off site-wide).
-  export QUANTUI_FREQ_PARALLEL=1
+  export QUANTUI_FREQ_PARALLEL="${QUANTUI_FREQ_PARALLEL:-1}"
 
 %files
   # Source paths are relative to where you run `apptainer build` (repo root).

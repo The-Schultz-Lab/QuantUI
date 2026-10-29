@@ -896,3 +896,33 @@ class TestCliAvoidsGuiStackImport:
         import quantui
 
         assert hasattr(quantui, "THIS_ATTR_DOES_NOT_EXIST") is False
+
+
+class TestResultsCommand:
+    """M-BATCH2 B2.11 — `quantui results JOB_DIR` inside the image."""
+
+    def _job(self, tmp_path, payload):
+        job = tmp_path / "H2O_sp_RHF_STO-3G"
+        attempt = job / "attempt-02_job77"
+        attempt.mkdir(parents=True)
+        (job / "attempt-01_job76").mkdir()  # unfinished: no result.json
+        (attempt / "result.json").write_text(json.dumps(payload))
+        return job, attempt
+
+    def test_prints_the_newest_finished_attempt(self, tmp_path, capsys):
+        from tests.slurm_ingest_helpers import sample_payload
+
+        job, attempt = self._job(tmp_path, sample_payload("single_point"))
+        assert cli.main(["results", str(job)]) == 0
+        out = capsys.readouterr().out
+        assert "attempt-02_job77" in out and "energy:" in out
+        assert cli.main(["results", str(attempt)]) == 0  # an attempt folder works too
+
+    def test_no_finished_result(self, tmp_path, capsys):
+        job = tmp_path / "pending"
+        (job / "attempt-01_job5").mkdir(parents=True)
+        assert cli.main(["results", str(job)]) == 1
+        assert "no finished result yet" in capsys.readouterr().out
+
+    def test_not_a_folder(self, tmp_path):
+        assert cli.main(["results", str(tmp_path / "missing")]) == 2

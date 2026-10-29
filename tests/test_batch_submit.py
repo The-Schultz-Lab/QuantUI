@@ -514,7 +514,14 @@ class TestLauncherMatchesQuantUI:
         for n_carbons in (0, 2, 5, 10):
             for calc in mod.SITE["calc_types"]:
                 for method in ("RHF", "UHF", "B3LYP", "MP2"):
-                    for basis in ("STO-3G", "def2-SVP", "cc-pVTZ", "6-31G*"):
+                    for basis in (
+                        "STO-3G",
+                        "def2-SVP",
+                        "cc-pVTZ",
+                        "6-31G*",
+                        "6-31G(d,p)",
+                        "lanl2dz",
+                    ):
                         for mult in (1, 3):
                             mol = _molecule(n_carbons)
                             mol["multiplicity"] = mult
@@ -526,13 +533,15 @@ class TestLauncherMatchesQuantUI:
                                 "charge": 0,
                                 "multiplicity": mult,
                                 "molecule": mol,
+                                # B2.4: walltime grows with these.
+                                "options": {"nstates": 40, "steps": 25},
                             }
                             expected = estimate_slurm_resources(
                                 CalculationRequest.from_dict(req)
                             )
                             assert mod.estimate(req) == expected, req
                             checked += 1
-        assert checked == 4 * 7 * 4 * 4 * 2  # every combination compared
+        assert checked == 4 * 7 * 4 * 6 * 2  # every combination compared
 
     def test_estimate_counts_transition_metal_electrons(self, launcher):
         # The old QuantUI table had no Mn/Mo, so these counted as 0 electrons.
@@ -730,6 +739,31 @@ class TestLauncherMatchesQuantUI:
         for k, v in env.items():
             monkeypatch.setenv(k, v)
         assert launcher.gpu_requested() == cfg.gpu_requested()
+
+    @pytest.mark.parametrize(
+        "calc",
+        ["single_point", "geometry_opt", "frequency", "tddft", "nmr", "retry"],
+    )
+    def test_results_summary_matches_quantui(self, launcher, tmp_path, calc):
+        # B2.11: `quantui results` (in the image) and `quantui-batch results`
+        # (login node) print the same summary.
+        from quantui.backends.result_summary import summarize
+        from tests.slurm_ingest_helpers import sample_payload
+
+        payload = sample_payload("frequency" if calc == "retry" else calc)
+        if calc == "retry":
+            payload["spectra"]["ir"]["imaginary_mode_retry"] = {
+                "followed_cm1": [-39.4],
+                "reopt_steps": 7,
+            }
+        job = tmp_path / "job"
+        attempt = job / "attempt-01_job1"
+        attempt.mkdir(parents=True)
+        (attempt / "result.json").write_text(json.dumps(payload))
+        ours = launcher.summarize(payload, job, attempt)
+        assert ours == summarize(payload, job, attempt)
+        if calc == "retry":
+            assert any("saddle-point retry" in line for line in ours)
 
     def test_overrides_are_validated_like_quantui(self, launcher, water):
         args = _args(
@@ -1620,6 +1654,45 @@ class TestStartupIngest:
             assert ingest_finished_jobs_on_startup(app) == []  # never twice
         assert refresh.call_count == 1
         assert len(list(results.iterdir())) == 1
+
+    def test_history_refresh_saves_jobs_finished_since_start(
+        self, tmp_path, monkeypatch, water
+    ):
+        # B2.10: a batch job that finishes while the app is open reaches
+        # History on the History tab's Refresh, not only at the next start.
+        from unittest.mock import MagicMock, patch
+
+        from quantui.app_runflow import on_past_refresh
+        from quantui.backends.slurm import SlurmBackend
+        from tests.slurm_ingest_helpers import patch_results_root, sample_payload
+
+        monkeypatch.setenv("QUANTUI_JOBS_DIR", str(tmp_path / "jobs"))
+        results = patch_results_root(tmp_path, monkeypatch)
+        registry = JobRegistry(
+            jobs_root=tmp_path / "jobs", staging_root=tmp_path / "staging"
+        )
+        req, _ = request_from_xyz(
+            water, calc_type="single_point", method="RHF", basis="STO-3G"
+        )
+        record = SlurmBackend(registry=registry, use_apptainer=False).prepare(
+            req, job_name="h2o"
+        )
+        app = self._app(registry)
+        app._refresh_results_browser = MagicMock()
+        with (
+            patch("quantui.app_slurm.is_slurm_available", return_value=False),
+            patch("quantui.app_runflow.refresh_results_browser"),
+        ):
+            on_past_refresh(app, None)  # nothing finished yet
+            assert not results.exists() or not any(results.iterdir())
+            attempt = Path(record.job_dir) / "attempt-01_job4243"
+            attempt.mkdir()
+            (attempt / "result.json").write_text(
+                json.dumps(sample_payload("single_point"))
+            )
+            on_past_refresh(app, None)
+        assert len(list(results.iterdir())) == 1
+        assert app._refresh_results_browser.call_count == 2
 
     def test_no_registry_means_nothing_is_created(self, tmp_path, monkeypatch):
         from quantui.app_slurm import ingest_finished_jobs_on_startup

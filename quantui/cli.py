@@ -467,6 +467,35 @@ def _cmd_submit(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def _cmd_results(args: argparse.Namespace) -> int:
+    """Summarize the newest finished attempt of a batch job folder (B2.11)."""
+    from quantui.backends.batch_chain import finished_attempts
+    from quantui.backends.result_summary import summarize
+
+    job_dir = Path(args.job_dir).expanduser()
+    if not job_dir.is_dir():
+        print(f"quantui results: {job_dir} is not a folder", file=sys.stderr)
+        return 2
+    if job_dir.name.startswith("attempt-") and (job_dir / "result.json").is_file():
+        attempt, job_dir = job_dir, job_dir.parent
+    else:
+        done = finished_attempts(job_dir)
+        if not done:
+            print(f"{job_dir.name} has no finished result yet.")
+            return 1
+        attempt = done[0]
+    try:
+        result = json.loads((attempt / "result.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(
+            f"quantui results: could not read {attempt / 'result.json'}: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+    print("\n".join(summarize(result, job_dir, attempt)))
+    return 0
+
+
 def _cmd_install_launcher(args: argparse.Namespace) -> int:
     """Write the host-side ``quantui-batch`` launcher (see quantui/batch_launcher.py)."""
     from quantui.batch_launcher import install_launcher
@@ -772,6 +801,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override the Apptainer image path (default: site-configured).",
     )
     submit_parser.set_defaults(func=_cmd_submit)
+
+    results_parser = sub.add_parser(
+        "results",
+        help=(
+            "Summarize a batch job folder's newest finished result: energy, "
+            "convergence, imaginary modes, strongest IR bands, excited states."
+        ),
+    )
+    results_parser.add_argument(
+        "job_dir", help="A job folder (or one of its attempt folders)."
+    )
+    results_parser.set_defaults(func=_cmd_results)
 
     launcher_parser = sub.add_parser(
         "install-launcher",

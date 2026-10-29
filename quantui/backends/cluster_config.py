@@ -20,10 +20,33 @@ DEFAULT_CORES = 4
 DEFAULT_MEMORY_GB = 8
 DEFAULT_WALLTIME = "04:00:00"
 
+
+def _env_positive_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using default %s", name, raw, default)
+        return default
+    return value if value > 0 else default
+
+
+# Hard limits for a submission, site-configurable (M-BATCH2 B2.4): NCShare's
+# `common` nodes have 512 GB, but the default stays at the classroom policy.
+# Read at import, like QUANTUI_SLURM_PARTITION; `quantui install-launcher`
+# copies the values into the launcher, so set them in the image environment.
 MIN_CORES = 1
-MAX_CORES = 32
+MAX_CORES = _env_positive_int("QUANTUI_SLURM_MAX_CORES", 32)
 MIN_MEMORY_GB = 1
-MAX_MEMORY_GB = 128
+MAX_MEMORY_GB = _env_positive_int("QUANTUI_SLURM_MAX_MEMORY_GB", 128)
+# The estimate's own ceiling, separate from the hard limit: a site can allow
+# 512 GB on request while keeping automatic requests at 128 GB.
+ESTIMATE_MAX_MEMORY_GB = min(
+    _env_positive_int("QUANTUI_SLURM_ESTIMATE_MAX_MEMORY_GB", MAX_MEMORY_GB),
+    MAX_MEMORY_GB,
+)
 MAX_CONCURRENT_JOBS = 2
 SUBMIT_COOLDOWN_SECONDS = 30
 STALE_NO_SLURM_ID_SECONDS = 600

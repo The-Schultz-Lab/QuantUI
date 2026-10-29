@@ -118,12 +118,14 @@ def ensure_job_registry(app: Any) -> JobRegistry:
 
 
 def ingest_finished_jobs_on_startup(app: Any) -> list[Path]:
-    """Save finished batch attempts to History when the app starts.
+    """Save finished batch attempts to History (app start and History Refresh).
 
     Runs whether or not SLURM is available *here*: ``quantui-batch`` jobs are
     submitted over SSH from a login node, while the app usually runs in an
     OnDemand session where ``sbatch`` is absent and the
-    Cluster Jobs tab (the only other ingest trigger) never refreshes. Skipped
+    Cluster Jobs tab never refreshes. The History tab's Refresh button runs
+    it too (M-BATCH2 B2.10), so a job that finishes while the app is open
+    appears without a restart. Skipped
     when no job registry exists yet, so the app does not create
     ``~/.quantui/jobs`` for users who have never run a batch job.
     """
