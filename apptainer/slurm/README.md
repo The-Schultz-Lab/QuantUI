@@ -44,6 +44,7 @@ quantui-batch submit water.xyz --calc frequency --method B3LYP --basis def2-SVP 
 quantui-batch submit water.xyz --preset lab4-ir        # named settings (see Presets)
 quantui-batch submit --from water-opt --calc frequency # start from that job's optimized geometry
 quantui-batch submit guess.xyz --calc transition_state --method B3LYP --basis def2-SVP
+quantui-batch submit --from guess_ts_B3LYP_def2-SVP --calc irc  # reaction path from that TS
 quantui-batch estimate water.xyz --calc frequency      # cores / memory / time, submits nothing
 quantui-batch status                                   # PENDING, RUNNING 40%, DONE, OUT_OF_MEMORY ...
 quantui-batch results <job>                            # energy, imaginary modes, IR bands, excited states
@@ -70,6 +71,10 @@ unfinished ones.
   job resumes the search from its last step, never redoes a finished search,
   and keeps the frequency check's finished displacements; `results` prints
   the verdict (transition state, minimum, or higher-order saddle point).
+- **IRC** (`--calc irc`, `--option max_steps=150` per direction) follows the
+  reaction path both ways from a transition state, usually `--from` a
+  Transition State job. A killed IRC starts over (each direction begins
+  from a Hessian at the saddle point); `results` prints the barriers.
 - **Presets** (`--preset NAME`; list with `quantui-batch presets`) are named
   settings: `calc`, `method`, `basis`, `charge`, `mult`, `solvent`, `preopt`,
   `options`, `description`. Read from `presets.json` beside the launcher

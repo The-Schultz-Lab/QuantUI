@@ -26,6 +26,7 @@ _CALC_TYPE_TAGS = {
     "single_point": "sp",
     "geometry_opt": "opt",
     "transition_state": "ts",
+    "irc": "irc",
     "frequency": "freq",
     "tddft": "tddft",
     "nmr": "nmr",
@@ -196,6 +197,8 @@ CALC_FACTORS = {
     "geometry_opt": 2.5,
     # A saddle search with analytic Hessians, then a full frequency check.
     "transition_state": 4.0,
+    # Gradients along the path both ways, from a Hessian at the start.
+    "irc": 3.0,
     "frequency": 4.0,
     "tddft": 2.0,
     "nmr": 2.0,

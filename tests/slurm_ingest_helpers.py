@@ -89,6 +89,25 @@ def sample_payload(calc_type: str) -> dict:
                 },
             },
         }
+    if calc_type == "irc":
+        return {
+            **base,
+            "homo_lumo_gap_ev": None,
+            "n_steps": 9,
+            "trajectory_file": "trajectory.json",
+            "spectra": {
+                "irc": {
+                    "reaction_coordinate": [-1.0, 0.0, 1.0],
+                    "energies_hartree": [-1.2, -1.12, -1.25],
+                    "ts_index": 1,
+                    "forward": {"converged": True, "n_steps": 5, "irc_steps": None},
+                    "reverse": {"converged": True, "n_steps": 4, "irc_steps": None},
+                    "barrier_from_start_kj": 210.0,
+                    "barrier_from_end_kj": 341.3,
+                    "verdict": "The transition state connects two minima.",
+                }
+            },
+        }
     if calc_type == "transition_state":
         freq = sample_payload("frequency")
         freq["spectra"]["ir"]["frequencies_cm1"] = [-1246.0, -12.0, 4400.0]

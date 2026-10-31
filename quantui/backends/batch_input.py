@@ -29,6 +29,7 @@ SOLVENT_CALC_TYPES = frozenset(
         "single_point",
         "geometry_opt",
         "transition_state",
+        "irc",
         "frequency",
         "tddft",
         "reorganization_energy",
@@ -36,7 +37,7 @@ SOLVENT_CALC_TYPES = frozenset(
 )
 # Calc types driven by analytic gradients: a post-HF method (no gradients
 # here) is refused before the job queues, not after it starts.
-GRADIENT_CALC_TYPES = frozenset({"transition_state"})
+GRADIENT_CALC_TYPES = frozenset({"transition_state", "irc"})
 
 
 class BatchInputError(ValueError):

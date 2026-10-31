@@ -58,6 +58,9 @@ from quantui.app_analysis import (
     pop_ir_spectrum as _ana_pop_ir_spectrum,
 )
 from quantui.app_analysis import (
+    pop_irc_profile as _ana_pop_irc_profile,
+)
+from quantui.app_analysis import (
     pop_isosurface as _ana_pop_isosurface,
 )
 from quantui.app_analysis import (
@@ -198,6 +201,9 @@ from quantui.app_exports import (
 )
 from quantui.app_formatters import (
     format_freq_result as _fmt_freq_result,
+)
+from quantui.app_formatters import (
+    format_irc_result as _fmt_irc_result,
 )
 from quantui.app_formatters import (
     format_nmr_result as _fmt_nmr_result,
@@ -2518,12 +2524,12 @@ class QuantUIApp:
         (
             "Trajectory",
             "traj_accordion",
-            "Geometry Opt / Transition State / PES Scan / Frequency pre-opt",
+            "Geometry Opt / Transition State / IRC / PES Scan / Frequency pre-opt",
         ),
         ("Vibrational", "vib_accordion", "Frequency / Transition State"),
         ("IR Spectrum", "_ir_accordion", "Frequency / Transition State"),
         ("Raman Spectrum", "_raman_accordion", "Frequency"),
-        ("PES Scan", "_pes_scan_accordion", "PES Scan"),
+        ("PES Scan", "_pes_scan_accordion", "PES Scan / IRC (energy profile)"),
         (
             "Isosurface",
             "_iso_accordion",
@@ -2589,6 +2595,12 @@ class QuantUIApp:
             ("Energies", "_pop_energies", False),
             ("Isosurface", "_pop_isosurface", False),
             ("Populations", "_pop_mulliken", False),
+        ],
+        # The energy profile reuses the PES Scan plot, its x axis the
+        # mass-weighted reaction coordinate; Trajectory plays the path.
+        "irc": [
+            ("PES Scan", "_pop_irc_profile", True),
+            ("Trajectory", "_pop_geo_trajectory", False),
         ],
         "tddft": [
             ("UV-Vis", "_pop_uv_vis", True),
@@ -2657,6 +2669,9 @@ class QuantUIApp:
 
     def _pop_pes_plot(self, ctx: _AnalysisContext) -> bool:
         return _ana_pop_pes_plot(self, ctx)
+
+    def _pop_irc_profile(self, ctx: _AnalysisContext) -> bool:
+        return _ana_pop_irc_profile(self, ctx)
 
     def _pop_pes_trajectory(self, ctx: _AnalysisContext) -> bool:
         return _ana_pop_pes_trajectory(self, ctx)
@@ -4447,6 +4462,7 @@ class QuantUIApp:
             "single_point": "Single Point",
             "geometry_opt": "Geometry Opt",
             "transition_state": "Transition State",
+            "irc": "IRC",
             "frequency": "Frequency",
             "tddft": "UV-Vis (TD-DFT)",
             "nmr": "NMR Shielding",
@@ -6662,6 +6678,25 @@ class QuantUIApp:
                     "transition_state": result.to_spectra(),
                 }
                 save_type = "transition_state"
+            elif ct == "IRC":
+                from quantui.irc import run_irc
+
+                # Start from the Transition State result picked under
+                # "Start from" (or the current molecule).
+                calc_mol = _run_resolve_seed_geometry(self, calc_mol, log=log)
+                self.run_status.value = "Following the reaction path…"
+                result = run_irc(
+                    calc_mol,
+                    self.method_dd.value,
+                    self.basis_dd.value,
+                    steps=int(self.max_steps_si.value),
+                    progress_stream=log,  # type: ignore[arg-type]
+                    solvent=_run_solvent,
+                    cancel_check=self._cancel_event.is_set,
+                )
+                result_html = self._format_irc_result(result)
+                save_spectra = {"irc": result.to_spectra()}
+                save_type = "irc"
             elif ct == "Frequency":
                 from quantui.freq_calc import run_freq_calc
 
@@ -7138,6 +7173,13 @@ class QuantUIApp:
                     'margin:6px 0 2px">Stationary point found (see verdict)</p>'
                 )
                 self._viz_label.layout.display = ""
+            elif ct == "IRC":
+                self._viz_label.value = (
+                    f'<p style="color:{_theme.css.TEXT_SECONDARY};font-size:12px;font-weight:600;'
+                    'margin:6px 0 2px">Transition state the path starts from '
+                    "(play the path in Trajectory)</p>"
+                )
+                self._viz_label.layout.display = ""
             self._queue_main_thread_callback(
                 self._show_result_3d,
                 _viz_mol,
@@ -7216,7 +7258,7 @@ class QuantUIApp:
                 _ana_ctx.result_dir = _saved_dir
                 _ana_ctx.timestamp = str(_saved_data.get("timestamp", ""))
                 # Persist trajectory so history viewer can replay it.
-                if ct in ("Geometry Opt", "Transition State", "PES Scan"):
+                if ct in ("Geometry Opt", "Transition State", "IRC", "PES Scan"):
                     _traj = getattr(
                         result,
                         "coordinates_list" if ct == "PES Scan" else "trajectory",
@@ -8126,6 +8168,9 @@ class QuantUIApp:
 
     def _format_ts_result(self, r) -> str:
         return _fmt_ts_result(r)
+
+    def _format_irc_result(self, r) -> str:
+        return _fmt_irc_result(r)
 
     def _format_tddft_result(self, r) -> str:
         return _fmt_tddft_result(r)

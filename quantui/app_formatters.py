@@ -751,6 +751,69 @@ def format_ts_result(r: Any) -> str:
     )
 
 
+def irc_rows(block: Optional[dict]) -> str:
+    """Result-card rows for an IRC (the ``irc`` spectra block, live or saved)."""
+    if not block:
+        return ""
+    fwd, rev = block.get("forward") or {}, block.get("reverse") or {}
+    ok = bool(fwd.get("converged")) and bool(rev.get("converged"))
+    b_start = block.get("barrier_from_start_kj")
+    b_end = block.get("barrier_from_end_kj")
+    downhill = all(isinstance(b, (int, float)) and b > 0.5 for b in (b_start, b_end))
+    color = _theme.css.ACCENT_SUCCESS if ok and downhill else _theme.css.ACCENT_WARNING
+    icon = "✓" if ok and downhill else "⚠"
+
+    def _row(label: str, value: str, vc: str) -> str:
+        return (
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL};'
+            f'vertical-align:top">{label}</td>'
+            f'<td style="color:{vc}">{value}</td></tr>'
+        )
+
+    def _kj(v: Any) -> str:
+        return f"{float(v):.1f} kJ/mol" if isinstance(v, (int, float)) else "n/a"
+
+    def _side(d: dict) -> str:
+        n = d.get("n_steps", "?")
+        tail = (
+            f" ({d['irc_steps']} on the path, then minimized)"
+            if d.get("irc_steps") is not None
+            else ""
+        )
+        return f"{n} steps{tail}, " + (
+            "reached a minimum" if d.get("converged") else "NOT converged"
+        )
+
+    return (
+        _row("Verdict", f"{icon} {html.escape(str(block.get('verdict', '')))}", color)
+        + _row(
+            "Barrier",
+            f"{_kj(b_start)} from the start of the path, {_kj(b_end)} from its end",
+            _theme.css.TEXT_HEADING,
+        )
+        + _row("Path, reverse side", _side(rev), _theme.css.TEXT_HEADING)
+        + _row("Path, forward side", _side(fwd), _theme.css.TEXT_HEADING)
+    )
+
+
+def format_irc_result(r: Any) -> str:
+    """Format an IRC result card."""
+    _rows = (
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">'
+        "Transition-state energy</td>"
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>'
+        + irc_rows(r.to_spectra())
+        + _solvent_row(getattr(r, "solvent", None), "every step in solvent")
+    )
+    return (
+        _result_card_open() + f"<b>IRC &mdash; {display_formula(r.formula)} "
+        f"({_method_basis_label(r.method, r.basis, None)})</b>"
+        + _result_card_table_open()
+        + f"{_rows}</table>"
+        + _RESULT_CARD_CLOSE
+    )
+
+
 def format_tddft_result(r: Any) -> str:
     """Format a TD-DFT / UV-Vis result card."""
     # r.converged now folds in per-root TD convergence, so the
@@ -1317,6 +1380,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
             _theme.css.ACCENT_PURPLE,
             _theme.css.SURFACE_PURPLE_BG,
         ),
+        "irc": ("IRC", _theme.css.ACCENT_PURPLE, _theme.css.SURFACE_PURPLE_BG),
     }
     ct = data.get("calc_type", "")
     _ct_label, _ct_fg, _ct_bg = _ct_labels.get(
@@ -1341,7 +1405,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     # format_tddft_result). A bare "SCF converged" label here would blame
     # the SCF for a CC/TD/Hessian-only failure whose reference SCF was
     # fine — mirror each live formatter's label choice.
-    if ct in ("frequency", "transition_state"):
+    if ct in ("frequency", "transition_state", "irc"):
         _conv_label = "Converged"
     elif ct == "tddft":
         _conv_label = "Converged"
@@ -1395,6 +1459,8 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     _ts_html = ""
     if ct == "transition_state":
         _ts_html = ts_verdict_rows((data.get("spectra") or {}).get("transition_state"))
+    elif ct == "irc":
+        _ts_html = irc_rows((data.get("spectra") or {}).get("irc"))
 
     _reorg_html = ""
     if ct == "reorganization_energy":

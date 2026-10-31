@@ -78,6 +78,7 @@ _CALC_TYPE_TITLES: dict = {
     "single_point": "Single Point",
     "geometry_opt": "Geometry Opt",
     "transition_state": "Transition State",
+    "irc": "IRC",
     "frequency": "Frequency",
     "tddft": "UV-Vis (TD-DFT)",
     "nmr": "NMR Shielding",

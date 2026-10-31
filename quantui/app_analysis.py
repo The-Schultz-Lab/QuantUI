@@ -1182,6 +1182,47 @@ def pop_pes_plot(app: Any, ctx: Any) -> bool:
     return bool(app._show_pes_scan_result(result))
 
 
+def pop_irc_profile(app: Any, ctx: Any) -> bool:
+    """IRC energy profile in the PES Scan panel: energy against the
+    mass-weighted reaction coordinate, zero at the transition state."""
+    block = None
+    if ctx.live_result is not None and hasattr(ctx.live_result, "to_spectra"):
+        block = ctx.live_result.to_spectra()
+    if block is None:
+        block = (ctx.spectra_data or {}).get("irc") or {}
+    energies = list(block.get("energies_hartree") or [])
+    s_vals = list(block.get("reaction_coordinate") or [])
+    if len(energies) < 2 or len(s_vals) != len(energies):
+        _set_panel_unavailable_message(
+            app, "PES Scan", "Not available: this IRC result has no path data."
+        )
+        return False
+    # The path's frames, so "Save lowest-energy geometry" works here too.
+    frames: list = []
+    if ctx.live_result is not None:
+        frames = list(getattr(ctx.live_result, "trajectory", []) or [])
+    elif ctx.result_dir is not None and (ctx.result_dir / "trajectory.json").exists():
+        try:
+            from quantui.results_storage import load_trajectory
+
+            frames, _ = load_trajectory(ctx.result_dir)
+        except Exception:  # noqa: BLE001 — the plot does not need them
+            frames = []
+    hartree_to_kcal = 627.5094740631
+    e_min = min(energies)
+    result = _types_mod.SimpleNamespace(
+        scan_type="irc",
+        atom_indices=[],
+        coordinates_list=frames,
+        scan_parameter_values=s_vals,
+        energies_hartree=energies,
+        energies_relative_kcal=[(e - e_min) * hartree_to_kcal for e in energies],
+        scan_coordinate_label="Reaction coordinate / Å·amu½",
+        converged_all=True,
+    )
+    return bool(app._show_pes_scan_result(result))
+
+
 def pop_pes_trajectory(app: Any, ctx: Any) -> bool:
     """Populate Trajectory panel from live or history PES scan data."""
     traj: list = []

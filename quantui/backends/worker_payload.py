@@ -241,6 +241,24 @@ def ts_result_payload(result, *, trajectory_file: str) -> Dict[str, Any]:
     return payload
 
 
+def irc_result_payload(result, *, trajectory_file: str) -> Dict[str, Any]:
+    """An IRC: the joined path and the ``irc`` block the app saves."""
+    return {
+        "calc_type": "irc",
+        "energy_hartree": result.energy_hartree,  # the transition state
+        "homo_lumo_gap_ev": None,
+        "converged": bool(result.converged),
+        "n_iterations": result.n_steps,
+        "n_steps": result.n_steps,
+        "method": result.method,
+        "basis": result.basis,
+        "formula": result.formula,
+        "solvent": result.solvent,
+        "trajectory_file": trajectory_file,
+        "spectra": {"irc": result.to_spectra()},
+    }
+
+
 def tddft_result_payload(result) -> Dict[str, Any]:
     wavelengths = result.wavelengths_nm()
     return {
@@ -420,7 +438,10 @@ def write_analysis_artifacts(
         except Exception:
             pass
 
-    if calc_type in ("geometry_opt", "transition_state", "pes_scan") and trajectory:
+    if (
+        calc_type in ("geometry_opt", "transition_state", "irc", "pes_scan")
+        and trajectory
+    ):
         e_list = list(energies or [])
         try:
             save_trajectory_xyz(staging_dir, frames=trajectory, energies=e_list)

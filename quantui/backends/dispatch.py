@@ -14,7 +14,9 @@ from .base import CalculationRequest
 from .slurm import SlurmBackend
 
 # Calc types that can consume a History seed geometry.
-_SEED_CALC_TYPES = frozenset({"geometry_opt", "frequency", "tddft", "nmr", "pes_scan"})
+_SEED_CALC_TYPES = frozenset(
+    {"geometry_opt", "irc", "frequency", "tddft", "nmr", "pes_scan"}
+)
 # Calc types that may run a DFT geometry optimization before the main step.
 # "Geometry optimization before the calculation" — mirrors the local run:
 # Frequency / TD-DFT / PES skip it when an (already optimized) seed is
@@ -128,6 +130,8 @@ def build_calculation_request(
     if calc_type == "transition_state":
         # Its own threshold, tighter than an optimization's (ts_search).
         options["fmax"] = float(app._ts_fmax_fi.value)
+        options["max_steps"] = int(app.max_steps_si.value)
+    if calc_type == "irc":
         options["max_steps"] = int(app.max_steps_si.value)
     if calc_type == "geometry_opt":
         from quantui.app_runflow import frozen_atom_indices

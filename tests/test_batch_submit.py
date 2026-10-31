@@ -541,7 +541,7 @@ class TestLauncherMatchesQuantUI:
                             )
                             assert mod.estimate(req) == expected, req
                             checked += 1
-        assert checked == 4 * 8 * 4 * 6 * 2  # every combination compared
+        assert checked == 4 * 9 * 4 * 6 * 2  # every combination compared
 
     def test_estimate_counts_transition_metal_electrons(self, launcher):
         # The old QuantUI table had no Mn/Mo, so these counted as 0 electrons.
@@ -746,6 +746,7 @@ class TestLauncherMatchesQuantUI:
             "single_point",
             "geometry_opt",
             "transition_state",
+            "irc",
             "frequency",
             "tddft",
             "nmr",

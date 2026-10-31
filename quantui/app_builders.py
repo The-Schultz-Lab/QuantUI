@@ -1306,6 +1306,7 @@ def build_shared_widgets(
             "Single Point",
             "Geometry Opt",
             "Transition State",
+            "IRC",
             "Frequency",
             "UV-Vis (TD-DFT)",
             "NMR Shielding",
@@ -1629,6 +1630,14 @@ def build_shared_widgets(
         "Finds a saddle point near this geometry, then checks it has exactly "
         "<b>one imaginary frequency</b>. Start near the barrier top (e.g. the "
         "highest PES-scan point)." + _ts_avail + "</span>"
+    )
+
+    app._irc_note = widgets.HTML(
+        f'<span style="color:{_theme.css.TEXT_SECONDARY};font-size:12px">'
+        "Follows the <b>reaction path</b> downhill from a transition state in "
+        "both directions, to the two minima it connects. Pick your Transition "
+        "State result under <b>Start from</b> and keep its method and basis. "
+        "The step limit applies to each direction." + _ts_avail + "</span>"
     )
 
     app._reorg_note = widgets.HTML(

@@ -61,6 +61,16 @@ def summarize(result: Dict[str, Any], job_dir: Path, attempt: Path) -> List[str]
             lines.append(
                 "  verdict:          " + str(ts["verdict"]).replace("cm⁻¹", "cm-1")
             )
+    if calc == "irc":
+        irc = spectra.get("irc") or {}
+        lines.append(f"  path steps:       {result.get('n_steps', '?')}")
+        lines.append(
+            f"  barrier:          {_num(irc.get('barrier_from_start_kj'), '.1f')} "
+            "kJ/mol from the start of the path, "
+            f"{_num(irc.get('barrier_from_end_kj'), '.1f')} kJ/mol from its end"
+        )
+        if irc.get("verdict"):
+            lines.append("  verdict:          " + str(irc["verdict"]))
     ir = spectra.get("ir") or {}
     if ir.get("frequencies_cm1"):
         freqs = [float(f) for f in ir["frequencies_cm1"]]

@@ -9,6 +9,19 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **IRC calc type** (M-TS TS.3, engine Sella): follows the reaction path
+  downhill from a transition state in both directions, in mass-weighted
+  coordinates, to the two minima it connects. Pick the Transition State
+  result under *Start from*. The card gives the barrier from each side and
+  a verdict; the PES Scan panel plots energy against the reaction coordinate
+  (click a point to jump the Trajectory panel there); Trajectory plays
+  reactant → TS → product; History replays both. Steps of 0.2 Å·amu½ with
+  Sella's gamma at 0.4 (measured: 35–71 SCFs per direction where the
+  defaults stalled); if Sella's inner loop gives out near a minimum, that
+  direction is finished by minimizing and the card says so. PCM supported.
+  Also a batch job (`--calc irc`, usually `--from` a Transition State job;
+  no mid-path resume) in `quantui submit`, `quantui-batch` and the app's
+  SLURM path; `results` prints the barriers and verdict.
 - **Full symmetry labels for D4h, D4, C4v and D2d** vibrational modes
   (square-planar, square-pyramidal and allene-type molecules) instead of
   their D2h/C2v/D2 subgroup labels. B1 and B2 follow the usual convention

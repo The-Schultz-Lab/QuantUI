@@ -441,6 +441,7 @@ _SOLVENT_LABELS = {
     "Frequency": "Implicit solvent (PCM) — Raman is not computed in solvent",
     "UV-Vis (TD-DFT)": "Implicit solvent (PCM) — non-equilibrium excitations",
     "Transition State": "Implicit solvent (PCM) — search and frequency check",
+    "IRC": "Implicit solvent (PCM) — every step of the path",
 }
 
 
@@ -510,7 +511,7 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     app._freq_preopt_cb.description = (
         _PES_PREOPT_DESC if ct == "PES Scan" else _FREQ_PREOPT_DESC_DEFAULT
     )
-    if ct in ("Geometry Opt", "Reorganization Energy", "Transition State"):
+    if ct in ("Geometry Opt", "Reorganization Energy", "Transition State", "IRC"):
         app._freq_preopt_cb.value = False
         app._freq_preopt_cb.layout.display = "none"
     elif ct in ("Frequency", "UV-Vis (TD-DFT)"):
@@ -590,6 +591,16 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
                 layout=layout_fn(gap="8px"),
             ),
             app._ts_note,
+        ]
+    elif ct == "IRC":
+        app._refresh_geo_seed_options()
+        app.calc_extra_opts.children = [
+            widgets.HBox(
+                [app._seed_dd, app._seed_refresh_btn],
+                layout=layout_fn(align_items="center", gap="6px", width="100%"),
+            ),
+            app.max_steps_si,
+            app._irc_note,
         ]
     elif ct == "Reorganization Energy":
         # The neutral and ion legs are real geometry optimizations and the run
@@ -1342,8 +1353,52 @@ def refresh_seed_options(app: Any) -> None:
     ``refresh_{geo,freq,tddft}_seed_options`` wrappers that used to exist here.
     """
     include_freq = getattr(app, "calc_type_dd", None)
+    if include_freq is not None and include_freq.value == "IRC":
+        _refresh_ts_seed_options(app, app._seed_dd)
+        return
     include_freq_seeds = include_freq is not None and include_freq.value == "Frequency"
     _refresh_seed_options(app, app._seed_dd, include_freq_seeds=include_freq_seeds)
+
+
+def _refresh_ts_seed_options(app: Any, dropdown: Any) -> None:
+    """IRC: list Transition State results (same formula as the molecule).
+
+    Unlike the optimization seeds, the geometry is not matched against the
+    current molecule: the transition state an IRC starts from is, by
+    construction, not the guess the user built.
+    """
+    from quantui.results_storage import list_results, load_result
+
+    mol = getattr(app, "_molecule", None)
+    formula = None
+    if mol is not None:
+        try:
+            formula = mol.get_formula()
+        except Exception:
+            formula = None
+    options = [("(use current molecule)", "")]
+    for d in list_results():
+        try:
+            data = load_result(d)
+            if data.get("calc_type") != "transition_state":
+                continue
+            if formula is not None and data.get("formula") != formula:
+                continue
+            if not (d / "trajectory.json").exists():
+                continue
+            ts_block = (data.get("spectra") or {}).get("transition_state") or {}
+            n_imag = ts_block.get("n_imaginary")
+            mark = "1 imag" if n_imag == 1 else f"{n_imag} imag — not a TS"
+            options.append(
+                (
+                    f"⛰ TS · {data['formula']}  {data['method']}/{data['basis']}, "
+                    f"{mark}  —  {data.get('timestamp', d.name[:19])}",
+                    str(d),
+                )
+            )
+        except Exception:
+            continue
+    dropdown.options = options
 
 
 def _gate_preopt_for_seed(app: Any, path_str: str) -> None:
@@ -2359,6 +2414,7 @@ _CALC_TYPE_KEYS: Dict[str, str] = {
     "Single Point": "single_point",
     "Geometry Opt": "geometry_opt",
     "Transition State": "transition_state",
+    "IRC": "irc",
     "Frequency": "frequency",
     "UV-Vis (TD-DFT)": "tddft",
     "NMR Shielding": "nmr",

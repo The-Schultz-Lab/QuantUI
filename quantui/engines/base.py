@@ -14,6 +14,7 @@ CALC_TYPES = (
     "single_point",
     "geometry_opt",
     "transition_state",
+    "irc",
     "frequency",
     "tddft",
     "nmr",

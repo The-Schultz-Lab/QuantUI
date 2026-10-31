@@ -246,7 +246,7 @@ def _ingest_with_sidecars(
     payload: dict[str, Any],
 ) -> Path:
     if calc_type := payload.get("calc_type"):
-        if calc_type in ("geometry_opt", "pes_scan"):
+        if calc_type in ("geometry_opt", "irc", "pes_scan"):
             _copy_trajectory(staging, saved_dir, payload)
     _copy_staging_sidecars(staging, saved_dir, payload)
     _finalize_history_entry(saved_dir)
@@ -374,6 +374,11 @@ def completion_summary_html(saved_dir: Path, payload: dict[str, Any]) -> str:
             "frequencies_cm1"
         ) or []
         lines.append(f"Modes: {len(freqs)}<br>")
+    if calc_type == "irc":
+        block = (payload.get("spectra") or {}).get("irc") or {}
+        lines.append(f"Path steps: {payload.get('n_steps', '?')}<br>")
+        if block.get("verdict"):
+            lines.append(f"{html.escape(str(block['verdict']))}<br>")
     if calc_type == "transition_state":
         ts = (payload.get("spectra") or {}).get("transition_state") or {}
         lines.append(f"Search steps: {payload.get('n_steps', '?')}<br>")

@@ -65,7 +65,7 @@ quantui-batch: run QuantUI calculations as Slurm batch jobs.
       FILE is an .xyz file or a QuantUI request .json. One job per file.
         --preset NAME      named settings from your course (see: presets);
                            any option below overrides the preset
-        --calc TYPE        single_point, geometry_opt, transition_state,
+        --calc TYPE        single_point, geometry_opt, transition_state, irc,
                            frequency, tddft, nmr, pes_scan,
                            reorganization_energy
         --method NAME      e.g. B3LYP          --basis NAME   e.g. def2-SVP
@@ -80,7 +80,8 @@ quantui-batch: run QuantUI calculations as Slurm batch jobs.
   quantui-batch submit --from JOB --calc TYPE [options]
       Start from JOB's optimized geometry (a geometry_opt, transition_state
       or frequency job, or one run with --preopt). If JOB is still running,
-      the new job waits for it to succeed.
+      the new job waits for it to succeed. An IRC usually starts this way:
+      submit --from MY-TS-JOB --calc irc
   quantui-batch estimate FILE... [options]
       Print the cores, memory and time a job would get. Submits nothing.
   quantui-batch status [-n N | --all]
@@ -1543,6 +1544,16 @@ def summarize(result, job_dir, attempt):
             lines.append(
                 "  verdict:          " + str(ts["verdict"]).replace("cm⁻¹", "cm-1")
             )
+    if calc == "irc":
+        irc = spectra.get("irc") or {}
+        lines.append(f"  path steps:       {result.get('n_steps', '?')}")
+        lines.append(
+            f"  barrier:          {_num(irc.get('barrier_from_start_kj'), '.1f')} "
+            "kJ/mol from the start of the path, "
+            f"{_num(irc.get('barrier_from_end_kj'), '.1f')} kJ/mol from its end"
+        )
+        if irc.get("verdict"):
+            lines.append("  verdict:          " + str(irc["verdict"]))
     ir = spectra.get("ir") or {}
     if ir.get("frequencies_cm1"):
         freqs = [float(f) for f in ir["frequencies_cm1"]]

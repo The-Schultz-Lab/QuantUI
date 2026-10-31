@@ -36,6 +36,7 @@ from .batch_input import SOLVENT_CALC_TYPES
 from .registry import JobRegistry, parse_attempt_dir_name
 from .worker_payload import (
     freq_result_payload,
+    irc_result_payload,
     molecule_from_dict,
     molecule_from_request,
     molecule_to_dict,
@@ -69,6 +70,7 @@ _SUPPORTED_CALC_TYPES = frozenset(CALC_TYPES)
 # - reorganization_energy: gas-phase optimizations + solvated single
 #   points (documented in reorganization_energy.py).
 # - transition_state: solvated search steps and frequency check (as the app).
+# - irc: every step of the path solvated.
 # nmr and pes_scan stay gas-phase only.
 # Defined in batch_input so `quantui submit` and the quantui-batch launcher
 # can refuse a solvated request before it is queued.
@@ -1086,6 +1088,46 @@ def _run_transition_state(
     return result
 
 
+def _run_irc(request: CalculationRequest, staging_dir: Path, log_stream) -> Any:
+    """IRC both ways from the request's geometry, a transition state.
+
+    Usually chained with ``--from`` a Transition State job. There is no
+    resume: each direction starts from a Hessian at the transition state,
+    and the whole path is a few dozen gradients each way.
+    """
+    from quantui.irc import DEFAULT_IRC_DX, DEFAULT_IRC_FMAX, DEFAULT_IRC_STEPS, run_irc
+
+    _log_seed_context(request, staging_dir)
+    molecule = molecule_from_request(request)
+    options = request.options or {}
+    max_steps = int(options.get("max_steps", DEFAULT_IRC_STEPS))
+    n_done = {"forward": 0, "reverse": 0}
+
+    def _on_step(direction: str, _mol: Any, _energy: float) -> None:
+        n_done[direction] += 1
+        share = min(sum(n_done.values()) / max(2 * max_steps, 1), 1.0)
+        _write_progress(
+            staging_dir,
+            "running",
+            f"IRC, {direction} direction, step {n_done[direction] - 1}",
+            10.0 + 85.0 * share,
+        )
+
+    _write_progress(staging_dir, "running", "Following the reaction path", 10.0)
+    return run_irc(
+        molecule,
+        request.method,
+        request.basis,
+        dx=float(options.get("dx", DEFAULT_IRC_DX)),
+        steps=max_steps,
+        fmax=float(options.get("fmax", DEFAULT_IRC_FMAX)),
+        progress_stream=log_stream,
+        solvent=request.solvent,
+        scf_rescue=bool(options.get("scf_rescue", True)),
+        on_step=_on_step,
+    )
+
+
 def _build_payload(
     calc_type: str, outcome: Any, staging_dir: Path, request: CalculationRequest
 ) -> dict[str, Any]:
@@ -1131,6 +1173,22 @@ def _build_payload(
             energies=outcome.energies_hartree,
         )
         return ts_result_payload(outcome, trajectory_file=traj_file)
+    if calc_type == "irc":
+        traj_file = write_trajectory_json(
+            staging_dir,
+            outcome.trajectory,
+            outcome.energies_hartree,
+        )
+        write_analysis_artifacts(
+            staging_dir,
+            calc_type,
+            outcome,
+            charge=request.charge,
+            multiplicity=request.multiplicity,
+            trajectory=outcome.trajectory,
+            energies=outcome.energies_hartree,
+        )
+        return irc_result_payload(outcome, trajectory_file=traj_file)
     if calc_type == "frequency":
         result, molecule = outcome
         write_analysis_artifacts(
@@ -1279,6 +1337,7 @@ def run_worker_request(
         "single_point": _run_single_point,
         "geometry_opt": _run_geometry_opt,
         "transition_state": _run_transition_state,
+        "irc": _run_irc,
         "frequency": _run_frequency,
         "tddft": _run_tddft,
         "nmr": _run_nmr,
