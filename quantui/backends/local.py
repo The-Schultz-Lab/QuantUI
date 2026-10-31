@@ -3,7 +3,7 @@ Local in-kernel execution backend (baseline).
 
 The app still calls ``session_calc.run_in_session`` directly from ``_do_run``.
 This backend exposes capabilities and registry helpers for the future
-``ComputeBackend`` seam without changing default runtime behaviour (CL2.1).
+``ComputeBackend`` seam without changing default runtime behaviour.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ class LocalBackend:
 
     def register_local_run(self, request: CalculationRequest) -> str:
         """
-        Record a local run in the registry (optional telemetry for CL2.3).
+        Record a local run in the registry (optional telemetry).
 
         Does not execute the calculation — callers still invoke session_calc.
         """
@@ -42,5 +42,5 @@ class LocalBackend:
         return request.request_id
 
     def dispatch(self, request: CalculationRequest) -> str:
-        """Reserved for app-layer wiring in CL2.3."""
+        """Reserved for future app-layer wiring."""
         return self.register_local_run(request)

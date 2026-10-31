@@ -18,7 +18,7 @@ logging.getLogger(__name__).addHandler(logging.NullHandler())
 # ``import quantui`` and lightweight entry points (``quantui.cli``,
 # ``quantui.backends.*``, the batch worker's argument parsing) load no
 # numpy / rdkit / ase / plotly / IPython until a name that needs them is
-# used (M-BATCH2 B2.6). On the NCShare login node the eager imports took
+# used. On the NCShare login node the eager imports took
 # ~10 s and numpy could fail outright against the per-user thread limit.
 # ``from quantui import X`` and ``quantui.X`` work as before. Names are not
 # cached here, so a test that patches the defining submodule is seen.

@@ -1,5 +1,5 @@
 """
-SLURM execution path for QuantUIApp (M-CLUSTER2 CL2.3).
+SLURM execution path for QuantUIApp.
 
 Submits batch jobs via :class:`~quantui.backends.slurm.SlurmBackend`, polls the
 on-disk registry + staging logs, and ingests finished single-point results into
@@ -124,7 +124,7 @@ def ingest_finished_jobs_on_startup(app: Any) -> list[Path]:
     submitted over SSH from a login node, while the app usually runs in an
     OnDemand session where ``sbatch`` is absent and the
     Cluster Jobs tab never refreshes. The History tab's Refresh button runs
-    it too (M-BATCH2 B2.10), so a job that finishes while the app is open
+    it too, so a job that finishes while the app is open
     appears without a restart. Skipped
     when no job registry exists yet, so the app does not create
     ``~/.quantui/jobs`` for users who have never run a batch job.
@@ -148,7 +148,7 @@ def ingest_finished_jobs_on_startup(app: Any) -> list[Path]:
 
 
 def batch_jobs_note_html(views: list) -> str:
-    """The History panel's list of batch jobs not finished yet (B2.10)."""
+    """The History panel's list of batch jobs not finished yet."""
     if not views:
         return ""
     rows = []
@@ -385,7 +385,7 @@ def _slurm_job_error_cell(record: JobRecord) -> str:
 
 
 def ingest_new_slurm_attempts(app: Any) -> list[Path]:
-    """Save finished, not-yet-ingested attempts to History (M-JOBDIRS JD.11).
+    """Save finished, not-yet-ingested attempts to History.
 
     Picks up hand-run ``sbatch submit.slurm`` attempts (which the app never
     monitored) and tracked successes nobody reconnected to. The attempt the
@@ -579,7 +579,7 @@ def on_slurm_jobs_cancel_clicked(app: Any, _btn: Any = None) -> None:
 
 
 def resubmit_slurm_job(app: Any, request_id: str) -> tuple[bool, str]:
-    """Resubmit a finished job as a new attempt in its job dir (M-JOBDIRS JD.4).
+    """Resubmit a finished job as a new attempt in its job dir.
 
     Returns ``(ok, user message)``. On success the Calculate tab starts
     monitoring the new attempt.
@@ -842,7 +842,7 @@ def on_slurm_reconnect_clicked(app: Any, _btn: Any = None) -> None:
 
 
 def on_slurm_job_root_changed(app: Any, value: str) -> None:
-    """Validate and persist the SLURM job folder root (M-JOBDIRS JD.1).
+    """Validate and persist the SLURM job folder root.
 
     Blank restores the default. A new root applies to new submissions;
     existing jobs keep their absolute folder paths in the registry.

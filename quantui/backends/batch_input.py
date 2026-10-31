@@ -1,7 +1,7 @@
 """
 Build ``CalculationRequest`` objects for ``quantui submit`` from files.
 
-``quantui submit`` started out (CL2.7) taking only hand-written
+``quantui submit`` started out taking only hand-written
 CalculationRequest JSON. Writing atoms and coordinates as nested JSON arrays
 is the hardest part of running QuantUI from a terminal, so an ``.xyz`` file
 plus a few flags is accepted too: the same request the Calculate tab would
@@ -18,14 +18,12 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .base import CALC_TYPES, CalculationRequest
 
-# Calc types whose worker runner honours options["preopt_before_run"]
-# (single point and NMR since ISSUE.19 #3).
+# Calc types whose worker runner honours options["preopt_before_run"].
 PREOPT_CALC_TYPES = frozenset({"single_point", "nmr", "frequency", "tddft", "pes_scan"})
 # Calc types the batch worker runs with a PCM solvent; it fails any other
 # calc type that asks for one (worker._SOLVENT_SUPPORTED_CALC_TYPES), so a
-# request is refused here, before it waits in the queue. Frequency and
-# TD-DFT joined with B2.2 (DEC-023), Transition State with TS.5; NMR and PES
-# scans stay gas-phase.
+# request is refused here, before it waits in the queue. NMR and PES scans
+# stay gas-phase.
 SOLVENT_CALC_TYPES = frozenset(
     {
         "single_point",
@@ -140,7 +138,7 @@ def request_from_xyz(
         raise BatchInputError(f"{path}: could not read XYZ — {exc}") from exc
     declared = xyz_header_atom_count(text)
     if declared is not None and declared != len(mol.atoms):
-        # B2.11: interactively the app only warns, but an unattended job
+        # Interactively the app only warns, but an unattended job
         # would run a truncated or padded file without anyone seeing it.
         # Checked before the spin check: a cut-off file is the real cause
         # of the odd electron count it usually also has.

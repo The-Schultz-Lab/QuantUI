@@ -30,8 +30,8 @@ Currently shipped subcommands:
   [--depends-on REQUEST_ID|SLURM_JOB_ID] [--partition NAME] [--no-apptainer]
   [--apptainer-image PATH]`` — submit
   one or more ``CalculationRequest`` JSON files to the SLURM batch backend
-  headlessly, with no interactive app/student session involved (M-CLUSTER2
-  CL2.7). Resource sizing defaults to ``estimate_slurm_resources()`` —
+  headlessly, with no interactive app/student session involved. Resource
+  sizing defaults to ``estimate_slurm_resources()`` —
   the same estimator the interactive app uses — unless overridden. Pass
   ``--dry-run`` to print the resolved cores/memory/walltime for each
   request without actually submitting. Respects the same
@@ -294,7 +294,7 @@ def _cmd_setup(args: argparse.Namespace) -> int:
 
 
 def _cmd_submit(args: argparse.Namespace) -> int:
-    """Submit one or more requests (JSON or ``.xyz``) to SLURM (M-CLUSTER2 CL2.7).
+    """Submit one or more requests (JSON or ``.xyz``) to SLURM.
 
     Headless equivalent of the interactive app's Slurm batch path — no
     student session or Voilà app involved. Before this existed, the only
@@ -428,7 +428,7 @@ def _cmd_submit(args: argparse.Namespace) -> int:
         # N requests submitted in one invocation would otherwise trip that
         # cooldown between every pair and fail partway through a
         # legitimate scripted run — sleep it out proactively instead
-        # (this is exactly CL2.7's motivating case: an instructor running
+        # (the motivating case for this command: an instructor running
         # a whole class's worth of jobs, e.g. Lab 2's 30, from one script).
         if submitted_count > 0:
             cooldown = submit_cooldown_seconds()
@@ -468,7 +468,7 @@ def _cmd_submit(args: argparse.Namespace) -> int:
 
 
 def _cmd_results(args: argparse.Namespace) -> int:
-    """Summarize the newest finished attempt of a batch job folder (B2.11)."""
+    """Summarize the newest finished attempt of a batch job folder."""
     from quantui.backends.batch_chain import finished_attempts
     from quantui.backends.result_summary import summarize
 
@@ -497,7 +497,7 @@ def _cmd_results(args: argparse.Namespace) -> int:
 
 
 def _cmd_jobs(args: argparse.Namespace) -> int:
-    """List batch jobs and where each one is (M-BATCH2 B2.9).
+    """List batch jobs and where each one is.
 
     With ``squeue`` on PATH the registry is refreshed from the queue first
     (so finished jobs stop counting against the concurrent-job limit) and
@@ -705,7 +705,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "submit",
         help=(
             "Submit CalculationRequest JSON file(s) to the SLURM batch "
-            "backend headlessly (M-CLUSTER2 CL2.7) — no interactive app."
+            "backend headlessly — no interactive app."
         ),
     )
     submit_parser.add_argument(

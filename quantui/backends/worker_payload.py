@@ -65,7 +65,7 @@ def session_result_payload(result) -> Dict[str, Any]:
         "method": result.method,
         "basis": result.basis,
         "formula": result.formula,
-        # M-ISSUES ISSUE.10 — session_calc.run_in_session() computes these on
+        # session_calc.run_in_session() computes these on
         # every SessionResult, but this function used to drop them before
         # they ever reached result.json: CHEM-3200's Lab 2 In-Lab Part A and
         # Postwork Q2 need the metal's Mulliken charge and the total dipole
@@ -73,23 +73,23 @@ def session_result_payload(result) -> Dict[str, Any]:
         # recoverable as-written. getattr-guarded so an older SessionResult
         # (e.g. the GPU-offload path, where mf.mulliken_pop is
         # NotImplemented and these are already None on the object itself)
-        # still serializes cleanly. See GOTCHAS.md.
+        # still serializes cleanly.
         "mulliken_charges": getattr(result, "mulliken_charges", None),
         "dipole_moment_debye": getattr(result, "dipole_moment_debye", None),
         "dipole_vector_debye": getattr(result, "dipole_vector_debye", None),
         "atom_symbols": getattr(result, "atom_symbols", None),
-        # M-SCF-ROBUST SCFR.5 provenance — "none"/"bootstrap"/"level_shift"/
+        # SCF-rescue provenance — "none"/"bootstrap"/"level_shift"/
         # "failed" (quantui.scf_robust.SCF_RESCUE_*). getattr-guarded so an
-        # older SessionResult (pre-SCFR) still serializes cleanly.
+        # older SessionResult (pre-rescue) still serializes cleanly.
         "scf_rescue_stage": getattr(result, "scf_rescue_stage", "none"),
-        # M-UX2 UXP2.10 — see the other *_result_payload functions' matching
-        # field.
+        # The PySCF class actually dispatched for the SCF (e.g. "RHF", "UKS");
+        # the other *_result_payload functions carry the matching field.
         "scf_variant": getattr(result, "scf_variant", "") or None,
-        # AUDIT F12 — these were computed onto SessionResult but never
-        # reached staging JSON at all (a serialization-layer gap distinct
-        # from _basic_result's ingest-layer one): post-HF correlation
-        # breakdown, solvent/GPU/density-fit provenance, and the AUDIT
-        # F04/F07 dispersion/CC-convergence flags.
+        # These are computed onto SessionResult and must reach the staging
+        # JSON too (a serialization-layer concern distinct from
+        # _basic_result's ingest-layer one): post-HF correlation breakdown,
+        # solvent/GPU/density-fit provenance, and the dispersion /
+        # CC-convergence flags.
         "mp2_correlation_hartree": getattr(result, "mp2_correlation_hartree", None),
         "ccsd_correlation_hartree": getattr(result, "ccsd_correlation_hartree", None),
         "ccsd_t_correction_hartree": getattr(result, "ccsd_t_correction_hartree", None),
@@ -122,7 +122,7 @@ def optimization_result_payload(result, *, trajectory_file: str) -> Dict[str, An
         "gpu_name": getattr(result, "gpu_name", None),
         "solvent": getattr(result, "solvent", None),
         "trajectory_file": trajectory_file,
-        # B2.3: the optimized geometry and its final-SCF dipole / Mulliken
+        # The optimized geometry and its final-SCF dipole / Mulliken
         # charges, so a course step that needs them (CHEM-3200 Lab 3 dipoles)
         # or a chained job (batch_chain) reads them here.
         "final_molecule": (
@@ -135,7 +135,7 @@ def optimization_result_payload(result, *, trajectory_file: str) -> Dict[str, An
 
 
 def _ground_state_fields(result) -> Dict[str, Any]:
-    """Populations / dipole / ⟨S²⟩ of the reference SCF (ISSUE.19 #6).
+    """Populations / dipole / ⟨S²⟩ of the reference SCF.
 
     For Frequency and TD-DFT payloads; ``_basic_result`` on ingest reads the
     same keys as for a single point.
@@ -170,8 +170,8 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
             "Cv_jmolk": getattr(_thermo, "Cv_jmolk", None),
             "Cp_jmolk": getattr(_thermo, "Cp_jmolk", None),
             "symmetry_number": getattr(_thermo, "symmetry_number", None),
-            # AUDIT F18 — pressure and the thermo model itself were never
-            # recorded anywhere; both are fixed by the harmonic-oscillator/
+            # Pressure and the thermo model itself are recorded explicitly;
+            # both are fixed by the harmonic-oscillator/
             # rigid-rotor/ideal-gas model at 1 atm used in freq_calc.py.
             "pressure_atm": getattr(_thermo, "pressure_atm", 1.0),
             "approximation": "ideal_gas_rigid_rotor_harmonic_oscillator",
@@ -188,9 +188,9 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
         "method": result.method,
         "basis": result.basis,
         "formula": result.formula,
-        # M-UX2 UXP2.10 — see session_result_payload's matching field.
+        # See session_result_payload's matching field.
         "scf_variant": getattr(result, "scf_variant", "") or None,
-        # AUDIT F12 — was never serialized, though FreqResult carries it.
+        # FreqResult carries it, so serialize it.
         "density_fit": bool(getattr(result, "density_fit", False)),
         "solvent": getattr(result, "solvent", None),
         "gpu_used": bool(getattr(result, "gpu_used", False)),
@@ -203,13 +203,13 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
                 "raman_activities": list(getattr(result, "raman_activities", []) or []),
                 "zpve_hartree": result.zpve_hartree,
                 "displacements": displacements,
-                # AUDIT F18 — thermo (H, S, G) was computed by freq_calc.py
-                # but discarded here; the saved JSON had only frequencies,
-                # intensities, activities, displacements, and ZPVE.
+                # Thermo (H, S, G) computed by freq_calc.py; without it the
+                # saved JSON would hold only frequencies, intensities,
+                # activities, displacements, and ZPVE.
                 "thermo": _thermo_payload,
-                # B2.5 — set when the job stepped off a saddle point.
+                # Set when the job stepped off a saddle point.
                 "imaginary_mode_retry": getattr(result, "imaginary_mode_retry", None),
-                # D1 — force check at the Hessian geometry.
+                # Force check at the Hessian geometry.
                 "max_force_ev_per_ang": getattr(result, "max_force_ev_per_ang", None),
             },
             "molecule": {
@@ -223,7 +223,7 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
 
 
 def ts_result_payload(result, *, trajectory_file: str) -> Dict[str, Any]:
-    """A Transition State result (M-TS TS.5): the frequency check's payload,
+    """A Transition State result: the frequency check's payload,
     plus the search path and the ``transition_state`` verdict block the app
     saves (``TSResult.to_spectra``)."""
     payload = freq_result_payload(result.freq, result.molecule)
@@ -252,16 +252,15 @@ def tddft_result_payload(result) -> Dict[str, Any]:
         "method": result.method,
         "basis": result.basis,
         "formula": result.formula,
-        # M-UX2 UXP2.10 — see session_result_payload's matching field.
+        # See session_result_payload's matching field.
         "scf_variant": getattr(result, "scf_variant", "") or None,
-        # AUDIT F12 — was never serialized, though TDDFTResult carries it.
+        # TDDFTResult carries it, so serialize it.
         "density_fit": bool(getattr(result, "density_fit", False)),
         "solvent": getattr(result, "solvent", None),
-        # AUDIT F08 (code review follow-up) — per-root convergence detail
-        # never left the worker process; a SLURM-submitted TDDFT run's
-        # History card could show only the folded "converged" bool, never
-        # the per-root tally format_tddft_result shows for an interactive
-        # run.
+        # Per-root convergence detail has to leave the worker process, or a
+        # SLURM-submitted TDDFT run's History card could show only the
+        # folded "converged" bool, never the per-root tally
+        # format_tddft_result shows for an interactive run.
         "td_converged": (
             [bool(c) for c in result.td_converged]
             if getattr(result, "td_converged", None) is not None
@@ -289,9 +288,9 @@ def nmr_result_payload(result) -> Dict[str, Any]:
         "method": result.method,
         "basis": result.basis,
         "formula": result.formula,
-        # M-UX2 UXP2.10 — see session_result_payload's matching field.
+        # See session_result_payload's matching field.
         "scf_variant": getattr(result, "scf_variant", "") or None,
-        # AUDIT F12 — was never serialized, though NMRResult carries it.
+        # NMRResult carries it, so serialize it.
         "density_fit": bool(getattr(result, "density_fit", False)),
         "spectra": {
             "nmr": {
@@ -370,7 +369,7 @@ def reorg_result_payload(result) -> Dict[str, Any]:
 
 def write_worker_result(staging_dir: Path, payload: Dict[str, Any]) -> Path:
     # Atomic: a finished result.json marks a successful attempt, and the app
-    # may scan for it while the worker is writing (M-JOBDIRS JD.11).
+    # may scan for it while the worker is writing.
     result_path = staging_dir / "result.json"
     tmp_path = staging_dir / "result.json.tmp"
     tmp_path.write_text(json.dumps(payload, indent=2))
@@ -401,7 +400,7 @@ def write_analysis_artifacts(
     )
 
     if calc_type == "tddft":
-        # Ground-state orbitals only (ISSUE.19 #6): Energies / Isosurface.
+        # Ground-state orbitals only: Energies / Isosurface.
         save_orbitals(staging_dir, result)
     if calc_type in ("single_point", "geometry_opt", "transition_state", "frequency"):
         save_orbitals(staging_dir, result)

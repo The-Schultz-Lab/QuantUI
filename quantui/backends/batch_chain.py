@@ -49,10 +49,10 @@ def finished_attempts(job_dir: Path) -> List[Path]:
 
 
 def _final_molecule(path: Path) -> Optional[Dict[str, Any]]:
-    """``final_molecule`` from a geometry_opt (B2.3) or transition_state
-    (TS.5) result.json, if recorded.
+    """``final_molecule`` from a geometry_opt or transition_state result.json,
+    if recorded.
 
-    Results written before B2.3 have none; the caller falls back to the
+    Older results have none; the caller falls back to the
     trajectory's last step.
     """
     try:
@@ -83,7 +83,7 @@ def geometry_from_attempt(attempt: Path, calc_type: str) -> Optional[Dict[str, A
             return geo
     if calc_type == "frequency":
         # The molecule the frequencies were computed at: the pre-opt's last
-        # step, or the re-optimized geometry after a saddle-point retry (B2.5).
+        # step, or the re-optimized geometry after a saddle-point retry.
         try:
             result = json.loads((attempt / "result.json").read_text(encoding="utf-8"))
             mol = result["spectra"]["molecule"]

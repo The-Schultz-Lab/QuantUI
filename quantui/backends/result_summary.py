@@ -1,5 +1,5 @@
 """
-Plain-text summary of a batch job's result.json (M-BATCH2 B2.11).
+Plain-text summary of a batch job's result.json.
 
 Used by ``quantui results JOB_DIR`` inside the image. The ``quantui-batch``
 launcher on the login node keeps a standard-library port of ``summarize``

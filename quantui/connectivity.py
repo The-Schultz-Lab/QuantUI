@@ -3,18 +3,19 @@
 RDKit's ``DetermineBonds`` models only organic valence and *raises* on a
 transition metal ("Atom N has no valences defined"), so the whole
 structure → geometry → viewer stack loses the metal. This module provides a
-purely geometric alternative used by the M-METAL work: two atoms are treated as
+purely geometric alternative for metal complexes: two atoms are treated as
 bonded when their separation is within a tolerance of the sum of their covalent
 radii. That covers metal↔donor coordination bonds RDKit can't perceive, without
 any valence model at all.
 
 Shared primitive for:
 
-* **MET.2** — detect a fetched structure that resolved to a *disconnected* salt
-  (cisplatin's name returns 2 NH₃ + 2 HCl + Pt²⁺, not the square-planar complex)
-  and warn instead of silently computing a wrong geometry.
-* **MET.1 / MET.6** — coordination-aware connectivity for geometry handling and
-  for drawing coordination bonds in the viewer.
+* **Salt detection** — detect a fetched structure that resolved to a
+  *disconnected* salt (cisplatin's name returns 2 NH₃ + 2 HCl + Pt²⁺, not the
+  square-planar complex) and warn instead of silently computing a wrong
+  geometry.
+* **Coordination bonds** — coordination-aware connectivity for geometry
+  handling and for drawing coordination bonds in the viewer.
 
 Pure logic — no RDKit, no PySCF, no widgets. Never raises on ordinary input.
 """
@@ -89,7 +90,7 @@ DEFAULT_TOLERANCE = 1.3
 # Coordination-complex metal centres: the transition metals plus the common
 # heavy main-group metals seen as centres. RDKit's organic bond perception can't
 # bond these, and 3Dmol.js's own perception leaves them as lone dots — so the
-# viewer draws their bonds explicitly (MET.6).
+# viewer draws their bonds explicitly.
 COORDINATION_METALS = frozenset(
     {
         # 3d / 4d / 5d transition metals
@@ -175,7 +176,7 @@ def metal_coordination_bonds(
     """Bonds with a metal centre at one end — the coordination bonds to draw.
 
     These are exactly the bonds RDKit / 3Dmol.js miss on a coordination complex,
-    so the viewer draws them itself (MET.6). Purely organic bonds are excluded
+    so the viewer draws them itself. Purely organic bonds are excluded
     (3Dmol.js already renders those).
     """
     return [
@@ -228,7 +229,7 @@ def hill_formula(symbols: Sequence[str]) -> str:
 
     The one shared implementation — :meth:`quantui.molecule.Molecule.get_formula`
     and :func:`quantui.app_runflow._formula_from_symbols` both delegate here
-    (M-ISSUES ISSUE.8) so the convention only has to change in one place.
+    so the convention only has to change in one place.
     """
     counts: Dict[str, int] = {}
     for s in symbols:
@@ -265,7 +266,7 @@ def describe_disconnection(
 
     Names the fragments by formula (grouping identical ones with an ``N×``
     multiplier), so a student sees *why* the loaded structure is suspect — the
-    cisplatin-salt case (MET.2), where a name resolves to separate ions rather
+    cisplatin-salt case, where a name resolves to separate ions rather
     than the coordinated complex.
     """
     fragments = fragment_formulas(atoms, coords, tolerance)
@@ -311,7 +312,7 @@ def disconnection_note(
     coords: Sequence[Sequence[float]],
     tolerance: float = DEFAULT_TOLERANCE,
 ) -> Optional[str]:
-    """Source-neutral version of :func:`describe_disconnection` (ISSUE.19 #9).
+    """Source-neutral version of :func:`describe_disconnection`.
 
     Shown for every load (XYZ, library, upload, edits, History), where a
     deliberate dimer or ion pair is as likely as a broken structure.

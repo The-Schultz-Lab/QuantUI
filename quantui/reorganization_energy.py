@@ -32,8 +32,8 @@ the rest of QuantUI: :func:`quantui.optimizer.optimize_geometry` for the
 relaxations and :func:`quantui.session_calc.run_in_session` for the
 single-point cross evaluations.
 
-Scope and approximations (AUDIT additional-concerns)
------------------------------------------------------
+Scope and approximations
+------------------------
 The core four-point energy differences above are exact given the four
 single-point energies; the two approximations worth being explicit about
 are in how those energies are obtained:
@@ -90,8 +90,8 @@ class ReorgChannelResult:
         lambda2_hartree: Neutral relaxation energy λ₂ (Ha).
         lambda_hartree: Total reorganization energy λ = λ₁ + λ₂ (Ha).
         converged: True if every SCF/opt feeding this channel converged.
-        s2_*: ⟨S²⟩ at the same four points as the ``e_*`` energies
-            (ISSUE.12); ``None`` for a closed-shell point. Compare with
+        s2_*: ⟨S²⟩ at the same four points as the ``e_*`` energies;
+            ``None`` for a closed-shell point. Compare with
             :func:`ideal_s2` to spot a spin-contaminated SCF, which gives a
             wrong energy and so a wrong λ.
     """
@@ -107,14 +107,14 @@ class ReorgChannelResult:
     lambda2_hartree: float
     lambda_hartree: float
     converged: bool
-    # REORG.2 — the ion-optimized geometry. It was computed and discarded
+    # The ion-optimized geometry. It was computed and discarded
     # before, which made the four energies impossible to interpret after the
     # fact: lambda measures how far the molecule relaxed on becoming an ion,
     # and without R_ion there is nothing to compare R_neutral against.
-    # Optional so results loaded from a pre-REORG.2 save still construct.
+    # Optional so results loaded from an older save still construct.
     ion_molecule: Optional[Molecule] = None
-    # ISSUE.12 — ⟨S²⟩ per point, None when closed shell (or a pre-ISSUE.12
-    # save). Same naming as the e_* energies they belong to.
+    # ⟨S²⟩ per point, None when closed shell (or a save written before these
+    # fields existed). Same naming as the e_* energies they belong to.
     s2_neutral_at_neutral: Optional[float] = None
     s2_ion_at_ion: Optional[float] = None
     s2_ion_at_neutral: Optional[float] = None
@@ -145,8 +145,8 @@ def reorg_geometries(channels: list, neutral_geometry: dict) -> list[dict]:
     """The DISTINCT geometries behind a run, each labelled with its energies.
 
     Takes the saved-payload shape (plain dicts), so the live and History paths
-    build the identical list — the same one-renderer discipline that fixed
-    REORG.1.
+    build the identical list — one renderer, so the live and History views
+    cannot disagree.
 
     Deduplicated by construction: R_neutral is shared by every channel and
     appears once. A hole+electron run therefore yields three entries
@@ -165,7 +165,7 @@ def reorg_geometries(channels: list, neutral_geometry: dict) -> list[dict]:
                 "atoms": list(neutral_geometry["atoms"]),
                 "coordinates": [list(c) for c in neutral_geometry["coordinates"]],
                 "note": ("E_neutral(R_neutral)" + (f", {shared}" if shared else "")),
-                # Carried through for exports (M-EXPORT2 EXP2.1/.4) — the
+                # Carried through for exports — the
                 # viewer doesn't need these, but an XYZ file with no charge/
                 # multiplicity is a structure nobody downstream can rerun.
                 "charge": neutral_geometry.get("charge", 0),
@@ -345,7 +345,7 @@ class ReorganizationEnergyResult:
 # Helpers
 # ============================================================================
 
-#: Keys of the ⟨S²⟩ fields on :class:`ReorgChannelResult` (ISSUE.12).
+#: Keys of the ⟨S²⟩ fields on :class:`ReorgChannelResult`.
 S2_KEYS = (
     "s2_neutral_at_neutral",
     "s2_ion_at_ion",
@@ -464,7 +464,7 @@ def run_reorganization_energy(
             stream in the app, ``sys.stdout`` otherwise).
         solvent: Optional PCM solvent name for the single-point evaluations.
         checkpoint: Optional :class:`~quantui.checkpoint.Checkpoint` for the
-            whole run (M-CHECKPOINT CHK.7). This run is really 2-3 independent
+            whole run. This run is really 2-3 independent
             geometry optimizations — the neutral reference plus one per ion
             channel — and each needs its own resume identity, or one leg's
             trajectory/Hessian would overwrite another's. So *checkpoint*
@@ -486,7 +486,7 @@ def run_reorganization_energy(
             finds its own checkpoint.
         scf_rescue: Whether every SCF here (each single point, each geometry
             optimization step) automatically retries through the shared
-            rescue helper on non-convergence (M-SCF-ROBUST, see
+            rescue helper on non-convergence (see
             :mod:`quantui.scf_robust`). Default ``True``.
 
     Returns:
@@ -537,7 +537,7 @@ def run_reorganization_energy(
     def _leg_checkpoint(
         tag: str, *, charge: int, multiplicity: int, coords: Any
     ) -> Optional[Any]:
-        """Nested checkpoint for one geometry-opt leg (CHK.7), or ``None``.
+        """Nested checkpoint for one geometry-opt leg, or ``None``.
 
         ``checkpoint`` (the whole-run checkpoint) is never passed straight to
         ``optimize_geometry`` — see the docstring above for why each leg needs

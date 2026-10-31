@@ -1,5 +1,5 @@
 """
-Calculation checkpoints — the ``.chk`` parity feature (M-CHECKPOINT).
+Calculation checkpoints — the ``.chk`` parity feature.
 
 A long calculation that dies partway currently throws away everything it
 finished. A Geometry Optimization eleven steps into a twelve-step run, a PES
@@ -26,13 +26,13 @@ Layout, under ``~/.quantui/checkpoints`` (override with
 
     <root>/<resume_key>/
         meta.json      identity + status, written atomically
-        scf.chk        PySCF chkfile (CHK.1)
-        opt.traj       ASE trajectory, appended per step (CHK.2)
-        opt.restart    BFGS Hessian state (CHK.2)
-        points.jsonl   one line per completed scan point (CHK.3)
+        scf.chk        PySCF chkfile
+        opt.traj       ASE trajectory, appended per step
+        opt.restart    BFGS Hessian state
+        points.jsonl   one line per completed scan point
         items/<name>/<item_id>.json   one file per completed named-set item
-                                      (CHK.4.1) — e.g. frequency's per-
-                                      displacement SCF results
+                                      — e.g. frequency's per-displacement
+                                      SCF results
 
 Checkpoints live outside the results directory on purpose: a result directory
 is created when a calculation *succeeds*, and the runs that most need a
@@ -137,7 +137,7 @@ class CalcIdentity:
     multiplicity: int = 1
     atom_symbols: tuple = ()
     coords: tuple = ()
-    # AUDIT F10 — calc-type-specific discriminators that don't fit the
+    # Calc-type-specific discriminators that don't fit the
     # generic fields above but still make two runs genuinely different
     # calculations. The only current use is PES scan's (scan_type,
     # *atom_indices): "calc_type" alone was just "pes_scan" for every
@@ -232,8 +232,8 @@ def mark_item_done_at(items_root: Path, item_id: str, payload: dict) -> bool:
     The path-only sibling of :meth:`Checkpoint.mark_item_done`, for callers
     that have only a directory path, not a full ``Checkpoint`` object — the
     exact situation a ``ProcessPoolExecutor`` worker is in: it receives the
-    checkpoint's item-set directory as a plain string through ``initargs``
-    (CHK.4.4), and a ``Checkpoint`` with a live log stream attached is not
+    checkpoint's item-set directory as a plain string through ``initargs``,
+    and a ``Checkpoint`` with a live log stream attached is not
     something safe to pickle across that process boundary.
 
     Safe under concurrent callers writing *different* item ids: each item
@@ -459,7 +459,7 @@ class Checkpoint:
 
     @property
     def run_log_path(self) -> Path:
-        """Accumulated stdout for cancel/resume continuity (CHK.8b / ISSUE.9)."""
+        """Accumulated stdout for cancel/resume continuity."""
         return self.dir / "run.log"
 
     def write_run_log(self, text: str) -> None:
@@ -566,7 +566,7 @@ class Checkpoint:
             return False
         return any(entry.is_dir() and _has_progress_in(entry) for entry in entries)
 
-    # ── Multi-stage runs (CHK.7) ────────────────────────────────────────────
+    # ── Multi-stage runs ────────────────────────────────────────────────────
 
     def sub(
         self,
@@ -606,7 +606,7 @@ class Checkpoint:
             leg_identity, root=self.dir / "legs", log_stream=self._log_stream
         )
 
-    # ── Scan points (CHK.3) ─────────────────────────────────────────────────
+    # ── Scan points ─────────────────────────────────────────────────────────
 
     def append_point(self, payload: dict) -> None:
         """Record one completed scan point. Best-effort, append-only.
@@ -645,9 +645,9 @@ class Checkpoint:
                 points.append(record)
         return points
 
-    # ── Named item sets (CHK.4.1) ───────────────────────────────────────────
+    # ── Named item sets ─────────────────────────────────────────────────────
     #
-    # CHK.3's ``points.jsonl`` assumes completion is a *prefix*: point 0, then
+    # The scan's ``points.jsonl`` assumes completion is a *prefix*: point 0, then
     # 1, then 2, one writer, one file, appended in order. That breaks down for
     # a frequency job's displaced-geometry SCFs, which `freq_ir_workers.py`
     # can run **concurrently** across worker processes — completion order is

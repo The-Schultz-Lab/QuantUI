@@ -33,7 +33,7 @@ def _env_positive_int(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
-# Hard limits for a submission, site-configurable (M-BATCH2 B2.4): NCShare's
+# Hard limits for a submission, site-configurable: NCShare's
 # `common` nodes have 512 GB, but the default stays at the classroom policy.
 # Read at import, like QUANTUI_SLURM_PARTITION; `quantui install-launcher`
 # copies the values into the launcher, so set them in the image environment.
@@ -111,7 +111,7 @@ WALLTIME_OPTIONS = [
 # Site-specific — override via env or config.local import in deployment.
 DEFAULT_PARTITION = os.environ.get("QUANTUI_SLURM_PARTITION", "common")
 
-# Optional site directives (M-BATCH2 B2.1), read per job so a changed
+# Optional site directives, read per job so a changed
 # environment applies without restarting. Each set variable adds one
 # ``#SBATCH`` line, in this order. NCShare GPU jobs, for example, need
 # ``QUANTUI_SLURM_PARTITION=gpu QUANTUI_SLURM_GRES=gpu:h200:1``.
@@ -206,7 +206,7 @@ def default_staging_root() -> Path:
     """Root for SLURM job folders.
 
     Precedence: ``QUANTUI_STAGING_DIR`` > the ``compute.slurm_job_root``
-    user setting (M-JOBDIRS JD.1) > ``~/.quantui/staging``.
+    user setting > ``~/.quantui/staging``.
     """
     override = os.environ.get("QUANTUI_STAGING_DIR")
     if override:
@@ -228,8 +228,8 @@ APPTAINER_BATCH_IMAGE = os.environ.get(
     os.path.expanduser("~/quantui-gpu.sif"),
 )
 
-# Shell block that gives every run of submit.slurm its own attempt dir
-# (M-JOBDIRS). Numbering is max(existing NN) + 1 under a lock, and ``mkdir``
+# Shell block that gives every run of submit.slurm its own attempt dir.
+# Numbering is max(existing NN) + 1 under a lock, and ``mkdir``
 # without ``-p`` makes the script fail rather than write into an existing
 # directory — an earlier attempt's files are never overwritten, whether the
 # job came from QuantUI's Resubmit or a hand-run ``sbatch submit.slurm``.
@@ -267,7 +267,7 @@ def build_attempt_setup(job_dir: str) -> str:
 # ``--comment=quantui`` tags every QuantUI job so an operator can list them
 # all (``squeue -o "%i %u %j %T %k"``), whoever submitted them and from where.
 # The worker is one process with OpenMP threads, hence one task with
-# ``{cores}`` CPUs (B2.1). ``--cpus-per-task`` also makes Slurm set this
+# ``{cores}`` CPUs. ``--cpus-per-task`` also makes Slurm set this
 # job's own SLURM_CPUS_PER_TASK, so a value inherited from a submitting
 # allocation can no longer set the thread count.
 SLURM_SCRIPT_TEMPLATE = """#!/bin/bash

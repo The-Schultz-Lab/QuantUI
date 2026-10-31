@@ -276,7 +276,7 @@ def parse_xyz(text):
         raise InputError("no atoms found")
     warnings = []  # type: list[str]
     if expected is not None and expected != len(atoms):
-        # B2.11, as quantui submit: an unattended job must not run a
+        # As in quantui submit: an unattended job must not run a
         # truncated or padded file.
         raise InputError(
             f"the first line says {expected} atoms but the file lists "

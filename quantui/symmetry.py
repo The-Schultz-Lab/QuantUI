@@ -1,7 +1,5 @@
 """Molecular point groups; orbital and vibrational-mode symmetry labels.
 
-M-CHEM CHEM.1 (point groups, MO labels), M-SPECTRA2 SPC2.4 (mode labels).
-
 Point-group detection uses PySCF's ``symm.geom.detect_symm``. Its default
 tolerance (1e-5 Bohr) is too strict for typed-in or optimized coordinates
 (NH3 with 4-decimal coordinates comes back as Cs), so detection runs at a
@@ -15,7 +13,7 @@ is C3v), and :class:`MOIrreps` says which group that is. They are numbered
 per irrep in energy order, the textbook way (1a1, 2a1, 1b2, 3a1, 1b1 for
 water).
 
-Vibrational modes (M-SPECTRA2 SPC2.4): :func:`label_mode_irreps` applies
+Vibrational modes: :func:`label_mode_irreps` applies
 the subgroup's operations to the normal-mode displacements, labelling each
 degenerate set by the trace of its representation. Full-group labels come
 back where the subgroup plus degeneracy determines them (C3v, D3h, D3,
@@ -409,7 +407,7 @@ def label_mo_irreps(
 
 
 # ---------------------------------------------------------------------------
-# Vibrational-mode irreps (M-SPECTRA2 SPC2.4)
+# Vibrational-mode irreps
 # ---------------------------------------------------------------------------
 
 #: Modes this close in frequency (cm⁻¹) are treated as one degenerate set.

@@ -15,7 +15,7 @@ def _converged_color(converged: bool) -> str:
 
 
 def signed(x: Any, ndigits: int) -> str:
-    """``{x:+.nf}`` without a negative zero ("−0.0000" for −1e-6, audit D17)."""
+    """``{x:+.nf}`` without a negative zero ("−0.0000" for −1e-6)."""
     return f"{round(float(x), ndigits) + 0.0:+.{ndigits}f}"
 
 
@@ -46,7 +46,7 @@ def friendly_timestamp(ts: Any) -> str:
     """``"2026-10-25_04-31-58-600504"`` → ``"2026-10-25 04:31"``.
 
     Result folders are named by a microsecond timestamp; History, Compare and
-    the Analysis heading showed it raw (audit D16). Anything that doesn't
+    the Analysis heading showed it raw. Anything that doesn't
     parse is returned unchanged.
     """
     from datetime import datetime
@@ -68,8 +68,8 @@ def _method_basis_label(method: str, basis: str, scf_variant: str | None) -> str
     fully automatic from multiplicity — correctly so, never a user toggle —
     but nothing in the results panel used to say which one actually ran. A
     student running Lab 2's six-metal series (5/6 open-shell) asked the
-    instructor directly whether QuantUI even supported UKS (M-UX2 UXP2.10;
-    see GOTCHAS.md). No suffix for "RHF"/"UHF" methods, where the method
+    instructor directly whether QuantUI even supported UKS.
+    No suffix for "RHF"/"UHF" methods, where the method
     name already says it, or for a calc type/older saved result that never
     set ``scf_variant``.
     """
@@ -89,7 +89,7 @@ _OPEN_SHELL_SCF_VARIANTS = frozenset({"UHF", "UKS", "ROHF", "ROKS"})
 def _homo_lumo_gap_label(scf_variant: str | None) -> str:
     """ "HOMO-LUMO gap", qualified "(α)" for an open-shell reference.
 
-    AUDIT additional-concerns — session_calc.py's gap extraction always
+    session_calc.py's gap extraction always
     reads spin channel 0 (alpha) for a 2-D ``mo_energy`` array (its own
     comment: "UHF: ... use alpha spin for the gap estimate"). The result
     card never said so, presenting a single-channel number as if it were
@@ -124,7 +124,7 @@ def _result_card_table_open() -> str:
 
 
 def _s2_html(s2: Any, multiplicity: Any) -> str:
-    """'0.7533 (ideal 0.7500)' plus a warning when spin-contaminated (ISSUE.12)."""
+    """'0.7533 (ideal 0.7500)' plus a warning when spin-contaminated."""
     from quantui.reorganization_energy import ideal_s2, spin_contaminated
 
     text = f"{float(s2):.4f}"
@@ -219,7 +219,7 @@ def _result_extra_rows(get: Any) -> str:
             "(approximate 2-electron integrals)</span></td></tr>"
         )
 
-    # AUDIT additional-concerns — session_calc.py extracts both properties
+    # session_calc.py extracts both properties
     # from ``mf`` (the HF/DFT reference) even for MP2/CCSD/CCSD(T), which
     # never builds a correlated density here. That is a real, potentially
     # intentional teaching simplification (a correlated dipole/population
@@ -268,7 +268,7 @@ def _result_extra_rows(get: Any) -> str:
 
 def format_result(r: Any) -> str:
     """Format a single-point-style result card."""
-    # AUDIT F07 — for CCSD/CCSD(T), r.converged also folds in the CC
+    # For CCSD/CCSD(T), r.converged also folds in the CC
     # amplitude solve's own convergence, so a bare "SCF converged" label
     # would misleadingly blame the reference SCF for a CC-only failure.
     _conv_label = (
@@ -350,7 +350,7 @@ def format_opt_result(r: Any) -> str:
 
 
 def _point_group_html(get: Any) -> str:
-    """Point group of the result's geometry as HTML, or '' (M-CHEM CHEM.1).
+    """Point group of the result's geometry as HTML, or ''.
 
     Reads ``pyscf_mol_atom`` (live results) or the saved frequency
     ``spectra.molecule`` block; other saved results carry no geometry here.
@@ -417,7 +417,7 @@ def _solvent_row(solvent: Any, note: str) -> str:
 
 
 def saddle_retry_rows(block: Optional[dict]) -> str:
-    """Result-card row for a saddle-point retry (B2.5), live or from History.
+    """Result-card row for a saddle-point retry, live or from History.
 
     *block* is ``FreqResult.imaginary_mode_retry`` /
     ``result.json`` ``spectra.ir.imaginary_mode_retry``.
@@ -453,7 +453,7 @@ def _thermo_card_rows(
     g_hartree: float,
     energy_hartree: Optional[float],
 ) -> str:
-    """Thermochemistry rows for the Frequency card, live and History (D6).
+    """Thermochemistry rows for the Frequency card, live and History.
 
     H and G are shown in hartree with their thermal correction relative to the
     electronic energy in kJ/mol. The old absolute G in kJ/mol (e.g. −200595
@@ -490,7 +490,7 @@ def _thermo_card_rows(
 
 
 def stationary_point_rows(max_force: Optional[float]) -> str:
-    """Result-card rows for the input-geometry force check (D1), live or History.
+    """Result-card rows for the input-geometry force check, live or History.
 
     Harmonic frequencies and thermochemistry assume a stationary point (zero
     gradient). Nothing is shown for results saved before the check existed.
@@ -603,7 +603,7 @@ def _basic_rows(get: Any, conv_label: str, conv_text: str, conv_color: str) -> s
 def _frequency_list_html(r: Any, *, limit: int = 9) -> str:
     """``1797 (a<sub>1</sub>), 4349 (a<sub>1</sub>), 4673 (b<sub>2</sub>)``.
 
-    Real modes in ascending order, each with its symmetry label (SPC2.4)
+    Real modes in ascending order, each with its symmetry label
     when the displacements and geometry are on the result.
     """
     freqs = [float(f) for f in (getattr(r, "frequencies_cm1", None) or [])]
@@ -650,10 +650,9 @@ def format_freq_result(r: Any) -> str:
     """Format a frequency-analysis result card.
 
     Same rows, in the same order, as the History card for the result
-    (:func:`format_past_result`) — they used to show different fields
-    (M-UIPOLISH P5).
+    (:func:`format_past_result`) — they used to show different fields.
     """
-    # AUDIT F15 — r.converged now also requires the Hessian/harmonic-
+    # r.converged now also requires the Hessian/harmonic-
     # analysis step to have completed, not just the reference SCF, so the
     # row is labeled/colored on overall status rather than "SCF converged".
     _conv = "Yes" if r.converged else "No (treat with caution)"
@@ -697,7 +696,7 @@ def format_freq_result(r: Any) -> str:
 
 
 def ts_verdict_rows(block: Optional[dict]) -> str:
-    """Result-card rows for a transition-state search (M-TS TS.2).
+    """Result-card rows for a transition-state search.
 
     *block* is the ``transition_state`` spectra entry
     (:meth:`quantui.ts_search.TSResult.to_spectra`), so the live and History
@@ -734,7 +733,7 @@ def ts_verdict_rows(block: Optional[dict]) -> str:
 
 
 def format_ts_result(r: Any) -> str:
-    """Format a transition-state search result card (M-TS TS.2)."""
+    """Format a transition-state search result card."""
     _rows = f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Energy</td>' f'<td style="color:{_theme.css.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>' + ts_verdict_rows(
         r.to_spectra()
     ) + _solvent_row(
@@ -754,7 +753,7 @@ def format_ts_result(r: Any) -> str:
 
 def format_tddft_result(r: Any) -> str:
     """Format a TD-DFT / UV-Vis result card."""
-    # AUDIT F08 — r.converged now folds in per-root TD convergence, so the
+    # r.converged now folds in per-root TD convergence, so the
     # row is labeled/colored on overall status, not just the ground SCF.
     _conv = "Yes" if r.converged else "No (treat with caution)"
     _cc = _converged_color(r.converged)
@@ -822,7 +821,7 @@ def format_nmr_result(r: Any) -> str:
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Reference</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.reference_compound} ({r.method}/{r.basis})</td></tr>'
     )
-    # AUDIT F17 — surface a fallback-reference substitution explicitly
+    # Surface a fallback-reference substitution explicitly
     # rather than letting the row above imply an exact-match reference.
     if getattr(r, "is_fallback_reference", False):
         _ref_key = getattr(r, "reference_key", "") or "a different level of theory"
@@ -864,7 +863,7 @@ def format_nmr_result(r: Any) -> str:
             "</td></tr>"
         )
 
-    # M4 audit fix (2026-07-14): the reference shielding constants table only
+    # The reference shielding constants table only
     # covers a handful of method/basis combinations; any other combination
     # silently substitutes the B3LYP/6-31G* constants, which can shift the
     # reported ppm values by several ppm relative to a properly calibrated
@@ -986,7 +985,7 @@ def _attach_relaxation_from_saved(payload: list[dict], data: dict) -> None:
 
 
 def _attach_relaxation(payload: list[dict], result: Any = None) -> None:
-    """Add RMSD / largest-atom-shift to each channel, in place (REORG.4).
+    """Add RMSD / largest-atom-shift to each channel, in place.
 
     Computed at DISPLAY time from geometries that are already stored, rather
     than persisted as another number that could drift out of step with the
@@ -1049,8 +1048,8 @@ def reorg_comparison_html(entries: list[tuple[str, dict]]) -> str:
 
     # theme.BORDER, not a hand-picked grey. Dark mode is a whole-page colour
     # inversion, so a light grey rule inverts to near-black on a near-black page
-    # and vanishes — the defect THEME.5 fixed, and which this table reintroduced
-    # until test_retired_border_greys_are_gone_from_in_app_chrome caught it.
+    # and vanishes — a defect this table once reintroduced, until
+    # test_retired_border_greys_are_gone_from_in_app_chrome caught it.
     th = f"text-align:left;padding:6px 12px;border-bottom:2px solid {_theme.css.BORDER}"
     td = f"padding:5px 12px;border-bottom:1px solid {_theme.css.BORDER}"
     head = (
@@ -1142,10 +1141,10 @@ def reorg_channels_html(channels: list[dict]) -> str:
                 f"mult {ch.get('ion_multiplicity', '?')}",
             ),
         ]
-        # Geometry relaxation (REORG.4): what λ physically measures. Only
+        # Geometry relaxation: what λ physically measures. Only
         # present once the ion geometry is saved, so older results simply omit
         # these rows rather than showing blanks.
-        # ⟨S²⟩ per open-shell point (ISSUE.12); absent on older saves.
+        # ⟨S²⟩ per open-shell point; absent on older saves.
         from quantui.reorganization_energy import s2_points
 
         _neutral_mult = (ch.get("neutral_geometry") or {}).get("multiplicity", 1)
@@ -1171,7 +1170,7 @@ def reorg_channels_html(channels: list[dict]) -> str:
             f'<table style="margin-top:2px;font-size:13px;border-collapse:collapse">'
             f"{body}</table></div>"
         )
-    # AUDIT additional-concerns — "Ion state" above reports a multiplicity
+    # "Ion state" above reports a multiplicity
     # chosen by electron-count parity/minimal spin (see
     # reorganization_energy._ion_multiplicity's own docstring), which is a
     # convenient default, NOT a ground-state determination — most relevant
@@ -1196,7 +1195,7 @@ def _ev(hartree: Any) -> str:
 
 
 def reorg_missing_data_notice() -> str:
-    """Shown on a reorganization-energy result saved before REORG.1.
+    """Shown on a reorganization-energy result saved without its channel data.
 
     Those runs never wrote their channel data, and it cannot be recovered — λ
     is two geometry optimizations and four SCF energies. So the card says so
@@ -1248,7 +1247,7 @@ def slurm_history_marker(data: dict[str, Any]) -> str:
     """Short History-list marker for a SLURM result, e.g. ``🖥 SLURM 812345·a2 ``.
 
     Empty for local results and for results saved before SLURM provenance
-    was recorded (M-JOBDIRS JD.6).
+    was recorded.
     """
     if data.get("execution_backend") != "slurm":
         return ""
@@ -1335,7 +1334,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     )
     _conv = "Yes" if data.get("converged") else "No (treat results with caution)"
     _cc = _converged_color(bool(data.get("converged")))
-    # AUDIT F07/F08/F15 (code review follow-up) — data["converged"] already
+    # data["converged"] already
     # folds in CC-amplitude (post-HF), TD-root (tddft), or Hessian
     # (frequency) convergence on top of the reference SCF's own status,
     # exactly like the live cards (format_result/format_freq_result/
@@ -1359,18 +1358,17 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     _extra += _slurm_provenance_row(data)
 
     # The saved thumbnail (a light, tiny copy of this card) was unreadable,
-    # and glaring in Dark theme; the card itself carries the same data
-    # (M-UIPOLISH V5).
+    # and glaring in Dark theme; the card itself carries the same data.
     _thumb_html = ""
 
-    # AUDIT F18 — restore persisted frequency thermochemistry into the
+    # Restore persisted frequency thermochemistry into the
     # History card. Older saved results (or a Hessian-only run with no
     # thermo block) have no "thermo" key at all; that's a silent no-op,
     # not an error.
     _thermo_html = ""
     if ct == "frequency":
         # Same order as the live card (format_freq_result): warning, basics,
-        # modes, extras, thermochemistry (M-UIPOLISH P5).
+        # modes, extras, thermochemistry.
         _ir_block = (data.get("spectra") or {}).get("ir") or {}
         _rows = (
             stationary_point_rows(_ir_block.get("max_force_ev_per_ang"))
@@ -1390,7 +1388,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
                 energy_hartree=data.get("energy_hartree"),
             )
 
-    # Reorganization-energy channels (REORG.1). This is the reported bug: the
+    # Reorganization-energy channels. This is the reported bug: the
     # card came back without the numbers the calculation exists to produce.
     # Keyed on the calc type AND the payload, so a reorg result saved before λ
     # persistence gets an explanation instead of a silently incomplete card.

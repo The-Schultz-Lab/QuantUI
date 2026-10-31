@@ -79,7 +79,7 @@ def plot_nmr_spectrum(
     # Equivalent nuclei (same δ within 0.05 ppm) share one stick, labelled
     # with every atom and as tall as their count — the integration a student
     # reads off a real spectrum. Separate labels used to print on top of
-    # each other (M-UIPOLISH P4).
+    # each other.
     groups: List[List[Tuple[int, float]]] = []
     for idx, delta in pairs:
         if groups and abs(groups[-1][-1][1] - delta) < 0.05:

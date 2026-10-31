@@ -14,7 +14,7 @@ from IPython.display import HTML, display
 
 from . import theme as _theme
 
-# ══ HISTORY SEARCH / FACETED FILTER (HIST.7) ══════════════════════════════
+# ══ HISTORY SEARCH / FACETED FILTER ═════════════════════════════════════
 #
 # The History browser caches the parsed ``result.json`` of every saved calc as
 # a list of entry dicts on ``app._history_entries`` (built in

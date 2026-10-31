@@ -156,7 +156,7 @@ def _cpu_raman_activities_fd(
 ) -> List[float]:
     """CPU Raman via pyscf-properties polarizability + geometry FD.
 
-    ``checkpoint``/``resume`` (M-CHECKPOINT CHK.4.4) mirror
+    ``checkpoint``/``resume`` mirror
     :func:`quantui.freq_calc.run_freq_calc`'s displacement checkpointing,
     under a separate named item set (``"raman_displacements"``) so this
     loop's per-displacement records can never collide with the IR loop's
@@ -182,11 +182,11 @@ def _cpu_raman_activities_fd(
     _coords0 = mol.atom_coords().copy()
     _total = _n_atoms * 3 * 2
 
-    # --- M-CHECKPOINT CHK.4: resume already-banked displacements ---
+    # --- Resume already-banked displacements ---
     # Single source of truth for every displacement's polarizability,
     # whichever path produced it (resumed, parallel pool, serial fallback) —
     # the assembly step below reads only from this dict, which is what
-    # makes it a proper CHK.4.5 gate.
+    # makes it a proper assembly gate.
     _alphas: dict = {}
     if checkpoint is not None and resume:
         for _item_id, _payload in checkpoint.completed_items(_ITEM_SET_NAME).items():
@@ -244,7 +244,7 @@ def _cpu_raman_activities_fd(
     from quantui import freq_ir_workers as _ir_par
     from quantui import freq_raman_workers as _ram_par
 
-    # AUDIT additional-concerns — see freq_calc.py's matching comment:
+    # See freq_calc.py's matching comment:
     # available_cpu_count() honors SLURM_CPUS_PER_TASK / cgroup affinity
     # instead of the whole machine's os.cpu_count().
     _cpu_count = _ir_par.available_cpu_count()
@@ -316,8 +316,8 @@ def _cpu_raman_activities_fd(
                             dm0_is_unrestricted,
                             density_fit_used,
                             _ckpt_items_dir,
-                            mol.ecp,  # AUDIT F05
-                            scf_rescue,  # AUDIT F19
+                            mol.ecp,  # ECP mapping, so workers match the reference
+                            scf_rescue,  # honor the caller's rescue choice
                         ),
                     ) as _pool:
                         _futs = {
@@ -372,7 +372,7 @@ def _cpu_raman_activities_fd(
                         {"alpha": alpha.tolist()},
                     )
 
-        # --- CHK.4.5: assembly gate --- runs once, from the shared dict.
+        # --- Assembly gate --- runs once, from the shared dict.
         for atom_idx in range(_n_atoms):
             for ax in range(3):
                 ap = _alphas[(atom_idx, ax, 1)]
@@ -390,7 +390,7 @@ def _cpu_raman_activities_fd(
     # BOHR_TO_ANGSTROM, rescaling only the denominator and leaving the
     # numerator in a0^3 instead of A^3 — a missing BOHR_TO_ANGSTROM**3
     # factor in the derivative, which becomes BOHR_TO_ANGSTROM**6 once
-    # squared into the Raman activity: ~45.54x too large (AUDIT F02).
+    # squared into the Raman activity: ~45.54x too large.
     dalpha_ang = dalpha * (_BOHR_TO_ANG**2)
     nm = np.asarray(displacements, dtype=float)
     if nm.ndim == 2:

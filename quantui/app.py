@@ -808,7 +808,7 @@ h1 {
    only. Two classes out-specifies the single-class rule above, and
    ``!important`` is required to beat its ``!important``. */
 /* The first two selectors cover the historical widgets.Output rendering; the
-   [class*=] selector covers the LiveLog container (M-LOGSCROLL route C), whose
+   [class*=] selector covers the LiveLog container, whose
    class carries a per-app uid suffix. LiveLog also sets the stack inline — this
    is belt-and-braces, since a directly-applied rule beats an inherited one. */
 .quantui-run-output .jp-OutputArea-output,
@@ -821,7 +821,7 @@ h1 {
 
 /* Section headers ------------------------------------------------------- */
 h3 {
-    /* 15 px sentence case (M-UIPOLISH T4): the 11-12 px letter-spaced grey
+    /* 15 px sentence case: the 11-12 px letter-spaced grey
        capitals barely registered as headings. */
     font-size: 15px !important;
     font-weight: 600 !important;
@@ -901,27 +901,27 @@ button.jupyter-button.mod-danger {
 .quantui-result-card table td {
     background: transparent !important;
     /* JupyterLab's rendered-HTML CSS right-aligns cells; with a full-width
-       table that put labels mid-card and values ~700 px away (audit D9). */
+       table that put labels mid-card and values ~700 px away. */
     text-align: left !important;
 }
 .quantui-result-card table.quantui-result-card-table {
     width: auto !important;
 }
 /* Label column hugs its text: a long full-width note row (colspan) used to
-   stretch it to ~380 px, leaving a gap before every value (M-UIPOLISH T5). */
+   stretch it to ~380 px, leaving a gap before every value. */
 .quantui-result-card-table td:first-child:not([colspan]) {
     width: 1% !important;
     white-space: nowrap !important;
 }
 /* Selected row in list boxes (Files, Compare): the browser default was light
-   grey with grey text in Dark theme (M-UIPOLISH V6). */
+   grey with grey text in Dark theme. */
 .widget-select select option:checked,
 .widget-select-multiple select option:checked {
     background: var(--q-surface-info-bg) linear-gradient(0deg, var(--q-surface-info-bg), var(--q-surface-info-bg)) !important;
     color: var(--q-text-strong) !important;
 }
 /* Help and Report Issue open as a right-hand drawer over the app, not a
-   block that pushed every tab down (M-UIPOLISH L14). */
+   block that pushed every tab down. */
 .quantui-drawer {
     position: fixed !important;
     top: 0 !important;
@@ -949,7 +949,7 @@ button.jupyter-button.quantui-history-recent:not(.mod-info):not(.mod-success):no
     height: auto !important;
 }
 .quantui-history-recent:hover { text-decoration: underline !important; }
-/* Activity indicator: a status chip, not a button (audit D15). */
+/* Activity indicator: a status chip, not a button. */
 .quantui-status-chip {
     pointer-events: none !important;
     cursor: default !important;
@@ -1014,7 +1014,7 @@ _HELP_ESC_JS = """
 
 # Plotly charts drawn while their panel was collapsed measure a zero-width
 # container and fall back to 700 px; `responsive` only reacts to window
-# resizes. Opening a panel or switching tabs now fires one (M-UIPOLISH L4).
+# resizes. Opening a panel or switching tabs now fires one.
 _PLOT_RESIZE_JS = """
 (function(){
   if (window.__quantuiPlotResize) { return; }
@@ -1031,7 +1031,7 @@ _PLOT_RESIZE_JS = """
 """
 
 # Bordered 500 px canvas plus its Save-PNG row (measured in Voilà). Was 620 px
-# while an info box sat above the canvas (removed, audit D8).
+# while an info box sat above the canvas (since removed).
 _CALC_VIEWER_MIN_HEIGHT = "540px"
 
 
@@ -1059,7 +1059,7 @@ _RE_CONV = re.compile(r"converged SCF energy\s*=\s*([\-\d\.]+)")
 _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
 # Internal bookkeeping lines hidden from the on-screen log (the saved
 # pyscf.log keeps every line): checkpoint saves are noise to a student, and
-# the status marker reads better as an arrow (M-UIPOLISH L5).
+# the status marker reads better as an arrow.
 _RE_LOG_HIDDEN = re.compile(r"^\[checkpoint\] saved.*(?:\n|$)", re.MULTILINE)
 
 
@@ -1460,7 +1460,7 @@ class _LogCapture:
         return self._buf.getvalue()
 
     def seed_prior(self, text: str) -> None:
-        """Prepend output from an earlier interrupted chunk (resume / ISSUE.9).
+        """Prepend output from an earlier interrupted chunk (resume).
 
         Seeds the capture buffer and the live Output widget so the archived
         ``pyscf.log`` and the on-screen log both show the full story.
@@ -2148,7 +2148,8 @@ class QuantUIApp:
         if loop is not None:
             loop.add_callback(self._refresh_results_browser)
             loop.add_callback(self._populate_compare_list)
-            # Startup is the moment that matters for CHK.6: after a restart
+            # Startup is the moment that matters for the unfinished-work
+            # list: after a restart
             # the targeted resume offer can't fire, because nothing is
             # configured yet.
             loop.add_callback(self._refresh_resume_list)
@@ -2174,7 +2175,7 @@ class QuantUIApp:
             widgets.VBox(
                 [
                     # Title and toolbar share one row; the toolbar wraps
-                    # under the title on narrow windows (M-UIPOLISH L2).
+                    # under the title on narrow windows.
                     widgets.HBox(
                         [
                             self._welcome_header,
@@ -2326,7 +2327,7 @@ class QuantUIApp:
         ):
             _slurm_refresh_jobs_tab(self)
         # Runs save new result folders while Files is out of view; re-list on
-        # entry so it never shows a stale "(empty directory)" (UIA.6). Keeps
+        # entry so it never shows a stale "(empty directory)". Keeps
         # the current folder.
         if change.get("new") == self._tab_index("files"):
             self._refresh_file_browser()
@@ -2573,12 +2574,12 @@ class QuantUIApp:
             ("Raman Spectrum", "_pop_raman_spectrum", False),
             ("Trajectory", "_pop_preopt_trajectory", False),
             # Energies loads the orbital state Isosurface checks, so it stays
-            # ahead of it (see geometry_opt). ISSUE.19 #6 added the last two.
+            # ahead of it (see geometry_opt).
             ("Energies", "_pop_energies", True),
             ("Isosurface", "_pop_isosurface", False),
             ("Populations", "_pop_mulliken", False),
         ],
-        # M-TS TS.2: the frequency check carries the modes; Vibrational opens
+        # The frequency check carries the modes; Vibrational opens
         # first so the imaginary mode can be animated straight away. Energies
         # precedes Isosurface (it loads the orbital state Isosurface checks).
         "transition_state": [
@@ -2591,7 +2592,7 @@ class QuantUIApp:
         ],
         "tddft": [
             ("UV-Vis", "_pop_uv_vis", True),
-            # Ground-state analysis of the reference SCF (ISSUE.19 #6).
+            # Ground-state analysis of the reference SCF.
             ("Energies", "_pop_energies", False),
             ("Isosurface", "_pop_isosurface", False),
             ("Populations", "_pop_mulliken", False),
@@ -2776,7 +2777,7 @@ class QuantUIApp:
     def _assemble_tabs(self) -> None:
         # Two columns on wide screens — molecule + viewer | setup + run — so
         # the right half of the page is no longer empty; they stack below
-        # ~1000 px (M-UIPOLISH L1).
+        # ~1000 px.
         self._calculate_tab_panel = widgets.VBox(
             [
                 self.step_progress.widget,
@@ -2800,7 +2801,7 @@ class QuantUIApp:
         )
 
         # "Calculation complete → View Results / Analysis" sits right under the
-        # Run button, not below the log (M-UIPOLISH L5). Built after run_panel.
+        # Run button, not below the log. Built after run_panel.
         _rp = list(self.run_panel.children)
         _run_row = next(
             i for i, c in enumerate(_rp) if self.run_btn in getattr(c, "children", ())
@@ -2957,7 +2958,7 @@ class QuantUIApp:
         self.mult_si.observe(self._safe_cb(self._sync_mult_to_molecule), names="value")
         self.method_dd.observe(self._safe_cb(self._update_estimate), names="value")
         self.basis_dd.observe(self._safe_cb(self._update_estimate), names="value")
-        # Unfinished-calculations list (CHK.6)
+        # Unfinished-calculations list
         self._resume_list_dd.observe(
             self._safe_cb(self._on_resume_entry_changed), names="value"
         )
@@ -3065,7 +3066,7 @@ class QuantUIApp:
         self.past_refresh_btn.on_click(self._on_past_refresh)
         self.copy_path_btn.on_click(self._on_copy_results_path)
         self.view_log_btn.on_click(self._on_view_log)
-        # History search / faceted filters (HIST.7)
+        # History search / faceted filters
         for _w in (
             self.history_search,
             self.history_method_dd,
@@ -3160,7 +3161,7 @@ class QuantUIApp:
         # Cube + bundle exports
         self._iso_export_cube_btn.on_click(self._on_iso_export_cube)
         self._iso_cancel_btn.on_click(self._safe_cb(self._on_iso_cancel))
-        # Reorg geometry views (REORG.3): both redraw from data already in
+        # Reorg geometry views: both redraw from data already in
         # memory, so they respond directly rather than behind an Apply button.
         for _w in (
             self._reorg_view_toggle,
@@ -3170,23 +3171,22 @@ class QuantUIApp:
             _w.observe(self._safe_cb(self._on_reorg_view_changed), names="value")
         # PNG capture arrives from the browser, so there is no button to bind
         # here — the viewer's own Save-PNG button posts into this Textarea and
-        # ipywidgets syncs it back, firing this observer (ORBX.1).
+        # ipywidgets syncs it back, firing this observer.
         self._orb_png_inbox.observe(
             self._safe_cb(self._on_orb_png_captured), names="value"
         )
-        # Same bridge, own inbox — the reorg-geometry viewer's Save-PNG button
-        # (M-EXPORT2 EXP2.2).
+        # Same bridge, own inbox — the reorg-geometry viewer's Save-PNG button.
         self._reorg_png_inbox.observe(
             self._safe_cb(self._on_reorg_png_captured), names="value"
         )
-        # Same bridge again — the vibrational single-viewer's Save-PNG button
-        # (M-EXPORT2 EXP2.2). Only fires for that path; the legacy per-mode
+        # Same bridge again — the vibrational single-viewer's Save-PNG button.
+        # Only fires for that path; the legacy per-mode
         # plotlymol3d fallback never renders the button.
         self._vib_png_inbox.observe(
             self._safe_cb(self._on_vib_png_captured), names="value"
         )
-        # Molecule (top) viewer — three independent Save-PNG buttons
-        # (M-EXPORT2 EXP2.2), one per output slot (Calculate/Results/
+        # Molecule (top) viewer — three independent Save-PNG buttons,
+        # one per output slot (Calculate/Results/
         # Analysis). Only fires for the py3Dmol backend; see
         # visualization_py3dmol.render_molecule_html's capture_class
         # docstring for why plotlymol has no equivalent button.
@@ -3199,7 +3199,7 @@ class QuantUIApp:
         self._mol_analysis_png_inbox.observe(
             self._safe_cb(self._on_mol_analysis_png_captured), names="value"
         )
-        # Click-to-measure (M-MEASURE MEAS.2/3): a click in the Analysis-tab
+        # Click-to-measure: a click in the Analysis-tab
         # viewer posts an atom index into this inbox the same way the PNG
         # buttons post a data URI.
         self._measure_inbox.observe(
@@ -3220,7 +3220,7 @@ class QuantUIApp:
         self._mulliken_dipole_dir_dd.observe(
             self._safe_cb(self._on_dipole_arrow_changed), names="value"
         )
-        # Persist the grid choice so it survives a relaunch (ORBX.2).
+        # Persist the grid choice so it survives a relaunch.
         self._iso_resolution_dd.observe(
             self._safe_cb(self._on_iso_resolution_changed), names="value"
         )
@@ -3251,7 +3251,7 @@ class QuantUIApp:
                 self._safe_cb(lambda c: _viz_on_thermo_inputs_changed(self, c)),
                 names="value",
             )
-        # M-SURFACES: surface type switches which controls apply.
+        # Surface type switches which controls apply.
         self._iso_surface_dd.observe(
             self._safe_cb(self._on_iso_surface_changed), names="value"
         )
@@ -3490,7 +3490,7 @@ class QuantUIApp:
             return
 
         # Folders first, newest first (result folders, like History); files by
-        # name (M-UIPOLISH V6).
+        # name.
         def _mtime(p: Path) -> float:
             try:
                 return p.stat().st_mtime
@@ -4029,7 +4029,7 @@ class QuantUIApp:
         if self._molecule is None or _render_molecule_html is None:
             return
         # Reserve the viewer's height only once there is a viewer, so the
-        # empty Calculate tab has no blank block (audit D17).
+        # empty Calculate tab has no blank block.
         self.viz_output.layout.min_height = _CALC_VIEWER_MIN_HEIGHT
         backend_to_use = backend if backend is not None else self._viz_backend
         from quantui.app_structure_edit import (
@@ -4268,7 +4268,7 @@ class QuantUIApp:
                     capture_class=_MOL_ANALYSIS_PNG_INBOX_CLASS,
                     show_info=False,
                 )
-                # M-MEASURE: same wiring as the post-calc render path — a
+                # Click-to-measure: same wiring as the post-calc render path — a
                 # backend-toggle switch is still a fresh viewer, so stale
                 # picks from the previous backend must not survive it.
                 from quantui.app_measurement import finalize_analysis_html
@@ -4503,7 +4503,7 @@ class QuantUIApp:
             f'<div style="font-size:12px;color:{_theme.css.TEXT_SUBTLE};margin:2px 0 0 0">'
             f"{resolved_note}. {note}</div>"
         )
-        # A small chip, not a full-width banner on every view (M-UIPOLISH C).
+        # A small chip, not a full-width banner on every view.
         # The platform note matters only where it bites: native Windows, or an
         # engine with a reduced feature set (PyFock).
         import sys as _sys
@@ -4670,7 +4670,7 @@ class QuantUIApp:
                     "⚠ No network detected — resolved offline from the bundled "
                     f"library (not PubChem). {msg}"
                 )
-            # MET.2: a fetched name can resolve to a disconnected ionic salt
+            # A fetched name can resolve to a disconnected ionic salt
             # (cisplatin → 2 NH₃ + 2 HCl + Pt²⁺) rather than the coordinated
             # complex. Warn rather than let a wrong geometry silently feed a run.
             try:
@@ -4815,7 +4815,7 @@ class QuantUIApp:
         """Offer the spin-state helper only for transition-metal molecules.
 
         It used to sit on every Calculate tab (water included) with Fe
-        preselected (audit D17). Now it appears when the molecule contains a
+        preselected. Now it appears when the molecule contains a
         metal it supports, with that metal chosen.
         """
         from quantui.spin_presets import supported_metals
@@ -5079,7 +5079,7 @@ class QuantUIApp:
             self._update_ir_figure(
                 self._ir_mode_toggle.value, self._ir_fwhm_slider.value
             )
-        # Raman follows, so the two spectra line up (M-UIPOLISH L8).
+        # Raman follows, so the two spectra line up.
         if getattr(self, "_last_raman_acts", None):
             self._update_raman_figure(
                 self._raman_mode_toggle.value, self._raman_fwhm_slider.value
@@ -5810,7 +5810,7 @@ class QuantUIApp:
             if label
             else ""
         )
-        # Point group (M-CHEM CHEM.1) — informational; skipped for very
+        # Point group — informational; skipped for very
         # large structures and when PySCF is unavailable.
         _pg_str = ""
         if len(mol.atoms) <= 200:
@@ -5822,7 +5822,7 @@ class QuantUIApp:
                     _pg_str = f" &bull; point group {_pg.summary_html()}"
             except Exception:  # noqa: BLE001 — informational only
                 _pg_str = ""
-        # Disconnected structure (ISSUE.19 #9): checked for every source, not
+        # Disconnected structure: checked for every source, not
         # only Online Search results; worded neutrally since a dimer or ion
         # pair can be deliberate.
         _frag_str = ""
@@ -5941,7 +5941,7 @@ class QuantUIApp:
         callback(*args, **kwargs)
 
     def _install_run_output_scroll_guard(self) -> None:
-        """No-op: superseded by :class:`quantui.live_log.LiveLog` (M-LOGSCROLL).
+        """No-op: superseded by :class:`quantui.live_log.LiveLog`.
 
         This used to inject a ``requestAnimationFrame`` loop that re-pinned the
         live log to the bottom every frame, to out-race ipywidgets' per-line
@@ -6275,7 +6275,7 @@ class QuantUIApp:
             except Exception:  # noqa: BLE001 — fall back to device-agnostic
                 _predicted_gpu_used = None
 
-            # Match session_calc's density-fitting decision (M-DF) so the
+            # Match session_calc's density-fitting decision so the
             # estimate is drawn from the pool the run will land in. Post-HF
             # references are never fitted, so predict False for them.
             _predicted_density_fit: Optional[bool] = None
@@ -6391,11 +6391,11 @@ class QuantUIApp:
         # writing into a finished log.
         log.start_heartbeat()
 
-        # --- Checkpoint for this run (M-CHECKPOINT) ---
+        # --- Checkpoint for this run ---
         # Opened before any calculation starts, because the runs worth
         # checkpointing are exactly the ones that never reach the end. Failure
         # to open one leaves ``_ckpt`` as None and the calc runs
-        # uncheckpointed, which is the pre-M-CHECKPOINT behaviour.
+        # uncheckpointed, which is the behaviour from before checkpointing.
         #
         # Deliberately after ``log`` exists: the checkpoint writes its own
         # provenance lines into the run log, and those lines are the only
@@ -6745,7 +6745,7 @@ class QuantUIApp:
                     method=self.method_dd.value,
                     basis=self.basis_dd.value,
                     progress_stream=log,  # type: ignore[arg-type]
-                    # AUDIT F16 — the app opens _ckpt and resolves _resume
+                    # The app opens _ckpt and resolves _resume
                     # above (used by Geometry Opt / PES Scan / Reorganization
                     # Energy), but never passed either into interactive
                     # Frequency runs, so expensive IR/Raman displacement
@@ -6756,7 +6756,7 @@ class QuantUIApp:
                     resume=_resume,
                     solvent=_run_solvent,
                 )
-                # B2.5 — our pre-opt can stop on a rotor saddle point; step
+                # Our pre-opt can stop on a rotor saddle point; step
                 # off it once and redo the frequencies. Only after a pre-opt
                 # that succeeded (_pre_opt is None when it failed and the
                 # user's geometry, maybe a saddle on purpose, was used).
@@ -6811,7 +6811,7 @@ class QuantUIApp:
                         "Cv_jmolk": getattr(_thermo, "Cv_jmolk", None),
                         "Cp_jmolk": getattr(_thermo, "Cp_jmolk", None),
                         "symmetry_number": getattr(_thermo, "symmetry_number", None),
-                        # AUDIT F18 — the temperature was already tracked on
+                        # The temperature was already tracked on
                         # ThermoData; pressure and the model itself were not,
                         # and neither survived a save. Both are fixed by the
                         # harmonic-oscillator/rigid-rotor/ideal-gas model at
@@ -6829,7 +6829,7 @@ class QuantUIApp:
                         "raman_activities": result.raman_activities,
                         "zpve_hartree": result.zpve_hartree,
                         "displacements": _displacements_serialized,
-                        # AUDIT F18 — thermo (H, S, G) was computed and shown
+                        # Thermo (H, S, G) was computed and shown
                         # live but never made it into the saved result.json.
                         "thermo": _thermo_serialized,
                         "imaginary_mode_retry": result.imaginary_mode_retry,
@@ -6963,7 +6963,7 @@ class QuantUIApp:
                             str(k): v for k, v in result.chemical_shifts_ppm.items()
                         },
                         "reference_compound": result.reference_compound,
-                        # AUDIT F17 — the backend records which reference
+                        # The backend records which reference
                         # shielding constants were actually used and
                         # whether that was a fallback substitution (e.g.
                         # a method/basis combo with no matching reference,
@@ -7825,7 +7825,7 @@ class QuantUIApp:
         stopped early must keep its resumable state.
 
         What happens here is bookkeeping: persist or clear the run log for
-        resume continuity (CHK.8b / ISSUE.9), refresh the resume offer, and
+        resume continuity, refresh the resume offer, and
         prune old checkpoints so the directory doesn't grow without bound.
         """
         try:

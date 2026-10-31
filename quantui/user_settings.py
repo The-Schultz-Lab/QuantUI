@@ -86,7 +86,7 @@ class VizSettings:
 
     default_backend: str = "auto"  # one of _VALID_VIZ_BACKENDS
     vib_framerate_fps: int = _VIB_FPS_DEFAULT  # py3Dmol vib-animation fps
-    # Orbital-isosurface cubegen grid (M-ORBEXPORT ORBX.2). Named rather
+    # Orbital-isosurface cubegen grid. Named rather
     # than numeric so the meaning survives a change to the underlying grid
     # sizes, and so a settings file written by a future version with more
     # presets degrades to the default instead of a nonsense number.
@@ -119,15 +119,15 @@ class ComputeSettings:
     # path. Default **off**: DF is a targeted speedup (big for TD-DFT and larger
     # systems, roughly neutral or slightly slower for small single points), and
     # a teaching tool should not silently approximate integrals. See
-    # quantui.density_fitting and the M-DF roadmap; per-calc-type defaults are
-    # set only once the size crossover is measured (DF.2).
+    # quantui.density_fitting; per-calc-type defaults are set only once the
+    # size crossover is measured.
     density_fit: bool = False
 
     # Where calculations run: in the Jupyter kernel (local) or via SLURM batch
     # (cluster). SLURM is only offered in the UI when ``sbatch`` is available.
     execution_backend: str = "local"
 
-    # Where SLURM job folders are created (M-JOBDIRS JD.1). Empty means the
+    # Where SLURM job folders are created. Empty means the
     # default ``~/.quantui/staging``; clusters with small home quotas should
     # point this at scratch or a project directory. ``QUANTUI_STAGING_DIR``
     # in the environment overrides it when set.
@@ -135,7 +135,7 @@ class ComputeSettings:
 
     # Which quantum chemistry library evaluates integrals and runs SCF.
     # ``auto`` keeps PySCF when both engines are installed; native Windows with
-    # only PyFock selects PyFock. UI wiring lands in PYF.4 — PYF.1 persists only.
+    # only PyFock selects PyFock.
     quantum_engine: str = "auto"
 
     # Whether the IR-intensity finite-difference loop may fan displaced SCFs

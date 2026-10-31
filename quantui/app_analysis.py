@@ -50,8 +50,8 @@ def _set_panel_unavailable_message(app: Any, panel_name: str, message: str) -> N
 
 
 # Panel titles carry a short "— needs <calc type>" hint while the panel has nothing
-# to show for the current result (audit D17), so a student can see which
-# panels apply without opening each one. Panels stay visible (DEC-009).
+# to show for the current result, so a student can see which
+# panels apply without opening each one. Panels stay visible.
 _TITLE_HINT_SEP = " — "
 
 
@@ -82,7 +82,7 @@ def _reset_unavailable_messages_for_context(app: Any, ctx: Any) -> None:
         if panel_name in expected_panels:
             if panel_name == "Trajectory" and calc_label == "Frequency":
                 # Not an error: a Frequency run has a trajectory only when it
-                # optimized first (M-UIPOLISH C).
+                # optimized first.
                 text = (
                     "No optimization steps in this run. Tick <b>Geometry "
                     "optimization before calculation</b> to record a trajectory."
@@ -263,7 +263,7 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     app._last_orb_mo_occ = None
     app._last_orb_method = None
     # A gallery belongs to the previous result: clear it, and drop any build
-    # still running for it (SURF.1).
+    # still running for it.
     app._gallery_token = int(getattr(app, "_gallery_token", 0)) + 1
     _gallery_out = getattr(app, "_orb_gallery_output", None)
     if _gallery_out is not None:
@@ -369,7 +369,7 @@ def order_analysis_panels(app: Any) -> None:
 
     Unavailable panels used to sit in fixed order among the useful ones, so a
     Frequency result showed "needs PES Scan" between Populations and the
-    vibrations (M-UIPOLISH L3).
+    vibrations.
     """
     panel = getattr(app, "analysis_tab_panel", None)
     accordions = list(getattr(app, "_ana_accordions", []) or [])
@@ -410,13 +410,14 @@ def pop_reorg_geometries(app: Any, ctx: Any) -> bool:
     """Populate the Geometries panel for a reorganization-energy result.
 
     Works from a live result OR a saved one by reading the same channel payload
-    both now carry — the shape REORG.1 introduced. That is deliberate: the
+    both now carry (``reorg_channels``). That is deliberate: the
     original bug was two paths reading different things, so this one never had
     the chance to grow a second reader.
 
-    Returns False when the payload is absent, which is exactly the pre-REORG.1
-    case; the panel then stays unavailable rather than showing an empty viewer,
-    and the results card explains why.
+    Returns False when the payload is absent, which is exactly the case for
+    results saved before that payload existed; the panel then stays
+    unavailable rather than showing an empty viewer, and the results card
+    explains why.
     """
     channels, neutral = _reorg_payload(app, ctx)
     if not channels or not neutral:
@@ -764,7 +765,7 @@ def _show_thermochemistry(app: Any, ctx: Any, freq_stub: Any, mol: Any) -> None:
 
 
 def _mode_symmetry_inputs(ctx: Any) -> dict:
-    """Saved displacements + geometry, for mode symmetry labels (SPC2.4)."""
+    """Saved displacements + geometry, for mode symmetry labels."""
     ir = ctx.spectra_data.get("ir", {})
     mol = ctx.spectra_data.get("molecule", {})
     atoms, coords = mol.get("atoms"), mol.get("coords")

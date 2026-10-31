@@ -10,8 +10,8 @@ Typical usage::
     fig = plot_ir_spectrum(result.frequencies_cm1, result.ir_intensities)
     fig = plot_ir_spectrum(freqs, intensities, mode="broadened", fwhm=30.0)
 
-AUDIT additional-concerns — broadened-mode normalization
-----------------------------------------------------------
+Broadened-mode normalization
+----------------------------
 The "broadened" Lorentzian kernel below is HEIGHT-normalized: each peak's
 value at its own center equals the supplied intensity, exactly like the
 stick plot, so switching FWHM only changes peak width, never peak height
@@ -36,7 +36,7 @@ import plotly.graph_objects as go
 
 # x-axis range is low → high wavenumber; ``plot_ir_spectrum(descending=True)``
 # flips it to the FTIR convention (high → low), which the app uses by default.
-# AUDIT additional-concerns — this used to be the FIXED plot range/grid
+# This used to be the FIXED plot range/grid
 # regardless of the actual data: a real water/STO-3G calculation has O-H
 # stretches at 4486.7/4788.3 cm⁻¹, which used to be clipped off the right
 # edge in stick mode (Plotly's xaxis.range) and never even entered the
@@ -112,7 +112,7 @@ def plot_ir_spectrum(
             the FTIR convention. Default ``False`` (low → high).
         labels: Optional symmetry label per mode, aligned with
             *frequencies* (``None`` entries allowed); shown in the stick
-            hover (SPC2.4).
+            hover.
 
     Returns:
         :class:`plotly.graph_objects.Figure` ready for display or wrapping

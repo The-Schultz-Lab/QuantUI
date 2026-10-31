@@ -324,8 +324,8 @@ CACTUS_CONNECT_TIMEOUT_S: float = 4.0
 
 # Bohr radius, in Angstrom — the exact value ``pyscf.data.nist.BOHR`` uses
 # internally, so unit conversions here stay consistent with what PySCF
-# actually computed with. (L audit fix: optimizer.py and freq_calc.py each
-# hand-typed their own slightly different literal for this.)
+# actually computed with. (optimizer.py and freq_calc.py used to each
+# hand-type their own slightly different literal for this.)
 BOHR_TO_ANGSTROM: float = 0.52917721092
 
 # Bundled-library size budget + heavy-atom ceilings.
@@ -334,7 +334,7 @@ LIBRARY_SIZE_BUDGET_BYTES: int = 10 * 1024 * 1024  # 10 MB
 LIBRARY_HEAVY_ATOM_CEILING_CURATED: int = 30  # named drugs run a bit larger
 LIBRARY_HEAVY_ATOM_CEILING_BULK: int = 9  # QM9 caps here anyway
 
-# Common chemical name → Hill formula, for History search (HIST.7).
+# Common chemical name → Hill formula, for History search.
 # The bundled QM9-derived library names its simplest molecules by formula
 # (benzene is stored as "C6H6", water as "H2O", …), so a name search can't
 # resolve them via the library. This curated map fills that gap for classroom
@@ -537,7 +537,7 @@ ATOMIC_NUMBERS: Dict[str, int] = {
 def electron_count(atoms: Any, charge: int) -> int:
     """Total electrons for element symbols *atoms* at *charge*.
 
-    The one electron count (M-BATCH2 B2.8): Molecule, the multiplicity
+    The one electron count: Molecule, the multiplicity
     suggestion, the XYZ loader and the SLURM resource estimate all use it.
     Symbols are title-cased (``"cl"`` → ``"Cl"``); an unknown symbol counts 0.
     """
@@ -688,7 +688,7 @@ def main():
 {geometry}
     '''
     mol.basis = '{basis}'
-    # AUDIT F06 — the resolved ECP mapping (e.g. {{'Na': 'LANL2DZ'}} for
+    # The resolved ECP mapping (e.g. {{'Na': 'LANL2DZ'}} for
     # LANL2DZ/def2 heavy elements, {{}} for an all-electron basis). Without
     # this a heavy-element system runs all-electron here — a different
     # Hamiltonian than the in-app calculation, not just numerical noise.
@@ -731,7 +731,7 @@ def main():
         elif method == 'UHF':
             mf = scf.UHF(mol)
         elif method in ('MP2', 'CCSD', 'CCSD(T)'):
-            # AUDIT F13 — post-HF methods used to fall into the DFT branch
+            # Post-HF methods used to fall into the DFT branch
             # below, setting mf.xc = 'MP2'/'CCSD'/'CCSD(T)' directly and
             # failing with "LibXCFunctional: name '...' not found". The
             # reference is scf.RHF(mol) regardless of spin — a factory
@@ -756,8 +756,8 @@ def main():
 {density_fit_block}{solvent_block}
         energy = _run_scf_with_rescue(mf)
 
-        # AUDIT F13 — MP2/CCSD/CCSD(T) correlation, mirroring
-        # quantui/session_calc.py including its AUDIT F07 convergence
+        # MP2/CCSD/CCSD(T) correlation, mirroring
+        # quantui/session_calc.py including its convergence
         # gating: post-HF work only runs on a converged reference, and
         # CCSD(T) triples only run if the CCSD amplitudes themselves
         # converged, rather than reporting a correlation "correction" on
@@ -825,7 +825,7 @@ def main():
             print()
 {post_scf_block}
             # Save results next to the script so the path is predictable.
-            # AUDIT additional-concerns — quantui.orbital_visualization.
+            # quantui.orbital_visualization.
             # generate_cube_file() requires 'mol_atom'/'mol_basis' (raises
             # ValueError without them: "Re-run the calculation with the
             # updated script template") and reads an optional 'mo_occ' to
@@ -867,8 +867,8 @@ if __name__ == "__main__":
     main()
 """
 
-# Optional sections of PYSCF_SCRIPT_TEMPLATE (ISSUE.19 #7: the export used
-# to write a gas-phase single point whatever the calculation was). Plain
+# Optional sections of PYSCF_SCRIPT_TEMPLATE (without them the export would
+# write a gas-phase single point whatever the calculation was). Plain
 # text, inserted with str.format, so braces here are literal Python.
 SCRIPT_DENSITY_FIT_BLOCK = """
         # Density fitting (RI), as set in the app's Settings. Not used for

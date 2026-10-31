@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 # Defaults also exposed in config.py for the notebook UI
 DEFAULT_FMAX: float = 0.05  # eV/Å — tight enough for educational use
 DEFAULT_OPT_STEPS: int = 200  # generous upper limit for small molecules
-# Pre-optimization before a frequency calculation (M-BATCH2 B2.5). Harmonic
+# Pre-optimization before a frequency calculation. Harmonic
 # frequencies are only meaningful at a stationary point, and the residual
 # forces left at DEFAULT_FMAX are enough to turn soft modes (methyl rotors,
 # torsions) imaginary: CHEM-3200 Lab 4's MoO2(acac)2 came back with 112i and
@@ -70,7 +70,7 @@ FREQ_PREOPT_FMAX: float = 0.01
 
 
 def join_optimizations(first: Any, second: Any) -> Any:
-    """*second* with *first*'s trajectory and energies in front (B2.5).
+    """*second* with *first*'s trajectory and energies in front.
 
     For a re-optimization that started from a displaced copy of *first*'s
     final geometry (saddle-point retry): the joined trajectory runs from
@@ -143,7 +143,7 @@ try:
             self.solvent = solvent
             # Canonical solvent name once PCM has been applied to a step.
             self.solvent_applied: Optional[str] = None
-            # M-SCF-ROBUST — whether each step's SCF goes through the shared
+            # Whether each step's SCF goes through the shared
             # rescue helper on non-convergence (default on; a batch caller
             # can disable it via CalculationRequest.options).
             self.scf_rescue = scf_rescue
@@ -163,7 +163,7 @@ try:
             self.status_label = status_label
             self.expected_steps = expected_steps  # history-based ~N prior
             self._eval_count = 0
-            # AUDIT F04 — None (method doesn't use D3), True (applied at
+            # None (method doesn't use D3), True (applied at
             # every step so far), or False (pyscf.dftd3 unavailable at some
             # step — sticky once seen, since it can't un-happen mid-run).
             self.dispersion_applied: Optional[bool] = None
@@ -244,7 +244,7 @@ try:
 
                 mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
                 mf.xc = resolve_xc(self.method)
-                # AUDIT F04 — this call used to omit progress_stream
+                # This call used to omit progress_stream
                 # entirely, so a missing pyscf.dftd3 gave NO warning
                 # anywhere on the optimizer path (unlike every other DFT
                 # entry point). maybe_apply_d3 now also always logs, but
@@ -255,7 +255,7 @@ try:
                 if self.dispersion_applied is not False:
                     self.dispersion_applied = _dispersion_applied
 
-            # Density fitting (RI), opt-in (M-DF). Off by default; applies to
+            # Density fitting (RI), opt-in. Off by default; applies to
             # every SCF in the optimization when the user enables it.
             from .density_fitting import try_density_fit as _try_density_fit
 
@@ -310,7 +310,7 @@ try:
 
             run_scf_with_rescue(mf, rescue=self.scf_rescue, stream=self.progress_stream)
 
-            # AUDIT F09 — BFGS previously accepted whatever gradient came
+            # BFGS previously accepted whatever gradient came
             # back regardless of mf.converged, so it could satisfy its force
             # criterion using an invalid electronic solution (verified: an
             # H2 optimization near its minimum, with SCF limited to one
@@ -398,7 +398,7 @@ class OptimizationResult:
     # PyFock it records the guarded CuPy request used by its calculator.
     gpu_used: bool = False
     gpu_name: Optional[str] = None
-    # AUDIT F04 — mirrors SessionResult.dispersion_applied: None (method
+    # Mirrors SessionResult.dispersion_applied: None (method
     # doesn't use D3), True/False (does, and pyscf.dftd3 was/wasn't
     # importable during the optimization).
     dispersion_applied: Optional[bool] = None
@@ -593,7 +593,7 @@ def optimize_geometry(
             taken are not repeated. Ignored (with a note to the progress
             stream) when the checkpoint holds nothing usable.
         scf_rescue: Whether each step's SCF automatically retries through the
-            shared rescue helper on non-convergence (M-SCF-ROBUST, see
+            shared rescue helper on non-convergence (see
             :mod:`quantui.scf_robust`). Default ``True``.
         use_gpu: Per-calculation GPU preference. ``False`` disables GPU
             migration; ``None`` follows the persistent QuantUI setting and
@@ -687,7 +687,7 @@ def optimize_geometry(
 
     _cancel_check = cancel_check_from_stream(_stream)
 
-    # --- Resume from a checkpoint (M-CHECKPOINT CHK.2) ---
+    # --- Resume from a checkpoint ---
     # Restart means two things, and only doing one of them wastes most of the
     # saving: continue from the last geometry *and* reload the BFGS Hessian.
     # Without the Hessian, BFGS restarts as steepest descent and spends
@@ -849,7 +849,7 @@ def optimize_geometry(
                 # checkpoint.update(steps_done=dyn.nsteps) callback below
                 # regresses the reported step count on every resume (a
                 # resumed-then-interrupted-again run under-reports how much
-                # work is banked). ISSUE.5. Seeding it from the checkpoint
+                # work is banked). Seeding it from the checkpoint
                 # makes step counting continue where the previous run left
                 # off. (ASE's own irun() also uses nsteps==0 to guard the
                 # pre-loop trajectory write it does for a *fresh* run; the

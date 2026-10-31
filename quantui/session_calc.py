@@ -47,8 +47,8 @@ class SessionResult:
         energy_hartree: Total SCF energy in Hartrees.
         homo_lumo_gap_ev: HOMO-LUMO gap in electronvolts, or ``None`` if the
             gap cannot be determined (e.g. open-shell UHF with complex orbital
-            occupations, or too few occupied orbitals). AUDIT additional-
-            concerns: for a 2-D ``mo_energy`` (UHF/UKS), this is the ALPHA-
+            occupations, or too few occupied orbitals).
+            For a 2-D ``mo_energy`` (UHF/UKS), this is the ALPHA-
             channel gap only — the beta channel is not computed or reported
             here. The result card labels this "HOMO-LUMO gap (α)" for an
             open-shell reference; treat it as a single-channel descriptor,
@@ -73,7 +73,7 @@ class SessionResult:
             ``"UHF"``, ``"ROHF"``, ``"RKS"``, ``"UKS"``) — the
             restricted/unrestricted choice is automatic from multiplicity,
             not a user toggle, so this is how a results panel or a saved
-            result confirms which one actually ran (M-UX2 UXP2.10).
+            result confirms which one actually ran.
     """
 
     energy_hartree: float
@@ -112,11 +112,11 @@ class SessionResult:
     # the result card can show *which* GPU ran the calc.
     gpu_used: bool = False
     gpu_name: Optional[str] = None
-    # Whether density fitting (RI) was applied to the SCF for this run (M-DF).
+    # Whether density fitting (RI) was applied to the SCF for this run.
     # ``False`` for exact four-centre integrals (the default) and for the
     # post-HF paths, which are never fitted here.
     density_fit: bool = False
-    # Whether Grimme D3 dispersion was actually applied (AUDIT F04). ``None``
+    # Whether Grimme D3 dispersion was actually applied. ``None``
     # when the method doesn't use D3 (e.g. RHF, or a functional whose
     # dispersion is built in, like wB97X-D); ``True``/``False`` when it does
     # and ``pyscf.dftd3`` was/wasn't importable. A ``False`` result is
@@ -124,7 +124,7 @@ class SessionResult:
     # e.g. "PBE-D3" — see :func:`maybe_apply_d3` and :meth:`summary`.
     dispersion_applied: Optional[bool] = None
     solvent: Optional[str] = None
-    # ISSUE.12 — <S^2> of the SCF reference for an open-shell (or any
+    # <S^2> of the SCF reference for an open-shell (or any
     # unrestricted) calculation; None for closed-shell RHF/RKS. Compare with
     # the ideal S(S+1) to judge spin contamination.
     spin_square: Optional[float] = None
@@ -136,17 +136,17 @@ class SessionResult:
     mo_coeff: Optional[Any] = None  # np.ndarray (n_ao, n_mo) or (2, n_ao, n_mo) UHF
     pyscf_mol_atom: Optional[Any] = None  # list of (symbol, [x,y,z]) tuples (Angstrom)
     pyscf_mol_basis: Optional[str] = None  # basis set string for cube generation
-    # SCF-rescue provenance (M-SCF-ROBUST SCFR.5) — one of
+    # SCF-rescue provenance — one of
     # quantui.scf_robust.SCF_RESCUE_{NONE,BOOTSTRAP,LEVEL_SHIFT,FAILED}. A
     # result that silently benefited from a rescue should say so, not read
     # like an ordinary convergence.
     scf_rescue_stage: str = "none"
-    # M-UX2 UXP2.10 — the actual PySCF class dispatched (e.g. "RHF", "UHF",
+    # The actual PySCF class dispatched (e.g. "RHF", "UHF",
     # "ROHF", "RKS", "UKS"), captured before any density-fit/PCM/GPU wrap.
     # "" for an older saved result that predates this field.
     scf_variant: str = ""
     # Quantum-engine provenance. Older saved results default to PySCF because
-    # it was QuantUI's sole engine before M-PYFOCK.
+    # it was QuantUI's sole engine before the PyFock engine was added.
     engine_id: str = "pyscf"
 
     @property
@@ -199,8 +199,8 @@ class SessionResult:
 
 # Maps QuantUI display names → PySCF xc strings where they differ.
 #
-# ``wB97X-D`` is a special case, but NOT the one this table used to assume
-# (AUDIT F03). PySCF rejects ``mf.xc = "wb97x-d"`` — but not because it needs
+# ``wB97X-D`` is a special case, but NOT the one this table used to assume.
+# PySCF rejects ``mf.xc = "wb97x-d"`` — but not because it needs
 # an external dispersion correction composed on: PySCF's own xc_code parser
 # (``pyscf.scf.dispersion.parse_dft``) black-lists the short "wb97x-d" /
 # "wb97x_d" spellings specifically because they're ambiguous between the
@@ -293,7 +293,7 @@ def maybe_apply_d3(mf, method: str, progress_stream=None):
     Returns ``(mf, dispersion_applied)``: the (possibly modified) mf object,
     and whether D3 was actually applied. ``dispersion_applied`` is ``True``
     when D3 was applied, ``False`` when the method needs D3 but no D3
-    backend is installed (AUDIT F04 — the result is missing its dispersion
+    backend is installed (the result is missing its dispersion
     correction; callers should record this rather than keep reporting the
     original method label as if uncorrected = corrected), and ``None`` when
     the method doesn't use D3 at all.
@@ -393,8 +393,8 @@ def build_mole(mol: Any) -> None:
     At ``verbose > NOTE`` PySCF's ``dump_input`` writes the whole
     ``__main__`` file into the output before its useful system info and
     ``[INPUT]`` summary. In the batch worker that file is ``worker.py``, so
-    every SCF-based job's ``live.log`` got ~900 lines of QuantUI source
-    (GOTCHAS 2026-10-10). In Jupyter/Voilà ``__main__`` has no file and
+    every SCF-based job's ``live.log`` got ~900 lines of QuantUI source.
+    In Jupyter/Voilà ``__main__`` has no file and
     nothing changes. The attribute is hidden only for the build.
     """
     import __main__
@@ -437,7 +437,7 @@ def ground_state_analysis(
 ) -> Dict[str, Any]:
     """Mulliken charges, dipole, ⟨S²⟩ and MO arrays of a converged SCF.
 
-    Shared by Single Point, Frequency and TD-DFT (ISSUE.19 #6) so every
+    Shared by Single Point, Frequency and TD-DFT so every
     result with a ground-state SCF can fill the Populations and Isosurface
     panels. Each piece is best-effort and ``None`` on failure.
 
@@ -445,11 +445,10 @@ def ground_state_analysis(
       HF-reference values (the result card labels them so).
     - gpu4pyscf has no population analysis on the GPU object, so Mulliken
       falls back to ``mf.to_cpu()``; the same for ``spin_square``.
-    - Mulliken and dipole are well defined for UHF/UKS (audit fix
-      2026-07-14).
+    - Mulliken and dipole are well defined for UHF/UKS.
     - MO arrays are kept whole: ``(2, n)`` / ``(2, nao, nmo)`` for an
       unrestricted reference.
-    - ⟨S²⟩ (ISSUE.12) only for open-shell or unrestricted references.
+    - ⟨S²⟩ only for open-shell or unrestricted references.
     - ``pyscf_mol_atom`` is built from the molecule in Å; PySCF's own
       ``mol._atom`` is in Bohr.
     """
@@ -574,7 +573,7 @@ def run_in_session(
             a good guess (that is exactly what a geometry optimization relies
             on internally). Ignored when no such chkfile exists.
         scf_rescue: Whether to automatically retry a non-converged SCF
-            through the shared rescue helper (M-SCF-ROBUST, see
+            through the shared rescue helper (see
             :mod:`quantui.scf_robust`) — same-basis bootstrap, then a
             level-shift fallback. Default ``True``; a batch/reproducibility
             caller can pass ``False`` to see the plain PySCF result as-is.
@@ -788,28 +787,27 @@ def _run_session_calc_body(
             mf = dft.RKS(mol)
         else:
             mf = dft.UKS(mol)
-        # M-UX2 UXP2.10 — capture the real dispatched class name ("RKS"/
+        # Capture the real dispatched class name ("RKS"/
         # "UKS") HERE, before ``maybe_apply_d3`` can wrap/rename it (D3's
         # wrapper class name is not guaranteed to preserve the base class's
         # ``__name__``). The restricted/unrestricted choice is fully
         # automatic from multiplicity — correctly so, never a user toggle —
         # but nothing in the UI used to say which one actually ran; a
         # student running Lab 2's six-metal series (5/6 open-shell) asked
-        # the instructor directly whether QuantUI even supported UKS. See
-        # GOTCHAS.md.
+        # the instructor directly whether QuantUI even supported UKS.
         scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
         mf, dispersion_applied = maybe_apply_d3(
             mf, method, progress_stream=progress_stream
         )
 
-    # --- Density fitting (RI), opt-in (M-DF) ---
+    # --- Density fitting (RI), opt-in ---
     # Applied to the freshly built SCF object, BEFORE the PCM wrap and the GPU
     # offload below: gpu4pyscf manages its own fitting, and ``mf.to_gpu()`` can
     # reject an already-fitted / PCM-wrapped object. Off by default. Skipped for
     # the post-HF methods (MP2 / CCSD / CCSD(T)) — fitting their HF reference
     # would change the correlation numerics, which is out of scope for this
-    # opt-in SCF speedup and tracked separately (M-DF).
+    # opt-in SCF speedup.
     from .density_fitting import try_density_fit as _try_density_fit
 
     if method_upper in ("MP2", "CCSD", "CCSD(T)"):
@@ -852,7 +850,7 @@ def _run_session_calc_body(
     _cancel_check = cancel_check_from_stream(stream)
     attach_scf_cancel_callback(mf, _cancel_check)
 
-    # --- Checkpoint / warm start (M-CHECKPOINT CHK.1) ---
+    # --- Checkpoint / warm start ---
     # Persist this run's converged density, and start from an earlier one when
     # a compatible chkfile exists. Both halves are best-effort: a checkpoint
     # problem must never stop a calculation that would otherwise run, so every
@@ -868,7 +866,7 @@ def _run_session_calc_body(
     )
 
     # --- Run SCF ---
-    # Every attempt goes through run_scf_with_rescue (M-SCF-ROBUST) instead of
+    # Every attempt goes through run_scf_with_rescue instead of
     # a bare mf.kernel() — a non-converged result is automatically retried
     # through a same-basis bootstrap, then a level-shift fallback, before
     # being reported as-is. A calculation that converges on the first try is
@@ -882,8 +880,8 @@ def _run_session_calc_body(
                 run_scf_with_rescue(mf, dm0=_dm0, rescue=scf_rescue, stream=stream)
             )
         except Exception as warm_exc:
-            # A warm start is an optimisation, not a requirement (M-CHECKPOINT
-            # CHK.1) — a warm-start-specific failure (a GPU-migrated mean-field
+            # A warm start is an optimisation, not a requirement:
+            # a warm-start-specific failure (a GPU-migrated mean-field
             # rejecting a host/numpy density, or a loadable-but-incompatible
             # chkfile density) must degrade to a scratch guess, not hard-fail
             # an otherwise-fine calculation.
@@ -905,7 +903,7 @@ def _run_session_calc_body(
                 f"({method}/{basis}): {exc}"
             ) from exc
 
-    # AUDIT F07 — post-HF work (MP2/CCSD/CCSD(T)) needs a converged
+    # Post-HF work (MP2/CCSD/CCSD(T)) needs a converged
     # reference; running it on an unconverged SCF's orbitals produces a
     # correlation "correction" on top of a wrong Hamiltonian, not a small
     # numerical difference. Checked once, right after the reference SCF,
@@ -945,7 +943,7 @@ def _run_session_calc_body(
     # show the HF reference + correlation breakdown (mirrors the MP2 path).
     ccsd_correlation_hartree: Optional[float] = None
     ccsd_t_correction_hartree: Optional[float] = None
-    # AUDIT F07 — CCSD's own amplitude convergence, tracked separately from
+    # CCSD's own amplitude convergence, tracked separately from
     # the HF reference's. The old code accepted _ccsd_obj.kernel()'s
     # correlation energy unconditionally and never checked
     # _ccsd_obj.converged, so a real one-iteration-limited non-convergence
@@ -997,7 +995,7 @@ def _run_session_calc_body(
                         ) from exc
 
     # --- Extract results from the mean-field object ---
-    # AUDIT F07 — overall convergence must reflect every stage that ran:
+    # Overall convergence must reflect every stage that ran:
     # the HF reference, and (when requested) CCSD's own amplitude solve.
     # A method that needed CC and didn't get a converged one is not a
     # converged result, regardless of what the HF reference alone did.
@@ -1051,7 +1049,7 @@ def _run_session_calc_body(
         logger.debug("HOMO-LUMO gap extraction failed (non-fatal): %s", exc)
 
     # Populations, dipole, ⟨S²⟩ and MO arrays — shared with Frequency and
-    # TD-DFT (ISSUE.19 #6); see ground_state_analysis.
+    # TD-DFT; see ground_state_analysis.
     _gs = ground_state_analysis(
         mf, molecule, basis, label=f"{method}/{basis}", gpu_used=gpu_used
     )

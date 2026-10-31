@@ -37,24 +37,24 @@ from quantui.orbital_visualization import (
 _ORB_PNG_INBOX_CLASS = "quantui-orb-png-inbox"
 
 # Same pattern, own inbox: the reorg-geometry viewer's Save-PNG button
-# (M-EXPORT2 EXP2.2) writes here rather than sharing _ORB_PNG_INBOX_CLASS, so
+# writes here rather than sharing _ORB_PNG_INBOX_CLASS, so
 # a capture from one viewer can never be mistaken for the other's.
 _REORG_PNG_INBOX_CLASS = "quantui-reorg-png-inbox"
 
-# Same pattern again for the geometry-optimization trajectory viewer
-# (M-EXPORT2 EXP2.2). Its inbox is built per-render in
+# Same pattern again for the geometry-optimization trajectory viewer.
+# Its inbox is built per-render in
 # app_visualization.show_opt_trajectory rather than once here, since that
 # panel's own widgets (export button/status) are already rebuilt on every
 # render — this just follows that existing convention.
 _TRAJ_PNG_INBOX_CLASS = "quantui-traj-png-inbox"
 
 # Same pattern again for the single-persistent-viewer vibrational mode
-# animation (M-EXPORT2 EXP2.2). Built once here, like the isosurface/reorg
+# animation. Built once here, like the isosurface/reorg
 # inboxes — the vib panel's mode dropdown/export button/js bridge are already
 # one-time app_builders widgets, unlike the trajectory panel's.
 _VIB_PNG_INBOX_CLASS = "quantui-vib-png-inbox"
 
-# Same pattern for the molecule (top) viewer (M-EXPORT2 EXP2.2) — but this
+# Same pattern for the molecule (top) viewer — but this
 # viewer renders into up to THREE independent output slots (Calculate-tab
 # preview, Results-tab viewer, Analysis-tab viewer), and up to two of those
 # can show the same molecule simultaneously (a post-calc render populates
@@ -99,7 +99,7 @@ def side_by_side(
     left_basis: str = "600px",
     right_basis: str = "360px",
 ) -> Any:
-    """Two columns that wrap into one on narrow screens (M-UIPOLISH L1).
+    """Two columns that wrap into one on narrow screens.
 
     Viewers sat at ~600 px with everything else stacked underneath, leaving
     the right half of a wide window empty.
@@ -296,7 +296,7 @@ def build_status_panel(
             "Always prefer PlotlyMol when available.",
         ],
     )
-    # Audit D12: the "Settings" card used to be a self-contained HTML box that
+    # The "Settings" card used to be a self-contained HTML box that
     # wrapped only the title and the first label, leaving the backend toggle
     # (and everything else) outside it. Now the whole settings column is the
     # card (see settings_box below) and each label sits above its control.
@@ -450,7 +450,7 @@ def build_status_panel(
             "Use the Cluster Jobs tab to monitor and cancel runs.</div>"
         )
 
-    # SLURM job folder root (M-JOBDIRS JD.1). Built unconditionally so the
+    # SLURM job folder root. Built unconditionally so the
     # app can wire it; only shown when SLURM is available.
     app.slurm_job_root_txt = widgets.Text(
         value=slurm_job_root_effective if slurm_job_root_env_locked else slurm_job_root,
@@ -560,7 +560,7 @@ def build_history_section(
         tooltip="Copy the results directory path to clipboard",
     )
     app.results_path_lbl = widgets.HTML()
-    # Batch jobs still running (B2.10): filled by History Refresh / app start.
+    # Batch jobs still running: filled by History Refresh / app start.
     app._batch_jobs_html = widgets.HTML(layout=layout_fn(display="none"))
     app.past_output = widgets.Output()
     app.view_log_btn = widgets.Button(
@@ -742,7 +742,7 @@ def build_history_section(
     app._cal_accordion = widgets.Accordion(children=[cal_panel], selected_index=None)
     app._cal_accordion.set_title(0, "Calibrate time estimates")
 
-    # ── Search / faceted filters (HIST.7) ──────────────────────────────
+    # ── Search / faceted filters ───────────────────────────────────────
     # All filtering is client-side over the cached ``app._history_entries``
     # list; widgets here only hold facet state. See app_history.apply_history_filter.
     from quantui.app_history import HISTORY_CALC_TYPE_FACETS, HISTORY_STATUS_FACETS
@@ -821,7 +821,7 @@ def build_history_section(
                 layout=layout_fn(align_items="center", gap="6px"),
             ),
             # Type / method / date / status facets in a closed section: four
-            # rows of filters sat above the result picker (M-UIPOLISH L13).
+            # rows of filters sat above the result picker.
             _collapsed(
                 "More filters (type, method, basis, date, status)",
                 [
@@ -975,8 +975,8 @@ def build_shared_widgets(
     # Output widget, which CANNOT shrink-wrap (JupyterLab's Lumino layout
     # pins its children to the full window width — measured 2026-08-03), so
     # it would draw a second, full-width box around the tight one.
-    # Live calc log — a QuantUI-owned scroll container, not a widgets.Output
-    # (M-LOGSCROLL route C). An Output rebuilds its DOM subtree and resets
+    # Live calc log — a QuantUI-owned scroll container, not a
+    # widgets.Output. An Output rebuilds its DOM subtree and resets
     # scrollTop on every appended line, which made it impossible to scroll up
     # during a run; LiveLog appends text nodes to a node that is never
     # re-rendered, so native overflow-anchor holds the user's position. It
@@ -1061,7 +1061,7 @@ def build_shared_widgets(
     )
     app.perf_estimate_html = widgets.HTML()
 
-    # Resume-from-checkpoint offer (M-CHECKPOINT CHK.5). Both widgets stay
+    # Resume-from-checkpoint offer. Both widgets stay
     # hidden until the configured calculation actually has stored progress —
     # a permanently-visible "Resume" control that is almost never applicable
     # is worse than none, because it invites the user to wonder what it would
@@ -1128,7 +1128,7 @@ def build_shared_widgets(
     )
     app._charge_mult_suggestion = None
 
-    # MET.5 spin-state helper: suggest a multiplicity for a metal centre from its
+    # Spin-state helper: suggest a multiplicity for a metal centre from its
     # oxidation state (d-count) + geometry. Suggests, never sets — the student
     # clicks an Apply button. Charge is not touched (depends on the ligands).
     from quantui.spin_presets import supported_metals
@@ -1200,8 +1200,8 @@ def build_shared_widgets(
                 layout=layout_fn(gap="6px"),
             )
         ],
-        # Hidden until a molecule with a supported transition metal is loaded
-        # (audit D17); _sync_spin_helper shows it and preselects the metal.
+        # Hidden until a molecule with a supported transition metal is
+        # loaded; _sync_spin_helper shows it and preselects the metal.
         layout=layout_fn(display="none"),
     )
     app.spin_helper_box.set_title(0, "🧲 Spin-state helper (metal complexes)")
@@ -1334,7 +1334,7 @@ def build_shared_widgets(
         style={"description_width": "100px"},
         layout=layout_fn(width="200px"),
     )
-    # Atoms held fixed during a Geometry Opt (INT.8): 1-based, ranges ok.
+    # Atoms held fixed during a Geometry Opt: 1-based, ranges ok.
     app.frozen_atoms_txt = widgets.Text(
         value="",
         placeholder="e.g. 1, 2, 5-7",
@@ -1368,7 +1368,7 @@ def build_shared_widgets(
         options=[("(use current molecule)", "")],
         description="Start from:",
         style={"description_width": "110px"},
-        # max_width: long History labels stretched it across the page (D17).
+        # max_width: long History labels stretched it across the page.
         layout=layout_fn(
             width="auto", flex="1 1 auto", min_width="260px", max_width="620px"
         ),
@@ -1602,7 +1602,7 @@ def build_shared_widgets(
         layout=layout_fn(width="320px"),
         tooltip="Which reorganization energy channel(s) to compute",
     )
-    # Transition State (M-TS TS.2): its own force threshold, tighter than a
+    # Transition State: its own force threshold, tighter than a
     # minimization's, so switching calc types never changes the other's.
     from quantui.ts_search import DEFAULT_TS_FMAX, sella_available
 
@@ -1671,7 +1671,7 @@ def build_shared_widgets(
     # native phase (first gradient / Hessian) visibly advances.
     app._run_elapsed_lbl = widgets.HTML(value="")
 
-    # Optional job folder / SLURM job name (M-JOBDIRS JD.2). Shown only in
+    # Optional job folder / SLURM job name. Shown only in
     # SLURM mode; blank uses <formula>_<calc>_<method>_<basis>.
     app._slurm_job_name_txt = widgets.Text(
         value="",
@@ -1716,13 +1716,13 @@ def build_shared_widgets(
     )
 
     # Red only while there is something to cancel; a disabled "danger" button
-    # still read as live (M-UIPOLISH V2).
+    # still read as live.
     def _cancel_style(change: Any) -> None:
         app.cancel_btn.button_style = "" if change["new"] else "danger"
 
     app.cancel_btn.observe(_cancel_style, names="disabled")
 
-    # MET.5: one-click fix shown only when a metal's basis blocks the run.
+    # One-click fix shown only when a metal's basis blocks the run.
     # Hidden until the pre-run guard reveals it; sets the basis to def2-SVP.
     app.basis_fix_btn = widgets.Button(
         description="Switch basis to def2-SVP",
@@ -1806,7 +1806,7 @@ def build_theme_selector(app: Any, *, layout_fn: Any) -> None:
     app._theme_style = widgets.Output(
         layout=layout_fn(height="0px", overflow="hidden", margin="0", padding="0")
     )
-    # A status indicator, not a control (audit D15): neutral while idle,
+    # A status indicator, not a control: neutral while idle,
     # coloured only while busy, and styled as a non-clickable chip
     # (.quantui-status-chip in the app CSS).
     app._activity_btn = widgets.Button(
@@ -1924,7 +1924,7 @@ def build_welcome_header(app: Any, *, layout_fn: Any = None) -> None:
     # Text-only HTML. ``_welcome_html`` is kept as a pure HTML widget so
     # ``app_runflow.on_exit_clicked`` can still ``.value = ...`` it with
     # the shutdown message.
-    # One line (M-UIPOLISH L2): the 44 px title, tagline and a help line used
+    # One line: the 44 px title, tagline and a help line used
     # ~180 px, so at 1024 x 768 the first screen held no controls at all.
     text_html = (
         '<div style="display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 14px">'
@@ -2004,7 +2004,7 @@ def build_molecule_section(
     )
     app.xyz_msg = widgets.Label()
 
-    # File upload (DEC-023 Tier-1 #1): the bytes travel over the widget
+    # File upload: the bytes travel over the widget
     # channel, so it works on a remote Voilà/OnDemand session too.
     from quantui.structure_upload import SUPPORTED_SUFFIXES as _UPLOAD_SUFFIXES
 
@@ -2125,7 +2125,7 @@ def build_molecule_section(
         tooltip="Re-expand the molecule input panel",
     )
     # Way back from the expanded editor to the compact summary once a molecule
-    # is loaded (audit D11: "Change" was one-way).
+    # is loaded ("Change" used to be one-way).
     app.collapse_mol_btn = widgets.Button(
         description="Done",
         icon="check",
@@ -2137,7 +2137,7 @@ def build_molecule_section(
         layout=layout_fn(align_items="center", gap="12px", padding="6px 0"),
     )
     # Hidden inbox + status for the Calculate-tab preview viewer's Save-PNG
-    # button (M-EXPORT2 EXP2.2) — same bridge as the isosurface/reorg/vib
+    # button — same bridge as the isosurface/reorg/vib
     # viewers, own class since this slot can be visible at the same time as
     # the Results/Analysis molecule viewers.
     app._mol_calc_png_inbox = widgets.Textarea(
@@ -2149,7 +2149,7 @@ def build_molecule_section(
     app._mol_calc_png_inbox.add_class(_MOL_CALC_PNG_INBOX_CLASS)
     app._mol_calc_png_status = widgets.HTML(value="")
 
-    # Edit Structure (M-INTERACT INT.8): works on typed atom numbers even
+    # Edit Structure: works on typed atom numbers even
     # without a viewer; clicking atoms needs py3Dmol.
     from quantui.app_structure_edit import build_edit_widgets
 
@@ -2171,7 +2171,7 @@ def mol_input_children(
     one-line summary + Change button). Everything below it — viewer, its PNG
     inbox, backend toggle, style controls, Edit Structure — is shared, and
     must stay that way: when the collapse/expand paths each kept their own
-    list, Edit Structure fell out of both (UIA.2).
+    list, Edit Structure fell out of both.
     """
     if not expanded:
         head = [app.mol_input_collapsed]
@@ -2185,7 +2185,7 @@ def mol_input_children(
         app._mol_calc_png_status,
     ]
     # Viewer controls, Edit Structure and the force-field clean-up act on a
-    # molecule; before one is loaded they were just clutter (M-UIPOLISH L11).
+    # molecule; before one is loaded they were just clutter.
     if getattr(app, "_molecule", None) is None:
         return children
     if app.viz_backend_toggle is not None:
@@ -2194,7 +2194,7 @@ def mol_input_children(
         children.append(app.viz_controls_box)
     children.append(app._edit_accordion)
     # The clean-up changes the geometry, so it lives with the molecule, not
-    # in Calculation Setup (M-UIPOLISH L10).
+    # in Calculation Setup.
     children += [app.preopt_preview_row, app.preopt_preview_box]
     return children
 
@@ -2506,7 +2506,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._vib_apply_mode_btn = widgets.Button(
         description="Use mode → new Frequency calc",
         icon="share",
-        # Shown only when there are imaginary modes to step off (audit D17);
+        # Shown only when there are imaginary modes to step off;
         # align_self keeps it button-sized instead of stretching full width.
         layout=layout_fn(
             width="auto", margin="0 0 8px 0", align_self="flex-start", display="none"
@@ -2556,7 +2556,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     # takes no visible space. See app_visualization._vib_bridge_set_mode.
     app._vib_js_bridge = widgets.Output(layout=layout_fn(margin="0", padding="0"))
 
-    # Hidden inbox for the single-viewer's Save-PNG button (M-EXPORT2 EXP2.2) —
+    # Hidden inbox for the single-viewer's Save-PNG button —
     # same write-into-DOM-node-then-sync-to-kernel bridge as the isosurface/
     # reorg viewers. Only wired for the single-viewer (py3Dmol) path; the
     # legacy plotlymol3d fallback has no equivalent capture global.
@@ -2571,7 +2571,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             widgets.VBox(
                 [
                     # Animation on the left; mode table and thermochemistry
-                    # beside it instead of far below (M-UIPOLISH L1, L7).
+                    # beside it instead of far below.
                     side_by_side(
                         [
                             vib_mode_row,
@@ -2625,7 +2625,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="100%", min_height="300px"),
     )
     ir_export_row = _plot_export_row("ir")
-    # Both directions stay available (instructor, 2026-10-25); the choice is
+    # Both directions stay available; the choice is
     # saved in user settings.
     app._ir_axis_dd = widgets.Dropdown(
         options=[
@@ -2794,7 +2794,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         style={"description_width": "40px"},
         layout=layout_fn(display="none", width="150px", margin="0 0 4px 0"),
     )
-    # M-SURFACES: what to draw. Orbitals are the original panel; the density
+    # Surface type: what to draw. Orbitals are the original panel; the density
     # surfaces are built from the same stored orbitals + occupations.
     app._iso_surface_dd = widgets.Dropdown(
         options=[
@@ -2841,7 +2841,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._orb_accordion.set_title(0, "Energy-level Diagram")
     app._orb_accordion.selected_index = None
 
-    # Orbital gallery (SURF.1, DEC-024): small linked viewers for the
+    # Orbital gallery: small linked viewers for the
     # orbitals around the gap, built on demand.
     app._orb_gallery_btn = widgets.Button(
         description="Orbital gallery",
@@ -2903,7 +2903,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         ),
         layout=layout_fn(width="160px", margin="8px 0 4px 8px"),
     )
-    # Cubegen grid (ORBX.2). Persisted, so someone who works at "fine" does not
+    # Cubegen grid. Persisted, so someone who works at "fine" does not
     # re-pick it every launch. The labels carry the cost multiplier because the
     # jump is steep — 100³ is ~4.6× the grid work of the 60³ default — and the
     # wait is the thing users are choosing between.
@@ -2920,7 +2920,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="290px", margin="8px 0 4px 0"),
     )
 
-    # ── Isosurface appearance (ORBX.2 cont.) ────────────────────────────
+    # ── Isosurface appearance ───────────────────────────────────────────
     # Both re-render from the cube already on disk — no cubegen — so dragging
     # either is fast. That is the whole reason they can be sliders rather than
     # an "apply" button.
@@ -2976,7 +2976,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         style={"description_width": "70px"},
         layout=layout_fn(width="330px"),
     )
-    # M-ORBEXPORT ORBX.7 — surface finish. Re-scoped from the original
+    # Surface finish. Re-scoped from the original
     # "metallic" request: the vendored 3Dmol.js is Lambert-only (no specular
     # term), so glossy/metallic isn't reachable on this backend; wireframe is
     # what the renderer can actually do.
@@ -2991,7 +2991,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="330px"),
     )
 
-    # ── PNG export options (ORBX.1 cont.) ───────────────────────────────
+    # ── PNG export options ──────────────────────────────────────────────
     app._iso_png_name = widgets.Text(
         value="",
         placeholder="default: orbital label",
@@ -3030,7 +3030,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="330px"),
     )
 
-    # Hidden inbox for client-side PNG capture (ORBX.1). The JS in the rendered
+    # Hidden inbox for client-side PNG capture. The JS in the rendered
     # isosurface writes a data URI into this Textarea's DOM node and dispatches
     # an 'input' event; ipywidgets' own view then syncs `value` to the kernel.
     # It is a real widget (not display:none on the outer box) because the view
@@ -3073,8 +3073,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                 ],
                 layout=layout_fn(align_items="center", gap="6px"),
             ),
-            # Surface controls beside the viewer; PNG options folded away
-            # (M-UIPOLISH L1).
+            # Surface controls beside the viewer; PNG options folded away.
             side_by_side(
                 [app._orb_iso_output],
                 [
@@ -3121,7 +3120,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._iso_accordion.set_title(0, "Orbital Isosurface")
     app._iso_accordion.selected_index = None
 
-    # ── Reorganization-energy geometries (M-REORG REORG.3) ──────────────
+    # ── Reorganization-energy geometries ────────────────────────────────
     # Two views of the same data, because they answer different questions:
     # stepping shows what each geometry looks like, overlaying shows what
     # MOVED — and displacement is what λ actually measures.
@@ -3150,7 +3149,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         style={"description_width": "70px"},
         layout=layout_fn(width="380px", display="none"),
     )
-    # Export the retained geometries as XYZ (M-EXPORT2 EXP2.1) — one file per
+    # Export the retained geometries as XYZ — one file per
     # distinct geometry (R_neutral + each R_ion), not per energy.
     app._reorg_export_btn = widgets.Button(
         description="Export XYZ",
@@ -3161,7 +3160,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._reorg_export_status = widgets.HTML(
         value="", layout=layout_fn(margin="4px 0 0 8px")
     )
-    # Hidden inbox for the viewer's Save-PNG button (M-EXPORT2 EXP2.2) — same
+    # Hidden inbox for the viewer's Save-PNG button — same
     # write-into-DOM-node-then-sync-to-kernel bridge as _orb_png_inbox, own
     # class so the two capture flows can never cross-fire each other.
     app._reorg_png_inbox = widgets.Textarea(
@@ -3343,7 +3342,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="300px", margin="0 0 6px 0"),
         continuous_update=False,
     )
-    # Audit D4: both conventions are in use; say which one is drawn and let
+    # Both dipole-arrow conventions are in use; say which one is drawn and let
     # the user switch (remembered in settings).
     try:
         _arrow_pref = str(app._user_settings.viz.dipole_arrow)
@@ -3399,7 +3398,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(align_items="center", flex_wrap="wrap", margin="0 0 4px 0"),
     )
     # Viewer beside its controls and the charge table; the bar chart below
-    # is capped so 3 atoms no longer get 1300 px (M-UIPOLISH L1, L6).
+    # is capped so 3 atoms no longer get 1300 px.
     app._mulliken_fig.layout.max_width = "720px"
     app._mulliken_accordion = widgets.Accordion(
         children=[
@@ -3481,8 +3480,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         value="",
         layout=layout_fn(display="none"),
     )
-    # Hidden inbox + status for the Results-tab viewer's Save-PNG button
-    # (M-EXPORT2 EXP2.2) — own class, same reasoning as the Calculate-tab one
+    # Hidden inbox + status for the Results-tab viewer's Save-PNG button:
+    # own class, same reasoning as the Calculate-tab one
     # above (this slot and the Analysis-tab one can both show the same
     # molecule at once, right after a calculation completes).
     app._mol_results_png_inbox = widgets.Textarea(
@@ -3491,7 +3490,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._mol_results_png_inbox.add_class(_MOL_RESULTS_PNG_INBOX_CLASS)
     app._mol_results_png_status = widgets.HTML(value="")
 
-    # Result card beside the structure (M-UIPOLISH L1); stacks when narrow.
+    # Result card beside the structure; stacks when narrow.
     app.results_tab_panel = widgets.VBox(
         [
             widgets.HBox(
@@ -3526,8 +3525,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     # box around it — the Output widget cannot shrink-wrap.
     app._analysis_mol_output = widgets.Output()
 
-    # Hidden inbox + status for the Analysis-tab viewer's Save-PNG button
-    # (M-EXPORT2 EXP2.2) — own class per the same cross-talk reasoning as the
+    # Hidden inbox + status for the Analysis-tab viewer's Save-PNG button:
+    # own class per the same cross-talk reasoning as the
     # Calculate/Results slots. This viewer has two render paths (post-calc
     # via show_result_3d, and the backend-toggle re-render in
     # app._rerender_3d_views) — both must pass this same capture_class.
@@ -3537,11 +3536,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._mol_analysis_png_inbox.add_class(_MOL_ANALYSIS_PNG_INBOX_CLASS)
     app._mol_analysis_png_status = widgets.HTML(value="")
 
-    # ── Click-to-measure (M-MEASURE MEAS.2-.6) ──────────────────────────
+    # ── Click-to-measure ────────────────────────────────────────────────
     # Hidden inbox for the click JS injected into the py3Dmol-rendered
     # Analysis viewer (app_measurement.inject_click_js) — same JS->kernel
     # "write into a hidden Textarea's DOM node, dispatch 'input'" trick
-    # ORBX.1's PNG capture uses, new inbox.
+    # the isosurface PNG capture uses, new inbox.
     app._measure_inbox = widgets.Textarea(
         value="", layout=layout_fn(width="1px", height="1px", visibility="hidden")
     )
@@ -3588,7 +3587,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         ]
     )
     # The panel stays visible regardless of backend — only its
-    # content swaps (MEAS.6). Shown when the resolved backend can't support
+    # content swaps. Shown when the resolved backend can't support
     # native clicking (plotlymol, or py3Dmol simply unavailable).
     app._measure_fallback_msg = widgets.HTML(
         value=(
@@ -3674,7 +3673,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._build_ana_switcher()
 
-    # Viewer beside Measurement (M-UIPOLISH L1).
+    # Viewer beside Measurement.
     ana_right: list[Any] = [app._measure_panel]
     if ana_backend_row is not None:
         ana_right.append(ana_backend_row)
@@ -3724,7 +3723,7 @@ def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) ->
     """Build compare tab widgets and export accordion."""
     from quantui.checklist_widget import CheckList
 
-    # Checkboxes, not a Ctrl/Shift-click list box (M-UIPOLISH L12).
+    # Checkboxes, not a Ctrl/Shift-click list box.
     app.compare_select = CheckList(options=[("(no saved results)", "")])
     app.compare_refresh_btn = widgets.Button(
         description="Refresh",
@@ -3741,7 +3740,7 @@ def build_compare_section(app: Any, *, layout_fn: Any, rdkit_available: bool) ->
     )
     app.compare_clear_btn = widgets.Button(
         description="Clear",
-        button_style="",  # neutral: clearing a selection is not a warning (D16)
+        button_style="",  # neutral: clearing a selection is not a warning
         icon="times",
         layout=layout_fn(width="90px"),
     )
@@ -3884,7 +3883,7 @@ def build_output_tab(app: Any, *, layout_fn: Any) -> None:
     )
     app._history_log_accordion.set_title(0, "PySCF output log")
 
-    # Unfinished work (M-CHECKPOINT CHK.6). History is where "things I did
+    # Unfinished work. History is where "things I did
     # earlier" already lives, and an interrupted run is exactly that — it
     # just never produced a result to save. The whole box hides when nothing
     # is resumable, so it costs an empty tab nothing.
@@ -4147,7 +4146,7 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
 
     app._exit_btn = widgets.Button(
         description="Exit",
-        # Neutral until armed; the confirm step turns it red (M-UIPOLISH V1).
+        # Neutral until armed; the confirm step turns it red.
         button_style="",
         icon="power-off",
         tooltip="Shut down the QuantUI server and end this session",
@@ -4167,7 +4166,7 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
     )
     app._exit_output = widgets.Output(layout=layout_fn(height="0px", overflow="hidden"))
 
-    # Audit D14: the panel could only be closed by finding the Help button
+    # The panel could only be closed by finding the Help button
     # again; give it its own close control.
     app._help_close_btn = widgets.Button(
         description="Close",
@@ -4204,7 +4203,7 @@ def build_help_section(app: Any, *, layout_fn: Any) -> None:
         ),
     )
     # A side drawer over the app instead of a block that pushed every tab
-    # down (M-UIPOLISH L14); see .quantui-drawer in app._APP_CSS.
+    # down; see .quantui-drawer in app._APP_CSS.
     app.help_tab_panel.add_class("quantui-drawer")
 
 
@@ -4213,7 +4212,7 @@ def build_issue_widgets(app: Any, *, layout_fn: Any) -> None:
     app._issue_btn = widgets.Button(
         description="Report Issue",
         # Neutral, not "warning" yellow: it was the most eye-catching control
-        # on every screen (M-UIPOLISH V1).
+        # on every screen.
         button_style="",
         icon="flag",
         tooltip="Report a bug or unexpected behaviour observed in this session",
@@ -4243,7 +4242,7 @@ def build_issue_widgets(app: Any, *, layout_fn: Any) -> None:
         [
             # Theme tokens, not fixed light-theme browns: on dark palettes the
             # panel background follows the theme and #92400e/#78350f text was
-            # nearly unreadable (audit D14).
+            # nearly unreadable.
             widgets.HTML(
                 '<p style="font-size:13px;font-weight:600;margin:0 0 6px;'
                 f'color:{_theme.css.ACCENT_WARNING}">&#9872; Report Issue</p>'

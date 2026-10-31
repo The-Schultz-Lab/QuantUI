@@ -29,18 +29,18 @@ def init_raman_worker(
 ) -> None:
     """Worker initializer — same threading discipline as IR workers.
 
-    ``checkpoint_items_dir`` (M-CHECKPOINT CHK.4.4): directory path (plain
+    ``checkpoint_items_dir``: directory path (plain
     string — see :func:`quantui.freq_ir_workers.init_worker`'s docstring for
     why not a ``Checkpoint`` object) where each completed displacement's
     polarizability is durably recorded via
     :func:`quantui.checkpoint.mark_item_done_at`. ``None`` when the run has
     no checkpoint.
 
-    ``ecp`` (AUDIT F05): the reference molecule's ``mol.ecp`` mapping — see
+    ``ecp``: the reference molecule's ``mol.ecp`` mapping — see
     :func:`quantui.freq_ir_workers.init_worker`'s docstring. Without it, a
     heavy-element ECP system runs all-electron in this worker instead.
 
-    ``scf_rescue`` (AUDIT F19): whether ``run_scf_with_rescue`` may apply
+    ``scf_rescue``: whether ``run_scf_with_rescue`` may apply
     its convergence-rescue ladder. Previously hardcoded to the default
     (``True``) regardless of the caller's ``scf_rescue`` choice.
     """
@@ -88,8 +88,8 @@ def _polarizability_module(mol: Any, dm0_is_unrestricted: bool):
 def run_displaced_polarizability(item_id: str, coords_bohr_flat) -> list[list[float]]:
     """Run one SCF at a displaced geometry; return α as a nested 3×3 list.
 
-    ``item_id`` (CHK.4.2, e.g. ``"d000_x_+"``) is used only to durably
-    record completion (CHK.4.4) when this run has a checkpoint — see
+    ``item_id`` (e.g. ``"d000_x_+"``) is used only to durably
+    record completion when this run has a checkpoint — see
     :func:`quantui.freq_ir_workers.run_displaced_scf`'s docstring for the
     same pattern and its crash-safety rationale.
     """
@@ -104,7 +104,7 @@ def run_displaced_polarizability(item_id: str, coords_bohr_flat) -> list[list[fl
     mol = gto.Mole()
     mol.atom = state["atom_str"]
     mol.basis = state["basis"]
-    # AUDIT F05 — without this, a heavy-element ECP system (e.g.
+    # Without this, a heavy-element ECP system (e.g.
     # NaH/LANL2DZ) silently runs all-electron here.
     mol.ecp = state.get("ecp") or {}
     mol.charge = state["charge"]
@@ -128,7 +128,7 @@ def run_displaced_polarizability(item_id: str, coords_bohr_flat) -> list[list[fl
     mf, _ = _try_density_fit(mf, enabled=bool(state.get("density_fit_used")))
     from .scf_robust import run_scf_with_rescue
 
-    # AUDIT F19 — honor the caller's scf_rescue choice instead of always
+    # Honor the caller's scf_rescue choice instead of always
     # taking run_scf_with_rescue's default (True).
     run_scf_with_rescue(mf, dm0=dm0, rescue=bool(state.get("scf_rescue", True)))
 

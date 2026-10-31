@@ -21,7 +21,7 @@ _WIDTH = 80  # total width of === border lines
 _SEP = "=" * _WIDTH
 _SUB = "-" * _WIDTH  # lighter divider between header sections
 
-# Static list of formats the app can export a result to (EXPORT milestone).
+# Static list of formats the app can export a result to.
 _EXPORT_FORMATS = "XYZ, MOL/SDF, PDB, Molden, .traj, cube, HTML spectra, .zip"
 
 # SCF/correlation methods that are NOT DFT functionals — shown verbatim in the
@@ -463,7 +463,7 @@ def format_log_footer(
         zpve = getattr(result, "zpve_hartree", None)
         n_steps = getattr(result, "n_steps", None)  # OptResult
 
-        # Convergence line. AUDIT F07/F08/F15 — .converged on several result
+        # Convergence line. .converged on several result
         # types now folds in more than the reference SCF (CCSD's own
         # amplitude convergence, TD-DFT's per-root convergence, the
         # Hessian/harmonic-analysis step actually completing), so this must

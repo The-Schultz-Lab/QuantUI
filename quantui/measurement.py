@@ -1,4 +1,4 @@
-"""Bond length / angle / dihedral measurement from picked atoms (M-MEASURE MEAS.1).
+"""Bond length / angle / dihedral measurement from picked atoms.
 
 Thin wrappers around ASE's ``Atoms.get_distance`` / ``get_angle`` /
 ``get_dihedral`` -- the read-direction sibling of the coordinate math

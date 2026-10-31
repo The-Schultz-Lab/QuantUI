@@ -1,8 +1,7 @@
 """
-Execution backends for QuantUI (local in-kernel and future SLURM batch).
+Execution backends for QuantUI: local in-kernel runs and SLURM batch jobs.
 
-Implements the v0.1 contract in ``QuantUI-development-tracking``:
-``TODO/EXECUTION-BACKEND-CONTRACT.md``.
+The shared request / progress / result types are in :mod:`quantui.backends.base`.
 """
 
 from .base import (

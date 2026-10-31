@@ -1,5 +1,5 @@
 """
-Where a batch job is, read from its job folder (M-BATCH2 B2.9 / B2.10).
+Where a batch job is, read from its job folder.
 
 A job submitted from a terminal (``quantui-batch`` on the login node, or
 ``quantui submit --prepare-only`` plus ``sbatch``) has a registry record with

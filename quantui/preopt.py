@@ -150,7 +150,7 @@ def preopt_support(molecule: Molecule) -> Optional[str]:
     """Why no pre-opt backend can handle ``molecule``, or ``None`` if one can.
 
     Lets a caller tell a genuine *"already optimal, nothing moved"* no-op apart
-    from *"nothing can pre-optimize this"* (M-METAL MET.4). RDKit's organic FF
+    from *"nothing can pre-optimize this"*. RDKit's organic FF
     handles organics; the optional GFN-FF (xtb) backend handles transition-metal
     complexes RDKit's valence model rejects — so a metal is *supported* whenever
     xtb is installed. When neither applies, the reason names the fix (install

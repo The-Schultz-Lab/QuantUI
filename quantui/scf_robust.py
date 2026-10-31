@@ -1,4 +1,4 @@
-"""Shared SCF-convergence rescue helper (M-SCF-ROBUST SCFR.1/SCFR.2).
+"""Shared SCF-convergence rescue helper.
 
 QuantUI used to build ``dft.RKS(mol)``/``dft.UKS(mol)`` (or ``scf.RHF``/
 ``scf.UHF``) and call bare ``mf.kernel()`` — no ``level_shift``, no
@@ -10,13 +10,11 @@ open-shell transition-metal complexes.
 This broke a real class deployment: CHEM-3200 Lab 2's Mn²⁺ hexaaquo
 single-point (B3LYP/def2-SVP, sextet, high-spin d⁵) oscillated 40-60 Ha every
 ~9 cycles and never converged under plain defaults, even though the request
-itself was correct. See ``QuantUI-development-tracking/TODO/GOTCHAS.md`` and
-``TODO/roadmaps/52-m-scf-robust-open-shell-convergence-roadmap.md`` for the
-full writeup and the two rescue strategies validated against that failure.
+itself was correct.
 
-This module is the shared helper both roadmap docs call for: every SCF
-``.kernel()`` call in the package should go through :func:`run_scf_with_rescue`
-instead of calling ``mf.kernel()`` directly.
+This module is the shared fix: every SCF ``.kernel()`` call in the package
+should go through :func:`run_scf_with_rescue` instead of calling
+``mf.kernel()`` directly.
 
 Two independent rescue stages, tried in order, only when the plain attempt
 doesn't converge:
@@ -39,7 +37,7 @@ calculations that already converge.
 A calculation whose first attempt converges is completely unaffected — the
 rescue stages never run, so there is zero behavior change (same energy, same
 iteration count) for the common case. This is the module's one hard
-invariant; see SCFR.4's regression tests.
+invariant; see the regression tests in ``tests/test_scf_robust.py``.
 """
 
 from __future__ import annotations
@@ -49,10 +47,10 @@ from typing import IO, Any, Optional
 
 logger = logging.getLogger(__name__)
 
-# Provenance markers (SCFR.5) — stamped onto ``mf.scf_rescue_stage`` so a
-# result that silently benefited from a rescue can be identified as such
-# later, mirroring M-CHECKPOINT's ``[checkpoint]`` log-line convention. Set
-# on *every* call, including the common converged-on-first-try case, so its
+# Provenance markers — stamped onto ``mf.scf_rescue_stage`` so a result that
+# silently benefited from a rescue can be identified as such later, mirroring
+# the checkpoint module's ``[checkpoint]`` log-line convention. Set on *every*
+# call, including the common converged-on-first-try case, so its
 # absence can never be mistaken for "wasn't tried".
 SCF_RESCUE_NONE = "none"  # first attempt converged (or rescue=False) — no-op
 SCF_RESCUE_BOOTSTRAP = "bootstrap"  # same-basis HF/UHF density bootstrap rescued it
@@ -87,14 +85,14 @@ def run_scf_with_rescue(
             ``init_guess``, ``max_cycle`` on it) — same as calling
             ``mf.kernel()`` directly would let a caller do.
         dm0: Optional starting density matrix for the *first* attempt only
-            (e.g. a checkpoint warm-start guess, M-CHECKPOINT CHK.1). If the
+            (e.g. a checkpoint warm-start guess). If the
             first attempt is unstable, the bootstrap rescue below builds and
             uses its own density instead — a warm start that was itself part
             of the problem shouldn't be retried unchanged.
         rescue: When ``False``, behaves exactly like calling
             ``mf.kernel(...)`` directly — no rescue attempted, whatever
             ``mf.converged``/energy comes back is final. Lets a batch or
-            reproducibility caller opt out (SCFR.3).
+            reproducibility caller opt out.
         max_stage: ``1`` = bootstrap only; ``2`` (default) = bootstrap, then
             the level-shift fallback if the bootstrap alone isn't enough.
         stream: Optional writable stream for status lines (the

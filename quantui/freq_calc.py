@@ -46,7 +46,7 @@ _CM1_TO_HARTREE: float = 4.556335252912e-6
 # Exact: 1 Hartree = HARTREE_TO_EV * e * N_A joules/mol
 _HARTREE_TO_JMOL: float = 2625499.6  # J/mol per Hartree (NIST 2018 CODATA)
 
-# Stationary-point check (D1). Harmonic frequencies and thermochemistry assume
+# Stationary-point check. Harmonic frequencies and thermochemistry assume
 # the gradient is zero. Above this largest per-atom force (eV/Å, the
 # optimizer's fmax convention) the result card warns that the geometry is not
 # a stationary point. Same value as the Geometry Opt default, so a structure
@@ -153,8 +153,7 @@ def _run_thermo(
         raise KeyError(f"Missing H or S in thermo dict (keys: {sorted(tout.keys())})")
     h = _thermo_value(h_raw)
     # PySCF's thermo() returns S_tot (and Cv/Cp) in Eh/K, not J/(mol·K).
-    # Convert for storage/display; G = H - T*S uses the Eh/K value
-    # (AUDIT F01).
+    # Convert for storage/display; G = H - T*S uses the Eh/K value.
     s_eh = _thermo_value(s_raw)
 
     def _jmolk(*keys: str) -> Optional[float]:
@@ -221,7 +220,7 @@ class FreqResult:
         energy_hartree: SCF energy at the input geometry in Hartrees.
         homo_lumo_gap_ev: HOMO-LUMO gap in eV, or ``None``.
         converged: ``True`` only when BOTH the SCF converged AND the
-            Hessian/harmonic-analysis step actually completed (AUDIT F15)
+            Hessian/harmonic-analysis step actually completed
             — e.g. a ROHF reference whose analytic Hessian PySCF doesn't
             support on this path used to report ``converged=True`` with
             ``frequencies_cm1=[]``, since this flag came solely from the
@@ -262,29 +261,29 @@ class FreqResult:
     """
     mo_energy_hartree: Optional[Any] = None
     """Orbital energies (Hartree) of the reference SCF; ``(2, n_mo)`` for
-    UHF/UKS, as on :class:`~quantui.session_calc.SessionResult` (both spin
-    channels since ISSUE.19 #6; older results kept alpha only)."""
+    UHF/UKS, as on :class:`~quantui.session_calc.SessionResult` (older
+    results kept alpha only)."""
     mo_occ: Optional[Any] = None
     """Occupations matching ``mo_energy_hartree``."""
     mo_coeff: Optional[Any] = None
-    """MO coefficients, for the Isosurface panel (ISSUE.19 #6)."""
+    """MO coefficients, for the Isosurface panel."""
     pyscf_mol_atom: Optional[List] = None
     pyscf_mol_basis: Optional[str] = None
     # Ground-state populations of the reference SCF, for the Populations
-    # panel (ISSUE.19 #6) — same meaning as on SessionResult.
+    # panel — same meaning as on SessionResult.
     atom_symbols: Optional[List[str]] = None
     mulliken_charges: Optional[List[float]] = None
     dipole_moment_debye: Optional[float] = None
     dipole_vector_debye: Optional[List[float]] = None
     spin_square: Optional[float] = None
     density_fit: bool = False
-    # M-UX2 UXP2.10 — the actual PySCF class dispatched for the reference
+    # The actual PySCF class dispatched for the reference
     # SCF (e.g. "RHF", "UHF", "RKS", "UKS"); "" for an older saved result.
     scf_variant: str = ""
     # PCM solvent the reference SCF, Hessian and IR displacements ran in, or
     # None for gas phase. Raman is not computed for a solvated run.
     solvent: Optional[str] = None
-    # Set when this result came from a saddle-point retry (B2.5): the modes
+    # Set when this result came from a saddle-point retry: the modes
     # followed, the re-optimization, and what is left. See
     # :func:`run_saddle_retry`.
     imaginary_mode_retry: Optional[dict] = None
@@ -293,7 +292,7 @@ class FreqResult:
     gpu_name: Optional[str] = None
     # Largest per-atom force (eV/Å) at the geometry the Hessian was computed
     # at, from the reference SCF's analytic gradient; None when the gradient
-    # was unavailable. See is_stationary() (D1).
+    # was unavailable. See is_stationary().
     max_force_ev_per_ang: Optional[float] = None
 
     @property
@@ -488,10 +487,10 @@ def run_freq_calc(
         scf_rescue: Whether every SCF here (the reference geometry, plus
             each finite-difference displacement for numerical IR
             intensities) automatically retries through the shared rescue
-            helper on non-convergence (M-SCF-ROBUST, see
+            helper on non-convergence (see
             :mod:`quantui.scf_robust`). Default ``True``.
-        checkpoint: Optional :class:`~quantui.checkpoint.Checkpoint`
-            (M-CHECKPOINT CHK.4). When given, each completed
+        checkpoint: Optional :class:`~quantui.checkpoint.Checkpoint`.
+            When given, each completed
             finite-difference displacement SCF (the ``6N``-solve numerical
             IR-intensity step) is durably recorded — see
             :mod:`quantui.freq_displacement_ids` — so a resumed run can skip
@@ -626,12 +625,12 @@ def _run_freq_calc_body(
         from .session_calc import maybe_apply_d3, resolve_xc
 
         mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
-        # M-UX2 UXP2.10 — capture before maybe_apply_d3 can wrap/rename it.
+        # Capture before maybe_apply_d3 can wrap/rename it.
         scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
         mf, _ = maybe_apply_d3(mf, method, progress_stream=stream)
 
-    # Density fitting (RI), opt-in (M-DF). Off by default. Applied to the main
+    # Density fitting (RI), opt-in. Off by default. Applied to the main
     # SCF; the per-displacement inner SCFs below get the same treatment so the
     # numerical IR-intensity step stays consistent with the reference.
     from .density_fitting import try_density_fit as _try_density_fit
@@ -647,7 +646,7 @@ def _run_freq_calc_body(
     if _pcm_applied:
         _status(f"Implicit solvent (PCM, {_pcm_solvent}) applied to SCF and Hessian.")
 
-    # GPU offload (GOTCHAS 2026-09-26): the reference SCF and the analytical
+    # GPU offload: the reference SCF and the analytical
     # Hessian, usually the most expensive part of a frequency job, ran on CPU
     # even on the GPU image. Same rule as the single point and the optimizer
     # (PR #125): after density fitting and PCM, before the kernel; any
@@ -709,14 +708,14 @@ def _run_freq_calc_body(
 
     # ── Ground-state analysis: populations, dipole, MO arrays ────────────────
     # Same helper as Single Point, so Frequency results fill the Energies,
-    # Isosurface and Populations panels (ISSUE.19 #6).
+    # Isosurface and Populations panels.
     from .session_calc import ground_state_analysis
 
     _gs = ground_state_analysis(
         mf, molecule, basis, label=f"{method}/{basis} freq", gpu_used=gpu_used
     )
 
-    # ── Residual forces at the input geometry (D1) ───────────────────────────
+    # ── Residual forces at the input geometry ────────────────────────────────
     max_force_ev_per_ang = _max_residual_force(mf, stream, _status)
 
     # ── Hessian + frequency analysis ─────────────────────────────────────────
@@ -726,7 +725,7 @@ def _run_freq_calc_body(
     zpve_hartree: float = 0.0
     displacements: Optional[List] = None
     thermo_data: Optional[ThermoData] = None
-    # AUDIT F15 — SCF convergence and Hessian/harmonic-analysis completion
+    # SCF convergence and Hessian/harmonic-analysis completion
     # are separate facts; a caught exception in the try block below (e.g.
     # ROHF's Hessian being unavailable on this path) must not leave the
     # overall FreqResult reading "converged" with an empty
@@ -756,7 +755,7 @@ def _run_freq_calc_body(
             else:
                 frequencies_cm1.append(float(f.real if hasattr(f, "real") else f))
 
-        # AUDIT F15 — the Hessian was built and harmonic_analysis() ran; a
+        # The Hessian was built and harmonic_analysis() ran; a
         # real frequency result exists regardless of whether the optional
         # IR/Raman/thermo enrichment below succeeds.
         _hessian_completed = True
@@ -824,14 +823,14 @@ def _run_freq_calc_body(
                 # silently dropped IR intensities for the whole calc (caught
                 # by the broad except below).
 
-                # --- M-CHECKPOINT CHK.4: resume already-banked displacements ---
+                # --- Resume already-banked displacements ---
                 # ``_dipoles`` is the single source of truth for every
                 # displacement's result, whichever path produced it (resumed
                 # from an earlier attempt, computed in this run's parallel
                 # pool, or computed in this run's serial fallback) — the
                 # final dpdx assembly below reads only from this dict, never
                 # from a path-specific variable, which is what makes the
-                # assembly step itself a proper CHK.4.5 gate: it only runs
+                # assembly step itself a proper gate: it only runs
                 # once every required id is present here, regardless of how
                 # it got there.
                 _ITEM_SET_NAME = "freq_displacements"
@@ -886,7 +885,7 @@ def _run_freq_calc_body(
                         _mf_d = scf.UHF(mol) if _dm0_is_unrestricted else scf.RHF(mol)
                     _mf_d.verbose = 0
                     _mf_d.stdout = stream
-                    # Match the main SCF's density-fitting choice (M-DF) before
+                    # Match the main SCF's density-fitting choice before
                     # any GPU offload, so displaced dipoles stay consistent with
                     # the reference energy.
                     _mf_d, _ = _try_density_fit(_mf_d, enabled=_density_fit_used)
@@ -919,7 +918,7 @@ def _run_freq_calc_body(
                 # can pin the contract.
                 from quantui import freq_ir_workers as _ir_par
 
-                # AUDIT additional-concerns — available_cpu_count() honors
+                # available_cpu_count() honors
                 # SLURM_CPUS_PER_TASK / cgroup affinity instead of the raw
                 # os.cpu_count() (whole-machine core count), so this run
                 # doesn't oversubscribe a SLURM allocation smaller than the
@@ -930,8 +929,8 @@ def _run_freq_calc_body(
                     displacement_count=_ir_total_solves,
                 )
 
-                # Checkpoint items directory as a plain string, for workers
-                # (CHK.4.4) — a ``Checkpoint`` with a live log stream attached
+                # Checkpoint items directory as a plain string, for workers:
+                # a ``Checkpoint`` with a live log stream attached
                 # is not something safe to pickle across the
                 # ``ProcessPoolExecutor`` process boundary, so workers get
                 # only the directory path and write via
@@ -1007,17 +1006,17 @@ def _run_freq_calc_body(
                                         _dm0_handle.name,
                                         _threads_each,
                                         _ckpt_items_dir,
-                                        mol.ecp,  # AUDIT F05
-                                        _density_fit_used,  # AUDIT F19
-                                        scf_rescue,  # AUDIT F19
+                                        mol.ecp,
+                                        _density_fit_used,
+                                        scf_rescue,
                                         _pcm_solvent,
                                     ),
                                 ) as _pool:
                                     # Submit all and store futures keyed by task
                                     # index so we can assemble +/- per (I, ax).
                                     # Each task also carries its own
-                                    # displacement id (CHK.4.2) so the worker
-                                    # can durably record it (CHK.4.4) the
+                                    # displacement id so the worker
+                                    # can durably record it the
                                     # moment it finishes — before this parent
                                     # process ever calls ``.result()``, so a
                                     # parent crash mid-wave never loses a
@@ -1094,7 +1093,7 @@ def _run_freq_calc_body(
                                 "remaining)"
                             )
 
-                    # --- CHK.4.5: assembly gate ---
+                    # --- Assembly gate ---
                     # Runs once, here, only after every required id is in
                     # ``_dipoles`` — whichever path (resume, parallel,
                     # serial fallback) put it there. Reading from one shared
@@ -1189,7 +1188,7 @@ def _run_freq_calc_body(
             logger.warning("Thermochemistry failed: %s", _exc)
             _status("Thermochemistry failed; frequency backend complete.")
 
-        # M-CHECKPOINT CHK.4 — the Hessian/frequency step (this whole outer
+        # The Hessian/frequency step (this whole outer
         # try) succeeded, so nothing here is worth resuming from anymore.
         # A thermochemistry failure just above does not change that: thermo
         # is best-effort enrichment, not the core deliverable this
@@ -1213,7 +1212,7 @@ def _run_freq_calc_body(
     return FreqResult(
         energy_hartree=energy_hartree,
         homo_lumo_gap_ev=homo_lumo_gap_ev,
-        # AUDIT F15 — overall success requires the Hessian/harmonic-analysis
+        # Overall success requires the Hessian/harmonic-analysis
         # step to have actually completed, not just the reference SCF.
         converged=converged and _hessian_completed,
         n_iterations=n_iterations,
@@ -1321,7 +1320,7 @@ def _analytical_hessian(mf: Any, gpu_used: bool, stream: IO[str], status: Any) -
 
 
 # ============================================================================
-# One retry off a saddle point (M-BATCH2 B2.5)
+# One retry off a saddle point
 # ============================================================================
 
 # Imaginary modes below this (negative = imaginary, cm-1) trigger the retry.

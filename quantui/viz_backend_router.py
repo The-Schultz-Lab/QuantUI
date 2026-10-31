@@ -140,7 +140,7 @@ class Decision:
 #   - Quality. Plotly renders isosurfaces by striding the volume down to a point
 #     cap before building a mesh, so it is downsampled by construction, while
 #     py3Dmol isosurfaces the cube in-browser at full resolution.
-#   - Capability. Only py3Dmol can carry the Save-PNG capture (ORBX.1), and only
+#   - Capability. Only py3Dmol can carry the Save-PNG capture, and only
 #     it can be told what the user is actually looking at, camera included.
 #
 # User: "plotlymol is really only good for the molecule viewing windows."

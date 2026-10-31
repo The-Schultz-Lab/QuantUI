@@ -1,8 +1,9 @@
 """3D Mulliken color + dipole-arrow overlays for the Mulliken panel viewer.
 
-Mirrors the M-MEASURE highlight bridge: a one-shot ``Javascript`` push into a
-hidden ``Output`` restyles the *live* py3Dmol viewer without a Python HTML
-re-render (which would discard the camera orientation the user rotated into).
+Mirrors the click-to-measure highlight bridge (:mod:`quantui.app_measurement`):
+a one-shot ``Javascript`` push into a hidden ``Output`` restyles the *live*
+py3Dmol viewer without a Python HTML re-render (which would discard the camera
+orientation the user rotated into).
 
 Injected by :func:`inject_populations_js` into the dedicated Mulliken-panel
 viewer only (decoupled from the top Analysis-tab structure viewer).
@@ -30,7 +31,7 @@ _POPULATIONS_JS = """
   var colored=false;
   // 3Dmol creates the viewer asynchronously, so an update can arrive before
   // it exists. Keep the latest payload and retry instead of dropping it
-  // (dropping it left the first render uncoloured, UIA.3).
+  // (dropping it left the first render uncoloured).
   var pending=null, retries=0;
 
   function clearArrow(){
@@ -365,7 +366,7 @@ def dipole_arrow_convention(app: Any) -> str:
 
 
 def dipole_caption_html(convention: str) -> str:
-    """One line saying which way the drawn arrow points (audit D4)."""
+    """One line saying which way the drawn arrow points."""
     if convention == "chemistry":
         text = (
             "Arrow head at the <b>negative</b> end (+ → −, chemistry crossed-arrow "

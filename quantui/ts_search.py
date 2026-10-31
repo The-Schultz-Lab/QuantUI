@@ -1,4 +1,4 @@
-"""Transition-state search (M-TS TS.2; engine choice DEC-024).
+"""Transition-state search.
 
 A first-order saddle point search with Sella, driven by QuantUI's own ASE
 calculator (``optimizer._QuantUIPySCFCalc``), so PCM solvent, density

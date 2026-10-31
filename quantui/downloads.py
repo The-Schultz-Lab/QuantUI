@@ -1,4 +1,4 @@
-"""Browser downloads for files QuantUI writes on the server (DEC-023 Tier-1 #1).
+"""Browser downloads for files QuantUI writes on the server.
 
 Every export lands on the machine running the kernel. On a laptop that is
 the student's own disk, but on Voilà/OnDemand/NCShare it is a remote node

@@ -14,7 +14,7 @@ the difference between an honest score and one inflated by hindsight.
 Two numbers matter together, and neither is meaningful alone:
 
 * **accuracy** — median |error| and the fraction landing within ±25 %, the
-  band M-EST set as the target;
+  target band;
 * **coverage** — how often the predictor produced any estimate at all. A
   model that answers only when it is sure scores beautifully on accuracy
   while telling the user nothing, so ``n_no_estimate`` is reported next to

@@ -1,4 +1,4 @@
-"""Read an uploaded structure file into a Molecule (DEC-023 Tier-1 #1, INT.4).
+"""Read an uploaded structure file into a Molecule.
 
 Formats and readers:
 

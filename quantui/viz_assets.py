@@ -120,7 +120,7 @@ def standalone_html(view_html: str, *, title: str = "QuantUI animation") -> str:
 def principal_view_rotation(
     coords: Any,
 ) -> Optional[Tuple[float, Tuple[float, float, float]]]:
-    """Axis–angle that turns a molecule to face the camera (M-UIPOLISH P1).
+    """Axis–angle that turns a molecule to face the camera.
 
     3Dmol looks down −z, so a molecule whose plane happens to contain z is
     seen edge-on: water looks linear and a dipole along z is invisible. This

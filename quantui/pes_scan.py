@@ -189,7 +189,7 @@ def _reuse_scan_point(
     that no longer matches, malformed geometry). Recomputing a point is cheap
     next to trusting a mismatched one.
 
-    AUDIT F10: a cached point's ``value`` alone does not identify WHICH
+    A cached point's ``value`` alone does not identify WHICH
     coordinate it was computed for — a banked O-H bond-scan point at 1.0 A
     and a fresh H-H bond scan targeting 1.0 A compared equal on ``value``
     alone, so the O-H point was reused and returned as if it were the H-H
@@ -308,7 +308,7 @@ def run_pes_scan(
             usual reason to resume a scan is that something went wrong.
         scf_rescue: Whether each scan point's SCF automatically retries
             through the shared rescue helper on non-convergence
-            (M-SCF-ROBUST, see :mod:`quantui.scf_robust`). Default ``True``.
+            (see :mod:`quantui.scf_robust`). Default ``True``.
 
     Returns:
         :class:`PESScanResult` with the full energy profile and geometries.
@@ -429,7 +429,7 @@ def run_pes_scan(
     # don't know where this point landed, but it wasn't back at the start."
     _last_good_molecule = molecule
 
-    # --- Reusable points from a previous attempt (M-CHECKPOINT CHK.3) ---
+    # --- Reusable points from a previous attempt ---
     # Keyed by point index, but each record also stores the coordinate value
     # it was computed at and is only reused when that value still matches.
     # That makes the cache self-validating: changing `start`, `stop`, or
@@ -570,7 +570,7 @@ def run_pes_scan(
                     {
                         "index": step_num,
                         "value": float(val),
-                        # AUDIT F10 — identifies WHICH coordinate this point
+                        # Identifies WHICH coordinate this point
                         # belongs to, so a later scan of a different bond/
                         # angle/dihedral (or different atoms) can't have a
                         # coincidentally-matching "value" reuse this point.

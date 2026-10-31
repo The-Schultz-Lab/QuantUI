@@ -200,7 +200,7 @@ def visualize_molecule_py3dmol(
     else:
         view.setStyle({style: {}})
 
-    # MET.6: 3Dmol.js now infers some metal-ligand contacts as covalent sticks,
+    # 3Dmol.js now infers some metal-ligand contacts as covalent sticks,
     # which render as thick tapered spokes (ferrocene). Hide those and draw
     # dashed coordination bonds ourselves (GaussView convention).
     decorate_py3dmol_coordination_bonds(view, molecule.atoms, molecule.coordinates)
@@ -248,7 +248,7 @@ def decorate_py3dmol_coordination_bonds(
     atoms: Sequence[str],
     coords: Sequence[Sequence[float]],
 ) -> None:
-    """Hide metal-ligand sticks and draw dashed coordination bonds (MET.6)."""
+    """Hide metal-ligand sticks and draw dashed coordination bonds."""
     _suppress_metal_coordination_sticks(view, atoms, coords)
     _add_coordination_bonds(view, atoms, coords)
 
@@ -374,7 +374,7 @@ def visualize_molecule_plotlymol(
             # a clean ValueError on most, a raw C++-level IndexError
             # ("unordered_map::at") on at least one Python-3.9 RDKit wheel
             # (a metal with no covalent-radius table entry). Normalized to one
-            # type here so callers — including the MET.3 fallback below, which
+            # type here so callers — including the py3Dmol fallback below, which
             # must still catch it — don't depend on a third-party
             # implementation detail that varies by platform/Python version.
             raise ValueError(
@@ -511,7 +511,7 @@ def visualize_molecule(
                 **plotly_kwargs,
             )
         except Exception as exc:  # noqa: BLE001 — a viewer must never hard-error
-            # MET.3: PlotlyMol runs RDKit valence perception, which raises on
+            # PlotlyMol runs RDKit valence perception, which raises on
             # transition metals ("Atom N has no valences defined"). py3Dmol
             # renders straight from coordinates with no valence model, so fall
             # back to it rather than crash on a valid molecule.
@@ -598,7 +598,7 @@ def render_molecule_html(
     caught and returned as inline HTML so the caller sees a
     visible failure message in the viewer slot instead of a blank 🙁 panel.
 
-    ``capture_class`` wires a "Save PNG" button (M-EXPORT2 EXP2.2), the same
+    ``capture_class`` wires a "Save PNG" button, the same
     viewer-agnostic bridge as the reorg/trajectory/vibrational viewers
     (``orbital_visualization._GENERIC_CAPTURE_JS`` reads
     ``window["viewer_"+UID]`` directly). **Only wired for the py3Dmol

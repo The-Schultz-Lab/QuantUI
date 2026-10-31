@@ -2,7 +2,7 @@
 
 QuantUI themes are **preset palettes** backed by CSS custom properties. Each
 palette defines independent light/dark (or tinted) values — the whole-page
-``filter: invert(1) hue-rotate(180deg)`` approach was retired in THEME.6.
+``filter: invert(1) hue-rotate(180deg)`` approach is no longer used.
 
 Inline HTML and app chrome reference tokens via ``theme.css.BORDER`` etc.
 (``var(--q-border)``), so a theme switch updates every surface that uses those
@@ -231,7 +231,7 @@ def _neutral_button_css() -> str:
         "border-radius: 5px !important; }\n"
         # Selected ToggleButtons option. Same selector plus .mod-active so it
         # outranks the rule above; without it the chosen option looked exactly
-        # like the others (UIA.8).
+        # like the others.
         ".jupyter-button.mod-active:not(.mod-info):not(.mod-success)"
         ":not(.mod-warning):not(.mod-danger):not(.mod-primary), "
         "button.jupyter-button.mod-active:not(.mod-info):not(.mod-success)"
@@ -306,8 +306,8 @@ def _nouislider_css() -> str:
 
     The native-range rules above only reach QuantUI's own in-viewer scrubbers.
     Without these, ``.noUi-connects`` (full track width) took the panel colour
-    and hid the track on every palette, and the white handle vanished on Light
-    (UIA.5).
+    and hid the track on every palette, and the white handle vanished on
+    Light.
     """
     scope = (".widget-slider", ".widget-hslider", ".widget-vslider")
 
@@ -644,7 +644,7 @@ def get_palette(palette_id: str) -> ThemePalette:
 
 
 def theme_css_block(palette_id: str) -> str:
-    """Inject CSS custom properties for *palette_id* (THEME.6)."""
+    """Inject CSS custom properties for *palette_id*."""
     palette = get_palette(palette_id)
     merged: Dict[str, str] = {}
     merged.update(palette.css_variables())
@@ -694,7 +694,7 @@ def plotly_colors(palette_id: str) -> dict:
         "axis_line_color": palette.border_strong,
         # Dark palettes: the panel colour rather than pure black, so 3D
         # viewers sit in the page instead of punching a black hole in it
-        # (audit D17). Light palettes keep a white scene.
+        # Light palettes keep a white scene.
         "scene_bgcolor": palette.bg_panel if palette.is_dark else "#ffffff",
     }
 

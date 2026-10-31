@@ -29,7 +29,7 @@ _STAGING_SIDECAR_FILES = (
 def slurm_provenance(record: JobRecord, staging: Path) -> dict[str, Any]:
     """``result.json`` extras that mark a History entry as a SLURM run.
 
-    M-JOBDIRS JD.5: stored under ``execution_backend`` / ``slurm`` so the
+    Stored under ``execution_backend`` / ``slurm`` so the
     History list and card can tell SLURM results from local ones. Additive —
     local results and results ingested before this simply lack the keys.
     For a job-dir record, *staging* is the attempt dir and its name gives the
@@ -53,14 +53,14 @@ def _copy_staging_sidecars(
     staging: Path, saved_dir: Path, payload: dict[str, Any] | None = None
 ) -> None:
     # Attempt dirs may hold shareable files under descriptive names
-    # (result.json["artifact_names"], M-JOBDIRS JD.7); History keeps the
+    # (result.json["artifact_names"]); History keeps the
     # fixed names its loaders expect.
     renamed = (payload or {}).get("artifact_names") or {}
     for name in _STAGING_SIDECAR_FILES:
         src = staging / renamed.get(name, name)
         if src.exists():
             shutil.copy2(src, saved_dir / name)
-    # HOMO/LUMO cubes for the Viewer (VW.7), written with orbitals.npz.
+    # HOMO/LUMO cubes for the Viewer, written with orbitals.npz.
     from quantui.orbital_visualization import FRONTIER_CUBES_DIR
 
     cubes = staging / FRONTIER_CUBES_DIR
@@ -81,7 +81,7 @@ def _finalize_history_entry(saved_dir: Path) -> None:
 def _basic_result(payload: dict[str, Any], record: JobRecord) -> SimpleNamespace:
     """Reconstruct a result-alike object from a worker's staging JSON.
 
-    AUDIT F12 — this used to reconstruct only 7 generic fields even though
+    This used to reconstruct only 7 generic fields even though
     ``session_result_payload()`` (and the other ``*_result_payload``
     builders) already serialize Mulliken charges, dipole, atom symbols,
     SCF variant/rescue provenance, post-HF correlation breakdown, and
@@ -145,7 +145,7 @@ def _ingest_frequency(
     result = _basic_result(payload, record)
     spectra = payload.get("spectra") or {}
     calc_type = payload.get("calc_type") or "frequency"
-    # A Transition State (TS.5) is saved like a frequency result plus its
+    # A Transition State is saved like a frequency result plus its
     # search path; History shows the stationary point it found.
     final = payload.get("final_molecule")
     saved_dir = save_result(
@@ -215,7 +215,7 @@ def _ingest_reorganization_energy(
                 lambda_hartree=ch_data["lambda_hartree"],
                 converged=ch_data["converged"],
                 ion_molecule=ion_mol,
-                # ISSUE.12 — absent from payloads written before it.
+                # ⟨S²⟩ fields are absent from older payloads.
                 **{k: ch_data.get(k) for k in S2_KEYS},
             )
         )
@@ -311,9 +311,9 @@ def uningested_attempts(record: JobRecord) -> list[Path]:
     """Finished attempt dirs of a job-dir record not yet saved to History.
 
     ``result.json`` is written only when a run succeeds, so its presence
-    marks a finished, successful attempt (M-JOBDIRS: successes only).
+    marks a finished, successful attempt (failed attempts never write it).
     Includes hand-run ``sbatch submit.slurm`` attempts the record never
-    tracked (JD.11). Legacy records return ``[]``: their single run is
+    tracked. Legacy records return ``[]``: their single run is
     ingested by the monitor / reconnect path, as before.
     """
     if record.job_dir is None:
@@ -348,7 +348,7 @@ def ingest_attempt(
         staging.name,
         result_dir=str(saved_dir) if tracked else None,
     )
-    # B2.9: a terminal-submitted job's record (status "prepared", no job id)
+    # A terminal-submitted job's record (status "prepared", no job id)
     # is never polled; a result saved to History means it succeeded.
     if record.status.lower() == "prepared":
         registry.update_status(record.request_id, "success")

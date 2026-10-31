@@ -1,4 +1,4 @@
-"""Structure editing operations (M-INTERACT INT.8, DEC-023 Tier-1 #8).
+"""Structure editing operations.
 
 GaussView-style edits on a :class:`~quantui.molecule.Molecule`, each
 returning a NEW molecule (the caller keeps the old one for undo):

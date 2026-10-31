@@ -580,7 +580,7 @@ def log_calculation(
     simply lack the keys, and every reader treats "absent" as "unknown"
     rather than assuming a default.
 
-    ``density_fit`` (added 2026-08-15, M-DF) records whether density fitting
+    ``density_fit`` (added 2026-08-15) records whether density fitting
     (RI) was applied to the SCF. It follows the same additive convention and is
     partitioned in :func:`estimate_time` exactly as ``gpu_used`` is — mixing
     fitted and unfitted runs of the same chemistry under one key would give the
@@ -1021,7 +1021,7 @@ def estimate_time_from_records(
             scoped = same_source
             _source_filtered = True
 
-    # Partition by density fitting (M-DF). Same shape as the device partition:
+    # Partition by density fitting. Same shape as the device partition:
     # older records predate DF and were all unfitted, so admit "absent" into
     # the unfitted pool. Mixing fitted and unfitted runs of the same chemistry
     # would give the estimator a bimodal distribution it cannot see.

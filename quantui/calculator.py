@@ -90,7 +90,7 @@ class PySCFCalculation:
         The script runs independently (no QuantUI required) and saves
         results to results.npz next to the script file.
 
-        ISSUE.19 #7: the script follows the app's settings — PCM *solvent*
+        The script follows the app's settings — PCM *solvent*
         and *density_fit* — and adds the Hessian/thermochemistry section for
         ``"frequency"`` and the excited-state section for ``"tddft"``. Other
         calc types (geometry optimization, NMR, PES scan, reorganization
@@ -112,7 +112,7 @@ class PySCFCalculation:
         formula = self.molecule.get_formula()
         job_name = f"{formula}_{self.method}_{self.basis}"
 
-        # AUDIT F06 — embed the resolved ECP mapping so a heavy-element
+        # Embed the resolved ECP mapping so a heavy-element
         # system (e.g. NaH/LANL2DZ) reproduces the in-app electron count
         # instead of silently running all-electron with only the basis set.
         #

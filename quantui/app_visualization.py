@@ -138,7 +138,7 @@ def show_result_3d(
                     lighting=app._viz_lighting,
                     bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
                     capture_class=_MOL_RESULTS_PNG_INBOX_CLASS,
-                    # D8: the result card above already names the molecule.
+                    # The result card above already names the molecule.
                     show_info=False,
                 )
                 app._set_html_output(app.result_viz_output, html)
@@ -170,7 +170,7 @@ def show_result_3d(
                     show_info=False,
                 )
                 if is_analysis_output:
-                    # M-MEASURE: wires click-to-measure into the freshly
+                    # Wires click-to-measure into the freshly
                     # rendered HTML (py3Dmol only) and resets any stale picks
                     # from whatever was shown before.
                     from quantui.app_measurement import finalize_analysis_html
@@ -360,7 +360,7 @@ def show_opt_trajectory(
             min_height="420px", width="100%", max_width="500px", overflow="hidden"
         )
     )
-    # Hidden inbox for the viewer's Save-PNG button (M-EXPORT2 EXP2.2) — same
+    # Hidden inbox for the viewer's Save-PNG button — same
     # write-into-DOM-node-then-sync-to-kernel bridge as the isosurface/reorg
     # viewers. Rebuilt every render like the export button/status below it,
     # since this panel's widgets are not part of the one-time app_builders
@@ -544,7 +544,7 @@ def render_traj_frame(app: Any, molecule: Any, output_widget: Any) -> None:
         with output_widget:
             display(fig)
         return
-    except Exception:  # noqa: BLE001 — MET.3: any PlotlyMol failure (missing
+    except Exception:  # noqa: BLE001 — any PlotlyMol failure (missing
         # backend, or the RDKit valence error a transition metal raises) must
         # fall through to the py3Dmol renderer below, never crash the frame.
         pass
@@ -686,7 +686,7 @@ def _xyz_block_coords(block: str) -> list:
 
 
 def freq_mode_irreps(freq_result: Any, molecule: Any = None) -> Any:
-    """Symmetry labels of a Frequency result's modes (SPC2.4), or ``None``.
+    """Symmetry labels of a Frequency result's modes, or ``None``.
 
     Needs the normal-mode displacements and the geometry they belong to:
     ``pyscf_mol_atom`` on a live result, else *molecule* (History).
@@ -721,7 +721,7 @@ def show_vib_animation(app: Any, freq_result: Any, molecule: Any) -> bool:
     if not freqs:
         return False
     # Stepping along a mode is how you leave a saddle point; with no
-    # imaginary mode there is nothing to step off (audit D17).
+    # imaginary mode there is nothing to step off.
     btn = getattr(app, "_vib_apply_mode_btn", None)
     if btn is not None:
         btn.layout.display = "" if any(float(f) < 0 for f in freqs) else "none"
@@ -923,7 +923,7 @@ def show_raman_spectrum(app: Any, freq_result: Any) -> bool:
     irreps = freq_mode_irreps(freq_result) if acts else None
     app._last_raman_labels = irreps.labels if irreps is not None else None
     if not acts:
-        # ISSUE.19 #5 — this used to plot every mode at the same height,
+        # This used to plot every mode at the same height,
         # which reads as a real spectrum in class. Say why there is none.
         app._raman_accordion.set_title(0, "Raman Spectrum (not computed)")
         app._raman_mode_toggle.layout.display = "none"
@@ -1016,7 +1016,7 @@ def update_raman_figure(app: Any, mode: str, fwhm: float) -> None:
             fwhm=fwhm,
             yaxis_title=y_title,
             labels=getattr(app, "_last_raman_labels", None),
-            # Same direction as the IR panel, so the spectra line up (L8).
+            # Same direction as the IR panel, so the spectra line up.
             descending=getattr(getattr(app, "_ir_axis_dd", None), "value", "descending")
             == "descending",
         )
@@ -1105,7 +1105,7 @@ def uv_default_range(wl: List[float], gamma: float) -> tuple[float, float]:
 
     It used to start at 100 nm or more, which hid the vacuum-UV bands of
     small molecules entirely (water's are at 57–106 nm), leaving an empty
-    plot (M-UIPOLISH P3).
+    plot.
     """
     shown = [w for w in wl if w >= _UV_MIN_DEFAULT_NM] or list(wl)
     pad = max(20.0, 0.15 * (max(shown) - min(shown)), 3.0 * gamma)
@@ -1201,7 +1201,7 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
             n_points = max(600, int((x_max - x_min) * 2.0))
             x_grid = _np.linspace(x_min, x_max, n_points)
             y_grid = _np.zeros_like(x_grid)
-            # AUDIT additional-concerns — same height-normalized Lorentzian
+            # Same height-normalized Lorentzian
             # convention as ir_plot.py/raman_plot.py (see ir_plot.py's
             # module docstring): peak height = supplied oscillator
             # strength, area scales with FWHM. Deliberate, not a bug.
@@ -1350,7 +1350,7 @@ def _nmr_summary_html(
     """One table, Atom | σ | δ, numbered like the viewer (O1, H2, H3).
 
     There used to be a σ table (H2, H3) and a separate shift table that
-    renumbered the same atoms H-1, H-2 (M-UIPOLISH P4).
+    renumbered the same atoms H-1, H-2.
     """
     from . import theme as _theme
 
@@ -1437,7 +1437,7 @@ def update_nmr_figure(app: Any, nucleus: str) -> None:
 
 
 def _attach_mo_irreps(info: Any, result: Any) -> None:
-    """Best-effort symmetry labels for the diagram (M-CHEM CHEM.1).
+    """Best-effort symmetry labels for the diagram.
 
     PySCF results only (PyFock orders its AOs differently). For an
     unrestricted result the diagram shows the alpha channel, so the alpha
@@ -1495,7 +1495,7 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
     app._last_orb_mol_atom = getattr(result, "pyscf_mol_atom", None)
     app._last_orb_mol_basis = getattr(result, "pyscf_mol_basis", None)
     app._last_orb_engine_id = str(getattr(result, "engine_id", "pyscf") or "pyscf")
-    # AUDIT additional-concerns — snapshot the method that actually
+    # Snapshot the method that actually
     # produced this mo_coeff, from the result object itself, rather than
     # reading the live Method dropdown at cube-generation time (below).
     # The dropdown can change (or a different History result can be
@@ -1504,7 +1504,7 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
     # exported — the cube's own provenance comment used to silently name
     # whatever method the dropdown showed at that later moment instead.
     app._last_orb_method = str(getattr(result, "method", "") or "")
-    # Spin toggle only for unrestricted results (SURF.1).
+    # Spin toggle only for unrestricted results.
     sync_iso_surface_controls(app)
 
     plotly_rendered = False
@@ -1858,7 +1858,7 @@ def render_orbital_isosurface(
     n_occ = orb_info.n_occupied
     n_total = len(orb_info.mo_energies_ev)
     # Unrestricted results: the beta channel has its own orbitals and its
-    # own HOMO (SURF.1). The diagram and orb_info describe alpha.
+    # own HOMO. The diagram and orb_info describe alpha.
     _beta = (
         _orbitals_unrestricted(app)
         and getattr(getattr(app, "_orb_spin_toggle", None), "value", "alpha") == "beta"
@@ -1942,12 +1942,12 @@ def render_orbital_isosurface(
         # Charge/spin aren't carried on the app's orbital-state attributes —
         # infer them from the MO occupations so charged/open-shell molecules
         # (H3O+, OH-, radicals, ...) don't fail to build in PySCF. Passing
-        # mol_basis lets AUDIT F14's ECP-aware charge inference apply.
+        # mol_basis lets the ECP-aware charge inference apply.
         _charge, _spin = infer_charge_and_spin(
             mol_atom, mo_occ_for_charge, basis=mol_basis
         )
 
-        # ORBX.2: the user-chosen cubegen grid. Read at generate time rather
+        # The user-chosen cubegen grid. Read at generate time rather
         # than cached, so changing the dropdown affects the next Generate
         # without any extra wiring. Falls back to the default if the widget is
         # absent (older layouts, tests constructing a partial app).
@@ -1963,8 +1963,7 @@ def render_orbital_isosurface(
         _grid = ISO_RESOLUTION_PRESETS.get(
             _res_key, ISO_RESOLUTION_PRESETS[DEFAULT_ISO_RESOLUTION]
         )
-        # M-EXPORT2 EXP2.4 / M-ORBEXPORT ORBX.4 — AUDIT additional-concerns:
-        # this used to read the LIVE method dropdown, which is not
+        # This used to read the LIVE method dropdown, which is not
         # necessarily what actually produced the stored mo_coeff (e.g.
         # after a History replay of a differently-computed result, or if
         # the dropdown is changed between loading the orbitals and
@@ -2002,7 +2001,7 @@ def render_orbital_isosurface(
                 method=_method_for_provenance,
             )
         except ImportError:
-            # The Viewer has no PySCF (VW.7): draw the HOMO/LUMO cube saved
+            # The Viewer has no PySCF: draw the HOMO/LUMO cube saved
             # with the calculation, if this is one of them.
             from quantui.orbital_visualization import (
                 frontier_cube_labels,
@@ -2136,7 +2135,7 @@ def render_orbital_isosurface(
 def render_density_surface(
     app: Any, mode: str, label: str, render_token: int | None = None
 ) -> None:
-    """Total density, spin density or ESP map (M-SURFACES SURF.2/3).
+    """Total density, spin density or ESP map.
 
     Built from the stored orbitals and occupations — no new SCF. Runs on the
     isosurface worker thread like the orbital path, and shares its viewer,
@@ -2948,8 +2947,8 @@ def iso_bridge_update(app: Any, **opts: Any) -> None:
     """Push appearance changes to the LIVE viewer — no Python re-render.
 
     This is what keeps the camera. A Python re-render replaces the viewer
-    wholesale, so the orientation the user rotated into is lost (GOTCHAS:
-    "Camera state does NOT persist across atomic HTML swaps"); the JS side
+    wholesale, so the orientation the user rotated into is lost
+    (camera state does not persist across atomic HTML swaps); the JS side
     instead saves getView()/setView() around a surface rebuild.
 
     It also stops the panel collapsing and the page jumping on every slider
@@ -3358,8 +3357,8 @@ def build_reorg_geometry_viewer_html(
     behaviour, offline loading and control styling match the trajectory viewer
     rather than being reinvented.
 
-    ``capture_class`` wires a "Save PNG" button (M-EXPORT2 EXP2.2), mirroring
-    the isosurface viewer's capture bridge (ORBX.1) but with a uid-scoped
+    ``capture_class`` wires a "Save PNG" button, mirroring
+    the isosurface viewer's capture bridge but with a uid-scoped
     capture function — see ``_GENERIC_CAPTURE_JS``. Empty omits the button.
     """
     import json
@@ -3662,7 +3661,7 @@ def build_trajectory_viewer_html(
     (``make_view``). ``energies`` (Hartree) and ``rel_e`` (kcal/mol) are optional
     per-step annotations; a <2-frame trajectory renders as a static structure.
 
-    ``capture_class`` wires a "Save PNG" button (M-EXPORT2 EXP2.2), the same
+    ``capture_class`` wires a "Save PNG" button, the same
     bridge as the reorg-geometry viewer (``_GENERIC_CAPTURE_JS`` reads off
     ``window["viewer_"+UID]``, which 3Dmol.js sets regardless of what is
     displayed in it — nothing trajectory-specific needed). Empty omits the
@@ -3854,7 +3853,7 @@ def build_vib_viewer_html(
     loader (``make_view``). Raises if displacements are missing/misshaped so the
     caller can fall back to the legacy per-mode renderer.
 
-    ``capture_class`` wires a "Save PNG" button (M-EXPORT2 EXP2.2), the same
+    ``capture_class`` wires a "Save PNG" button, the same
     viewer-agnostic bridge as the trajectory/reorg viewers (``_GENERIC_CAPTURE_JS``
     reads ``window["viewer_"+UID]`` directly, so it works whether or not the
     viewer has finished loading its initial mode by the time the button
@@ -3862,7 +3861,7 @@ def build_vib_viewer_html(
     omits the button. Deliberately not offered on the legacy per-mode
     plotlymol3d fallback (``_render_vib_mode_plotlymol``) — that backend has no
     equivalent client-side capture global, same reasoning as the main molecule
-    viewer (see M-EXPORT2 roadmap).
+    viewer.
     """
     import json
     import re
@@ -4051,7 +4050,7 @@ def vib_mode_table_html(freq_result: Any, irreps: Any = None) -> str:
     """Every normal mode with its frequency, IR intensity and Raman activity.
 
     With *irreps* (:class:`~quantui.symmetry.ModeIrreps`), a symmetry column
-    and the molecule's Γvib caption (SPC2.4).
+    and the molecule's Γvib caption.
     """
     freqs = list(getattr(freq_result, "frequencies_cm1", None) or [])
     ir = list(getattr(freq_result, "ir_intensities", None) or [])
@@ -4116,7 +4115,7 @@ def show_thermo_box(
 ) -> None:
     """Remember what thermochemistry needs and show it at the current T/P.
 
-    *max_force_ev_per_ang* (D1) puts the not-a-stationary-point warning above
+    *max_force_ev_per_ang* puts the not-a-stationary-point warning above
     the table, as on the result card.
     """
     box = getattr(app, "_thermo_box", None)
@@ -4468,7 +4467,7 @@ def build_vib_export_html(app: Any, mode_number: int) -> tuple[str, str]:
     )
 
 
-# ── Orbital gallery (M-SURFACES SURF.1, DEC-024) ─────────────────────────────
+# ── Orbital gallery ──────────────────────────────────────────────────────────
 
 
 def build_gallery_for_app(app: Any, each_side: int = 3) -> str:

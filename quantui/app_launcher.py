@@ -31,7 +31,7 @@ LAUNCHER_SCRIPT_NAME = "quantui-app"
 # (display cell only; no repo-root sys.path hack needed for installed packages).
 _APP_NOTEBOOK: dict = {
     # No "# QuantUI" heading cell: the app's own banner already shows the
-    # name, so the heading only duplicated it (rendered-UI audit D8).
+    # name, so the heading only duplicated it.
     "cells": [
         {
             "cell_type": "code",
@@ -69,7 +69,7 @@ def quantui_home() -> Path:
     return Path.home() / ".quantui"
 
 
-#: Where the viewer remembers the last results folder it opened (VW.12).
+#: Where the viewer remembers the last results folder it opened.
 VIEWER_LAST_FOLDER_NAME = "viewer-last-folder.json"
 
 
@@ -457,7 +457,7 @@ def run_viewer_app(
     argv = build_voila_argv(notebook, port=port, no_browser=True)
     argv[:1] = voila_cmd
     argv.append("--Voila.ip=127.0.0.1")
-    # Laptop security (VW.11): binding to 127.0.0.1 keeps other machines out,
+    # Laptop security: binding to 127.0.0.1 keeps other machines out,
     # but any local process or web page could still start kernels on this
     # port. A per-run token closes that; without it Voila serves a login page
     # and starts nothing. (Standalone Voila reads no XSRF setting at all, so

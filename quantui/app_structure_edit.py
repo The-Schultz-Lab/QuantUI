@@ -1,4 +1,4 @@
-"""Edit Structure panel on the Calculate tab (M-INTERACT INT.8).
+"""Edit Structure panel on the Calculate tab.
 
 Pick atoms by clicking the Calculate-tab viewer (py3Dmol; same click bridge
 as click-to-measure and PES picking) or by typing their numbers, then set a

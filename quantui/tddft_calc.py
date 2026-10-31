@@ -6,7 +6,7 @@ time-dependent density functional theory (TD-DFT).  For Hartree-Fock
 methods (RHF/UHF), falls back to full TDHF (the random-phase
 approximation, RPA — ``mf.TDHF()``) and notes this in the output.
 
-AUDIT additional-concerns — TDHF is NOT the same method as CIS. Full
+TDHF is NOT the same method as CIS. Full
 TDHF/RPA includes the excitation/de-excitation (A/B block) coupling that
 the Tamm-Dancoff approximation (TDA) drops; CIS is HF's TDA. This module
 calls ``mf.TDHF()`` (full RPA), so its labels say TDHF/RPA rather than
@@ -66,7 +66,7 @@ class TDDFTResult:
         converged: ``True`` when the ground-state SCF converged, the TD
             solve ran and produced states, and — whenever per-root status is
             available — at least one requested root actually converged
-            (AUDIT F08; relaxed in code review from "every root" to "at
+            (relaxed from "every root" to "at
             least one root", since it is routine for a Davidson solve's
             higher/harder roots to miss the default iteration budget while
             the lower, physically relevant ones are fine). ``False`` only
@@ -100,7 +100,7 @@ class TDDFTResult:
     oscillator_strengths: List[float] = field(default_factory=list)
     nstates: int = 10
     density_fit: bool = False
-    # AUDIT F08 — per-root Davidson convergence from the TD solver itself,
+    # Per-root Davidson convergence from the TD solver itself,
     # distinct from the ground-state SCF's own converged flag above. None
     # if the TD solve never ran (e.g. it raised before td.kernel()
     # completed) or the installed PySCF doesn't expose td.converged.
@@ -110,14 +110,14 @@ class TDDFTResult:
     # "converged" root counts, since a Davidson solve can return energies
     # for roots it never actually converged.
     n_converged_states: Optional[int] = None
-    # M-UX2 UXP2.10 — the actual PySCF class dispatched for the
+    # The actual PySCF class dispatched for the
     # ground-state SCF (e.g. "RHF", "UHF", "RKS", "UKS"); "" for an older
     # saved result.
     scf_variant: str = ""
     # PCM solvent (None = gas phase). Ground state: equilibrium PCM with the
     # static dielectric. Excitations: non-equilibrium (optical dielectric).
     solvent: Optional[str] = None
-    # Ground-state analysis of the reference SCF (ISSUE.19 #6), so TD-DFT
+    # Ground-state analysis of the reference SCF, so TD-DFT
     # results fill the Energies, Isosurface and Populations panels too.
     mo_energy_hartree: Optional[Any] = None
     mo_occ: Optional[Any] = None
@@ -211,7 +211,7 @@ def run_tddft_calc(
         progress_stream: Optional writable text stream for live PySCF output.
         scf_rescue: Whether the ground-state SCF automatically retries
             through the shared rescue helper on non-convergence
-            (M-SCF-ROBUST, see :mod:`quantui.scf_robust`). Default ``True``.
+            (see :mod:`quantui.scf_robust`). Default ``True``.
         solvent: PCM solvent name (``config.SOLVENT_OPTIONS``) or ``None``.
             The ground state is solvated with the static dielectric constant;
             the vertical excitations use non-equilibrium solvation with the
@@ -322,12 +322,12 @@ def _run_tddft_calc_body(
         from .session_calc import maybe_apply_d3, resolve_xc
 
         mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
-        # M-UX2 UXP2.10 — capture before maybe_apply_d3 can wrap/rename it.
+        # Capture before maybe_apply_d3 can wrap/rename it.
         scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
         mf, _ = maybe_apply_d3(mf, method, progress_stream=progress_stream)
 
-    # Density fitting (RI), opt-in (M-DF). Off by default. TD-DFT is where the
+    # Density fitting (RI), opt-in. Off by default. TD-DFT is where the
     # measured win is largest (~1.6x on aspirin), so this is the primary target.
     from .density_fitting import try_density_fit as _try_density_fit
 
@@ -393,7 +393,7 @@ def _run_tddft_calc_body(
     except Exception as exc:
         logger.debug("HOMO-LUMO gap extraction failed in TD-DFT calc: %s", exc)
 
-    # ── Ground-state analysis (ISSUE.19 #6) ─────────────────────────────────
+    # ── Ground-state analysis ───────────────────────────────────────────────
     from .session_calc import ground_state_analysis
 
     _gs = ground_state_analysis(mf, molecule, basis, label=f"{method}/{basis} TD")
@@ -401,7 +401,7 @@ def _run_tddft_calc_body(
     # ── TD-DFT / TDHF ────────────────────────────────────────────────────────
     excitation_energies_ev: List[float] = []
     oscillator_strengths: List[float] = []
-    # AUDIT F08 — td.kernel() copies energies/oscillator strengths without
+    # td.kernel() copies energies/oscillator strengths without
     # checking td.converged (a per-root array from the Davidson solve). A
     # real one-iteration-limited TDHF/6-31G water solve had
     # converged=[False, False, False] yet reported success with three
@@ -447,7 +447,7 @@ def _run_tddft_calc_body(
             except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
                 pass
 
-    # AUDIT F08 — overall success requires the TD solve to have actually
+    # Overall success requires the TD solve to have actually
     # produced converged roots, not just a ground-state SCF. A TD-DFT run
     # whose entire purpose is the excited states is not "converged" if the
     # Davidson solve raised before producing any roots, or if none of the
@@ -459,7 +459,7 @@ def _run_tddft_calc_body(
     # the lower ones (usually what a UV-Vis analysis actually cares about)
     # are fine, so a perfectly normal multi-state run was always flagged
     # "treat with caution". Relaxed to "at least one requested root
-    # converged" — still catches the original bug this audit fixed (a
+    # converged" — still catches the original failure (a
     # solve where every root came back unconverged), and n_converged_states
     # below still reports the exact per-root tally for anyone who wants it.
     #

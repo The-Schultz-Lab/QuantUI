@@ -1,24 +1,23 @@
-"""Click-to-measure atom selection for the Analysis-tab viewer (M-MEASURE).
+"""Click-to-measure atom selection for the Analysis-tab viewer.
 
-py3Dmol-only for v1 (MEAS.2-.6): the Analysis tab's top viewer
+py3Dmol-only for now: the Analysis tab's top viewer
 (``app._analysis_mol_output``) is dual-backend (py3Dmol / plotlymol), but
 only py3Dmol renders through a live ``$3Dmol.GLViewer`` with a native
 ``setClickable`` — plotlymol is a static Plotly figure with no equivalent
-without restructuring it into a live widget, which is out of scope here. See
-roadmap 45 ("Real constraint found: backend split").
+without restructuring it into a live widget, which is out of scope here.
 
 Two one-way bridges, same shape as the isosurface panel's:
 
-- **JS -> kernel** (a click): the exact "standard trick" ORBX.1 uses for its
-  Save-PNG button — the click handler writes the picked atom's index into a
-  hidden ``widgets.Textarea`` and dispatches an ``input`` event, which
+- **JS -> kernel** (a click): the exact "standard trick" the orbital viewer
+  uses for its Save-PNG button — the click handler writes the picked atom's
+  index into a hidden ``widgets.Textarea`` and dispatches an ``input`` event, which
   ipywidgets' own view syncs to the kernel. See ``inject_click_js``.
 - **kernel -> JS** (a highlight update): mirrors
   ``app_visualization.iso_bridge_update`` — a hidden ``widgets.Output``
   receives one-shot ``IPython.display.Javascript`` that calls a bridge
   function the click JS defined, so the live viewer can be restyled without a
   Python re-render (which would lose the camera orientation the user rotated
-  into — GOTCHAS: "Camera state does NOT persist across atomic HTML swaps").
+  into — camera state does not persist across atomic HTML swaps).
 """
 
 from __future__ import annotations
@@ -41,7 +40,7 @@ MAX_PICKS = 4
 MEASURE_INBOX_CLASS = "quantui-measure-inbox"
 
 # ---------------------------------------------------------------------------
-# JS -> kernel: click transport (MEAS.2)
+# JS -> kernel: click transport
 # ---------------------------------------------------------------------------
 
 # Appended after the normal py3Dmol-rendered HTML for the Analysis-tab viewer
@@ -64,7 +63,7 @@ _MEASURE_CLICK_JS = """
     shapes=[];
   }
 
-  // Highlight picked atoms with a translucent sphere overlay (MEAS.4). Looks
+  // Highlight picked atoms with a translucent sphere overlay. Looks
   // the atom's live coordinates up on the model rather than taking them from
   // Python, so this needs nothing but the index the click already sent.
   //
@@ -248,7 +247,7 @@ def inject_click_js(html: str, *, inbox_class: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# kernel -> JS: push a highlight update to the live viewer (MEAS.4)
+# kernel -> JS: push a highlight update to the live viewer
 # ---------------------------------------------------------------------------
 
 
@@ -279,7 +278,7 @@ def push_highlight(app: Any, indices: Sequence[int]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Readout text (MEAS.5)
+# Readout text
 # ---------------------------------------------------------------------------
 
 _PLACEHOLDER_TEXT = "Click an atom in the viewer to start measuring."
@@ -300,7 +299,7 @@ def _set_readout(app: Any, text: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Python-side pick state machine (MEAS.3)
+# Python-side pick state machine
 # ---------------------------------------------------------------------------
 
 
@@ -356,7 +355,7 @@ def on_measure_inbox_changed(app: Any, change: dict) -> None:
 
 
 def on_measure_clear(app: Any, btn: Any = None) -> None:
-    """Clear button (MEAS.5): empty the pick chain and its highlights."""
+    """Clear button: empty the pick chain and its highlights."""
     _ = btn
     app._measure_picks = []
     _set_readout(app, _PLACEHOLDER_TEXT)
@@ -368,16 +367,16 @@ def reset_picks(app: Any) -> None:
 
     A fresh render is a brand-new ``<canvas>`` with none of the old
     highlights, so there is nothing to push to the browser here; only the
-    Python-side state and the readout text need clearing (MEAS.3: "Switching
-    molecules or leaving the Analysis tab clears stale picks — no
-    measurement is ever silently computed against the wrong structure.").
+    Python-side state and the readout text need clearing. Switching
+    molecules or leaving the Analysis tab clears stale picks, so no
+    measurement is ever silently computed against the wrong structure.
     """
     app._measure_picks = []
     _set_readout(app, _PLACEHOLDER_TEXT)
 
 
 # ---------------------------------------------------------------------------
-# plotlymol fallback messaging (MEAS.6)
+# plotlymol fallback messaging
 # ---------------------------------------------------------------------------
 
 
@@ -410,7 +409,7 @@ def finalize_analysis_html(app: Any, html: str, backend: Any) -> str:
     Called at both places that render into ``app._analysis_mol_output``
     (the post-calc render in ``app_visualization.show_result_3d`` and the
     backend-toggle re-render in ``app._rerender_3d_views``), so click-to-
-    measure and MEAS.3's stale-pick reset apply identically regardless of
+    measure and the stale-pick reset apply identically regardless of
     which path produced the view.
 
     Mulliken charge colouring lives in the dedicated Mulliken-panel viewer

@@ -1,5 +1,5 @@
 """
-SLURM batch execution backend (M-CLUSTER2 CL2.2 foundation).
+SLURM batch execution backend.
 
 Salvages polling / batch-squeue patterns from the legacy ``SLURMJobManager``
 and adapts them to the execution-backend contract + on-disk registry.
@@ -93,7 +93,7 @@ class SlurmBackend:
         )
 
     def _count_active_slurm_jobs(self) -> int:
-        """Active SLURM records, after syncing them with the queue (B2.9).
+        """Active SLURM records, after syncing them with the queue.
 
         Records only leave ``submitted``/``running`` when someone polls. With
         no app open (``quantui submit`` from a terminal) nothing did, so
@@ -231,7 +231,7 @@ class SlurmBackend:
         if email is not None:
             resolved_events = validate_mail_events(mail_events)
 
-        # M-JOBDIRS: the job dir name doubles as the SLURM job name, so
+        # The job dir name doubles as the SLURM job name, so
         # squeue output matches the directory on disk.
         name = sanitize_job_name(job_name or "") or default_job_name(request)
         record = self.registry.create(
@@ -326,7 +326,7 @@ class SlurmBackend:
         return slurm_job_id
 
     def _worker_command(self, request_path: Path, job_dir: Path) -> str:
-        # AUDIT F21 — every path here is inserted into shell text (this
+        # Every path here is inserted into shell text (this
         # string is embedded verbatim into the generated sbatch script),
         # not passed as an argv list, so an unquoted path containing a
         # space (or any other shell metacharacter) splits into multiple

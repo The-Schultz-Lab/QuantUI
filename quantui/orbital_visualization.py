@@ -344,7 +344,7 @@ def plot_orbital_diagram(
 # ============================================================================
 
 
-# Occupied MOs more than this far below the HOMO are treated as core (D2).
+# Occupied MOs more than this far below the HOMO are treated as core.
 # Valence levels sit well inside it (F 2s is ~30 eV below the HOMO in
 # fluorocarbons); 1s/2p core levels are hundreds of eV down. Defined on
 # energies rather than per-element shell counts so it stays right for ECP
@@ -400,7 +400,7 @@ def plot_orbital_diagram_plotly(
     import plotly.graph_objects as go
 
     scale = max(0.5, float(font_scale))
-    # Base sizes raised (M-UIPOLISH T3): at 1.00 the subtitle and gap label
+    # Base sizes raised: at 1.00 the subtitle and gap label
     # rendered at ~9 px.
     fs_title = max(9, int(round(15 * scale)))
     fs_axis = max(8, int(round(13 * scale)))
@@ -609,7 +609,7 @@ def infer_charge_and_spin(
 
     - ``spin`` (PySCF's ``2S = n_alpha - n_beta``) is ``n_alpha - n_beta``
       when ``mo_occ`` is 2-D (UHF/UKS, shape ``(2, n_mo)``). When ``mo_occ``
-      is 1-D, it is the count of singly-occupied orbitals (AUDIT F14): a
+      is 1-D, it is the count of singly-occupied orbitals: a
       1-D array is NOT necessarily closed-shell — ROHF is 1-D too (values
       2/1/0), and by the standard ROHF convention every singly-occupied
       orbital is alpha, so that count IS 2S directly. This is 0 for a
@@ -618,7 +618,7 @@ def infer_charge_and_spin(
       which SCF variant actually produced ``mo_occ``.
     - ``charge`` is the effective nuclear charge (sum of atomic numbers in
       ``mol_atom``, minus each ECP's core-electron count when ``basis`` is
-      given — AUDIT F14: a bare atomic-number sum overcounts an ECP system
+      given — a bare atomic-number sum overcounts an ECP system
       by however many core electrons the ECP replaced, since ``mo_occ``
       only counts the explicit/valence electrons the calculation used)
       minus the total electron count (``sum(mo_occ)`` over all spin
@@ -686,7 +686,7 @@ def infer_charge_and_spin(
 
 
 def _resolution_label(nx: int, ny: int, nz: int) -> str:
-    """Named preset (M-ORBEXPORT ORBX.2) matching *nx/ny/nz*, or ``"custom"``.
+    """Named preset matching *nx/ny/nz*, or ``"custom"``.
 
     Only a cubic grid matching one of :data:`ISO_RESOLUTION_PRESETS` gets its
     friendly name back; anything else (a non-cubic grid, or a value nobody
@@ -713,7 +713,7 @@ def _write_cube_provenance(
     quantity: str = "orbital",
 ) -> None:
     """Overwrite a freshly written cube file's two free-text comment lines
-    with QuantUI provenance (M-EXPORT2 EXP2.4 / M-ORBEXPORT ORBX.4).
+    with QuantUI provenance.
 
     The Gaussian cube format reserves exactly its first two lines for
     human-readable comments — everything from line 3 on (atom count, grid
@@ -772,8 +772,8 @@ def generate_cube_file(
     margin : float
         Extra space (Bohr) beyond atomic extents.
     method : str
-        Method/functional label for the provenance comment (M-EXPORT2
-        EXP2.4). ``results.npz`` doesn't carry it, so this has to come from
+        Method/functional label for the provenance comment.
+        ``results.npz`` doesn't carry it, so this has to come from
         the caller; omitted from the comment when blank.
 
     Returns
@@ -901,8 +901,8 @@ def generate_cube_from_arrays(
         PySCF's ``2S = n_alpha - n_beta``. Required for open-shell
         (odd-electron) molecules — default 0 assumes closed-shell.
     method : str
-        Method/functional label for the provenance comment (M-EXPORT2
-        EXP2.4) — e.g. ``'B3LYP'``. Best-effort: the caller's current method
+        Method/functional label for the provenance comment,
+        e.g. ``'B3LYP'``. Best-effort: the caller's current method
         selection, not necessarily re-verified against what actually produced
         *mo_coeff* (this function has no way to check that). Omitted from the
         comment entirely when blank, rather than guessed at.
@@ -960,7 +960,7 @@ def generate_cube_from_arrays(
     return output_path
 
 
-# Surfaces other than single orbitals (M-SURFACES SURF.2/3). Default
+# Surfaces other than single orbitals. Default
 # isovalues in atomic units: 0.002 e/bohr^3 is the classic "molecular
 # surface" used for ESP maps (roughly the van der Waals envelope).
 SURFACE_KINDS = ("orbital", "density", "spin", "esp")
@@ -1029,7 +1029,7 @@ def generate_surface_cubes(
     spin: int = 0,
     method: str = "",
 ) -> dict:
-    """Write the cube(s) for a density-type surface (M-SURFACES SURF.2/3).
+    """Write the cube(s) for a density-type surface.
 
     *kind* is ``"density"`` (total electron density), ``"spin"`` (alpha minus
     beta; positive = excess alpha) or ``"esp"`` (total density, plus the
@@ -1194,7 +1194,7 @@ def generate_pyfock_cube_from_arrays(
 # resolution regardless of molecule size, so the volume is strided down to this
 # cap at render time to keep the figure payload bounded; the saved .cube keeps
 # full resolution.
-# Named grid presets (M-ORBEXPORT ORBX.2). cubegen cost scales as nx*ny*nz,
+# Named grid presets. cubegen cost scales as nx*ny*nz,
 # so these are roughly 0.3x / 1x / 2.4x / 4.6x the work of the 60^3 default.
 ISO_RESOLUTION_PRESETS: dict[str, int] = {
     "coarse": 40,
@@ -1400,7 +1400,7 @@ def _build_molecule_overlay_data(atoms: list[tuple[int, float, float, float]]) -
     }
 
 
-# Named phase-colour pairs (M-ORBEXPORT ORBX.6). These are conventions people
+# Named phase-colour pairs. These are conventions people
 # recognise from other software, not arbitrary picks, which is why they are
 # presets rather than only a colour picker.
 ORBITAL_COLOR_SCHEMES: dict[str, tuple[str, str]] = {
@@ -1438,8 +1438,8 @@ def orbital_colors(scheme: str) -> tuple[str, str]:
 # Doing the work in JS is also what makes the controls live. Isovalue, opacity,
 # colours and background can then be changed on the existing viewer, so the
 # camera the user rotated into survives — a Python re-render cannot preserve it,
-# because it replaces the whole viewer (see GOTCHAS: "Camera state does NOT
-# persist across atomic HTML swaps").
+# because it replaces the whole viewer (camera state does not
+# persist across atomic HTML swaps).
 _ISO_VIEWER_JS = """
 (function(){
   var UID="__UID__", DATA=__DATA__, FMT=__FMT__;
@@ -1614,7 +1614,7 @@ def render_orbital_isosurface_py3dmol(
         Initial surface threshold and transparency. Both are changeable live via
         ``window.__quantuiIsoUpdate`` without rebuilding the viewer.
     wireframe
-        Surface finish (M-ORBEXPORT ORBX.7). Re-scoped from the original
+        Surface finish. Re-scoped from the original
         "metallic" request after reading the vendored 3Dmol.js: Lambert
         shading has no specular term, so glossy/metallic isn't reachable on
         this backend — wireframe is what the renderer can actually do.
@@ -1664,7 +1664,7 @@ def render_surface_py3dmol(
     style: str = "stick",
     capture_class: str = "",
 ) -> str:
-    """Density-type surface viewer (M-SURFACES): same viewer and live
+    """Density-type surface viewer: same viewer and live
     controls as :func:`render_orbital_isosurface_py3dmol`.
 
     *mode* ``"density"`` draws one surface; ``"spin"`` draws positive
@@ -1856,10 +1856,10 @@ _ORB_BTN_STYLE = (
     "background:#f8fafc;color:#334155;cursor:pointer;font-size:13px;line-height:1.4;"
 )
 
-# JS->kernel bridge for "save what I am looking at" (M-ORBEXPORT ORBX.1).
+# JS->kernel bridge for "save what I am looking at".
 #
-# Direction matters: M-LOGSCROLL route C pushes kernel -> JS, and there is no
-# equivalent in this codebase for coming back the other way. The trick used
+# Direction matters: the live log (live_log.py) pushes kernel -> JS, and there
+# is no equivalent in this codebase for coming back the other way. The trick used
 # here is the standard one for ipywidgets: write into a hidden Textarea's DOM
 # node and dispatch an 'input' event, which the widget's own view is already
 # listening for, so it syncs `value` back to the kernel like a user typing.
@@ -1869,8 +1869,8 @@ _ORB_BTN_STYLE = (
 # the browser for anything synchronously. A DOM button captures and posts in
 # one direction, which is also why the frame steppers are built this way.
 #
-# ⚠️ The capture MUST come from the live viewer, not a re-render. Per GOTCHAS
-# ("Camera state does NOT persist across atomic HTML swaps"), anything that
+# ⚠️ The capture MUST come from the live viewer, not a re-render. Camera
+# state does not persist across atomic HTML swaps, so anything that
 # re-renders first exports the default camera rather than the one the user
 # rotated into — which is the entire value of client-side capture.
 _PNG_CAPTURE_JS = """
@@ -1929,7 +1929,7 @@ def _png_capture_controls(
     *capture_fn* is the name of the global JS function (already defined
     elsewhere, e.g. ``window[capture_fn] = function(transparent){...}``) that
     does the actual ``pngURI()`` capture. Defaults to the isosurface viewer's
-    bare, unscoped global for backward compatibility (ORBX.1). Callers with
+    bare, unscoped global for backward compatibility. Callers with
     multiple live viewers of the same kind on a page (e.g. a fresh uid per
     render) must pass a uid-scoped name to avoid one viewer's button
     capturing another viewer's frame.
@@ -1948,7 +1948,7 @@ def _png_capture_controls(
     )
 
 
-# Generic, viewer-agnostic UID-scoped capture function (M-EXPORT2 EXP2.2).
+# Generic, viewer-agnostic UID-scoped capture function.
 # Relocated here from app_visualization.py (2026-08-26) once a fourth viewer
 # (the molecule viewer) needed it from visualization_py3dmol.py, a module
 # below app_visualization.py in the import graph — this module has no
@@ -2145,7 +2145,7 @@ def plot_cube_isosurface(
     return fig
 
 
-# ── Orbital gallery (M-SURFACES SURF.1, DEC-024) ─────────────────────────────
+# ── Orbital gallery ──────────────────────────────────────────────────────────
 #
 # A grid of small viewers for the orbitals around the HOMO-LUMO gap, so a
 # student can compare them side by side. Each tile is its own minimal 3Dmol
@@ -2356,7 +2356,7 @@ def build_orbital_gallery_html(
     )
 
 
-# ── Frontier-orbital cubes saved with a result (M-VIEWER VW.7) ─────────────
+# ── Frontier-orbital cubes saved with a result ─────────────────────────────
 #
 # The Viewer (desktop installer and browser build) has no PySCF, so it cannot
 # evaluate an orbital on a grid: a result stores only the basis-set *name*.

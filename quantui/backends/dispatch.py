@@ -18,8 +18,8 @@ _SEED_CALC_TYPES = frozenset({"geometry_opt", "frequency", "tddft", "nmr", "pes_
 # Calc types that may run a DFT geometry optimization before the main step.
 # "Geometry optimization before the calculation" — mirrors the local run:
 # Frequency / TD-DFT / PES skip it when an (already optimized) seed is
-# selected; Single Point and NMR honour the checkbox regardless (ISSUE.19 #3:
-# the SLURM path used to drop it for those two).
+# selected; Single Point and NMR honour the checkbox regardless (the
+# SLURM path used to drop it for those two).
 _PREOPT_CALC_TYPES = frozenset({"frequency", "tddft", "pes_scan"})
 _PREOPT_ANY_SEED_CALC_TYPES = frozenset({"single_point", "nmr"})
 
@@ -184,7 +184,7 @@ def build_calculation_request(
         from quantui.freq_calc import is_freq_mode_seed
 
         # A mode-displaced Frequency seed is off the minimum and must be
-        # re-optimized (ISSUE.19 #8); any other seed is already optimized.
+        # re-optimized; any other seed is already optimized.
         seed_is_optimized = bool(seed_path) and not is_freq_mode_seed(seed_path or "")
         if calc_type in _PREOPT_ANY_SEED_CALC_TYPES or (
             calc_type in _PREOPT_CALC_TYPES and not seed_is_optimized
