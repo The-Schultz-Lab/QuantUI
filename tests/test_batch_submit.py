@@ -541,7 +541,7 @@ class TestLauncherMatchesQuantUI:
                             )
                             assert mod.estimate(req) == expected, req
                             checked += 1
-        assert checked == 4 * 7 * 4 * 6 * 2  # every combination compared
+        assert checked == 4 * 8 * 4 * 6 * 2  # every combination compared
 
     def test_estimate_counts_transition_metal_electrons(self, launcher):
         # The old QuantUI table had no Mn/Mo, so these counted as 0 electrons.
@@ -742,7 +742,15 @@ class TestLauncherMatchesQuantUI:
 
     @pytest.mark.parametrize(
         "calc",
-        ["single_point", "geometry_opt", "frequency", "tddft", "nmr", "retry"],
+        [
+            "single_point",
+            "geometry_opt",
+            "transition_state",
+            "frequency",
+            "tddft",
+            "nmr",
+            "retry",
+        ],
     )
     def test_results_summary_matches_quantui(self, launcher, tmp_path, calc):
         # B2.11: `quantui results` (in the image) and `quantui-batch results`
@@ -764,6 +772,12 @@ class TestLauncherMatchesQuantUI:
         assert ours == summarize(payload, job, attempt)
         if calc == "retry":
             assert any("saddle-point retry" in line for line in ours)
+        if calc == "transition_state":
+            # The verdict's count (noise left out), never "not a true minimum".
+            text = "\n".join(ours)
+            assert "imaginary modes:  1 (1246.0i cm-1); a transition state" in text
+            assert "verdict:          Transition state" in text and "cm-1" in text
+            assert "not a true minimum" not in text
 
     def test_overrides_are_validated_like_quantui(self, launcher, water):
         args = _args(
@@ -1572,6 +1586,30 @@ class TestResultsAndCheck:
 
 @needs_posix
 class TestTagAndSolvent:
+    def test_transition_state_jobs(self, cluster):
+        # TS.5: a post-HF method is refused before anything queues; PCM is
+        # accepted and the job folder is tagged "ts".
+        r = cluster.run(
+            "submit", "water.xyz", "--calc", "transition_state", "--method", "MP2"
+        )
+        assert r.returncode != 0 and "analytic gradients" in r.stderr
+        r = cluster.run(
+            "submit",
+            "water.xyz",
+            "--calc",
+            "transition_state",
+            "--method",
+            "B3LYP",
+            "--basis",
+            "STO-3G",
+            "--solvent",
+            "water",
+        )
+        assert r.returncode == 0, r.stderr
+        (job,) = [d for d in cluster.staging.iterdir() if "_ts_" in d.name]
+        req = json.loads((job / "request.json").read_text())
+        assert req["calc_type"] == "transition_state" and req["solvent"] == "Water"
+
     def test_every_job_is_tagged_quantui(self, cluster):
         from quantui.backends import cluster_config as cfg
 

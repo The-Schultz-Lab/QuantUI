@@ -2362,17 +2362,14 @@ _CALC_TYPE_KEYS: Dict[str, str] = {
 }
 
 
-# Calculate-tab labels whose solvent box is live (B2.8: one source). The
-# batch worker's set, plus Transition State, which runs only in the app so
-# far (M-TS TS.5 adds it to SLURM).
-_APP_ONLY_SOLVENT_CALC_TYPES = frozenset({"transition_state"})
-
-
+# Calculate-tab labels whose solvent box is live (B2.8: one source, the batch
+# worker's set; Transition State joined it with M-TS TS.5).
 def _solvent_supported_labels() -> frozenset:
     from quantui.backends.batch_input import SOLVENT_CALC_TYPES
 
-    keys = SOLVENT_CALC_TYPES | _APP_ONLY_SOLVENT_CALC_TYPES
-    return frozenset(label for label, key in _CALC_TYPE_KEYS.items() if key in keys)
+    return frozenset(
+        label for label, key in _CALC_TYPE_KEYS.items() if key in SOLVENT_CALC_TYPES
+    )
 
 
 _SOLVENT_SUPPORTED_CALC_TYPES = _solvent_supported_labels()

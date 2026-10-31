@@ -16,7 +16,8 @@ killed by OOM or TIMEOUT resumes close to where it died on the next
 resubmission instead of restarting from nothing. ``frequency``/``tddft``
 have no checkpoint hook anywhere in QuantUI (each is one atomic library call,
 not a chunked/resumable loop) — nothing here can help those beyond the
-preopt step ahead of them.
+preopt step ahead of them. ``transition_state`` saves its search after every
+step and keeps a finished search (see :func:`_run_transition_state`).
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ from .worker_payload import (
     reorg_result_payload,
     session_result_payload,
     tddft_result_payload,
+    ts_result_payload,
     write_analysis_artifacts,
     write_trajectory_json,
     write_worker_result,
@@ -66,6 +68,7 @@ _SUPPORTED_CALC_TYPES = frozenset(CALC_TYPES)
 # - tddft: solvated pre-opt, ground state, non-equilibrium excitations.
 # - reorganization_energy: gas-phase optimizations + solvated single
 #   points (documented in reorganization_energy.py).
+# - transition_state: solvated search steps and frequency check (as the app).
 # nmr and pes_scan stay gas-phase only (DEC-023).
 # Defined in batch_input so `quantui submit` and the quantui-batch launcher
 # can refuse a solvated request before it is queued.
@@ -107,6 +110,11 @@ def _tag_from_stage_label(stage_label: str) -> str:
 
 # Job-folder files for a saddle-point retry (B2.5) that a killed job resumes.
 _SADDLE_RETRY_START = "saddle_retry_start.json"
+# Transition State (M-TS TS.5): the search's path so far, rewritten after
+# every step, and the finished search, so a killed job resumes the search
+# where it stopped or, once it finished, runs only the frequency check.
+_TS_PROGRESS = "ts_search_progress.json"
+_TS_SEARCH_DONE = "ts_search_result.json"
 _SADDLE_RETRY_GEOMETRY = "saddle_retry_geometry.json"
 
 
@@ -890,6 +898,196 @@ def _run_reorganization_energy(
     )
 
 
+def _ts_state_key(request: CalculationRequest) -> dict[str, Any]:
+    """What a saved search must match to be resumed (the same calculation)."""
+    return {
+        "atoms": [str(a) for a in (request.molecule.get("atoms") or [])],
+        "method": request.method,
+        "basis": request.basis,
+        "charge": int(request.charge),
+        "multiplicity": int(request.multiplicity),
+        "solvent": request.solvent,
+    }
+
+
+def _read_ts_state(path: Path, key: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("key") != key:
+        return None
+    return data
+
+
+def _write_json_atomic(path: Path, data: dict) -> None:
+    """Write *path* whole or not at all (a job can be killed mid-write)."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _run_transition_state(
+    request: CalculationRequest, staging_dir: Path, log_stream
+) -> Any:
+    """Sella saddle-point search, then the frequency check (M-TS TS.5).
+
+    Same calculation as the app's Transition State (``run_ts_search``). A
+    killed job resumes: the search restarts from its last saved step (Sella
+    rebuilds its starting Hessian there, so the path is not bit-identical to
+    an uninterrupted one), a finished search is never redone, and the
+    frequency check keeps its finished displacements (CHK.4).
+    """
+    from quantui.molecule import Molecule
+    from quantui.ts_search import (
+        DEFAULT_TS_FMAX,
+        DEFAULT_TS_STEPS,
+        TSResult,
+        apply_frequency_check,
+        run_ts_search,
+    )
+
+    _log_seed_context(request, staging_dir)
+    molecule = molecule_from_request(request)
+    options = request.options or {}
+    fmax = float(options.get("fmax", DEFAULT_TS_FMAX))
+    max_steps = int(options.get("max_steps", DEFAULT_TS_STEPS))
+    scf_rescue = bool(options.get("scf_rescue", True))
+    state_dir = _job_state_dir(staging_dir)
+    progress_path = state_dir / _TS_PROGRESS
+    done_path = state_dir / _TS_SEARCH_DONE
+    key = _ts_state_key(request)
+
+    def _mol(coords: list) -> Molecule:
+        return Molecule(
+            list(molecule.atoms),
+            coords,
+            charge=molecule.charge,
+            multiplicity=molecule.multiplicity,
+            validate_spin=False,
+        )
+
+    done = _read_ts_state(done_path, key)
+    if done is not None:
+        _append_log(
+            staging_dir,
+            "[checkpoint] The transition-state search finished in an earlier "
+            "attempt; running only the frequency check.",
+        )
+        frames = [_mol(c) for c in done["trajectory"]]
+        result = TSResult(
+            formula=molecule.get_formula(),
+            method=request.method,
+            basis=request.basis,
+            molecule=frames[-1],
+            energy_hartree=float(done["energies"][-1]),
+            converged=bool(done["search_converged"]),
+            search_converged=bool(done["search_converged"]),
+            n_steps=len(frames) - 1,
+            trajectory=frames,
+            energies_hartree=[float(e) for e in done["energies"]],
+            verdict=str(done.get("verdict", "")),
+            solvent=done.get("solvent"),
+        )
+    else:
+        prior = _read_ts_state(progress_path, key)
+        coords: list = []
+        energies: list = []
+        if prior is not None and prior.get("trajectory"):
+            coords = [list(map(list, c)) for c in prior["trajectory"]]
+            energies = [float(e) for e in prior["energies"]]
+            molecule = _mol(coords[-1])
+            _append_log(
+                staging_dir,
+                f"[checkpoint] Resuming the transition-state search at step "
+                f"{len(energies) - 1} from an earlier attempt.",
+            )
+        resumed = bool(coords)
+        remaining = max(max_steps - max(len(energies) - 1, 0), 0)
+        skip_start = [resumed]  # a resumed search re-records the saved last step
+
+        def _on_step(mol: Any, energy: float) -> None:
+            if skip_start[0]:
+                skip_start[0] = False
+                return
+            coords.append([[float(v) for v in row] for row in mol.coordinates])
+            energies.append(float(energy))
+            _write_json_atomic(
+                progress_path,
+                {"key": key, "trajectory": coords, "energies": energies},
+            )
+            pct = 15.0 + 45.0 * min(len(energies) / max(max_steps, 1), 1.0)
+            _write_progress(
+                staging_dir,
+                "running",
+                f"Transition-state search, step {len(energies) - 1}",
+                pct,
+            )
+
+        _write_progress(
+            staging_dir, "running", "Searching for a transition state", 15.0
+        )
+        result = run_ts_search(
+            molecule,
+            request.method,
+            request.basis,
+            fmax=fmax,
+            steps=remaining,
+            progress_stream=log_stream,
+            solvent=request.solvent,
+            scf_rescue=scf_rescue,
+            check_frequencies=False,
+            on_step=_on_step,
+        )
+        if resumed:
+            result.trajectory = [_mol(c) for c in coords]
+            result.energies_hartree = list(energies)
+            result.n_steps = len(energies) - 1
+        _write_json_atomic(
+            done_path,
+            {
+                "key": key,
+                "trajectory": [
+                    [[float(v) for v in row] for row in m.coordinates]
+                    for m in result.trajectory
+                ],
+                "energies": [float(e) for e in result.energies_hartree],
+                "search_converged": bool(result.search_converged),
+                "verdict": result.verdict,
+                "solvent": result.solvent,
+            },
+        )
+        progress_path.unlink(missing_ok=True)
+
+    _write_progress(
+        staging_dir, "running", "Frequency check at the final geometry", 60.0
+    )
+    ckpt, resumable = _begin_worker_checkpoint(
+        result.molecule,
+        calc_type="transition_state",
+        method=request.method,
+        basis=request.basis,
+        staging_dir=staging_dir,
+        log_stream=log_stream,
+        extra=("frequency_check",),
+    )
+    if resumable:
+        _append_log(
+            staging_dir,
+            "[checkpoint] Resuming the frequency check: some displacement SCFs "
+            "are already banked from an earlier attempt.",
+        )
+    apply_frequency_check(
+        result,
+        progress_stream=log_stream,
+        scf_rescue=scf_rescue,
+        solvent=request.solvent,
+        checkpoint=ckpt,
+        resume=resumable,
+    )
+    return result
+
+
 def _build_payload(
     calc_type: str, outcome: Any, staging_dir: Path, request: CalculationRequest
 ) -> dict[str, Any]:
@@ -919,6 +1117,22 @@ def _build_payload(
             energies=outcome.energies_hartree,
         )
         return optimization_result_payload(outcome, trajectory_file=traj_file)
+    if calc_type == "transition_state":
+        traj_file = write_trajectory_json(
+            staging_dir,
+            outcome.trajectory,
+            outcome.energies_hartree,
+        )
+        write_analysis_artifacts(
+            staging_dir,
+            calc_type,
+            outcome,
+            charge=request.charge,
+            multiplicity=request.multiplicity,
+            trajectory=outcome.trajectory,
+            energies=outcome.energies_hartree,
+        )
+        return ts_result_payload(outcome, trajectory_file=traj_file)
     if calc_type == "frequency":
         result, molecule = outcome
         write_analysis_artifacts(
@@ -1066,6 +1280,7 @@ def run_worker_request(
     runners: dict[str, Callable[..., Any]] = {
         "single_point": _run_single_point,
         "geometry_opt": _run_geometry_opt,
+        "transition_state": _run_transition_state,
         "frequency": _run_frequency,
         "tddft": _run_tddft,
         "nmr": _run_nmr,

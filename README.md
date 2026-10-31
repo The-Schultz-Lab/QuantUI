@@ -295,7 +295,9 @@ pip install "quantui[ts]"
 
 Sella pulls in jax/jaxlib (about 380 MB) and is LGPL-3.0, used as a
 separately installed library. Without it the calc type stays in the menu and
-says how to install it. Local runs only for now (not SLURM batch jobs).
+says how to install it. It also runs as a SLURM batch job
+(`quantui-batch submit FILE --calc transition_state`); both Apptainer images
+include it.
 
 ### Optional: GFN-FF metal pre-optimization (xtb)
 

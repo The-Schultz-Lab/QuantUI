@@ -222,6 +222,25 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
     }
 
 
+def ts_result_payload(result, *, trajectory_file: str) -> Dict[str, Any]:
+    """A Transition State result (M-TS TS.5): the frequency check's payload,
+    plus the search path and the ``transition_state`` verdict block the app
+    saves (``TSResult.to_spectra``)."""
+    payload = freq_result_payload(result.freq, result.molecule)
+    payload.update(
+        calc_type="transition_state",
+        energy_hartree=result.energy_hartree,
+        converged=bool(result.converged),
+        n_steps=result.n_steps,
+        solvent=result.solvent or payload.get("solvent"),
+        trajectory_file=trajectory_file,
+        # The stationary point found, for --from chaining and History.
+        final_molecule=molecule_to_dict(result.molecule),
+    )
+    payload["spectra"]["transition_state"] = result.to_spectra()
+    return payload
+
+
 def tddft_result_payload(result) -> Dict[str, Any]:
     wavelengths = result.wavelengths_nm()
     return {
@@ -384,7 +403,7 @@ def write_analysis_artifacts(
     if calc_type == "tddft":
         # Ground-state orbitals only (ISSUE.19 #6): Energies / Isosurface.
         save_orbitals(staging_dir, result)
-    if calc_type in ("single_point", "geometry_opt", "frequency"):
+    if calc_type in ("single_point", "geometry_opt", "transition_state", "frequency"):
         save_orbitals(staging_dir, result)
         try:
             save_molden(
@@ -402,7 +421,7 @@ def write_analysis_artifacts(
         except Exception:
             pass
 
-    if calc_type in ("geometry_opt", "pes_scan") and trajectory:
+    if calc_type in ("geometry_opt", "transition_state", "pes_scan") and trajectory:
         e_list = list(energies or [])
         try:
             save_trajectory_xyz(staging_dir, frames=trajectory, energies=e_list)

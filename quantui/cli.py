@@ -725,8 +725,8 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="TYPE",
         help=(
-            "Calculation type: single_point, geometry_opt, frequency, tddft, "
-            "nmr, pes_scan, reorganization_energy."
+            "Calculation type: single_point, geometry_opt, transition_state, "
+            "frequency, tddft, nmr, pes_scan, reorganization_energy."
         ),
     )
     input_group.add_argument(

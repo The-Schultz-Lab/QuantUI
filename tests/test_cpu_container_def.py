@@ -64,8 +64,21 @@ class TestCpuImagePySCFExtras:
         post = _section(cpu_def_text, "%post")
         # A bare `pip install -e .` skipped pyscf-properties (NMR, analytical
         # Raman) and pyscf-dispersion (PBE-D3).
-        assert re.search(r'pip install[^\n]*-e\s+"?\.\[pyscf\]"?', post)
+        assert re.search(
+            r'pip install[^\n]*-e\s+"?\.\[(?:[\w-]+,)*pyscf\b[^\]]*\]"?', post
+        )
         assert not re.search(r"pip install[^\n]*-e\s+\.\s*$", post, re.M)
+
+    def test_both_images_ship_sella_for_transition_states(self, cpu_def_text):
+        # M-TS TS.5: Transition State runs in batch jobs and in the window on
+        # the cluster, so both images install the [ts] extra and fail the
+        # build when Sella does not import.
+        for text in (cpu_def_text, GPU_DEF.read_text(encoding="utf-8")):
+            post = _section(text, "%post")
+            assert re.search(
+                r'pip install[^\n]*-e\s+"?\.\[[^\]]*\bts\b[^\]]*\]"?', post
+            )
+            assert "sella_available()" in post
 
     def test_build_fails_without_nmr_and_d3(self, cpu_def_text):
         post = _section(cpu_def_text, "%post")

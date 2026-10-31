@@ -25,6 +25,7 @@ class SlurmJobAccounting:
 _CALC_TYPE_TAGS = {
     "single_point": "sp",
     "geometry_opt": "opt",
+    "transition_state": "ts",
     "frequency": "freq",
     "tddft": "tddft",
     "nmr": "nmr",
@@ -193,6 +194,8 @@ def _walltime_steps_for(count: int, default: int) -> int:
 CALC_FACTORS = {
     "single_point": 1.0,
     "geometry_opt": 2.5,
+    # A saddle search with analytic Hessians, then a full frequency check.
+    "transition_state": 4.0,
     "frequency": 4.0,
     "tddft": 2.0,
     "nmr": 2.0,
@@ -308,7 +311,8 @@ def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
     # the opt-in isn't active, or for any non-frequency calc type) so a
     # caller/log can see whether — and by how much — this fired.
     freq_parallel_multiplier = 1
-    if request.calc_type == "frequency":
+    # A Transition State ends with the same frequency calculation (TS.5).
+    if request.calc_type in ("frequency", "transition_state"):
         try:
             from quantui.freq_ir_workers import freq_parallel_opt_in, pick_worker_count
 

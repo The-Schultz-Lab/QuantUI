@@ -89,6 +89,25 @@ def sample_payload(calc_type: str) -> dict:
                 },
             },
         }
+    if calc_type == "transition_state":
+        freq = sample_payload("frequency")
+        freq["spectra"]["ir"]["frequencies_cm1"] = [-1246.0, -12.0, 4400.0]
+        freq["spectra"]["ir"]["ir_intensities"] = [5.0, 0.1, 1.0]
+        freq["spectra"]["transition_state"] = {
+            "search_converged": True,
+            "n_steps": 9,
+            "n_imaginary": 1,
+            "imaginary_cm1": [-1246.0],
+            "verdict": "Transition state: exactly one imaginary frequency "
+            "(1246i cm⁻¹).",
+        }
+        return {
+            **freq,
+            "calc_type": "transition_state",
+            "n_steps": 9,
+            "trajectory_file": "trajectory.json",
+            "final_molecule": freq["spectra"]["molecule"],
+        }
     if calc_type == "tddft":
         return {
             **base,

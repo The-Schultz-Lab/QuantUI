@@ -9,8 +9,9 @@ the worker calls :func:`final_geometry` when the job starts, after Slurm's
 ``afterok`` dependency has let it run.
 
 Only geometries a job actually optimized are offered: the last step of a
-``geometry_opt`` trajectory, the last step of a ``preopt_before_run``
-trajectory, or the molecule a ``frequency`` result was computed at. A PES
+``geometry_opt`` trajectory, the stationary point a ``transition_state``
+search found, the last step of a ``preopt_before_run`` trajectory, or the
+molecule a ``frequency`` result was computed at. A PES
 scan's ``trajectory.json`` holds scan points, not a minimum, so it is never
 used.
 """
@@ -48,7 +49,8 @@ def finished_attempts(job_dir: Path) -> List[Path]:
 
 
 def _final_molecule(path: Path) -> Optional[Dict[str, Any]]:
-    """``final_molecule`` from a geometry_opt result.json (B2.3), if recorded.
+    """``final_molecule`` from a geometry_opt (B2.3) or transition_state
+    (TS.5) result.json, if recorded.
 
     Results written before B2.3 have none; the caller falls back to the
     trajectory's last step.
@@ -73,7 +75,7 @@ def _last_step(path: Path) -> Optional[Dict[str, Any]]:
 
 def geometry_from_attempt(attempt: Path, calc_type: str) -> Optional[Dict[str, Any]]:
     """The optimized geometry one finished attempt produced, if it has one."""
-    if calc_type == "geometry_opt":
+    if calc_type in ("geometry_opt", "transition_state"):
         geo = _final_molecule(attempt / "result.json") or _last_step(
             attempt / "trajectory.json"
         )
@@ -113,5 +115,6 @@ def final_geometry(job_dir: Path) -> Dict[str, Any]:
             return geo
     raise ValueError(
         f"{job_dir.name} ({calc_type}) did not optimize its geometry; start from "
-        "a geometry_opt job, a frequency job, or a job run with --preopt"
+        "a geometry_opt, transition_state or frequency job, or a job run "
+        "with --preopt"
     )

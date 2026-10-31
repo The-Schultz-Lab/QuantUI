@@ -125,6 +125,10 @@ def build_calculation_request(
     if calc_type in ("geometry_opt", "reorganization_energy"):
         options["fmax"] = float(app.fmax_fi.value)
         options["max_steps"] = int(app.max_steps_si.value)
+    if calc_type == "transition_state":
+        # Its own threshold, tighter than an optimization's (ts_search).
+        options["fmax"] = float(app._ts_fmax_fi.value)
+        options["max_steps"] = int(app.max_steps_si.value)
     if calc_type == "geometry_opt":
         from quantui.app_runflow import frozen_atom_indices
 

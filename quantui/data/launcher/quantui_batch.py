@@ -65,8 +65,9 @@ quantui-batch: run QuantUI calculations as Slurm batch jobs.
       FILE is an .xyz file or a QuantUI request .json. One job per file.
         --preset NAME      named settings from your course (see: presets);
                            any option below overrides the preset
-        --calc TYPE        single_point, geometry_opt, frequency, tddft, nmr,
-                           pes_scan, reorganization_energy
+        --calc TYPE        single_point, geometry_opt, transition_state,
+                           frequency, tddft, nmr, pes_scan,
+                           reorganization_energy
         --method NAME      e.g. B3LYP          --basis NAME   e.g. def2-SVP
         --charge N         default 0           --mult N       default 1
         --solvent NAME     e.g. Water          --preopt       optimize first
@@ -77,9 +78,9 @@ quantui-batch: run QuantUI calculations as Slurm batch jobs.
         --queue-rest       over the job limit? line jobs up behind yours
         --again            submit even if the same calculation already exists
   quantui-batch submit --from JOB --calc TYPE [options]
-      Start from JOB's optimized geometry (a geometry_opt or frequency job,
-      or one run with --preopt). If JOB is still running, the new job waits
-      for it to succeed.
+      Start from JOB's optimized geometry (a geometry_opt, transition_state
+      or frequency job, or one run with --preopt). If JOB is still running,
+      the new job waits for it to succeed.
   quantui-batch estimate FILE... [options]
       Print the cores, memory and time a job would get. Submits nothing.
   quantui-batch status [-n N | --all]
@@ -521,7 +522,10 @@ def estimate(request):
         walltime = _next_walltime(walltime)
 
     multiplier = 1
-    if request["calc_type"] == "frequency" and SITE["freq_parallel"]:
+    if (
+        request["calc_type"] in ("frequency", "transition_state")
+        and SITE["freq_parallel"]
+    ):
         displacements = max(num_atoms, 1) * 3 * 2
         multiplier = max(1, min(max(1, cores // 2), displacements))
         if multiplier > 1:
@@ -1019,13 +1023,14 @@ def chain_source(name, q):
     if not source:
         die(f"{job_dir.name} has no readable request.json")
     calc = source.get("calc_type")
-    optimizes = calc in ("geometry_opt", "frequency") or (
+    optimizes = calc in ("geometry_opt", "transition_state", "frequency") or (
         source.get("options") or {}
     ).get("preopt_before_run")
     if not optimizes:
         die(
             f"{job_dir.name} ({calc}) does not optimize the geometry; --from needs "
-            "a geometry_opt or frequency job, or one run with --preopt"
+            "a geometry_opt, transition_state or frequency job, or one run "
+            "with --preopt"
         )
     ids = job_ids(job_dir) or [jid for _n, jid, _p in attempts(job_dir)]
     last = ids[-1] if ids else None
@@ -1079,6 +1084,17 @@ def chained_request(source_dir, source, args, extra_options):
         },
     }
     return request, warnings
+
+
+def check_method(request):
+    """Refuse a method the calc type cannot use (port of batch_input)."""
+    if request["calc_type"] not in SITE["gradient_calc_types"]:
+        return
+    if request["method"].strip().upper() in SITE["post_hf_methods"]:
+        raise InputError(
+            f"{request['method']} has no analytic gradients here, so it cannot "
+            f"drive a {request['calc_type']} job; use RHF/UHF or a DFT functional"
+        )
 
 
 def check_solvent(request):
@@ -1173,6 +1189,7 @@ def requests_from_args(args, extra, q):
         try:
             request, warnings = chained_request(source_dir, source, args, extra)
             check_solvent(request)
+            check_method(request)
             out.append((f"--from {source_dir.name}", request, warnings, dep))
         except InputError as exc:
             sys.stderr.write(f"--from {source_dir.name}: {exc}\n")
@@ -1182,6 +1199,7 @@ def requests_from_args(args, extra, q):
         try:
             request, warnings = build_request(Path(name), args, extra)
             check_solvent(request)
+            check_method(request)
             out.append((name, request, warnings, None))
         except InputError as exc:
             sys.stderr.write(f"{name}: {exc}\n")
@@ -1518,13 +1536,30 @@ def summarize(result, job_dir, attempt):
             f"  next step:        quantui-batch submit --from {job_dir.name} --calc frequency"
         )
     spectra = result.get("spectra") or {}
+    if calc == "transition_state":
+        ts = spectra.get("transition_state") or {}
+        lines.append(f"  search steps:     {result.get('n_steps', '?')}")
+        if ts.get("verdict"):
+            lines.append(
+                "  verdict:          " + str(ts["verdict"]).replace("cm⁻¹", "cm-1")
+            )
     ir = spectra.get("ir") or {}
     if ir.get("frequencies_cm1"):
         freqs = [float(f) for f in ir["frequencies_cm1"]]
         ints = [float(i) for i in (ir.get("ir_intensities") or [0.0] * len(freqs))]
         imag = [f for f in freqs if f < 0]
         lines.append(f"  vibrational modes: {len(freqs)}")
-        if imag:
+        if calc == "transition_state":
+            # The verdict's own count, which leaves out numerical noise.
+            counted = (spectra.get("transition_state") or {}).get("imaginary_cm1")
+            counted = imag if counted is None else [float(f) for f in counted]
+            shown = ", ".join(f"{abs(f):.1f}i" for f in counted)
+            lines.append(
+                f"  imaginary modes:  {len(counted)}"
+                + (f" ({shown} cm-1)" if counted else "")
+                + "; a transition state has exactly one"
+            )
+        elif imag:
             shown = ", ".join(f"{abs(f):.1f}i" for f in imag)
             lines.append(
                 f"  IMAGINARY modes:  {len(imag)} ({shown} cm-1): not a true minimum"

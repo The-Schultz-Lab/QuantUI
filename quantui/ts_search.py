@@ -19,7 +19,7 @@ from __future__ import annotations
 import io
 import sys
 from dataclasses import dataclass, field
-from typing import IO, Any, List, Optional
+from typing import IO, Any, Callable, List, Optional
 
 from .molecule import Molecule
 
@@ -210,6 +210,7 @@ def run_ts_search(
     analytic_hessian: bool = True,
     check_frequencies: bool = True,
     cancel_check: Any = None,
+    on_step: Optional[Callable[[Molecule, float], None]] = None,
 ) -> TSResult:
     """Search for a transition state near *molecule*, then check it.
 
@@ -222,7 +223,11 @@ def run_ts_search(
         solvent: PCM solvent for the search and the frequency check.
         analytic_hessian: Start Sella from PySCF's analytic Hessian (and use
             it when Sella refreshes its Hessian). Otherwise Sella estimates it.
-        check_frequencies: Run the frequency calculation afterwards.
+        check_frequencies: Run the frequency calculation afterwards
+            (:func:`apply_frequency_check` runs it separately).
+        on_step: Called with ``(geometry, energy_hartree)`` after every
+            step, the starting point included (the batch worker saves its
+            progress with it, so a killed job can resume).
     """
     from . import config as _config
 
@@ -284,6 +289,8 @@ def run_ts_search(
             )
         )
         energies.append(e_ha)
+        if on_step is not None:
+            on_step(trajectory[-1], e_ha)
         stream.write(
             f"  step {len(energies) - 1:3d}   E = {e_ha:.8f} Ha   "
             f"max force = {fmax_now:.4f} eV/Å\n"
@@ -308,56 +315,77 @@ def run_ts_search(
         multiplicity=molecule.multiplicity,
         validate_spin=False,
     )
-    energy = energies[-1] if energies else float("nan")
-
-    freq = None
-    n_imag: Optional[int] = None
-    imag: List[float] = []
-    verdict = (
-        "The search did not converge, so this geometry is not a stationary "
-        "point. Try more steps or a better starting guess."
-        if not search_converged
-        else "Frequency check skipped."
-    )
-    if check_frequencies:
-        from .freq_calc import run_freq_calc
-
-        stream.write("\n── Frequency check at the final geometry ──\n")
-        freq = run_freq_calc(
-            final,
-            method,
-            basis,
-            progress_stream=stream,
-            scf_rescue=scf_rescue,
-            solvent=solvent,
-        )
-        energy = float(freq.energy_hartree)
-        if freq.frequencies_cm1:
-            n_imag, imag, verdict = classify_stationary_point(
-                list(freq.frequencies_cm1)
-            )
-            if not search_converged:
-                verdict = (
-                    "The search did NOT converge (forces still above the "
-                    "threshold); the frequencies below describe an unconverged "
-                    "geometry. " + verdict
-                )
-        stream.write(f"\n{verdict}\n")
-
-    return TSResult(
+    result = TSResult(
         formula=molecule.get_formula(),
         method=method,
         basis=basis,
         molecule=final,
-        energy_hartree=energy,
-        converged=bool(search_converged and (freq is None or freq.converged)),
+        energy_hartree=energies[-1] if energies else float("nan"),
+        converged=search_converged,
         search_converged=search_converged,
         n_steps=n_steps,
         trajectory=trajectory,
         energies_hartree=energies,
-        n_imaginary=n_imag,
-        imaginary_cm1=imag,
-        verdict=verdict,
+        verdict=(
+            "The search did not converge, so this geometry is not a stationary "
+            "point. Try more steps or a better starting guess."
+            if not search_converged
+            else "Frequency check skipped."
+        ),
         solvent=getattr(calc, "solvent_applied", None) or solvent,
-        freq=freq,
     )
+    if check_frequencies:
+        apply_frequency_check(
+            result, progress_stream=stream, scf_rescue=scf_rescue, solvent=solvent
+        )
+    return result
+
+
+def apply_frequency_check(
+    result: TSResult,
+    *,
+    progress_stream: Optional[IO[str]] = None,
+    scf_rescue: bool = True,
+    solvent: Optional[str] = None,
+    checkpoint: Any = None,
+    resume: bool = False,
+) -> TSResult:
+    """Run the frequency check at *result*'s final geometry and fill it in.
+
+    Sets ``freq``, the energy, the imaginary-mode count and the verdict, and
+    folds the frequency run's convergence into ``converged``. *checkpoint*
+    and *resume* are passed to :func:`~quantui.freq_calc.run_freq_calc`, so
+    a batch job killed during the check keeps its finished displacements.
+    """
+    from .freq_calc import run_freq_calc
+
+    stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
+    stream.write("\n── Frequency check at the final geometry ──\n")
+    freq = run_freq_calc(
+        result.molecule,
+        result.method,
+        result.basis,
+        progress_stream=stream,
+        scf_rescue=scf_rescue,
+        solvent=solvent,
+        checkpoint=checkpoint,
+        resume=resume,
+    )
+    result.freq = freq
+    result.energy_hartree = float(freq.energy_hartree)
+    if freq.frequencies_cm1:
+        n_imag, imag, verdict = classify_stationary_point(list(freq.frequencies_cm1))
+        if not result.search_converged:
+            verdict = (
+                "The search did NOT converge (forces still above the "
+                "threshold); the frequencies below describe an unconverged "
+                "geometry. " + verdict
+            )
+        result.n_imaginary, result.imaginary_cm1, result.verdict = (
+            n_imag,
+            imag,
+            verdict,
+        )
+    result.converged = bool(result.search_converged and freq.converged)
+    stream.write(f"\n{result.verdict}\n")
+    return result

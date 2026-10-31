@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 CALC_TYPES = (
     "single_point",
     "geometry_opt",
+    "transition_state",
     "frequency",
     "tddft",
     "nmr",

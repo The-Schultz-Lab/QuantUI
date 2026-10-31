@@ -4,6 +4,7 @@ Promote finished SLURM staging artifacts into History-compatible result dirs.
 
 from __future__ import annotations
 
+import html
 import json
 import math
 import shutil
@@ -137,13 +138,20 @@ def _ingest_frequency(
 
     result = _basic_result(payload, record)
     spectra = payload.get("spectra") or {}
+    calc_type = payload.get("calc_type") or "frequency"
+    # A Transition State (TS.5) is saved like a frequency result plus its
+    # search path; History shows the stationary point it found.
+    final = payload.get("final_molecule")
     saved_dir = save_result(
         result,
         pyscf_log=log_text,
-        calc_type="frequency",
+        calc_type=calc_type,
         spectra=spectra,
         extras=extras,
+        molecule=molecule_from_dict(final) if final else None,
     )
+    if payload.get("trajectory_file"):
+        _copy_trajectory(staging, saved_dir, payload)
     ir = spectra.get("ir") or {}
     freqs = ir.get("frequencies_cm1")
     displacements = ir.get("displacements")
@@ -258,7 +266,7 @@ def ingest_staging_success(
 
     from quantui.results_storage import save_result
 
-    if calc_type == "frequency":
+    if calc_type in ("frequency", "transition_state"):
         return _ingest_frequency(staging, payload, record, log_text, extras)
 
     if calc_type == "reorganization_energy":
@@ -356,6 +364,11 @@ def completion_summary_html(saved_dir: Path, payload: dict[str, Any]) -> str:
             "frequencies_cm1"
         ) or []
         lines.append(f"Modes: {len(freqs)}<br>")
+    if calc_type == "transition_state":
+        ts = (payload.get("spectra") or {}).get("transition_state") or {}
+        lines.append(f"Search steps: {payload.get('n_steps', '?')}<br>")
+        if ts.get("verdict"):
+            lines.append(f"{html.escape(str(ts['verdict']))}<br>")
     if calc_type == "tddft":
         excitations = (payload.get("spectra") or {}).get("uv_vis", {}).get(
             "excitation_energies_ev"

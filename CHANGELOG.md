@@ -9,6 +9,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Transition State as a batch job** (M-TS TS.5): `quantui submit`,
+  `quantui-batch submit --calc transition_state` and the app's SLURM path
+  run the same Sella search and frequency check as the window, PCM included.
+  A killed job resumes the search from its last step, never redoes a
+  finished search, and keeps the frequency check's finished displacements.
+  History shows the stationary point found with its search path;
+  `results` prints the verdict; `--from` a TS job starts from its saddle
+  point. A post-HF method is refused before the job queues. Both Apptainer
+  images now install the `[ts]` extra (Sella), which Transition State needs
+  on the cluster in the window as well.
 - **Clarity and layout pass** (M-UIPOLISH, from a rendered-UI walk-through):
   - Molecules open facing the camera in every viewer (principal axes), so
     water no longer looks linear and the dipole arrow is visible.

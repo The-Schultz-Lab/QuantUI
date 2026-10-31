@@ -54,13 +54,30 @@ def summarize(result: Dict[str, Any], job_dir: Path, attempt: Path) -> List[str]
             f"  next step:        quantui-batch submit --from {job_dir.name} --calc frequency"
         )
     spectra = result.get("spectra") or {}
+    if calc == "transition_state":
+        ts = spectra.get("transition_state") or {}
+        lines.append(f"  search steps:     {result.get('n_steps', '?')}")
+        if ts.get("verdict"):
+            lines.append(
+                "  verdict:          " + str(ts["verdict"]).replace("cm⁻¹", "cm-1")
+            )
     ir = spectra.get("ir") or {}
     if ir.get("frequencies_cm1"):
         freqs = [float(f) for f in ir["frequencies_cm1"]]
         ints = [float(i) for i in (ir.get("ir_intensities") or [0.0] * len(freqs))]
         imag = [f for f in freqs if f < 0]
         lines.append(f"  vibrational modes: {len(freqs)}")
-        if imag:
+        if calc == "transition_state":
+            # The verdict's own count, which leaves out numerical noise.
+            counted = (spectra.get("transition_state") or {}).get("imaginary_cm1")
+            counted = imag if counted is None else [float(f) for f in counted]
+            shown = ", ".join(f"{abs(f):.1f}i" for f in counted)
+            lines.append(
+                f"  imaginary modes:  {len(counted)}"
+                + (f" ({shown} cm-1)" if counted else "")
+                + "; a transition state has exactly one"
+            )
+        elif imag:
             shown = ", ".join(f"{abs(f):.1f}i" for f in imag)
             lines.append(
                 f"  IMAGINARY modes:  {len(imag)} ({shown} cm-1): not a true minimum"

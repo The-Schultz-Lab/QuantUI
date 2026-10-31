@@ -24,10 +24,21 @@ PREOPT_CALC_TYPES = frozenset({"single_point", "nmr", "frequency", "tddft", "pes
 # Calc types the batch worker runs with a PCM solvent; it fails any other
 # calc type that asks for one (worker._SOLVENT_SUPPORTED_CALC_TYPES), so a
 # request is refused here, before it waits in the queue. Frequency and
-# TD-DFT joined with B2.2 (DEC-023); NMR and PES scans stay gas-phase.
+# TD-DFT joined with B2.2 (DEC-023), Transition State with TS.5; NMR and PES
+# scans stay gas-phase.
 SOLVENT_CALC_TYPES = frozenset(
-    {"single_point", "geometry_opt", "frequency", "tddft", "reorganization_energy"}
+    {
+        "single_point",
+        "geometry_opt",
+        "transition_state",
+        "frequency",
+        "tddft",
+        "reorganization_energy",
+    }
 )
+# Calc types driven by analytic gradients: a post-HF method (no gradients
+# here) is refused before the job queues, not after it starts.
+GRADIENT_CALC_TYPES = frozenset({"transition_state"})
 
 
 class BatchInputError(ValueError):
@@ -206,6 +217,19 @@ def check_solvent(request: CalculationRequest) -> None:
     request.solvent = canonical
 
 
+def check_method(request: CalculationRequest) -> None:
+    """Refuse a method the calc type cannot use (post-HF for a TS search)."""
+    if request.calc_type not in GRADIENT_CALC_TYPES:
+        return
+    from quantui import config
+
+    if request.method.strip().upper() in config.POST_HF_METHODS:
+        raise BatchInputError(
+            f"{request.method} has no analytic gradients here, so it cannot drive "
+            f"a {request.calc_type} job; use RHF/UHF or a DFT functional."
+        )
+
+
 def load_request(
     path: Path,
     *,
@@ -239,6 +263,7 @@ def load_request(
             preopt=preopt,
         )
         check_solvent(request)
+        check_method(request)
         return request, warnings
 
     data = json.loads(path.read_text())
@@ -267,4 +292,5 @@ def load_request(
     if preopt and request.calc_type in PREOPT_CALC_TYPES:
         request.options["preopt_before_run"] = True
     check_solvent(request)
+    check_method(request)
     return request, warnings

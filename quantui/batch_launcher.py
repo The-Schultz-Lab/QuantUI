@@ -49,7 +49,11 @@ def site_constants() -> Dict[str, Any]:
     from quantui.backends import cluster_config as cfg
     from quantui.backends import slurm_utils
     from quantui.backends.base import CALC_TYPES
-    from quantui.backends.batch_input import PREOPT_CALC_TYPES, SOLVENT_CALC_TYPES
+    from quantui.backends.batch_input import (
+        GRADIENT_CALC_TYPES,
+        PREOPT_CALC_TYPES,
+        SOLVENT_CALC_TYPES,
+    )
     from quantui.freq_ir_workers import freq_parallel_opt_in
 
     return {
@@ -79,6 +83,8 @@ def site_constants() -> Dict[str, Any]:
         "freq_parallel": bool(freq_parallel_opt_in()),
         "solvent_options": sorted(config.SOLVENT_OPTIONS),
         "solvent_calc_types": sorted(SOLVENT_CALC_TYPES),
+        "gradient_calc_types": sorted(GRADIENT_CALC_TYPES),
+        "post_hf_methods": sorted(config.POST_HF_METHODS),
     }
 
 

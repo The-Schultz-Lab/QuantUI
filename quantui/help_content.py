@@ -558,6 +558,10 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "ΔH‡ or ΔG‡). Use a DFT functional or HF; MP2/CCSD have no "
             "analytic gradients here. The Trajectory panel shows the search "
             "path, not the reaction path (that is an IRC, coming later).</p>"
+            "<p><b>Long searches on a cluster</b> can run as a batch job "
+            "instead: <code>quantui-batch submit guess.xyz --calc "
+            "transition_state --method B3LYP --basis def2-SVP</code>. A killed "
+            "job resumes the search where it stopped when it is run again.</p>"
         ),
     },
     "surfaces": {
