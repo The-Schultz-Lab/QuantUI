@@ -131,6 +131,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- **`quantui-batch check` prints a fix hint only under a failed or warning
+  line.** Passing lines showed their hint too (`[ok  ] image …` followed by
+  "ask your instructor: the course image is missing or unreadable"), which
+  read as an error to students.
 - **Generate Isosurface works again for molecular orbitals** — it failed for
   every MO with `unexpected keyword argument 'esp_range'` since the ESP-map
   release. The orbital gallery was not affected.

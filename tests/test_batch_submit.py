@@ -1561,6 +1561,14 @@ class TestResultsAndCheck:
         r = cluster.run("check", extra_env={"QUANTUI_BATCH_IMAGE": "/nope.sif"})
         assert r.returncode == 1 and "[FAIL] image /nope.sif" in r.stdout
 
+    def test_check_shows_fix_hints_only_under_failures(self, cluster):
+        hint = "ask your instructor: the course image is missing or unreadable"
+        r = cluster.run("check")
+        assert "[ok  ] image " in r.stdout and hint not in r.stdout
+        assert "needs 3.6 or newer" not in r.stdout
+        r = cluster.run("check", extra_env={"QUANTUI_BATCH_IMAGE": "/nope.sif"})
+        assert f"[FAIL] image /nope.sif\n         {hint}" in r.stdout
+
 
 @needs_posix
 class TestTagAndSolvent:

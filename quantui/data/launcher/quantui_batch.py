@@ -1613,7 +1613,9 @@ def cmd_check(argv):
         mark = {True: "ok  ", False: "FAIL", None: "warn"}[ok]
         if ok is False:
             problems += 1
-        print(f"[{mark}] {text}" + (f"\n         {fix}" if fix else ""))
+        # The hint says how to fix a failure, so a passing line never shows it.
+        hint = fix if fix and ok is not True else ""
+        print(f"[{mark}] {text}" + (f"\n         {hint}" if hint else ""))
 
     me = Path(os.path.realpath(__file__))
     report(True, f"quantui-batch from QuantUI {INSTALLED_FROM} ({me})")
