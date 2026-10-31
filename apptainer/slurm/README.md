@@ -52,6 +52,11 @@ quantui-batch rerun <job> --more-memory                # or --more-time, or any 
 quantui-batch cancel <job>
 ```
 
+Inside the image (an allocation, or an OnDemand terminal) `quantui jobs`
+lists the same jobs with their state read from each job folder (refreshed
+from the queue when `squeue` is there), and History in the app shows the
+unfinished ones.
+
 - Inputs are `.xyz` files (`--calc` required unless a preset sets it;
   `--method`, `--basis`, `--charge`, `--mult`, `--solvent`, `--preopt`,
   `--option KEY=VALUE`) or request JSON. A charge/multiplicity that cannot

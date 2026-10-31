@@ -342,6 +342,10 @@ def ingest_attempt(
         staging.name,
         result_dir=str(saved_dir) if tracked else None,
     )
+    # B2.9: a terminal-submitted job's record (status "prepared", no job id)
+    # is never polled; a result saved to History means it succeeded.
+    if record.status.lower() == "prepared":
+        registry.update_status(record.request_id, "success")
     return saved_dir
 
 

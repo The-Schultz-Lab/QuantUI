@@ -1645,6 +1645,7 @@ class QuantUIApp:
         result_output: Any
         result_viz_output: Any
         results_path_lbl: Any
+        _batch_jobs_html: Any
         run_btn: Any
         cancel_btn: Any
         basis_fix_btn: Any

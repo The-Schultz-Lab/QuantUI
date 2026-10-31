@@ -9,6 +9,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **`quantui jobs`** (M-BATCH2 B2.9): your batch jobs, newest first, with
+  where each one is: waiting, running (with the worker's progress),
+  done or failed. With `squeue` on PATH it refreshes the job records from
+  the queue first; without it (an OnDemand session) it reads each job
+  folder. `--running` lists unfinished jobs, `--all` every job.
+- **History lists batch jobs not finished yet** (B2.10): on app start and
+  on Refresh, jobs submitted from a terminal show their state and progress
+  from their job folders, since OnDemand has no `squeue`. A
+  terminal-submitted job's record is marked succeeded when its result is
+  saved to History.
 - **Transition State as a batch job** (M-TS TS.5): `quantui submit`,
   `quantui-batch submit --calc transition_state` and the app's SLURM path
   run the same Sella search and frequency check as the window, PCM included.

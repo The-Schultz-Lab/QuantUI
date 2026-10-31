@@ -136,6 +136,7 @@ def ingest_finished_jobs_on_startup(app: Any) -> list[Path]:
     except Exception:  # noqa: BLE001 — startup must not fail over a job folder
         logger.exception("Failed to ingest finished SLURM attempts at startup")
         return []
+    refresh_batch_jobs_note(app)
     if saved:
         from quantui.app_runflow import refresh_results_browser
 
@@ -144,6 +145,53 @@ def ingest_finished_jobs_on_startup(app: Any) -> list[Path]:
         except Exception:  # noqa: BLE001
             logger.exception("Failed to refresh History after SLURM ingest")
     return saved
+
+
+def batch_jobs_note_html(views: list) -> str:
+    """The History panel's list of batch jobs not finished yet (B2.10)."""
+    if not views:
+        return ""
+    rows = []
+    for v in views:
+        pct = (
+            f" ({v.percent:.0f}%)"
+            if v.state == "running" and isinstance(v.percent, (int, float))
+            else ""
+        )
+        rows.append(
+            f"<li><code>{html.escape(v.name)}</code> "
+            f"{html.escape(v.calc_type)} {html.escape(v.method)}/"
+            f"{html.escape(v.basis)}: <b>{html.escape(v.state)}</b>{pct} "
+            f"<span style='color:{_theme.css.TEXT_SUBTLE}'>"
+            f"{html.escape(v.detail)}</span></li>"
+        )
+    return (
+        f'<div style="font-size:12px;color:{_theme.css.TEXT_STRONG};margin:6px 0">'
+        f"<b>Batch jobs not finished yet</b> ({len(views)}). Each appears in "
+        "History when it finishes; press Refresh to check."
+        f'<ul style="margin:4px 0 0 18px;padding:0">{"".join(rows)}</ul></div>'
+    )
+
+
+def refresh_batch_jobs_note(app: Any) -> None:
+    """Show batch jobs still waiting or running, read from their job folders.
+
+    The app usually runs where there is no ``squeue`` (OnDemand) while jobs
+    are submitted with ``quantui-batch`` over SSH, so the state comes from
+    each job folder (``backends/batch_status``), not from Slurm.
+    """
+    note = getattr(app, "_batch_jobs_html", None)
+    if note is None:
+        return
+    try:
+        from quantui.backends.batch_status import job_views
+
+        views = job_views(ensure_job_registry(app), unfinished_only=True)
+    except Exception:  # noqa: BLE001 — a bad job folder must not break History
+        logger.exception("Failed to read batch job states")
+        views = []
+    note.value = batch_jobs_note_html(views)
+    note.layout.display = "" if views else "none"
 
 
 def startup_slurm_check(app: Any) -> None:

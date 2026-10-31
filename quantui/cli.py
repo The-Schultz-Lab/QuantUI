@@ -496,6 +496,75 @@ def _cmd_results(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_jobs(args: argparse.Namespace) -> int:
+    """List batch jobs and where each one is (M-BATCH2 B2.9).
+
+    With ``squeue`` on PATH the registry is refreshed from the queue first
+    (so finished jobs stop counting against the concurrent-job limit) and
+    queued jobs show their Slurm state; without it (an OnDemand session)
+    the state is read from each job folder.
+    """
+    import shutil
+
+    from quantui.backends.batch_status import job_views
+    from quantui.backends.registry import JobRegistry
+
+    registry = JobRegistry()
+    queue: dict = {}
+    if shutil.which("squeue"):
+        from quantui.backends.slurm import SlurmBackend
+
+        backend = SlurmBackend(registry=registry)
+        try:
+            backend.refresh_registry_statuses()
+            ids = [
+                r.slurm_job_id
+                for r in registry.list_all()
+                if r.backend_id == "cluster_slurm" and r.slurm_job_id
+            ]
+            from quantui.backends.batch_status import logged_job_ids
+
+            for r in registry.list_all():
+                if r.job_path is not None:
+                    ids.extend(logged_job_ids(r.job_path))
+            queue = {
+                jid: state
+                for jid, state in backend.batch_poll_slurm_statuses(
+                    sorted(set(ids))
+                ).items()
+                if state and state != "UNKNOWN"
+            }
+        except Exception as exc:  # noqa: BLE001 — a queue error must not hide the list
+            print(f"quantui jobs: could not read the queue ({exc})", file=sys.stderr)
+    views = job_views(registry, queue=queue, unfinished_only=args.running)
+    if not args.all:
+        views = views[: args.n]
+    if not views:
+        print("No batch jobs." if not args.running else "No batch jobs running.")
+        return 0
+    rows = [("JOB", "TYPE", "METHOD/BASIS", "STATE", "SLURM ID", "DETAIL")]
+    for v in views:
+        state = v.state + (
+            f" {v.percent:.0f}%"
+            if v.state == "running" and isinstance(v.percent, (int, float))
+            else ""
+        )
+        rows.append(
+            (
+                v.name,
+                v.calc_type,
+                f"{v.method}/{v.basis}",
+                state,
+                v.job_id or "-",
+                v.detail,
+            )
+        )
+    widths = [max(len(row[i]) for row in rows) for i in range(5)]
+    for row in rows:
+        print("  ".join(c.ljust(w) for c, w in zip(row[:5], widths)) + "  " + row[5])
+    return 0
+
+
 def _cmd_install_launcher(args: argparse.Namespace) -> int:
     """Write the host-side ``quantui-batch`` launcher (see quantui/batch_launcher.py)."""
     from quantui.batch_launcher import install_launcher
@@ -813,6 +882,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "job_dir", help="A job folder (or one of its attempt folders)."
     )
     results_parser.set_defaults(func=_cmd_results)
+
+    jobs_parser = sub.add_parser(
+        "jobs",
+        help=(
+            "List your batch jobs and where each one is: waiting, running "
+            "(with progress), done or failed."
+        ),
+    )
+    jobs_parser.add_argument(
+        "-n", type=int, default=10, help="Show the newest N jobs (default 10)."
+    )
+    jobs_parser.add_argument("--all", action="store_true", help="Show every job.")
+    jobs_parser.add_argument(
+        "--running", action="store_true", help="Only jobs not finished yet."
+    )
+    jobs_parser.set_defaults(func=_cmd_jobs)
 
     launcher_parser = sub.add_parser(
         "install-launcher",

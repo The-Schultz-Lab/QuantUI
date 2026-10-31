@@ -560,6 +560,8 @@ def build_history_section(
         tooltip="Copy the results directory path to clipboard",
     )
     app.results_path_lbl = widgets.HTML()
+    # Batch jobs still running (B2.10): filled by History Refresh / app start.
+    app._batch_jobs_html = widgets.HTML(layout=layout_fn(display="none"))
     app.past_output = widgets.Output()
     app.view_log_btn = widgets.Button(
         description="View log",
@@ -901,6 +903,7 @@ def build_history_section(
                 layout=layout_fn(align_items="center", gap="8px"),
             ),
             app.results_path_lbl,
+            app._batch_jobs_html,
             app.past_output,
         ]
     )
