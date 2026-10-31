@@ -31,6 +31,8 @@ def results_env(tmp_path, monkeypatch):
     # setenv (not delenv) so monkeypatch restores the variable even after
     # viewer code rewrites os.environ directly.
     monkeypatch.setenv(RESULTS_DIR_ENV, str(tmp_path))
+    # Opening a folder remembers it (VW.12); keep that out of the real home.
+    monkeypatch.setenv("QUANTUI_HOME", str(tmp_path / ".quantui-home"))
     return tmp_path
 
 
@@ -86,6 +88,34 @@ class TestViewerApp:
         assert len([v for _, v in app.past_dd.options if v]) == 2
         assert "2 calculations found" in app._viewer_status_html.value
 
+    def test_opened_folder_is_remembered_for_next_time(
+        self, results_env, monkeypatch, tmp_path
+    ):
+        # VW.12: `quantui view` with no folder reopens the last one.
+        app = QuantUIApp(viewer=True)
+        other = tmp_path / "other"
+        other.mkdir()
+        app._viewer_folder_txt.value = str(other)
+        app._viewer_open_btn.click()
+        assert app_launcher.remembered_viewer_folder() == other.resolve()
+        other.rmdir()  # a folder that is gone is forgotten
+        assert app_launcher.remembered_viewer_folder() is None
+
+    def test_copy_path_without_threads_keeps_the_label(self, results_env, monkeypatch):
+        # VW.12: the browser viewer cannot start threads; Copy path must not
+        # raise there (the "Copied" label just stays).
+        import threading
+
+        app = QuantUIApp(viewer=True)
+
+        def _no_threads(self):
+            raise RuntimeError("can't start new thread")
+
+        monkeypatch.setattr(threading.Thread, "start", _no_threads)
+        monkeypatch.setattr("quantui.app_runflow.display", lambda *a, **k: None)
+        app.copy_path_btn.click()
+        assert "Copied" in app.results_path_lbl.value
+
     def test_open_folder_bad_path_reports_error(self, results_env, monkeypatch):
         monkeypatch.setenv(RESULTS_DIR_ENV, str(results_env))
         app = QuantUIApp(viewer=True)
@@ -109,6 +139,62 @@ class TestViewerLauncher:
     def test_missing_folder_fails(self, tmp_path, monkeypatch):
         monkeypatch.setattr(app_launcher, "voila_executable", lambda: "voila")
         assert app_launcher.run_viewer_app(tmp_path / "missing") == 1
+
+    def test_viewer_needs_its_per_run_token(self, monkeypatch, tmp_path):
+        # VW.11: other local processes / web pages cannot start kernels.
+        monkeypatch.setenv("QUANTUI_HOME", str(tmp_path))
+        runs = []
+
+        class _Proc:
+            def __init__(self, argv, env):
+                runs.append(argv)
+
+            def wait(self, timeout=None):
+                return 0
+
+            def poll(self):
+                return None
+
+        opened = []
+        monkeypatch.setattr(app_launcher.subprocess, "Popen", _Proc)
+        monkeypatch.setattr(app_launcher, "_wait_for_port", lambda *a, **k: True)
+        monkeypatch.setattr(app_launcher, "_open_url_best_effort", opened.append)
+        monkeypatch.setattr(app_launcher, "_stop_child_on_termination", lambda p: None)
+        assert app_launcher.run_viewer_app(tmp_path) == 0
+        assert app_launcher.run_viewer_app(tmp_path) == 0
+        tokens = [
+            a.split("=", 1)[1]
+            for argv in runs
+            for a in argv
+            if a.startswith("--Voila.token=")
+        ]
+        assert len(tokens) == 2 and tokens[0] != tokens[1] and len(tokens[0]) >= 24
+        assert "--Voila.ip=127.0.0.1" in runs[0]
+        assert opened[0].endswith(f"/?token={tokens[0]}")
+
+    def test_viewer_without_a_folder_reopens_the_last_one(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("QUANTUI_HOME", str(tmp_path / "home"))
+        monkeypatch.delenv(RESULTS_DIR_ENV, raising=False)
+        last = tmp_path / "last"
+        last.mkdir()
+        app_launcher.remember_viewer_folder(last)
+        envs = []
+
+        class _Proc:
+            def __init__(self, argv, env):
+                envs.append(env)
+
+            def wait(self, timeout=None):
+                return 0
+
+            def poll(self):
+                return None
+
+        monkeypatch.setattr(app_launcher.subprocess, "Popen", _Proc)
+        monkeypatch.setattr(app_launcher, "_wait_for_port", lambda *a, **k: True)
+        monkeypatch.setattr(app_launcher, "_stop_child_on_termination", lambda p: None)
+        assert app_launcher.run_viewer_app(open_browser=False) == 0
+        assert envs[0][RESULTS_DIR_ENV] == str(last)
 
     def test_cli_view_parses(self, monkeypatch, tmp_path):
         seen = {}

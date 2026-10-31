@@ -69,6 +69,34 @@ def quantui_home() -> Path:
     return Path.home() / ".quantui"
 
 
+#: Where the viewer remembers the last results folder it opened (VW.12).
+VIEWER_LAST_FOLDER_NAME = "viewer-last-folder.json"
+
+
+def remember_viewer_folder(folder: Path) -> None:
+    """Save *folder* so the next ``quantui view`` without a folder opens it."""
+    try:
+        home = quantui_home()
+        home.mkdir(parents=True, exist_ok=True)
+        (home / VIEWER_LAST_FOLDER_NAME).write_text(
+            json.dumps({"folder": str(folder)}), encoding="utf-8"
+        )
+    except OSError:
+        pass  # a read-only home only costs the convenience
+
+
+def remembered_viewer_folder() -> Optional[Path]:
+    """The last folder the viewer opened, if it still exists."""
+    try:
+        data = json.loads(
+            (quantui_home() / VIEWER_LAST_FOLDER_NAME).read_text(encoding="utf-8")
+        )
+        folder = Path(str(data["folder"]))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return folder if folder.is_dir() else None
+
+
 def _viewer_notebook() -> dict:
     """The app notebook with the display cell switched to viewer mode."""
     nb: dict = json.loads(json.dumps(_APP_NOTEBOOK))
@@ -318,6 +346,13 @@ def find_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def viewer_token() -> str:
+    """A fresh random token for one ``quantui view`` run."""
+    import secrets
+
+    return secrets.token_urlsafe(24)
+
+
 def _wait_for_port(port: int, proc: subprocess.Popen, timeout_s: float) -> bool:
     """Poll until Voilà accepts connections on *port* (or the process dies)."""
     import socket
@@ -399,8 +434,8 @@ def run_viewer_app(
 
     Needs only the ``[app]`` extra — no quantum engine. The folder reaches the
     kernel through ``QUANTUI_RESULTS_DIR`` (Voilà kernels inherit the server's
-    environment); with no folder the viewer opens on the user's home directory
-    and the in-app folder bar picks the real one.
+    environment); with no folder the viewer opens the folder it opened last
+    (else the user's home directory) and the in-app folder bar picks another.
     """
     voila_cmd = _viewer_voila_command()
     if voila_cmd is None:
@@ -415,15 +450,23 @@ def run_viewer_app(
             return 1
         env["QUANTUI_RESULTS_DIR"] = str(folder)
     elif not env.get("QUANTUI_RESULTS_DIR"):
-        env["QUANTUI_RESULTS_DIR"] = str(Path.home())
+        env["QUANTUI_RESULTS_DIR"] = str(remembered_viewer_folder() or Path.home())
 
     port = port or find_free_port()
     notebook = ensure_viewer_notebook()
     argv = build_voila_argv(notebook, port=port, no_browser=True)
     argv[:1] = voila_cmd
     argv.append("--Voila.ip=127.0.0.1")
+    # Laptop security (VW.11): binding to 127.0.0.1 keeps other machines out,
+    # but any local process or web page could still start kernels on this
+    # port. A per-run token closes that; without it Voila serves a login page
+    # and starts nothing. (Standalone Voila reads no XSRF setting at all, so
+    # the disable_check_xsrf flag above has no effect here; JUPYTER_TOKEN is
+    # not read either, hence the command-line option.)
+    token = viewer_token()
+    argv.append(f"--Voila.token={token}")
 
-    url = f"http://127.0.0.1:{port}"
+    url = f"http://127.0.0.1:{port}/?token={token}"
     print(f"Starting QuantUI Viewer at {url}")
     print(f"Results folder: {env['QUANTUI_RESULTS_DIR']}")
     proc = subprocess.Popen(argv, env=env)

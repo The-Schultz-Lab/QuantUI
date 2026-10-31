@@ -1773,7 +1773,12 @@ def on_copy_results_path(app: Any, btn: Any) -> None:
             f'<span style="font-size:13px;color:{_theme.css.TEXT_SLATE}">{p}</span>'
         )
 
-    threading.Thread(target=_reset, daemon=True).start()
+    try:
+        threading.Thread(target=_reset, daemon=True).start()
+    except RuntimeError:
+        # The browser viewer (Pyodide) has no threads, and sleeping inline
+        # would freeze the page: the "Copied" label just stays (VW.12).
+        pass
 
 
 def on_reset_click(app: Any, btn: Any) -> None:

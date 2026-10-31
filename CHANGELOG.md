@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **`quantui view` opens the last folder it showed** when started without
+  one (desktop shortcuts), instead of the home directory.
 - **`quantui jobs`** (M-BATCH2 B2.9): your batch jobs, newest first, with
   where each one is: waiting, running (with the worker's progress),
   done or failed. With `squeue` on PATH it refreshes the job records from
@@ -105,6 +107,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- **`quantui view` needs a per-run token.** It listened on 127.0.0.1 with
+  no authentication, so any local process or web page could start kernels
+  on its port; it now starts Voila with a random token and opens the URL
+  that carries it. A request without it gets a login page. (Standalone
+  Voila has no XSRF setting, so the `disable_check_xsrf` flag was never in
+  effect for the viewer; DEC-001's container setting is unchanged.)
 - **Frequency results check the geometry** — every Frequency run now
   computes the forces at the input geometry. When the largest force is above
   the Geometry Opt threshold (0.05 eV/Å) the result card (live and History)
@@ -151,6 +159,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- **"Copy path" in the browser viewer** no longer raises: Pyodide cannot
+  start the thread that resets the label, so the label just stays.
 - **`quantui-batch check` prints a fix hint only under a failed or warning
   line.** Passing lines showed their hint too (`[ok  ] image …` followed by
   "ask your instructor: the course image is missing or unreadable"), which
