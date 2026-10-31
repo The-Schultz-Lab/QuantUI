@@ -9,6 +9,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Full symmetry labels for D4h, D4, C4v and D2d** vibrational modes
+  (square-planar, square-pyramidal and allene-type molecules) instead of
+  their D2h/C2v/D2 subgroup labels. B1 and B2 follow the usual convention
+  (C2′ axes, or σv planes, through the ligands), so a square-planar AB4's
+  B1g is the in-plane stretch. Point-group detection for mode labels no
+  longer drops to a lower group at the loose tolerance (an exact square
+  pyramid was labelled C2v).
 - **The Viewer draws the HOMO and LUMO** (M-VIEWER VW.7): when orbitals are
   saved (app or batch job), the HOMO and LUMO, each spin for unrestricted
   results, are also saved as gzipped cubes at the Isosurface panel's

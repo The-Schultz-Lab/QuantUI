@@ -40,6 +40,11 @@ GAMMA = {
     "C2H6": ("D3d", "3A1g + 3Eg + A1u + 2A2u + 3Eu"),
     "CH3Cl": ("C3v", "3A1 + 3E"),
     "SF6": ("Oh", "A1g + Eg + T2g + 2T1u + T2u"),
+    # Fourfold axes: full tables, B1/B2 by the C2' / σv-through-atoms rule.
+    "AlF4m": ("D4h", "A1g + B1g + B2g + A2u + B2u + 2Eu"),
+    "AlF4m_turned": ("D4h", "A1g + B1g + B2g + A2u + B2u + 2Eu"),
+    "ClF5": ("C4v", "3A1 + 2B1 + B2 + 3E"),
+    "C3H4": ("D2d", "3A1 + B1 + 3B2 + 4E"),
     "C6H6": (
         "D6h",
         "2A1g + A2g + 2B2g + E1g + 4E2g + A2u + 2B1u + 2B2u + 3E1u + 2E2u",
@@ -56,6 +61,27 @@ class TestGammaVib:
         assert (res.group, res.gamma) == (group, gamma)
         assert not res.is_subgroup
         assert all(lbl for lbl in res.labels)
+
+    def test_square_planar_b1g_is_the_stretch(self):
+        # With x along a C2' (through the ligands), B1g is the in-plane
+        # stretch and B2g the in-plane bend, as in textbook tables.
+        import numpy as np
+
+        m = MODES["AlF4m_turned"]
+        res = _label("AlF4m_turned")
+        x = np.array([c for _, c in m["atoms"]])
+        d = np.array(m["disps"])
+
+        def stretch(i):
+            return sum(
+                abs(np.dot(x[k] - x[0], d[i][k] - d[i][0]))
+                / np.linalg.norm(x[k] - x[0])
+                for k in range(1, 5)
+            )
+
+        b1g = res.labels.index("b1g")
+        b2g = res.labels.index("b2g")
+        assert stretch(b1g) > 0.1 and stretch(b2g) < 1e-3
 
     def test_ammonia_modes(self):
         # CHEM.1 success criterion: NH3 → symmetry-labelled modes, 2A1 + 2E.

@@ -17,8 +17,9 @@ Vibrational modes: :func:`label_mode_irreps` applies
 the subgroup's operations to the normal-mode displacements, labelling each
 degenerate set by the trace of its representation. Full-group labels come
 back where the subgroup plus degeneracy determines them (C3v, D3h, D3,
-D3d, D6h, linear molecules) or from built-in Td/Oh character tables;
-other groups (e.g. D4h) keep subgroup labels, flagged as such.
+D3d, D6h, linear molecules) or from built-in character tables (Td, Oh,
+D4h, D4, C4v, D2d); other groups (e.g. D5h) keep subgroup labels, flagged
+as such.
 
 QuantUI never runs its SCFs with ``symmetry=True``. Labels are assigned
 afterwards by projecting the converged orbitals onto PySCF's
@@ -534,6 +535,99 @@ _FULL_TABLES: Dict[str, Tuple[str, _ClassOps, _Irreps]] = {
 }
 
 
+_C2_X = ((1, 0, 0), (0, -1, 0), (0, 0, -1))
+_SIGMA_XZ = ((1, 0, 0), (0, -1, 0), (0, 0, 1))  # contains z and x
+_SIGMA_H = ((1, 0, 0), (0, 1, 0), (0, 0, -1))
+# A1, A2, B1, B2, E of the groups with a fourfold axis (D4, C4v, D2d): columns
+# E, 2X4, C2, 2(C2' or σv), 2(C2'' or σd).
+_FOURFOLD_IRREPS: _Irreps = [
+    ("A1", (1, 1, 1, 1, 1)),
+    ("A2", (1, 1, 1, -1, -1)),
+    ("B1", (1, -1, 1, 1, -1)),
+    ("B2", (1, -1, 1, -1, 1)),
+    ("E", (2, 0, -2, 0, 0)),
+]
+
+
+def _with_inversion(rows: _Irreps) -> _Irreps:
+    """g and u irreps of G × Ci, classes ordered (G, i·G)."""
+    return [(n + "g", c + c) for n, c in rows] + [
+        (n + "u", c + tuple(-x for x in c)) for n, c in rows
+    ]
+
+
+# Their D2h / C2v / D2 subgroup cannot tell B1 from B2 (or A1 from B1), so
+# these get full tables too. B1 vs B2 depends on which C2 axes are C2' (or
+# which mirror planes are σv); _fourfold_frame puts x along a C2' axis
+# through atoms (or the xz plane, a σv, through atoms), the usual convention
+# (square-planar AB4: B1g in-plane stretch, B2g in-plane bend).
+_D4_CLASSES: _ClassOps = [
+    (1, _E3),
+    (2, _C4_Z),
+    (1, _C2_Z),
+    (2, _C2_X),  # C2'
+    (2, _C2_110),  # C2''
+]
+_FULL_TABLES.update(
+    {
+        # i·C4 is in the S4 class, i·C2 is σh, i·C2' a σv, i·C2'' a σd.
+        "D4h": (
+            "D2h",
+            _D4_CLASSES + [(w, _neg(m)) for w, m in _D4_CLASSES],
+            _with_inversion(_FOURFOLD_IRREPS),
+        ),
+        "D4": ("D2", _D4_CLASSES, _FOURFOLD_IRREPS),
+        "C4v": (
+            "C2v",
+            [(1, _E3), (2, _C4_Z), (1, _C2_Z), (2, _SIGMA_XZ), (2, _SIGMA_XY_SWAP)],
+            _FOURFOLD_IRREPS,
+        ),
+        "D2d": (
+            "D2",
+            [(1, _E3), (2, _S4_Z), (1, _C2_Z), (2, _C2_X), (2, _SIGMA_XY_SWAP)],
+            _FOURFOLD_IRREPS,
+        ),
+    }
+)
+
+
+def _fourfold_frame(top: str, coords: Any, axes: Any, match_tol: float) -> Any:
+    """Axes in which *top*'s full table applies, or None.
+
+    Tries PySCF's frame and the same frame turned 45° about z. A frame must
+    map the molecule onto itself under every class operation; of those, the
+    one with an atom on the x axis (D4h, D4: x is a C2' axis) or in the xz
+    plane off the z axis (C4v: xz is a σv) follows the usual convention.
+    D2d has a single valid frame. With no such atom B1 and B2 cannot be
+    named, and the subgroup's labels are kept.
+    """
+    import numpy as np
+
+    ops = [np.asarray(m, float) for _, m in _FULL_TABLES[top][1]]
+
+    def valid(c: Any) -> bool:
+        return all(
+            np.linalg.norm(c - row, axis=1).min() <= match_tol
+            for r in ops
+            for row in c @ r.T
+        )
+
+    def follows_convention(c: Any) -> bool:
+        if top == "D2d":
+            return True
+        off_z = np.abs(c[:, 0]) > match_tol
+        if top == "C4v":
+            return bool(np.any((np.abs(c[:, 1]) < match_tol) & off_z))
+        return bool(np.any((np.abs(c[:, 1:]).max(axis=1) < match_tol) & off_z))
+
+    h = np.sqrt(0.5)
+    rot = np.array([[h, h, 0.0], [-h, h, 0.0], [0.0, 0.0, 1.0]])
+    for frame, c in ((axes, coords), (rot @ axes, coords @ rot.T)):
+        if valid(c) and follows_convention(c):
+            return frame
+    return None
+
+
 def _primes(name: str) -> str:
     """PySCF's Cs names ``A'`` / ``A"`` → ``A′`` / ``A″``."""
     return name.replace('"', "″").replace("'", "′")
@@ -689,6 +783,12 @@ def label_mode_irreps(
                 top, orig, axes = geom.detect_symm(list(zip(atoms, xyz)))
             finally:
                 geom.TOLERANCE = old
+            # PySCF rounds inertia moments, so a looser tolerance can report
+            # less symmetry (an exact square pyramid as C2v); as in
+            # detect_point_group, never take less than the strict result.
+            strict = geom.detect_symm(list(zip(atoms, xyz)))
+            if group_order(str(strict[0])) > group_order(str(top)):
+                top, orig, axes = strict
         top = str(top)
         if top in ("Dooh", "Coov"):
             subgroup = "D2h" if top == "Dooh" else "C2v"  # z along the axis
@@ -711,8 +811,16 @@ def label_mode_irreps(
                 axes = axes[[1, 0, 2]]
                 coords = (xyz - orig) @ axes.T
             recoverable = through_atoms(0)
+        table_group: Optional[str] = top
+        if top in ("D4h", "D4", "C4v", "D2d") and subgroup == _FULL_TABLES[top][0]:
+            frame = _fourfold_frame(top, coords, axes, match_tol)
+            if frame is None:
+                table_group = None
+            else:
+                axes = frame
+                coords = (xyz - orig) @ axes.T
         vecs = disp @ axes.T
-        full_table = _FULL_TABLES.get(top)
+        full_table = _FULL_TABLES.get(table_group) if table_group else None
         if full_table is not None and full_table[0] == subgroup:
             classes = [(w, np.asarray(m, float)) for w, m in full_table[1]]
             irreps = [(name, chars) for name, chars in full_table[2]]
