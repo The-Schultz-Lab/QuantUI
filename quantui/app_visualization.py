@@ -1987,19 +1987,40 @@ def render_orbital_isosurface(
             mo_coeff = _np.asarray(mo_coeff)[1]
             orbital_label = f"{orbital_label} (β)"
             cube_path = cube_path.with_name(cube_path.stem + "_beta.cube")
-        _cube_generator(
-            mol_atom,
-            mol_basis,
-            mo_coeff,
-            orb_idx,
-            cube_path,
-            nx=_grid,
-            ny=_grid,
-            nz=_grid,
-            charge=_charge,
-            spin=_spin,
-            method=_method_for_provenance,
-        )
+        try:
+            _cube_generator(
+                mol_atom,
+                mol_basis,
+                mo_coeff,
+                orb_idx,
+                cube_path,
+                nx=_grid,
+                ny=_grid,
+                nz=_grid,
+                charge=_charge,
+                spin=_spin,
+                method=_method_for_provenance,
+            )
+        except ImportError:
+            # The Viewer has no PySCF (VW.7): draw the HOMO/LUMO cube saved
+            # with the calculation, if this is one of them.
+            from quantui.orbital_visualization import (
+                frontier_cube_labels,
+                load_frontier_cube,
+            )
+
+            if not load_frontier_cube(result_dir, orb_idx, beta=_beta, dest=cube_path):
+                saved = frontier_cube_labels(result_dir)
+                raise ImportError(
+                    "the Viewer cannot compute orbital surfaces (no PySCF). "
+                    + (
+                        f"It can show the orbitals saved with this calculation: "
+                        f"{', '.join(saved)}."
+                        if saved
+                        else "This result was saved without orbital surfaces."
+                    )
+                    + " Open it in the full QuantUI for other orbitals."
+                ) from None
         scene_bgcolor = app._plotly_theme_colors()["scene_bgcolor"]
 
         # Route the render: py3Dmol does native, full-resolution in-browser

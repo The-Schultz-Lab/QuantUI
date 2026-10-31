@@ -9,6 +9,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **The Viewer draws the HOMO and LUMO** (M-VIEWER VW.7): when orbitals are
+  saved (app or batch job), the HOMO and LUMO, each spin for unrestricted
+  results, are also saved as gzipped cubes at the Isosurface panel's
+  default grid (about 0.4 MB each; `frontier_cubes/`). The desktop and
+  browser Viewer, which have no PySCF, draw those; for any other orbital,
+  density or ESP they say to open the result in the full QuantUI. Set
+  `QUANTUI_FRONTIER_CUBES=0` to skip them.
 - **`quantui view` opens the last folder it showed** when started without
   one (desktop shortcuts), instead of the home directory.
 - **`quantui jobs`** (M-BATCH2 B2.9): your batch jobs, newest first, with

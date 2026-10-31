@@ -125,6 +125,8 @@ class TestRealJob:
         assert data["spectra"]["transition_state"]["n_imaginary"] == 1
         assert data["geometry"]["coordinates"][2] != pytest.approx(HCN_GUESS[2])
         assert (saved / "trajectory.json").exists()
+        # The Viewer's saved HOMO/LUMO cubes come along (VW.7).
+        assert (saved / "frontier_cubes" / "index.json").exists()
         html = completion_summary_html(saved, payload)
         assert "Search steps" in html and "Transition state" in html
 

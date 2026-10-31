@@ -2354,3 +2354,138 @@ def build_orbital_gallery_html(
         "together. Coarse grid for speed; use Generate above for a detailed "
         "view of one orbital.</p>"
     )
+
+
+# ── Frontier-orbital cubes saved with a result (M-VIEWER VW.7) ─────────────
+#
+# The Viewer (desktop installer and browser build) has no PySCF, so it cannot
+# evaluate an orbital on a grid: a result stores only the basis-set *name*.
+# When a calculation's orbitals are saved, the HOMO and LUMO (each spin, for
+# unrestricted results) are therefore also written as gzipped cubes at the
+# Isosurface panel's default grid, about 0.4 MB each, and the Viewer draws
+# those. Density, ESP and other orbitals still need the full app.
+
+#: Folder inside a result directory holding the saved cubes.
+FRONTIER_CUBES_DIR = "frontier_cubes"
+#: Set to 0 to skip writing them (large batch campaigns).
+FRONTIER_CUBES_ENV = "QUANTUI_FRONTIER_CUBES"
+
+
+def _frontier_targets(mo_occ: Any) -> List[Tuple[str, str, int]]:
+    """``(spin, label, index)`` for each HOMO/LUMO in *mo_occ*."""
+    occ = np.asarray(mo_occ, dtype=float)
+    spins = [("alpha", occ[0]), ("beta", occ[1])] if occ.ndim == 2 else [("", occ)]
+    out: List[Tuple[str, str, int]] = []
+    for spin, row in spins:
+        filled = np.nonzero(row > 0.5)[0]
+        if not len(filled):
+            continue
+        homo = int(filled[-1])
+        out.append((spin, "HOMO", homo))
+        if homo + 1 < len(row):
+            out.append((spin, "LUMO", homo + 1))
+    return out
+
+
+def save_frontier_cubes(
+    result_dir: Path,
+    *,
+    mol_atom: list,
+    mol_basis: str,
+    mo_coeff: Any,
+    mo_occ: Any,
+    method: str = "",
+) -> List[str]:
+    """Write the HOMO/LUMO cubes for the Viewer; return their labels.
+
+    Needs PySCF (the full app or a batch job). Never raises: a result is
+    complete without them.
+    """
+    import gzip
+    import json
+    import os
+    import tempfile
+
+    if os.environ.get(FRONTIER_CUBES_ENV, "1").strip().lower() in ("0", "false", "no"):
+        return []
+    labels: List[str] = []
+    try:
+        targets = _frontier_targets(mo_occ)
+        charge, spin = infer_charge_and_spin(mol_atom, mo_occ, basis=mol_basis)
+        coeff = np.asarray(mo_coeff)
+        out_dir = Path(result_dir) / FRONTIER_CUBES_DIR
+        entries = []
+        grid = ISO_RESOLUTION_PRESETS[DEFAULT_ISO_RESOLUTION]
+        with tempfile.TemporaryDirectory() as tmp:
+            for spin_name, label, index in targets:
+                c = coeff[1] if spin_name == "beta" else coeff
+                cube = Path(tmp) / "mo.cube"
+                generate_cube_from_arrays(
+                    mol_atom,
+                    mol_basis,
+                    c,
+                    index,
+                    cube,
+                    nx=grid,
+                    ny=grid,
+                    nz=grid,
+                    charge=charge,
+                    spin=spin,
+                    method=method,
+                )
+                name = f"{spin_name or 'mo'}_{index}.cube.gz"
+                text = compact_cube_text(cube.read_text())
+                out_dir.mkdir(exist_ok=True)
+                (out_dir / name).write_bytes(gzip.compress(text.encode(), 6))
+                full = f"{label} ({spin_name[0]})" if spin_name else label
+                entries.append(
+                    {"label": full, "index": index, "spin": spin_name, "file": name}
+                )
+                labels.append(full)
+        if entries:
+            (out_dir / "index.json").write_text(
+                json.dumps({"grid": grid, "orbitals": entries}, indent=1)
+            )
+    except Exception as exc:  # noqa: BLE001 — optional extra for the Viewer
+        logger.info("Frontier cubes not saved (%s)", exc)
+    return labels
+
+
+def _frontier_index(result_dir: Path) -> List[dict]:
+    import json
+
+    try:
+        data = json.loads(
+            (Path(result_dir) / FRONTIER_CUBES_DIR / "index.json").read_text()
+        )
+        return [e for e in data.get("orbitals", []) if isinstance(e, dict)]
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
+def frontier_cube_labels(result_dir: Path) -> List[str]:
+    """Labels of the cubes saved with *result_dir* (e.g. ``["HOMO", "LUMO"]``)."""
+    return [str(e.get("label")) for e in _frontier_index(result_dir)]
+
+
+def load_frontier_cube(
+    result_dir: Path, orbital_index: int, *, beta: bool, dest: Path
+) -> bool:
+    """Write the saved cube for *orbital_index* to *dest*; False if none."""
+    import gzip
+
+    spins = ("beta",) if beta else ("alpha", "")
+    for entry in _frontier_index(result_dir):
+        if int(entry.get("index", -1)) != int(orbital_index):
+            continue
+        if entry.get("spin", "") not in spins:
+            continue
+        try:
+            raw = (
+                Path(result_dir) / FRONTIER_CUBES_DIR / str(entry["file"])
+            ).read_bytes()
+            Path(dest).write_text(gzip.decompress(raw).decode())
+        except (OSError, KeyError, ValueError):
+            return False
+        return True
+    return False

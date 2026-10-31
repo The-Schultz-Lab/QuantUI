@@ -449,6 +449,12 @@ def load_result(result_dir: Path) -> dict:
     return data
 
 
+def _pyscf_importable() -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec("pyscf") is not None
+
+
 def save_orbitals(result_dir: Path, result: object) -> None:
     """Persist MO data to *result_dir*/orbitals.npz and orbitals_meta.json.
 
@@ -486,6 +492,27 @@ def save_orbitals(result_dir: Path, result: object) -> None:
     meta["engine_id"] = str(getattr(result, "engine_id", "pyscf") or "pyscf")
     if meta:
         (result_dir / "orbitals_meta.json").write_text(json.dumps(meta))
+
+    # HOMO/LUMO cubes for the Viewer, which has no PySCF (VW.7). PySCF
+    # orbitals only: PyFock results need PyFock's own grid evaluator.
+    if (
+        mo_coeff is not None
+        and mo_occ is not None
+        and mol_atom
+        and mol_basis
+        and meta["engine_id"] == "pyscf"
+        and _pyscf_importable()
+    ):
+        from quantui.orbital_visualization import save_frontier_cubes
+
+        save_frontier_cubes(
+            result_dir,
+            mol_atom=list(mol_atom),
+            mol_basis=str(mol_basis),
+            mo_coeff=mo_coeff,
+            mo_occ=mo_occ,
+            method=str(getattr(result, "method", "") or ""),
+        )
 
 
 def _write_molden_orbitals(

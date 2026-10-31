@@ -60,6 +60,12 @@ def _copy_staging_sidecars(
         src = staging / renamed.get(name, name)
         if src.exists():
             shutil.copy2(src, saved_dir / name)
+    # HOMO/LUMO cubes for the Viewer (VW.7), written with orbitals.npz.
+    from quantui.orbital_visualization import FRONTIER_CUBES_DIR
+
+    cubes = staging / FRONTIER_CUBES_DIR
+    if cubes.is_dir() and not (saved_dir / FRONTIER_CUBES_DIR).exists():
+        shutil.copytree(cubes, saved_dir / FRONTIER_CUBES_DIR)
 
 
 def _finalize_history_entry(saved_dir: Path) -> None:
