@@ -160,6 +160,8 @@ class TestViewerLauncher:
         monkeypatch.setattr(app_launcher, "_wait_for_port", lambda *a, **k: True)
         monkeypatch.setattr(app_launcher, "_open_url_best_effort", opened.append)
         monkeypatch.setattr(app_launcher, "_stop_child_on_termination", lambda p: None)
+        # Voila itself is not needed: only the command line it gets is checked.
+        monkeypatch.setattr(app_launcher, "_viewer_voila_command", lambda: ["voila"])
         assert app_launcher.run_viewer_app(tmp_path) == 0
         assert app_launcher.run_viewer_app(tmp_path) == 0
         tokens = [
@@ -193,6 +195,8 @@ class TestViewerLauncher:
         monkeypatch.setattr(app_launcher.subprocess, "Popen", _Proc)
         monkeypatch.setattr(app_launcher, "_wait_for_port", lambda *a, **k: True)
         monkeypatch.setattr(app_launcher, "_stop_child_on_termination", lambda p: None)
+        # Voila itself is not needed: only the command line it gets is checked.
+        monkeypatch.setattr(app_launcher, "_viewer_voila_command", lambda: ["voila"])
         assert app_launcher.run_viewer_app(open_browser=False) == 0
         assert envs[0][RESULTS_DIR_ENV] == str(last)
 
