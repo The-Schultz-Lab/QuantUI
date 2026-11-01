@@ -175,6 +175,7 @@ class TestP6P7Formulas:
         assert got == ["NH3", "H2O", "CH4", "SiH4", "HCl", "C6H6"]
 
     def test_frequency_row_lists_modes_with_symmetry(self):
+        pytest.importorskip("pyscf")  # mode symmetry labels use PySCF
         import json
         import pathlib
         from types import SimpleNamespace
@@ -250,6 +251,7 @@ class TestPhase2CopyAndStyle:
         assert app.cancel_btn.button_style == ""
 
     def test_engine_is_a_chip_without_the_platform_paragraph(self, app):
+        pytest.importorskip("pyscf")  # with no engine the box says so instead
         import sys
 
         html = app.engine_capability_html.value

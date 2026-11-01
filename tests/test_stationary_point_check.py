@@ -107,6 +107,7 @@ class TestResultCards:
 
 class TestThermoPanel:
     def test_analysis_thermo_box_carries_the_warning(self, monkeypatch, tmp_path):
+        pytest.importorskip("pyscf")  # the thermochemistry is PySCF's
         monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(tmp_path / "s.json"))
         from quantui.app import QuantUIApp
         from quantui.app_visualization import show_thermo_box
