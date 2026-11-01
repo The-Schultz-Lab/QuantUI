@@ -604,7 +604,7 @@ quantui/                  Main package
 notebooks/
   molecule_computations.ipynb   Main user-facing interface (3-cell launcher)
   tutorials/                    Step-by-step guided notebooks (01–05)
-tests/                    pytest test suite (~3,700 tests; run in parallel via pytest-xdist)
+tests/                    pytest test suite (~4,100 tests; run in parallel via pytest-xdist)
 apptainer/                Container definition for reproducible deployment
 local-setup/              Conda environment definition
 pyproject.toml            Package metadata and tool config

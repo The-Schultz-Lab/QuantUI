@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-01
+
 ### Added
 
 - **IRC calc type** (M-TS TS.3, engine Sella): follows the reaction path
@@ -1368,7 +1370,8 @@ Initial public scaffolding of the QuantUI package: `quantui` package with
 `calculator.py`, basic notebook launcher, Apptainer container definition,
 MIT license, and project metadata.
 
-[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.8.1...v0.8.2

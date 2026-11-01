@@ -37,6 +37,7 @@ Reach for the CLI when you want to:
 | [`quantui analytics build`](#quantui-analytics-build) | Build an HTML usage dashboard from `perf_log.jsonl` |
 | [`quantui submit`](#quantui-submit) | Submit `.xyz` or request-JSON files as SLURM batch jobs |
 | [`quantui results`](#quantui-results) | Summarize a batch job folder's newest finished result |
+| [`quantui jobs`](#quantui-jobs) | List your batch jobs and where each one is |
 | [`quantui install-launcher`](#quantui-install-launcher) | Write the `quantui-batch` launcher for submitting from a login node |
 
 ---
@@ -386,6 +387,24 @@ quantui results ~/.quantui/staging/H2O_freq_B3LYP_def2-SVP
 
 The argument can also be one attempt folder. Exit code 1 means no attempt has
 finished yet.
+
+---
+
+## `quantui jobs`
+
+List your batch jobs, newest first, with where each one is: waiting, running
+(with the worker's progress), done or failed.
+
+```bash
+quantui jobs              # the newest 10
+quantui jobs --running    # only jobs not finished yet
+quantui jobs --all
+```
+
+With `squeue` on PATH (an allocation on the cluster) it first refreshes the job
+records from the queue. Without it (an OnDemand terminal) the state is read
+from each job folder; a running job whose progress has not changed for 30
+minutes is flagged as possibly stopped.
 
 ---
 
