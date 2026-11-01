@@ -3,7 +3,9 @@
 The Viewer is a lightweight QuantUI for looking at results you already have.
 It has only the **History** and **Analysis** tabs: energies, orbital diagrams,
 IR / Raman / UV-Vis spectra, optimization trajectories, vibrational modes and
-populations. It cannot run calculations.
+populations. It cannot run calculations, so its orbital surfaces are the HOMO
+and LUMO saved with each result (by QuantUI 0.11.0 or later); other orbitals,
+density and ESP surfaces need the full app.
 
 There are two ways to use it. Neither needs git or a terminal.
 

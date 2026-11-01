@@ -100,6 +100,8 @@ class TestApp:
         return d
 
     def test_seed_run_card_panels_and_history(self, tmp_path, monkeypatch):
+        # The engine is mocked, but native Windows without PySCF runs nothing.
+        pytest.importorskip("pyscf")
         from unittest.mock import patch
 
         from quantui import load_result

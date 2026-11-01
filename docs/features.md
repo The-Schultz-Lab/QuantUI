@@ -40,9 +40,10 @@ local Python kernel.
   <div class="feature-card__title">Calculations</div>
   <p class="feature-card__body">
     RHF, UHF, nine DFT functionals, MP2, CCSD, and CCSD(T) &mdash;
-    with eight calculation types: single point, geometry optimization,
+    with nine calculation types: single point, geometry optimization,
     <strong>transition-state search</strong> (Sella, with an automatic
-    frequency check), frequencies/thermochemistry, TD-DFT UV-Vis, NMR
+    frequency check), the <strong>IRC</strong> reaction path from a
+    transition state, frequencies/thermochemistry, TD-DFT UV-Vis, NMR
     shielding, 1D PES scans and Marcus reorganization energies. PCM
     implicit solvation for single points, optimizations, frequencies
     and TD-DFT. Diffuse basis sets (6-31+G*, 6-31++G**, aug-cc-pVDZ,

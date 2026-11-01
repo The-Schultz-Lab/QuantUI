@@ -1,6 +1,6 @@
 # Supported Methods
 
-Eight calculation types over fourteen methods and ten basis sets, all
+Nine calculation types over fourteen methods and ten basis sets, all
 dispatched through a single Calculate tab.
 
 ## Calculation types
@@ -10,6 +10,7 @@ dispatched through a single Calculate tab.
 | **Single Point** | Energy, HOMO–LUMO gap, Mulliken charges, dipole moment |
 | **Geometry Opt** | Optimized structure with step-by-step trajectory animation; optional frozen atoms |
 | **Transition State** | Saddle point near the input geometry (Sella; `pip install "quantui[ts]"`), then a frequency check that says whether it is a transition state (one imaginary frequency), a minimum, or a higher-order saddle point |
+| **IRC** | Reaction path from a Transition State result, followed downhill both ways (Sella) to the two minima it connects: barrier from each side, energy profile against the reaction coordinate, animated path |
 | **Frequency** | Vibrational frequencies, ZPVE, IR intensities, thermochemistry at any temperature and pressure, animated normal modes |
 | **UV-Vis (TD-DFT)** | Excitation energies, oscillator strengths, UV-Vis spectrum plot |
 | **NMR Shielding** | ^1^H and ^13^C chemical shifts vs TMS via GIAO |
