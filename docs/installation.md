@@ -1,33 +1,25 @@
 # Installation
 
-Recommended: **conda** on Linux, macOS, or WSL.
+Linux, macOS or WSL, Python 3.9–3.11:
 
 ```bash
-# Create a dedicated conda environment
 conda create -n quantui python=3.11
 conda activate quantui
-
-# Install with PySCF, ASE, and Voilà app server
-pip install -e ".[pyscf,ase,app]"
-
-# Launch in JupyterLab (full IDE — shows code)
-jupyter lab notebooks/molecule_computations.ipynb
-
-# Or in Voilà app mode (widget-only UI — code hidden)
-voila notebooks/molecule_computations.ipynb
-```
-
-## PyPI install
-
-If you are not developing from source:
-
-```bash
 pip install "quantui[pyscf,ase,app]"
 ```
 
+Launch:
+
+```bash
+voila notebooks/molecule_computations.ipynb       # app mode (code hidden)
+jupyter lab notebooks/molecule_computations.ipynb # full JupyterLab
+```
+
+From a source checkout, use `pip install -e ".[pyscf,ase,app]"` instead.
+
 ## Windows
 
-For native Windows and the guarded PyFock subset, use Python 3.11:
+Native Windows runs a PyFock subset (neutral, closed-shell PBE/def2-SVP or def2-TZVP single points and optimizations). Use Python 3.11:
 
 ```powershell
 py -3.11 -m venv .venv
@@ -35,25 +27,20 @@ py -3.11 -m venv .venv
 python -m pip install "quantui[pyfock,ase,app]"
 ```
 
-Automatic engine selection uses PyFock when PySCF is absent. The validated
-subset supports neutral, closed-shell PBE/def2-SVP or PBE/def2-TZVP single
-points and geometry optimizations. For all
-other methods and workflows, use WSL or the Apptainer container described in
-[Platform Support](platforms.md).
+For everything else, use WSL or Apptainer ([Platform Support](platforms.md)).
 
 ## Optional extras
 
-| Extra | What it adds |
+| Extra | Adds |
 | --- | --- |
-| `pyscf` | Canonical PySCF backend (full calculation and analysis feature set) |
-| `pyfock` | PyFock backend (native-Windows PBE single points and geometry optimization) |
-| `ase` | ASE bridge for trajectory export and structure I/O |
-| `app` | Voilà, JupyterLab, and notebook launcher dependencies |
-| `xtb` | GFN-FF metal pre-optimization via xtb |
-| `ts` | Transition-state searches via [Sella](https://github.com/zadorlab/sella) (pulls in jax, about 380 MB) |
+| `pyscf` | PySCF backend (full feature set) |
+| `pyfock` | PyFock backend (native Windows) |
+| `ase` | Trajectory export and structure I/O |
+| `app` | Voilà and JupyterLab |
+| `xtb` | GFN-FF pre-optimization for metals |
+| `ts` | Transition states and IRC via [Sella](https://github.com/zadorlab/sella) (about 380 MB) |
 
 ## Next steps
 
-- Check [Platform Support](platforms.md) for OS-specific notes
-- Work through the [Tutorials](tutorials.md) notebooks
-- Browse [Supported Methods](methods.md) for calculation types and basis sets
+- [Tutorials](tutorials.md)
+- [Supported Methods](methods.md)

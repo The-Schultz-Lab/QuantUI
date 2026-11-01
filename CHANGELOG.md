@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+
+- Documentation site: an "Open the Viewer" link in the Home sidebar and on
+  the home page, a two-column Features page, and shorter text throughout.
+
 ### Fixed
 
 - **IRC no longer ends both directions in the same minimum** when Sella's
