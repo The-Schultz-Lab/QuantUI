@@ -91,7 +91,7 @@ def init_worker(
         BLAS thread budget for this worker. Set as ``OMP_NUM_THREADS`` /
         ``MKL_NUM_THREADS`` / ``OPENBLAS_NUM_THREADS`` / ``PYSCF_NUM_THREADS``.
     checkpoint_items_dir:
-        M-CHECKPOINT CHK.4.4. Directory path (plain string — a
+        Directory path (plain string — a
         ``Checkpoint`` object with a live log stream is not safe to pickle
         across this process boundary) where each completed displacement's
         result is durably recorded via
@@ -99,7 +99,7 @@ def init_worker(
         has no checkpoint (checkpointing is always optional — see
         :mod:`quantui.checkpoint`'s "never break a calculation" rule).
     ecp:
-        The reference molecule's ``mol.ecp`` mapping (AUDIT F05) —
+        The reference molecule's ``mol.ecp`` mapping —
         ``{element: basis}`` for elements whose basis carries an effective
         core potential (e.g. LANL2DZ/def2 on heavy atoms), or ``{}``/``None``
         for an all-electron basis. Without this, a worker rebuilding the
@@ -108,8 +108,8 @@ def init_worker(
         Hamiltonian (more electrons, no core potential), not just numerical
         noise. See :func:`quantui.inorganic_guards.ecp_for_basis`.
     density_fit:
-        AUDIT F19 — whether the *reference* SCF used density fitting
-        (M-DF). The serial IR loop matches this via
+        Whether the *reference* SCF used density fitting. The serial IR
+        loop matches this via
         ``try_density_fit(mf, enabled=density_fit_used)`` before every
         displaced SCF; this worker previously had no such parameter at
         all, so every parallel displacement ran without density fitting
@@ -118,7 +118,7 @@ def init_worker(
         speed, whenever the user opted into parallel IR on a fitted
         calculation.
     scf_rescue:
-        AUDIT F19 — whether :func:`quantui.scf_robust.run_scf_with_rescue`
+        Whether :func:`quantui.scf_robust.run_scf_with_rescue`
         may apply its convergence-rescue ladder for this run. The serial
         loop threads the caller's ``scf_rescue`` flag through
         (``run_scf_with_rescue(_mf_d, dm0=_dm0, rescue=scf_rescue)``); this
@@ -162,8 +162,8 @@ def run_displaced_scf(item_id: str, coords_bohr_flat) -> Any:
     submitted displacement task. ``coords_bohr_flat`` is the displaced
     geometry packed as a flat Python list (``[x0, y0, z0, x1, y1, z1, ...]``)
     for cheap pickling — reshaped to ``(N_atoms, 3)`` inside the worker.
-    ``item_id`` is the displacement's stable id (CHK.4.2, e.g. ``"d000_x_+"``)
-    — used only to durably record completion (CHK.4.4) when this run has a
+    ``item_id`` is the displacement's stable id (e.g. ``"d000_x_+"``)
+    — used only to durably record completion when this run has a
     checkpoint; it plays no role in the SCF itself.
 
     Uses ``_WORKER_STATE`` populated by :func:`init_worker` for the
@@ -194,7 +194,7 @@ def run_displaced_scf(item_id: str, coords_bohr_flat) -> Any:
     mol = gto.Mole()
     mol.atom = state["atom_str"]
     mol.basis = state["basis"]
-    # AUDIT F05 — without this, a heavy-element ECP system (e.g.
+    # Without this, a heavy-element ECP system (e.g.
     # NaH/LANL2DZ) silently runs all-electron here: a different
     # Hamiltonian than the reference calculation, not just numerical noise.
     mol.ecp = state.get("ecp") or {}
@@ -204,7 +204,7 @@ def run_displaced_scf(item_id: str, coords_bohr_flat) -> Any:
     mol.build()
     mol.set_geom_(coords, unit="Bohr")
 
-    # M5 audit fix (2026-07-14): whether this displaced SCF needs an
+    # Whether this displaced SCF needs an
     # unrestricted (UHF/UKS) object is determined by the shared dm0's
     # actual shape -- (2, nao, nao) for UHF/UKS/ROHF, (nao, nao) for
     # RHF/RKS -- NOT by mol.spin == 0. Those two signals only agree when
@@ -224,7 +224,7 @@ def run_displaced_scf(item_id: str, coords_bohr_flat) -> Any:
     else:
         mf = scf.UHF(mol) if dm0_is_unrestricted else scf.RHF(mol)
     mf.verbose = 0
-    # AUDIT F19 — match the reference SCF's density-fitting choice, exactly
+    # Match the reference SCF's density-fitting choice, exactly
     # like the serial loop's `_try_density_fit(_mf_d, enabled=_density_fit_used)`
     # (freq_calc.py). Without this, enabling parallel IR silently ran every
     # displaced SCF without density fitting whenever the reference was fitted
@@ -238,7 +238,7 @@ def run_displaced_scf(item_id: str, coords_bohr_flat) -> Any:
     mf, _ = apply_pcm(mf, state.get("solvent"))
     from .scf_robust import run_scf_with_rescue
 
-    # AUDIT F19 — honor the caller's scf_rescue choice instead of always
+    # Honor the caller's scf_rescue choice instead of always
     # taking run_scf_with_rescue's default (True); the serial loop already
     # threads scf_rescue through as `rescue=scf_rescue`.
     run_scf_with_rescue(mf, dm0=dm0, rescue=bool(state.get("scf_rescue", True)))
@@ -259,7 +259,7 @@ def run_displaced_scf(item_id: str, coords_bohr_flat) -> Any:
 def available_cpu_count() -> int:
     """CPU budget for sizing the parallel IR/Raman worker pool.
 
-    AUDIT additional-concerns — the driver used to size the worker pool
+    The driver used to size the worker pool
     from a bare ``os.cpu_count() or 1``, which reports the WHOLE
     machine's core count regardless of any SLURM allocation or cgroup/
     container CPU limit. On a 128-core host with an 8-core SLURM

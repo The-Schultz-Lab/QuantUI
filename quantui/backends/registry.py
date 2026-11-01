@@ -1,18 +1,19 @@
 """
-On-disk job registry for execution backends (M-CLUSTER2 CL2.1).
+On-disk job registry for execution backends.
 
 Each submitted calculation gets ``<jobs_root>/<request_id>.json`` plus a
 directory under ``staging_root`` for live logs, progress files and results.
 
 Two layouts exist:
 
-* **Job dir (M-JOBDIRS)** — ``staging_root/<job name>/`` holds ``request.json``
+* **Job dir** — ``staging_root/<job name>/`` holds ``request.json``
   and ``submit.slurm``; every run of that script creates its own
   ``attempt-NN_job<SLURM id>/`` subdirectory, so a retry never overwrites an
   earlier attempt's files. :attr:`JobRecord.staging_path` resolves to the
   attempt dir of the currently tracked SLURM job.
 * **Legacy** — ``staging_root/<request_id>/`` holds everything directly.
-  Records written before M-JOBDIRS have no ``job_dir`` and keep this behavior.
+  Records written before job dirs existed have no ``job_dir`` and keep this
+  behavior.
 """
 
 from __future__ import annotations
@@ -64,7 +65,7 @@ class JobRecord:
     result_dir: Optional[str] = None
     resources: Dict[str, Any] = field(default_factory=dict)
     error: Optional[Dict[str, Any]] = None
-    # M-JOBDIRS — None on legacy records (staging_dir holds everything).
+    # Job dir path; None on legacy records (staging_dir holds everything).
     job_dir: Optional[str] = None
     # One entry per sbatch submission made through QuantUI:
     # {"slurm_job_id", "submitted_at", "source"}. Hand-run sbatch attempts are
@@ -198,7 +199,7 @@ class JobRegistry:
     ) -> JobRecord:
         """Register *request*.
 
-        With *job_name* the record gets a job dir (M-JOBDIRS layout); without
+        With *job_name* the record gets a job dir (job-dir layout); without
         it, a legacy ``staging_root/<request_id>/`` dir.
         """
         if job_name:

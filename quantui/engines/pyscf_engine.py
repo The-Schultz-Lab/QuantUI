@@ -1,8 +1,8 @@
 """
 PySCF quantum engine adapter (registry + capability handshake).
 
-PYF.1: probe availability and publish capabilities only. Calculation dispatch
-remains on the existing ``session_calc`` path until PYF.3 wires the registry.
+Probes availability and publishes capabilities only. Calculation dispatch
+remains on the existing ``session_calc`` path until the registry is wired in.
 """
 
 from __future__ import annotations

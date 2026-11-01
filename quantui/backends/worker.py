@@ -1,5 +1,5 @@
 """
-Headless batch worker entrypoint for SLURM jobs (M-CLUSTER2 CL2.2).
+Headless batch worker entrypoint for SLURM jobs.
 
 Invoked from a batch script::
 
@@ -7,7 +7,7 @@ Invoked from a batch script::
 
 Supports all QuantUI Calculate-tab calc types (see ``CALC_TYPES``).
 
-Checkpoint/resume (M-CLUSTER2 CL2.8): ``geometry_opt`` and ``pes_scan`` (plus
+Checkpoint/resume: ``geometry_opt`` and ``pes_scan`` (plus
 any ``preopt_before_run`` step ahead of another calc type) open a
 :class:`~quantui.checkpoint.Checkpoint` scoped to their own staging directory
 (``<staging_dir>/.checkpoint/``, distinct from the interactive app's
@@ -16,7 +16,8 @@ killed by OOM or TIMEOUT resumes close to where it died on the next
 resubmission instead of restarting from nothing. ``frequency``/``tddft``
 have no checkpoint hook anywhere in QuantUI (each is one atomic library call,
 not a chunked/resumable loop) — nothing here can help those beyond the
-preopt step ahead of them.
+preopt step ahead of them. ``transition_state`` saves its search after every
+step and keeps a finished search (see :func:`_run_transition_state`).
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ from .batch_input import SOLVENT_CALC_TYPES
 from .registry import JobRegistry, parse_attempt_dir_name
 from .worker_payload import (
     freq_result_payload,
+    irc_result_payload,
     molecule_from_dict,
     molecule_from_request,
     molecule_to_dict,
@@ -44,6 +46,7 @@ from .worker_payload import (
     reorg_result_payload,
     session_result_payload,
     tddft_result_payload,
+    ts_result_payload,
     write_analysis_artifacts,
     write_trajectory_json,
     write_worker_result,
@@ -53,7 +56,7 @@ logger = logging.getLogger(__name__)
 
 _SUPPORTED_CALC_TYPES = frozenset(CALC_TYPES)
 
-# AUDIT F11 (additional concern, code review) — a solvent on a calc type
+# A solvent on a calc type
 # whose runner ignores it must fail the request, never silently run
 # gas-phase. These runners thread request.solvent through to PCM
 # (session_calc.apply_pcm), matching the app's solvent checkbox
@@ -66,7 +69,9 @@ _SUPPORTED_CALC_TYPES = frozenset(CALC_TYPES)
 # - tddft: solvated pre-opt, ground state, non-equilibrium excitations.
 # - reorganization_energy: gas-phase optimizations + solvated single
 #   points (documented in reorganization_energy.py).
-# nmr and pes_scan stay gas-phase only (DEC-023).
+# - transition_state: solvated search steps and frequency check (as the app).
+# - irc: every step of the path solvated.
+# nmr and pes_scan stay gas-phase only.
 # Defined in batch_input so `quantui submit` and the quantui-batch launcher
 # can refuse a solvated request before it is queued.
 _SOLVENT_SUPPORTED_CALC_TYPES = SOLVENT_CALC_TYPES
@@ -105,18 +110,23 @@ def _tag_from_stage_label(stage_label: str) -> str:
     return (stage_label.split() or ["run"])[0].lower()
 
 
-# Job-folder files for a saddle-point retry (B2.5) that a killed job resumes.
+# Job-folder files for a saddle-point retry that a killed job resumes.
 _SADDLE_RETRY_START = "saddle_retry_start.json"
+# Transition State: the search's path so far, rewritten after
+# every step, and the finished search, so a killed job resumes the search
+# where it stopped or, once it finished, runs only the frequency check.
+_TS_PROGRESS = "ts_search_progress.json"
+_TS_SEARCH_DONE = "ts_search_result.json"
 _SADDLE_RETRY_GEOMETRY = "saddle_retry_geometry.json"
 
 
 def _job_state_dir(staging_dir: Path) -> Path:
     """Where state that must outlive one attempt lives: the job folder.
 
-    Since M-JOBDIRS each run of ``submit.slurm`` writes into its own
+    Each run of ``submit.slurm`` writes into its own
     ``attempt-NN_job<id>/`` folder. A checkpoint or cached pre-opt geometry
     kept there was invisible to the resubmission, which starts in a new
-    attempt folder, so CL2.8/CHK.4 resume never happened. For an attempt
+    attempt folder, so checkpoint resume never happened. For an attempt
     folder this returns its job folder; for a legacy staging dir (no
     attempts) the dir itself.
     """
@@ -138,8 +148,7 @@ def _begin_worker_checkpoint(
     log_stream,
     extra: tuple = (),
 ):
-    """Open a checkpoint for this job, scoped to its own staging directory
-    (M-CLUSTER2 CL2.8).
+    """Open a checkpoint for this job, scoped to its own staging directory.
 
     Checkpoints live at ``<job folder>/.checkpoint/`` (``_job_state_dir``)
     — inside the job's own folder, not ``~/.quantui/checkpoints`` (the
@@ -188,10 +197,10 @@ def _maybe_run_preopt(
     from quantui.optimizer import DEFAULT_FMAX, FREQ_PREOPT_FMAX, optimize_geometry
 
     scf_rescue = bool(options.get("scf_rescue", True))
-    # B2.5: frequencies need a tighter stationary point (same as the app).
+    # Frequencies need a tighter stationary point (same as the app).
     preopt_fmax = FREQ_PREOPT_FMAX if request.calc_type == "frequency" else DEFAULT_FMAX
 
-    # M-CLUSTER2 CL2.8 — a preopt's *own* starting geometry is fixed (the
+    # A preopt's *own* starting geometry is fixed (the
     # request's input XYZ, same every attempt), but pes_scan/frequency/
     # tddft's checkpoint identity downstream of it requires exact-geometry
     # match — and two independent optimizer runs of the same molecule land
@@ -318,8 +327,8 @@ def _maybe_run_preopt(
         return molecule, None
 
 
-# Files people copy out of a job folder get the job name as their stem
-# (M-JOBDIRS JD.7): fixed name -> suffix appended to the job name. Files the
+# Files people copy out of a job folder get the job name as their stem:
+# fixed name -> suffix appended to the job name. Files the
 # app reads back (result.json, orbitals.npz, progress.json, live.log) keep
 # fixed names. Ingest maps these back via result.json["artifact_names"].
 _DESCRIPTIVE_ARTIFACTS = {
@@ -346,7 +355,7 @@ def _apply_descriptive_names(staging_dir: Path, stem: str) -> dict[str, str]:
 def _update_tracked_record(request: CalculationRequest, status: str, **kwargs) -> None:
     """Update the registry record, but only for the SLURM job it tracks.
 
-    A hand-run ``sbatch submit.slurm`` (M-JOBDIRS) runs under a SLURM job id
+    A hand-run ``sbatch submit.slurm`` runs under a SLURM job id
     the record has never seen; letting it flip the record's status would
     make the app ingest or report the wrong attempt. Those attempts are
     picked up from disk instead. Outside SLURM (no ``SLURM_JOB_ID``) or
@@ -403,7 +412,7 @@ def _run_single_point(
     from quantui.session_calc import run_in_session
 
     molecule = molecule_from_request(request)
-    # ISSUE.19 #3 — honour "geometry optimization before the calculation",
+    # Honour "geometry optimization before the calculation",
     # as the local run does.
     molecule, _pre_opt = _maybe_run_preopt(
         request,
@@ -437,11 +446,11 @@ def _run_geometry_opt(
     fmax = float(options.get("fmax", 0.05))
     max_steps = int(options.get("max_steps", 200))
     scf_rescue = bool(options.get("scf_rescue", True))
-    # 0-based indices held fixed (INT.8); same option name as the app sends.
+    # 0-based indices held fixed; same option name as the app sends.
     frozen = [int(i) for i in (options.get("frozen_atoms") or [])]
     _write_progress(staging_dir, "running", "Optimizing geometry", 15.0)
 
-    # M-CLUSTER2 CL2.8 — a job killed by OOM/TIMEOUT can resume close to
+    # A job killed by OOM/TIMEOUT can resume close to
     # where it died on the next resubmission instead of restarting from
     # nothing. The request's starting geometry is fixed every attempt (the
     # input XYZ never changes), so unlike pes_scan's own preopt this needs
@@ -547,7 +556,7 @@ def _run_frequency(
     options = request.options or {}
     scf_rescue = bool(options.get("scf_rescue", True))
 
-    # B2.5 — a pre-opt can stop on a rotor saddle point; the frequencies are
+    # A pre-opt can stop on a rotor saddle point; the frequencies are
     # then retried once from a displaced geometry. Only after a pre-opt that
     # succeeded (it saves its geometry in the job folder; a failed one falls
     # back to the user's geometry, which may be a saddle on purpose).
@@ -583,12 +592,11 @@ def _run_frequency(
 
     _write_progress(staging_dir, "running", "Running frequency analysis", 15.0)
 
-    # M-CHECKPOINT CHK.4 — this is the calc type the real production pain
-    # (roadmap 34's "Real-world cost data" note) was about: a killed
+    # This is the calc type where a kill costs the most: a killed
     # frequency job used to discard the entire 6N-displacement Hessian
     # computation on every resubmission, unlike geometry_opt/pes_scan
-    # (CL2.8) on the same batch path. Resume diffs a *set* of already-banked
-    # displacement ids (CHK.4.1/.2), not a prefix — see freq_calc.py and
+    # on the same batch path. Resume diffs a *set* of already-banked
+    # displacement ids, not a prefix — see freq_calc.py and
     # freq_ir_workers.py/freq_raman_workers.py for why that matters under
     # the QUANTUI_FREQ_PARALLEL opt-in.
     ckpt, resumable = _begin_worker_checkpoint(
@@ -670,7 +678,7 @@ def _run_saddle_retry_resumable(
     log_stream,
     scf_rescue: bool,
 ):
-    """``freq_calc.run_saddle_retry`` with the batch job's resume points (B2.5).
+    """``freq_calc.run_saddle_retry`` with the batch job's resume points.
 
     The re-optimization is checkpointed, and its final geometry is saved in
     the job folder once it finishes, so a later attempt goes straight to
@@ -826,7 +834,7 @@ def _run_pes_scan(request: CalculationRequest, staging_dir: Path, log_stream) ->
         write_preopt_trajectory=False,
     )
 
-    # M-CLUSTER2 CL2.8 — most of a pes_scan's cost is its N independent scan
+    # Most of a pes_scan's cost is its N independent scan
     # points; a killed run at, say, point 20 of 25 now only has 5 left to
     # redo on resubmission, instead of all 25.
     ckpt, resumable = _begin_worker_checkpoint(
@@ -836,7 +844,7 @@ def _run_pes_scan(request: CalculationRequest, staging_dir: Path, log_stream) ->
         basis=request.basis,
         staging_dir=staging_dir,
         log_stream=log_stream,
-        # AUDIT F10 — calc_type="pes_scan" alone can't tell a bond scan
+        # calc_type="pes_scan" alone can't tell a bond scan
         # apart from an angle scan of atoms 2,3,4, so two different scan
         # configurations of the same molecule/method/basis used to collide
         # on the same resume_key.
@@ -890,6 +898,236 @@ def _run_reorganization_energy(
     )
 
 
+def _ts_state_key(request: CalculationRequest) -> dict[str, Any]:
+    """What a saved search must match to be resumed (the same calculation)."""
+    return {
+        "atoms": [str(a) for a in (request.molecule.get("atoms") or [])],
+        "method": request.method,
+        "basis": request.basis,
+        "charge": int(request.charge),
+        "multiplicity": int(request.multiplicity),
+        "solvent": request.solvent,
+    }
+
+
+def _read_ts_state(path: Path, key: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("key") != key:
+        return None
+    return data
+
+
+def _write_json_atomic(path: Path, data: dict) -> None:
+    """Write *path* whole or not at all (a job can be killed mid-write)."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _run_transition_state(
+    request: CalculationRequest, staging_dir: Path, log_stream
+) -> Any:
+    """Sella saddle-point search, then the frequency check.
+
+    Same calculation as the app's Transition State (``run_ts_search``). A
+    killed job resumes: the search restarts from its last saved step (Sella
+    rebuilds its starting Hessian there, so the path is not bit-identical to
+    an uninterrupted one), a finished search is never redone, and the
+    frequency check keeps its finished displacements.
+    """
+    from quantui.molecule import Molecule
+    from quantui.ts_search import (
+        DEFAULT_TS_FMAX,
+        DEFAULT_TS_STEPS,
+        TSResult,
+        apply_frequency_check,
+        run_ts_search,
+    )
+
+    _log_seed_context(request, staging_dir)
+    molecule = molecule_from_request(request)
+    options = request.options or {}
+    fmax = float(options.get("fmax", DEFAULT_TS_FMAX))
+    max_steps = int(options.get("max_steps", DEFAULT_TS_STEPS))
+    scf_rescue = bool(options.get("scf_rescue", True))
+    state_dir = _job_state_dir(staging_dir)
+    progress_path = state_dir / _TS_PROGRESS
+    done_path = state_dir / _TS_SEARCH_DONE
+    key = _ts_state_key(request)
+
+    def _mol(coords: list) -> Molecule:
+        return Molecule(
+            list(molecule.atoms),
+            coords,
+            charge=molecule.charge,
+            multiplicity=molecule.multiplicity,
+            validate_spin=False,
+        )
+
+    done = _read_ts_state(done_path, key)
+    if done is not None:
+        _append_log(
+            staging_dir,
+            "[checkpoint] The transition-state search finished in an earlier "
+            "attempt; running only the frequency check.",
+        )
+        frames = [_mol(c) for c in done["trajectory"]]
+        result = TSResult(
+            formula=molecule.get_formula(),
+            method=request.method,
+            basis=request.basis,
+            molecule=frames[-1],
+            energy_hartree=float(done["energies"][-1]),
+            converged=bool(done["search_converged"]),
+            search_converged=bool(done["search_converged"]),
+            n_steps=len(frames) - 1,
+            trajectory=frames,
+            energies_hartree=[float(e) for e in done["energies"]],
+            verdict=str(done.get("verdict", "")),
+            solvent=done.get("solvent"),
+        )
+    else:
+        prior = _read_ts_state(progress_path, key)
+        coords: list = []
+        energies: list = []
+        if prior is not None and prior.get("trajectory"):
+            coords = [list(map(list, c)) for c in prior["trajectory"]]
+            energies = [float(e) for e in prior["energies"]]
+            molecule = _mol(coords[-1])
+            _append_log(
+                staging_dir,
+                f"[checkpoint] Resuming the transition-state search at step "
+                f"{len(energies) - 1} from an earlier attempt.",
+            )
+        resumed = bool(coords)
+        remaining = max(max_steps - max(len(energies) - 1, 0), 0)
+        skip_start = [resumed]  # a resumed search re-records the saved last step
+
+        def _on_step(mol: Any, energy: float) -> None:
+            if skip_start[0]:
+                skip_start[0] = False
+                return
+            coords.append([[float(v) for v in row] for row in mol.coordinates])
+            energies.append(float(energy))
+            _write_json_atomic(
+                progress_path,
+                {"key": key, "trajectory": coords, "energies": energies},
+            )
+            pct = 15.0 + 45.0 * min(len(energies) / max(max_steps, 1), 1.0)
+            _write_progress(
+                staging_dir,
+                "running",
+                f"Transition-state search, step {len(energies) - 1}",
+                pct,
+            )
+
+        _write_progress(
+            staging_dir, "running", "Searching for a transition state", 15.0
+        )
+        result = run_ts_search(
+            molecule,
+            request.method,
+            request.basis,
+            fmax=fmax,
+            steps=remaining,
+            progress_stream=log_stream,
+            solvent=request.solvent,
+            scf_rescue=scf_rescue,
+            check_frequencies=False,
+            on_step=_on_step,
+        )
+        if resumed:
+            result.trajectory = [_mol(c) for c in coords]
+            result.energies_hartree = list(energies)
+            result.n_steps = len(energies) - 1
+        _write_json_atomic(
+            done_path,
+            {
+                "key": key,
+                "trajectory": [
+                    [[float(v) for v in row] for row in m.coordinates]
+                    for m in result.trajectory
+                ],
+                "energies": [float(e) for e in result.energies_hartree],
+                "search_converged": bool(result.search_converged),
+                "verdict": result.verdict,
+                "solvent": result.solvent,
+            },
+        )
+        progress_path.unlink(missing_ok=True)
+
+    _write_progress(
+        staging_dir, "running", "Frequency check at the final geometry", 60.0
+    )
+    ckpt, resumable = _begin_worker_checkpoint(
+        result.molecule,
+        calc_type="transition_state",
+        method=request.method,
+        basis=request.basis,
+        staging_dir=staging_dir,
+        log_stream=log_stream,
+        extra=("frequency_check",),
+    )
+    if resumable:
+        _append_log(
+            staging_dir,
+            "[checkpoint] Resuming the frequency check: some displacement SCFs "
+            "are already banked from an earlier attempt.",
+        )
+    apply_frequency_check(
+        result,
+        progress_stream=log_stream,
+        scf_rescue=scf_rescue,
+        solvent=request.solvent,
+        checkpoint=ckpt,
+        resume=resumable,
+    )
+    return result
+
+
+def _run_irc(request: CalculationRequest, staging_dir: Path, log_stream) -> Any:
+    """IRC both ways from the request's geometry, a transition state.
+
+    Usually chained with ``--from`` a Transition State job. There is no
+    resume: each direction starts from a Hessian at the transition state,
+    and the whole path is a few dozen gradients each way.
+    """
+    from quantui.irc import DEFAULT_IRC_DX, DEFAULT_IRC_FMAX, DEFAULT_IRC_STEPS, run_irc
+
+    _log_seed_context(request, staging_dir)
+    molecule = molecule_from_request(request)
+    options = request.options or {}
+    max_steps = int(options.get("max_steps", DEFAULT_IRC_STEPS))
+    n_done = {"forward": 0, "reverse": 0}
+
+    def _on_step(direction: str, _mol: Any, _energy: float) -> None:
+        n_done[direction] += 1
+        share = min(sum(n_done.values()) / max(2 * max_steps, 1), 1.0)
+        _write_progress(
+            staging_dir,
+            "running",
+            f"IRC, {direction} direction, step {n_done[direction] - 1}",
+            10.0 + 85.0 * share,
+        )
+
+    _write_progress(staging_dir, "running", "Following the reaction path", 10.0)
+    return run_irc(
+        molecule,
+        request.method,
+        request.basis,
+        dx=float(options.get("dx", DEFAULT_IRC_DX)),
+        steps=max_steps,
+        fmax=float(options.get("fmax", DEFAULT_IRC_FMAX)),
+        progress_stream=log_stream,
+        solvent=request.solvent,
+        scf_rescue=bool(options.get("scf_rescue", True)),
+        on_step=_on_step,
+    )
+
+
 def _build_payload(
     calc_type: str, outcome: Any, staging_dir: Path, request: CalculationRequest
 ) -> dict[str, Any]:
@@ -919,6 +1157,38 @@ def _build_payload(
             energies=outcome.energies_hartree,
         )
         return optimization_result_payload(outcome, trajectory_file=traj_file)
+    if calc_type == "transition_state":
+        traj_file = write_trajectory_json(
+            staging_dir,
+            outcome.trajectory,
+            outcome.energies_hartree,
+        )
+        write_analysis_artifacts(
+            staging_dir,
+            calc_type,
+            outcome,
+            charge=request.charge,
+            multiplicity=request.multiplicity,
+            trajectory=outcome.trajectory,
+            energies=outcome.energies_hartree,
+        )
+        return ts_result_payload(outcome, trajectory_file=traj_file)
+    if calc_type == "irc":
+        traj_file = write_trajectory_json(
+            staging_dir,
+            outcome.trajectory,
+            outcome.energies_hartree,
+        )
+        write_analysis_artifacts(
+            staging_dir,
+            calc_type,
+            outcome,
+            charge=request.charge,
+            multiplicity=request.multiplicity,
+            trajectory=outcome.trajectory,
+            energies=outcome.energies_hartree,
+        )
+        return irc_result_payload(outcome, trajectory_file=traj_file)
     if calc_type == "frequency":
         result, molecule = outcome
         write_analysis_artifacts(
@@ -966,7 +1236,7 @@ def run_worker_request(
 ) -> CalculationResult:
     """Run one batch request.
 
-    Outputs go to *attempt_dir* (M-JOBDIRS: one dir per run of
+    Outputs go to *attempt_dir* (one dir per run of
     ``submit.slurm``), or, for legacy staging dirs, next to ``request.json``.
     """
     data = json.loads(request_path.read_text(encoding="utf-8"))
@@ -1024,7 +1294,7 @@ def run_worker_request(
             save_type=calc_type,
         )
 
-    # AUDIT F11 — a solvent set for a calc_type whose science API doesn't
+    # A solvent set for a calc_type whose science API doesn't
     # accept one used to be silently dropped (gas-phase result, solvent
     # label nowhere). Fail the request instead of running a calculation
     # the user asked for solvated and got gas-phase.
@@ -1066,6 +1336,8 @@ def run_worker_request(
     runners: dict[str, Callable[..., Any]] = {
         "single_point": _run_single_point,
         "geometry_opt": _run_geometry_opt,
+        "transition_state": _run_transition_state,
+        "irc": _run_irc,
         "frequency": _run_frequency,
         "tddft": _run_tddft,
         "nmr": _run_nmr,

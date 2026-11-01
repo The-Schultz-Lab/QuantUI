@@ -14,6 +14,7 @@ CALC_TYPES = (
     "single_point",
     "geometry_opt",
     "transition_state",
+    "irc",
     "frequency",
     "tddft",
     "nmr",
@@ -73,7 +74,7 @@ class EngineRequest:
 
 @dataclass
 class EngineResult:
-    """Normalized engine output — maps into ``SessionResult`` in PYF.3+."""
+    """Normalized engine output — maps into ``SessionResult``."""
 
     request_id: str
     engine_id: str
@@ -131,7 +132,7 @@ class EngineResult:
 
 @dataclass(frozen=True)
 class EngineCapabilities:
-    """Capability handshake published by each engine for UI gating (PYF.4+)."""
+    """Capability handshake published by each engine for UI gating."""
 
     engine_id: str
     display_name: str

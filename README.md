@@ -295,7 +295,9 @@ pip install "quantui[ts]"
 
 Sella pulls in jax/jaxlib (about 380 MB) and is LGPL-3.0, used as a
 separately installed library. Without it the calc type stays in the menu and
-says how to install it. Local runs only for now (not SLURM batch jobs).
+says how to install it. It also runs as a SLURM batch job
+(`quantui-batch submit FILE --calc transition_state`); both Apptainer images
+include it.
 
 ### Optional: GFN-FF metal pre-optimization (xtb)
 
@@ -516,6 +518,7 @@ Five step-by-step notebooks in [`notebooks/tutorials/`](https://github.com/The-S
 | Single Point | Energy, HOMO-LUMO gap, Mulliken charges, dipole moment |
 | Geometry Opt | Optimised structure, trajectory animation; optional frozen atoms |
 | Transition State | Saddle point near the input geometry (Sella, optional `[ts]` extra), then a frequency check: transition state, minimum, or higher-order saddle point; animated imaginary mode |
+| IRC | Reaction path from a Transition State result, downhill both ways to the minima it connects (Sella); barrier from each side, energy profile and animated path |
 | Frequency | Vibrational frequencies, ZPVE, IR intensities, thermochemistry at any temperature and pressure, animated normal modes, IR spectrum chart (stick / Lorentzian broadened) |
 | UV-Vis (TD-DFT) | Excitation energies, oscillator strengths, UV-Vis spectrum plot |
 | NMR Shielding | ¹H and ¹³C chemical shifts relative to TMS via GIAO; tabulated by element |

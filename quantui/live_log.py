@@ -1,4 +1,4 @@
-"""Live calculation log that QuantUI owns end-to-end (M-LOGSCROLL route C).
+"""Live calculation log that QuantUI owns end-to-end.
 
 Why this exists
 ---------------
@@ -60,7 +60,8 @@ Known limitation
 ----------------
 Text lives in the DOM, not widget state, so a frontend re-render (kernel
 reconnect) loses it. Python keeps the authoritative copy in :attr:`text`; call
-:meth:`resync` to repaint. M-RECONNECT should call it when restoring a view.
+:meth:`resync` to repaint; kernel-reconnect handling should call it when
+restoring a view.
 """
 
 from __future__ import annotations
@@ -87,10 +88,9 @@ _MAIL_CLASS = "quantui-live-mail"
 # The container is the scroll box AND the text-node parent — deliberately no
 # inner <span>. _APP_CSS's system-font rule targets bare `span` with !important,
 # so a wrapper span would be forced back to a proportional font and re-break the
-# ASCII header exactly as .jp-OutputArea-output did (see GOTCHAS).
+# ASCII header exactly as .jp-OutputArea-output did.
 _CONTAINER_STYLE = (
-    # 220 px and drag-to-resize: a 300 px empty box dominated the run area
-    # (M-UIPOLISH L5).
+    # 220 px and drag-to-resize: a 300 px empty box dominated the run area.
     "height:220px;resize:vertical;overflow-y:auto;overflow-anchor:auto;"
     f"border:1px solid {_theme.css.BORDER};border-radius:2px;padding:8px;"
     "font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,"

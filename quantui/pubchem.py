@@ -66,7 +66,7 @@ def _http_get(
     to :class:`PubChemAPIError` exactly as before.
     """
     timeout = timeout if timeout is not None else config.PUBCHEM_TIMEOUT_S
-    # M10 audit fix (2026-07-14): if config.PUBCHEM_MAX_RETRIES were ever 0
+    # If config.PUBCHEM_MAX_RETRIES were ever 0
     # (or negative), `range(config.PUBCHEM_MAX_RETRIES)` would iterate zero
     # times, leaving `response` at its None initializer and returning None
     # from a function typed to return requests.Response — every caller
@@ -373,7 +373,7 @@ def sdf_to_xyz(sdf_content: str) -> Tuple[str, Dict[str, Any]]:
         conf = mol.GetConformer() if mol.GetNumConformers() else None
         coords_embedded = conf is None or not conf.Is3D()
 
-        # M-METAL MET.1: RDKit's valence-based bond perception draws no bond
+        # RDKit's valence-based bond perception draws no bond
         # between a metal centre and its donor atoms, so a coordination complex
         # looks like several disconnected fragments to GetMolFrags/EmbedMolecule
         # — exactly the "salt" shape _separate_fragments exists to fix. Applying
@@ -575,7 +575,7 @@ def check_pubchem_availability() -> bool:
     Returns:
         bool: True if PubChem is accessible, False otherwise
     """
-    # M10 audit fix (2026-07-14): this used to call requests.get() directly,
+    # This used to call requests.get() directly,
     # bypassing the shared client-side rate limiter (_throttle()) that every
     # other function in this module goes through — a burst of concurrent
     # availability checks (e.g. several students in a classroom clicking

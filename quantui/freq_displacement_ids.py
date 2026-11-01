@@ -1,4 +1,4 @@
-"""Deterministic displacement-id scheme for frequency checkpointing (CHK.4.2).
+"""Deterministic displacement-id scheme for frequency checkpointing.
 
 A Frequency job's numerical IR-intensity step needs one SCF per Cartesian
 displacement of each atom (``+Δ`` and ``-Δ``) — ``6N`` total for an
@@ -6,10 +6,9 @@ displacement of each atom (``+Δ`` and ``-Δ``) — ``6N`` total for an
 points, these displacements have no inherent order once
 ``freq_ir_workers.py``'s ``QUANTUI_FREQ_PARALLEL`` opt-in runs them
 concurrently across worker processes — completion order is
-non-deterministic. So CHK.4 (see
-``QuantUI-development-tracking/TODO/roadmaps/34-m-checkpoint-calc-restart-roadmap.md``)
-resumes a *set* of completed displacement ids rather than a *prefix*, and
-this module is the single source of truth for what those ids are — shared
+non-deterministic. So frequency checkpointing resumes a *set* of completed
+displacement ids rather than a *prefix*, and this module is the single source
+of truth for what those ids are — shared
 by :mod:`quantui.freq_calc`'s serial loop, its parallel dispatch, and
 :mod:`quantui.freq_ir_workers` / :mod:`quantui.freq_raman_workers`'s worker
 processes — so none of them can ever disagree about what "required" means.

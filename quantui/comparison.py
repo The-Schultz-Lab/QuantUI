@@ -193,7 +193,7 @@ def comparison_table_html(summaries: Sequence[CalcSummary]) -> str:
         rows.append(
             # Explicit, theme-aware row colours: JupyterLab's rendered-HTML
             # CSS stripes odd rows white, which left light text unreadable
-            # on every other row in Dark theme (M-UIPOLISH).
+            # on every other row in Dark theme.
             f"<tr style='background:var(--q-bg-panel, transparent);"
             f"color:var(--q-text-body, inherit)'>"
             f"<td style='padding:4px 12px;'>{_esc(s.label)}</td>"

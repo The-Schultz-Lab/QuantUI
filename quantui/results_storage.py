@@ -334,7 +334,7 @@ def save_result(
 
     data: dict = {
         "_schema_version": _SCHEMA_VERSION,
-        # Reorganization-energy channels (M-REORG REORG.1). A FIRST-CLASS field,
+        # Reorganization-energy channels. A FIRST-CLASS field,
         # not a generic `extras` bag: lambda is the headline number of this
         # calculation type, and burying it would leave it undiscoverable and
         # unqueryable. None for every other calc type.
@@ -366,12 +366,11 @@ def save_result(
         "ccsd_t_correction_hartree": _opt_float(
             getattr(result, "ccsd_t_correction_hartree", None)
         ),
-        # AUDIT F07/F08 (code review follow-up) — cc_converged/td_converged
-        # were only ever attributes on the in-memory result object, never
-        # persisted here, so a reloaded History card had no way to tell "no
+        # cc_converged/td_converged are persisted (not only kept on the
+        # in-memory result) so a reloaded History card can tell "no
         # post-HF/TD-DFT correlation ran" (None) apart from "it ran and
-        # converged/didn't" (True/False) even though data["converged"]
-        # already folds one of these in. See format_past_result.
+        # converged/didn't" (True/False); data["converged"] alone folds one
+        # of these in and cannot. See format_past_result.
         "cc_converged": getattr(result, "cc_converged", None),
         "td_converged": _opt_bool_list(getattr(result, "td_converged", None)),
         "n_converged_states": _opt_int(getattr(result, "n_converged_states", None)),
@@ -380,7 +379,7 @@ def save_result(
         # history card falls back exactly as before (CPU / no dipole / no
         # charges). Coerced JSON-safe (numpy scalars/arrays → float/list).
         "solvent": getattr(result, "solvent", None),
-        # ISSUE.12 — ⟨S²⟩ of an open-shell SCF; None for closed shell.
+        # ⟨S²⟩ of an open-shell SCF; None for closed shell.
         "spin_square": _opt_float(getattr(result, "spin_square", None)),
         "gpu_used": bool(getattr(result, "gpu_used", False)),
         "gpu_name": getattr(result, "gpu_name", None),
@@ -391,7 +390,7 @@ def save_result(
         ),
         "mulliken_charges": _opt_float_list(getattr(result, "mulliken_charges", None)),
         "atom_symbols": _opt_str_list(getattr(result, "atom_symbols", None)),
-        # M-UX2 UXP2.10 — the actual PySCF class dispatched (RHF/UHF/RKS/
+        # The actual PySCF class dispatched (RHF/UHF/RKS/
         # UKS), so a saved/History result can also confirm which one ran.
         # ``None`` for a calc type that doesn't set it (geometry_opt,
         # pes_scan, reorganization_energy) or an older saved result.
@@ -449,6 +448,12 @@ def load_result(result_dir: Path) -> dict:
     return data
 
 
+def _pyscf_importable() -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec("pyscf") is not None
+
+
 def save_orbitals(result_dir: Path, result: object) -> None:
     """Persist MO data to *result_dir*/orbitals.npz and orbitals_meta.json.
 
@@ -487,6 +492,27 @@ def save_orbitals(result_dir: Path, result: object) -> None:
     if meta:
         (result_dir / "orbitals_meta.json").write_text(json.dumps(meta))
 
+    # HOMO/LUMO cubes for the Viewer, which has no PySCF. PySCF
+    # orbitals only: PyFock results need PyFock's own grid evaluator.
+    if (
+        mo_coeff is not None
+        and mo_occ is not None
+        and mol_atom
+        and mol_basis
+        and meta["engine_id"] == "pyscf"
+        and _pyscf_importable()
+    ):
+        from quantui.orbital_visualization import save_frontier_cubes
+
+        save_frontier_cubes(
+            result_dir,
+            mol_atom=list(mol_atom),
+            mol_basis=str(mol_basis),
+            mo_coeff=mo_coeff,
+            mo_occ=mo_occ,
+            method=str(getattr(result, "method", "") or ""),
+        )
+
 
 def _write_molden_orbitals(
     _molden,
@@ -499,7 +525,7 @@ def _write_molden_orbitals(
 ) -> None:
     """Write the ``[Atoms]``/``[GTO]``/``[MO]`` sections for one Molden file.
 
-    M-ISSUES ISSUE.11 fix. The previous implementation called
+    The previous implementation called
     ``pyscf.tools.molden.from_mo(mol, dest, mo_coeff, ene=mo_energy_hartree,
     occ=mo_occ)`` directly — for UHF/UKS, ``mo_coeff``/``mo_energy_hartree``/
     ``mo_occ`` are a **pair** of arrays (alpha, beta), shape ``(2, nao,

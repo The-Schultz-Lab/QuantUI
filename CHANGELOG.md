@@ -9,6 +9,55 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **IRC calc type** (M-TS TS.3, engine Sella): follows the reaction path
+  downhill from a transition state in both directions, in mass-weighted
+  coordinates, to the two minima it connects. Pick the Transition State
+  result under *Start from*. The card gives the barrier from each side and
+  a verdict; the PES Scan panel plots energy against the reaction coordinate
+  (click a point to jump the Trajectory panel there); Trajectory plays
+  reactant → TS → product; History replays both. Steps of 0.2 Å·amu½ with
+  Sella's gamma at 0.4 (measured: 35–71 SCFs per direction where the
+  defaults stalled); if Sella's inner loop gives out near a minimum, that
+  direction is finished by minimizing and the card says so. PCM supported.
+  Also a batch job (`--calc irc`, usually `--from` a Transition State job;
+  no mid-path resume) in `quantui submit`, `quantui-batch` and the app's
+  SLURM path; `results` prints the barriers and verdict.
+- **Full symmetry labels for D4h, D4, C4v and D2d** vibrational modes
+  (square-planar, square-pyramidal and allene-type molecules) instead of
+  their D2h/C2v/D2 subgroup labels. B1 and B2 follow the usual convention
+  (C2′ axes, or σv planes, through the ligands), so a square-planar AB4's
+  B1g is the in-plane stretch. Point-group detection for mode labels no
+  longer drops to a lower group at the loose tolerance (an exact square
+  pyramid was labelled C2v).
+- **The Viewer draws the HOMO and LUMO** (M-VIEWER VW.7): when orbitals are
+  saved (app or batch job), the HOMO and LUMO, each spin for unrestricted
+  results, are also saved as gzipped cubes at the Isosurface panel's
+  default grid (about 0.4 MB each; `frontier_cubes/`). The desktop and
+  browser Viewer, which have no PySCF, draw those; for any other orbital,
+  density or ESP they say to open the result in the full QuantUI. Set
+  `QUANTUI_FRONTIER_CUBES=0` to skip them.
+- **`quantui view` opens the last folder it showed** when started without
+  one (desktop shortcuts), instead of the home directory.
+- **`quantui jobs`** (M-BATCH2 B2.9): your batch jobs, newest first, with
+  where each one is: waiting, running (with the worker's progress),
+  done or failed. With `squeue` on PATH it refreshes the job records from
+  the queue first; without it (an OnDemand session) it reads each job
+  folder. `--running` lists unfinished jobs, `--all` every job.
+- **History lists batch jobs not finished yet** (B2.10): on app start and
+  on Refresh, jobs submitted from a terminal show their state and progress
+  from their job folders, since OnDemand has no `squeue`. A
+  terminal-submitted job's record is marked succeeded when its result is
+  saved to History.
+- **Transition State as a batch job** (M-TS TS.5): `quantui submit`,
+  `quantui-batch submit --calc transition_state` and the app's SLURM path
+  run the same Sella search and frequency check as the window, PCM included.
+  A killed job resumes the search from its last step, never redoes a
+  finished search, and keeps the frequency check's finished displacements.
+  History shows the stationary point found with its search path;
+  `results` prints the verdict; `--from` a TS job starts from its saddle
+  point. A post-HF method is refused before the job queues. Both Apptainer
+  images now install the `[ts]` extra (Sella), which Transition State needs
+  on the cluster in the window as well.
 - **Clarity and layout pass** (M-UIPOLISH, from a rendered-UI walk-through):
   - Molecules open facing the camera in every viewer (principal axes), so
     water no longer looks linear and the dipole arrow is visible.
@@ -85,6 +134,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- **`quantui view` needs a per-run token.** It listened on 127.0.0.1 with
+  no authentication, so any local process or web page could start kernels
+  on its port; it now starts Voila with a random token and opens the URL
+  that carries it. A request without it gets a login page. (Standalone
+  Voila has no XSRF setting, so the `disable_check_xsrf` flag was never in
+  effect for the viewer; DEC-001's container setting is unchanged.)
 - **Frequency results check the geometry** — every Frequency run now
   computes the forces at the input geometry. When the largest force is above
   the Geometry Opt threshold (0.05 eV/Å) the result card (live and History)
@@ -131,6 +186,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- **"Copy path" in the browser viewer** no longer raises: Pyodide cannot
+  start the thread that resets the label, so the label just stays.
+- **`quantui-batch check` prints a fix hint only under a failed or warning
+  line.** Passing lines showed their hint too (`[ok  ] image …` followed by
+  "ask your instructor: the course image is missing or unreadable"), which
+  read as an error to students.
 - **Generate Isosurface works again for molecular orbitals** — it failed for
   every MO with `unexpected keyword argument 'esp_range'` since the ESP-map
   release. The orbital gallery was not affected.

@@ -1,7 +1,5 @@
 """
 Execution-backend contract types (v0.1).
-
-See ``QuantUI-development-tracking/TODO/EXECUTION-BACKEND-CONTRACT.md``.
 """
 
 from __future__ import annotations
@@ -12,6 +10,8 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 CALC_TYPES = (
     "single_point",
     "geometry_opt",
+    "transition_state",
+    "irc",
     "frequency",
     "tddft",
     "nmr",
@@ -99,7 +99,7 @@ class BackendCapabilities:
 
 @runtime_checkable
 class ComputeBackend(Protocol):
-    """Backend interface consumed by the app layer (future CL2.3 wiring)."""
+    """Backend interface consumed by the app layer (future wiring)."""
 
     @property
     def backend_id(self) -> str: ...

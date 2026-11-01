@@ -1,7 +1,7 @@
 """
 Build ``CalculationRequest`` objects for ``quantui submit`` from files.
 
-``quantui submit`` started out (CL2.7) taking only hand-written
+``quantui submit`` started out taking only hand-written
 CalculationRequest JSON. Writing atoms and coordinates as nested JSON arrays
 is the hardest part of running QuantUI from a terminal, so an ``.xyz`` file
 plus a few flags is accepted too: the same request the Calculate tab would
@@ -18,16 +18,26 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .base import CALC_TYPES, CalculationRequest
 
-# Calc types whose worker runner honours options["preopt_before_run"]
-# (single point and NMR since ISSUE.19 #3).
+# Calc types whose worker runner honours options["preopt_before_run"].
 PREOPT_CALC_TYPES = frozenset({"single_point", "nmr", "frequency", "tddft", "pes_scan"})
 # Calc types the batch worker runs with a PCM solvent; it fails any other
 # calc type that asks for one (worker._SOLVENT_SUPPORTED_CALC_TYPES), so a
-# request is refused here, before it waits in the queue. Frequency and
-# TD-DFT joined with B2.2 (DEC-023); NMR and PES scans stay gas-phase.
+# request is refused here, before it waits in the queue. NMR and PES scans
+# stay gas-phase.
 SOLVENT_CALC_TYPES = frozenset(
-    {"single_point", "geometry_opt", "frequency", "tddft", "reorganization_energy"}
+    {
+        "single_point",
+        "geometry_opt",
+        "transition_state",
+        "irc",
+        "frequency",
+        "tddft",
+        "reorganization_energy",
+    }
 )
+# Calc types driven by analytic gradients: a post-HF method (no gradients
+# here) is refused before the job queues, not after it starts.
+GRADIENT_CALC_TYPES = frozenset({"transition_state", "irc"})
 
 
 class BatchInputError(ValueError):
@@ -129,7 +139,7 @@ def request_from_xyz(
         raise BatchInputError(f"{path}: could not read XYZ — {exc}") from exc
     declared = xyz_header_atom_count(text)
     if declared is not None and declared != len(mol.atoms):
-        # B2.11: interactively the app only warns, but an unattended job
+        # Interactively the app only warns, but an unattended job
         # would run a truncated or padded file without anyone seeing it.
         # Checked before the spin check: a cut-off file is the real cause
         # of the odd electron count it usually also has.
@@ -206,6 +216,19 @@ def check_solvent(request: CalculationRequest) -> None:
     request.solvent = canonical
 
 
+def check_method(request: CalculationRequest) -> None:
+    """Refuse a method the calc type cannot use (post-HF for a TS search)."""
+    if request.calc_type not in GRADIENT_CALC_TYPES:
+        return
+    from quantui import config
+
+    if request.method.strip().upper() in config.POST_HF_METHODS:
+        raise BatchInputError(
+            f"{request.method} has no analytic gradients here, so it cannot drive "
+            f"a {request.calc_type} job; use RHF/UHF or a DFT functional."
+        )
+
+
 def load_request(
     path: Path,
     *,
@@ -239,6 +262,7 @@ def load_request(
             preopt=preopt,
         )
         check_solvent(request)
+        check_method(request)
         return request, warnings
 
     data = json.loads(path.read_text())
@@ -267,4 +291,5 @@ def load_request(
     if preopt and request.calc_type in PREOPT_CALC_TYPES:
         request.options["preopt_before_run"] = True
     check_solvent(request)
+    check_method(request)
     return request, warnings

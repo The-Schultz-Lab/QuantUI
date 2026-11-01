@@ -9,8 +9,8 @@ B3LYP/6-31G*: TD-DFT was ~1.6x faster, but a small SCF was slightly *slower*
 (building the auxiliary integrals costs more than it saves at that size), while
 the total-energy change was ~0.008 kcal/mol — far below chemical accuracy. So
 DF is a *targeted* speedup, exposed as an opt-in that is **off by default**; the
-per-calc-type default is only set once the size crossover has been measured
-(roadmap M-DF, DF.2). This module is the plumbing that makes it selectable.
+per-calc-type default is only set once the size crossover has been measured.
+This module is the plumbing that makes it selectable.
 
 Mirrors :mod:`quantui.gpu_offload`: a single ``try_density_fit`` helper that
 never raises, plus a settings gate. It must be applied to the freshly built
@@ -63,7 +63,7 @@ def try_density_fit(
         hold the preference, and by tests).
     auxbasis:
         Optional auxiliary basis name. ``None`` lets PySCF choose its default
-        fitting set (DF.3 will revisit whether a matched auxbasis is better).
+        fitting set (whether a matched auxbasis is better is still open).
 
     Returns
     -------

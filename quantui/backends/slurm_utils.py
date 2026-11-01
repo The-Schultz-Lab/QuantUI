@@ -21,10 +21,12 @@ class SlurmJobAccounting:
     elapsed: str = ""
 
 
-# Short calc-type tags for job dir names (M-JOBDIRS JD.2).
+# Short calc-type tags for job dir names.
 _CALC_TYPE_TAGS = {
     "single_point": "sp",
     "geometry_opt": "opt",
+    "transition_state": "ts",
+    "irc": "irc",
     "frequency": "freq",
     "tddft": "tddft",
     "nmr": "nmr",
@@ -51,7 +53,7 @@ def sanitize_job_name(name: str) -> str:
 
 
 def job_name_basis(basis: str) -> str:
-    """A basis set name as it appears in job and folder names (B2.11).
+    """A basis set name as it appears in job and folder names.
 
     Pople polarisation is written the way chemists abbreviate it:
     ``6-31G*`` / ``6-31G(d)`` → ``6-31Gd``, ``6-31G**`` / ``6-31G(d,p)`` →
@@ -137,11 +139,11 @@ def parse_sacct_states(sacct_output: str) -> Dict[str, str]:
 # copy them into the host-side ``quantui-batch`` launcher, which re-implements
 # this estimate without importing QuantUI (tests/test_batch_submit.py checks
 # that the two agree).
-# Relative memory per basis. Not calibrated against sacct yet (B2.4 calls
-# for that); new entries are placed by basis size relative to the old ones:
-# def2-SVP has cc-pVDZ's functions (C 3s2p1d, H 2s1p); def2-TZVP matches
-# cc-pVTZ on heavy atoms but is smaller on H; LANL2DZ is D95V-sized on
-# light atoms (its heavy-atom ECP removes core functions).
+# Relative memory per basis. Not calibrated against sacct yet; new entries
+# are placed by basis size relative to the old ones: def2-SVP has cc-pVDZ's
+# functions (C 3s2p1d, H 2s1p); def2-TZVP matches cc-pVTZ on heavy atoms
+# but is smaller on H; LANL2DZ is D95V-sized on light atoms (its heavy-atom
+# ECP removes core functions).
 BASIS_FACTORS = {
     "STO-3G": 1.0,
     "3-21G": 1.2,
@@ -193,6 +195,10 @@ def _walltime_steps_for(count: int, default: int) -> int:
 CALC_FACTORS = {
     "single_point": 1.0,
     "geometry_opt": 2.5,
+    # A saddle search with analytic Hessians, then a full frequency check.
+    "transition_state": 4.0,
+    # Gradients along the path both ways, from a Hessian at the start.
+    "irc": 3.0,
     "frequency": 4.0,
     "tddft": 2.0,
     "nmr": 2.0,
@@ -207,7 +213,7 @@ def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
 
     Seed logic from legacy ``PySCFCalculation.estimate_resources()``, extended
     with coarse calc-type multipliers. NCShare operators should tune defaults
-    after the CL2.2 spike.
+    against measured ``sacct`` usage.
     """
     mol = request.molecule
     atoms = mol.get("atoms") or []
@@ -274,7 +280,7 @@ def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
         if idx + 1 < len(cfg.WALLTIME_OPTIONS):
             walltime = cfg.WALLTIME_OPTIONS[idx + 1]
 
-    # B2.4: work that grows with an option the defaults assume — TD-DFT
+    # Work that grows with an option the defaults assume — TD-DFT
     # states (default 10) and PES scan points (default 10, each one an
     # optimization). One walltime step per doubling; memory is unchanged.
     options = request.options or {}
@@ -292,7 +298,7 @@ def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
             if idx + 1 < len(cfg.WALLTIME_OPTIONS):
                 walltime = cfg.WALLTIME_OPTIONS[idx + 1]
 
-    # M-CLUSTER2 CL2.9 — QUANTUI_FREQ_PARALLEL awareness. The base `frequency`
+    # QUANTUI_FREQ_PARALLEL awareness. The base `frequency`
     # estimate above (calc_factor=4.0) already independently validated as
     # correct for the *serial* IR-displacement loop (CHEM-3200 Lab 2: a real
     # 19-atom def2-SVP UKS frequency job needed exactly the 120-128GB this
@@ -308,7 +314,8 @@ def estimate_slurm_resources(request: CalculationRequest) -> Dict[str, Any]:
     # the opt-in isn't active, or for any non-frequency calc type) so a
     # caller/log can see whether — and by how much — this fired.
     freq_parallel_multiplier = 1
-    if request.calc_type == "frequency":
+    # A Transition State ends with the same frequency calculation.
+    if request.calc_type in ("frequency", "transition_state"):
         try:
             from quantui.freq_ir_workers import freq_parallel_opt_in, pick_worker_count
 

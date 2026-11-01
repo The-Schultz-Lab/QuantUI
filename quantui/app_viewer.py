@@ -155,6 +155,10 @@ def on_open_folder(app: Any) -> None:
         return
     set_results_dir(path)
     app._viewer_folder_txt.value = str(path)
+    if not IN_BROWSER:  # uploads live in the browser's memory only
+        from quantui.app_launcher import remember_viewer_folder
+
+        remember_viewer_folder(path)
     app._deactivate_all_ana_panels()
     app._refresh_results_browser()
     from quantui.results_storage import list_results

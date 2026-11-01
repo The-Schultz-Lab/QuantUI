@@ -1,4 +1,4 @@
-"""Oxidation-state → d-count → spin-state multiplicity suggestions (M-METAL MET.5).
+"""Oxidation-state → d-count → spin-state multiplicity suggestions.
 
 **Suggests, never sets.** A transition metal's spin multiplicity is *not* fixed
 by its oxidation state alone: for an octahedral d⁴–d⁷ centre the ligand field

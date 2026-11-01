@@ -43,6 +43,8 @@ quantui-batch check                                    # is everything this need
 quantui-batch submit water.xyz --calc frequency --method B3LYP --basis def2-SVP --preopt
 quantui-batch submit water.xyz --preset lab4-ir        # named settings (see Presets)
 quantui-batch submit --from water-opt --calc frequency # start from that job's optimized geometry
+quantui-batch submit guess.xyz --calc transition_state --method B3LYP --basis def2-SVP
+quantui-batch submit --from guess_ts_B3LYP_def2-SVP --calc irc  # reaction path from that TS
 quantui-batch estimate water.xyz --calc frequency      # cores / memory / time, submits nothing
 quantui-batch status                                   # PENDING, RUNNING 40%, DONE, OUT_OF_MEMORY ...
 quantui-batch results <job>                            # energy, imaginary modes, IR bands, excited states
@@ -51,20 +53,36 @@ quantui-batch rerun <job> --more-memory                # or --more-time, or any 
 quantui-batch cancel <job>
 ```
 
+Inside the image (an allocation, or an OnDemand terminal) `quantui jobs`
+lists the same jobs with their state read from each job folder (refreshed
+from the queue when `squeue` is there), and History in the app shows the
+unfinished ones.
+
 - Inputs are `.xyz` files (`--calc` required unless a preset sets it;
   `--method`, `--basis`, `--charge`, `--mult`, `--solvent`, `--preopt`,
   `--option KEY=VALUE`) or request JSON. A charge/multiplicity that cannot
   fit the electron count, an unknown solvent, or a solvent on a calc type the
   batch worker runs gas-phase only (`nmr`, `pes_scan`) is refused
-  before anything is queued.
+  before anything is queued, as is a post-HF method for `transition_state`
+  (no analytic gradients).
+- **Transition State** (`--calc transition_state`, `--option fmax=0.01`,
+  `--option max_steps=200`) runs the app's Sella search and frequency check.
+  The image needs the `[ts]` extra (both `.def` files install it). A killed
+  job resumes the search from its last step, never redoes a finished search,
+  and keeps the frequency check's finished displacements; `results` prints
+  the verdict (transition state, minimum, or higher-order saddle point).
+- **IRC** (`--calc irc`, `--option max_steps=150` per direction) follows the
+  reaction path both ways from a transition state, usually `--from` a
+  Transition State job. A killed IRC starts over (each direction begins
+  from a Hessian at the saddle point); `results` prints the barriers.
 - **Presets** (`--preset NAME`; list with `quantui-batch presets`) are named
   settings: `calc`, `method`, `basis`, `charge`, `mult`, `solvent`, `preopt`,
   `options`, `description`. Read from `presets.json` beside the launcher
   (shared, operator-maintained; `install-launcher --force` leaves it alone),
   then `~/.quantui/batch-presets.json`, then `$QUANTUI_BATCH_PRESETS`; later
   files win, and command-line options override the preset.
-- **Chained jobs**: `--from JOB` (a `geometry_opt` or `frequency` job, or one
-  run with `--preopt`) takes JOB's molecule, charge, multiplicity, method and
+- **Chained jobs**: `--from JOB` (a `geometry_opt`, `transition_state` or
+  `frequency` job, or one run with `--preopt`) takes JOB's molecule, charge, multiplicity, method and
   basis unless given, and the worker loads JOB's final geometry when the job
   starts (`quantui/backends/batch_chain.py`; never a PES-scan trajectory). If
   JOB is still queued or running, the new job gets

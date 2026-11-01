@@ -30,8 +30,8 @@ Currently shipped subcommands:
   [--depends-on REQUEST_ID|SLURM_JOB_ID] [--partition NAME] [--no-apptainer]
   [--apptainer-image PATH]`` — submit
   one or more ``CalculationRequest`` JSON files to the SLURM batch backend
-  headlessly, with no interactive app/student session involved (M-CLUSTER2
-  CL2.7). Resource sizing defaults to ``estimate_slurm_resources()`` —
+  headlessly, with no interactive app/student session involved. Resource
+  sizing defaults to ``estimate_slurm_resources()`` —
   the same estimator the interactive app uses — unless overridden. Pass
   ``--dry-run`` to print the resolved cores/memory/walltime for each
   request without actually submitting. Respects the same
@@ -294,7 +294,7 @@ def _cmd_setup(args: argparse.Namespace) -> int:
 
 
 def _cmd_submit(args: argparse.Namespace) -> int:
-    """Submit one or more requests (JSON or ``.xyz``) to SLURM (M-CLUSTER2 CL2.7).
+    """Submit one or more requests (JSON or ``.xyz``) to SLURM.
 
     Headless equivalent of the interactive app's Slurm batch path — no
     student session or Voilà app involved. Before this existed, the only
@@ -428,7 +428,7 @@ def _cmd_submit(args: argparse.Namespace) -> int:
         # N requests submitted in one invocation would otherwise trip that
         # cooldown between every pair and fail partway through a
         # legitimate scripted run — sleep it out proactively instead
-        # (this is exactly CL2.7's motivating case: an instructor running
+        # (the motivating case for this command: an instructor running
         # a whole class's worth of jobs, e.g. Lab 2's 30, from one script).
         if submitted_count > 0:
             cooldown = submit_cooldown_seconds()
@@ -468,7 +468,7 @@ def _cmd_submit(args: argparse.Namespace) -> int:
 
 
 def _cmd_results(args: argparse.Namespace) -> int:
-    """Summarize the newest finished attempt of a batch job folder (B2.11)."""
+    """Summarize the newest finished attempt of a batch job folder."""
     from quantui.backends.batch_chain import finished_attempts
     from quantui.backends.result_summary import summarize
 
@@ -493,6 +493,75 @@ def _cmd_results(args: argparse.Namespace) -> int:
         )
         return 1
     print("\n".join(summarize(result, job_dir, attempt)))
+    return 0
+
+
+def _cmd_jobs(args: argparse.Namespace) -> int:
+    """List batch jobs and where each one is.
+
+    With ``squeue`` on PATH the registry is refreshed from the queue first
+    (so finished jobs stop counting against the concurrent-job limit) and
+    queued jobs show their Slurm state; without it (an OnDemand session)
+    the state is read from each job folder.
+    """
+    import shutil
+
+    from quantui.backends.batch_status import job_views
+    from quantui.backends.registry import JobRegistry
+
+    registry = JobRegistry()
+    queue: dict = {}
+    if shutil.which("squeue"):
+        from quantui.backends.slurm import SlurmBackend
+
+        backend = SlurmBackend(registry=registry)
+        try:
+            backend.refresh_registry_statuses()
+            ids = [
+                r.slurm_job_id
+                for r in registry.list_all()
+                if r.backend_id == "cluster_slurm" and r.slurm_job_id
+            ]
+            from quantui.backends.batch_status import logged_job_ids
+
+            for r in registry.list_all():
+                if r.job_path is not None:
+                    ids.extend(logged_job_ids(r.job_path))
+            queue = {
+                jid: state
+                for jid, state in backend.batch_poll_slurm_statuses(
+                    sorted(set(ids))
+                ).items()
+                if state and state != "UNKNOWN"
+            }
+        except Exception as exc:  # noqa: BLE001 — a queue error must not hide the list
+            print(f"quantui jobs: could not read the queue ({exc})", file=sys.stderr)
+    views = job_views(registry, queue=queue, unfinished_only=args.running)
+    if not args.all:
+        views = views[: args.n]
+    if not views:
+        print("No batch jobs." if not args.running else "No batch jobs running.")
+        return 0
+    rows = [("JOB", "TYPE", "METHOD/BASIS", "STATE", "SLURM ID", "DETAIL")]
+    for v in views:
+        state = v.state + (
+            f" {v.percent:.0f}%"
+            if v.state == "running" and isinstance(v.percent, (int, float))
+            else ""
+        )
+        rows.append(
+            (
+                v.name,
+                v.calc_type,
+                f"{v.method}/{v.basis}",
+                state,
+                v.job_id or "-",
+                v.detail,
+            )
+        )
+    widths = [max(len(row[i]) for row in rows) for i in range(5)]
+    for row in rows:
+        print("  ".join(c.ljust(w) for c, w in zip(row[:5], widths)) + "  " + row[5])
     return 0
 
 
@@ -636,7 +705,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "submit",
         help=(
             "Submit CalculationRequest JSON file(s) to the SLURM batch "
-            "backend headlessly (M-CLUSTER2 CL2.7) — no interactive app."
+            "backend headlessly — no interactive app."
         ),
     )
     submit_parser.add_argument(
@@ -725,8 +794,8 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="TYPE",
         help=(
-            "Calculation type: single_point, geometry_opt, frequency, tddft, "
-            "nmr, pes_scan, reorganization_energy."
+            "Calculation type: single_point, geometry_opt, transition_state, irc, "
+            "frequency, tddft, nmr, pes_scan, reorganization_energy."
         ),
     )
     input_group.add_argument(
@@ -813,6 +882,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "job_dir", help="A job folder (or one of its attempt folders)."
     )
     results_parser.set_defaults(func=_cmd_results)
+
+    jobs_parser = sub.add_parser(
+        "jobs",
+        help=(
+            "List your batch jobs and where each one is: waiting, running "
+            "(with progress), done or failed."
+        ),
+    )
+    jobs_parser.add_argument(
+        "-n", type=int, default=10, help="Show the newest N jobs (default 10)."
+    )
+    jobs_parser.add_argument("--all", action="store_true", help="Show every job.")
+    jobs_parser.add_argument(
+        "--running", action="store_true", help="Only jobs not finished yet."
+    )
+    jobs_parser.set_defaults(func=_cmd_jobs)
 
     launcher_parser = sub.add_parser(
         "install-launcher",

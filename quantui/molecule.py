@@ -370,7 +370,7 @@ def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
     if expected_atoms is not None:
         n_frames = _count_xyz_frames(lines, body_start - 2, expected_atoms)
         if n_frames > 1:
-            # ISSUE.19 #10 — the second frame's count line used to fail as
+            # The second frame's count line used to fail as
             # "Line N: not enough values", which says nothing useful.
             raise ValueError(
                 f"❌ This looks like a multi-frame XYZ file ({n_frames} "

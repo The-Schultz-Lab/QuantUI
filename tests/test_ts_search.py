@@ -113,10 +113,13 @@ class TestApp:
         assert app._ts_fmax_fi in kids[0].children
         assert app._ts_fmax_fi.value == pytest.approx(0.01)
 
-    def test_slurm_refuses_it_for_now(self):
+    def test_slurm_runs_it(self):
+        # TS.5: a batch job like every other calc type, solvent included.
+        from quantui.app_runflow import _SOLVENT_SUPPORTED_CALC_TYPES
         from quantui.app_slurm import _SUPPORTED_SLURM_CALC_TYPES
 
-        assert "transition_state" not in _SUPPORTED_SLURM_CALC_TYPES
+        assert "transition_state" in _SUPPORTED_SLURM_CALC_TYPES
+        assert "Transition State" in _SOLVENT_SUPPORTED_CALC_TYPES
 
     def test_run_save_and_history(self, tmp_path, monkeypatch):
         pytest.importorskip("sella")

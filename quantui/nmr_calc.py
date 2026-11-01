@@ -48,7 +48,7 @@ class NMRResult:
     reference_key: str = ""
     is_fallback_reference: bool = False
     density_fit: bool = False
-    # M-UX2 UXP2.10 — the actual PySCF class dispatched for the SCF (e.g.
+    # The actual PySCF class dispatched for the SCF (e.g.
     # "RHF", "UHF", "RKS", "UKS"); "" for an older saved result.
     scf_variant: str = ""
 
@@ -116,7 +116,7 @@ def run_nmr_calc(
         progress_stream: Optional writable text stream for PySCF output.
         scf_rescue: Whether the ground-state SCF automatically retries
             through the shared rescue helper on non-convergence
-            (M-SCF-ROBUST, see :mod:`quantui.scf_robust`). Default ``True``.
+            (see :mod:`quantui.scf_robust`). Default ``True``.
 
     Returns:
         :class:`NMRResult` with per-atom shieldings and ¹H/¹³C shifts.
@@ -374,12 +374,12 @@ def _run_nmr_calc_body(
         # lookup before, which would fail for wB97X-D after the alias
         # change to "wb97x" + external D3).
         mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
-        # M-UX2 UXP2.10 — capture before maybe_apply_d3 can wrap/rename it.
+        # Capture the SCF class name before maybe_apply_d3 can wrap/rename it.
         scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
         mf, _ = maybe_apply_d3(mf, method, progress_stream=stream)
 
-    # Density fitting (RI), opt-in (M-DF). Off by default. See DF.5: DF shifts
+    # Density fitting (RI), opt-in. Off by default. DF shifts
     # absolute shieldings, but chemical shifts are differences so the error
     # largely cancels — this is flagged for explicit validation before DF is
     # ever defaulted on for NMR.

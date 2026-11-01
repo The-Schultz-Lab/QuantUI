@@ -140,8 +140,9 @@ FROM: condaforge/miniforge3:26.1.1-3
   # analytical Raman) and pyscf-dispersion (PBE-D3), which this image used to
   # miss. PySCF itself is already satisfied by the conda package above, so pip
   # leaves it alone. Naming the extra keeps this list from going stale
-  # (ISSUE.18).
-  pip install --no-cache-dir -e ".[pyscf]"
+  # (ISSUE.18). [ts] adds Sella for Transition State (M-TS TS.5; it pulls in
+  # jax/jaxlib, about 380 MB).
+  pip install --no-cache-dir -e ".[pyscf,ts]"
 
   echo "Verifying installation..."
   python -c "import quantui; print('QuantUI OK')"
@@ -156,6 +157,9 @@ FROM: condaforge/miniforge3:26.1.1-3
   # build here rather than ship blank viewers.
   python -c "from quantui.viz_assets import _JS_PATH, _js_data_uri, make_view; assert _JS_PATH.exists() and _JS_PATH.stat().st_size > 100000, 'vendored 3Dmol.js missing/too small'; assert _js_data_uri().startswith('data:text/javascript;base64,'); v = make_view(width=80, height=80); v.addModel('1\nH\nH 0 0 0', 'xyz'); h = v._make_html(); assert 'jsdelivr' not in h and 'data:text/javascript;base64,' in h, 'viewer not loading vendored 3Dmol offline'; print('offline 3Dmol OK')"
   python -c "import ase; print('ASE OK')"
+  # Transition State (M-TS): Sella from the [ts] extra, in the window and in
+  # batch jobs (TS.5).
+  python -c "from quantui.ts_search import sella_available; assert sella_available(), 'Sella missing: Transition State unavailable'; print('Sella OK')"
   # No GPU dependency (GFN-FF is a Fortran CPU force field, unlike gpu4pyscf
   # in quantui-gpu.def), so importing — not just find_spec-probing — is safe
   # on the build host and catches a broken libxtb link at build time.

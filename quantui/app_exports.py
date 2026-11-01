@@ -27,7 +27,7 @@ def export_destination(
     timestamp: bool = False,
 ) -> Path:
     """The one place that decides where a new export lands and what it's
-    called (M-EXPORT2 EXP2.3).
+    called.
 
     Before this, each exporter picked its own destination and built its own
     filename inline (``on_export_xyz`` / ``on_export_mol`` / ``on_export_pdb``
@@ -37,7 +37,7 @@ def export_destination(
     existing structure exporters are left as-is deliberately — they already
     work, and retrofitting working export paths carries real regression risk
     for no user-facing benefit. This is about not repeating the inconsistency
-    as the export surface grows (EXP2.1, and whatever comes after it).
+    as the export surface grows.
 
     Every part of ``name_parts`` is sanitised (:func:`_safe_name`) and joined
     with underscores, so a caller passes meaningful pieces (formula, a
@@ -98,7 +98,7 @@ def on_export(app: Any, btn: Any) -> None:
             method=app.method_dd.value,
             basis=app.basis_dd.value,
         )
-        # M11 audit fix (2026-07-14): the basis set is embedded verbatim in
+        # The basis set is embedded verbatim in
         # the filename (e.g. "6-31G*.py"), and "*" is invalid in a Windows
         # filename — this export silently failed there. _safe_name (already
         # used by results_storage for the same purpose) replaces anything
@@ -112,7 +112,7 @@ def on_export(app: Any, btn: Any) -> None:
         # could never find it).
         result_dir = getattr(app, "_last_result_dir", None)
         dest = (result_dir / fname) if isinstance(result_dir, Path) else Path(fname)
-        # ISSUE.19 #7 — follow the calc type, solvent and density fitting the
+        # Follow the calc type, solvent and density fitting the
         # app would use, instead of always a gas-phase single point.
         from quantui.app_runflow import _CALC_TYPE_KEYS
         from quantui.calculator import SCRIPT_FULL_CALC_TYPES
@@ -147,7 +147,7 @@ def on_export(app: Any, btn: Any) -> None:
 def on_export_xyz(app: Any, btn: Any) -> None:
     """Export molecule geometry to an XYZ file.
 
-    Provenance (M-EXPORT2 EXP2.4): the comment line carries charge and
+    Provenance: the comment line carries charge and
     multiplicity alongside method/basis, matching
     :func:`on_export_reorg_geometries`'s format — before this fix the two
     XYZ exporters disagreed (reorg had charge/multiplicity, this one didn't),
@@ -221,18 +221,17 @@ def on_export_pdb(app: Any, btn: Any) -> None:
 
 
 def on_export_reorg_geometries(app: Any, btn: Any) -> None:
-    """Export every retained reorg-energy geometry as its own XYZ file
-    (M-EXPORT2 EXP2.1).
+    """Export every retained reorg-energy geometry as its own XYZ file.
 
     ``app._reorg_geometries`` (built by ``reorg_geometries()``) is already
     deduplicated to the DISTINCT geometries behind a run — R_neutral once,
     plus one R_ion per channel — so this writes exactly that many files, not
-    one per energy. Naming follows EXP2.1's request directly:
+    one per energy. Each file is named for what it holds:
     ``<formula>_R_neutral_<method>_<basis>.xyz`` /
     ``<formula>_R_hole_<method>_<basis>.xyz`` rather than three files all
     called ``geometry.xyz``.
 
-    Provenance (EXP2.4): each file's comment line carries the charge,
+    Provenance: each file's comment line carries the charge,
     multiplicity, method/basis, and which of the four λ energies were
     evaluated on that geometry (``note`` — already computed by
     ``reorg_geometries()`` for the viewer, reused here rather than
@@ -335,7 +334,7 @@ def _with_dpi(
     raw: bytes, dpi: Optional[int], *, metadata: Optional[dict[str, str]] = None
 ) -> bytes:
     """Stamp *dpi* into the PNG's pHYs chunk, and optionally provenance
-    (M-EXPORT2 EXP2.4) into ``tEXt`` chunks — one re-encode for both, since
+    into ``tEXt`` chunks — one re-encode for both, since
     Pillow does both in the same ``save()`` call. *dpi* of ``None`` skips the
     pHYs stamp and writes metadata only — for exporters that intentionally
     don't offer a DPI setting (e.g. the reorg-geometry PNG, which deliberately
@@ -351,7 +350,8 @@ def _with_dpi(
     grid resolution, whatever the caller has. A PNG has no comment-line
     equivalent to an XYZ or cube file, so this is the export's only chance to
     carry that context; without it a figure someone emailed you a year later
-    is orphaned from what produced it, same argument as ORBX.4 for cubes.
+    is orphaned from what produced it, same argument as the cube export's
+    comment header.
     Read back with ``PIL.Image.open(path).text``.
 
     Pillow is already a dependency (via matplotlib). If anything goes wrong the
@@ -385,7 +385,7 @@ def _with_dpi(
 
 
 def on_orb_png_captured(app: Any, change: dict) -> None:
-    """Write a PNG captured from the live isosurface viewer (ORBX.1).
+    """Write a PNG captured from the live isosurface viewer.
 
     Fires when the viewer's Save-PNG button writes a data URI into the hidden
     inbox Textarea. The image is whatever the user is actually looking at,
@@ -448,7 +448,7 @@ def on_orb_png_captured(app: Any, change: dict) -> None:
     safe = safe.strip() or "orbital"
     dest = Path(result_dir) / f"{safe}.png"
 
-    # Provenance (M-EXPORT2 EXP2.4 / M-ORBEXPORT ORBX.4): best-effort from
+    # Provenance: best-effort from
     # the live UI state, same caveat as the cube path — not re-verified
     # against what actually produced the captured image (e.g. after a
     # History replay). The resolution key is read directly from the dropdown
@@ -477,12 +477,12 @@ def on_orb_png_captured(app: Any, change: dict) -> None:
 
 
 def on_reorg_png_captured(app: Any, change: dict) -> None:
-    """Write a PNG captured from the live reorg-geometry viewer (M-EXPORT2 EXP2.2).
+    """Write a PNG captured from the live reorg-geometry viewer.
 
     Same capture/decode/save shape as ``on_orb_png_captured``, fed by its own
     inbox (``_reorg_png_inbox`` / ``_REORG_PNG_INBOX_CLASS``) so a capture from
     this viewer is never mistaken for an isosurface capture. Filename/location
-    goes through ``export_destination`` (EXP2.3) since this is a new exporter,
+    goes through ``export_destination`` since this is a new exporter,
     not a retrofit of existing behaviour.
 
     Deliberately skips the isosurface panel's DPI-stamping/custom-name extras
@@ -542,7 +542,7 @@ def on_reorg_png_captured(app: Any, change: dict) -> None:
         _fail(str(exc))
         return
 
-    # Provenance (M-EXPORT2 EXP2.4) — metadata only, no DPI stamp (see
+    # Provenance — metadata only, no DPI stamp (see
     # _with_dpi's docstring for why this exporter skips DPI intentionally).
     raw = _with_dpi(
         raw,
@@ -563,8 +563,7 @@ def on_reorg_png_captured(app: Any, change: dict) -> None:
 
 
 def on_vib_png_captured(app: Any, change: dict) -> None:
-    """Write a PNG captured from the live vibrational single-viewer
-    (M-EXPORT2 EXP2.2).
+    """Write a PNG captured from the live vibrational single-viewer.
 
     Same capture/decode/save shape as ``on_reorg_png_captured``, fed by its
     own inbox (``_vib_png_inbox`` / ``_VIB_PNG_INBOX_CLASS``). Only the
@@ -635,7 +634,7 @@ def on_vib_png_captured(app: Any, change: dict) -> None:
         _fail(str(exc))
         return
 
-    # Provenance (M-EXPORT2 EXP2.4) — same argument as the reorg/trajectory
+    # Provenance — same argument as the reorg/trajectory
     # exporters: cheap now, unrecoverable once the file has left the machine.
     metadata = {"Software": "QuantUI", "Method": method, "Basis": basis}
     if freq_cm1:
@@ -664,7 +663,7 @@ def _on_mol_png_captured(
     slot_label: str,
 ) -> None:
     """Shared implementation for the molecule (top) viewer's three Save-PNG
-    buttons (M-EXPORT2 EXP2.2) — Calculate-tab preview, Results-tab viewer,
+    buttons — Calculate-tab preview, Results-tab viewer,
     Analysis-tab viewer. These are the same underlying viewer
     (``visualization_py3dmol.render_molecule_html``) rendered into three
     independent output slots, not three different viewers, so one shared
@@ -737,7 +736,7 @@ def _on_mol_png_captured(
         _fail(str(exc))
         return
 
-    # Provenance (M-EXPORT2 EXP2.4) — same argument as every other exporter
+    # Provenance — same argument as every other exporter
     # in this module: cheap now, unrecoverable once the file has left the
     # machine.
     raw = _with_dpi(
@@ -804,7 +803,7 @@ def on_mol_analysis_png_captured(app: Any, change: dict) -> None:
 def on_traj_png_captured(
     app: Any, change: dict, *, formula: str = "", status: Any = None
 ) -> None:
-    """Write a PNG captured from the live trajectory viewer (M-EXPORT2 EXP2.2).
+    """Write a PNG captured from the live trajectory viewer.
 
     Same capture/decode/save shape as ``on_reorg_png_captured``, but the
     trajectory panel's widgets (unlike the isosurface/reorg accordions) are
@@ -863,7 +862,7 @@ def on_traj_png_captured(
         _fail(str(exc))
         return
 
-    # Provenance (M-EXPORT2 EXP2.4) — same argument as the reorg exporter:
+    # Provenance — same argument as the reorg exporter:
     # cheap now, unrecoverable once the file has left the machine.
     raw = _with_dpi(
         raw,

@@ -1,7 +1,7 @@
 """A scrolling list of checkboxes with the ``SelectMultiple`` interface.
 
 Compare used a ``SelectMultiple`` list box, which needs Ctrl/Shift-click to
-pick more than one row — not obvious to students (M-UIPOLISH L12). This keeps
+pick more than one row — not obvious to students. This keeps
 the attributes the app reads and writes (``options`` as ``(label, value)``
 pairs, ``value`` as a tuple of the checked values) so callers are unchanged.
 """

@@ -1,5 +1,5 @@
 """
-SLURM execution path for QuantUIApp (M-CLUSTER2 CL2.3).
+SLURM execution path for QuantUIApp.
 
 Submits batch jobs via :class:`~quantui.backends.slurm.SlurmBackend`, polls the
 on-disk registry + staging logs, and ingests finished single-point results into
@@ -124,7 +124,7 @@ def ingest_finished_jobs_on_startup(app: Any) -> list[Path]:
     submitted over SSH from a login node, while the app usually runs in an
     OnDemand session where ``sbatch`` is absent and the
     Cluster Jobs tab never refreshes. The History tab's Refresh button runs
-    it too (M-BATCH2 B2.10), so a job that finishes while the app is open
+    it too, so a job that finishes while the app is open
     appears without a restart. Skipped
     when no job registry exists yet, so the app does not create
     ``~/.quantui/jobs`` for users who have never run a batch job.
@@ -136,6 +136,7 @@ def ingest_finished_jobs_on_startup(app: Any) -> list[Path]:
     except Exception:  # noqa: BLE001 — startup must not fail over a job folder
         logger.exception("Failed to ingest finished SLURM attempts at startup")
         return []
+    refresh_batch_jobs_note(app)
     if saved:
         from quantui.app_runflow import refresh_results_browser
 
@@ -144,6 +145,53 @@ def ingest_finished_jobs_on_startup(app: Any) -> list[Path]:
         except Exception:  # noqa: BLE001
             logger.exception("Failed to refresh History after SLURM ingest")
     return saved
+
+
+def batch_jobs_note_html(views: list) -> str:
+    """The History panel's list of batch jobs not finished yet."""
+    if not views:
+        return ""
+    rows = []
+    for v in views:
+        pct = (
+            f" ({v.percent:.0f}%)"
+            if v.state == "running" and isinstance(v.percent, (int, float))
+            else ""
+        )
+        rows.append(
+            f"<li><code>{html.escape(v.name)}</code> "
+            f"{html.escape(v.calc_type)} {html.escape(v.method)}/"
+            f"{html.escape(v.basis)}: <b>{html.escape(v.state)}</b>{pct} "
+            f"<span style='color:{_theme.css.TEXT_SUBTLE}'>"
+            f"{html.escape(v.detail)}</span></li>"
+        )
+    return (
+        f'<div style="font-size:12px;color:{_theme.css.TEXT_STRONG};margin:6px 0">'
+        f"<b>Batch jobs not finished yet</b> ({len(views)}). Each appears in "
+        "History when it finishes; press Refresh to check."
+        f'<ul style="margin:4px 0 0 18px;padding:0">{"".join(rows)}</ul></div>'
+    )
+
+
+def refresh_batch_jobs_note(app: Any) -> None:
+    """Show batch jobs still waiting or running, read from their job folders.
+
+    The app usually runs where there is no ``squeue`` (OnDemand) while jobs
+    are submitted with ``quantui-batch`` over SSH, so the state comes from
+    each job folder (``backends/batch_status``), not from Slurm.
+    """
+    note = getattr(app, "_batch_jobs_html", None)
+    if note is None:
+        return
+    try:
+        from quantui.backends.batch_status import job_views
+
+        views = job_views(ensure_job_registry(app), unfinished_only=True)
+    except Exception:  # noqa: BLE001 — a bad job folder must not break History
+        logger.exception("Failed to read batch job states")
+        views = []
+    note.value = batch_jobs_note_html(views)
+    note.layout.display = "" if views else "none"
 
 
 def startup_slurm_check(app: Any) -> None:
@@ -337,7 +385,7 @@ def _slurm_job_error_cell(record: JobRecord) -> str:
 
 
 def ingest_new_slurm_attempts(app: Any) -> list[Path]:
-    """Save finished, not-yet-ingested attempts to History (M-JOBDIRS JD.11).
+    """Save finished, not-yet-ingested attempts to History.
 
     Picks up hand-run ``sbatch submit.slurm`` attempts (which the app never
     monitored) and tracked successes nobody reconnected to. The attempt the
@@ -531,7 +579,7 @@ def on_slurm_jobs_cancel_clicked(app: Any, _btn: Any = None) -> None:
 
 
 def resubmit_slurm_job(app: Any, request_id: str) -> tuple[bool, str]:
-    """Resubmit a finished job as a new attempt in its job dir (M-JOBDIRS JD.4).
+    """Resubmit a finished job as a new attempt in its job dir.
 
     Returns ``(ok, user message)``. On success the Calculate tab starts
     monitoring the new attempt.
@@ -794,7 +842,7 @@ def on_slurm_reconnect_clicked(app: Any, _btn: Any = None) -> None:
 
 
 def on_slurm_job_root_changed(app: Any, value: str) -> None:
-    """Validate and persist the SLURM job folder root (M-JOBDIRS JD.1).
+    """Validate and persist the SLURM job folder root.
 
     Blank restores the default. A new root applies to new submissions;
     existing jobs keep their absolute folder paths in the registry.

@@ -9,7 +9,7 @@ Typical usage::
     from quantui.raman_plot import plot_raman_spectrum
     fig = plot_raman_spectrum(result.frequencies_cm1, result.raman_activities)
 
-AUDIT additional-concerns — see ir_plot.py's module docstring: the
+See ir_plot.py's module docstring: the
 broadened-mode Lorentzian here is the same height-normalized convention
 (peak height = supplied activity, area scales with FWHM), deliberately,
 not a bug.
@@ -43,7 +43,7 @@ def plot_raman_spectrum(
     """
     real_pairs = [(f, a) for f, a in zip(frequencies, activities) if f > 0]
     sym = _peak_labels(frequencies, labels)
-    # AUDIT additional-concerns — see ir_plot.py: the x-range must cover
+    # See ir_plot.py: the x-range must cover
     # every real (positive) frequency present, not just the fixed
     # 400-4000 cm⁻¹ default, or a real high-frequency mode (O-H stretches
     # routinely sit above 4000 cm⁻¹) is silently clipped off the plot.

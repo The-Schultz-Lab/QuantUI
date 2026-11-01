@@ -1,4 +1,4 @@
-"""Pre-run guards for inorganic / metal calculations (M-METAL MET.5).
+"""Pre-run guards for inorganic / metal calculations.
 
 Two mid-run PySCF failures are common the moment a student loads a
 transition-metal complex, and both surface as cryptic tracebacks deep inside a

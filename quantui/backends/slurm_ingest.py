@@ -4,6 +4,7 @@ Promote finished SLURM staging artifacts into History-compatible result dirs.
 
 from __future__ import annotations
 
+import html
 import json
 import math
 import shutil
@@ -28,7 +29,7 @@ _STAGING_SIDECAR_FILES = (
 def slurm_provenance(record: JobRecord, staging: Path) -> dict[str, Any]:
     """``result.json`` extras that mark a History entry as a SLURM run.
 
-    M-JOBDIRS JD.5: stored under ``execution_backend`` / ``slurm`` so the
+    Stored under ``execution_backend`` / ``slurm`` so the
     History list and card can tell SLURM results from local ones. Additive —
     local results and results ingested before this simply lack the keys.
     For a job-dir record, *staging* is the attempt dir and its name gives the
@@ -52,13 +53,19 @@ def _copy_staging_sidecars(
     staging: Path, saved_dir: Path, payload: dict[str, Any] | None = None
 ) -> None:
     # Attempt dirs may hold shareable files under descriptive names
-    # (result.json["artifact_names"], M-JOBDIRS JD.7); History keeps the
+    # (result.json["artifact_names"]); History keeps the
     # fixed names its loaders expect.
     renamed = (payload or {}).get("artifact_names") or {}
     for name in _STAGING_SIDECAR_FILES:
         src = staging / renamed.get(name, name)
         if src.exists():
             shutil.copy2(src, saved_dir / name)
+    # HOMO/LUMO cubes for the Viewer, written with orbitals.npz.
+    from quantui.orbital_visualization import FRONTIER_CUBES_DIR
+
+    cubes = staging / FRONTIER_CUBES_DIR
+    if cubes.is_dir() and not (saved_dir / FRONTIER_CUBES_DIR).exists():
+        shutil.copytree(cubes, saved_dir / FRONTIER_CUBES_DIR)
 
 
 def _finalize_history_entry(saved_dir: Path) -> None:
@@ -74,7 +81,7 @@ def _finalize_history_entry(saved_dir: Path) -> None:
 def _basic_result(payload: dict[str, Any], record: JobRecord) -> SimpleNamespace:
     """Reconstruct a result-alike object from a worker's staging JSON.
 
-    AUDIT F12 — this used to reconstruct only 7 generic fields even though
+    This used to reconstruct only 7 generic fields even though
     ``session_result_payload()`` (and the other ``*_result_payload``
     builders) already serialize Mulliken charges, dipole, atom symbols,
     SCF variant/rescue provenance, post-HF correlation breakdown, and
@@ -137,13 +144,20 @@ def _ingest_frequency(
 
     result = _basic_result(payload, record)
     spectra = payload.get("spectra") or {}
+    calc_type = payload.get("calc_type") or "frequency"
+    # A Transition State is saved like a frequency result plus its
+    # search path; History shows the stationary point it found.
+    final = payload.get("final_molecule")
     saved_dir = save_result(
         result,
         pyscf_log=log_text,
-        calc_type="frequency",
+        calc_type=calc_type,
         spectra=spectra,
         extras=extras,
+        molecule=molecule_from_dict(final) if final else None,
     )
+    if payload.get("trajectory_file"):
+        _copy_trajectory(staging, saved_dir, payload)
     ir = spectra.get("ir") or {}
     freqs = ir.get("frequencies_cm1")
     displacements = ir.get("displacements")
@@ -201,7 +215,7 @@ def _ingest_reorganization_energy(
                 lambda_hartree=ch_data["lambda_hartree"],
                 converged=ch_data["converged"],
                 ion_molecule=ion_mol,
-                # ISSUE.12 — absent from payloads written before it.
+                # ⟨S²⟩ fields are absent from older payloads.
                 **{k: ch_data.get(k) for k in S2_KEYS},
             )
         )
@@ -232,7 +246,7 @@ def _ingest_with_sidecars(
     payload: dict[str, Any],
 ) -> Path:
     if calc_type := payload.get("calc_type"):
-        if calc_type in ("geometry_opt", "pes_scan"):
+        if calc_type in ("geometry_opt", "irc", "pes_scan"):
             _copy_trajectory(staging, saved_dir, payload)
     _copy_staging_sidecars(staging, saved_dir, payload)
     _finalize_history_entry(saved_dir)
@@ -258,7 +272,7 @@ def ingest_staging_success(
 
     from quantui.results_storage import save_result
 
-    if calc_type == "frequency":
+    if calc_type in ("frequency", "transition_state"):
         return _ingest_frequency(staging, payload, record, log_text, extras)
 
     if calc_type == "reorganization_energy":
@@ -297,9 +311,9 @@ def uningested_attempts(record: JobRecord) -> list[Path]:
     """Finished attempt dirs of a job-dir record not yet saved to History.
 
     ``result.json`` is written only when a run succeeds, so its presence
-    marks a finished, successful attempt (M-JOBDIRS: successes only).
+    marks a finished, successful attempt (failed attempts never write it).
     Includes hand-run ``sbatch submit.slurm`` attempts the record never
-    tracked (JD.11). Legacy records return ``[]``: their single run is
+    tracked. Legacy records return ``[]``: their single run is
     ingested by the monitor / reconnect path, as before.
     """
     if record.job_dir is None:
@@ -334,6 +348,10 @@ def ingest_attempt(
         staging.name,
         result_dir=str(saved_dir) if tracked else None,
     )
+    # A terminal-submitted job's record (status "prepared", no job id)
+    # is never polled; a result saved to History means it succeeded.
+    if record.status.lower() == "prepared":
+        registry.update_status(record.request_id, "success")
     return saved_dir
 
 
@@ -356,6 +374,16 @@ def completion_summary_html(saved_dir: Path, payload: dict[str, Any]) -> str:
             "frequencies_cm1"
         ) or []
         lines.append(f"Modes: {len(freqs)}<br>")
+    if calc_type == "irc":
+        block = (payload.get("spectra") or {}).get("irc") or {}
+        lines.append(f"Path steps: {payload.get('n_steps', '?')}<br>")
+        if block.get("verdict"):
+            lines.append(f"{html.escape(str(block['verdict']))}<br>")
+    if calc_type == "transition_state":
+        ts = (payload.get("spectra") or {}).get("transition_state") or {}
+        lines.append(f"Search steps: {payload.get('n_steps', '?')}<br>")
+        if ts.get("verdict"):
+            lines.append(f"{html.escape(str(ts['verdict']))}<br>")
     if calc_type == "tddft":
         excitations = (payload.get("spectra") or {}).get("uv_vis", {}).get(
             "excitation_energies_ev"

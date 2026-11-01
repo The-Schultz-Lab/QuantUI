@@ -66,7 +66,7 @@ def _write_run_header(app: Any) -> None:
             _out_dir = None
         # Density fitting is applied iff the setting is on and the method isn't a
         # post-HF one (session_calc never fits those references). Mirror that so
-        # the banner states what the run will actually do (M-DF).
+        # the banner states what the run will actually do.
         try:
             _df_on = bool(
                 app._user_settings.compute.density_fit
@@ -126,7 +126,7 @@ def _set_run_output(app: Any, outputs: tuple) -> None:
 
 def on_run_clicked(app: Any, btn: Any) -> None:
     """Reset result panes and start the background run thread."""
-    # Pre-run guard (M-METAL MET.5): catch a basis with no parameters for an
+    # Pre-run guard: catch a basis with no parameters for an
     # element (e.g. 6-31G on Pt) or a charge/multiplicity inconsistent with the
     # electron count, and explain it here — on the main thread, before anything
     # is cleared — instead of letting PySCF raise a cryptic error deep in the
@@ -163,7 +163,7 @@ def on_run_clicked(app: Any, btn: Any) -> None:
                 app.run_status.value = "Adjust the settings above, then Run again."
             except Exception:  # noqa: BLE001 — status label is best-effort
                 pass
-            # MET.5: if the blocker is purely the basis (def2-SVP would clear it),
+            # If the blocker is purely the basis (def2-SVP would clear it),
             # offer a one-click switch rather than making the student hunt the
             # dropdown. Only reveal it when def2-SVP actually resolves coverage.
             _update_basis_fix_button(app, mol)
@@ -262,7 +262,7 @@ def _spin_small(text: str, color: str = _theme.css.TEXT_LABEL) -> str:
 
 
 def on_spin_suggest(app: Any, btn: Any = None) -> None:
-    """Compute a spin-multiplicity suggestion and render it (MET.5).
+    """Compute a spin-multiplicity suggestion and render it.
 
     Suggests only — the Apply buttons (wired to on_spin_apply) do the setting.
     A refusal (e.g. non-d8 square-planar) or bad input is shown as a flag, not a
@@ -302,7 +302,7 @@ def on_spin_suggest(app: Any, btn: Any = None) -> None:
 
 
 def on_spin_apply(app: Any, index: int) -> None:
-    """Set the multiplicity field from a suggested spin state (MET.5)."""
+    """Set the multiplicity field from a suggested spin state."""
     mults = getattr(app, "_spin_suggested_mults", [])
     if index >= len(mults):
         return
@@ -404,7 +404,7 @@ def on_charge_mult_apply(app: Any, btn: Any = None) -> None:
 
 
 def on_basis_fix(app: Any, btn: Any = None) -> None:
-    """One-click MET.5 fix: set the basis to def2-SVP and hide the button."""
+    """One-click fix: set the basis to def2-SVP and hide the button."""
     try:
         app.basis_dd.value = _METAL_FIX_BASIS
     except Exception:  # noqa: BLE001 — a stale option list must not raise
@@ -418,7 +418,7 @@ def on_basis_fix(app: Any, btn: Any = None) -> None:
         pass
 
 
-# AUDIT F11 — a calc type whose runner ignores the solvent must not offer
+# A calc type whose runner ignores the solvent must not offer
 # the checkbox (it used to be a silent no-op for Frequency/UV-Vis/NMR/PES).
 #
 # Full PCM support (session_calc.apply_pcm everywhere):
@@ -429,7 +429,7 @@ def on_basis_fix(app: Any, btn: Any = None) -> None:
 # - "UV-Vis (TD-DFT)": solvated ground state, non-equilibrium excitations.
 # "Reorganization Energy" keeps its documented approximation: gas-phase
 # optimizations, solvated single points (reorganization_energy.py).
-# NMR Shielding and PES Scan stay gas-phase only (DEC-023).
+# NMR Shielding and PES Scan stay gas-phase only.
 # The set itself (_SOLVENT_SUPPORTED_CALC_TYPES) is derived below, after
 # _CALC_TYPE_KEYS, from the batch worker's batch_input.SOLVENT_CALC_TYPES.
 
@@ -441,6 +441,7 @@ _SOLVENT_LABELS = {
     "Frequency": "Implicit solvent (PCM) — Raman is not computed in solvent",
     "UV-Vis (TD-DFT)": "Implicit solvent (PCM) — non-equilibrium excitations",
     "Transition State": "Implicit solvent (PCM) — search and frequency check",
+    "IRC": "Implicit solvent (PCM) — every step of the path",
 }
 
 
@@ -464,14 +465,14 @@ def frozen_atom_indices(app: Any) -> list:
 
 def _update_solvent_control_for_calc_type(app: Any, ct: str) -> None:
     """Disable the solvent checkbox for calc types that would silently
-    ignore it, so a checked box can never mean "no effect" (AUDIT F11)."""
+    ignore it, so a checked box can never mean "no effect"."""
     try:
         cb = app.solvent_cb
     except AttributeError:
         return
     if ct in _SOLVENT_SUPPORTED_CALC_TYPES:
         cb.disabled = False
-        # AUDIT F11 — label any approximation explicitly rather than letting
+        # Label any approximation explicitly rather than letting
         # a checked box imply more than the run does.
         cb.description = _SOLVENT_LABELS.get(ct, "Implicit solvent (PCM)")
     else:
@@ -506,11 +507,11 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     # away from the barrier it is meant to find.
     # PES Scan relabels this checkbox; every other type uses the default label.
     # Set it here for all types — restoring it only on the way out of PES
-    # missed PES -> Reorg -> ... -> Frequency (UIA.4).
+    # missed PES -> Reorg -> ... -> Frequency.
     app._freq_preopt_cb.description = (
         _PES_PREOPT_DESC if ct == "PES Scan" else _FREQ_PREOPT_DESC_DEFAULT
     )
-    if ct in ("Geometry Opt", "Reorganization Energy", "Transition State"):
+    if ct in ("Geometry Opt", "Reorganization Energy", "Transition State", "IRC"):
         app._freq_preopt_cb.value = False
         app._freq_preopt_cb.layout.display = "none"
     elif ct in ("Frequency", "UV-Vis (TD-DFT)"):
@@ -591,9 +592,19 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
             ),
             app._ts_note,
         ]
+    elif ct == "IRC":
+        app._refresh_geo_seed_options()
+        app.calc_extra_opts.children = [
+            widgets.HBox(
+                [app._seed_dd, app._seed_refresh_btn],
+                layout=layout_fn(align_items="center", gap="6px", width="100%"),
+            ),
+            app.max_steps_si,
+            app._irc_note,
+        ]
     elif ct == "Reorganization Energy":
         # The neutral and ion legs are real geometry optimizations and the run
-        # uses these two fields, so they are shown here too (ISSUE.19 #4: they
+        # uses these two fields, so they are shown here too (they
         # were read while hidden, carrying over whatever was last set on
         # Geometry Opt / PES Scan).
         app.calc_extra_opts.children = [
@@ -632,7 +643,7 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
             ),
             # The coordinate summary repeated the atom dropdowns; the "± around
             # current" range tool now sits in a closed section, with Suggest
-            # range beside Start/Stop (M-UIPOLISH L9).
+            # range beside Start/Stop.
             app._scan_current_value_html,
             widgets.HBox(
                 [
@@ -811,7 +822,7 @@ def _set_scan_range(app: Any, start: float, stop: float) -> None:
     """Write a suggested range, rounded to what a user would type.
 
     Suggestions are computed from the live geometry, so unrounded they showed
-    as e.g. ``0.70792379`` (UIA.7). 0.001 Å / 0.1° is finer than any scan step.
+    as e.g. ``0.70792379``. 0.001 Å / 0.1° is finer than any scan step.
     """
     ndigits = 3 if app._scan_type_dd.value.lower() == "bond" else 1
     app._scan_start.value = round(float(start), ndigits)
@@ -1342,8 +1353,52 @@ def refresh_seed_options(app: Any) -> None:
     ``refresh_{geo,freq,tddft}_seed_options`` wrappers that used to exist here.
     """
     include_freq = getattr(app, "calc_type_dd", None)
+    if include_freq is not None and include_freq.value == "IRC":
+        _refresh_ts_seed_options(app, app._seed_dd)
+        return
     include_freq_seeds = include_freq is not None and include_freq.value == "Frequency"
     _refresh_seed_options(app, app._seed_dd, include_freq_seeds=include_freq_seeds)
+
+
+def _refresh_ts_seed_options(app: Any, dropdown: Any) -> None:
+    """IRC: list Transition State results (same formula as the molecule).
+
+    Unlike the optimization seeds, the geometry is not matched against the
+    current molecule: the transition state an IRC starts from is, by
+    construction, not the guess the user built.
+    """
+    from quantui.results_storage import list_results, load_result
+
+    mol = getattr(app, "_molecule", None)
+    formula = None
+    if mol is not None:
+        try:
+            formula = mol.get_formula()
+        except Exception:
+            formula = None
+    options = [("(use current molecule)", "")]
+    for d in list_results():
+        try:
+            data = load_result(d)
+            if data.get("calc_type") != "transition_state":
+                continue
+            if formula is not None and data.get("formula") != formula:
+                continue
+            if not (d / "trajectory.json").exists():
+                continue
+            ts_block = (data.get("spectra") or {}).get("transition_state") or {}
+            n_imag = ts_block.get("n_imaginary")
+            mark = "1 imag" if n_imag == 1 else f"{n_imag} imag — not a TS"
+            options.append(
+                (
+                    f"⛰ TS · {data['formula']}  {data['method']}/{data['basis']}, "
+                    f"{mark}  —  {data.get('timestamp', d.name[:19])}",
+                    str(d),
+                )
+            )
+        except Exception:
+            continue
+    dropdown.options = options
 
 
 def _gate_preopt_for_seed(app: Any, path_str: str) -> None:
@@ -1354,7 +1409,7 @@ def _gate_preopt_for_seed(app: Any, path_str: str) -> None:
     - A mode-displaced Frequency seed is deliberately *off* the minimum (the
       point is to step away from a saddle point), and frequencies there mean
       nothing until it is re-optimized: tick it and leave it enabled
-      (ISSUE.19 #8 — this path used to disable it).
+      (this path used to disable it).
     - No seed: enable.
     """
     from quantui.freq_calc import is_freq_mode_seed
@@ -1511,7 +1566,7 @@ def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> No
 
     if rmsd <= _PREOPT_NEGLIGIBLE_RMSD_A:
         # Nothing to show or decide — but a 0 Å result has two very different
-        # causes, and conflating them misleads (M-METAL MET.4). Either the
+        # causes, and conflating them misleads. Either the
         # bonded FF ran and the geometry was already fine (an honest no-op), or
         # the FF could not build a model at all — a metal complex, where
         # DetermineBonds raises and preoptimize() returns the input unchanged.
@@ -1677,7 +1732,7 @@ def on_compare(app: Any, btn: Any, *, layout_fn: Any) -> None:
                 )
     if not summaries:
         return
-    # λ comparison (M-REORG): screening candidates by reorganization energy is
+    # λ comparison: screening candidates by reorganization energy is
     # the workflow this calculation type exists for, and a single λ is hard to
     # judge without others beside it.
     _reorg_entries = []
@@ -1750,7 +1805,7 @@ def on_compare_clear(app: Any, btn: Any) -> None:
 
 
 def on_past_refresh(app: Any, btn: Any) -> None:
-    """Refresh History, first saving any batch jobs that finished since (B2.10)."""
+    """Refresh History, first saving any batch jobs that finished since."""
     from quantui.app_slurm import ingest_finished_jobs_on_startup
 
     ingest_finished_jobs_on_startup(app)
@@ -1773,7 +1828,12 @@ def on_copy_results_path(app: Any, btn: Any) -> None:
             f'<span style="font-size:13px;color:{_theme.css.TEXT_SLATE}">{p}</span>'
         )
 
-    threading.Thread(target=_reset, daemon=True).start()
+    try:
+        threading.Thread(target=_reset, daemon=True).start()
+    except RuntimeError:
+        # The browser viewer (Pyodide) has no threads, and sleeping inline
+        # would freeze the page: the "Copied" label just stays.
+        pass
 
 
 def on_reset_click(app: Any, btn: Any) -> None:
@@ -2354,6 +2414,7 @@ _CALC_TYPE_KEYS: Dict[str, str] = {
     "Single Point": "single_point",
     "Geometry Opt": "geometry_opt",
     "Transition State": "transition_state",
+    "IRC": "irc",
     "Frequency": "frequency",
     "UV-Vis (TD-DFT)": "tddft",
     "NMR Shielding": "nmr",
@@ -2362,17 +2423,14 @@ _CALC_TYPE_KEYS: Dict[str, str] = {
 }
 
 
-# Calculate-tab labels whose solvent box is live (B2.8: one source). The
-# batch worker's set, plus Transition State, which runs only in the app so
-# far (M-TS TS.5 adds it to SLURM).
-_APP_ONLY_SOLVENT_CALC_TYPES = frozenset({"transition_state"})
-
-
+# Calculate-tab labels whose solvent box is live (one source: the batch
+# worker's set, which includes Transition State).
 def _solvent_supported_labels() -> frozenset:
     from quantui.backends.batch_input import SOLVENT_CALC_TYPES
 
-    keys = SOLVENT_CALC_TYPES | _APP_ONLY_SOLVENT_CALC_TYPES
-    return frozenset(label for label, key in _CALC_TYPE_KEYS.items() if key in keys)
+    return frozenset(
+        label for label, key in _CALC_TYPE_KEYS.items() if key in SOLVENT_CALC_TYPES
+    )
 
 
 _SOLVENT_SUPPORTED_CALC_TYPES = _solvent_supported_labels()
@@ -2415,7 +2473,7 @@ def update_estimate(app: Any, *, calc_log_mod: Any, change: Any = None) -> None:
         except Exception:  # noqa: BLE001 — fall back to device-agnostic prediction
             _predicted_gpu_used = None
 
-        # Predict the density-fitting choice (M-DF) the same way, so the
+        # Predict the density-fitting choice the same way, so the
         # estimate is drawn from the fitted / unfitted pool the run will land
         # in. Post-HF references are never fitted (see session_calc).
         _predicted_density_fit: Optional[bool] = None
@@ -2462,7 +2520,7 @@ def checkpoint_identity(app: Any) -> Any:
         _ct = calc_type_key(app)
         extra: tuple = ()
         if _ct == "pes_scan":
-            # AUDIT F10 — calc_type="pes_scan" alone doesn't distinguish a
+            # calc_type="pes_scan" alone doesn't distinguish a
             # bond scan from an angle/dihedral scan, or which atoms it
             # scans, so two different scan configurations of the same
             # molecule/method/basis used to collide on the same
@@ -2821,7 +2879,7 @@ def refresh_results_browser(app: Any) -> None:
         app.past_dd.options = [("(no saved results)", "")]
         return
     # Build the entry cache once. Each entry keeps both the display label and
-    # the parsed facet keys so HIST.7 filtering never re-reads disk.
+    # the parsed facet keys so History filtering never re-reads disk.
     entries: list[dict[str, Any]] = []
     for d in dirs:
         try:
@@ -2834,7 +2892,7 @@ def refresh_results_browser(app: Any) -> None:
             # comes from result.json's ``calibration_run_id`` extras field
             # written by the worker.
             calib_marker = "🔧 " if data.get("calibration_run_id") else ""
-            # SLURM batch results carry job id + attempt (M-JOBDIRS JD.6).
+            # SLURM batch results carry job id + attempt.
             slurm_marker = slurm_history_marker(data)
             formula = display_formula(data.get("formula", "?"))
             method = data.get("method", "?")
