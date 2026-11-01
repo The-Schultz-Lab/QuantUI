@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # Features
 
 From molecule input to spectra and history replay &mdash; everything runs in your
@@ -5,7 +10,7 @@ local Python kernel.
 
 <div class="quantui-landing" markdown="0">
 <div class="section" style="padding-top: 0;">
-<div class="features-grid">
+<div class="features-grid features-grid--page">
 
 <div class="card">
   <div class="feature-card__icon">⚗️</div>

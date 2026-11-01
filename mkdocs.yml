@@ -77,7 +77,9 @@ markdown_extensions:
       permalink: true
 
 nav:
-  - Home: index.md
+  - Home:
+      - Overview: index.md
+      - Open the Viewer: https://the-schultz-lab.github.io/QuantUI/viewer/app/voici/render/viewer.html
   - Getting Started:
       - Installation: installation.md
       - Platform Support: platforms.md

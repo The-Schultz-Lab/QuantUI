@@ -31,6 +31,7 @@ hide:
         <div class="hero__actions">
           <a class="btn btn--primary" href="https://github.com/The-Schultz-Lab/QuantUI">View on GitHub</a>
           <a class="btn btn--outline" href="installation/">Get started</a>
+          <a class="btn btn--outline" href="viewer/app/voici/render/viewer.html">Open the Viewer</a>
         </div>
         <div class="hero__meta">
           <span class="hero__stat">Python 3.9&ndash;3.11</span>
