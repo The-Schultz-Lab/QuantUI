@@ -54,7 +54,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-14]
+        # macos-15: Apple silicon like the retired macos-14 image, so the .pkg
+        # stays arm64.
+        os: [ubuntu-latest, windows-latest, macos-15]
     defaults:
       run:
         shell: bash -el {0}
