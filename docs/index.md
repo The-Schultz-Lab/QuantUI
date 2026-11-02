@@ -18,10 +18,9 @@ hide:
         </div>
         <h1 class="hero__title">Free, open, and<br>interactive quantum chemistry</h1>
         <p class="hero__subtitle">
-          A point-and-click app for
-          <a class="hero__link" href="https://pyscf.org" target="_blank" rel="noopener">PySCF</a>:
-          run DFT through coupled cluster, then view orbitals and spectra.
-          On your laptop, a cluster or a GPU.
+          An all-in-one frontend for open-source computational chemistry
+          packages: select and visualize your system, run DFT, and analyze
+          the outputs with interactive plots
         </p>
         <div class="hero__actions">
           <a class="btn btn--primary" href="https://github.com/The-Schultz-Lab/QuantUI">View on GitHub</a>
