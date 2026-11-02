@@ -306,6 +306,7 @@ def run_irc(
 
     from .optimizer import _QuantUIPySCFCalc
     from .session_calc import HARTREE_TO_EV, resolve_solvent
+    from .ts_search import _analytic_hessian_fn
 
     if _QuantUIPySCFCalc is None:
         raise ImportError("ASE calculator support is unavailable.")
@@ -336,6 +337,10 @@ def run_irc(
         cancel_check=cancel_check,
     )
     atoms.calc = calc
+    # The path leaves the saddle along the lowest Hessian mode. Sella's own
+    # iterative estimate of that Hessian can carry a spurious mode, which
+    # sends the first step sideways and lets both directions fall into the
+    # same valley; PySCF's analytic Hessian gives the true mode.
     irc = IRC(
         atoms,
         logfile=os.devnull,
@@ -343,6 +348,7 @@ def run_irc(
         eta=_IRC_ETA,
         gamma=_IRC_GAMMA,
         ninner_iter=_IRC_INNER_ITER,
+        hessian_function=_analytic_hessian_fn(calc),
     )
     current: dict = {}
 

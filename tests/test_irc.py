@@ -286,10 +286,8 @@ def test_batch_chain_ts_then_irc(tmp_path):
 
 @pytest.mark.slow
 def test_early_inner_loop_failure_still_reaches_both_minima(monkeypatch):
-    # In CI Sella's inner loop failed one step from the saddle, and the
-    # BFGS that finished the direction jumped back across the ridge: both
-    # ends were HNC. Force that failure; descent steps must keep each
-    # direction on its own side.
+    # Sella's inner loop failing one step from the saddle: the direction is
+    # finished by descent and must stay on its own side.
     pytest.importorskip("sella")
     pytest.importorskip("pyscf")
     import numpy as np
@@ -322,4 +320,28 @@ def test_early_inner_loop_failure_still_reaches_both_minima(monkeypatch):
         return "C" if np.linalg.norm(x[2] - x[0]) < np.linalg.norm(x[2] - x[1]) else "N"
 
     assert {h_on(r.trajectory[0]), h_on(r.trajectory[-1])} == {"C", "N"}
+    assert r.verdict.startswith("The transition state connects two minima")
+
+
+@pytest.mark.slow
+def test_slightly_off_saddle_start_still_reaches_both_minima():
+    # A transition state is only converged to a force threshold, and CI's
+    # numerics put it slightly elsewhere than a laptop's. From such a start
+    # Sella's own Hessian estimate had a spurious mode: the first step went
+    # sideways and both directions ended at HCN (CI on Python 3.9 and 3.11).
+    pytest.importorskip("sella")
+    pytest.importorskip("pyscf")
+    import numpy as np
+
+    from quantui.irc import run_irc
+    from quantui.ts_search import run_ts_search
+
+    guess = Molecule(ATOMS, [[0, 0, 0], [0, 0, 1.18], [1.05, 0, 0.55]])
+    ts = run_ts_search(guess, "RHF", "STO-3G", progress_stream=io.StringIO())
+    rng = np.random.default_rng(3)
+    start = Molecule(
+        ATOMS,
+        (np.asarray(ts.molecule.coordinates) + rng.normal(0, 0.003, (3, 3))).tolist(),
+    )
+    r = run_irc(start, "RHF", "STO-3G", progress_stream=io.StringIO())
     assert r.verdict.startswith("The transition state connects two minima")

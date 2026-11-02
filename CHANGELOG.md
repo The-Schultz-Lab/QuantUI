@@ -14,12 +14,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
-- **IRC no longer ends both directions in the same minimum** when Sella's
-  inner loop fails close to the saddle point: the direction is finished
-  with mass-weighted steepest-descent steps (which stay on their side of
-  the ridge) before a short-step BFGS, instead of BFGS straight away,
-  whose first steps could jump back across. If both ends still match, the
-  verdict says so rather than reporting a connection.
+- **IRC no longer ends both directions in the same minimum.** Sella's
+  iterative estimate of the starting Hessian could carry a spurious mode,
+  so from a transition state converged only to the force threshold the
+  first step went sideways and both directions fell into one valley. The
+  IRC now starts from PySCF's analytic Hessian, as the transition-state
+  search already does. If Sella's inner loop fails, the direction is
+  finished by mass-weighted steepest descent before a short-step BFGS;
+  if both ends still match, the verdict says so rather than reporting a
+  connection.
 - Viewer installer builds use the `macos-15` runner (`macos-14` is retired).
 
 ## [0.11.0] - 2026-11-01
