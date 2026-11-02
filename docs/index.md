@@ -12,25 +12,20 @@ hide:
       <div class="hero__text">
         <div class="hero__eyebrow">
           <a class="pill" href="https://pypi.org/project/quantui/" target="_blank" rel="noopener">pip install quantui</a>
-          <span class="pill">Open-source PySCF + PyFock frontend</span>
           <span class="pill pill--teal">No cluster required</span>
           <span class="pill pill--teal">Runs offline</span>
           <span class="pill pill--teal">GPU-ready</span>
         </div>
         <h1 class="hero__title">Free, open, and<br>interactive quantum chemistry</h1>
         <p class="hero__subtitle">
-          QuantUI puts <a class="hero__link" href="https://pyscf.org" target="_blank" rel="noopener">PySCF</a>
-          and a guarded native-Windows <a class="hero__link" href="https://github.com/manassharma07/PyFock" target="_blank" rel="noopener">PyFock</a> subset
-          behind an interactive Jupyter/Voil&agrave; UI. Run DFT, MP2, CCSD,
-          CCSD(T), TD-DFT, NMR, geometry optimization, transition-state
-          searches, frequencies, and PES scans &mdash; visualize structures,
-          orbitals, densities, IR and UV-Vis
-          spectra, all on your laptop with optional NVIDIA GPU offload via
-          <a class="hero__link" href="https://github.com/pyscf/gpu4pyscf" target="_blank" rel="noopener">gpu4pyscf</a>.
+          An all-in-one frontend for open-source computational chemistry
+          packages: select and visualize your system, run DFT, and analyze
+          the outputs with interactive plots
         </p>
         <div class="hero__actions">
           <a class="btn btn--primary" href="https://github.com/The-Schultz-Lab/QuantUI">View on GitHub</a>
           <a class="btn btn--outline" href="installation/">Get started</a>
+          <a class="btn btn--outline" href="viewer/app/voici/render/viewer.html">Open the Viewer</a>
         </div>
         <div class="hero__meta">
           <span class="hero__stat">Python 3.9&ndash;3.11</span>
@@ -75,37 +70,35 @@ hide:
   <div class="container">
     <h2 class="section__title">See it in action</h2>
     <p class="section__subtitle">
-      Real QuantUI output &mdash; a molecular orbital, an orbital energy-level
-      diagram, an IR spectrum, and a geometry optimization. The two panels marked
-      <em>Interactive</em> are live: drag to rotate, press play.
+      Real QuantUI output. <em>Interactive</em> panels are live: drag to rotate, press play.
     </p>
     <div class="gallery-grid">
       <figure class="gallery-figure">
         <img src="images/cisplatin_lumo.png" alt="Cisplatin LUMO isosurface" loading="lazy">
         <figcaption>
           <strong>Cisplatin LUMO</strong>
-          <span>Molecular-orbital isosurface, B3LYP / LANL2DZ (ECP on Pt and Cl).</span>
+          <span>B3LYP / LANL2DZ.</span>
         </figcaption>
       </figure>
       <figure class="gallery-figure">
         <img src="images/aspartame_orbital_diagram.png" alt="Aspartame orbital energy-level diagram" loading="lazy">
         <figcaption>
           <strong>Aspartame orbital energies</strong>
-          <span>Occupied/virtual energy levels, HOMO&ndash;LUMO gap 6.09 eV (B3LYP / 6-31G*).</span>
+          <span>HOMO&ndash;LUMO gap 6.09 eV, B3LYP / 6-31G*.</span>
         </figcaption>
       </figure>
       <figure class="gallery-figure">
         <img src="images/benzene_ir_spectrum.png" alt="Benzene IR spectrum" loading="lazy">
         <figcaption>
           <strong>Benzene IR spectrum</strong>
-          <span>Analytical Hessian, &omega;B97X-D / 6-31G &mdash; the four IR-active bands.</span>
+          <span>&omega;B97X-D / 6-31G.</span>
         </figcaption>
       </figure>
       <figure class="gallery-figure">
         <img src="images/cisplatin_optimization.png" alt="Cisplatin geometry-optimization energy convergence" loading="lazy">
         <figcaption>
           <strong>Geometry optimization</strong>
-          <span>Cisplatin relaxing over 21 BFGS steps, B3LYP / LANL2DZ.</span>
+          <span>Cisplatin, 21 steps, B3LYP / LANL2DZ.</span>
         </figcaption>
       </figure>
       <figure class="gallery-figure">
@@ -113,7 +106,7 @@ hide:
         <figcaption>
           <span class="gallery-badge">Interactive</span>
           <strong>Optimization trajectory</strong>
-          <span>Cisplatin relaxing step by step &mdash; press play, drag to rotate.
+          <span>Cisplatin, step by step.
             <a href="examples/cisplatin_trajectory.html" target="_blank" rel="noopener">Open full &nearr;</a></span>
         </figcaption>
       </figure>
@@ -122,7 +115,7 @@ hide:
         <figcaption>
           <span class="gallery-badge">Interactive</span>
           <strong>Vibrational mode</strong>
-          <span>A benzene normal mode animated in 3D.
+          <span>A benzene normal mode.
             <a href="examples/benzene_vib_mode.html" target="_blank" rel="noopener">Open full &nearr;</a></span>
         </figcaption>
       </figure>
@@ -137,8 +130,7 @@ hide:
   <div class="container--narrow">
     <h2 class="quickstart__title">Ready to run your first calculation?</h2>
     <p class="quickstart__text">
-      Install with conda or pip, then launch the notebook in JupyterLab or Voil&agrave;.
-      Five step-by-step tutorials walk you through water, basis sets, radicals, ions, and comparisons.
+      Install with pip, launch the app, then try the five tutorials.
     </p>
     <a class="btn btn--primary" href="installation/">Installation guide &rarr;</a>
   </div>

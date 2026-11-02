@@ -64,6 +64,11 @@ class TestResult:
         assert "forward path was completed by minimizing" in r.verdict
         assert r.verdict.startswith("Not every direction reached a minimum")
 
+    def test_same_minimum_at_both_ends_is_not_called_a_connection(self):
+        r = _fake()
+        r.forward.trajectory[-1] = r.reverse.trajectory[-1]
+        assert r.verdict.startswith("Both directions ended at the same minimum")
+
     def test_post_hf_is_refused(self):
         from quantui.irc import run_irc
 
@@ -277,3 +282,66 @@ def test_batch_chain_ts_then_irc(tmp_path):
     assert dists(start) == pytest.approx(
         dists(ts["final_molecule"]["coords"]), abs=1e-3
     )
+
+
+@pytest.mark.slow
+def test_early_inner_loop_failure_still_reaches_both_minima(monkeypatch):
+    # Sella's inner loop failing one step from the saddle: the direction is
+    # finished by descent and must stay on its own side.
+    pytest.importorskip("sella")
+    pytest.importorskip("pyscf")
+    import numpy as np
+    from sella.optimize import irc as sella_irc
+
+    from quantui.irc import run_irc
+    from quantui.ts_search import run_ts_search
+
+    step, run = sella_irc.IRC.step, sella_irc.IRC.run
+
+    def failing_step(self):
+        self._n_steps = getattr(self, "_n_steps", 0) + 1
+        if self._n_steps > 1:
+            raise sella_irc.IRCInnerLoopConvergenceFailure
+        return step(self)
+
+    def counted_run(self, *a, **kw):
+        self._n_steps = 0
+        return run(self, *a, **kw)
+
+    monkeypatch.setattr(sella_irc.IRC, "step", failing_step)
+    monkeypatch.setattr(sella_irc.IRC, "run", counted_run)
+    guess = Molecule(ATOMS, [[0, 0, 0], [0, 0, 1.18], [1.05, 0, 0.55]])
+    ts = run_ts_search(guess, "RHF", "STO-3G", progress_stream=io.StringIO())
+    r = run_irc(ts.molecule, "RHF", "STO-3G", progress_stream=io.StringIO())
+    assert r.forward.irc_steps == 1 and r.reverse.irc_steps == 1
+
+    def h_on(frame):
+        x = np.asarray(frame.coordinates)
+        return "C" if np.linalg.norm(x[2] - x[0]) < np.linalg.norm(x[2] - x[1]) else "N"
+
+    assert {h_on(r.trajectory[0]), h_on(r.trajectory[-1])} == {"C", "N"}
+    assert r.verdict.startswith("The transition state connects two minima")
+
+
+@pytest.mark.slow
+def test_slightly_off_saddle_start_still_reaches_both_minima():
+    # A transition state is only converged to a force threshold, and CI's
+    # numerics put it slightly elsewhere than a laptop's. From such a start
+    # Sella's own Hessian estimate had a spurious mode: the first step went
+    # sideways and both directions ended at HCN (CI on Python 3.9 and 3.11).
+    pytest.importorskip("sella")
+    pytest.importorskip("pyscf")
+    import numpy as np
+
+    from quantui.irc import run_irc
+    from quantui.ts_search import run_ts_search
+
+    guess = Molecule(ATOMS, [[0, 0, 0], [0, 0, 1.18], [1.05, 0, 0.55]])
+    ts = run_ts_search(guess, "RHF", "STO-3G", progress_stream=io.StringIO())
+    rng = np.random.default_rng(3)
+    start = Molecule(
+        ATOMS,
+        (np.asarray(ts.molecule.coordinates) + rng.normal(0, 0.003, (3, 3))).tolist(),
+    )
+    r = run_irc(start, "RHF", "STO-3G", progress_stream=io.StringIO())
+    assert r.verdict.startswith("The transition state connects two minima")

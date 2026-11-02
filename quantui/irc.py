@@ -156,6 +156,13 @@ class IRCResult:
     def verdict(self) -> str:
         b_rev, b_fwd = self.barriers_kj()
         lower = [b > _DESCENT_KJ for b in (b_rev, b_fwd)]
+        ends = (self.reverse.trajectory[-1:], self.forward.trajectory[-1:])
+        if all(lower) and all(ends) and _same_structure(ends[0][0], ends[1][0]):
+            return (
+                "Both directions ended at the same minimum, so this path does "
+                "not show what the transition state connects. Run the IRC "
+                "again, or check the imaginary mode in a Frequency run."
+            )
         if not all(lower):
             return (
                 "The path did not go downhill on both sides, so the start "
@@ -208,6 +215,54 @@ class IRCResult:
         }
 
 
+def _steepest_descent(
+    atoms: Any,
+    record: Callable[[], None],
+    *,
+    fmax: float,
+    ds: float = 0.15,
+    max_steps: int = 40,
+) -> bool:
+    """Mass-weighted steepest descent from *atoms*' current geometry.
+
+    Steps of *ds* Å·amu½ straight down the mass-weighted gradient, halved
+    whenever the energy would rise; *record* is called after every accepted
+    step. Returns True if the forces fell below *fmax*.
+    """
+    import numpy as np
+
+    sqrt_m = np.sqrt(atoms.get_masses())[:, None]
+    energy = atoms.get_potential_energy()
+    for _ in range(max_steps):
+        forces = atoms.get_forces()
+        if float(np.sqrt((forces**2).sum(axis=1)).max()) < fmax:
+            return True
+        grad = -forces / sqrt_m
+        start = atoms.get_positions().copy()
+        atoms.set_positions(start - ds * (grad / np.linalg.norm(grad)) / sqrt_m)
+        new = atoms.get_potential_energy()
+        if new > energy:  # past the valley floor along this line
+            atoms.set_positions(start)
+            ds *= 0.5
+            if ds < 0.01:
+                break
+            continue
+        energy = new
+        record()
+    return False
+
+
+def _same_structure(a: Molecule, b: Molecule, tol: float = 0.05) -> bool:
+    """True when *a* and *b* have the same interatomic distances (within *tol* Å)."""
+    import numpy as np
+
+    def dists(m: Molecule) -> Any:
+        x = np.asarray(m.coordinates, dtype=float)
+        return np.linalg.norm(x[:, None] - x[None], axis=-1)
+
+    return bool(np.abs(dists(a) - dists(b)).max() < tol)
+
+
 def run_irc(
     molecule: Molecule,
     method: str = "RHF",
@@ -251,6 +306,7 @@ def run_irc(
 
     from .optimizer import _QuantUIPySCFCalc
     from .session_calc import HARTREE_TO_EV, resolve_solvent
+    from .ts_search import _analytic_hessian_fn
 
     if _QuantUIPySCFCalc is None:
         raise ImportError("ASE calculator support is unavailable.")
@@ -281,6 +337,10 @@ def run_irc(
         cancel_check=cancel_check,
     )
     atoms.calc = calc
+    # The path leaves the saddle along the lowest Hessian mode. Sella's own
+    # iterative estimate of that Hessian can carry a spurious mode, which
+    # sends the first step sideways and lets both directions fall into the
+    # same valley; PySCF's analytic Hessian gives the true mode.
     irc = IRC(
         atoms,
         logfile=os.devnull,
@@ -288,6 +348,7 @@ def run_irc(
         eta=_IRC_ETA,
         gamma=_IRC_GAMMA,
         ninner_iter=_IRC_INNER_ITER,
+        hessian_function=_analytic_hessian_fn(calc),
     )
     current: dict = {}
 
@@ -325,11 +386,17 @@ def run_irc(
             irc_steps = max(len(current["energies"]) - 1, 0)
             stream.write(
                 f"  Sella's IRC step did not converge after {irc_steps} steps; "
-                "finishing this direction by minimizing from here.\n"
+                "finishing this direction by descending from here.\n"
             )
-            opt = BFGS(atoms, logfile=io.StringIO())
-            opt.attach(_record, interval=1)
-            converged = bool(opt.run(fmax=fmax, steps=steps))
+            # Steepest descent first: near the saddle a quasi-Newton step
+            # can jump the ridge into the other valley (both directions then
+            # end at the same minimum); descent steps only go downhill on
+            # this side. BFGS with short steps finishes from the valley.
+            converged = _steepest_descent(atoms, _record, fmax=fmax)
+            if not converged:
+                opt = BFGS(atoms, logfile=io.StringIO(), maxstep=0.05)
+                opt.attach(_record, interval=1)
+                converged = bool(opt.run(fmax=fmax, steps=steps))
             # The minimization's first observer call repeats the last point.
             if len(current["frames"]) > irc_steps + 1:
                 del current["frames"][irc_steps + 1]
