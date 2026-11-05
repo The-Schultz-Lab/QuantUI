@@ -80,9 +80,10 @@ class TestSurfaceCubes:
         pytest.importorskip("pyscf")
 
     def test_density_cube_integrates_to_the_electron_count(self, tmp_path):
-        from pyscf.tools import cubegen
-
-        from quantui.orbital_visualization import generate_surface_cubes
+        from quantui.orbital_visualization import (
+            generate_surface_cubes,
+            parse_cube_file,
+        )
 
         atoms, mf = _water_scf()
         out = generate_surface_cubes(
@@ -96,9 +97,12 @@ class TestSurfaceCubes:
             ny=60,
             nz=60,
         )
-        cube = cubegen.Cube(mf.mol, 60, 60, 60, margin=5.0)
-        rho = cube.read(str(out["cube"]))
-        n_elec = float(rho.sum()) * abs(np.linalg.det(cube.box)) / cube.get_ngrids()
+        # Voxel volume from the file's own axis vectors, as the spin test
+        # does: PySCF 2.15 changed cubegen.Cube.box to span first-to-last
+        # grid point, so det(box) / ngrids is no longer one voxel.
+        cube = parse_cube_file(out["cube"])
+        voxel = abs(float(np.linalg.det(np.asarray(cube["axes"], dtype=float))))
+        n_elec = float(np.asarray(cube["data"]).sum()) * voxel
         assert n_elec == pytest.approx(10.0, rel=0.03)
         assert "electron density" in out["cube"].read_text().splitlines()[0]
         assert out["esp_cube"] is None

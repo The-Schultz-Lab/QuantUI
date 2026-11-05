@@ -44,6 +44,29 @@ _QUEUE_STATES = {
     "SUSPENDED": "running",
 }
 
+#: Finished SLURM states (``sacct``) that leave no result: the view's state
+#: and what to say. ``{name}`` is the job folder's name. COMPLETED is not
+#: here: a job that completed with a result.json is done before this is read,
+#: and one that completed without one is handled on its own.
+_ENDED_QUEUE_STATES = {
+    "CANCELLED": ("cancelled", "cancelled"),
+    "TIMEOUT": (
+        "failed",
+        "hit its time limit; rerun with more time "
+        "(quantui-batch rerun {name} --more-time)",
+    ),
+    "OUT_OF_MEMORY": (
+        "failed",
+        "ran out of memory; rerun with more memory "
+        "(quantui-batch rerun {name} --more-memory)",
+    ),
+    "FAILED": ("failed", "the job failed; see live.log (quantui-batch log {name})"),
+    "NODE_FAIL": ("failed", "the node failed; rerun it"),
+    "BOOT_FAIL": ("failed", "the node failed to start; rerun it"),
+    "PREEMPTED": ("failed", "preempted by another job; rerun it"),
+    "DEADLINE": ("failed", "reached its deadline; rerun it"),
+}
+
 
 @dataclass
 class JobView:
@@ -54,7 +77,7 @@ class JobView:
     calc_type: str
     method: str
     basis: str
-    state: str  # prepared | waiting | running | done | failed
+    state: str  # prepared | waiting | running | done | failed | cancelled
     detail: str
     percent: Optional[float] = None
     job_id: Optional[str] = None
@@ -127,8 +150,11 @@ def job_view(
 ) -> JobView:
     """Describe *record*'s newest submission.
 
-    *queue* maps SLURM job ids to their ``squeue`` state, when the caller
-    can see the queue; without it the state is read from the job folder.
+    *queue* maps SLURM job ids to their state from ``squeue`` (or ``sacct``
+    once they have left the queue), when the caller can see the queue;
+    without it the state is read from the job folder. A finished state with
+    no result (cancelled, out of time or memory) wins over a ``progress.json``
+    the killed worker left behind.
     """
     now = time.time() if now is None else now
     req = record.request_obj
@@ -161,7 +187,19 @@ def job_view(
 
     queued = (queue or {}).get(job_id or "")
     if queued is not None:
-        view.state = _QUEUE_STATES.get(queued.upper(), "running")
+        # sacct can append detail, e.g. "CANCELLED by 1234".
+        slurm_state = (queued.split() or [""])[0].upper()
+        ended = _ENDED_QUEUE_STATES.get(slurm_state)
+        if ended is not None:
+            view.state, view.detail = ended[0], ended[1].format(name=name)
+            return view
+        if slurm_state == "COMPLETED":
+            view.state = "failed"
+            view.detail = (
+                f"finished without a result; see live.log (quantui-batch log {name})"
+            )
+            return view
+        view.state = _QUEUE_STATES.get(slurm_state, "running")
         if view.state == "waiting":
             view.detail = f"in the queue ({queued.upper()})"
             return view

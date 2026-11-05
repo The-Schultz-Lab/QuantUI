@@ -7,6 +7,21 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+
+- **`quantui-batch` and `quantui submit` refuse a method QuantUI does not
+  support** instead of warning and queueing it. The worker fails any method
+  outside the supported list, so `--method HF` (or a typo) used to wait in
+  the queue and then fail; it is now refused before `sbatch`, with a hint
+  that Hartree-Fock is RHF or UHF. Accepted names are normalised to their
+  usual spelling (`cam-b3lyp` becomes `CAM-B3LYP`).
+- **`quantui jobs` no longer shows a cancelled, timed-out or out-of-memory
+  job as running.** A killed worker leaves its last `progress.json` behind,
+  and any Slurm state other than the queued/running ones read as "running".
+  Finished states from `sacct` now win: cancelled, or failed with the fix
+  (`--more-time`, `--more-memory`, the log); a job that completed without a
+  result is failed.
+
 ## [0.11.1] - 2026-11-02
 
 ### Changed

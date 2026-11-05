@@ -24,8 +24,10 @@ from pathlib import Path
 import pytest
 
 from quantui import cli
+from quantui.backends.base import CalculationRequest
 from quantui.backends.batch_input import (
     BatchInputError,
+    check_method,
     load_request,
     parse_option_pairs,
     request_from_xyz,
@@ -141,16 +143,35 @@ class TestRequestFromXyz:
                 bad, calc_type="single_point", method="RHF", basis="STO-3G"
             )
 
-    def test_warns_on_unknown_method_and_useless_preopt(self, water):
+    def test_warns_on_useless_preopt(self, water):
         _, warnings = request_from_xyz(
             water,
             calc_type="geometry_opt",
-            method="B3LPY",
+            method="B3LYP",
             basis="STO-3G",
             preopt=True,
         )
-        assert any("B3LPY" in w for w in warnings)
         assert any("--preopt has no effect" in w for w in warnings)
+
+    def test_refuses_a_method_the_worker_cannot_run(self, water, tmp_path):
+        # The worker fails any method outside SUPPORTED_METHODS, so it is
+        # refused before it waits in the queue (it used to be a warning).
+        with pytest.raises(BatchInputError, match="unknown method 'B3LPY'"):
+            load_request(water, calc_type="single_point", method="B3LPY")
+        with pytest.raises(BatchInputError, match="RHF for closed shells"):
+            load_request(water, calc_type="single_point", method="HF")
+        req, _ = request_from_xyz(
+            water, calc_type="single_point", method="RHF", basis="STO-3G"
+        )
+        req.method = "hf"
+        as_json = tmp_path / "req.json"
+        as_json.write_text(json.dumps(req.to_dict()))
+        with pytest.raises(BatchInputError, match="unknown method 'hf'"):
+            load_request(as_json)
+
+    def test_method_spelling_is_normalised(self, water):
+        req, _ = load_request(water, calc_type="single_point", method=" wb97x-d ")
+        assert req.method == "wB97X-D"
 
     def test_single_point_and_nmr_take_preopt(self, water):
         # The worker pre-optimizes these too since ISSUE.19 #3.
@@ -640,6 +661,34 @@ class TestLauncherMatchesQuantUI:
         assert ours["request_id"].split("-")[0] == theirs["request_id"].split("-")[0]
         ours.pop("request_id"), theirs.pop("request_id")
         assert ours == theirs
+
+    @pytest.mark.parametrize(
+        "method, refusal",
+        [
+            ("HF", "RHF for closed shells"),
+            ("B3LPY", "unknown method 'B3LPY'"),
+        ],
+    )
+    def test_refuses_a_method_the_worker_cannot_run(
+        self, launcher, water, method, refusal
+    ):
+        # Same rule as batch_input.check_method: refused before sbatch.
+        args = _args(launcher, [str(water), "--calc", "single_point"])
+        req, warnings = launcher.build_request(water, args, {})
+        assert warnings == []
+        req["method"] = method
+        with pytest.raises(launcher.InputError, match=refusal):
+            launcher.check_method(req)
+        theirs = CalculationRequest.from_dict(dict(req))
+        with pytest.raises(BatchInputError, match=refusal):
+            check_method(theirs)
+
+    def test_method_spelling_is_normalised(self, launcher, water):
+        args = _args(launcher, [str(water), "--calc", "geometry_opt"])
+        req, _ = launcher.build_request(water, args, {})
+        req["method"] = "cam-b3lyp"
+        launcher.check_method(req)
+        assert req["method"] == "CAM-B3LYP"
 
     @pytest.mark.parametrize(
         "basis", ["def2-SVP", "6-31G*", "6-31G(d,p)", "6-31+G**", "6-311++G(2df,2p)"]

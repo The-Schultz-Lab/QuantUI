@@ -116,6 +116,35 @@ class TestJobView:
         (attempt / "result.json").write_text("{}")
         assert job_view(record).state == "done"
 
+    @pytest.mark.parametrize(
+        "slurm_state, state, says",
+        [
+            ("CANCELLED by 1234", "cancelled", "cancelled"),
+            ("TIMEOUT", "failed", "--more-time"),
+            ("OUT_OF_MEMORY", "failed", "--more-memory"),
+            ("FAILED", "failed", "quantui-batch log water_opt"),
+            ("NODE_FAIL", "failed", "rerun it"),
+            ("COMPLETED", "failed", "without a result"),
+        ],
+    )
+    def test_a_finished_job_is_not_running(self, roots, slurm_state, state, says):
+        # A killed worker leaves its last progress.json behind; once sacct
+        # reports the job finished, that progress must not read as running.
+        job, record = _terminal_job(roots)
+        _submit(job, "1001")
+        _progress(job / "attempt-01_job1001")
+        view = job_view(record, queue={"1001": slurm_state})
+        assert view.state == state and not view.unfinished
+        assert says in view.detail
+
+    def test_a_result_wins_over_the_queue_state(self, roots):
+        job, record = _terminal_job(roots)
+        _submit(job, "1001")
+        attempt = job / "attempt-01_job1001"
+        _progress(attempt)
+        (attempt / "result.json").write_text("{}")
+        assert job_view(record, queue={"1001": "COMPLETED"}).state == "done"
+
     def test_hand_run_sbatch_without_a_job_log(self, roots):
         # quantui submit --prepare-only, then sbatch by hand: no job log.
         job, record = _terminal_job(roots)

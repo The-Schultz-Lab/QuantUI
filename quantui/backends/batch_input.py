@@ -153,14 +153,6 @@ def request_from_xyz(
         )
 
     warnings: List[str] = []
-    from quantui import config
-
-    known_methods = {m.upper() for m in config.SUPPORTED_METHODS}
-    if method.upper() not in known_methods:
-        warnings.append(
-            f"method {method!r} is not in QuantUI's method list; PySCF may still "
-            "accept it, but check the spelling."
-        )
 
     opts = dict(options or {})
     if preopt:
@@ -217,12 +209,32 @@ def check_solvent(request: CalculationRequest) -> None:
 
 
 def check_method(request: CalculationRequest) -> None:
-    """Refuse a method the calc type cannot use (post-HF for a TS search)."""
-    if request.calc_type not in GRADIENT_CALC_TYPES:
-        return
+    """Normalise the method's spelling, or refuse one the worker cannot run.
+
+    The worker fails any method outside ``config.SUPPORTED_METHODS``
+    (``session_calc``, ``calculator``), so an unknown one ("HF", a typo) is
+    refused here, before it waits in the queue; so is a post-HF method for a
+    gradient-driven calc type (a TS search or IRC).
+    """
     from quantui import config
 
-    if request.method.strip().upper() in config.POST_HF_METHODS:
+    names = {m.upper(): m for m in config.SUPPORTED_METHODS}
+    given = request.method.strip()
+    canonical = names.get(given.upper())
+    if canonical is None:
+        hint = (
+            " (Hartree-Fock is RHF for closed shells, UHF for open shells)"
+            if given.upper() == "HF"
+            else ""
+        )
+        raise BatchInputError(
+            f"unknown method {given!r}{hint}; choose one of "
+            f"{', '.join(config.SUPPORTED_METHODS)}."
+        )
+    request.method = canonical
+    if request.calc_type not in GRADIENT_CALC_TYPES:
+        return
+    if canonical.upper() in config.POST_HF_METHODS:
         raise BatchInputError(
             f"{request.method} has no analytic gradients here, so it cannot drive "
             f"a {request.calc_type} job; use RHF/UHF or a DFT functional."
