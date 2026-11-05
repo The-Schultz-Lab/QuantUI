@@ -368,9 +368,10 @@ quantui submit water.xyz --calc geometry_opt --prepare-only
 Useful flags: `--charge`, `--mult`, `--solvent`, `--preopt`,
 `--option KEY=VALUE` (repeatable), `--cores`, `--memory-gb`, `--walltime`,
 `--email`, `--job-name`, `--partition`. `quantui submit --help` lists them all.
-An impossible charge/multiplicity, an unknown solvent, or a solvent on a calc
-type the batch worker runs gas-phase only (NMR, PES scan) is refused before
-anything is queued.
+An impossible charge/multiplicity, a method QuantUI does not support (e.g.
+`HF`: use `RHF` or `UHF`), an unknown solvent, or a solvent on a calc type the
+batch worker runs gas-phase only (NMR, PES scan) is refused before anything is
+queued.
 
 ---
 

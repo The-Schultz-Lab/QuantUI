@@ -355,11 +355,6 @@ def build_request(path, args, extra_options):
                 f"charge {charge} and multiplicity {mult} do not fit this "
                 f"molecule: {problem}"
             )
-        if method.upper() not in {m.upper() for m in SITE["supported_methods"]}:
-            warnings.append(
-                f"method {method!r} is not in QuantUI's method list; PySCF may "
-                "still accept it, but check the spelling."
-            )
         options = dict(extra_options)
         if args.preopt:
             if args.calc in SITE["preopt_calc_types"]:
@@ -1088,10 +1083,29 @@ def chained_request(source_dir, source, args, extra_options):
 
 
 def check_method(request):
-    """Refuse a method the calc type cannot use (port of batch_input)."""
+    """Normalise the method's spelling, or refuse one the worker cannot run.
+
+    Port of batch_input.check_method: an unknown method ("HF", a typo) would
+    fail in the worker after waiting in the queue, so it is refused here, as
+    is a post-HF method for a gradient-driven calc type.
+    """
+    names = {m.upper(): m for m in SITE["supported_methods"]}
+    given = request["method"].strip()
+    canonical = names.get(given.upper())
+    if canonical is None:
+        hint = (
+            " (Hartree-Fock is RHF for closed shells, UHF for open shells)"
+            if given.upper() == "HF"
+            else ""
+        )
+        raise InputError(
+            f"unknown method {given!r}{hint}; choose one of "
+            f"{', '.join(SITE['supported_methods'])}"
+        )
+    request["method"] = canonical
     if request["calc_type"] not in SITE["gradient_calc_types"]:
         return
-    if request["method"].strip().upper() in SITE["post_hf_methods"]:
+    if canonical.upper() in SITE["post_hf_methods"]:
         raise InputError(
             f"{request['method']} has no analytic gradients here, so it cannot "
             f"drive a {request['calc_type']} job; use RHF/UHF or a DFT functional"

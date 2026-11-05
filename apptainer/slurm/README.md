@@ -61,7 +61,8 @@ unfinished ones.
 - Inputs are `.xyz` files (`--calc` required unless a preset sets it;
   `--method`, `--basis`, `--charge`, `--mult`, `--solvent`, `--preopt`,
   `--option KEY=VALUE`) or request JSON. A charge/multiplicity that cannot
-  fit the electron count, an unknown solvent, or a solvent on a calc type the
+  fit the electron count, a method QuantUI does not support (`HF`: use `RHF`
+  or `UHF`), an unknown solvent, or a solvent on a calc type the
   batch worker runs gas-phase only (`nmr`, `pes_scan`) is refused
   before anything is queued, as is a post-HF method for `transition_state`
   (no analytic gradients).
