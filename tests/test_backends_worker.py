@@ -730,6 +730,108 @@ class TestCheckpointWiring:
             encoding="utf-8"
         )
 
+    # ── reorganization_energy ──────────────────────────────────────────────
+    # The library has taken checkpoint/resume since CHK.7 (PR #55), but the
+    # batch worker never passed them, so a TIMEOUT threw away all 2-3
+    # optimizations. The whole-run checkpoint holds nothing itself; progress
+    # lives in nested per-leg checkpoints (Checkpoint.sub).
+
+    @staticmethod
+    def _reorg_result():
+        from quantui.molecule import Molecule
+        from quantui.reorganization_energy import ReorganizationEnergyResult
+
+        mol = Molecule(
+            atoms=["H", "H"],
+            coordinates=[[0, 0, 0], [0, 0, 0.74]],
+            charge=0,
+            multiplicity=1,
+        )
+        return ReorganizationEnergyResult(
+            formula="H2",
+            method="RHF",
+            basis="STO-3G",
+            mode="both",
+            molecule=mol,
+            neutral_charge=0,
+            neutral_multiplicity=1,
+            neutral_energy_hartree=-1.12,
+            channels=[],
+        )
+
+    @staticmethod
+    def _set_reorg_request(staging, mode: str = "both") -> None:
+        data = json.loads((staging / "request.json").read_text())
+        data["calc_type"] = "reorganization_energy"
+        data["options"] = {"mode": mode}
+        (staging / "request.json").write_text(json.dumps(data))
+
+    def _reorg_ckpt_with_leg_progress(self, staging, *, mode: str):
+        """A prior attempt killed mid-way through its neutral leg."""
+        from quantui.checkpoint import Checkpoint
+
+        ckpt = Checkpoint(
+            self._identity(
+                calc_type="reorganization_energy",
+                extra=(f"mode={mode}", "solvent="),
+            ),
+            root=staging / ".checkpoint",
+        )
+        ckpt.begin()
+        leg = ckpt.sub(
+            "neutral_opt",
+            charge=0,
+            multiplicity=1,
+            coords=[[0, 0, 0], [0, 0, 0.74]],
+        )
+        leg.begin()
+        leg.trajectory_path.write_text("dummy trajectory data")
+        return ckpt
+
+    @patch("quantui.reorganization_energy.run_reorganization_energy")
+    def test_reorg_first_attempt_gets_a_fresh_checkpoint(self, mock_reorg, staging):
+        from quantui.checkpoint import Checkpoint
+
+        mock_reorg.return_value = self._reorg_result()
+        self._set_reorg_request(staging)
+
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "success"
+        _args, kwargs = mock_reorg.call_args
+        assert kwargs["resume"] is False
+        assert isinstance(kwargs["checkpoint"], Checkpoint)
+        assert kwargs["mode"] == "both"
+        assert (staging / ".checkpoint").is_dir()
+
+    @patch("quantui.reorganization_energy.run_reorganization_energy")
+    def test_reorg_resumes_when_a_prior_attempt_left_leg_progress(
+        self, mock_reorg, staging
+    ):
+        self._reorg_ckpt_with_leg_progress(staging, mode="both")
+        mock_reorg.return_value = self._reorg_result()
+        self._set_reorg_request(staging, mode="both")
+
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "success"
+        _args, kwargs = mock_reorg.call_args
+        assert kwargs["resume"] is True
+        assert "Resuming reorganization energy" in (staging / "live.log").read_text(
+            encoding="utf-8"
+        )
+
+    @patch("quantui.reorganization_energy.run_reorganization_energy")
+    def test_reorg_does_not_resume_a_different_mode(self, mock_reorg, staging):
+        """Mode is part of the identity: a "hole" run's legs are not this
+        "both" run's checkpoint."""
+        self._reorg_ckpt_with_leg_progress(staging, mode="hole")
+        mock_reorg.return_value = self._reorg_result()
+        self._set_reorg_request(staging, mode="both")
+
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "success"
+        _args, kwargs = mock_reorg.call_args
+        assert kwargs["resume"] is False
+
 
 class TestCheckpointsOutliveAttempts:
     """Since M-JOBDIRS each run writes into its own attempt folder; the
