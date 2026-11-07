@@ -15,8 +15,8 @@ Everything runs in your local Python kernel.
   <div class="feature-card__icon">⚗️</div>
   <div class="feature-card__title">Molecule Input</div>
   <p class="feature-card__body">
-    Paste XYZ, pick from ~1,900 bundled molecules, search by name, SMILES or CAS
-    (works offline), or upload a file. Edit bonds, angles and atoms in place.
+    Paste XYZ, pick from ~2,100 bundled molecules, search by name, SMILES or CAS
+    (SMILES and bundled names work offline), or upload a file. Edit bonds, angles and atoms in place.
   </p>
 </div>
 
@@ -35,7 +35,7 @@ Everything runs in your local Python kernel.
   <p class="feature-card__body">
     HF, nine DFT functionals, MP2, CCSD and CCSD(T). Single points, optimizations,
     <strong>transition states</strong> and <strong>IRC</strong>, frequencies, UV-Vis, NMR,
-    PES scans. PCM solvent.
+    PES scans, Marcus reorganization energies. PCM solvent.
   </p>
 </div>
 
@@ -43,7 +43,7 @@ Everything runs in your local Python kernel.
   <div class="feature-card__icon">📊</div>
   <div class="feature-card__title">Spectra &amp; Analysis</div>
   <p class="feature-card__body">
-    IR, UV-Vis and NMR spectra, point groups, orbital diagrams,
+    IR, Raman, UV-Vis and NMR spectra, point groups, orbital diagrams,
     density and ESP surfaces, thermochemistry, side-by-side comparisons.
   </p>
 </div>
@@ -64,7 +64,7 @@ Everything runs in your local Python kernel.
   <p class="feature-card__body">
     Optional NVIDIA offload via
     <a class="hero__link" href="https://github.com/pyscf/gpu4pyscf" target="_blank" rel="noopener">gpu4pyscf</a>
-    for HF, DFT and TD-DFT. Each result shows which device ran it.
+    for HF and DFT single points, optimizations and frequencies. Each result shows which device ran it.
   </p>
 </div>
 
@@ -82,7 +82,7 @@ Everything runs in your local Python kernel.
   <div class="feature-card__title">CLI &amp; Analytics</div>
   <p class="feature-card__body">
     <code class="inline-code">quantui</code> launches the app, checks the GPU,
-    tails the log and builds an HTML usage dashboard. See the <a href="CLI.md">CLI reference</a>.
+    tails the log and builds an HTML usage dashboard. See the <a href="../CLI/">CLI reference</a>.
   </p>
 </div>
 
@@ -99,8 +99,8 @@ Everything runs in your local Python kernel.
   <div class="feature-card__icon">🖥️</div>
   <div class="feature-card__title">Voil&agrave; App Mode</div>
   <p class="feature-card__body">
-    A widget-only app for classrooms and research groups, with light and
-    dark themes.
+    A widget-only app for classrooms and research groups, with six
+    colour themes.
   </p>
 </div>
 

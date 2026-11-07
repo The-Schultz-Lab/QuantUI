@@ -83,7 +83,7 @@ def resolve_engine(preferred: EnginePreference | None = None) -> QuantumEngine:
             f"Engine {choice!r} is not installed (found: {installed}).",
             user_message=(
                 f"The {choice} engine is not available in this environment. "
-                "Check the Status tab for install guidance."
+                "Check the System Settings tab for install guidance."
             ),
         )
     return by_id[choice]

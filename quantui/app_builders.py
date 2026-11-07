@@ -169,7 +169,7 @@ def build_status_panel(
     slurm_job_root_env_locked: bool = False,
     slurm_job_root_effective: str = "",
 ) -> None:
-    """Build the Status tab panel."""
+    """Build the System Settings tab panel."""
     cores, mem_gb = get_session_resources_fn()
     mem = f"{mem_gb} GB" if mem_gb is not None else "unknown"
     py_ver = (

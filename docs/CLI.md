@@ -277,7 +277,7 @@ GPU offload not available
 ```
 
 Other reasons you may see: `GPU offload is switched off in QuantUI
-settings (Status tab → Settings → GPU offload)`, `gpu4pyscf is installed
+settings (System Settings tab → GPU offload → Use GPU when available)`, `gpu4pyscf is installed
 but failed to import: <error>` (usually missing CUDA libraries), and
 `gpu4pyscf import raised <ExceptionType>: <error>`.
 

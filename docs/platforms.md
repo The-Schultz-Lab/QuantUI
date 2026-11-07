@@ -11,10 +11,11 @@
 
 ## GPU offload
 
-Optional, via [gpu4pyscf](https://github.com/pyscf/gpu4pyscf) on a CUDA GPU. `QUANTUI_DISABLE_GPU=1` forces CPU. Check it with:
+Optional, via [gpu4pyscf](https://github.com/pyscf/gpu4pyscf) on a CUDA GPU (`quantui[gpu-cuda12x]` or `quantui[gpu-cuda13x]`, matching your driver). `QUANTUI_DISABLE_GPU=1` forces CPU. PyFock has its own CuPy GPU path (`quantui[pyfock,pyfock-gpu-cuda12x]` or `-cuda13x`). Check them with:
 
 ```bash
-quantui gpu check
+quantui gpu check                 # gpu4pyscf
+quantui gpu check --engine pyfock # PyFock
 ```
 
 See the [CLI reference](CLI.md#quantui-gpu-check).

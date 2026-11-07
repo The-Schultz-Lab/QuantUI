@@ -157,7 +157,7 @@ def _cmd_gpu_check(args: argparse.Namespace) -> int:
                 "double-precision throughput is typically 1/32–1/64 of its "
                 "single-precision. Quantum-chemistry SCF is double-precision "
                 "throughout, so offload here may be SLOWER than your CPU. "
-                "Benchmark before relying on it; switch it off in the Status "
+                "Benchmark before relying on it; switch it off on the System Settings "
                 "tab or with QUANTUI_DISABLE_GPU=1.",
                 file=sys.stderr,
             )

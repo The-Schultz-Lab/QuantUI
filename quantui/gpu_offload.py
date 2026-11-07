@@ -27,7 +27,7 @@ User opt-out, two ways:
   everything. Useful for benchmarks, regression debugging, and "first run
   as student" comparisons, and it propagates to subprocess workers.
 - ``compute.gpu_enabled = false`` in user settings — the persistent UI
-  toggle (Status tab → Settings). Survives restarts.
+  toggle (System Settings tab → GPU offload). Survives restarts.
 
 Not every CUDA device is worth using: double-precision throughput on
 consumer cards is a small fraction of their single-precision, and PySCF is
@@ -91,14 +91,14 @@ _STRONG_FP64_MARKERS: tuple = (
 )
 
 # Reason strings for the "GPU not in use" cases, surfaced by `quantui gpu check`
-# and the Status tab. Kept here so the CLI and the UI can't drift from the
+# and the System Settings tab. Kept here so the CLI and the UI can't drift from the
 # probe's actual logic (they previously re-derived it, which is how a broken
 # CUDA install came to be reported as "gpu4pyscf not installed").
 _REASON_OK = ""
 _REASON_ENV_DISABLED = "QUANTUI_DISABLE_GPU is set in the environment"
 _REASON_SETTINGS_DISABLED = (
     "GPU offload is switched off in QuantUI settings "
-    "(Status tab → Settings → GPU offload)"
+    "(System Settings tab → GPU offload → Use GPU when available)"
 )
 _REASON_NOT_INSTALLED = (
     "gpu4pyscf is not installed — install the extra matching your driver's "
@@ -221,7 +221,7 @@ def is_gpu_available() -> Tuple[bool, Optional[str]]:
     """Return ``(available, gpu_name)`` for the current process.
 
     Thin view over :func:`probe_gpu` that drops the reason, kept because it is
-    the long-standing call used by the run dispatcher and the Status tab.
+    the long-standing call used by the run dispatcher and the System Settings tab.
     Cached for the process lifetime — the answer doesn't change once the kernel
     is up. Callers that need a re-check (a settings toggle, or a test
     simulating driver loss) call ``is_gpu_available.cache_clear()``.

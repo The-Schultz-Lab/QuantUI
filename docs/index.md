@@ -30,7 +30,7 @@ hide:
         <div class="hero__meta">
           <span class="hero__stat">Python 3.9&ndash;3.11</span>
           <span class="hero__sep">&middot;</span>
-          <span class="hero__stat">3700+ tests</span>
+          <span class="hero__stat">4,100+ tests</span>
           <span class="hero__sep">&middot;</span>
           <span class="hero__stat">MIT License</span>
           <span class="hero__sep">&middot;</span>
