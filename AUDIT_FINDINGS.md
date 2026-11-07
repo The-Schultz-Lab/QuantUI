@@ -8,7 +8,7 @@ Findings are ordered by severity. File/line references are to the audited commit
 **Status (2026-07-14):** all 5 High, all 14 Medium, and 13 of 14 Low findings below were marked fixed, regression-tested, and merged on `claude/repo-audit-findings-yolusq`. Only item #12 (`prune_events` malformed-entry retention) is left as-is, by explicit choice — its original "deliberate" behavior stays unchanged.
 
 **Re-check (2026-11-07, against `main`):** every item is still resolved except:
-- **H5 — partially open.** Blank / `#` / `!` title lines are fixed, but a count line followed directly by atoms (no title line, e.g. `3\nO …\nH …\nH …`) still loses the first atom, and the count mismatch is still only a warning.
+- **H5 — now fixed (2026-11-07).** The remaining case — a count line followed directly by atoms with no title line (`3\nO …\nH …\nH …`) — lost the first atom; the parser now recognises it (regression tests in `tests/test_molecule.py::TestXyzHeaderTitleLine`). A count/atom mismatch is still only a warning.
 - **Low #4 — partial**, as noted in the item (`HARTREE_TO_EV` still re-declared in several modules).
 - **Low #12 — deferred** by choice (unchanged).
 
@@ -81,7 +81,7 @@ The AttributeError is swallowed by the broad `except` at line 841, so `xyz_strin
 
 **Fix:** use `Chem.RWMol()`, track a separate atom counter, size the conformer, and call `.GetMol()` at the end.
 
-### H5. XYZ parser silently drops the first atom for standard files with a blank or `#` title line — ✅ Fixed (title-line cases); ⚠️ no-title-line case still open (2026-11-07)
+### H5. XYZ parser silently drops the first atom for standard files with a blank or `#` title line — ✅ Fixed (title-line cases 2026-07-14; no-title-line case 2026-11-07)
 `molecule.parse_xyz_input()` strips blank lines and full-line comments **before** detecting the `count / title / atoms…` header layout (lines 364-405). For a completely standard file such as:
 
 ```
