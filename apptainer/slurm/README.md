@@ -101,6 +101,12 @@ unfinished ones.
   moves to the next `WALLTIME_OPTIONS` step (doubling past 48 h). Overrides
   carry over to later reruns. Submissions are logged in
   `<job>/.quantui-batch-jobs` (id, time, sbatch options).
+- **Resume after OOM/TIMEOUT**: a rerun continues from the job's checkpoint
+  (`<job>/.checkpoint/`) for `geometry_opt` (last step), `frequency`
+  (finished displacements), `pes_scan` (finished points),
+  `transition_state` (last step), `reorganization_energy` (each
+  optimization leg) and any `--preopt` step. `single_point`, `tddft` and
+  `nmr` are one calculation each and start over; so does `irc`.
 - Job folders go to the user's job root: `QUANTUI_STAGING_DIR`, else
   **System Settings → SLURM job folder** (`compute.slurm_job_root` in
   `~/.quantui/settings.json`), else `~/.quantui/staging`.
@@ -188,4 +194,4 @@ python -m quantui.backends.worker --request /path/to/job/request.json \
 `submit.slurm` passes `--attempt-dir` itself. Without it, outputs go next to
 `request.json` (the pre-job-folder layout).
 
-Supported calc types: `single_point`, `geometry_opt`, `frequency`, `tddft`, `nmr`, `pes_scan`, `reorganization_energy`.
+Supported calc types: `single_point`, `geometry_opt`, `transition_state`, `irc`, `frequency`, `tddft`, `nmr`, `pes_scan`, `reorganization_energy`.
