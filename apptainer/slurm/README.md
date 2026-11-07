@@ -56,7 +56,8 @@ quantui-batch path <job>                               # print the job folder
 
 `status` shows the newest 10 jobs (`-n N`, or `--all`). A job can be named
 by its full name or a unique prefix (e.g. `water_opt` for
-`water_opt_B3LYP_def2-SVP`). `quantui-batch help` lists every command.
+`water_opt_B3LYP_def2-SVP`). `quantui-batch help` lists every command;
+`quantui-batch --version` prints the QuantUI version it was installed from.
 
 Inside the image (an allocation, or an OnDemand terminal) `quantui jobs`
 lists the same jobs with their state read from each job folder (refreshed
@@ -184,6 +185,8 @@ See the [NCShare SLURM batch runbook](https://github.com/NCCU-Schultz-Lab/QuantU
 | `QUANTUI_SLURM_QOS` | *(unset)* | `#SBATCH --qos=` value, e.g. `nccu_h200_hp` with partition `gpu-hp` |
 | `QUANTUI_SLURM_ACCOUNT` | *(unset)* | `#SBATCH --account=` value |
 | `QUANTUI_BATCH_IMAGE` | app / `quantui submit`: `~/quantui-gpu.sif`; `quantui-batch`: the image it was installed from | Apptainer image for the batch worker |
+| `QUANTUI_JOBS_DIR` | `~/.quantui/jobs` | `quantui-batch`'s job-registry directory |
+| `QUANTUI_SETTINGS_PATH` | `~/.quantui/settings.json` | Settings file `quantui-batch` reads the **SLURM job folder** from |
 | `QUANTUI_STAGING_DIR` | *(unset — System Settings value, else `~/.quantui/staging`)* | Job folder root. Overrides the System Settings value and locks that field. A root outside `$HOME` is bound into Apptainer automatically. |
 
 ## Operator runbook

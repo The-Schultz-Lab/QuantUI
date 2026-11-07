@@ -45,7 +45,8 @@ stack to students who will never have a GPU. See [GPU image](#gpu-image) below.
 | `QUANTUI_FREQ_PARALLEL` | `1` — parallel CPU workers for IR-intensity displacements on frequency calcs (≥4 cores, ≥2 atoms). Overrides the Settings checkbox while set. | unset (off unless you set it) |
 | `QUANTUI_ENABLE_SLURM` | unset (class stays in-kernel) | unset |
 
-The compiled `.sif` image is **not** committed to git — it is too large (~4–5 GB).
+The compiled `.sif` image is **not** committed to git — it is far too large
+(it carries a full conda env with PySCF, RDKit, xtb and Sella/JAX).
 Build it locally (see below). [GitHub Releases](https://github.com/The-Schultz-Lab/QuantUI/releases)
 currently carry the PyPI package and the Viewer installers, not a `.sif`.
 
@@ -117,7 +118,8 @@ bash apptainer/build.sh --fakeroot
 ```
 
 Build time: **~15–30 minutes** (download + extract dominate; the mamba solve is fast)
-on a modern laptop with a good internet connection. Final image size: **~4–5 GB**.
+on a modern laptop with a good internet connection. Check the final size with
+`ls -lh quantui.sif`.
 
 The script must be run from the **repo root** (not from `apptainer/`) because
 the `%files` paths in the `.def` (an explicit allowlist: `pyproject.toml`,
