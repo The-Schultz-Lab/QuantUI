@@ -7,7 +7,33 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- **Help topics** for Frequency (IR, Raman, thermochemistry), UV-Vis
+  (TD-DFT), NMR, Reorganization Energy, implicit solvent (PCM), GPU
+  acceleration and running on a SLURM cluster. These had no help coverage.
+- The full 3Dmol.js BSD-3-Clause license now ships with the vendored copy
+  (`quantui/data/js/3Dmol-LICENSE.txt`).
+
 ### Fixed
+
+- **Pasted XYZ coordinates no longer lose their first atom** when a count
+  line is followed directly by the atoms with no title line
+  (`3`, `O …`, `H …`, `H …`): water used to load as H₂, with only a log
+  warning.
+- **The tutorial notebooks run again.** All five failed: they were written
+  for a removed cluster-submission workflow, needed `$USER`, or used
+  renamed attributes. They now run in-session in seconds, and every value
+  they quote is the value the code prints (e.g. RHF/6-31G water is
+  −75.984 Ha, not −76.03; STO-3G lies ~667 kcal/mol above cc-pVDZ, not
+  "30–100").
+- Documentation site: the gallery images and the Features → CLI link were
+  broken on the published site.
+- GPU messages, a CLI note and an engine error pointed at a "Status tab"
+  that no longer exists; they now name the System Settings tab.
+- In-app help corrected throughout to match the current UI (labels,
+  Upload File, Compare tab, resume and warm-start details, RHF/UHF
+  behaviour, search order).
 
 - **`quantui-batch` and `quantui submit` refuse a method QuantUI does not
   support** instead of warning and queueing it. The worker fails any method
@@ -27,6 +53,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   continues from where it stopped, as in the app.
 - The Help topic "Resuming an interrupted calculation" no longer says
   Frequency cannot be resumed, and now lists Reorganization Energy.
+
+### Changed
+
+- Documentation brought in line with the code: CLI reference (`quantui
+  view`, `gpu check --engine`, `submit` requirements and flags,
+  `install-launcher` options), SLURM batch guide, Apptainer guide (base
+  image, build options; no `.sif` is published on Releases), README and
+  docs site (GPU coverage, IRC/Raman/reorganization energy, install from
+  PyPI with `quantui run app`), SECURITY.md (supported versions,
+  subprocess use), and the contributor and agent guides.
 
 ## [0.11.1] - 2026-11-02
 
