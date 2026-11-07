@@ -568,7 +568,7 @@ def build_history_section(
         button_style="",
         icon="file-text-o",
         layout=layout_fn(width="110px"),
-        tooltip="Open the full PySCF output log in the Output tab",
+        tooltip="Show the full PySCF output log (History → PySCF output log)",
     )
 
     # 4-tier calibration selector. ToggleButtons works for

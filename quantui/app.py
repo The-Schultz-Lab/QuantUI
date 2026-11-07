@@ -7538,7 +7538,7 @@ class QuantUIApp:
             _elapsed = time.perf_counter() - _run_wall_t
             _elapsed_cpu = time.process_time() - _run_cpu_t
             _tb_str = _tb.format_exc()
-            # Full details → Output tab (for debugging/instructors)
+            # Full details → the log panel (for debugging/instructors)
             log.write(f"\n--- Calculation Error ---\n{exc}\n\n{_tb_str}")
             # Structured failure footer
             try:
