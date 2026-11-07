@@ -344,6 +344,31 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "unsure, leaving it off is the safe, exact choice.</p>"
         ),
     },
+    "gpu_offload": {
+        "title": "GPU acceleration",
+        "body": (
+            "<p>With an NVIDIA GPU and the gpu4pyscf packages installed, QuantUI "
+            "can run the expensive parts of a calculation on the GPU. The "
+            "<b>GPU offload (gpu4pyscf)</b> row on the <b>System Settings</b> tab "
+            "shows whether a GPU was found, and each result card says which "
+            "device ran it.</p>"
+            "<ul>"
+            "<li><b>What runs on the GPU:</b> HF and DFT single points, geometry "
+            "optimization steps, and a frequency calculation's SCF, Hessian and "
+            "displaced SCFs.</li>"
+            "<li><b>What stays on the CPU:</b> MP2, CCSD and CCSD(T), and the "
+            "TD-DFT excitation step.</li>"
+            "<li><b>Switch it off</b> by unticking <b>Use GPU when available</b> "
+            "(System Settings), or set <code>QUANTUI_DISABLE_GPU=1</code>.</li>"
+            "</ul>"
+            "<p><b>Is it worth it?</b> Quantum chemistry needs double precision. "
+            "Data-center GPUs (A100, H100, H200) are fast at it; most consumer and "
+            "workstation cards are not, and can be <i>slower</i> than your CPU — "
+            "QuantUI warns when it detects such a card. Small molecules also gain "
+            "little, because the GPU's start-up overhead dominates. Compare timings "
+            "on your own machine before relying on it.</p>"
+        ),
+    },
     "freq_parallel": {
         "title": "Parallel IR/Raman finite differences — when to enable",
         "body": (
@@ -477,6 +502,140 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "<p>In the Analysis tab, click a point on the energy curve to jump "
             "the Trajectory viewer to that geometry. Failed points appear as red "
             "× markers; the gold star marks the minimum.</p>"
+        ),
+    },
+    "frequency": {
+        "title": "Frequency calculations (IR, Raman, thermochemistry)",
+        "body": (
+            "<p>A <b>Frequency</b> calculation computes the Hessian (second "
+            "derivatives of the energy) at the current geometry and turns it "
+            "into vibrational modes. It gives you:</p>"
+            "<ul>"
+            "<li><b>Frequencies</b> (cm<sup>-1</sup>) and animated normal modes "
+            "in the <b>Vibrational</b> panel.</li>"
+            "<li>An <b>IR spectrum</b> (intensities from the dipole change along "
+            "each mode) and, in the gas phase, a <b>Raman spectrum</b>.</li>"
+            "<li><b>Thermochemistry</b>: zero-point energy, U, H, S, G, Cv and Cp. "
+            "Change <b>T (K)</b> and <b>P (atm)</b> to recompute them from the "
+            "stored frequencies — no new calculation needed.</li>"
+            "</ul>"
+            "<p><b>Optimize first.</b> Frequencies only mean something at a "
+            "stationary point. Tick <b>Geometry optimization before "
+            "calculation</b> (it uses a tighter force threshold for this) or start "
+            "from an optimized result with <b>Start from:</b>.</p>"
+            "<p><b>Imaginary frequencies</b> (shown as negative numbers) mean the "
+            "structure is not a minimum: one means a saddle point such as a "
+            "transition state. To leave a saddle point, pick that result in "
+            "<b>Start from:</b>, choose the imaginary mode under <b>Perturb "
+            "mode:</b>, and run again from the displaced geometry.</p>"
+            "<p>Frequency is one of the most expensive calculation types. On a "
+            "multi-core machine, <b>Parallelize IR/Raman displacements (CPU)</b> "
+            "on the System Settings tab speeds up the IR and Raman step.</p>"
+        ),
+    },
+    "uv_vis": {
+        "title": "UV-Vis spectra (TD-DFT)",
+        "body": (
+            "<p><b>UV-Vis (TD-DFT)</b> computes electronic excitations from the "
+            "ground state with time-dependent DFT. For each excited state you get "
+            "the excitation energy (eV and nm) and its <b>oscillator "
+            "strength</b> — how bright the absorption is. The <b>UV-Vis</b> "
+            "panel turns these into a spectrum.</p>"
+            "<ul>"
+            "<li><b>Excited states:</b> how many states to compute (default 10, "
+            "up to 50). More states reach shorter wavelengths but take longer.</li>"
+            "<li><b>Method:</b> use a DFT functional — B3LYP or PBE0 for general "
+            "work, CAM-B3LYP or wB97X-D when charge-transfer states matter. With "
+            "RHF/UHF the same step runs TDHF/RPA instead, which usually "
+            "overestimates excitation energies.</li>"
+            "<li><b>Geometry:</b> excitations are vertical, so they depend on the "
+            "ground-state structure — optimize first (tick <b>Geometry "
+            "optimization before calculation</b> or use <b>Start from:</b>).</li>"
+            "<li><b>Solvent:</b> with PCM the excitations use non-equilibrium "
+            "solvation (only the solvent's electrons respond instantly).</li>"
+            "</ul>"
+            "<p>A small basis such as STO-3G gives poor excitation energies; "
+            "6-31G* or def2-SVP is a reasonable start, and a diffuse set helps "
+            "for anions and Rydberg-like states. Density fitting (System Settings) "
+            "speeds TD-DFT up considerably.</p>"
+        ),
+    },
+    "nmr": {
+        "title": "NMR chemical shifts",
+        "body": (
+            "<p><b>NMR Shielding</b> computes the magnetic shielding of every "
+            "nucleus (GIAO method) and converts it to <b>chemical shifts</b> "
+            "for <sup>1</sup>H and <sup>13</sup>C relative to TMS: "
+            "δ = σ(TMS) − σ(nucleus).</p>"
+            "<ul>"
+            "<li><b>Reference:</b> σ(TMS) is taken from a built-in table for the "
+            "same method and basis (e.g. B3LYP/6-31G*, B3LYP/def2-SVP, "
+            "RHF/6-31G*). For a combination not in the table, QuantUI falls back to "
+            "the B3LYP/6-31G* reference and says so on the result card — shifts "
+            "are then less reliable.</li>"
+            "<li><b>Methods:</b> RHF, UHF or a DFT functional. Post-HF methods "
+            "(MP2, CCSD) are not available for NMR, and meta-GGA functionals "
+            "(e.g. M06-L) are not supported by the GIAO step.</li>"
+            "<li><b>Geometry:</b> shifts are sensitive to structure — optimize "
+            "first.</li>"
+            "<li><b>Gas phase only:</b> the implicit-solvent option is not "
+            "available for NMR.</li>"
+            "</ul>"
+            "<p>Needs the <code>pyscf-properties</code> package (included in "
+            "QuantUI's <code>[pyscf]</code> install).</p>"
+        ),
+    },
+    "reorganization_energy": {
+        "title": "Reorganization energy (Marcus)",
+        "body": (
+            "<p><b>Reorganization Energy</b> computes λ, the energy cost of the "
+            "structural relaxation that accompanies gaining or losing an electron "
+            "— a key quantity in Marcus theory of charge transfer (organic "
+            "semiconductors, redox chemistry).</p>"
+            "<p>QuantUI uses the <b>four-point scheme</b>. It optimizes the "
+            "neutral molecule and the ion, then evaluates each charge state at "
+            "both geometries:</p>"
+            "<ul>"
+            "<li>λ<sub>1</sub> = E<sub>ion</sub>(neutral geometry) − "
+            "E<sub>ion</sub>(ion geometry)</li>"
+            "<li>λ<sub>2</sub> = E<sub>neutral</sub>(ion geometry) − "
+            "E<sub>neutral</sub>(neutral geometry)</li>"
+            "<li>λ = λ<sub>1</sub> + λ<sub>2</sub></li>"
+            "</ul>"
+            "<p><b>Channel:</b> <i>Hole</i> (cation, +1), <i>Electron</i> (anion, "
+            "−1) or <i>Both</i>. The ion's multiplicity is set automatically, and "
+            "RHF is switched to UHF for an open-shell ion.</p>"
+            "<p>This runs two or three geometry optimizations, so it takes several "
+            "times longer than one optimization. With implicit solvent, the "
+            "optimizations stay in the gas phase and the final single points are "
+            "solvated. The <b>Geometries</b> panel overlays the neutral and ion "
+            "structures. Use a diffuse basis set for the electron (anion) "
+            "channel.</p>"
+        ),
+    },
+    "implicit_solvent": {
+        "title": "Implicit solvent (PCM)",
+        "body": (
+            "<p>Tick <b>Implicit solvent (PCM)</b> to surround the molecule with a "
+            "polarizable continuum: the solvent is modelled as a dielectric that "
+            "responds to the molecule's charge distribution, with no explicit "
+            "solvent molecules. Available solvents: Water, Ethanol, THF, DMSO and "
+            "Acetonitrile.</p>"
+            "<p><b>What it applies to:</b></p>"
+            "<ul>"
+            "<li><b>Single Point</b>, <b>Geometry Opt</b> (every step is "
+            "solvated), <b>Transition State</b> and <b>IRC</b>.</li>"
+            "<li><b>Frequency</b>: the SCF, Hessian and IR intensities are "
+            "solvated; Raman is not computed in solvent.</li>"
+            "<li><b>UV-Vis (TD-DFT)</b>: non-equilibrium excitations.</li>"
+            "<li><b>Reorganization Energy</b>: gas-phase optimizations, solvated "
+            "final single points.</li>"
+            "<li><b>NMR Shielding</b> and <b>PES Scan</b> are gas-phase only; the "
+            "checkbox is disabled for them.</li>"
+            "</ul>"
+            "<p>PCM captures bulk electrostatic effects (it stabilizes ions and "
+            "polar molecules) but not specific interactions such as hydrogen "
+            "bonds to the solute. It is not available with the PyFock engine.</p>"
         ),
     },
     "measure": {
@@ -757,6 +916,34 @@ HELP_TOPICS: Dict[str, Dict[str, str]] = {
             "will keep hitting the same failure. Untick <b>Resume from "
             "checkpoint</b> and change something — a smaller basis set, a better "
             "starting geometry — rather than retrying the same work.</p>"
+        ),
+    },
+    "cluster_jobs": {
+        "title": "Running on a cluster (SLURM)",
+        "body": (
+            "<p>Where an administrator has enabled it, QuantUI can send "
+            "calculations to a SLURM cluster instead of running them in this "
+            "Jupyter session. Choose <b>SLURM batch (cluster)</b> under "
+            "<b>Execution backend</b> on the System Settings tab; if that option "
+            "is missing, cluster mode is not enabled here.</p>"
+            "<ul>"
+            "<li>With SLURM selected, <b>Run Calculation</b> submits the job "
+            "and a <b>Cluster Jobs</b> tab appears.</li>"
+            "<li><b>Cluster Jobs</b> lists your jobs and their state. "
+            "<b>Refresh</b> updates it, <b>View progress</b> follows a running "
+            "job on the Calculate tab, <b>Cancel job</b> stops one, "
+            "<b>Resubmit</b> runs a job again (for example after it ran out of "
+            "time), and <b>Remove</b> clears a finished job from the list.</li>"
+            "<li>Finished jobs appear in <b>History</b> (marked "
+            "<code>🖥 SLURM</code>), where you open them like any other "
+            "result.</li>"
+            "<li>A resubmitted Geometry Opt, Frequency, PES Scan, Transition State "
+            "or Reorganization Energy job continues from its checkpoint instead "
+            "of starting over.</li>"
+            "</ul>"
+            "<p>From a terminal on the cluster, the <code>quantui-batch</code> "
+            "command does the same (submit, status, results, rerun). Ask your "
+            "instructor where it is installed.</p>"
         ),
     },
     "citing_pyscf": {
