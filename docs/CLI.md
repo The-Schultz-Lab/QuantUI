@@ -83,7 +83,7 @@ quantui run app --port 8888
   and ensure `voila` is on your `PATH`.
 - Exit code `1` in **Apptainer + JupyterLab** sessions (NCShare and
   similar HPC portals) — use `quantui setup` and launch from JupyterLab
-  instead; see [`quantui setup`](#ncshare--hpc-jupyterlab).
+  instead; see [`quantui setup`](#ncshare-and-hpc-jupyterlab).
 - Override the config directory with `QUANTUI_HOME` (useful in tests).
 
 ---
@@ -103,7 +103,7 @@ quantui-app          # after ~/.local/bin is on PATH
 
 Pass `--force` to overwrite an existing notebook or script.
 
-### NCShare / HPC JupyterLab
+### NCShare and HPC JupyterLab
 
 On cluster portals that launch QuantUI inside **Apptainer + JupyterLab**
 (NCShare is the primary example), the browser proxies only the Jupyter
