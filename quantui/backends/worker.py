@@ -7,17 +7,19 @@ Invoked from a batch script::
 
 Supports all QuantUI Calculate-tab calc types (see ``CALC_TYPES``).
 
-Checkpoint/resume: ``geometry_opt`` and ``pes_scan`` (plus
-any ``preopt_before_run`` step ahead of another calc type) open a
-:class:`~quantui.checkpoint.Checkpoint` scoped to their own staging directory
-(``<staging_dir>/.checkpoint/``, distinct from the interactive app's
+Checkpoint/resume: ``geometry_opt``, ``frequency`` (banked
+finite-difference displacements), ``pes_scan``, ``reorganization_energy``
+(one nested checkpoint per optimization leg), plus any ``preopt_before_run``
+step ahead of another calc type, open a
+:class:`~quantui.checkpoint.Checkpoint` scoped to the job's own folder
+(``<job folder>/.checkpoint/``, distinct from the interactive app's
 ``~/.quantui/checkpoints``) — see :func:`_begin_worker_checkpoint`. A job
 killed by OOM or TIMEOUT resumes close to where it died on the next
-resubmission instead of restarting from nothing. ``frequency``/``tddft``
-have no checkpoint hook anywhere in QuantUI (each is one atomic library call,
-not a chunked/resumable loop) — nothing here can help those beyond the
-preopt step ahead of them. ``transition_state`` saves its search after every
-step and keeps a finished search (see :func:`_run_transition_state`).
+resubmission instead of restarting from nothing. ``transition_state`` saves
+its search after every step and keeps a finished search (see
+:func:`_run_transition_state`). ``single_point``/``tddft``/``nmr`` have no
+resume (each is one atomic library call, not a chunked loop) beyond the
+preopt step ahead of them; ``irc`` restarts by design (see :func:`_run_irc`).
 """
 
 from __future__ import annotations
@@ -884,16 +886,43 @@ def _run_reorganization_energy(
 
     molecule = molecule_from_request(request)
     options = request.options or {}
+    mode = str(options.get("mode", "both"))
     _write_progress(staging_dir, "running", "Computing reorganization energy", 10.0)
+
+    # 2-3 independent geometry optimizations (neutral + one per ion channel)
+    # — a TIMEOUT used to throw all of them away. The whole-run checkpoint
+    # holds nothing itself; run_reorganization_energy() nests one checkpoint
+    # per leg under it (Checkpoint.sub), and resumable_state() sees progress
+    # in any leg. Mode and solvent go into the identity so a rerun with a
+    # different channel set or solvation never picks up the wrong legs.
+    ckpt, resumable = _begin_worker_checkpoint(
+        molecule,
+        calc_type="reorganization_energy",
+        method=request.method,
+        basis=request.basis,
+        staging_dir=staging_dir,
+        log_stream=log_stream,
+        extra=(f"mode={mode}", f"solvent={request.solvent or ''}"),
+    )
+    if resumable:
+        _append_log(
+            staging_dir,
+            "[checkpoint] Resuming reorganization energy — continuing each "
+            "geometry optimization (neutral / ion legs) from a previous "
+            "attempt's checkpoint.",
+        )
+
     return run_reorganization_energy(
         molecule=molecule,
-        mode=str(options.get("mode", "both")),
+        mode=mode,
         method=request.method,
         basis=request.basis,
         fmax=float(options.get("fmax", 0.05)),
         steps=int(options.get("max_steps", 200)),
         progress_stream=log_stream,
         solvent=request.solvent,
+        checkpoint=ckpt,
+        resume=resumable,
         scf_rescue=bool(options.get("scf_rescue", True)),
     )
 

@@ -21,6 +21,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   Finished states from `sacct` now win: cancelled, or failed with the fix
   (`--more-time`, `--more-memory`, the log); a job that completed without a
   result is failed.
+- **A SLURM Reorganization Energy job resumes after a timeout or OOM.** The
+  batch worker never handed the run its checkpoint, so `quantui-batch rerun`
+  redid all two or three geometry optimizations. Each optimization now
+  continues from where it stopped, as in the app.
+- The Help topic "Resuming an interrupted calculation" no longer says
+  Frequency cannot be resumed, and now lists Reorganization Energy.
 
 ## [0.11.1] - 2026-11-02
 
