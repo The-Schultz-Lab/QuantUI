@@ -42,7 +42,7 @@ Users add that folder to `PATH` once, then on the login node:
 quantui-batch check                                    # is everything this needs in place?
 quantui-batch submit water.xyz --calc frequency --method B3LYP --basis def2-SVP --preopt
 quantui-batch submit water.xyz --preset lab4-ir        # named settings (see Presets)
-quantui-batch submit --from water-opt --calc frequency # start from that job's optimized geometry
+quantui-batch submit --from water_opt --calc frequency # from that geometry_opt job's final geometry
 quantui-batch submit guess.xyz --calc transition_state --method B3LYP --basis def2-SVP
 quantui-batch submit --from guess_ts_B3LYP_def2-SVP --calc irc  # reaction path from that TS
 quantui-batch estimate water.xyz --calc frequency      # cores / memory / time, submits nothing
@@ -51,7 +51,12 @@ quantui-batch results <job>                            # energy, imaginary modes
 quantui-batch log <job> -f                             # follow live.log of the latest attempt
 quantui-batch rerun <job> --more-memory                # or --more-time, or any sbatch option
 quantui-batch cancel <job>
+quantui-batch path <job>                               # print the job folder
 ```
+
+`status` shows the newest 10 jobs (`-n N`, or `--all`). A job can be named
+by its full name or a unique prefix (e.g. `water_opt` for
+`water_opt_B3LYP_def2-SVP`). `quantui-batch help` lists every command.
 
 Inside the image (an allocation, or an OnDemand terminal) `quantui jobs`
 lists the same jobs with their state read from each job folder (refreshed
@@ -60,12 +65,14 @@ unfinished ones.
 
 - Inputs are `.xyz` files (`--calc` required unless a preset sets it;
   `--method`, `--basis`, `--charge`, `--mult`, `--solvent`, `--preopt`,
-  `--option KEY=VALUE`) or request JSON. A charge/multiplicity that cannot
-  fit the electron count, a method QuantUI does not support (`HF`: use `RHF`
-  or `UHF`), an unknown solvent, or a solvent on a calc type the
-  batch worker runs gas-phase only (`nmr`, `pes_scan`) is refused
-  before anything is queued, as is a post-HF method for `transition_state`
-  (no analytic gradients).
+  `--option KEY=VALUE`, `--no-preopt` to override a preset; resources with
+  `--cores`, `--memory-gb`, `--walltime`, `--email`, `--job-name`) or
+  request JSON. A method QuantUI does not support (`HF`: use `RHF` or
+  `UHF`), an unknown solvent, or a solvent on a calc type the batch worker
+  runs gas-phase only (`nmr`, `pes_scan`) is refused before anything is
+  queued, as is a post-HF method for `transition_state` or `irc` (no
+  analytic gradients). For `.xyz` and `--from` inputs, so is a
+  charge/multiplicity that cannot fit the electron count.
 - **Transition State** (`--calc transition_state`, `--option fmax=0.01`,
   `--option max_steps=200`) runs the app's Sella search and frequency check.
   The image needs the `[ts]` extra (both `.def` files install it). A killed
@@ -120,9 +127,10 @@ unfinished ones.
   new job. (The generated script now also asks for `--ntasks=1
   --cpus-per-task=N`, so Slurm sets the job's own value either way.)
 - Finished attempts appear in the app's **History** the next time the app
-  starts (no Cluster Jobs tab or `QUANTUI_ENABLE_SLURM` needed).
-- No GPU unless `QUANTUI_SLURM_GRES` asks for one (see the table below);
-  `apptainer exec --nv` is used only then.
+  starts, or on History's **Refresh** (no Cluster Jobs tab or
+  `QUANTUI_ENABLE_SLURM` needed).
+- No GPU unless `QUANTUI_SLURM_GRES` (or `QUANTUI_SLURM_NV=1`) asks for one
+  (see the table below); `apptainer exec --nv` is used only then.
 
 ## Job folders
 
@@ -158,7 +166,7 @@ Status polling uses **`squeue`** for active jobs and **`sacct`** for terminal st
 
 ## Operator environment variables
 
-See the [NCShare SLURM batch runbook](https://github.com/The-Schultz-Lab/QuantUI-development-tracking/blob/main/TODO/runbooks/NCShare-SLURM-batch-runbook.md) for the full operator matrix. Key overrides:
+See the [NCShare SLURM batch runbook](https://github.com/NCCU-Schultz-Lab/QuantUI-development-tracking/blob/main/TODO/runbooks/NCShare-SLURM-batch-runbook.md) for the full operator matrix. Key overrides:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -175,14 +183,14 @@ See the [NCShare SLURM batch runbook](https://github.com/The-Schultz-Lab/QuantUI
 | `QUANTUI_SLURM_NV` | *(unset — auto)* | `1` / `0` forces `apptainer exec --nv` on / off; unset follows `QUANTUI_SLURM_GRES` (on when it contains `gpu`). Set `1` for a GPU GRES named otherwise, e.g. `shard:1`. |
 | `QUANTUI_SLURM_QOS` | *(unset)* | `#SBATCH --qos=` value, e.g. `nccu_h200_hp` with partition `gpu-hp` |
 | `QUANTUI_SLURM_ACCOUNT` | *(unset)* | `#SBATCH --account=` value |
-| `QUANTUI_BATCH_IMAGE` | `~/quantui-gpu.sif` | Apptainer image for batch worker |
+| `QUANTUI_BATCH_IMAGE` | app / `quantui submit`: `~/quantui-gpu.sif`; `quantui-batch`: the image it was installed from | Apptainer image for the batch worker |
 | `QUANTUI_STAGING_DIR` | *(unset — System Settings value, else `~/.quantui/staging`)* | Job folder root. Overrides the System Settings value and locks that field. A root outside `$HOME` is bound into Apptainer automatically. |
 
 ## Operator runbook
 
-See the planning repo runbook:
+See the planning repo runbook (private; lab members only):
 
-[NCShare SLURM batch runbook](https://github.com/The-Schultz-Lab/QuantUI-development-tracking/blob/main/TODO/runbooks/NCShare-SLURM-batch-runbook.md)
+[NCShare SLURM batch runbook](https://github.com/NCCU-Schultz-Lab/QuantUI-development-tracking/blob/main/TODO/runbooks/NCShare-SLURM-batch-runbook.md)
 
 ## Worker entrypoint
 

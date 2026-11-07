@@ -13,8 +13,10 @@ The CLI is meant to *complement* the Voilà app. Most commands are
 read-only diagnostics against `~/.quantui/` (or whatever
 `QUANTUI_LOG_DIR` points at). The exceptions are **`quantui run app`**
 and **`quantui setup`**, which start (or prepare) the student-facing
-Voilà interface, and **`quantui submit`** / **`quantui install-launcher`**,
-which send calculations to a SLURM cluster.
+Voilà interface; **`quantui view`**, which opens the History + Analysis
+viewer on a results folder; **`quantui submit`**, which sends calculations
+to a SLURM cluster; and **`quantui install-launcher`**, which writes the
+`quantui-batch` launcher for doing that from a login node.
 
 Reach for the CLI when you want to:
 
@@ -32,6 +34,7 @@ Reach for the CLI when you want to:
 | --- | --- |
 | [`quantui run app`](#quantui-run-app) | Start the Voilà student app |
 | [`quantui setup`](#quantui-setup) | Write `~/.quantui/app.ipynb` and a `quantui-app` shell shortcut |
+| [`quantui view`](#quantui-view) | Open the History + Analysis viewer on a results folder |
 | [`quantui log tail`](#quantui-log-tail) | Print recent events from `event_log.jsonl` |
 | [`quantui gpu check`](#quantui-gpu-check) | Probe GPU-offload availability and explain failures |
 | [`quantui analytics build`](#quantui-analytics-build) | Build an HTML usage dashboard from `perf_log.jsonl` |
@@ -129,6 +132,30 @@ above — do not use it for browser access on NCShare.
 
 ---
 
+## `quantui view`
+
+Open the read-only **History + Analysis viewer** (the same viewer the
+desktop installers ship; see [Viewer](viewer.md)) on a QuantUI results
+folder. Requires the **`[app]` extra**.
+
+```bash
+quantui view                      # folder: $QUANTUI_RESULTS_DIR, else the last one opened, else ~
+quantui view ~/quantui_results    # a specific folder
+quantui view --no-browser         # print the URL only
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `FOLDER` | see above | Results folder to open (exit `1` if it is not a folder) |
+| `--port PORT` | a free port | TCP port for Voilà |
+| `--no-browser` | off | Do not open the browser automatically |
+
+The server binds to `127.0.0.1` and uses a per-run token, so other
+machines and other local web pages cannot start kernels on it. The full
+URL (with the token) is printed at startup.
+
+---
+
 ## `quantui log tail`
 
 Print the last *N* entries from the QuantUI event log
@@ -168,10 +195,11 @@ quantui log tail -n 200 | grep -i error | tail -5
 
 ### Notes
 
-- The event log auto-prunes entries older than 7 days on every write,
-  so `tail` always reflects the active week.
-- Output goes to stdout; "log is empty" / "log not found" notices go to
-  stderr so they don't pollute pipelines.
+- The event log is pruned of entries older than 7 days periodically
+  (every 20 writes), so `tail` reflects roughly the active week.
+- Output goes to stdout; the `(event log is empty)` and
+  `(no event log at PATH)` notices go to stderr so they don't pollute
+  pipelines.
 - Exit code: always `0` (even when no events exist — the absence of
   events is not an error).
 
@@ -187,7 +215,9 @@ environment. This is the canonical one-liner for verifying that
 
 ### Flags
 
-None.
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--engine {pyscf,pyfock}` | `pyscf` | Which GPU path to probe: `pyscf` (gpu4pyscf + cupy) or `pyfock` (PyFock's CuPy path) |
 
 ### Examples
 
@@ -215,16 +245,20 @@ QUANTUI_DISABLE_GPU=1 quantui gpu check   # confirms env-var path
 
 ```
 GPU offload available: NVIDIA GeForce RTX 4050 Laptop GPU
+  note: NVIDIA GeForce RTX 4050 Laptop GPU looks like a consumer/workstation GPU, ...
+  ... offload here may be SLOWER than your CPU. Benchmark before relying on it; ...
 ```
 
-(exit code `0`)
+(exit code `0`). The `note:` (on stderr) appears for any card without
+strong double-precision throughput — most consumer and workstation GPUs.
+With `--engine pyfock` the first line reads `PyFock GPU available: <name>`.
 
-**When GPU is unavailable**, the command prints a reason so you know
-where to look next:
+**When GPU is unavailable**, the command prints a reason (to stderr) so
+you know where to look next:
 
 ```
 GPU offload not available
-  reason: gpu4pyscf not installed (see README → 'Optional: GPU acceleration')
+  reason: gpu4pyscf is not installed — install the extra matching your driver's CUDA version, e.g. pip install 'quantui[gpu-cuda13x]' (see README → 'Optional: GPU acceleration')
 ```
 
 ```
@@ -239,9 +273,13 @@ GPU offload not available
 
 ```
 GPU offload not available
-  reason: cupy/gpu4pyscf import succeeded but probe raised — run
-  `python -c "import cupy; cupy.show_config()"` to inspect
+  reason: cupy device probe failed: <error>
 ```
+
+Other reasons you may see: `GPU offload is switched off in QuantUI
+settings (Status tab → Settings → GPU offload)`, `gpu4pyscf is installed
+but failed to import: <error>` (usually missing CUDA libraries), and
+`gpu4pyscf import raised <ExceptionType>: <error>`.
 
 (all return exit code `1`)
 
@@ -269,6 +307,9 @@ The dashboard contains:
 - **GPU vs CPU speedup table** — for every `(method, basis, formula)`
   tuple that has runs on *both* devices, the median CPU time, median
   GPU time, and the speedup factor. Sorted best-speedup first.
+- **Prediction accuracy** — how close the runtime estimator's
+  predictions were to the measured times (median error, share within
+  25%, and a predicted-vs-actual scatter).
 - **Method usage** — bar chart of run counts per method.
 - **Calc-type distribution** — bar chart of run counts per calculation
   type.
@@ -367,11 +408,18 @@ quantui submit water.xyz --calc geometry_opt --prepare-only
 
 Useful flags: `--charge`, `--mult`, `--solvent`, `--preopt`,
 `--option KEY=VALUE` (repeatable), `--cores`, `--memory-gb`, `--walltime`,
-`--email`, `--job-name`, `--partition`. `quantui submit --help` lists them all.
-An impossible charge/multiplicity, a method QuantUI does not support (e.g.
-`HF`: use `RHF` or `UHF`), an unknown solvent, or a solvent on a calc type the
-batch worker runs gas-phase only (NMR, PES scan) is refused before anything is
-queued.
+`--email`, `--mail-events`, `--job-name`, `--partition`, `--no-apptainer`,
+`--apptainer-image`. `quantui submit --help` lists them all.
+
+A method QuantUI does not support (e.g. `HF`: use `RHF` or `UHF`), an unknown
+solvent, or a solvent on a calc type the batch worker runs gas-phase only
+(NMR, PES scan) is refused before anything is queued; for `.xyz` inputs, so is
+an impossible charge/multiplicity.
+
+A real submission needs `sbatch` on PATH **and** `QUANTUI_ENABLE_SLURM` set
+(see [Environment variables](#environment-variables)); otherwise the command
+exits `1` with the reason. `--dry-run` and `--prepare-only` skip that check
+and cannot be combined (exit `2`).
 
 ---
 
@@ -386,8 +434,9 @@ results`, for use inside the image.
 quantui results ~/.quantui/staging/H2O_freq_B3LYP_def2-SVP
 ```
 
-The argument can also be one attempt folder. Exit code 1 means no attempt has
-finished yet.
+The argument can also be one attempt folder. Exit code `1` means no attempt has
+finished yet (or its `result.json` cannot be read); `2` means the argument is
+not a folder.
 
 ---
 
@@ -398,6 +447,7 @@ List your batch jobs, newest first, with where each one is: waiting, running
 
 ```bash
 quantui jobs              # the newest 10
+quantui jobs -n 25        # the newest 25
 quantui jobs --running    # only jobs not finished yet
 quantui jobs --all
 ```
@@ -420,6 +470,12 @@ on a compute node. Run this once per image, inside it, from an allocation:
 apptainer exec /path/to/quantui.sif quantui install-launcher /shared/bin
 ```
 
+| Argument / flag | Default | Description |
+| --- | --- | --- |
+| `DIR` | `~/bin` | Directory to write `quantui-batch` into |
+| `--image PATH` | the image this command runs in | Apptainer image the launcher submits to |
+| `--force` | off | Overwrite an existing `quantui-batch` (without it, exit `1`) |
+
 Students then use `quantui-batch submit`, `status`, `results`, `log`,
 `rerun --more-memory`, `cancel` and more. Full guide (presets, `--from`
 chaining, `--queue-rest`, `check`):
@@ -436,7 +492,7 @@ chaining, `--queue-rest`, `check`):
 | `QUANTUI_LOG_DIR` | Override the default `~/.quantui/logs/` location. The dashboard's default output (`~/.quantui/dashboard.html`) follows: it lives one level up from the active `QUANTUI_LOG_DIR`. |
 | `QUANTUI_DISABLE_GPU` | Force CPU mode even when gpu4pyscf is installed. `quantui gpu check` reports this as the reason. Accepted truthy values: `1`, `true`, `True`. |
 | `QUANTUI_ENABLE_SLURM` | Opt in to **SLURM batch (cluster)** on the System Settings → Execution backend dropdown. Requires `sbatch` on PATH. Off by default so student deployments stay in-kernel until an operator enables cluster mode in the Apptainer image, JupyterHub spawner, or shell. Accepted truthy values: `1`, `true`, `yes`, `on`. |
-| `QUANTUI_FREQ_PARALLEL` | Opt in to parallel **CPU** workers for the IR-intensity finite-difference loop in frequency calculations (`6N` displaced SCFs). Same effect as the **Parallelize IR intensity displacements** checkbox on the System Settings tab; when this env var is set it overrides the saved setting. Reference SCF and Hessian still use gpu4pyscf when available. Requires ≥4 cores and ≥2 atoms. Off by default. Accepted truthy values: `1`, `true`, `yes`, `on`. |
+| `QUANTUI_FREQ_PARALLEL` | Opt in to parallel **CPU** workers for the IR/Raman finite-difference displacement loops in frequency calculations (`6N` displaced SCFs). Same effect as the **Parallelize IR/Raman displacements (CPU)** checkbox on the System Settings tab; when this env var is set it overrides the saved setting. Reference SCF and Hessian still use gpu4pyscf when available. Requires ≥4 cores and ≥2 atoms. Off by default. Accepted truthy values: `1`, `true`, `yes`, `on`. |
 
 ---
 
