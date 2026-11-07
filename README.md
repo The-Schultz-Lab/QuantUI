@@ -498,10 +498,10 @@ Five step-by-step notebooks in [`notebooks/tutorials/`](https://github.com/The-S
 | Notebook | Topic |
 | --- | --- |
 | [01_first_calculation.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/01_first_calculation.ipynb) | Your first RHF calculation |
-| [02_basis_set_study.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/02_basis_set_study.ipynb) | Comparing STO-3G, 6-31G, cc-pVDZ |
+| [02_basis_set_study.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/02_basis_set_study.ipynb) | Comparing STO-3G, 6-31G, 6-31G*, cc-pVDZ |
 | [03_multiplicity_radicals.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/03_multiplicity_radicals.ipynb) | Open-shell molecules and UHF |
 | [04_charged_species.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/04_charged_species.ipynb) | Ions and charged systems |
-| [05_comparing_results.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/05_comparing_results.ipynb) | Side-by-side result analysis (needs `pandas`) |
+| [05_comparing_results.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/05_comparing_results.ipynb) | Side-by-side result analysis |
 
 The notebooks are not in the PyPI package; clone the repository to run them.
 

@@ -32,7 +32,7 @@ Your first quantum chemistry calculation!
 **Difficulty:** Intermediate
 
 Compare different basis sets on the same molecule.
-- Run H₂O with STO-3G, 6-31G, and cc-pVDZ
+- Run H₂O with STO-3G, 6-31G, 6-31G*, and cc-pVDZ
 - Compare energies and computational costs
 - Understand accuracy vs. speed trade-offs
 - See basis set convergence
@@ -42,14 +42,14 @@ Compare different basis sets on the same molecule.
 ---
 
 ### 3. [Multiplicity & Radicals](03_multiplicity_radicals.ipynb)
-**Time:** ~25–30 minutes
+**Time:** ~20–30 minutes
 **Difficulty:** Intermediate
 
 Learn about spin states with oxygen molecule.
-- Calculate O₂ as singlet (wrong!)
-- Calculate O₂ as triplet (correct!)
+- Calculate O₂ as singlet (wrong!) and triplet (correct!)
 - Understand multiplicity = 2S + 1
-- Learn when to use UHF vs RHF
+- Learn when to use UHF, ROHF or RHF; check spin contamination
+- Apply the rules to the ·OH radical and methylene (CH₂)
 
 **Perfect for:** Understanding open-shell systems
 
@@ -60,10 +60,10 @@ Learn about spin states with oxygen molecule.
 **Difficulty:** Intermediate
 
 Work with ions and charged molecules.
-- Calculate NH₃ (neutral)
-- Calculate NH₄⁺ (cation)
-- Calculate NH₂⁻ (anion)
-- Understand protonation effects
+- Calculate NH₃, NH₄⁺, NH₂⁻ and the NH₃•⁺ / NH₂• radicals
+- Ionization energy, proton affinity and deprotonation energy
+- Why anions need diffuse basis sets
+- Electron affinity: why it needs electron correlation too
 
 **Perfect for:** Understanding charge effects
 
@@ -71,14 +71,13 @@ Work with ions and charged molecules.
 
 ### 5. [Comparing Results](05_comparing_results.ipynb)
 **Time:** ~25–30 minutes
-**Requires:** `pandas` (`pip install pandas`; not a QuantUI dependency)
 **Difficulty:** Intermediate
 
 Analyze and compare multiple calculations.
-- Load multiple job results
-- Create comparison tables
-- Visualize energy trends
-- Export data for reports
+- Save, reload and compare results with QuantUI's own tools
+- Basis-set convergence and error cancellation (NH₃ ionization energy)
+- Which method comparisons are meaningful (RHF / MP2 / B3LYP)
+- Export a CSV and write a methods statement
 
 **Perfect for:** Data analysis and reporting
 
@@ -92,7 +91,7 @@ Analyze and compare multiple calculations.
 2. **Work sequentially** - Each builds on previous concepts
 3. **Read explanations** - Don't just run cells
 4. **Try variations** - Experiment with different molecules
-5. **Check solutions** - Compare your results
+5. **Check the checkpoints** - Compare your numbers with the expected values
 
 ### 🎓 For Classroom Use
 
