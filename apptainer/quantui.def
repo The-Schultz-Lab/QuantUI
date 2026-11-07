@@ -32,7 +32,7 @@ FROM: condaforge/miniforge3:26.1.1-3
   Maintainer "Jonathan Schultz"
   Purpose "Local teaching interface for quantum chemistry calculations"
   # Deliberately not a version number: this image installs the working tree
-  # (%files . /opt/quantui), so a hardcoded label here goes stale on every bump
+  # (the %files allowlist below), so a hardcoded label here goes stale on every bump
   # and says nothing the install does not. `quantui.__version__` inside the
   # image is the authoritative answer. The GPU image installs the working tree
   # too (DEC-025) and also records the commit it was built from.

@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # Vendored 3Dmol.js — the exact build py3Dmol 2.x's constructor default points
 # at, so the API the py3Dmol-generated JS calls (createViewer, addModel,
 # addVolumetricData, addModelsAsFrames, animate, ...) is guaranteed present.
-# Provenance + license: data/js/PROVENANCE.md, data/js/3Dmol-min.js.LICENSE.txt.
+# Provenance + license: data/js/PROVENANCE.md, data/js/3Dmol-LICENSE.txt.
 THREEDMOL_VERSION = "2.5.4"
 _JS_PATH = Path(__file__).parent / "data" / "js" / "3Dmol-min.js"
 

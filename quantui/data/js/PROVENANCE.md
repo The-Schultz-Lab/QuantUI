@@ -4,7 +4,10 @@
 
 - **Version:** 3Dmol.js 2.5.4
 - **Source:** https://cdn.jsdelivr.net/npm/3dmol@2.5.4/build/3Dmol-min.js
-- **License:** BSD-3-Clause (see `3Dmol-min.js.LICENSE.txt`)
+- **License:** BSD-3-Clause — full text (with the bundled GLmol, Three.js and
+  jQuery notices) in `3Dmol-LICENSE.txt`, copied from the npm `3dmol@2.5.4`
+  package's `LICENSE`. `3Dmol-min.js.LICENSE.txt` is only the bundle's
+  webpack banner.
 - **Why vendored:** py3Dmol's generated HTML loads 3Dmol.js from the jsDelivr
   CDN at render time. That fetch fails silently with no network (offline
   classroom deployment) or under a restrictive CSP, leaving every 3D view

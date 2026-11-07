@@ -15,12 +15,11 @@ These interactive tutorials guide you through quantum chemistry calculations ste
 ## Tutorial Series
 
 ### 1. [First Calculation](01_first_calculation.ipynb) - **Start Here!**
-**Time:** ~15 minutes
+**Time:** ~15–20 minutes
 **Difficulty:** Beginner
 
 Your first quantum chemistry calculation!
-- Submit a water molecule calculation
-- Monitor job progress
+- Run a water molecule calculation
 - Interpret basic results
 - Understand SCF convergence
 
@@ -29,7 +28,7 @@ Your first quantum chemistry calculation!
 ---
 
 ### 2. [Basis Set Study](02_basis_set_study.ipynb)
-**Time:** ~30 minutes
+**Time:** ~30–35 minutes
 **Difficulty:** Intermediate
 
 Compare different basis sets on the same molecule.
@@ -43,7 +42,7 @@ Compare different basis sets on the same molecule.
 ---
 
 ### 3. [Multiplicity & Radicals](03_multiplicity_radicals.ipynb)
-**Time:** ~25 minutes
+**Time:** ~25–30 minutes
 **Difficulty:** Intermediate
 
 Learn about spin states with oxygen molecule.
@@ -57,7 +56,7 @@ Learn about spin states with oxygen molecule.
 ---
 
 ### 4. [Charged Species](04_charged_species.ipynb)
-**Time:** ~20 minutes
+**Time:** ~20–25 minutes
 **Difficulty:** Intermediate
 
 Work with ions and charged molecules.
@@ -71,7 +70,8 @@ Work with ions and charged molecules.
 ---
 
 ### 5. [Comparing Results](05_comparing_results.ipynb)
-**Time:** ~25 minutes
+**Time:** ~25–30 minutes
+**Requires:** `pandas` (`pip install pandas`; not a QuantUI dependency)
 **Difficulty:** Intermediate
 
 Analyze and compare multiple calculations.
@@ -139,9 +139,6 @@ Instructors can:
 **Problem:** Can't see visualizations
 **Solution:** Ensure py3Dmol is installed (see main notebook setup)
 
-**Problem:** Jobs stuck in PENDING
-**Solution:** Cluster may be busy - check status in main notebook
-
 **Problem:** Different energy than expected
 **Solution:** Small differences are okay - check units and significant figures
 
@@ -150,8 +147,8 @@ Instructors can:
 ## Next Steps
 
 After completing these tutorials:
-1. Use the main [quantui_interface.ipynb](../quantui_interface.ipynb) for your own calculations
-2. Try the [analysis.ipynb](../analysis.ipynb) for advanced data analysis
+1. Use the main app — [molecule_computations.ipynb](../molecule_computations.ipynb), or `quantui run app` — for your own calculations
+2. Use the app's **History**, **Analysis** and **Compare** tabs to revisit and compare results
 3. Experiment with molecules from your coursework
 
 ---

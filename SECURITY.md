@@ -1,14 +1,18 @@
 # Security Policy
 
 QuantUI is an educational teaching tool designed for classroom and local
-research use. It runs calculations inside your own Python session — there is
-no server, no user accounts, and no data stored outside your local machine.
+research use. By default it runs calculations inside your own Python session —
+there is no hosted server and no user accounts, and results stay on the
+machine (or cluster account) you run it on. The optional SLURM batch mode
+writes job folders under your own cluster home and submits them with your own
+`sbatch`.
 
 ## Supported Versions
 
 | Version | Supported |
 |---------|-----------|
-| 0.1.x   | Yes       |
+| 0.11.x  | Yes       |
+| < 0.11  | No        |
 
 ## Reporting a Vulnerability
 
@@ -41,8 +45,12 @@ no multi-user server, no authentication layer, and no persistent user data.
 The primary security concerns are:
 
 - **Path traversal** in file I/O (molecule XYZ parsing, script export)
-- **Unsafe subprocess calls** (none currently; `subprocess` is not used in the
-  main package — PySCF runs in-process via the Python API)
+- **Unsafe subprocess calls** — PySCF runs in-process via the Python API, but
+  `subprocess` is used for SLURM (`sbatch`, `squeue`, `sacct`, `scancel`; see
+  `quantui/backends/slurm.py` and the `quantui-batch` launcher), for starting
+  Voilà (`quantui run app` / `quantui view`), and for small CLI and diagnostic
+  helpers. Job-folder paths and resource requests for SLURM are validated in
+  `quantui/backends/cluster_security.py`.
 - **Dependency vulnerabilities** in the scientific Python stack (numpy, pyscf,
   ase, etc.) — monitored via Dependabot
 

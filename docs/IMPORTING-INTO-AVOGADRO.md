@@ -1,6 +1,7 @@
 # Importing QuantUI results into Avogadro / IQmol / Jmol
 
-QuantUI saves every calculation as a *result folder* under `~/.quantui/results/`.
+QuantUI saves every calculation as a *result folder* under `$QUANTUI_RESULTS_DIR`
+(`~/.quantui/results/` in the containers; `./results` if the variable is unset).
 Each folder ships with portable, standards-compliant files that the wider
 quantum-chemistry ecosystem already knows how to read. No screen-scraping,
 no lock-in, no waiting on QuantUI to add a feature you can already get from
@@ -15,10 +16,10 @@ in which tool?"**
 | --- | --- | --- |
 | View molecular orbitals in 3D | `result.molden` | Avogadro · IQmol · Jmol |
 | Animate vibrational normal modes | `result.molden` (from a Frequency calc) | Avogadro |
-| Plot or replay a geometry-optimization or PES-scan trajectory | `trajectory.xyz` (any tool) or `trajectory.traj` (ASE) | VMD · Avogadro · ASE-GUI |
+| Plot or replay a geometry-optimization, PES-scan, Transition State or IRC trajectory | `trajectory.xyz` (any tool) or `trajectory.traj` (ASE) | VMD · Avogadro · ASE-GUI |
 | Render an orbital isosurface from a saved cube | `HOMO.cube` / `LUMO.cube` / etc. | Avogadro · VMD · ChimeraX |
-| Open spectrum data in Excel / a notebook | `*_data_*.csv` (per-panel: IR, UV-Vis, orbitals, PES) | LibreOffice Calc · Excel · `pandas.read_csv` |
-| Share the whole result with a collaborator | `<result-folder>.zip` (use **Export bundle** in the Analysis tab) | Any unzip tool |
+| Open spectrum data in Excel / a notebook | `*_data_*.csv` (per-panel: IR, Raman, UV-Vis, NMR, orbitals, PES; written by **Copy data**) | LibreOffice Calc · Excel · `pandas.read_csv` |
+| Share the whole result with a collaborator | `<result-folder>.zip` (**Results** tab → **Export** → **Export bundle (.zip)**; written next to the folder) | Any unzip tool |
 | Edit a structure and re-run elsewhere | `trajectory.traj` (last frame) | ASE-GUI |
 
 ## Where the files live
@@ -27,25 +28,27 @@ After a calculation finishes, open the **Files tab** in QuantUI and select
 the result folder. You will see a tree like this:
 
 ```text
-2026-05-25_14-32-11-394021_H2O_B3LYP_6-31Gs/
+2026-05-25_14-32-11-394021_H2O_B3LYP_6-31Gx/
 ├── result.json           ← machine-readable result metadata
 ├── result.molden         ← MOs + (for freq) vibrations  ← EXPORT.1 / EXPORT.2
 ├── pyscf.log             ← raw PySCF output
 ├── orbitals.npz          ← MO coefficients (for QuantUI re-render)
 ├── thumbnail.png         ← preview card image
-├── trajectory.xyz        ← geo-opt / PES frames (multi-frame XYZ)  ← EXPORT.3
-├── trajectory.traj       ← geo-opt / PES frames (ASE binary)       ← EXPORT.7
-├── ir_data_<ts>.csv      ← IR-spectrum (freq+intensity) data       ← EXPORT.4
-├── uv_data_<ts>.csv      ← UV-Vis-spectrum data                    ← EXPORT.4
-├── orb_data_<ts>.csv     ← orbital-diagram data                    ← EXPORT.4
-├── pes_data_<ts>.csv     ← PES-scan data                           ← EXPORT.4
-└── isosurfaces/
+├── trajectory.xyz        ← opt / PES / TS / IRC frames (multi-frame XYZ)
+├── trajectory.traj       ← the same frames (ASE binary)
+├── ir_spectrum_data_<ts>.csv             ← written by Copy data (IR panel)
+├── raman_spectrum_data_<ts>.csv          ← … Raman panel
+├── uv_vis_spectrum_data_<ts>.csv         ← … UV-Vis panel
+├── nmr_spectrum_data_<ts>.csv            ← … NMR panel
+├── orbital_energy_diagram_data_<ts>.csv  ← … orbital diagram
+├── pes_scan_profile_data_<ts>.csv        ← … PES-scan panel
+└── isosurfaces/                          ← written when you generate an isosurface
     ├── H2O_HOMO_<ts>.cube
-    └── H2O_LUMO_<ts>.cube                                          ← EXPORT.5
+    └── H2O_LUMO_<ts>.cube
 ```
 
-Files marked `← EXPORT.X` were added in the M-EXPORT milestone (session 54,
-QuantUI 0.2.0). Older result folders may not have them.
+The CSV and cube files appear only after you export them. Very old result
+folders may not have the Molden or trajectory files.
 
 ## Per-tool quick start
 
@@ -119,27 +122,30 @@ ASE round-trips the binary `.traj` file with per-frame energies preserved.
 
 Every spectrum / diagram panel exports its data as a per-trace CSV via
 the **📋 Copy data** button. The file is also written to the result folder
-as `<panel>_data_<timestamp>.csv`. The format is one section per trace:
+as `<panel>_data_<timestamp>.csv`. The format is a title line, then one
+section per trace (each with its own `x,y` header):
 
 ```text
-# trace 1
+# IR Spectrum
+
+# <trace name>
 x,y
 400,0.0
 401,0.012
 ...
 ```
 
-This parses cleanly with stdlib `csv.reader`, `pandas.read_csv`, Excel,
-LibreOffice Calc, or anything else that knows how to read comma-separated
-values with comment lines.
+A single-trace file reads directly with `pandas.read_csv(path, comment="#")`.
+For multi-trace files, split on the `# <trace name>` lines first (or read
+with stdlib `csv.reader`), since each section repeats the `x,y` header.
 
 ## Bundle export
 
-The **Export bundle** button in the Analysis tab zips an entire result
+**Export bundle (.zip)** (Results tab → **Export**) zips an entire result
 folder. The archive lands as a sibling of the result directory:
 
 ```text
-~/.quantui/results/2026-05-25_14-32-11-394021_H2O_B3LYP_6-31Gs.zip
+~/.quantui/results/2026-05-25_14-32-11-394021_H2O_B3LYP_6-31Gx.zip
 ```
 
 Share that one file and your collaborator gets every artifact above —
@@ -150,9 +156,8 @@ no need to walk them through which file does what.
 - **Avogadro 1.2 doesn't show vibrations.** Upgrade to Avogadro 2; the v1
   branch is no longer maintained. Avogadro 2 reads QuantUI's Molden
   vibration blocks natively.
-- **`result.molden` is missing for an older result.** Auto-export was
-  added in session 54 (QuantUI 0.2.0). Older results don't have a
-  `.molden`; re-running the calc regenerates one.
+- **`result.molden` is missing for an older result.** Very old results
+  predate the automatic Molden export; re-running the calc writes one.
 - **IQmol can't open the file.** IQmol's parser is stricter than
   Avogadro's. If you see a parse error, open the file in Avogadro first
   to confirm it's well-formed — usually a sign of a half-written file
@@ -168,9 +173,5 @@ no need to walk them through which file does what.
 - [ASE trajectory file format](https://wiki.fysik.dtu.dk/ase/ase/io/trajectory.html)
 - [Cube file format (Gaussian convention)](https://gaussian.com/cubegen/)
 
-## Roadmap link
-
-This page closes work-package **EXPORT.6** in [M-EXPORT](https://github.com/NCCU-Schultz-Lab/QuantUI/blob/main/CHANGELOG.md).
-The companion exports (Molden, multi-frame XYZ, ASE `.traj`, per-panel CSV,
-cube + bundle) are tracked as EXPORT.1, EXPORT.2, EXPORT.3, EXPORT.4,
-EXPORT.5, and EXPORT.7 in the same milestone.
+See the [CHANGELOG](https://github.com/The-Schultz-Lab/QuantUI/blob/main/CHANGELOG.md)
+for when each export was added.
