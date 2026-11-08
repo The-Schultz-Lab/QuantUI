@@ -111,6 +111,9 @@ class TSResult:
     verdict: str = ""
     solvent: Optional[str] = None
     freq: Any = None  # FreqResult at the final geometry
+    # TSGuessResult when the search started from a reactant + product
+    # interpolation (quantui.ts_guess); None for a plain search.
+    guess: Any = None
 
     @property
     def is_transition_state(self) -> bool:

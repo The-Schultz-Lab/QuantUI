@@ -87,6 +87,11 @@ _CATEGORY_LABELS = {
 }
 
 
+#: ``_ts_product_dd`` value meaning "use the pasted XYZ as the product"
+#: (Transition State from reactant + product, TS.4).
+TS_PRODUCT_XYZ = "__xyz__"
+
+
 def _category_label(cat: str) -> str:
     return _CATEGORY_LABELS.get(cat, cat.replace("-", " ").title())
 
@@ -1632,8 +1637,58 @@ def build_shared_widgets(
         f'<span style="color:{_theme.css.TEXT_SECONDARY};font-size:12px">'
         "Finds a saddle point near this geometry, then checks it has exactly "
         "<b>one imaginary frequency</b>. Start near the barrier top (e.g. the "
-        "highest PES-scan point)." + _ts_avail + "</span>"
+        "highest PES-scan point), or give a <b>product</b> below to build the "
+        "starting guess from reactant + product." + _ts_avail + "</span>"
     )
+    # Optional product structure (TS.4, QST2-style guess): the current
+    # molecule is the reactant; the run interpolates to the product (IDPP)
+    # and starts the search from the highest-energy image.
+    from quantui.ts_guess import DEFAULT_N_IMAGES, MAX_N_IMAGES, MIN_N_IMAGES
+
+    app._ts_product_dd = widgets.Dropdown(
+        options=[
+            ("(none — search from the current geometry)", ""),
+            ("Paste product XYZ…", TS_PRODUCT_XYZ),
+        ],
+        value="",
+        description="Product:",
+        style={"description_width": "110px"},
+        layout=layout_fn(
+            width="auto", flex="1 1 auto", min_width="260px", max_width="620px"
+        ),
+        tooltip=(
+            "Optional product structure. The current molecule is the reactant; "
+            "the run builds the starting guess from the path between them."
+        ),
+    )
+    app._ts_product_refresh_btn = widgets.Button(
+        description="",
+        icon="refresh",
+        layout=layout_fn(width="32px", height="28px", padding="0"),
+        tooltip="Refresh the list of saved Geometry Opt results",
+    )
+    app._ts_product_xyz = widgets.Textarea(
+        value="",
+        placeholder=(
+            "Product XYZ: the same atoms in the same order as the current "
+            "molecule, e.g.\nC  0.000  0.000  0.000\nN  0.000  0.000  1.169\n"
+            "H  0.000  0.000  2.164"
+        ),
+        layout=layout_fn(width="440px", height="110px", display="none"),
+    )
+    app._ts_n_images_si = widgets.BoundedIntText(
+        value=DEFAULT_N_IMAGES,
+        min=MIN_N_IMAGES,
+        max=MAX_N_IMAGES,
+        description="Images:",
+        style={"description_width": "110px"},
+        layout=layout_fn(width="190px", display="none"),
+        tooltip=(
+            "Interpolated geometries between reactant and product; each costs "
+            "one single point (plus two for the endpoints)"
+        ),
+    )
+    app._ts_product_note = widgets.HTML("")
 
     app._irc_note = widgets.HTML(
         f'<span style="color:{_theme.css.TEXT_SECONDARY};font-size:12px">'
