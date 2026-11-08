@@ -352,8 +352,10 @@ def format_opt_result(r: Any) -> str:
 def _point_group_html(get: Any) -> str:
     """Point group of the result's geometry as HTML, or ''.
 
-    Reads ``pyscf_mol_atom`` (live results) or the saved frequency
-    ``spectra.molecule`` block; other saved results carry no geometry here.
+    Reads ``pyscf_mol_atom`` (live results), the saved frequency
+    ``spectra.molecule`` block, or the top-level ``geometry`` block every
+    other saved result carries (``atoms`` + ``coordinates``) — without that
+    last one a single point reloaded from History lost its point-group row.
     """
     try:
         from quantui.symmetry import detect_point_group, point_group_of_atom_list
@@ -364,9 +366,15 @@ def _point_group_html(get: Any) -> str:
         else:
             spectra = get("spectra") or {}
             mol = spectra.get("molecule") if isinstance(spectra, dict) else None
-            if not mol or not mol.get("atoms"):
-                return ""
-            pg = detect_point_group(mol["atoms"], mol.get("coords") or [])
+            if mol and mol.get("atoms"):
+                atoms, coords = mol["atoms"], mol.get("coords") or []
+            else:
+                geom = get("geometry") or {}
+                if not isinstance(geom, dict) or not geom.get("atoms"):
+                    return ""
+                atoms = geom["atoms"]
+                coords = geom.get("coordinates") or geom.get("coords") or []
+            pg = detect_point_group(atoms, coords)
         return pg.summary_html() if pg is not None else ""
     except Exception:  # noqa: BLE001 — informational row only
         return ""
