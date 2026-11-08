@@ -9,6 +9,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **ECD (electronic circular dichroism) spectra** (M-SPECTRA2 SPC2.3). UV-Vis
+  (TD-DFT) runs now also compute rotatory strengths (velocity gauge, plotted;
+  length gauge shown alongside) in 10⁻⁴⁰ cgs, and a new **ECD** panel beside
+  UV-Vis shows the stick or Gaussian-broadened Δε spectrum (Stephens & Harada
+  convention) with HTML/PNG export and Copy data. Enantiomers give exactly
+  mirror-image spectra; an achiral molecule is labelled as such. Needs a
+  diffuse basis for meaningful Rydberg bands; not available with ECP basis
+  sets (PySCF limitation). Saved with results and batch jobs.
 - **NPA charges and bond orders** (M-CHEM CHEM.2/CHEM.3). The Populations
   panel (now *Populations & Bond Orders*) shows natural population analysis
   (NPA) charges beside Mulliken, with a Mulliken/NPA toggle for the chart and
