@@ -39,7 +39,7 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass, field
-from typing import IO, Any, List, Optional
+from typing import IO, Any, Dict, List, Optional
 
 from .molecule import Molecule
 from .session_calc import HARTREE_TO_EV
@@ -127,6 +127,7 @@ class TDDFTResult:
     atom_symbols: Optional[List[str]] = None
     mulliken_charges: Optional[List[float]] = None
     npa_charges: Optional[List[float]] = None
+    bond_orders: Optional[List[Dict[str, Any]]] = None
     dipole_moment_debye: Optional[float] = None
     dipole_vector_debye: Optional[List[float]] = None
     spin_square: Optional[float] = None
@@ -498,6 +499,7 @@ def _run_tddft_calc_body(
         atom_symbols=_gs["atom_symbols"],
         mulliken_charges=_gs["mulliken_charges"],
         npa_charges=_gs["npa_charges"],
+        bond_orders=_gs["bond_orders"],
         dipole_moment_debye=_gs["dipole_moment_debye"],
         dipole_vector_debye=_gs["dipole_vector_debye"],
         spin_square=_gs["spin_square"],

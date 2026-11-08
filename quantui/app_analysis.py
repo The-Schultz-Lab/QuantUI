@@ -279,6 +279,11 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     app._last_npa_charges = None
     app._npa_unavailable_reason = ""
     app._pop_reference_note = ""
+    app._last_bond_orders = None
+    app._bond_orders_unavailable_reason = ""
+    bo_table = getattr(app, "_bond_order_table", None)
+    if bo_table is not None:
+        bo_table.value = ""
     app._last_mulliken_dipole = None
     app._last_mulliken_dipole_vector = None
     app._last_mulliken_fig = None
@@ -940,11 +945,13 @@ _POST_HF_PREFIXES = ("MP2", "CCSD")
 
 
 def _ctx_result_fields(ctx: Any) -> dict:
-    """``npa_charges`` / ``engine_id`` / ``method`` from a live or History ctx."""
+    """``npa_charges`` / ``bond_orders`` / ``engine_id`` / ``method`` from a
+    live or History ctx."""
     if ctx.live_result is not None:
         result = ctx.live_result
         return {
             "npa_charges": getattr(result, "npa_charges", None),
+            "bond_orders": getattr(result, "bond_orders", None),
             "engine_id": getattr(result, "engine_id", None) or "pyscf",
             "method": getattr(result, "method", None) or getattr(ctx, "method", ""),
         }
@@ -959,6 +966,7 @@ def _ctx_result_fields(ctx: Any) -> dict:
         return {}
     return {
         "npa_charges": data.get("npa_charges"),
+        "bond_orders": data.get("bond_orders"),
         "engine_id": data.get("engine_id") or "pyscf",
         "method": data.get("method") or getattr(ctx, "method", ""),
     }
@@ -990,6 +998,50 @@ def _npa_payload(ctx: Any, n_atoms: int) -> tuple[Optional[list[float]], str]:
     return None, "NPA charges could not be computed for this result."
 
 
+def _bond_orders_payload(ctx: Any, n_atoms: int) -> tuple[Optional[list[dict]], str]:
+    """Validated bond-order pairs for *ctx* (or ``None``) and, if ``None``, why.
+
+    An empty list is valid data (no pair reached the threshold, e.g. a
+    single atom); ``None`` means "not computed".
+    """
+    fields = _ctx_result_fields(ctx)
+    raw = fields.get("bond_orders")
+    if raw is not None:
+        pairs: list[dict] = []
+        try:
+            for item in raw:
+                i, j = int(item["i"]), int(item["j"])
+                if not (0 <= i < n_atoms and 0 <= j < n_atoms):
+                    raise ValueError("atom index out of range")
+                w = item.get("wiberg")
+                pairs.append(
+                    {
+                        "i": i,
+                        "j": j,
+                        "mayer": float(item["mayer"]),
+                        "wiberg": None if w is None else float(w),
+                    }
+                )
+        except (KeyError, TypeError, ValueError, AttributeError):
+            pairs = []
+            raw = None
+        if raw is not None:
+            return pairs, ""
+    engine = str(fields.get("engine_id") or "pyscf")
+    if engine.lower() != "pyscf":
+        return None, (
+            "Bond orders are not available for the "
+            f"{_html_mod.escape(engine)} engine (computed from PySCF's density "
+            "and overlap matrices)."
+        )
+    if getattr(ctx, "source", "") == "history":
+        return None, (
+            "Bond orders were not saved with this History result (saved before "
+            "they were added, or the analysis failed). Re-run to compute them."
+        )
+    return None, "Bond orders could not be computed for this result."
+
+
 def _is_post_hf(method: str) -> bool:
     return str(method or "").upper().startswith(_POST_HF_PREFIXES)
 
@@ -1018,6 +1070,7 @@ def pop_mulliken(app: Any, ctx: Any) -> bool:
             _set_panel_unavailable_message(app, "Populations", msg)
             return False
         npa, npa_reason = _npa_payload(ctx, len(symbols))
+        bond_orders, bo_reason = _bond_orders_payload(ctx, len(symbols))
         method = str(
             _ctx_result_fields(ctx).get("method") or getattr(ctx, "method", "") or ""
         )
@@ -1031,9 +1084,12 @@ def pop_mulliken(app: Any, ctx: Any) -> bool:
                 molecule=_mulliken_molecule(app, ctx),
                 npa_charges=npa,
                 npa_unavailable_reason=npa_reason,
+                bond_orders=bond_orders,
+                bond_orders_unavailable_reason=bo_reason,
                 reference_note=(
-                    "Charges are from the HF reference density, not the "
-                    f"correlated {_html_mod.escape(str(method))} density."
+                    "Charges and bond orders are from the HF reference "
+                    f"density, not the correlated {_html_mod.escape(method)} "
+                    "density."
                     if _is_post_hf(method)
                     else ""
                 ),
@@ -1094,13 +1150,16 @@ def show_mulliken_populations(
     molecule: Any = None,
     npa_charges: Optional[list] = None,
     npa_unavailable_reason: str = "",
+    bond_orders: Optional[list] = None,
+    bond_orders_unavailable_reason: str = "",
     reference_note: str = "",
 ) -> bool:
     """Write the charge table + Plotly chart into the Populations accordion.
 
     Mulliken charges are required; NPA charges (CHEM.2) are optional — when
     present they get their own table column and the Mulliken/NPA toggle
-    switches the chart and 3D colouring between the two schemes.
+    switches the chart and 3D colouring between the two schemes. Bond
+    orders (CHEM.3) fill their own table and the optional 3D bond labels.
     """
     if not atom_symbols or not charges or len(atom_symbols) != len(charges):
         return False
@@ -1116,6 +1175,14 @@ def show_mulliken_populations(
             "NPA charges are not available for this result."
         )
     app._pop_reference_note = reference_note
+    if bond_orders is not None:
+        app._last_bond_orders = [dict(b) for b in bond_orders]
+        app._bond_orders_unavailable_reason = ""
+    else:
+        app._last_bond_orders = None
+        app._bond_orders_unavailable_reason = bond_orders_unavailable_reason or (
+            "Bond orders are not available for this result."
+        )
     app._last_mulliken_dipole = (
         float(dipole_debye) if dipole_debye is not None else None
     )
@@ -1155,6 +1222,7 @@ def show_mulliken_populations(
 
     _sync_charge_scheme_toggle(app)
     render_population_text(app)
+    render_bond_order_table(app)
 
     update_mulliken_figure(app)
     # Cache geometry for lazy render when the accordion becomes visible.
@@ -1253,6 +1321,68 @@ def render_population_text(app: Any) -> None:
     app._mulliken_table.value = (
         '<table style="border-collapse:collapse;margin:0 0 10px;font-size:13px">'
         f"<tr>{header}</tr>{''.join(rows)}</table>"
+    )
+
+
+def render_bond_order_table(app: Any) -> None:
+    """Mayer / Wiberg table (strongest first) or the unavailable reason."""
+    out = getattr(app, "_bond_order_table", None)
+    if out is None:
+        return
+    dd = getattr(app, "_bond_label_dd", None)
+    pairs = getattr(app, "_last_bond_orders", None)
+    muted = (
+        f"font-size:12px;color:{_theme.css.TEXT_MUTED_LIGHT};margin:0 0 6px;"
+        "font-style:italic"
+    )
+    if pairs is None:
+        if dd is not None:
+            dd.value = "off"
+            dd.disabled = True
+        reason = getattr(app, "_bond_orders_unavailable_reason", "") or ""
+        out.value = f'<p style="{muted}">{reason}</p>' if reason else ""
+        return
+    if dd is not None:
+        dd.disabled = False
+    from quantui.population_analysis import BOND_ORDER_MIN
+
+    symbols = list(getattr(app, "_last_mulliken_symbols", None) or [])
+
+    def _label(k: int) -> str:
+        sym = symbols[k] if k < len(symbols) else "?"
+        return f"{_html_mod.escape(sym)}{k + 1}"
+
+    th = (
+        f'<th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};'
+        'font-size:12px;padding:2px 14px 2px 0">'
+    )
+    td = (
+        f'<td style="padding:2px 14px 2px 0;color:{_theme.css.TEXT_HEADING};'
+        'font-family:monospace">'
+    )
+    td_sym = f'<td style="padding:2px 14px 2px 0;color:{_theme.css.TEXT_SECONDARY}">'
+    rows = []
+    for bo in pairs:
+        w = bo.get("wiberg")
+        rows.append(
+            f"<tr>{td_sym}{_label(bo['i'])}–{_label(bo['j'])}</td>"
+            f"{td}{float(bo['mayer']):.3f}</td>"
+            f"{td}{'—' if w is None else f'{float(w):.3f}'}</td></tr>"
+        )
+    if not rows:
+        rows.append(
+            f'<tr><td colspan="3" style="{muted}">No atom pair reaches '
+            f"{BOND_ORDER_MIN:.2f}.</td></tr>"
+        )
+    out.value = (
+        f'<div style="font-size:12px;color:{_theme.css.TEXT_SECONDARY};'
+        'font-weight:600;margin:4px 0 2px">Bond orders</div>'
+        '<div style="max-height:260px;overflow-y:auto">'
+        '<table style="border-collapse:collapse;margin:0 0 4px;font-size:13px">'
+        f"<tr>{th}Atoms</th>{th}Mayer</th>{th}Wiberg (NAO)</th></tr>"
+        f"{''.join(rows)}</table></div>"
+        f'<p style="{muted}">Pairs with both indices below '
+        f"{BOND_ORDER_MIN:.2f} are not listed.</p>"
     )
 
 

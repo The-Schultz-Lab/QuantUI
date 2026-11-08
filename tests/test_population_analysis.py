@@ -165,10 +165,11 @@ class TestGroundStateAnalysis:
         def _boom(_mf):
             raise RuntimeError("nao exploded")
 
-        monkeypatch.setattr(pa, "scf_npa_charges", _boom)
+        monkeypatch.setattr(pa, "scf_population_analysis", _boom)
         mf = _rhf(_WATER, "sto-3g")
         out = ground_state_analysis(mf, self._molecule(), "STO-3G")
         assert out["npa_charges"] is None
+        assert out["bond_orders"] is None
         assert out["mulliken_charges"] is not None
 
     def test_run_in_session_sets_field(self):

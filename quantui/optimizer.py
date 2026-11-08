@@ -47,7 +47,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, Any, List, Optional
+from typing import IO, Any, Dict, List, Optional
 
 from .ase_bridge import ASE_AVAILABLE, atoms_to_molecule, molecule_to_atoms
 from .config import BOHR_TO_ANGSTROM as _BOHR_TO_ANG
@@ -411,6 +411,7 @@ class OptimizationResult:
     atom_symbols: Optional[List[str]] = None
     mulliken_charges: Optional[List[float]] = None
     npa_charges: Optional[List[float]] = None
+    bond_orders: Optional[List[Dict[str, Any]]] = None
     dipole_moment_debye: Optional[float] = None
     dipole_vector_debye: Optional[List[float]] = None
     engine_id: str = "pyscf"
@@ -967,6 +968,7 @@ def optimize_geometry(
     )
     _opt_mulliken: Optional[List[float]] = None
     _opt_npa: Optional[List[float]] = None
+    _opt_bond_orders: Optional[List[Dict[str, Any]]] = None
     _opt_dipole: Optional[float] = None
     _opt_dipole_vec: Optional[List[float]] = None
     _opt_density_fit = bool(getattr(atoms.calc, "_density_fit_used", False))
@@ -999,11 +1001,15 @@ def optimize_geometry(
                     _pop_exc,
                 )
             try:
-                from .population_analysis import scf_npa_charges
+                from .population_analysis import scf_population_analysis
 
-                _opt_npa = scf_npa_charges(_last_mf)
+                _pa = scf_population_analysis(_last_mf)
+                _opt_npa = _pa["npa_charges"]
+                _opt_bond_orders = _pa["bond_orders"]
             except Exception as _npa_exc:
-                logger.debug("Final-step NPA failed in optimizer: %s", _npa_exc)
+                logger.debug(
+                    "Final-step NPA / bond orders failed in optimizer: %s", _npa_exc
+                )
             try:
                 _dip = _np_mo.asarray(_last_mf.dip_moment(verbose=0))
                 _dip_list = [float(x) for x in _dip.reshape(-1)[:3]]
@@ -1104,6 +1110,7 @@ def optimize_geometry(
         atom_symbols=_opt_atom_symbols,
         mulliken_charges=_opt_mulliken,
         npa_charges=_opt_npa,
+        bond_orders=_opt_bond_orders,
         dipole_moment_debye=_opt_dipole,
         dipole_vector_debye=_opt_dipole_vec,
         dispersion_applied=getattr(atoms.calc, "dispersion_applied", None),

@@ -89,6 +89,10 @@ class SessionResult:
     # (quantui.population_analysis). ``None`` when not computed (non-PySCF
     # engine, failure, or a result saved before NPA existed).
     npa_charges: Optional[List[float]] = None
+    # Mayer / Wiberg (NAO-basis) bond orders, CHEM.3: list of
+    # {"i", "j", "mayer", "wiberg"} for atom pairs (0-based) above
+    # population_analysis.BOND_ORDER_MIN. ``None`` when not computed.
+    bond_orders: Optional[List[Dict[str, Any]]] = None
     dipole_moment_debye: Optional[float] = None
     # Cartesian dipole components in Debye (same frame as molecular coords).
     # Magnitude is ``dipole_moment_debye``; kept separately so older results
@@ -439,7 +443,7 @@ def ground_state_analysis(
     label: str = "",
     gpu_used: bool = False,
 ) -> Dict[str, Any]:
-    """Mulliken + NPA charges, dipole, ⟨S²⟩ and MO arrays of a converged SCF.
+    """Mulliken/NPA charges, bond orders, dipole, ⟨S²⟩ and MO arrays of an SCF.
 
     Shared by Single Point, Frequency and TD-DFT so every
     result with a ground-state SCF can fill the Populations and Isosurface
@@ -451,7 +455,8 @@ def ground_state_analysis(
       falls back to ``mf.to_cpu()``; the same for ``spin_square``.
     - Mulliken and dipole are well defined for UHF/UKS.
     - NPA charges (natural atomic orbitals, :mod:`quantui.population_analysis`)
-      use the total α+β density for an unrestricted/ROHF reference.
+      use the total α+β density for an unrestricted/ROHF reference; Mayer
+      and Wiberg bond orders use the α and β densities separately.
     - MO arrays are kept whole: ``(2, n)`` / ``(2, nao, nmo)`` for an
       unrestricted reference.
     - ⟨S²⟩ only for open-shell or unrestricted references.
@@ -464,6 +469,7 @@ def ground_state_analysis(
         "atom_symbols": list(molecule.atoms),
         "mulliken_charges": None,
         "npa_charges": None,
+        "bond_orders": None,
         "dipole_moment_debye": None,
         "dipole_vector_debye": None,
         "spin_square": None,
@@ -487,11 +493,11 @@ def ground_state_analysis(
     except Exception as exc:
         logger.debug("Mulliken population extraction failed: %s", exc)
     try:
-        from .population_analysis import scf_npa_charges
+        from .population_analysis import scf_population_analysis
 
-        out["npa_charges"] = scf_npa_charges(mf)
+        out.update(scf_population_analysis(mf))
     except Exception as exc:
-        logger.debug("NPA (natural population) analysis failed: %s", exc)
+        logger.debug("NPA / bond-order analysis failed: %s", exc)
     try:
         dip = _host_array(mf.dip_moment(verbose=0))
         vec = [float(x) for x in dip.reshape(-1)[:3]]
@@ -1068,6 +1074,7 @@ def _run_session_calc_body(
     )
     mulliken_charges = _gs["mulliken_charges"]
     npa_charges = _gs["npa_charges"]
+    bond_orders = _gs["bond_orders"]
     dipole_moment_debye = _gs["dipole_moment_debye"]
     dipole_vector_debye = _gs["dipole_vector_debye"]
     spin_square = _gs["spin_square"]
@@ -1099,6 +1106,7 @@ def _run_session_calc_body(
         atom_symbols=list(molecule.atoms),
         mulliken_charges=mulliken_charges,
         npa_charges=npa_charges,
+        bond_orders=bond_orders,
         dipole_moment_debye=dipole_moment_debye,
         dipole_vector_debye=dipole_vector_debye,
         mp2_correlation_hartree=mp2_correlation_hartree,

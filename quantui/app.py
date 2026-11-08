@@ -1794,6 +1794,8 @@ class QuantUIApp:
         _mulliken_overlay_note: Any
         _pop_scheme_tb: Any
         _pop_scheme_note: Any
+        _bond_label_dd: Any
+        _bond_order_table: Any
         _populations_js_bridge: Any
         _nmr_accordion: Any
         _nmr_fig: Any
@@ -2011,6 +2013,9 @@ class QuantUIApp:
         self._last_npa_charges: Any = None
         self._npa_unavailable_reason: str = ""
         self._pop_reference_note: str = ""
+        # Mayer / Wiberg bond-order pairs (CHEM.3) for the shown result.
+        self._last_bond_orders: Any = None
+        self._bond_orders_unavailable_reason: str = ""
         self._last_mulliken_dipole: Any = None
         self._last_mulliken_dipole_vector: Any = None
         self._last_mulliken_fig: Any = None
@@ -3284,6 +3289,9 @@ class QuantUIApp:
         )
         self._pop_scheme_tb.observe(
             self._safe_cb(self._on_pop_scheme_changed), names="value"
+        )
+        self._bond_label_dd.observe(
+            self._safe_cb(self._on_mulliken_overlay_changed), names="value"
         )
         # Persist the grid choice so it survives a relaunch.
         self._iso_resolution_dd.observe(
@@ -6690,6 +6698,9 @@ class QuantUIApp:
                 )
                 result.npa_charges = getattr(
                     _sp_result, "npa_charges", getattr(result, "npa_charges", None)
+                )
+                result.bond_orders = getattr(
+                    _sp_result, "bond_orders", getattr(result, "bond_orders", None)
                 )
                 result.dipole_moment_debye = getattr(
                     _sp_result, "dipole_moment_debye", result.dipole_moment_debye

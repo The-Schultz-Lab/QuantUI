@@ -161,6 +161,7 @@ _FREQ_FIELDS = frozenset(
         "atom_symbols",
         "mulliken_charges",
         "npa_charges",
+        "bond_orders",
         "dipole_moment_debye",
         "dipole_vector_debye",
         "spin_square",

@@ -3417,7 +3417,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         description="?",
         button_style="",
         layout=layout_fn(width="28px", height="28px", padding="0"),
-        tooltip="Mulliken vs. NPA charges — opens Help",
+        tooltip="Mulliken vs. NPA charges, Mayer vs. Wiberg bond orders — opens Help",
     )
     app._mulliken_color_cb = widgets.Checkbox(
         value=True,
@@ -3489,6 +3489,19 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         value="",
         layout=layout_fn(width="100%", margin="0"),
     )
+    # Mayer / Wiberg bond orders (CHEM.3): table + optional 3D bond labels.
+    app._bond_label_dd = widgets.Dropdown(
+        options=[("Off", "off"), ("Mayer", "mayer"), ("Wiberg", "wiberg")],
+        value="off",
+        description="Bond labels:",
+        tooltip="Label bonds (index ≥ 0.30) with their Mayer or Wiberg bond order",
+        style={"description_width": "80px"},
+        layout=layout_fn(width="200px", margin="0 0 4px 0"),
+    )
+    app._bond_order_table = widgets.HTML(
+        value="",
+        layout=layout_fn(width="100%"),
+    )
     # Soft notice under the overlay toggles (e.g. older History without μ vector).
     app._mulliken_overlay_note = widgets.HTML(
         value="",
@@ -3503,7 +3516,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         [
             widgets.HTML(
                 f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY};'
-                'font-weight:600">Partial charges from the SCF density</span>'
+                'font-weight:600">Partial charges and bond orders from the '
+                "SCF density</span>"
             ),
             app._mulliken_help_btn,
         ],
@@ -3533,9 +3547,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                             mulliken_overlay_row,
                             app._mulliken_dipole_caption,
                             app._mulliken_vividness_slider,
+                            app._bond_label_dd,
                             app._mulliken_overlay_note,
                             app._mulliken_summary,
                             app._mulliken_table,
+                            app._bond_order_table,
                         ],
                         layout_fn=layout_fn,
                     ),
@@ -3547,7 +3563,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         ],
         layout=layout_fn(display="none", margin="8px 0"),
     )
-    app._mulliken_accordion.set_title(0, "Populations (Mulliken / NPA)")
+    app._mulliken_accordion.set_title(0, "Populations & Bond Orders")
     app._mulliken_accordion.selected_index = None
 
     app._result_dir_label = widgets.HTML(
