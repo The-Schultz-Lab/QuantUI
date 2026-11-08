@@ -3196,8 +3196,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         # a result can be drawn (VW.7); density, spin, ESP and the gallery
         # could only fail, so they are removed and the panel says so (viewer
         # audit VA.2). The orbital controls stay: show_orbital_diagram only
-        # reveals them when the result has saved cubes.
-        app._iso_surface_dd.options = [("Molecular orbital", "orbital")]
+        # reveals them when the result has saved cubes. The surface kind is
+        # pinned by hiding its dropdown (value stays "orbital"); its options
+        # are left intact so the dispatch code and its tests see one widget
+        # shape with or without PySCF.
+        app._iso_surface_dd.value = "orbital"
         app._iso_surface_dd.layout.display = "none"
         iso_body.children = (
             widgets.HTML(
