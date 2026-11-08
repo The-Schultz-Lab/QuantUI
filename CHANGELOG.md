@@ -9,6 +9,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Transition-state guess from a reactant and a product** (M-TS TS.4,
+  QST2-style). On the Transition State calc type, pick a *Product* (a saved
+  Geometry Opt result with the same atoms, or pasted XYZ): QuantUI aligns it
+  to the current molecule, builds an IDPP-interpolated path (7 images by
+  default), computes each image's energy, starts the Sella search from the
+  highest one and plots the path profile in the PES Scan panel. Warns when
+  atoms pass through each other (usually mismatched atom order) or when the
+  path has no barrier. `quantui.ts_guess`. Batch jobs still start from one
+  geometry.
 - **Help topics** for Frequency (IR, Raman, thermochemistry), UV-Vis
   (TD-DFT), NMR, Reorganization Energy, implicit solvent (PCM), GPU
   acceleration and running on a SLURM cluster. These had no help coverage.
