@@ -87,6 +87,12 @@ def _reset_unavailable_messages_for_context(app: Any, ctx: Any) -> None:
                     "No optimization steps in this run. Tick <b>Geometry "
                     "optimization before calculation</b> to record a trajectory."
                 )
+            elif panel_name == "ECD":
+                text = (
+                    "No rotatory strengths in this result — it was saved before "
+                    "ECD support, used an ECP basis set, or the TD-DFT step "
+                    "failed. Re-run UV-Vis (TD-DFT) to compute them."
+                )
             else:
                 text = f"This {calc_label} result has no data for this panel."
             _set_panel_unavailable_message(app, panel_name, text)
@@ -154,6 +160,9 @@ def build_ana_switcher(app: Any, *, layout_fn: Any) -> None:
     )
     app._tddft_accordion.observe(
         app._safe_cb(app._on_tddft_accordion_show), names=["selected_index"]
+    )
+    app._ecd_accordion.observe(
+        app._safe_cb(app._on_ecd_accordion_show), names=["selected_index"]
     )
     app._orb_accordion.observe(
         app._safe_cb(app._on_orb_accordion_show), names=["selected_index"]
@@ -856,6 +865,27 @@ def pop_uv_vis(app: Any, ctx: Any) -> bool:
     if not energies_ev or not osc:
         return False
     return bool(app._show_uv_vis_spectrum(energies_ev, osc, wl))
+
+
+def pop_ecd(app: Any, ctx: Any) -> bool:
+    """Populate the ECD panel from live or history TD-DFT rotatory strengths.
+
+    Returns ``False`` when no rotatory strengths exist (an ECP basis, a
+    failed TD solve, or a result saved before ECD support) — the panel then
+    keeps its "no data" placeholder.
+    """
+    if ctx.live_result is not None:
+        energies_ev = list(getattr(ctx.live_result, "excitation_energies_ev", []))
+        r_vel = list(getattr(ctx.live_result, "rotatory_strengths_velocity", []) or [])
+        r_len = list(getattr(ctx.live_result, "rotatory_strengths_length", []) or [])
+    else:
+        uv = ctx.spectra_data.get("uv_vis", {}) or {}
+        energies_ev = list(uv.get("excitation_energies_ev") or [])
+        r_vel = list(uv.get("rotatory_strengths_velocity") or [])
+        r_len = list(uv.get("rotatory_strengths_length") or [])
+    if not energies_ev or not r_vel or len(r_vel) != len(energies_ev):
+        return False
+    return bool(app._show_ecd_spectrum(energies_ev, r_vel, r_len))
 
 
 def pop_nmr_shielding(app: Any, ctx: Any) -> bool:

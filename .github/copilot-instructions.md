@@ -51,7 +51,7 @@ QuantUI/
 │   ├── session_calc.py       ← In-session PySCF runner (run_in_session)
 │   ├── optimizer.py          ← QM geometry optimization (ASE-BFGS + PySCF)
 │   ├── freq_calc.py          ← Frequency / vibrational analysis
-│   ├── tddft_calc.py         ← TD-DFT UV-Vis excited states
+│   ├── tddft_calc.py         ← TD-DFT UV-Vis excited states + ECD rotatory strengths
 │   ├── nmr_calc.py           ← NMR shielding (GIAO), returns NMRResult
 │   ├── pes_scan.py           ← Potential energy surface (bond/angle/dihedral)
 │   ├── ts_search.py          ← Transition-state search (Sella) + frequency check
@@ -187,7 +187,7 @@ must understand this pattern.**
 After a calculation completes (live or history), `_apply_analysis_context(ctx)` is the
 single entry point for all panel population. It:
 
-1. Calls `_deactivate_all_ana_panels()` to reset all 11 panels — collapses accordions
+1. Calls `_deactivate_all_ana_panels()` to reset all 12 panels — collapses accordions
    and restores "Not available" placeholders (panels remain in the DOM — never hidden)
 2. Looks up `_PANEL_REGISTRY[ctx.calc_type]` for an ordered list of
    `(panel_name, populate_method_name, auto_select)` tuples
@@ -226,7 +226,7 @@ _PANEL_REGISTRY = {
     "frequency":      [Vibrational, IR Spectrum, Raman Spectrum, Trajectory (pre-opt), Energies, Isosurface, Populations],
     "transition_state": [Vibrational, IR Spectrum, Trajectory, Energies, Isosurface, Populations],
     "irc":            [PES Scan (energy profile via _pop_irc_profile), Trajectory],
-    "tddft":          [UV-Vis, Energies, Isosurface, Populations],
+    "tddft":          [UV-Vis, ECD, Energies, Isosurface, Populations],
     "nmr":            [NMR],
     "reorganization_energy": [Energies(False), Geometries(True), Isosurface],
     "pes_scan":       [PES Scan, Trajectory (_pop_pes_trajectory)],
@@ -392,9 +392,9 @@ bail out instead of overwriting newer output.
 
 ---
 
-## Analysis Tab — 11 Panels
+## Analysis Tab — 12 Panels
 
-All 11 panels are **always in the DOM** (`layout.display=""`, `selected_index=None`).
+All 12 panels are **always in the DOM** (`layout.display=""`, `selected_index=None`).
 Unavailable panels show a "Not available — run a X calculation first" placeholder.
 `_activate_ana_panel()` swaps the placeholder for real content and expands the accordion.
 `_deactivate_all_ana_panels()` restores placeholders and collapses — never hides.
@@ -415,6 +415,7 @@ Source of truth: `_PANEL_META` / `_PANEL_REGISTRY` in `app.py`.
 | Isosurface | `_iso_accordion` | Single Point, Geometry Opt, Frequency, Transition State, UV-Vis, Reorganization Energy (Linux/WSL) |
 | Geometries | `_reorg_geom_accordion` | Reorganization Energy |
 | UV-Vis | `_tddft_accordion` | UV-Vis (TD-DFT) |
+| ECD | `_ecd_accordion` | UV-Vis (TD-DFT) — rotatory strengths from the same states |
 | NMR | `_nmr_accordion` | NMR Shielding |
 
 ---
@@ -435,6 +436,7 @@ Source of truth: `_PANEL_META` / `_PANEL_REGISTRY` in `app.py`.
 | `quantui/nmr_calc.py` | `run_nmr_calc()` — GIAO shielding; returns `NMRResult` |
 | `quantui/pes_scan.py` | `run_pes_scan()` — bond/angle/dihedral PES; returns `PESScanResult` |
 | `quantui/ir_plot.py` | `plot_ir_spectrum()` — Plotly stick/broadened IR chart |
+| `quantui/ecd_plot.py` | `ecd_delta_epsilon()` / `plot_ecd_spectrum()` — Gaussian Δε broadening (Stephens–Harada) and ECD chart |
 | `notebooks/molecule_computations.ipynb` | Thin launcher — 3 cells only (do not add logic here) |
 | your project `STATUS.md` | **Read this first every session** — current state, git log, open tasks |
 | your project `feature-requests.md` | FR backlog |
@@ -622,12 +624,15 @@ Default results dir: `Path("results")` relative to cwd, or `$QUANTUI_RESULTS_DIR
   "n_iterations": 12,
   "spectra": {
     "ir":     {"frequencies_cm1": [...], "ir_intensities": [...], "zpve_hartree": 0.021, "displacements": [...]},
-    "uv_vis": {"excitation_energies_ev": [...], "oscillator_strengths": [...], "wavelengths_nm": [...]},
+    "uv_vis": {"excitation_energies_ev": [...], "oscillator_strengths": [...], "wavelengths_nm": [...],
+               "rotatory_strengths_velocity": [...], "rotatory_strengths_length": [...]},
     "nmr":    {"atom_symbols": [...], "shielding_iso_ppm": [...], "chemical_shifts_ppm": {"0": 1.2, ...}, "reference_compound": "TMS"},
     "molecule": {"atoms": [...], "coords": [...], "charge": 0, "multiplicity": 1}
   }
 }
 ```
+
+`uv_vis.rotatory_strengths_*` (ECD, SPC2.3) are in 10⁻⁴⁰ esu²·cm²; absent on older results.
 
 Schema rules: new fields must be additive only. Never remove or rename existing keys.
 

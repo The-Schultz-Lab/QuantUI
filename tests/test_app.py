@@ -3562,6 +3562,8 @@ class TestAnaSwitcher:
             # tab populated nothing for those runs.
             "Geometries",
             "UV-Vis",
+            # SPC2.3 — ECD from the same TD-DFT states, right after UV-Vis.
+            "ECD",
             "NMR",
         ]
 

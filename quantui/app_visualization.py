@@ -1302,6 +1302,168 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
             pass
 
 
+# ── ECD (electronic circular dichroism) ─────────────────────────────────────
+
+
+def show_ecd_spectrum(
+    app: Any,
+    energies_ev: List[float],
+    rot_velocity: List[float],
+    rot_length: Optional[List[float]] = None,
+) -> bool:
+    """Store ECD data (R_n in 10⁻⁴⁰ cgs) and render the default Δε plot.
+
+    Returns ``False`` (nothing rendered) when no rotatory strengths exist —
+    e.g. an ECP basis, or a result saved before ECD support.
+    """
+    rows = []
+    rl = list(rot_length or [])
+    for i, (e, r) in enumerate(zip(energies_ev or [], rot_velocity or [])):
+        try:
+            e_val, r_val = float(e), float(r)
+        except Exception:
+            continue
+        if e_val <= 0:
+            continue
+        r_len: Optional[float] = None
+        if i < len(rl):
+            try:
+                r_len = float(rl[i])
+            except Exception:
+                r_len = None
+        rows.append((e_val, r_val, r_len))
+    if not rows:
+        return False
+    rows.sort(key=lambda p: p[0])
+    app._last_ecd_energies_ev = [p[0] for p in rows]
+    app._last_ecd_rot_velocity = [p[1] for p in rows]
+    app._last_ecd_rot_length = [p[2] for p in rows]
+
+    from quantui.ecd_plot import DEFAULT_SIGMA_EV
+
+    app._update_ecd_figure("Broadened", DEFAULT_SIGMA_EV)
+    app._queue_main_thread_callback(app._wire_ecd_controls)
+    return True
+
+
+def wire_ecd_controls(app: Any) -> None:
+    """Reset ECD controls to their defaults on the main thread."""
+    from quantui.ecd_plot import DEFAULT_SIGMA_EV
+
+    app._ecd_mode_toggle.value = "Broadened"
+    app._ecd_sigma_slider.value = DEFAULT_SIGMA_EV
+    app._ecd_sigma_slider.layout.display = ""
+
+
+def on_ecd_mode_changed(app: Any, change: dict[str, Any]) -> None:
+    """Stick (R_n) / Broadened (Δε) toggle for the ECD panel."""
+    mode = change["new"]
+    app._ecd_sigma_slider.layout.display = "" if mode == "Broadened" else "none"
+    app._update_ecd_figure(mode, app._ecd_sigma_slider.value)
+
+
+def on_ecd_sigma_changed(app: Any, change: dict[str, Any]) -> None:
+    """Re-render the Δε curve when the Gaussian width changes."""
+    if app._ecd_mode_toggle.value == "Broadened":
+        app._update_ecd_figure("Broadened", change["new"])
+
+
+def ecd_state_table_html(
+    energies_ev: List[float],
+    rot_velocity: List[float],
+    rot_length: List[Optional[float]],
+) -> str:
+    """Excited states by energy: state, E (eV), λ (nm), R_vel, R_len."""
+    if not energies_ev:
+        return ""
+    cell = "padding:2px 12px;text-align:right"
+    body = ""
+    for i, (e, rv, rl) in enumerate(
+        zip(energies_ev, rot_velocity, rot_length), start=1
+    ):
+        rl_txt = f"{rl:.3f}" if rl is not None else "—"
+        body += (
+            f"<tr><td style='{cell}'>S{i}</td><td style='{cell}'>{e:.3f}</td>"
+            f"<td style='{cell}'>{1239.84193 / e:.1f}</td>"
+            f"<td style='{cell}'>{rv:.3f}</td><td style='{cell}'>{rl_txt}</td></tr>"
+        )
+    return (
+        '<div style="margin:6px 0 0 4px;font-size:12px;max-height:220px;'
+        'overflow-y:auto"><table style="border-collapse:collapse"><tr>'
+        f"<th style='{cell}'>State</th><th style='{cell}'>E (eV)</th>"
+        f"<th style='{cell}'>λ (nm)</th>"
+        f"<th style='{cell}' title='Velocity gauge (origin-independent; plotted)'>"
+        "R<sub>vel</sub></th>"
+        f"<th style='{cell}' title='Length gauge (for comparison)'>R<sub>len</sub></th>"
+        "</tr>"
+        f"{body}</table>"
+        f"<div style='color:{_theme.css.TEXT_MUTED};margin-top:4px'>"
+        "R in 10⁻⁴⁰ esu²·cm² (cgs). R<sub>vel</sub> and R<sub>len</sub> "
+        "agree for a large enough basis.</div></div>"
+    )
+
+
+ACHIRAL_NOTE_HTML = (
+    '<p style="font-size:12px;margin:0 0 6px">'
+    "<b>This molecule is not chiral (its ECD is zero).</b> Every rotatory "
+    "strength is numerically zero: a molecule superimposable on its mirror "
+    "image absorbs left- and right-circularly polarized light equally.</p>"
+)
+
+
+def update_ecd_figure(app: Any, mode: str, sigma_ev: float) -> None:
+    """Re-render the ECD chart for *mode* (Stick/Broadened) and width σ (eV)."""
+    energies = list(getattr(app, "_last_ecd_energies_ev", []) or [])
+    rot = list(getattr(app, "_last_ecd_rot_velocity", []) or [])
+    if not energies or not rot:
+        return
+    try:
+        import plotly.io as _pio
+
+        from quantui.ecd_plot import is_effectively_achiral, plot_ecd_spectrum
+
+        # Same default λ window as the UV-Vis panel (its 20 nm default line
+        # width), so the two spectra line up side by side.
+        x_range = uv_default_range([1239.84193 / e for e in energies], 10.0)
+        fig = plot_ecd_spectrum(
+            energies,
+            rot,
+            mode=str(mode or "Broadened").lower(),
+            sigma_ev=max(float(sigma_ev), 0.01),
+            x_range_nm=x_range,
+        )
+        tc = app._plotly_theme_colors()
+        fig.update_layout(font=dict(color=tc["font_color"]))
+        fig.update_xaxes(gridcolor=tc["grid_color"])
+        fig.update_yaxes(gridcolor=tc["grid_color"])
+        app._apply_plotly_theme(fig)
+        app._last_ecd_fig = fig
+        note = ACHIRAL_NOTE_HTML if is_effectively_achiral(rot) else ""
+        app._set_html_output(
+            app._ecd_fig,
+            note
+            + _pio.to_html(
+                fig,
+                include_plotlyjs="require",
+                full_html=False,
+                config={"responsive": True},
+            )
+            + ecd_state_table_html(
+                energies,
+                rot,
+                list(getattr(app, "_last_ecd_rot_length", []) or [None] * len(rot)),
+            ),
+        )
+    except Exception as exc:
+        app._last_ecd_fig = None
+        try:
+            from quantui import calc_log as _clog
+
+            _clog.log_event("ecd_fig_error", f"{type(exc).__name__}: {exc}"[:300])
+        except Exception:
+            pass
+
+
 def show_nmr_spectrum(
     app: Any,
     *,

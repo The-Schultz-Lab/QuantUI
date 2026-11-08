@@ -3374,6 +3374,64 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._tddft_accordion.set_title(0, "UV-Vis Absorption Spectrum")
     app._tddft_accordion.selected_index = None
 
+    # ECD (electronic circular dichroism) — same TD-DFT run as UV-Vis, so it
+    # sits right after it. Stick = rotatory strengths R_n; Broadened = Δε
+    # (Gaussian in energy, Stephens–Harada convention; see ecd_plot.py).
+    from quantui.ecd_plot import DEFAULT_SIGMA_EV as _ECD_SIGMA
+
+    app._ecd_mode_toggle = widgets.ToggleButtons(
+        options=["Stick", "Broadened"],
+        value="Broadened",
+        style={"button_width": "96px"},
+        layout=layout_fn(margin="0 8px 0 0"),
+    )
+    app._ecd_sigma_slider = widgets.FloatSlider(
+        value=_ECD_SIGMA,
+        min=0.05,
+        max=1.0,
+        step=0.05,
+        description="Width σ (eV):",
+        readout_format=".2f",
+        style={"description_width": "110px"},
+        layout=layout_fn(width="290px"),
+        tooltip=(
+            "Gaussian half-width at 1/e of the peak height "
+            "(FWHM ≈ 1.665 σ). Typical: 0.2–0.4 eV."
+        ),
+        continuous_update=False,
+    )
+    app._ecd_hint = widgets.HTML(
+        value=(
+            f'<p style="font-size:12px;color:{_theme.css.TEXT_SECONDARY};margin:0 0 6px">'
+            "Positive Δε: left-circularly polarized light is absorbed more. "
+            "The mirror-image molecule (other enantiomer) gives the "
+            "mirror-image spectrum. Velocity-gauge rotatory strengths.</p>"
+        )
+    )
+    app._ecd_fig = widgets.Output(
+        layout=layout_fn(width="100%", min_height="320px"),
+    )
+    ecd_export_row = _plot_export_row("ecd")
+    app._ecd_accordion = widgets.Accordion(
+        children=[
+            widgets.VBox(
+                [
+                    widgets.HBox(
+                        [app._ecd_mode_toggle, app._ecd_sigma_slider],
+                        layout=layout_fn(align_items="center", margin="0 0 4px 0"),
+                    ),
+                    app._ecd_hint,
+                    ecd_export_row,
+                    app._ecd_fig,
+                ],
+                layout=layout_fn(padding="8px"),
+            )
+        ],
+        layout=layout_fn(display="none", margin="8px 0"),
+    )
+    app._ecd_accordion.set_title(0, "ECD (Circular Dichroism) Spectrum")
+    app._ecd_accordion.selected_index = None
+
     app._nmr_nucleus_toggle = widgets.ToggleButtons(
         options=["¹H", "¹³C"],
         value="¹H",
@@ -3846,6 +3904,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             # the registry knew about it, and the Analysis tab showed nothing.
             app._reorg_geom_accordion,
             app._tddft_accordion,
+            app._ecd_accordion,
             app._nmr_accordion,
         ]
     )
