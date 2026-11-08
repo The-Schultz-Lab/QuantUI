@@ -747,10 +747,46 @@ def ts_verdict_rows(block: Optional[dict]) -> str:
     )
 
 
+def ts_guess_rows(block: Optional[dict]) -> str:
+    """Result-card row for a search started from reactant + product.
+
+    *block* is the ``ts_guess`` spectra entry
+    (:meth:`quantui.ts_guess.TSGuessResult.to_spectra`); empty for a search
+    started from a single geometry.
+    """
+    if not block:
+        return ""
+    n_img = block.get("n_images")
+    idx = block.get("guess_index")
+    est = block.get("barrier_estimate_kcal")
+    est_txt = (
+        f"; that image is {float(est):.1f} kcal/mol above the reactant (a rough "
+        "estimate: the images are not relaxed, so the barrier is usually lower)"
+        if isinstance(est, (int, float))
+        else ""
+    )
+    value = (
+        f"Highest-energy image ({idx} of {n_img} between reactant and product, "
+        f"{html.escape(str(block.get('interpolation', 'idpp')).upper())} "
+        f"interpolation){est_txt}. Profile in the PES Scan panel."
+    )
+    warn = "".join(
+        f"<br>⚠ {html.escape(str(w))}" for w in (block.get("warnings") or [])
+    )
+    return (
+        f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL};'
+        f'vertical-align:top">Starting guess</td>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{value}{warn}</td></tr>'
+    )
+
+
 def format_ts_result(r: Any) -> str:
     """Format a transition-state search result card."""
+    _guess = getattr(r, "guess", None)
     _rows = f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Energy</td>' f'<td style="color:{_theme.css.TEXT_HEADING}">{r.energy_hartree:.8f} Ha</td></tr>' + ts_verdict_rows(
         r.to_spectra()
+    ) + ts_guess_rows(
+        _guess.to_spectra() if _guess is not None else None
     ) + _solvent_row(
         getattr(r, "solvent", None), "search and frequencies in solvent"
     ) + _point_group_row(
@@ -1473,7 +1509,9 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     # persistence gets an explanation instead of a silently incomplete card.
     _ts_html = ""
     if ct == "transition_state":
-        _ts_html = ts_verdict_rows((data.get("spectra") or {}).get("transition_state"))
+        _ts_html = ts_verdict_rows(
+            (data.get("spectra") or {}).get("transition_state")
+        ) + ts_guess_rows((data.get("spectra") or {}).get("ts_guess"))
     elif ct == "irc":
         _ts_html = irc_rows((data.get("spectra") or {}).get("irc"))
 

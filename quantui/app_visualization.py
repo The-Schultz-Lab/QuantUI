@@ -4346,6 +4346,8 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
         e_rel = result.energies_relative_kcal
         x_vals = result.scan_parameter_values
         energies = result.energies_hartree
+        _link = bool(getattr(result, "link_trajectory", True))
+        _click_hint = " — click to view geometry" if _link else ""
 
         valid_x: list = []
         valid_y: list = []
@@ -4365,7 +4367,7 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
                     f"{result.scan_coordinate_label}: {x:.4f}<br>"
                     f"ΔE = {de:.3f} kcal/mol<br>"
                     f"E = {e:.8f} Ha<br>"
-                    f"Point {i + 1}/{len(x_vals)} — click to view geometry"
+                    f"Point {i + 1}/{len(x_vals)}{_click_hint}"
                 )
             else:
                 fail_x.append(x)
@@ -4390,15 +4392,23 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
                     hoverinfo="text",
                 )
             )
-            min_idx = valid_y.index(min(valid_y))
+            # A caller can star another point (the TS guess of an
+            # interpolated path) instead of the minimum.
+            _hl = getattr(result, "highlight_index", None)
+            if isinstance(_hl, int) and _hl in valid_idx:
+                star_idx = valid_idx.index(_hl)
+                star_name = str(getattr(result, "highlight_name", "") or "Selected")
+            else:
+                star_idx = valid_y.index(min(valid_y))
+                star_name = "Minimum energy"
             fig.add_trace(
                 go.Scatter(
-                    x=[valid_x[min_idx]],
-                    y=[valid_y[min_idx]],
+                    x=[valid_x[star_idx]],
+                    y=[valid_y[star_idx]],
                     mode="markers",
-                    name="Minimum",
+                    name=star_name.replace(" energy", ""),
                     marker=dict(size=14, color="#ca8a04", symbol="star"),
-                    hovertext=[valid_hover[min_idx] + "<br><b>Minimum energy</b>"],
+                    hovertext=[valid_hover[star_idx] + f"<br><b>{star_name}</b>"],
                     hoverinfo="text",
                 )
             )
@@ -4450,7 +4460,7 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
   attach();
 })();
 </script>"""
-        app._set_html_output(app._pes_plot_html, plot_html + link_js)
+        app._set_html_output(app._pes_plot_html, plot_html + (link_js if _link else ""))
     except Exception:
         app._last_pes_fig = None
         pass

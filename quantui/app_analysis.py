@@ -1234,6 +1234,48 @@ def pop_irc_profile(app: Any, ctx: Any) -> bool:
     return bool(app._show_pes_scan_result(result))
 
 
+def pop_ts_guess_profile(app: Any, ctx: Any) -> bool:
+    """Transition State from reactant + product: the interpolated path's
+    energy profile in the PES Scan panel, the starting guess starred."""
+    block = None
+    guess = getattr(ctx.live_result, "guess", None) if ctx.live_result else None
+    if guess is not None and hasattr(guess, "to_spectra"):
+        block = guess.to_spectra()
+    if block is None:
+        block = (ctx.spectra_data or {}).get("ts_guess") or {}
+    raw = list(block.get("energies_hartree") or [])
+    x_vals = list(block.get("path_fraction") or [])
+    energies = [float("nan") if e is None else float(e) for e in raw]
+    finite = [e for e in energies if e == e]
+    if len(energies) < 3 or len(x_vals) != len(energies) or not finite:
+        _set_panel_unavailable_message(
+            app,
+            "PES Scan",
+            "Not available: this transition-state search started from a single "
+            "geometry. Choose a Product structure to get an interpolated path "
+            "and its energy profile.",
+        )
+        return False
+    hartree_to_kcal = 627.5094740631
+    e_ref = energies[0] if energies[0] == energies[0] else min(finite)
+    result = _types_mod.SimpleNamespace(
+        scan_type="ts_guess",
+        atom_indices=[],
+        coordinates_list=[],
+        scan_parameter_values=x_vals,
+        energies_hartree=energies,
+        energies_relative_kcal=[(e - e_ref) * hartree_to_kcal for e in energies],
+        scan_coordinate_label="Reactant → product (fraction of path length)",
+        converged_all=all(e == e for e in energies),
+        # Star the starting guess instead of the minimum, and do not link
+        # clicks to the Trajectory panel (it plays the search, not the path).
+        highlight_index=block.get("guess_index"),
+        highlight_name="TS guess (highest image)",
+        link_trajectory=False,
+    )
+    return bool(app._show_pes_scan_result(result))
+
+
 def pop_pes_trajectory(app: Any, ctx: Any) -> bool:
     """Populate Trajectory panel from live or history PES scan data."""
     traj: list = []

@@ -85,6 +85,9 @@ from quantui.app_analysis import (
     pop_reorg_geometries as _ana_pop_reorg_geometries,
 )
 from quantui.app_analysis import (
+    pop_ts_guess_profile as _ana_pop_ts_guess_profile,
+)
+from quantui.app_analysis import (
     pop_uv_vis as _ana_pop_uv_vis,
 )
 from quantui.app_analysis import (
@@ -410,7 +413,13 @@ from quantui.app_runflow import (
     refresh_seed_options as _run_refresh_seed_options,
 )
 from quantui.app_runflow import (
+    refresh_ts_product_options as _run_refresh_ts_product_options,
+)
+from quantui.app_runflow import (
     resolve_seed_geometry as _run_resolve_seed_geometry,
+)
+from quantui.app_runflow import (
+    resolve_ts_product as _run_resolve_ts_product,
 )
 from quantui.app_runflow import (
     update_estimate as _run_update_estimate,
@@ -420,6 +429,9 @@ from quantui.app_runflow import (
 )
 from quantui.app_runflow import (
     update_scan_widgets as _run_update_scan_widgets,
+)
+from quantui.app_runflow import (
+    update_ts_product_ui as _run_update_ts_product_ui,
 )
 from quantui.app_slurm import (
     on_slurm_job_root_changed as _slurm_on_job_root_changed,
@@ -1819,6 +1831,11 @@ class QuantUIApp:
         _reorg_mode_dd: Any
         _ts_fmax_fi: Any
         _ts_note: Any
+        _ts_product_dd: Any
+        _ts_product_refresh_btn: Any
+        _ts_product_xyz: Any
+        _ts_n_images_si: Any
+        _ts_product_note: Any
         _reorg_export_btn: Any
         _reorg_export_status: Any
         _reorg_png_inbox: Any
@@ -2529,7 +2546,11 @@ class QuantUIApp:
         ("Vibrational", "vib_accordion", "Frequency / Transition State"),
         ("IR Spectrum", "_ir_accordion", "Frequency / Transition State"),
         ("Raman Spectrum", "_raman_accordion", "Frequency"),
-        ("PES Scan", "_pes_scan_accordion", "PES Scan / IRC (energy profile)"),
+        (
+            "PES Scan",
+            "_pes_scan_accordion",
+            "PES Scan / IRC / Transition State from a product (energy profile)",
+        ),
         (
             "Isosurface",
             "_iso_accordion",
@@ -2595,6 +2616,9 @@ class QuantUIApp:
             ("Energies", "_pop_energies", False),
             ("Isosurface", "_pop_isosurface", False),
             ("Populations", "_pop_mulliken", False),
+            # Only a search started from reactant + product has a profile:
+            # the interpolated images' energies (TS.4).
+            ("PES Scan", "_pop_ts_guess_profile", False),
         ],
         # The energy profile reuses the PES Scan plot, its x axis the
         # mass-weighted reaction coordinate; Trajectory plays the path.
@@ -2675,6 +2699,9 @@ class QuantUIApp:
 
     def _pop_pes_trajectory(self, ctx: _AnalysisContext) -> bool:
         return _ana_pop_pes_trajectory(self, ctx)
+
+    def _pop_ts_guess_profile(self, ctx: _AnalysisContext) -> bool:
+        return _ana_pop_ts_guess_profile(self, ctx)
 
     # ── History panel (Cell 8) ────────────────────────────────────────────
 
@@ -2956,6 +2983,14 @@ class QuantUIApp:
         )
         self._scan_seed_refresh_btn.on_click(
             self._safe_cb(lambda _btn: _run_refresh_pes_seed_options(self))
+        )
+        # Transition State: optional product structure (TS.4).
+        self._ts_product_dd.observe(
+            self._safe_cb(lambda _chg: _run_update_ts_product_ui(self)),
+            names="value",
+        )
+        self._ts_product_refresh_btn.on_click(
+            self._safe_cb(lambda _btn: _run_refresh_ts_product_options(self))
         )
         self._scan_pick_inbox.observe(
             self._safe_cb(self._on_pes_pick_inbox_changed), names="value"
@@ -5945,6 +5980,13 @@ class QuantUIApp:
             self._refresh_seed_options()
         except Exception:
             pass
+        # Transition State's product list depends on the reactant (same
+        # atoms in the same order, not the current geometry).
+        try:
+            if self.calc_type_dd.value == "Transition State":
+                _run_refresh_ts_product_options(self)
+        except Exception:
+            pass
 
     def _queue_main_thread_callback(self, callback, *args, **kwargs) -> None:
         """Run a callback on the notebook/kernel thread when possible."""
@@ -6642,6 +6684,32 @@ class QuantUIApp:
             elif ct == "Transition State":
                 from quantui.ts_search import run_ts_search
 
+                # Optional product (TS.4): the current molecule is the
+                # reactant; start from the highest interpolated image.
+                _ts_guess = None
+                _ts_product = _run_resolve_ts_product(self, calc_mol, log=log)
+                if _ts_product is not None:
+                    from quantui.ts_guess import (
+                        build_ts_guess,
+                        check_search_possible,
+                    )
+
+                    check_search_possible(self.method_dd.value)
+                    self.run_status.value = (
+                        "Building a transition-state guess from reactant + product…"
+                    )
+                    _ts_guess = build_ts_guess(
+                        calc_mol,
+                        _ts_product,
+                        self.method_dd.value,
+                        self.basis_dd.value,
+                        n_images=int(self._ts_n_images_si.value),
+                        solvent=_run_solvent,
+                        progress_stream=log,  # type: ignore[arg-type]
+                        cancel_check=self._cancel_event.is_set,
+                    )
+                    calc_mol = _ts_guess.guess
+
                 self.run_status.value = "Searching for a transition state…"
                 result = run_ts_search(
                     calc_mol,
@@ -6653,6 +6721,7 @@ class QuantUIApp:
                     solvent=_run_solvent,
                     cancel_check=self._cancel_event.is_set,
                 )
+                result.guess = _ts_guess
                 # Everything downstream (viewer, saved geometry, Vibrational
                 # panel) describes the stationary point that was found.
                 calc_mol = result.molecule
@@ -6683,6 +6752,8 @@ class QuantUIApp:
                     },
                     "transition_state": result.to_spectra(),
                 }
+                if _ts_guess is not None:
+                    save_spectra["ts_guess"] = _ts_guess.to_spectra()
                 save_type = "transition_state"
             elif ct == "IRC":
                 from quantui.irc import run_irc

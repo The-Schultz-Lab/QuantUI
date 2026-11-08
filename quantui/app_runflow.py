@@ -11,7 +11,7 @@ import ipywidgets as widgets
 from IPython.display import HTML, Javascript, display
 
 from quantui import theme as _theme
-from quantui.app_builders import mol_input_children
+from quantui.app_builders import TS_PRODUCT_XYZ, mol_input_children
 
 _METAL_FIX_BASIS = "def2-SVP"
 
@@ -585,13 +585,22 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
             ),
         ]
     elif ct == "Transition State":
+        refresh_ts_product_options(app)
         app.calc_extra_opts.children = [
             widgets.HBox(
                 [app._ts_fmax_fi, app.max_steps_si],
                 layout=layout_fn(gap="8px"),
             ),
             app._ts_note,
+            widgets.HBox(
+                [app._ts_product_dd, app._ts_product_refresh_btn],
+                layout=layout_fn(align_items="center", gap="6px", width="100%"),
+            ),
+            app._ts_product_xyz,
+            app._ts_n_images_si,
+            app._ts_product_note,
         ]
+        update_ts_product_ui(app)
     elif ct == "IRC":
         app._refresh_geo_seed_options()
         app.calc_extra_opts.children = [
@@ -1399,6 +1408,129 @@ def _refresh_ts_seed_options(app: Any, dropdown: Any) -> None:
         except Exception:
             continue
     dropdown.options = options
+
+
+def refresh_ts_product_options(app: Any) -> None:
+    """Transition State: list possible product structures.
+
+    Saved Geometry Opt results (final geometry) with the same atoms in the
+    same order as the current molecule, excluding results at the current
+    geometry (that is the reactant). Keeps the selection when it is still
+    listed.
+    """
+    from quantui.results_storage import list_results, load_result
+
+    dd = app._ts_product_dd
+    previous = dd.value
+    mol = getattr(app, "_molecule", None)
+    cur_atoms = cur_coords = None
+    formula = None
+    if mol is not None:
+        try:
+            import numpy as _np
+
+            formula = mol.get_formula()
+            cur_atoms = list(mol.atoms)
+            cur_coords = _np.asarray(mol.coordinates, dtype=float)
+        except Exception:
+            cur_atoms = cur_coords = formula = None
+    options = [
+        ("(none — search from the current geometry)", ""),
+        ("Paste product XYZ…", TS_PRODUCT_XYZ),
+    ]
+    for d in list_results():
+        try:
+            data = load_result(d)
+            if data.get("calc_type") != "geometry_opt":
+                continue
+            if formula is not None and data.get("formula") != formula:
+                continue
+            final = _load_final_geometry(d)
+            if final is None:
+                continue
+            atoms, coords = final
+            if cur_atoms is not None:
+                if list(atoms) != cur_atoms:
+                    continue  # different atom order: cannot be interpolated
+                if _geometries_match(cur_atoms, cur_coords, atoms, coords):
+                    continue  # the current molecule itself
+            options.append(
+                (
+                    f"⚙ Geom-opt · {data['formula']}  "
+                    f"{data['method']}/{data['basis']}  —  "
+                    f"{data.get('timestamp', d.name[:19])}",
+                    str(d),
+                )
+            )
+        except Exception:
+            continue
+    dd.options = options
+    values = [v for _label, v in options]
+    dd.value = previous if previous in values else ""
+    update_ts_product_ui(app)
+
+
+def update_ts_product_ui(app: Any, change: Any = None) -> None:
+    """Show the XYZ box / image count / note for the selected product."""
+    value = app._ts_product_dd.value or ""
+    app._ts_product_xyz.layout.display = "" if value == TS_PRODUCT_XYZ else "none"
+    app._ts_n_images_si.layout.display = "" if value else "none"
+    if value:
+        app._ts_product_note.value = (
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SECONDARY}">'
+            "The current molecule is the <b>reactant</b>. The run first builds "
+            "a path of images between reactant and product (IDPP "
+            "interpolation), computes each image's energy, then searches for "
+            "the transition state from the <b>highest-energy image</b>. Both "
+            "structures must list the same atoms in the same order.</span>"
+        )
+    else:
+        app._ts_product_note.value = ""
+
+
+def resolve_ts_product(app: Any, reactant: Any, *, log: Any | None = None) -> Any:
+    """The product :class:`~quantui.molecule.Molecule` for this run, or None.
+
+    A pasted XYZ takes the reactant's charge and multiplicity; a saved
+    result keeps its own (the guess builder checks they match).
+    """
+    value = getattr(getattr(app, "_ts_product_dd", None), "value", "") or ""
+    if not value:
+        return None
+    from quantui.molecule import Molecule
+
+    if value == TS_PRODUCT_XYZ:
+        from quantui.molecule import parse_xyz_input
+
+        text = app._ts_product_xyz.value or ""
+        if not text.strip():
+            raise ValueError(
+                "Product is set to 'Paste product XYZ' but the box is empty. "
+                "Paste the product's coordinates, or set Product to (none)."
+            )
+        atoms, coords = parse_xyz_input(text)
+        product = Molecule(
+            atoms,
+            coords,
+            charge=reactant.charge,
+            multiplicity=reactant.multiplicity,
+            validate_spin=False,
+        )
+        source = "pasted XYZ"
+    else:
+        from quantui.results_storage import load_trajectory
+
+        frames, _ = load_trajectory(Path(value))
+        if not frames:
+            raise ValueError(f"No geometry saved in {Path(value).name}.")
+        product = frames[-1]
+        source = Path(value).name
+    if log is not None:
+        log.write(
+            f"\nProduct structure ({source}): {product.get_formula()}, "
+            f"{len(product.atoms)} atoms. Reactant: the current molecule.\n"
+        )
+    return product
 
 
 def _gate_preopt_for_seed(app: Any, path_str: str) -> None:
