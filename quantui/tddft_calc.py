@@ -49,6 +49,67 @@ logger = logging.getLogger(__name__)
 # Planck × speed of light in eV·nm  (h·c = 1239.84 eV·nm)
 _EV_TO_NM: float = 1239.84193
 
+# One atomic unit of rotatory strength, expressed in the conventional ECD unit
+# of 10⁻⁴⁰ esu²·cm² (= 10⁻⁴⁰ erg·cm³, "10⁻⁴⁰ cgs"). In atomic units the
+# electric dipole unit is e·a₀ and the magnetic dipole unit is eħ/(m_e·c)
+# (= 2 μ_B), so with μ = −r and m = −½L (L in units of ħ):
+#   e·a₀ · eħ/(m_e·c) = 4.80320e-10 esu · 0.529177e-8 cm · 1.85480e-20 erg/G
+#                     = 4.71444e-38 esu²·cm²  →  471.44 × 10⁻⁴⁰ cgs.
+# (CODATA 2018 constants; the oft-quoted "235.7" factor is half this and goes
+# with an atomic-unit R defined from L rather than ½L.)
+ROTATORY_AU_TO_1E40_CGS: float = 471.443648
+
+
+def rotatory_strengths(td: Any) -> tuple[List[float], List[float]]:
+    """Rotatory strengths of the solved excited states of a PySCF TD object.
+
+    The rotatory strength of the transition 0 → n (Rosenfeld) is
+
+        R_n = Im( ⟨0|μ|n⟩ · ⟨n|m|0⟩ ),   μ = −Σ r_i,  m = −½ Σ L_i  (a.u.).
+
+    With real wavefunctions this is R_n = ½ d·g, where d = ⟨0|r|n⟩ and
+    g = ⟨0|r×∇|n⟩. Two gauges are returned:
+
+    * **velocity gauge** (preferred, origin-independent): the hypervirial
+      relation ⟨0|∇|n⟩ = ω_n ⟨0|r|n⟩ (exact for exact states) replaces d by
+      ⟨0|∇|n⟩/ω_n, so  R_n^vel = ⟨0|∇|n⟩·g / (2 ω_n).  Shifting the gauge
+      origin by **a** adds ⟨0|∇|n⟩·(**a**×⟨0|∇|n⟩)/(2ω) = 0, so this form does
+      not depend on where the molecule sits — even in a finite basis.
+    * **length gauge**: R_n^len = ½ d·g — depends on the gauge origin in a
+      finite basis (PySCF uses the nuclear charge centre); converges to the
+      velocity value as the basis approaches completeness.
+
+    PySCF conventions (verified against the libcint integral definitions):
+    ``td.transition_dipole()`` = d, ``td.transition_velocity_dipole()`` =
+    +⟨0|∇|n⟩ (from ``int1e_ipovlp`` = ⟨∇μ|ν⟩, negated), and
+    ``td.transition_magnetic_dipole()`` = −g (``int1e_cg_irxp`` = ⟨μ|r×∇|ν⟩,
+    negated). Hence R^vel = −V·M / (2ω) and R^len = −½ D·M. The arbitrary
+    sign of each eigenvector cancels in both products.
+
+    Args:
+        td: A solved PySCF TDHF/TDDFT/TDA object (``td.e``/``td.xy`` set).
+
+    Returns:
+        ``(velocity, length)`` — two lists, one value per state, in
+        10⁻⁴⁰ esu²·cm².
+
+    Raises:
+        NotImplementedError: For ECP / pseudopotential molecules (PySCF does
+            not implement the non-local commutator terms needed for the
+            velocity and magnetic dipole operators there).
+    """
+    import numpy as _np
+
+    omega = _np.asarray(td.e, dtype=float)  # Hartree
+    d = _np.asarray(td.transition_dipole(), dtype=float)
+    v = _np.asarray(td.transition_velocity_dipole(), dtype=float)
+    m = _np.asarray(td.transition_magnetic_dipole(), dtype=float)
+    with _np.errstate(divide="ignore", invalid="ignore"):
+        r_vel = _np.where(omega > 0, -_np.einsum("sx,sx->s", v, m) / (2.0 * omega), 0.0)
+    r_len = -0.5 * _np.einsum("sx,sx->s", d, m)
+    k = ROTATORY_AU_TO_1E40_CGS
+    return [float(x) * k for x in r_vel], [float(x) * k for x in r_len]
+
 
 # ============================================================================
 # Result dataclass
@@ -131,6 +192,13 @@ class TDDFTResult:
     dipole_moment_debye: Optional[float] = None
     dipole_vector_debye: Optional[List[float]] = None
     spin_square: Optional[float] = None
+    # ECD (electronic circular dichroism): rotatory strengths, one per
+    # excited state, in 10⁻⁴⁰ esu²·cm² (see :func:`rotatory_strengths`).
+    # Velocity gauge is the origin-independent one the ECD panel plots;
+    # length gauge is kept for comparison. Empty when not computed (TD solve
+    # failed, ECP basis, or an older saved result).
+    rotatory_strengths_velocity: List[float] = field(default_factory=list)
+    rotatory_strengths_length: List[float] = field(default_factory=list)
 
     @property
     def energy_ev(self) -> float:
@@ -413,6 +481,8 @@ def _run_tddft_calc_body(
     scf_converged = converged
     td_converged: Optional[List[bool]] = None
     n_converged_states: Optional[int] = None
+    rotatory_strengths_velocity: List[float] = []
+    rotatory_strengths_length: List[float] = []
 
     try:
         emit_status(
@@ -440,6 +510,20 @@ def _run_tddft_calc_body(
         if _raw_td_converged is not None:
             td_converged = [bool(c) for c in _raw_td_converged]
             n_converged_states = sum(td_converged)
+
+        # ECD rotatory strengths — cheap one-electron contractions, but
+        # never allowed to fail the TD-DFT run (ECP bases raise
+        # NotImplementedError in PySCF; anything else is logged and skipped).
+        try:
+            r_vel, r_len = rotatory_strengths(td)
+            if len(r_vel) == len(excitation_energies_ev):
+                rotatory_strengths_velocity, rotatory_strengths_length = r_vel, r_len
+        except Exception as exc:  # noqa: BLE001 — optional extra
+            logger.info("Rotatory strengths (ECD) skipped: %s", exc)
+            try:
+                stream.write(f"\nNote: ECD rotatory strengths not computed ({exc}).\n")
+            except Exception:  # noqa: BLE001 — cleanup (stream may be closed)
+                pass
 
     except Exception as exc:
         logger.warning("TD-DFT/TDHF calculation failed: %s", exc)
@@ -503,4 +587,6 @@ def _run_tddft_calc_body(
         dipole_moment_debye=_gs["dipole_moment_debye"],
         dipole_vector_debye=_gs["dipole_vector_debye"],
         spin_square=_gs["spin_square"],
+        rotatory_strengths_velocity=rotatory_strengths_velocity,
+        rotatory_strengths_length=rotatory_strengths_length,
     )

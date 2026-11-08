@@ -328,6 +328,16 @@ def tddft_result_payload(result) -> Dict[str, Any]:
                 "excitation_energies_ev": list(result.excitation_energies_ev),
                 "oscillator_strengths": list(result.oscillator_strengths),
                 "wavelengths_nm": list(wavelengths),
+                # ECD rotatory strengths (10⁻⁴⁰ esu²·cm²), additive keys —
+                # same as the interactive _do_run save.
+                "rotatory_strengths_velocity": [
+                    float(r)
+                    for r in (getattr(result, "rotatory_strengths_velocity", []) or [])
+                ],
+                "rotatory_strengths_length": [
+                    float(r)
+                    for r in (getattr(result, "rotatory_strengths_length", []) or [])
+                ],
             }
         },
     }

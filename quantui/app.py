@@ -49,6 +49,9 @@ from quantui.app_analysis import (
     on_reorg_view_changed as _ana_on_reorg_view_changed,
 )
 from quantui.app_analysis import (
+    pop_ecd as _ana_pop_ecd,
+)
+from quantui.app_analysis import (
     pop_energies as _ana_pop_energies,
 )
 from quantui.app_analysis import (
@@ -475,6 +478,12 @@ from quantui.app_visualization import (
     build_vib_export_html as _viz_build_vib_export_html,
 )
 from quantui.app_visualization import (
+    on_ecd_mode_changed as _viz_on_ecd_mode_changed,
+)
+from quantui.app_visualization import (
+    on_ecd_sigma_changed as _viz_on_ecd_sigma_changed,
+)
+from quantui.app_visualization import (
     on_ir_fwhm_changed as _viz_on_ir_fwhm_changed,
 )
 from quantui.app_visualization import (
@@ -547,6 +556,9 @@ from quantui.app_visualization import (
     rerender_3d_scenes_for_theme as _viz_rerender_3d_scenes_for_theme,
 )
 from quantui.app_visualization import (
+    show_ecd_spectrum as _viz_show_ecd_spectrum,
+)
+from quantui.app_visualization import (
     show_ir_spectrum as _viz_show_ir_spectrum,
 )
 from quantui.app_visualization import (
@@ -577,6 +589,9 @@ from quantui.app_visualization import (
     traj_step_html as _viz_traj_step_html,
 )
 from quantui.app_visualization import (
+    update_ecd_figure as _viz_update_ecd_figure,
+)
+from quantui.app_visualization import (
     update_ir_figure as _viz_update_ir_figure,
 )
 from quantui.app_visualization import (
@@ -587,6 +602,9 @@ from quantui.app_visualization import (
 )
 from quantui.app_visualization import (
     update_uv_vis_figure as _viz_update_uv_vis_figure,
+)
+from quantui.app_visualization import (
+    wire_ecd_controls as _viz_wire_ecd_controls,
 )
 from quantui.app_visualization import (
     wire_ir_controls as _viz_wire_ir_controls,
@@ -1875,6 +1893,15 @@ class QuantUIApp:
         _uv_xmin_input: Any
         _uv_xmax_input: Any
         _uv_range_hint: Any
+        _ecd_accordion: Any
+        _ecd_fig: Any
+        _ecd_hint: Any
+        _ecd_mode_toggle: Any
+        _ecd_sigma_slider: Any
+        _ecd_export_btn: Any
+        _ecd_export_fmt_dd: Any
+        _ecd_export_status: Any
+        _ecd_copy_data_btn: Any
         _to_analysis_btn: Any
         _viz_backend: Any
         _viz_label: Any
@@ -1991,6 +2018,10 @@ class QuantUIApp:
         self._last_uv_oscillator_strengths: list[float] = []
         self._last_ir_fig: Any = None
         self._last_uv_fig: Any = None
+        self._last_ecd_energies_ev: list[float] = []
+        self._last_ecd_rot_velocity: list[float] = []
+        self._last_ecd_rot_length: list[Any] = []
+        self._last_ecd_fig: Any = None
         self._last_nmr_fig: Any = None
         self._last_orb_fig: Any = None
         self._last_orb_info: Any = None
@@ -2504,6 +2535,12 @@ class QuantUIApp:
                 self._uv_fwhm_slider.value,
             )
 
+    def _on_ecd_accordion_show(self, change) -> None:
+        if change["new"] == 0 and getattr(self, "_last_ecd_energies_ev", None):
+            self._update_ecd_figure(
+                self._ecd_mode_toggle.value, self._ecd_sigma_slider.value
+            )
+
     def _on_nmr_accordion_show(self, change) -> None:
         if change["new"] == 0 and getattr(self, "_last_nmr_atom_symbols", None):
             self._update_nmr_figure(self._nmr_nucleus_toggle.value)
@@ -2569,6 +2606,7 @@ class QuantUIApp:
         ),
         ("Geometries", "_reorg_geom_accordion", "Reorganization Energy"),
         ("UV-Vis", "_tddft_accordion", "UV-Vis (TD-DFT)"),
+        ("ECD", "_ecd_accordion", "UV-Vis (TD-DFT)"),
         ("NMR", "_nmr_accordion", "NMR Shielding"),
     ]
 
@@ -2639,6 +2677,8 @@ class QuantUIApp:
         ],
         "tddft": [
             ("UV-Vis", "_pop_uv_vis", True),
+            # Same TD-DFT states: rotatory strengths → ECD (SPC2.3).
+            ("ECD", "_pop_ecd", False),
             # Ground-state analysis of the reference SCF.
             ("Energies", "_pop_energies", False),
             ("Isosurface", "_pop_isosurface", False),
@@ -2695,6 +2735,9 @@ class QuantUIApp:
 
     def _pop_uv_vis(self, ctx: _AnalysisContext) -> bool:
         return _ana_pop_uv_vis(self, ctx)
+
+    def _pop_ecd(self, ctx: _AnalysisContext) -> bool:
+        return _ana_pop_ecd(self, ctx)
 
     def _pop_nmr_shielding(self, ctx: _AnalysisContext) -> bool:
         return _ana_pop_nmr_shielding(self, ctx)
@@ -3096,12 +3139,19 @@ class QuantUIApp:
         self._uv_xmax_input.observe(
             self._safe_cb(self._on_uv_range_changed), names="value"
         )
+        self._ecd_mode_toggle.observe(
+            self._safe_cb(self._on_ecd_mode_changed), names="value"
+        )
+        self._ecd_sigma_slider.observe(
+            self._safe_cb(self._on_ecd_sigma_changed), names="value"
+        )
         self._nmr_nucleus_toggle.observe(
             self._safe_cb(self._on_nmr_nucleus_changed), names="value"
         )
         self._ir_export_btn.on_click(self._on_ir_export_plot)
         self._raman_export_btn.on_click(self._on_raman_export_plot)
         self._uv_export_btn.on_click(self._on_uv_export_plot)
+        self._ecd_export_btn.on_click(self._on_ecd_export_plot)
         self._nmr_export_btn.on_click(self._on_nmr_export_plot)
         self._orb_export_btn.on_click(self._on_orb_export_plot)
         self._pes_export_btn.on_click(self._on_pes_export_plot)
@@ -3111,6 +3161,7 @@ class QuantUIApp:
         self._ir_copy_data_btn.on_click(self._on_ir_copy_data)
         self._raman_copy_data_btn.on_click(self._on_raman_copy_data)
         self._uv_copy_data_btn.on_click(self._on_uv_copy_data)
+        self._ecd_copy_data_btn.on_click(self._on_ecd_copy_data)
         self._nmr_copy_data_btn.on_click(self._on_nmr_copy_data)
         self._orb_copy_data_btn.on_click(self._on_orb_copy_data)
         self._pes_copy_data_btn.on_click(self._on_pes_copy_data)
@@ -4181,6 +4232,11 @@ class QuantUIApp:
                 self._uv_mode_toggle.value,
                 self._uv_fwhm_slider.value,
             )
+        if getattr(self, "_last_ecd_energies_ev", None):
+            self._update_ecd_figure(
+                self._ecd_mode_toggle.value,
+                self._ecd_sigma_slider.value,
+            )
         if getattr(self, "_last_mulliken_charges", None):
             _ana_update_mulliken_figure(self)
         _last_pes = getattr(self, "_last_pes_result", None)
@@ -5199,6 +5255,14 @@ class QuantUIApp:
             status_widget=self._uv_export_status,
         )
 
+    def _on_ecd_export_plot(self, btn) -> None:
+        self._export_plot_figure(
+            fig=getattr(self, "_last_ecd_fig", None),
+            stem="ecd_spectrum",
+            fmt=self._ecd_export_fmt_dd.value,
+            status_widget=self._ecd_export_status,
+        )
+
     def _on_nmr_export_plot(self, btn) -> None:
         self._export_plot_figure(
             fig=getattr(self, "_last_nmr_fig", None),
@@ -5587,6 +5651,14 @@ class QuantUIApp:
             stem="uv_vis_spectrum",
             title="UV-Vis Spectrum",
             status_widget=self._uv_export_status,
+        )
+
+    def _on_ecd_copy_data(self, _btn) -> None:
+        self._copy_plot_data(
+            fig=getattr(self, "_last_ecd_fig", None),
+            stem="ecd_spectrum",
+            title="ECD Spectrum",
+            status_widget=self._ecd_export_status,
         )
 
     def _on_nmr_copy_data(self, _btn) -> None:
@@ -6189,6 +6261,26 @@ class QuantUIApp:
 
     def _on_uv_range_changed(self, change) -> None:
         _viz_on_uv_range_changed(self, change)
+
+    def _show_ecd_spectrum(
+        self,
+        energies_ev: list,
+        rot_velocity: list,
+        rot_length: Optional[list] = None,
+    ) -> bool:
+        return _viz_show_ecd_spectrum(self, energies_ev, rot_velocity, rot_length)
+
+    def _wire_ecd_controls(self) -> None:
+        _viz_wire_ecd_controls(self)
+
+    def _on_ecd_mode_changed(self, change) -> None:
+        _viz_on_ecd_mode_changed(self, change)
+
+    def _on_ecd_sigma_changed(self, change) -> None:
+        _viz_on_ecd_sigma_changed(self, change)
+
+    def _update_ecd_figure(self, mode: str, sigma_ev: float) -> None:
+        _viz_update_ecd_figure(self, mode, sigma_ev)
 
     def _show_nmr_spectrum(
         self,
@@ -7017,6 +7109,14 @@ class QuantUIApp:
                         "excitation_energies_ev": result.excitation_energies_ev,
                         "oscillator_strengths": result.oscillator_strengths,
                         "wavelengths_nm": result.wavelengths_nm(),
+                        # ECD (additive keys): R_n in 10⁻⁴⁰ esu²·cm²; empty
+                        # lists when not computed (e.g. ECP basis).
+                        "rotatory_strengths_velocity": list(
+                            getattr(result, "rotatory_strengths_velocity", []) or []
+                        ),
+                        "rotatory_strengths_length": list(
+                            getattr(result, "rotatory_strengths_length", []) or []
+                        ),
                     }
                 }
                 save_type = "tddft"
