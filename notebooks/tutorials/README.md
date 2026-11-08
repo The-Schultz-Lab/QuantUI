@@ -15,12 +15,11 @@ These interactive tutorials guide you through quantum chemistry calculations ste
 ## Tutorial Series
 
 ### 1. [First Calculation](01_first_calculation.ipynb) - **Start Here!**
-**Time:** ~15 minutes
+**Time:** ~15–20 minutes
 **Difficulty:** Beginner
 
 Your first quantum chemistry calculation!
-- Submit a water molecule calculation
-- Monitor job progress
+- Run a water molecule calculation
 - Interpret basic results
 - Understand SCF convergence
 
@@ -29,11 +28,11 @@ Your first quantum chemistry calculation!
 ---
 
 ### 2. [Basis Set Study](02_basis_set_study.ipynb)
-**Time:** ~30 minutes
+**Time:** ~30–35 minutes
 **Difficulty:** Intermediate
 
 Compare different basis sets on the same molecule.
-- Run H₂O with STO-3G, 6-31G, and cc-pVDZ
+- Run H₂O with STO-3G, 6-31G, 6-31G*, and cc-pVDZ
 - Compare energies and computational costs
 - Understand accuracy vs. speed trade-offs
 - See basis set convergence
@@ -43,42 +42,42 @@ Compare different basis sets on the same molecule.
 ---
 
 ### 3. [Multiplicity & Radicals](03_multiplicity_radicals.ipynb)
-**Time:** ~25 minutes
+**Time:** ~20–30 minutes
 **Difficulty:** Intermediate
 
 Learn about spin states with oxygen molecule.
-- Calculate O₂ as singlet (wrong!)
-- Calculate O₂ as triplet (correct!)
+- Calculate O₂ as singlet (wrong!) and triplet (correct!)
 - Understand multiplicity = 2S + 1
-- Learn when to use UHF vs RHF
+- Learn when to use UHF, ROHF or RHF; check spin contamination
+- Apply the rules to the ·OH radical and methylene (CH₂)
 
 **Perfect for:** Understanding open-shell systems
 
 ---
 
 ### 4. [Charged Species](04_charged_species.ipynb)
-**Time:** ~20 minutes
+**Time:** ~20–25 minutes
 **Difficulty:** Intermediate
 
 Work with ions and charged molecules.
-- Calculate NH₃ (neutral)
-- Calculate NH₄⁺ (cation)
-- Calculate NH₂⁻ (anion)
-- Understand protonation effects
+- Calculate NH₃, NH₄⁺, NH₂⁻ and the NH₃•⁺ / NH₂• radicals
+- Ionization energy, proton affinity and deprotonation energy
+- Why anions need diffuse basis sets
+- Electron affinity: why it needs electron correlation too
 
 **Perfect for:** Understanding charge effects
 
 ---
 
 ### 5. [Comparing Results](05_comparing_results.ipynb)
-**Time:** ~25 minutes
+**Time:** ~25–30 minutes
 **Difficulty:** Intermediate
 
 Analyze and compare multiple calculations.
-- Load multiple job results
-- Create comparison tables
-- Visualize energy trends
-- Export data for reports
+- Save, reload and compare results with QuantUI's own tools
+- Basis-set convergence and error cancellation (NH₃ ionization energy)
+- Which method comparisons are meaningful (RHF / MP2 / B3LYP)
+- Export a CSV and write a methods statement
 
 **Perfect for:** Data analysis and reporting
 
@@ -92,7 +91,7 @@ Analyze and compare multiple calculations.
 2. **Work sequentially** - Each builds on previous concepts
 3. **Read explanations** - Don't just run cells
 4. **Try variations** - Experiment with different molecules
-5. **Check solutions** - Compare your results
+5. **Check the checkpoints** - Compare your numbers with the expected values
 
 ### 🎓 For Classroom Use
 
@@ -139,9 +138,6 @@ Instructors can:
 **Problem:** Can't see visualizations
 **Solution:** Ensure py3Dmol is installed (see main notebook setup)
 
-**Problem:** Jobs stuck in PENDING
-**Solution:** Cluster may be busy - check status in main notebook
-
 **Problem:** Different energy than expected
 **Solution:** Small differences are okay - check units and significant figures
 
@@ -150,8 +146,8 @@ Instructors can:
 ## Next Steps
 
 After completing these tutorials:
-1. Use the main [quantui_interface.ipynb](../quantui_interface.ipynb) for your own calculations
-2. Try the [analysis.ipynb](../analysis.ipynb) for advanced data analysis
+1. Use the main app — [molecule_computations.ipynb](../molecule_computations.ipynb), or `quantui run app` — for your own calculations
+2. Use the app's **History**, **Analysis** and **Compare** tabs to revisit and compare results
 3. Experiment with molecules from your coursework
 
 ---

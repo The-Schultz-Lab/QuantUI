@@ -37,7 +37,7 @@ python -m pip install --upgrade --ignore-installed setuptools wheel || true
 # with nothing installed.
 python -m pip install -e ".[pyscf,ase,dev,xtb,ts]"
 
-echo "QuantUI cloud env ready: package + [pyscf,ase,dev,xtb] installed." >&2
+echo "QuantUI cloud env ready: package + [pyscf,ase,dev,xtb,ts] installed." >&2
 
 # Warn if the private planning repo isn't attached to this session. In a cloud
 # session an attached repo is cloned as a sibling of this one; the planning docs

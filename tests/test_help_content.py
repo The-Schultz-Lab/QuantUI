@@ -26,6 +26,22 @@ class TestHelpTopics:
         for key in ("charge", "multiplicity", "method", "basis_set"):
             assert key in HELP_TOPICS, f"Missing expected topic: {key}"
 
+    def test_calc_type_and_feature_topics_present(self):
+        """Every calculation type and major feature has its own topic
+        (2026-11 docs audit: these had no help coverage at all)."""
+        for key in (
+            "frequency",
+            "uv_vis",
+            "nmr",
+            "reorganization_energy",
+            "implicit_solvent",
+            "gpu_offload",
+            "cluster_jobs",
+            "transition_state",
+            "pes_scan",
+        ):
+            assert key in HELP_TOPICS, f"Missing expected topic: {key}"
+
     def test_each_entry_has_title_and_body(self):
         for key, entry in HELP_TOPICS.items():
             assert "title" in entry, f"Topic '{key}' missing 'title'"

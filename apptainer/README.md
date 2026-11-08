@@ -22,8 +22,11 @@ air-gapped or restricted-network classroom.
 | `build.sh` | Build script with clean/test/fakeroot options |
 | `quantui-gpu.def` | **GPU image** definition (CUDA 12.x + gpu4pyscf) |
 | `build-gpu.sh` | GPU build script (`--clean`, `--test`, `--fakeroot`) |
-| `verify-gpu.sh` | Six-step check that a GPU image really reaches the GPU |
+| `verify-gpu.sh` | Seven-step (0–6) check that a GPU image really reaches the GPU |
+| `_build_env.sh` | Shared build-scratch setup sourced by both build scripts (moves scratch off a small `/tmp`) |
 | `slurm/quantui-gpu-test.sbatch` | Batch template for verifying on a cluster |
+| `slurm/quantui-batch.sbatch` | Batch template for running a QuantUI calculation |
+| `slurm/README.md` | SLURM batch guide: `quantui-batch`, job folders, operator variables |
 | `ncshare-gpu-diagnostic.ipynb` | Interactive diagnostic to run **inside** the image on a GPU node |
 | `make_ncshare_diagnostic.py` | Generates that notebook (edit here, not the `.ipynb`) |
 | `README.md` (this file) | Build, run, and distribution guide |
@@ -42,19 +45,21 @@ stack to students who will never have a GPU. See [GPU image](#gpu-image) below.
 | `QUANTUI_FREQ_PARALLEL` | `1` — parallel CPU workers for IR-intensity displacements on frequency calcs (≥4 cores, ≥2 atoms). Overrides the Settings checkbox while set. | unset (off unless you set it) |
 | `QUANTUI_ENABLE_SLURM` | unset (class stays in-kernel) | unset |
 
-The compiled `.sif` image is **not** committed to git — it is too large (~4–5 GB).
-Build it locally (see below) or download the latest release asset from the
-[GitHub Releases page](https://github.com/The-Schultz-Lab/QuantUI/releases).
+The compiled `.sif` image is **not** committed to git — it is far too large
+(it carries a full conda env with PySCF, RDKit, xtb and Sella/JAX).
+Build it locally (see below). [GitHub Releases](https://github.com/The-Schultz-Lab/QuantUI/releases)
+currently carry the PyPI package and the Viewer installers, not a `.sif`.
 
 ---
 
 ## Getting the container
 
-### Option A — Download a pre-built release (easiest)
+### Option A — Use a site-provided image (easiest)
 
-1. Go to [Releases](https://github.com/The-Schultz-Lab/QuantUI/releases)
-2. Download `quantui.sif` from the latest release
-3. Run it directly — no build step needed
+On a cluster that hosts QuantUI (e.g. NCShare), use the image your
+instructor or operator provides (on NCShare:
+`/opt/apps/containers/users/quantui.sif`). No `.sif` is published on GitHub
+Releases at present.
 
 ### Option B — Build from source
 
@@ -65,7 +70,7 @@ Use the provided build script — see the [Build section](#building-from-source)
 ## Prerequisites (for building locally)
 
 - **Apptainer ≥ 1.0** on Linux, macOS, or WSL
-- ~6 GB free disk space (build scratch + final image)
+- ~20 GB free disk space for build scratch and cache (`_build_env.sh` moves scratch off `/tmp` when it has less than 25 GB free)
 - Internet access during build (packages are downloaded from conda-forge and PyPI)
 
 ### Install Apptainer on Ubuntu / WSL
@@ -102,7 +107,7 @@ cd /path/to/QuantUI
 # Standard build
 bash apptainer/build.sh
 
-# Remove old .sif first, then rebuild (recommended after code changes)
+# Overwrite the existing .sif (kept if the build fails); recommended after code changes
 bash apptainer/build.sh --clean
 
 # Build + run container tests immediately after
@@ -112,12 +117,14 @@ bash apptainer/build.sh --clean --test
 bash apptainer/build.sh --fakeroot
 ```
 
-Build time: **~20–40 minutes** (dominated by the conda solve + PySCF download)
-on a modern laptop with a good internet connection. Final image size: **~4–5 GB**.
+Build time: **~15–30 minutes** (download + extract dominate; the mamba solve is fast)
+on a modern laptop with a good internet connection. Check the final size with
+`ls -lh quantui.sif`.
 
 The script must be run from the **repo root** (not from `apptainer/`) because
-the `.def` file copies the entire repo root into the container with
-`%files . /opt/quantui`.
+the `%files` paths in the `.def` (an explicit allowlist: `pyproject.toml`,
+`README.md`, `LICENSE`, `MANIFEST.in`, `CHANGELOG.md`, `quantui/`,
+`notebooks/`, `tests/`, `docs/`) are relative to it.
 
 ---
 
@@ -280,9 +287,10 @@ B3LYP/STO-3G: -75.312587 Ha  converged: True
 | `MP2` | Post-HF | Accurate small-molecule energetics (O(N⁵)) |
 | `CCSD`, `CCSD(T)` | Post-HF coupled cluster | Benchmark-quality energies (O(N⁶)/O(N⁷); (T) is CPU-only) |
 
-Six calculation types run over these: Single Point, Geometry Opt, Frequency
-(+ thermochemistry / IR), UV-Vis (TD-DFT), NMR shielding, and 1D PES scan; PCM
-implicit solvent (Water, Ethanol, THF, DMSO, Acetonitrile) is a single checkbox.
+Nine calculation types run over these: Single Point, Geometry Opt, Transition
+State, IRC, Frequency (+ thermochemistry / IR / Raman), UV-Vis (TD-DFT), NMR
+shielding, 1D PES scan, and Reorganization Energy; PCM implicit solvent
+(Water, Ethanol, THF, DMSO, Acetonitrile) is a single checkbox.
 
 ### Basis sets
 
@@ -301,6 +309,7 @@ implicit solvent (Water, Ethanol, THF, DMSO, Acetonitrile) is a single checkbox.
 | `def2-SVP` | Medium | Good default for DFT |
 | `def2-SVPD` | Medium | def2-SVP plus diffuse functions; anions, heavy elements |
 | `def2-TZVP` | High | Near-complete-basis for DFT |
+| `LANL2DZ` | Medium | Effective core potential on heavy elements; transition metals |
 
 ---
 
@@ -416,13 +425,13 @@ sudo apt-get install -y apptainer
 
 | Layer | Contents |
 | --- | --- |
-| Base | `continuumio/miniconda3:latest` (Debian + conda) |
-| conda-forge | jupyter, jupyterlab, ipywidgets, notebook, pyscf, numpy, scipy, matplotlib, plotly, h5py, rdkit |
+| Base | `condaforge/miniforge3:26.1.1-3` (pinned; Ubuntu + conda/mamba) |
+| conda-forge (dedicated `quantui` env) | python=3.11, jupyter, jupyterlab, ipywidgets, notebook, pyscf, numpy, scipy, matplotlib, plotly, h5py, rdkit, xtb-python |
 | pip | voila, ase, py3dmol, requests |
-| QuantUI | installed from `/opt/quantui` (the repo root, copied at build time) — bundles the molecule library + vendored 3Dmol.js for offline use |
+| QuantUI | editable install of `/opt/quantui` with the `[pyscf,ts]` extras (pyscf-properties, pyscf-dispersion, Sella) — bundles the molecule library + vendored 3Dmol.js for offline use |
 
-The `.git` directory, `__pycache__` folders, and internal dev files are removed
-during build to keep the image lean. A build-time check asserts the vendored
+Only the allowlisted paths are copied in (no `.git` or dev files); the build
+removes `__pycache__`, `*.egg-info` and `.pytest_cache`. A build-time check asserts the vendored
 3Dmol.js is present and the viewer is CDN-free, so a broken offline build fails
 fast instead of shipping blank 3D views.
 
@@ -430,14 +439,10 @@ fast instead of shipping blank 3D views.
 
 ## Updating the container version
 
-Edit `%labels` in `quantui.def` to bump the version string, then rebuild:
-
-```singularity
-%labels
-  Version "0.3.0"
-```
-
-Tag the git commit and push so the version is traceable:
+The image has no version label on purpose: it installs the working tree, so
+`quantui.__version__` inside the image is the authoritative version. Bump
+`version` in `pyproject.toml` (and `quantui/__init__.py`), rebuild, then tag
+the git commit and push so the version is traceable:
 
 ```bash
 git tag v0.3.0
@@ -527,7 +532,7 @@ separate step that has to run where a device exists:
 bash apptainer/verify-gpu.sh quantui-gpu.sif
 ```
 
-It climbs a six-rung ladder, each rung isolating one layer:
+It climbs a seven-rung ladder (steps 0–6), each rung isolating one layer:
 
 | Step | Proves |
 | --- | --- |

@@ -79,8 +79,8 @@ From: nvidia/cuda:12.8.1-devel-ubuntu24.04
   # pip installs in it from unrelated work.
   export PYTHONNOUSERSITE=1
 
-  # Respect a caller-provided value; only default it. quantui.def hardcodes
-  # this, which silently overrides --env. On NCShare $HOME is /hpc/home/$USER
+  # Respect a caller-provided value; only default it (quantui.def does the
+  # same), so --env and the job environment win. On NCShare $HOME is /hpc/home/$USER
   # (NFS) — fine for small JSON, but override it to fast local scratch if a job
   # writes many results.
   export QUANTUI_RESULTS_DIR="${QUANTUI_RESULTS_DIR:-${HOME}/.quantui/results}"

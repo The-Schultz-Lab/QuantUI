@@ -23,7 +23,7 @@ _REASON_OK = ""
 _REASON_ENV_DISABLED = "QUANTUI_DISABLE_GPU is set in the environment"
 _REASON_SETTINGS_DISABLED = (
     "GPU acceleration is switched off in QuantUI settings "
-    "(Status tab → Settings → GPU offload)"
+    "(System Settings tab → GPU offload → Use GPU when available)"
 )
 _REASON_NOT_INSTALLED = (
     "CuPy is not installed — install the PyFock GPU extra matching your CUDA "

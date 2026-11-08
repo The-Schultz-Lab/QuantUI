@@ -51,11 +51,12 @@ if [[ -z "${APPTAINER_TMPDIR:-}" ]]; then
     _why="${_why:+$_why, }only ${_tmp_avail_g}G free on /tmp"
 
   if [[ -n "$_why" ]]; then
-    # NEVER inside the source tree. quantui.def does `%files . /opt/quantui`,
-    # so a scratch dir under $PWD becomes part of what Apptainer copies, and
-    # the build dies with "cannot copy a directory, '.', into itself" — plus
-    # permission errors from reading the half-built rootfs it is copying.
-    # (Put it in $PWD first; it broke exactly this way, 2026-08-04.)
+    # NEVER inside the source tree. When quantui.def still did
+    # `%files . /opt/quantui`, a scratch dir under $PWD became part of what
+    # Apptainer copied, and the build died with "cannot copy a directory, '.',
+    # into itself" — plus permission errors from reading the half-built rootfs
+    # (2026-08-04). The .def now copies an allowlist, but a scratch dir under
+    # $PWD is still a bad idea (it could land in a listed directory).
     _scratch_root="${XDG_CACHE_HOME:-$HOME/.cache}/quantui-apptainer-build"
     mkdir -p "$_scratch_root"
     APPTAINER_TMPDIR="$(mktemp -d "$_scratch_root/run-XXXXXX")"

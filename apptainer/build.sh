@@ -7,8 +7,8 @@
 #   bash apptainer/build.sh --test     # build + run container tests
 #   bash apptainer/build.sh --fakeroot # build without root (HPC systems)
 #
-# The .def file copies the repo root into the container, so this script
-# MUST be run from the repo root, not from apptainer/.
+# The .def file's %files allowlist uses paths relative to the repo root, so
+# this script MUST be run from the repo root, not from apptainer/.
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 

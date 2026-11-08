@@ -87,7 +87,7 @@ fi
 
 # Clear bytecode and disable .pyc writes. Required when the repo is on a
 # /mnt/c (WSL2 DrvFs) checkout, where Windows-side mtime changes are not
-# reliably propagated and Python may load stale pre-edit .pyc (see GOTCHAS.md).
+# reliably propagated and Python may load stale pre-edit .pyc.
 # Harmless on a native-filesystem clone, so it is kept for parity.
 rm -rf quantui/__pycache__
 export PYTHONDONTWRITEBYTECODE=1

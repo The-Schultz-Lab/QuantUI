@@ -30,6 +30,16 @@ The installers are not code-signed, so the first run warns you:
 
 Start **QuantUI Viewer** from your apps menu, enter your results folder under **Results folder**, click **Open**. Click **Exit** when done.
 
+## From an existing QuantUI install
+
+If QuantUI is already installed (with the `[app]` extra), open the same viewer on a results folder with:
+
+```bash
+quantui view /path/to/results
+```
+
+See [`quantui view`](CLI.md#quantui-view) for the options.
+
 ## Needs the full app
 
 - Other orbitals, density and ESP surfaces (they need PySCF).

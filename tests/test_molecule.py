@@ -446,6 +446,39 @@ class TestXyzHeaderTitleLine:
         atoms, coords = parse_xyz_input(xyz_text)
         assert atoms == ["O", "H", "H"]
 
+    # Audit H5 remainder (2026-11-07): a count line followed directly by the
+    # atom rows, with no title line, used to lose its first atom (water was
+    # parsed as H2, with only a log warning).
+
+    def test_count_line_without_title_keeps_all_atoms(self):
+        xyz_text = (
+            "3\nO  0.0  0.0  0.117\nH  0.0  0.757  -0.467\nH  0.0  -0.757  -0.467"
+        )
+        atoms, coords = parse_xyz_input(xyz_text)
+        assert atoms == ["O", "H", "H"]
+        assert coords[0] == [0.0, 0.0, 0.117]
+
+    def test_count_line_without_title_with_trailing_blank_and_comment(self):
+        xyz_text = "2\nH  0.0  0.0  0.0\n# bond along z\nH  0.0  0.0  0.74\n\n"
+        atoms, _ = parse_xyz_input(xyz_text)
+        assert atoms == ["H", "H"]
+
+    def test_atom_like_title_line_is_still_a_title(self):
+        """A title that happens to read as an atom row leaves one row too
+        many, so it must still be consumed as the title."""
+        xyz_text = (
+            "3\nH 1 2 3\nO  0.0  0.0  0.117\n"
+            "H  0.0  0.757  -0.467\nH  0.0  -0.757  -0.467"
+        )
+        atoms, coords = parse_xyz_input(xyz_text)
+        assert atoms == ["O", "H", "H"]
+        assert coords[0] == [0.0, 0.0, 0.117]
+
+    def test_multi_frame_detection_unchanged(self):
+        frame = "2\ntitle\nH 0 0 0\nH 0 0 0.74\n"
+        with pytest.raises(ValueError, match="multi-frame"):
+            parse_xyz_input(frame + frame)
+
 
 class TestEnhancedXYZParser:
     """Test enhanced XYZ parser features."""

@@ -72,24 +72,27 @@ Real output from QuantUI, straight from the app:
   optional live PubChem/CACTUS search.)
 - **3D visualization** — interactive py3Dmol viewer (py3Dmol-first; optional
   plotlymol3d fallback for non-trajectory tasks). A capability-aware backend
-  router picks the right renderer per task, and a Status-tab toggle persists
+  router picks the right renderer per task, and a System Settings toggle persists
   your default-backend preference between sessions
 - **In-session calculations** — RHF, UHF, 9 DFT functionals, MP2, CCSD,
   CCSD(T), NMR shielding, TD-DFT UV-Vis, 1D PES scans, Marcus reorganization
-  energies and **transition-state searches** (Sella, with an automatic
-  frequency check that says whether it found a TS) via PySCF, running
-  in your Python kernel. Optional PyFock 0.1.x adds native-Windows PBE
+  energies, **transition-state searches** (Sella, with an automatic
+  frequency check that says whether it found a TS) and **IRC reaction paths**
+  via PySCF, running in your Python kernel. Optional PyFock (≥0.1.7) adds native-Windows PBE
   single points and geometry optimizations for neutral, closed-shell molecules
   with def2-SVP/def2-TZVP, including orbital and population analysis;
   engine capabilities automatically gate the setup menus
 - **Implicit solvent** — PCM solvation (Water, Ethanol, THF, DMSO,
   Acetonitrile) via a single checkbox: single points, solvated geometry
-  optimizations, frequencies (PCM Hessian + IR; Raman stays gas-phase) and
-  TD-DFT (non-equilibrium excitations). NMR and PES scans are gas-phase only
+  optimizations, transition-state searches and IRC paths, frequencies (PCM
+  Hessian + IR; Raman is not computed in solvent), TD-DFT (non-equilibrium
+  excitations) and reorganization energies (gas-phase optimizations, solvated
+  single points). NMR and PES scans are gas-phase only
 - **Rich results** — total energy, HOMO-LUMO gap, Mulliken charges, dipole
   moment, point group, ⟨S²⟩ with a spin-contamination flag for open-shell
   results, thermochemistry (U, H, S, G, Cv, Cp at any temperature and
-  pressure), IR spectrum chart (stick and Lorentzian-broadened), ¹H/¹³C NMR
+  pressure), IR and Raman spectrum charts (stick and Lorentzian-broadened;
+  Raman in the gas phase), ¹H/¹³C NMR
   chemical shifts, an orbital energy-level diagram with symmetry labels
   (1a₁, 1b₂ …), and a side-by-side comparison table for multiple calculations
 - **Surfaces** — any molecular orbital (α and β for unrestricted results), an
@@ -103,9 +106,11 @@ Real output from QuantUI, straight from the app:
   switches on repeat visits and history replay are instant
 - **Inorganic / coordination complexes** — first-class support for
   transition-metal chemistry the organic pipeline can't handle: 14 bundled
-  metal complexes (octahedral / tetrahedral / square-planar; aqua, ammine,
-  cyanide, carbonyl, halide, oxo) with correct charge and spin; a pre-run guard
-  that catches a metal on an incompatible basis (nudges to def2-SVP / LANL2DZ)
+  metal complexes (octahedral / tetrahedral / square-planar / sandwich; aqua,
+  ammine, cyanide, carbonyl, halide, oxo, cyclopentadienyl) with correct charge
+  and spin; a pre-run guard that catches a metal on an incompatible basis
+  (suggests def2-SVP or def2-TZVP, with a one-click switch to def2-SVP;
+  LANL2DZ is also available)
   and an impossible charge/multiplicity before the calculation starts; a
   **spin-state helper** that suggests a multiplicity from a metal centre's
   oxidation state and geometry (both high- and low-spin where the ligand field
@@ -116,20 +121,21 @@ Real output from QuantUI, straight from the app:
 - **Results persistence** — every calculation is saved automatically to a
   timestamped directory; a built-in browser lets you reload past results
   after a kernel restart; the full `pyscf.log` is shown inline
-- **Structure exports** — download XYZ, MOL/SDF, or PDB files alongside the
+- **Structure exports** — download XYZ, MOL, or PDB files alongside the
   saved results; script export for a standalone `.py` file. Every export also
   downloads straight to your computer, including from a remote
   Voilà/OnDemand session
-- **Plot export** — save IR, UV-Vis, PES, and orbital diagrams as standalone
-  HTML
+- **Plot export** — save IR, Raman, UV-Vis, NMR, PES and orbital plots as
+  standalone HTML or PNG
 - **Optional GPU acceleration** — when [gpu4pyscf](https://github.com/pyscf/gpu4pyscf)
   and a CUDA-capable NVIDIA GPU are present, single-point SCF calculations auto-offload
-  via `mf.to_gpu()` (RHF / UHF / RKS / UKS supported; CCSD(T) stays on CPU).
-  The Status tab + every result card show which compute device was used.
-  Set `QUANTUI_DISABLE_GPU=1` to force CPU even when the GPU is available.
-  Geometry-optimization SCF and gradient steps offload the same way. For a
-  frequency calculation, the displaced IR SCFs offload, but the reference SCF
-  and the analytical Hessian still run on the CPU.
+  via `mf.to_gpu()` (RHF / UHF / RKS / UKS; post-HF methods and TD-DFT stay on
+  CPU). The System Settings tab and every result card show which compute
+  device was used. Set `QUANTUI_DISABLE_GPU=1` (or untick **Use GPU when
+  available**) to force CPU even when the GPU is available.
+  Geometry-optimization SCF and gradient steps offload the same way, as do a
+  frequency calculation's reference SCF, analytical Hessian and displaced IR
+  SCFs.
 - **Cluster batch jobs** — `quantui-batch` submits QuantUI calculations to
   SLURM from a login node over SSH, without starting the image there (presets,
   chaining from another job's optimized geometry, reruns with more memory or
@@ -138,7 +144,8 @@ Real output from QuantUI, straight from the app:
 - **Timing calibration** — one-click benchmark suite populates the time
   estimator with real machine data so predictions are accurate from the first run
 - **Voilà app mode** — serve the notebook as a polished widget-only UI (no
-  code visible), with Light/Dark themes, a dedicated output log, and an
+  code visible), with six colour themes (Light, Dark, Midnight, Dark Blue,
+  Hot Pink, Dark Maroon), a dedicated output log, and an
   in-app bug-report form
 
 ---
@@ -183,6 +190,10 @@ See [`apptainer/README.md`](https://github.com/The-Schultz-Lab/QuantUI/blob/main
 ### Option A — conda (recommended for Linux/macOS/WSL)
 
 ```bash
+# Get the source
+git clone https://github.com/The-Schultz-Lab/QuantUI.git
+cd QuantUI
+
 # Create a dedicated environment
 conda create -n quantui python=3.11
 conda activate quantui
@@ -194,13 +205,14 @@ pip install -e ".[pyscf,ase,app]"
 ### Option B — pip only
 
 ```bash
-python -m pip install quantui[pyscf,ase,app]
+python -m pip install "quantui[pyscf,ase,app]"
+quantui run app --open     # the PyPI package does not include the notebooks
 ```
 
 For the limited native-Windows engine instead:
 
 ```bash
-python -m pip install quantui[pyfock,ase,app]
+python -m pip install "quantui[pyfock,ase,app]"
 ```
 
 ### Option C — Apptainer container (Windows / reproducible deployment)
@@ -249,16 +261,16 @@ python -c "import gpu4pyscf, cupy; print('GPUs:', cupy.cuda.runtime.getDeviceCou
 ```
 
 Should print `GPUs: 1` (or more). Once verified, launch QuantUI as usual
-— the Status tab will show "GPU offload: active (NVIDIA {device-name})"
-and result cards will display the compute device.
+— the System Settings tab's **GPU offload (gpu4pyscf)** row shows ✓ and
+the device name, and result cards display the compute device.
 
 **Method coverage** (per the gpu4pyscf docs):
 
 | Method | GPU offload |
 | --- | --- |
-| RHF, UHF, RKS, UKS (any DFT functional), TD-DFT | Yes |
-| MP2, CCSD | Experimental on GPU (auto-offload) |
-| CCSD(T) | CPU only (gpu4pyscf doesn't support GPU triples; QuantUI's dispatcher detects this and skips) |
+| RHF, UHF, RKS, UKS (any DFT functional): single points, optimizations, frequencies | Yes |
+| TD-DFT | CPU (QuantUI does not offload the excited-state step) |
+| MP2, CCSD, CCSD(T) | CPU only (QuantUI skips GPU offload for post-HF methods) |
 
 Whenever gpu4pyscf can't offload a particular call, QuantUI falls back
 to CPU automatically and the result card reflects which device ran.
@@ -310,7 +322,7 @@ isn't available and points you to the DFT geometry optimization.
 
 ```bash
 # Linux (PyPI wheels bundle the compiled library):
-pip install quantui[xtb]
+pip install "quantui[xtb]"
 
 # Windows / macOS (no PyPI wheel — use conda-forge):
 conda install -c conda-forge xtb-python
@@ -324,7 +336,10 @@ GFN-FF; organic molecules still use the faster RDKit force field.
 ## Quick start
 
 ```bash
-# Activate your environment
+# Any install (including pip from PyPI): start the Voilà app
+quantui run app --open
+
+# From a source checkout (Option A), you can also open the notebook directly.
 conda activate quantui
 
 # JupyterLab (full IDE — shows code)
@@ -341,7 +356,7 @@ Open the notebook, pick a molecule, choose a method and basis set, and click
 
 ## Launching QuantUI as an app
 
-For the smoothest day-to-day experience, QuantUI ships two double-clickable
+For the smoothest day-to-day experience, QuantUI ships three double-clickable
 launchers that activate the right conda environment, install the editable
 package on first run (and only re-install when `pyproject.toml` actually
 changes), clear any stale bytecode, start Voilà on port `8867`, and open the
@@ -483,10 +498,12 @@ Five step-by-step notebooks in [`notebooks/tutorials/`](https://github.com/The-S
 | Notebook | Topic |
 | --- | --- |
 | [01_first_calculation.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/01_first_calculation.ipynb) | Your first RHF calculation |
-| [02_basis_set_study.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/02_basis_set_study.ipynb) | Comparing STO-3G, 6-31G, cc-pVDZ |
+| [02_basis_set_study.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/02_basis_set_study.ipynb) | Comparing STO-3G, 6-31G, 6-31G*, cc-pVDZ |
 | [03_multiplicity_radicals.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/03_multiplicity_radicals.ipynb) | Open-shell molecules and UHF |
 | [04_charged_species.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/04_charged_species.ipynb) | Ions and charged systems |
 | [05_comparing_results.ipynb](https://github.com/The-Schultz-Lab/QuantUI/blob/main/notebooks/tutorials/05_comparing_results.ipynb) | Side-by-side result analysis |
+
+The notebooks are not in the PyPI package; clone the repository to run them.
 
 ---
 
@@ -562,20 +579,26 @@ pytest -m "not network" \
 
 ```text
 quantui/                  Main package
-  app.py                  QuantUIApp — widget orchestration, run dispatch
-  app_analysis.py         Analysis-tab panel registry + _pop_* methods
+  app.py                  QuantUIApp — widget orchestration, run dispatch, panel registry
+  app_analysis.py         Analysis-tab _pop_* methods + panel switcher
   app_builders.py         _build_* widget construction
   app_runflow.py          _do_run + run/orchestration UI handlers
   app_visualization.py    Trajectory / vib / IR / orbital / PES rendering
   app_history.py          History tab loaders, replay context
   app_formatters.py       Result-card and text formatters
   app_exports.py          Export handlers (XYZ/MOL/PDB/script)
+  app_viewer.py           Read-only History + Analysis viewer (`quantui view`)
+  cli.py                  `quantui` command-line toolkit
+  engines/                PySCF / PyFock engine dispatch
   molecule.py             Molecule input and validation
   session_calc.py         In-session PySCF runner (RHF/UHF/DFT/MP2/PCM)
   freq_calc.py            Vibrational frequency + thermochemistry
   ir_plot.py              IR spectrum chart (stick / Lorentzian broadened)
+  raman_calc.py           Static Raman activities (gas phase)
+  raman_plot.py           Raman spectrum chart
   tddft_calc.py           TD-DFT UV-Vis excited-state calculations
   ts_search.py            Transition-state search (Sella) + frequency check
+  irc.py                  IRC reaction path from a transition state (Sella)
   reorganization_energy.py  Marcus four-point reorganization energy
   nmr_calc.py             NMR shielding + ¹H/¹³C chemical shifts
   pes_scan.py             1D potential energy surface scan
@@ -599,7 +622,7 @@ quantui/                  Main package
   ase_bridge.py           ASE structure I/O
   batch_launcher.py       Renders the quantui-batch login-node launcher
   backends/               SLURM batch backend, worker and job registry
-  preopt.py               RDKit MMFF94/UFF force-field pre-optimization
+  preopt.py               RDKit MMFF94/UFF (+ optional xtb GFN-FF) pre-optimization
   data/                   Bundled library (SQLite + manifests) + vendored 3Dmol.js
 notebooks/
   molecule_computations.ipynb   Main user-facing interface (3-cell launcher)

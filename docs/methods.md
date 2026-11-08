@@ -10,9 +10,9 @@ Nine calculation types, fourteen methods, fourteen basis sets.
 | **Geometry Opt** | Optimized structure and trajectory; optional frozen atoms |
 | **Transition State** | Saddle point (Sella, `quantui[ts]`) plus a frequency check |
 | **IRC** | Path from a transition state to the two minima it connects; barriers and energy profile |
-| **Frequency** | Frequencies, IR intensities, ZPVE, thermochemistry, animated modes |
+| **Frequency** | Frequencies, IR intensities, Raman activities (gas phase), ZPVE, thermochemistry, animated modes |
 | **UV-Vis (TD-DFT)** | Excitation energies, oscillator strengths, spectrum |
-| **NMR Shielding** | ^1^H and ^13^C shifts vs TMS (GIAO) |
+| **NMR Shielding** | ¹H and ¹³C shifts vs TMS (GIAO) |
 | **PES Scan** | 1D bond, angle or dihedral scan |
 | **Reorganization Energy** | Marcus four-point λ for hole and/or electron transfer |
 
@@ -40,4 +40,4 @@ Available sets:
 !!! note "Diffuse basis sets"
     `+`/`++`, `aug-` and trailing `D` sets describe anions and weak interactions. Slower, and SCF may need more cycles. `6-31+G*` stops at Ca; `6-31++G**` and `aug-cc-pVDZ` lack iodine; `def2-SVPD` covers heavy elements. The pre-run check flags missing elements.
 
-For metals, the app suggests **def2-SVP** or **LANL2DZ**.
+For metals on a basis without parameters, the app suggests **def2-SVP** or **def2-TZVP** (one click switches to def2-SVP); **LANL2DZ** is also available.

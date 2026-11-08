@@ -37,12 +37,15 @@ and, for environment questions,
 
 ```bash
 python -m pip install --upgrade pip
-pip install -e ".[pyscf,ase,dev]"
+pip install -e ".[pyscf,ase,dev,xtb,ts]"
 ```
 
-This mirrors `.github/workflows/ci.yml`. A `SessionStart` hook
-(`.claude/hooks/`) does this automatically on cloud sessions so the suite and
-linters are runnable immediately.
+This mirrors the Linux job in `.github/workflows/ci.yml`. A `SessionStart`
+hook (`.claude/hooks/`) does this automatically on cloud sessions so the suite
+and linters are runnable immediately. If the container's default `python` is
+outside 3.9–3.11 (e.g. 3.13), that install can fail (`pyscf-properties` does
+not build); create a 3.11 env instead, e.g.
+`uv venv -p python3.11 .venv && . .venv/bin/activate` and install as above.
 
 **Local (conda):** use [`local-setup/environment.yml`](local-setup/environment.yml)
 (env name `quantui`). On Linux/WSL PySCF comes from conda-forge.
@@ -56,12 +59,12 @@ Supported Python: **3.9 / 3.10 / 3.11**.
 ```bash
 pytest -m "not network"       # what CI runs; add "and not slow and not notebook" for the fast inner loop
 pytest tests/test_foo.py -n0  # one test, serial (breakpoints work; -n=auto is on by default)
-pre-commit run --all-files    # ruff (v0.16.0) + black (26.5.1) — keep pins in lockstep with pyproject/CI
+pre-commit run --all-files    # file hygiene + nbstripout + black (26.5.1) + ruff (v0.16.0); mypy runs on pre-push and in CI
 ```
 
-Test baseline (see STATUS): **~1852 passed / 17 skipped** on a full local run.
-`network`-marked tests need internet (live PubChem/CACTUS) — skip them in the
-cloud.
+Test baseline (see STATUS): **~4120 passed / 24 skipped** for
+`pytest -m "not network"` (cloud, Python 3.11, 2026-11). `network`-marked tests
+need internet (live PubChem) — skip them in the cloud.
 
 ---
 
@@ -95,10 +98,12 @@ That line **is** the cloud/local boundary:
 
 ## Key constraints (full list in copilot-instructions.md)
 
-- **All UI logic in `quantui/app.py`** (`QuantUIApp`); the notebook is a 3-cell
-  launcher only (DEC-002).
-- **Plotly embedding is `include_plotlyjs="require"`, never CDN** (DEC-010,
-  guarded by `tests/test_code_quality.py`).
+- **All UI logic lives in the package** — `QuantUIApp` in `quantui/app.py` plus
+  its `quantui/app_*.py` companion modules; the notebook is a 3-cell launcher
+  only (DEC-002).
+- **Plotly embedding is `include_plotlyjs="require"` in the app (inline for
+  standalone exports), never `"cdn"`** (DEC-010, guarded by
+  `tests/test_code_quality.py`).
 - **Analysis panels are always visible; content is swapped, not containers
   shown/hidden** (DEC-009).
 - **Offline-first:** the bundled molecule library and 3Dmol.js are vendored;

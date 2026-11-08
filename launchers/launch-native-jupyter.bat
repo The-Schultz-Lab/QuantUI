@@ -29,7 +29,7 @@ REM Uses port 8868 to avoid conflict with container-based launchers on 8866 and
 REM native Voila launcher on 8867.
 REM Clears quantui/__pycache__ on every launch to prevent stale .pyc bytecode
 REM (WSL2 DrvFs does not reliably propagate Windows-side mtime changes, so Python
-REM may load pre-edit bytecode even after source changes -- see GOTCHAS.md).
+REM may load pre-edit bytecode even after source changes).
 REM PYTHONDONTWRITEBYTECODE=1 prevents a new stale cache from accumulating.
 start "QuantUI [native-jupyter]" wsl -d Ubuntu --cd "%WSLPATH%" -- bash ./launchers/launch-native-jupyter.sh
 

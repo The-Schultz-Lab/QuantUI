@@ -294,6 +294,44 @@ def _count_xyz_frames(lines: List[str], count_idx: int, n_atoms: int) -> int:
     return max(frames, 1)
 
 
+def _is_atom_row(line: str) -> bool:
+    """True if *line* reads as ``SYMBOL X Y Z`` (inline comments ignored)."""
+    for comment_char in ("#", "!"):
+        line = line.split(comment_char)[0]
+    parts = line.split()
+    if len(parts) < 4 or not utils.validate_atom_symbol(parts[0]):
+        return False
+    try:
+        float(parts[1]), float(parts[2]), float(parts[3])
+    except ValueError:
+        return False
+    return True
+
+
+def _has_title_line(lines: List[str], count_idx: int, n_atoms: int) -> bool:
+    """Whether the line after the count line at *count_idx* is a title line.
+
+    A standard XYZ file has one, but a pasted block is often just the count
+    followed directly by the atoms. Treating the first atom as the title
+    silently dropped it (water came out as H2). The line after the count is
+    an atom, not a title, only when it reads as an atom row AND the atom rows
+    starting there number exactly *n_atoms*; a title that merely looks like
+    an atom leaves one row too many, so it is still treated as the title.
+    """
+    nxt = count_idx + 1
+    if nxt >= len(lines) or not _is_atom_row(lines[nxt].strip()):
+        return True
+    rows = 0
+    for raw in lines[nxt:]:
+        stripped = raw.strip()
+        if not stripped or stripped.startswith(("#", "!")):
+            continue
+        if not _is_atom_row(stripped):
+            return True  # something else follows: keep the standard layout
+        rows += 1
+    return rows != n_atoms
+
+
 def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
     """
     Parse XYZ coordinate input from text.
@@ -353,6 +391,7 @@ def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
     # comment (both very common in practice).
     expected_atoms = None
     body_start = 0
+    count_idx = 0
     for idx, raw in enumerate(lines):
         stripped = raw.strip()
         if not stripped:
@@ -361,14 +400,18 @@ def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
             continue
         try:
             expected_atoms = int(stripped)
-            body_start = idx + 2  # count line + title line, whatever it is
+            count_idx = idx
+            # Count line + title line, whatever the title is -- unless the
+            # count is followed directly by the atom rows (no title line).
+            has_title = _has_title_line(lines, idx, expected_atoms)
+            body_start = idx + 2 if has_title else idx + 1
             logger.debug(f"Detected XYZ file format expecting {expected_atoms} atoms")
         except ValueError:
             pass  # first content line isn't a bare count -> no header
         break  # only the first non-blank/non-comment line is eligible
 
     if expected_atoms is not None:
-        n_frames = _count_xyz_frames(lines, body_start - 2, expected_atoms)
+        n_frames = _count_xyz_frames(lines, count_idx, expected_atoms)
         if n_frames > 1:
             # The second frame's count line used to fail as
             # "Line N: not enough values", which says nothing useful.

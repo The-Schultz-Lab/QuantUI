@@ -2852,19 +2852,19 @@ class QuantUIApp:
             self.viz_backend_toggle_ana.observe(
                 self._safe_cb(self._on_viz_backend_changed_ana), names="value"
             )
-        # Settings → "Default 3D backend" preference (Status tab; persisted).
+        # Settings → "Default 3D backend" preference (System Settings tab; persisted).
         self.viz_default_backend_dd.observe(
             self._safe_cb(self._on_viz_default_backend_changed), names="value"
         )
-        # Settings → Vibrational animation framerate (Status tab; persisted).
+        # Settings → Vibrational animation framerate (System Settings tab; persisted).
         self.vib_framerate_si.observe(
             self._safe_cb(self._on_vib_framerate_changed), names="value"
         )
-        # Settings → GPU offload on/off (Status tab; persisted).
+        # Settings → GPU offload on/off (System Settings tab; persisted).
         self.gpu_enabled_cb.observe(
             self._safe_cb(self._on_gpu_enabled_changed), names="value"
         )
-        # Settings → density fitting (RI) on/off (Status tab; persisted).
+        # Settings → density fitting (RI) on/off (System Settings tab; persisted).
         self.density_fit_enabled_cb.observe(
             self._safe_cb(self._on_density_fit_enabled_changed), names="value"
         )
@@ -7538,7 +7538,7 @@ class QuantUIApp:
             _elapsed = time.perf_counter() - _run_wall_t
             _elapsed_cpu = time.process_time() - _run_cpu_t
             _tb_str = _tb.format_exc()
-            # Full details → Output tab (for debugging/instructors)
+            # Full details → the log panel (for debugging/instructors)
             log.write(f"\n--- Calculation Error ---\n{exc}\n\n{_tb_str}")
             # Structured failure footer
             try:
