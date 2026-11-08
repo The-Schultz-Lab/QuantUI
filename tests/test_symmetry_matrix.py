@@ -320,16 +320,8 @@ class TestHistoryReplay:
         html = format_result(r)
         assert "Point group" in html and "C<sub>2v</sub>" in html
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "app_formatters._point_group_html reads only pyscf_mol_atom (live) "
-            "or spectra['molecule'] (frequency). A saved single-point "
-            "result.json carries its geometry under 'geometry' (atoms/"
-            "coordinates), which is never read, so the History card drops the "
-            "Point group row the live card shows."
-        ),
-    )
+    # Was a strict xfail: the History card dropped the point-group row
+    # because _point_group_html never read the saved 'geometry' block.
     def test_single_point_history_card_shows_the_point_group(self, saved_sp):
         from quantui.app_formatters import format_past_result
         from quantui.results_storage import load_result
