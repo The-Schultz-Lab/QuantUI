@@ -20,10 +20,24 @@ specs:
   - ipykernel
   - ipywidgets >=8,<9
   - numpy
+  # OpenBLAS, not MKL: on win-64 conda-forge's numpy otherwise resolves to MKL,
+  # ~115 MB compressed and several hundred MB installed, for a viewer that
+  # does no heavy linear algebra. Measured with a conda-forge solve
+  # (2026-11-08): Windows download 284 -> 170 MB from this line alone.
+  - libblas=*=*openblas
   - matplotlib-base
   - plotly
   - py3dmol
   - requests
+# Pandoc (~25 MB compressed, ~100 MB installed) arrives only through the
+# `nbconvert` metapackage Voila requires; Voila renders notebooks with
+# nbconvert-core's HTML exporter and never calls pandoc. JupyterLab itself is
+# not in this environment (only jupyterlab_server). The installer smoke test
+# (smoke_launch.py, viewer-builds.yml) launches and renders the viewer, so a
+# missing runtime dependency fails CI rather than a student's install.
+exclude:
+  - pandoc
+  - nbconvert-pandoc
 extra_files:
   - quantui-{{ environ["QUANTUI_VERSION"] }}-py3-none-any.whl
   - create_shortcuts.ps1  # [win]
