@@ -59,6 +59,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - **Viewer demo results** — the Frequency sample is computed at the optimized
   geometry (it was at the input geometry: max force 3.2 eV/Å, so its
   frequencies were not meaningful), and the TD-DFT sample keeps its orbitals.
+- **History cards show the point group for every saved result.** A single
+  point reloaded from History lost its *Point group* row (the live card had
+  it): the formatter never read the saved `geometry` block.
+- **Smaller Viewer installers** (M-VIEWER VW.8): Windows 338 → 208 MB,
+  Linux 247 → 223 MB, macOS 213 → 185 MB. The Windows build no longer
+  bundles Intel MKL (NumPy now uses OpenBLAS), and pandoc, which Voilà never
+  calls, is left out on every platform.
 - **Pasted XYZ coordinates no longer lose their first atom** when a count
   line is followed directly by the atoms with no title line
   (`3`, `O …`, `H …`, `H …`): water used to load as H₂, with only a log
