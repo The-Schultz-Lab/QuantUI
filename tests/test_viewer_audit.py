@@ -198,7 +198,9 @@ def test_isosurface_panel_without_pyscf_keeps_only_saved_orbitals(env, no_pyscf)
     assert any("no PySCF" in str(getattr(w, "value", "")) for w in widgets)
     assert app._iso_generate_btn in widgets  # VW.7 path stays reachable
     assert app._orb_gallery_btn not in widgets
-    assert [v for _, v in app._iso_surface_dd.options] == ["orbital"]
+    # Only orbitals can be drawn: the surface-kind dropdown is hidden at "orbital".
+    assert app._iso_surface_dd.layout.display == "none"
+    assert app._iso_surface_dd.value == "orbital"
 
 
 def test_orbital_controls_shown_without_pyscf_only_with_saved_cubes(
