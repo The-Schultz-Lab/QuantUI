@@ -85,6 +85,10 @@ class SessionResult:
     formula: str
     atom_symbols: Optional[List[str]] = None
     mulliken_charges: Optional[List[float]] = None
+    # Natural (NPA) charges from PySCF's natural atomic orbitals
+    # (quantui.population_analysis). ``None`` when not computed (non-PySCF
+    # engine, failure, or a result saved before NPA existed).
+    npa_charges: Optional[List[float]] = None
     dipole_moment_debye: Optional[float] = None
     # Cartesian dipole components in Debye (same frame as molecular coords).
     # Magnitude is ``dipole_moment_debye``; kept separately so older results
@@ -435,7 +439,7 @@ def ground_state_analysis(
     label: str = "",
     gpu_used: bool = False,
 ) -> Dict[str, Any]:
-    """Mulliken charges, dipole, ⟨S²⟩ and MO arrays of a converged SCF.
+    """Mulliken + NPA charges, dipole, ⟨S²⟩ and MO arrays of a converged SCF.
 
     Shared by Single Point, Frequency and TD-DFT so every
     result with a ground-state SCF can fill the Populations and Isosurface
@@ -446,6 +450,8 @@ def ground_state_analysis(
     - gpu4pyscf has no population analysis on the GPU object, so Mulliken
       falls back to ``mf.to_cpu()``; the same for ``spin_square``.
     - Mulliken and dipole are well defined for UHF/UKS.
+    - NPA charges (natural atomic orbitals, :mod:`quantui.population_analysis`)
+      use the total α+β density for an unrestricted/ROHF reference.
     - MO arrays are kept whole: ``(2, n)`` / ``(2, nao, nmo)`` for an
       unrestricted reference.
     - ⟨S²⟩ only for open-shell or unrestricted references.
@@ -457,6 +463,7 @@ def ground_state_analysis(
     out: Dict[str, Any] = {
         "atom_symbols": list(molecule.atoms),
         "mulliken_charges": None,
+        "npa_charges": None,
         "dipole_moment_debye": None,
         "dipole_vector_debye": None,
         "spin_square": None,
@@ -479,6 +486,12 @@ def ground_state_analysis(
         out["mulliken_charges"] = [float(c) for c in _host_array(chg)]
     except Exception as exc:
         logger.debug("Mulliken population extraction failed: %s", exc)
+    try:
+        from .population_analysis import scf_npa_charges
+
+        out["npa_charges"] = scf_npa_charges(mf)
+    except Exception as exc:
+        logger.debug("NPA (natural population) analysis failed: %s", exc)
     try:
         dip = _host_array(mf.dip_moment(verbose=0))
         vec = [float(x) for x in dip.reshape(-1)[:3]]
@@ -1054,6 +1067,7 @@ def _run_session_calc_body(
         mf, molecule, basis, label=f"{method}/{basis}", gpu_used=gpu_used
     )
     mulliken_charges = _gs["mulliken_charges"]
+    npa_charges = _gs["npa_charges"]
     dipole_moment_debye = _gs["dipole_moment_debye"]
     dipole_vector_debye = _gs["dipole_vector_debye"]
     spin_square = _gs["spin_square"]
@@ -1084,6 +1098,7 @@ def _run_session_calc_body(
         formula=formula,
         atom_symbols=list(molecule.atoms),
         mulliken_charges=mulliken_charges,
+        npa_charges=npa_charges,
         dipole_moment_debye=dipole_moment_debye,
         dipole_vector_debye=dipole_vector_debye,
         mp2_correlation_hartree=mp2_correlation_hartree,

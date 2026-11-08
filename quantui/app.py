@@ -1792,6 +1792,8 @@ class QuantUIApp:
         _mulliken_dipole_caption: Any
         _mulliken_mol_output: Any
         _mulliken_overlay_note: Any
+        _pop_scheme_tb: Any
+        _pop_scheme_note: Any
         _populations_js_bridge: Any
         _nmr_accordion: Any
         _nmr_fig: Any
@@ -2005,6 +2007,10 @@ class QuantUIApp:
         # Mulliken Populations panel state (table + Plotly bar chart).
         self._last_mulliken_symbols: Any = None
         self._last_mulliken_charges: Any = None
+        # NPA charges (CHEM.2) for the shown result; None when unavailable.
+        self._last_npa_charges: Any = None
+        self._npa_unavailable_reason: str = ""
+        self._pop_reference_note: str = ""
         self._last_mulliken_dipole: Any = None
         self._last_mulliken_dipole_vector: Any = None
         self._last_mulliken_fig: Any = None
@@ -3275,6 +3281,9 @@ class QuantUIApp:
         )
         self._mulliken_dipole_dir_dd.observe(
             self._safe_cb(self._on_dipole_arrow_changed), names="value"
+        )
+        self._pop_scheme_tb.observe(
+            self._safe_cb(self._on_pop_scheme_changed), names="value"
         )
         # Persist the grid choice so it survives a relaunch.
         self._iso_resolution_dd.observe(
@@ -5099,6 +5108,13 @@ class QuantUIApp:
 
         push_populations_overlay(self)
 
+    def _on_pop_scheme_changed(self, change=None) -> None:
+        """Mulliken/NPA toggle: swap table emphasis, chart and 3D colours."""
+        _ = change
+        from quantui.app_analysis import on_charge_scheme_changed
+
+        on_charge_scheme_changed(self)
+
     def _on_dipole_arrow_changed(self, change=None) -> None:
         """Redraw the dipole arrow in the chosen convention and remember it."""
         from quantui.populations_overlay import (
@@ -6671,6 +6687,9 @@ class QuantUIApp:
                 )
                 result.mulliken_charges = getattr(
                     _sp_result, "mulliken_charges", result.mulliken_charges
+                )
+                result.npa_charges = getattr(
+                    _sp_result, "npa_charges", getattr(result, "npa_charges", None)
                 )
                 result.dipole_moment_debye = getattr(
                     _sp_result, "dipole_moment_debye", result.dipole_moment_debye

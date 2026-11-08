@@ -389,6 +389,9 @@ def save_result(
             getattr(result, "dipole_vector_debye", None)
         ),
         "mulliken_charges": _opt_float_list(getattr(result, "mulliken_charges", None)),
+        # Natural (NPA) charges — additive; absent/None on older results and
+        # on engines without NAO analysis (the Populations panel says so).
+        "npa_charges": _opt_float_list(getattr(result, "npa_charges", None)),
         "atom_symbols": _opt_str_list(getattr(result, "atom_symbols", None)),
         # The actual PySCF class dispatched (RHF/UHF/RKS/
         # UKS), so a saved/History result can also confirm which one ran.

@@ -276,6 +276,9 @@ def apply_analysis_context(app: Any, ctx: Any) -> None:
     # without charges cannot leak the prior calc's chart into this one.
     app._last_mulliken_symbols = None
     app._last_mulliken_charges = None
+    app._last_npa_charges = None
+    app._npa_unavailable_reason = ""
+    app._pop_reference_note = ""
     app._last_mulliken_dipole = None
     app._last_mulliken_dipole_vector = None
     app._last_mulliken_fig = None
@@ -933,6 +936,64 @@ def _mulliken_payload(
     return symbols, charges, dip_f, vec
 
 
+_POST_HF_PREFIXES = ("MP2", "CCSD")
+
+
+def _ctx_result_fields(ctx: Any) -> dict:
+    """``npa_charges`` / ``engine_id`` / ``method`` from a live or History ctx."""
+    if ctx.live_result is not None:
+        result = ctx.live_result
+        return {
+            "npa_charges": getattr(result, "npa_charges", None),
+            "engine_id": getattr(result, "engine_id", None) or "pyscf",
+            "method": getattr(result, "method", None) or getattr(ctx, "method", ""),
+        }
+    result_dir = getattr(ctx, "result_dir", None)
+    if result_dir is None:
+        return {}
+    try:
+        from quantui import load_result
+
+        data = load_result(result_dir)
+    except Exception:  # noqa: BLE001 — missing extras, never a crash
+        return {}
+    return {
+        "npa_charges": data.get("npa_charges"),
+        "engine_id": data.get("engine_id") or "pyscf",
+        "method": data.get("method") or getattr(ctx, "method", ""),
+    }
+
+
+def _npa_payload(ctx: Any, n_atoms: int) -> tuple[Optional[list[float]], str]:
+    """NPA charges for *ctx* (or ``None``) and, if ``None``, why — shown in
+    the panel so "not computed for this engine" never reads as "zero"."""
+    fields = _ctx_result_fields(ctx)
+    raw = fields.get("npa_charges")
+    if raw is not None:
+        try:
+            charges = [float(c) for c in raw]
+        except (TypeError, ValueError):
+            charges = []
+        if len(charges) == n_atoms:
+            return charges, ""
+    engine = str(fields.get("engine_id") or "pyscf")
+    if engine.lower() != "pyscf":
+        return None, (
+            f"NPA charges are not available for the {_html_mod.escape(engine)} "
+            "engine (they use PySCF's natural atomic orbitals)."
+        )
+    if getattr(ctx, "source", "") == "history":
+        return None, (
+            "NPA charges were not saved with this History result (saved before "
+            "NPA was added, or the analysis failed). Re-run to compute them."
+        )
+    return None, "NPA charges could not be computed for this result."
+
+
+def _is_post_hf(method: str) -> bool:
+    return str(method or "").upper().startswith(_POST_HF_PREFIXES)
+
+
 def pop_mulliken(app: Any, ctx: Any) -> bool:
     """Populate the Mulliken Populations panel (table + bar chart + overlays).
 
@@ -956,6 +1017,10 @@ def pop_mulliken(app: Any, ctx: Any) -> bool:
                 )
             _set_panel_unavailable_message(app, "Populations", msg)
             return False
+        npa, npa_reason = _npa_payload(ctx, len(symbols))
+        method = str(
+            _ctx_result_fields(ctx).get("method") or getattr(ctx, "method", "") or ""
+        )
         return bool(
             show_mulliken_populations(
                 app,
@@ -964,6 +1029,14 @@ def pop_mulliken(app: Any, ctx: Any) -> bool:
                 dipole,
                 dipole_vector=dip_vec,
                 molecule=_mulliken_molecule(app, ctx),
+                npa_charges=npa,
+                npa_unavailable_reason=npa_reason,
+                reference_note=(
+                    "Charges are from the HF reference density, not the "
+                    f"correlated {_html_mod.escape(str(method))} density."
+                    if _is_post_hf(method)
+                    else ""
+                ),
             )
         )
     except Exception as exc:
@@ -1019,13 +1092,30 @@ def show_mulliken_populations(
     *,
     dipole_vector: Optional[list] = None,
     molecule: Any = None,
+    npa_charges: Optional[list] = None,
+    npa_unavailable_reason: str = "",
+    reference_note: str = "",
 ) -> bool:
-    """Write Mulliken table + Plotly chart into the Populations accordion."""
+    """Write the charge table + Plotly chart into the Populations accordion.
+
+    Mulliken charges are required; NPA charges (CHEM.2) are optional — when
+    present they get their own table column and the Mulliken/NPA toggle
+    switches the chart and 3D colouring between the two schemes.
+    """
     if not atom_symbols or not charges or len(atom_symbols) != len(charges):
         return False
 
     app._last_mulliken_symbols = list(atom_symbols)
     app._last_mulliken_charges = [float(c) for c in charges]
+    if npa_charges is not None and len(npa_charges) == len(atom_symbols):
+        app._last_npa_charges = [float(c) for c in npa_charges]
+        app._npa_unavailable_reason = ""
+    else:
+        app._last_npa_charges = None
+        app._npa_unavailable_reason = npa_unavailable_reason or (
+            "NPA charges are not available for this result."
+        )
+    app._pop_reference_note = reference_note
     app._last_mulliken_dipole = (
         float(dipole_debye) if dipole_debye is not None else None
     )
@@ -1063,53 +1153,8 @@ def show_mulliken_populations(
                 "μ<sub>z</sub> — re-run this calculation to enable.</p>"
             )
 
-    from quantui.app_formatters import signed
-
-    q_sum = sum(app._last_mulliken_charges)
-    summary_bits = [
-        f"Sum of Mulliken charges: <b>{signed(q_sum, 4)} e</b>"
-        f' <span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
-        "(should match the molecular charge)</span>"
-    ]
-    dip_vec = app._last_mulliken_dipole_vector
-    if app._last_mulliken_dipole is not None:
-        if dip_vec is not None:
-            vx, vy, vz = dip_vec
-            summary_bits.append(
-                f"Dipole moment: <b>{app._last_mulliken_dipole:.4f} D</b>"
-                f' <span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
-                f"(μ = [{signed(vx, 3)}, {signed(vy, 3)}, {signed(vz, 3)}] D"
-                " — SCF density)</span>"
-            )
-        else:
-            summary_bits.append(
-                f"Dipole moment: <b>{app._last_mulliken_dipole:.4f} D</b>"
-                f' <span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
-                "(magnitude only — re-run to enable the 3D arrow)</span>"
-            )
-    app._mulliken_summary.value = (
-        f'<p style="font-size:13px;color:{_theme.css.TEXT_HEADING};margin:0 0 8px">'
-        + "<br>".join(summary_bits)
-        + "</p>"
-    )
-
-    rows = "".join(
-        f'<tr><td style="padding:2px 14px 2px 0;color:{_theme.css.TEXT_SECONDARY}">'
-        f"{_html_mod.escape(sym)}{i + 1}</td>"
-        f'<td style="color:{_theme.css.TEXT_HEADING};font-family:monospace">'
-        f"{chg:+.4f}</td></tr>"
-        for i, (sym, chg) in enumerate(
-            zip(app._last_mulliken_symbols, app._last_mulliken_charges)
-        )
-    )
-    app._mulliken_table.value = (
-        f'<table style="border-collapse:collapse;margin:0 0 10px;font-size:13px">'
-        f'<tr><th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};'
-        f'font-size:12px;padding:2px 14px 2px 0">Atom</th>'
-        f'<th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};'
-        f'font-size:12px">Charge (e)</th></tr>'
-        f"{rows}</table>"
-    )
+    _sync_charge_scheme_toggle(app)
+    render_population_text(app)
 
     update_mulliken_figure(app)
     # Cache geometry for lazy render when the accordion becomes visible.
@@ -1119,10 +1164,115 @@ def show_mulliken_populations(
     return True
 
 
+def _sync_charge_scheme_toggle(app: Any) -> None:
+    """Enable the Mulliken/NPA toggle only when NPA charges exist."""
+    tb = getattr(app, "_pop_scheme_tb", None)
+    note = getattr(app, "_pop_scheme_note", None)
+    has_npa = getattr(app, "_last_npa_charges", None) is not None
+    if tb is not None:
+        if not has_npa and tb.value != "mulliken":
+            tb.value = "mulliken"
+        tb.disabled = not has_npa
+    if note is not None:
+        reason = getattr(app, "_npa_unavailable_reason", "") or ""
+        note.value = (
+            ""
+            if has_npa or not reason
+            else (
+                f'<p style="font-size:12px;color:{_theme.css.TEXT_MUTED_LIGHT};'
+                f'margin:0 0 6px;font-style:italic">{reason}</p>'
+            )
+        )
+
+
+def render_population_text(app: Any) -> None:
+    """Summary (charge sum, dipole) and per-atom table for the active scheme."""
+    from quantui.app_formatters import signed
+    from quantui.populations_overlay import active_charge_scheme, displayed_charges
+
+    scheme = active_charge_scheme(app)
+    label = "NPA" if scheme == "npa" else "Mulliken"
+    shown = displayed_charges(app)
+    muted = f"color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px"
+    summary_bits = []
+    ref_note = getattr(app, "_pop_reference_note", "") or ""
+    if ref_note:
+        summary_bits.append(f'<span style="{muted}">{ref_note}</span>')
+    summary_bits.append(
+        f"Sum of {label} charges: <b>{signed(sum(shown), 4)} e</b>"
+        f' <span style="{muted}">(should match the molecular charge)</span>'
+    )
+    dip_vec = app._last_mulliken_dipole_vector
+    if app._last_mulliken_dipole is not None:
+        if dip_vec is not None:
+            vx, vy, vz = dip_vec
+            summary_bits.append(
+                f"Dipole moment: <b>{app._last_mulliken_dipole:.4f} D</b>"
+                f' <span style="{muted}">'
+                f"(μ = [{signed(vx, 3)}, {signed(vy, 3)}, {signed(vz, 3)}] D"
+                " — SCF density)</span>"
+            )
+        else:
+            summary_bits.append(
+                f"Dipole moment: <b>{app._last_mulliken_dipole:.4f} D</b>"
+                f' <span style="{muted}">'
+                "(magnitude only — re-run to enable the 3D arrow)</span>"
+            )
+    app._mulliken_summary.value = (
+        f'<p style="font-size:13px;color:{_theme.css.TEXT_HEADING};margin:0 0 8px">'
+        + "<br>".join(summary_bits)
+        + "</p>"
+    )
+
+    npa = getattr(app, "_last_npa_charges", None)
+    th = (
+        f'<th style="text-align:left;color:{_theme.css.TEXT_SECONDARY};'
+        'font-size:12px;padding:2px 14px 2px 0">'
+    )
+    td_sym = f'<td style="padding:2px 14px 2px 0;color:{_theme.css.TEXT_SECONDARY}">'
+
+    def _td(value: float, active: bool) -> str:
+        weight = "font-weight:600;" if active else ""
+        return (
+            f'<td style="padding:2px 14px 2px 0;color:{_theme.css.TEXT_HEADING};'
+            f'font-family:monospace;{weight}">{value:+.4f}</td>'
+        )
+
+    rows = []
+    for i, sym in enumerate(app._last_mulliken_symbols):
+        cells = [f"{td_sym}{_html_mod.escape(sym)}{i + 1}</td>"]
+        cells.append(_td(app._last_mulliken_charges[i], scheme == "mulliken"))
+        if npa is not None:
+            cells.append(_td(npa[i], scheme == "npa"))
+        rows.append("<tr>" + "".join(cells) + "</tr>")
+    header = f"{th}Atom</th>"
+    if npa is not None:
+        header += f"{th}Mulliken (e)</th>{th}NPA (e)</th>"
+    else:
+        header += f"{th}Charge (e)</th>"
+    app._mulliken_table.value = (
+        '<table style="border-collapse:collapse;margin:0 0 10px;font-size:13px">'
+        f"<tr>{header}</tr>{''.join(rows)}</table>"
+    )
+
+
+def on_charge_scheme_changed(app: Any) -> None:
+    """Mulliken/NPA toggle: re-render text, chart and 3D colours."""
+    if not getattr(app, "_last_mulliken_charges", None):
+        return
+    render_population_text(app)
+    update_mulliken_figure(app)
+    from quantui.populations_overlay import push_populations_overlay
+
+    push_populations_overlay(app)
+
+
 def update_mulliken_figure(app: Any) -> None:
-    """Re-render the Mulliken bar chart into ``app._mulliken_fig``."""
+    """Re-render the charge bar chart (active scheme) into ``app._mulliken_fig``."""
+    from quantui.populations_overlay import active_charge_scheme, displayed_charges
+
     symbols = getattr(app, "_last_mulliken_symbols", None)
-    charges = getattr(app, "_last_mulliken_charges", None)
+    charges = displayed_charges(app)
     if not symbols or not charges:
         return
     try:
@@ -1130,7 +1280,11 @@ def update_mulliken_figure(app: Any) -> None:
 
         from quantui.mulliken_plot import plot_mulliken_charges
 
-        fig = plot_mulliken_charges(symbols, charges)
+        fig = plot_mulliken_charges(
+            symbols,
+            charges,
+            scheme="NPA" if active_charge_scheme(app) == "npa" else "Mulliken",
+        )
         app._apply_plotly_theme(fig)
         app._last_mulliken_fig = fig
         app._set_html_output(

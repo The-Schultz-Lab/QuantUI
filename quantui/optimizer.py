@@ -410,6 +410,7 @@ class OptimizationResult:
     # the Populations Analysis panel activates after a Geometry Opt too.
     atom_symbols: Optional[List[str]] = None
     mulliken_charges: Optional[List[float]] = None
+    npa_charges: Optional[List[float]] = None
     dipole_moment_debye: Optional[float] = None
     dipole_vector_debye: Optional[List[float]] = None
     engine_id: str = "pyscf"
@@ -965,6 +966,7 @@ def optimize_geometry(
         list(trajectory[-1].atoms) if trajectory else None
     )
     _opt_mulliken: Optional[List[float]] = None
+    _opt_npa: Optional[List[float]] = None
     _opt_dipole: Optional[float] = None
     _opt_dipole_vec: Optional[List[float]] = None
     _opt_density_fit = bool(getattr(atoms.calc, "_density_fit_used", False))
@@ -996,6 +998,12 @@ def optimize_geometry(
                     "Final-step Mulliken extraction failed in optimizer: %s",
                     _pop_exc,
                 )
+            try:
+                from .population_analysis import scf_npa_charges
+
+                _opt_npa = scf_npa_charges(_last_mf)
+            except Exception as _npa_exc:
+                logger.debug("Final-step NPA failed in optimizer: %s", _npa_exc)
             try:
                 _dip = _np_mo.asarray(_last_mf.dip_moment(verbose=0))
                 _dip_list = [float(x) for x in _dip.reshape(-1)[:3]]
@@ -1095,6 +1103,7 @@ def optimize_geometry(
         gpu_name=_opt_gpu_name,
         atom_symbols=_opt_atom_symbols,
         mulliken_charges=_opt_mulliken,
+        npa_charges=_opt_npa,
         dipole_moment_debye=_opt_dipole,
         dipole_vector_debye=_opt_dipole_vec,
         dispersion_applied=getattr(atoms.calc, "dispersion_applied", None),

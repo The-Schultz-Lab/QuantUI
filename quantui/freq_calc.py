@@ -273,6 +273,7 @@ class FreqResult:
     # panel — same meaning as on SessionResult.
     atom_symbols: Optional[List[str]] = None
     mulliken_charges: Optional[List[float]] = None
+    npa_charges: Optional[List[float]] = None
     dipole_moment_debye: Optional[float] = None
     dipole_vector_debye: Optional[List[float]] = None
     spin_square: Optional[float] = None
@@ -1232,6 +1233,7 @@ def _run_freq_calc_body(
         pyscf_mol_basis=basis,
         atom_symbols=_gs["atom_symbols"],
         mulliken_charges=_gs["mulliken_charges"],
+        npa_charges=_gs["npa_charges"],
         dipole_moment_debye=_gs["dipole_moment_debye"],
         dipole_vector_debye=_gs["dipole_vector_debye"],
         spin_square=_gs["spin_square"],

@@ -3417,7 +3417,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         description="?",
         button_style="",
         layout=layout_fn(width="28px", height="28px", padding="0"),
-        tooltip="What are Mulliken charges? — opens Help",
+        tooltip="Mulliken vs. NPA charges — opens Help",
     )
     app._mulliken_color_cb = widgets.Checkbox(
         value=True,
@@ -3471,6 +3471,24 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
     app._mulliken_mol_output = widgets.Output(
         layout=layout_fn(width="100%", min_height="320px", margin="0 0 8px 0"),
     )
+    # Mulliken / NPA charge-scheme toggle (CHEM.2). Drives the bar chart, the
+    # 3D colours and the summary sum; the table always lists both columns.
+    # Disabled (and reset to Mulliken) when the result has no NPA charges.
+    app._pop_scheme_tb = widgets.ToggleButtons(
+        options=[("Mulliken", "mulliken"), ("NPA", "npa")],
+        value="mulliken",
+        description="Charges:",
+        tooltips=[
+            "Mulliken: AO populations split by overlap (basis-set sensitive)",
+            "NPA: natural population analysis (natural atomic orbitals)",
+        ],
+        style={"description_width": "60px", "button_width": "82px"},
+        layout=layout_fn(width="auto", margin="0 0 4px 0"),
+    )
+    app._pop_scheme_note = widgets.HTML(
+        value="",
+        layout=layout_fn(width="100%", margin="0"),
+    )
     # Soft notice under the overlay toggles (e.g. older History without μ vector).
     app._mulliken_overlay_note = widgets.HTML(
         value="",
@@ -3510,6 +3528,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
                     side_by_side(
                         [app._mulliken_mol_output],
                         [
+                            app._pop_scheme_tb,
+                            app._pop_scheme_note,
                             mulliken_overlay_row,
                             app._mulliken_dipole_caption,
                             app._mulliken_vividness_slider,
@@ -3527,7 +3547,7 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         ],
         layout=layout_fn(display="none", margin="8px 0"),
     )
-    app._mulliken_accordion.set_title(0, "Mulliken Populations")
+    app._mulliken_accordion.set_title(0, "Populations (Mulliken / NPA)")
     app._mulliken_accordion.selected_index = None
 
     app._result_dir_label = widgets.HTML(

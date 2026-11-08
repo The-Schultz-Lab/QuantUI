@@ -337,10 +337,26 @@ def show_mulliken_viewer(
         app._set_html_output(out, _mulliken_viewer_unavailable_html())
 
 
+def active_charge_scheme(app: Any) -> str:
+    """``"npa"`` when the Mulliken/NPA toggle says NPA *and* NPA charges
+    exist for the shown result; otherwise ``"mulliken"``."""
+    value = getattr(getattr(app, "_pop_scheme_tb", None), "value", "mulliken")
+    if value == "npa" and getattr(app, "_last_npa_charges", None):
+        return "npa"
+    return "mulliken"
+
+
+def displayed_charges(app: Any) -> List[float]:
+    """Charges of the active scheme (chart, colours, summary sum)."""
+    if active_charge_scheme(app) == "npa":
+        return list(getattr(app, "_last_npa_charges", None) or [])
+    return list(getattr(app, "_last_mulliken_charges", None) or [])
+
+
 def overlay_payload(app: Any, mol: Any) -> dict:
     """Overlay payload for *mol* from the app's charges, dipole and checkboxes."""
     symbols = list(getattr(app, "_last_mulliken_symbols", None) or [])
-    charges = list(getattr(app, "_last_mulliken_charges", None) or [])
+    charges = displayed_charges(app)
     dip_vec = getattr(app, "_last_mulliken_dipole_vector", None)
     color_on = bool(getattr(getattr(app, "_mulliken_color_cb", None), "value", False))
     dip_on = bool(getattr(getattr(app, "_mulliken_dipole_cb", None), "value", False))

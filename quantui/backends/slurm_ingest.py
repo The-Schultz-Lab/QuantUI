@@ -106,6 +106,7 @@ def _basic_result(payload: dict[str, Any], record: JobRecord) -> SimpleNamespace
         basis=str(payload.get("basis", record.request_obj.basis)),
         formula=str(payload.get("formula", "?")),
         mulliken_charges=payload.get("mulliken_charges"),
+        npa_charges=payload.get("npa_charges"),
         dipole_moment_debye=payload.get("dipole_moment_debye"),
         dipole_vector_debye=payload.get("dipole_vector_debye"),
         atom_symbols=payload.get("atom_symbols"),

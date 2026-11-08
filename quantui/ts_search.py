@@ -160,6 +160,7 @@ _FREQ_FIELDS = frozenset(
         "pyscf_mol_basis",
         "atom_symbols",
         "mulliken_charges",
+        "npa_charges",
         "dipole_moment_debye",
         "dipole_vector_debye",
         "spin_square",
