@@ -72,8 +72,8 @@ def ecd_delta_epsilon(
     """
     if sigma_ev <= 0:
         raise ValueError("sigma_ev must be positive")
-    e = np.asarray(e_grid_ev, dtype=float)
-    out = np.zeros_like(e)
+    e: np.ndarray = np.asarray(e_grid_ev, dtype=float)
+    out: np.ndarray = np.zeros_like(e)
     # R in 10⁻⁴⁰ cgs → prefactor 1e-40 / 2.2965e-39 = 1 / 22.965
     pref = 1e-40 / (ECD_INTEGRAL_CONST * math.sqrt(math.pi) * sigma_ev)
     for de, r in zip(energies_ev, rotatory_strengths_1e40):
