@@ -29,7 +29,7 @@ Where students get them:
 | User gets | `.exe` / `.pkg` / `.sh` plus a "QuantUI Viewer" shortcut | A web page, nothing installed |
 | Results folder | Any folder on disk (type the path, **Open**) | Upload a `.zip` of it (**Upload .zip**) |
 | Offline | Yes | Only if Pyodide is self-hosted (see below) |
-| Size | ~240 MB download, ~1 GB installed (Linux build) | ~20–60 MB first load from CDN; ~550 MB site if self-hosted |
+| Size | Installer download ~185–225 MB (CI build 2026-11-08: Windows 208, Linux 223, macOS 185 MB; was 338 / 247 / 213 MB in v0.11.1) | ~20–60 MB first load from CDN; ~550 MB site if self-hosted |
 | Isosurfaces | Not available (needs PySCF) | Not available (needs PySCF) |
 | Signing | **Unsigned** — see below | None needed |
 
