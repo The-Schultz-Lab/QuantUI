@@ -375,7 +375,7 @@ def on_view_log(app: Any, btn: Any) -> None:
     # Build analysis context from disk and apply via registry
     ctx = app._build_history_context(result_dir)
     if ctx is not None:
-        data_stub = {"calc_type": ctx.calc_type, "spectra": ctx.spectra_data}
+        data_stub = _mol_lookup_data(result_dir, ctx)
         try:
             mol = app._mol_from_result_dir(result_dir, data_stub)
             if mol is not None:
@@ -387,6 +387,23 @@ def on_view_log(app: Any, btn: Any) -> None:
         app._apply_analysis_context(ctx)
 
     app._goto_output_tab()
+
+
+def _mol_lookup_data(result_dir: Path, ctx: Any) -> dict[str, Any]:
+    """What :func:`mol_from_result_dir` needs, including ``geometry``.
+
+    A stub of only ``calc_type`` + ``spectra`` dropped the top-level
+    ``geometry`` (its first source), so NMR / PES / reorganization results
+    opened in Analysis with a blank structure viewer (viewer audit VA.4).
+    """
+    data: dict[str, Any] = {"calc_type": ctx.calc_type, "spectra": ctx.spectra_data}
+    try:
+        saved = _json.loads((Path(result_dir) / "result.json").read_text())
+        if isinstance(saved.get("geometry"), dict):
+            data["geometry"] = saved["geometry"]
+    except Exception:  # noqa: BLE001 — the other sources still apply
+        pass
+    return data
 
 
 def mol_from_result_dir(result_dir: Path, data: dict[str, Any]) -> Any:
@@ -594,7 +611,7 @@ def history_load_analysis(
         with timer.stage("build_context"):
             ctx = app._build_history_context(result_dir)
         if ctx is not None:
-            data_stub = {"calc_type": ctx.calc_type, "spectra": ctx.spectra_data}
+            data_stub = _mol_lookup_data(result_dir, ctx)
             with timer.stage("mol_reconstruction"):
                 try:
                     mol = app._mol_from_result_dir(result_dir, data_stub)

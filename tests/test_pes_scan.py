@@ -417,10 +417,15 @@ class TestFormatPesScanResult:
 
 # ── PySCF-gated integration test ─────────────────────────────────────────────
 
-_pyscf_available = pytest.mark.skipif(
-    not __import__("sys").platform.startswith("linux"),
-    reason="PySCF only available on Linux/WSL",
-)
+try:
+    import pyscf  # noqa: F401
+
+    _HAS_PYSCF = True
+except ImportError:
+    _HAS_PYSCF = False
+
+# Installed, not just Linux: a Linux env without PySCF ran (and failed) these.
+_pyscf_available = pytest.mark.skipif(not _HAS_PYSCF, reason="PySCF not installed")
 
 
 @_pyscf_available

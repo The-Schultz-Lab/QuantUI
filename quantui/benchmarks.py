@@ -869,58 +869,19 @@ def _save_calibration_step(
         save_trajectory,
     )
 
-    # Build the spectra dict for Frequency calcs — must match what the
-    # Analysis tab's _pop_ir_spectrum / _pop_vibrational expect.
+    # Frequency: the same spectra payload the app and batch jobs save
+    # (thermo, D1 max force, saddle retry, mode symmetry labels).
     spectra: dict = {}
     if calc_type == "frequency":
-        displacements_serialized = None
-        try:
-            import numpy as _np
+        from quantui.backends.worker_payload import freq_result_payload
 
-            if getattr(res, "displacements", None) is not None:
-                displacements_serialized = _np.asarray(res.displacements).tolist()
-        except Exception:  # noqa: BLE001 — best-effort
-            pass
-        spectra = {
-            "ir": {
-                "frequencies_cm1": getattr(res, "frequencies_cm1", []),
-                "ir_intensities": getattr(res, "ir_intensities", []),
-                "raman_activities": getattr(res, "raman_activities", []),
-                "zpve_hartree": getattr(res, "zpve_hartree", 0.0),
-                "displacements": displacements_serialized,
-            },
-            "molecule": {
-                "atoms": list(mol.atoms),
-                "coords": [list(map(float, row)) for row in mol.coordinates],
-                "charge": mol.charge,
-                "multiplicity": mol.multiplicity,
-            },
-        }
+        spectra = freq_result_payload(res, mol)["spectra"]
 
-    # For GeoOpt the ``res`` from optimize_geometry has its own .method /
-    # .basis / .formula via res.molecule. save_result expects those
-    # attributes on the top-level result. Build a uniform shim.
-    if calc_type == "geometry_opt":
-        from types import SimpleNamespace
-
-        save_obj = SimpleNamespace(
-            formula=res.molecule.get_formula(),
-            method=res.method,
-            basis=res.basis,
-            energy_hartree=(
-                res.energies_hartree[-1] if res.energies_hartree else float("nan")
-            ),
-            converged=bool(res.converged),
-            n_iterations=int(getattr(res, "n_steps", -1)),
-            homo_lumo_gap_ev=None,
-            mo_energy_hartree=getattr(res, "mo_energy_hartree", None),
-            mo_occ=getattr(res, "mo_occ", None),
-            mo_coeff=getattr(res, "mo_coeff", None),
-            pyscf_mol_atom=getattr(res, "pyscf_mol_atom", None),
-            pyscf_mol_basis=getattr(res, "pyscf_mol_basis", None),
-        )
-    else:
-        save_obj = res
+    # Saved as the app saves it: the OptimizationResult itself (it carries
+    # the final SCF's orbitals, Mulliken charges and dipole) at its final
+    # geometry. A hand-built shim here used to drop the populations.
+    save_obj = res
+    save_mol = res.molecule if calc_type == "geometry_opt" else mol
 
     extras = {"calibration_run_id": calibration_run_id}
     try:
@@ -930,6 +891,7 @@ def _save_calibration_step(
             calc_type=calc_type,
             spectra=spectra or None,
             extras=extras,
+            molecule=save_mol,
         )
     except Exception:  # noqa: BLE001 — save is best-effort
         return None

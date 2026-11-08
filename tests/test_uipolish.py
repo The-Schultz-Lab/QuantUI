@@ -10,6 +10,16 @@ import pytest
 
 from quantui.app import QuantUIApp
 
+try:
+    import pyscf  # noqa: F401
+
+    _PYSCF = True
+except ImportError:
+    _PYSCF = False
+
+# Labels / the engine chip are computed with PySCF; the Windows CI job has none.
+pyscf_only = pytest.mark.skipif(not _PYSCF, reason="PySCF not installed")
+
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
@@ -174,6 +184,7 @@ class TestP6P7Formulas:
         got = [display_formula(f) for f in ["H3N", "H2O", "CH4", "H4Si", "HCl", "C6H6"]]
         assert got == ["NH3", "H2O", "CH4", "SiH4", "HCl", "C6H6"]
 
+    @pyscf_only
     def test_frequency_row_lists_modes_with_symmetry(self):
         pytest.importorskip("pyscf")  # mode symmetry labels use PySCF
         import json
@@ -250,6 +261,7 @@ class TestPhase2CopyAndStyle:
         app.cancel_btn.disabled = True
         assert app.cancel_btn.button_style == ""
 
+    @pyscf_only
     def test_engine_is_a_chip_without_the_platform_paragraph(self, app):
         pytest.importorskip("pyscf")  # with no engine the box says so instead
         import sys
@@ -399,7 +411,11 @@ class TestPhase3Layout:
         assert "var(--q-bg-panel" in comparison_table_html([s])
 
     def test_side_by_side_viewers(self, app):
-        for widget in (app._mulliken_mol_output, app.vib_output, app._orb_iso_output):
+        # Without PySCF the isosurface panel is a note, not a viewer (VA.2).
+        viewers = [app._mulliken_mol_output, app.vib_output]
+        if _PYSCF:
+            viewers.append(app._orb_iso_output)
+        for widget in viewers:
             parents = [
                 w
                 for w in _walk(app.analysis_tab_panel)
