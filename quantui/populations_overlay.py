@@ -1,4 +1,5 @@
-"""3D Mulliken color + dipole-arrow overlays for the Mulliken panel viewer.
+"""3D charge colours, dipole arrow and bond-order labels for the Populations
+panel viewer.
 
 Mirrors the click-to-measure highlight bridge (:mod:`quantui.app_measurement`):
 a one-shot ``Javascript`` push into a hidden ``Output`` restyles the *live*
@@ -23,11 +24,17 @@ logger = logging.getLogger(__name__)
 # gets a ~1.3 Å half-length — readable next to a typical bond without dominating.
 _DIPOLE_SCALE_A_PER_D = 0.70
 
+# Bond-order labels are drawn only for pairs at or above this index, so the
+# weak non-bonded pairs listed in the table (≥ BOND_ORDER_MIN) do not clutter
+# the 3D view with labels floating between unbonded atoms.
+BOND_LABEL_MIN = 0.30
+
 _POPULATIONS_JS = """
 (function(){
   var UID="__UID__";
   function v(){ return window["viewer_"+UID]; }
   var arrowShapes=[];
+  var bondLabels=[];
   var colored=false;
   // 3Dmol creates the viewer asynchronously, so an update can arrive before
   // it exists. Keep the latest payload and retry instead of dropping it
@@ -40,6 +47,14 @@ _POPULATIONS_JS = """
       try{ vw.removeShape(arrowShapes[i]); }catch(e){}
     }
     arrowShapes=[];
+  }
+
+  function clearLabels(){
+    var vw=v(); if(!vw){ return; }
+    for(var i=0;i<bondLabels.length;i++){
+      try{ vw.removeLabel(bondLabels[i]); }catch(e){}
+    }
+    bondLabels=[];
   }
 
   function resetAtomColors(){
@@ -61,6 +76,7 @@ _POPULATIONS_JS = """
     }
     pending=null;
     clearArrow();
+    clearLabels();
     resetAtomColors();
 
     var colors = payload.colors || null;
@@ -89,6 +105,23 @@ _POPULATIONS_JS = """
           color: arrow.color || "#16a34a"
         }));
       }catch(e){}
+    }
+    var labels = payload.labels || null;
+    if(labels && labels.length){
+      for(var k=0;k<labels.length;k++){
+        try{
+          bondLabels.push(vw.addLabel(labels[k].text, {
+            position: labels[k].position,
+            fontSize: 11,
+            fontColor: "#111827",
+            backgroundColor: "#ffffff",
+            backgroundOpacity: 0.75,
+            borderThickness: 0,
+            alignment: "center",
+            inFront: true
+          }));
+        }catch(e){}
+      }
     }
     vw.render();
     return true;
@@ -200,6 +233,47 @@ def dipole_arrow_endpoints(
     }
 
 
+def bond_order_labels(
+    bond_orders: Optional[Sequence[dict]],
+    coordinates: Optional[Sequence[Sequence[float]]],
+    index: str,
+    *,
+    min_value: float = BOND_LABEL_MIN,
+) -> List[dict]:
+    """``[{text, position}]`` at bond midpoints for py3Dmol ``addLabel``.
+
+    *index* is ``"mayer"`` or ``"wiberg"``; anything else → no labels.
+    Pairs below *min_value* or with out-of-range atom indices are skipped.
+    """
+    if index not in ("mayer", "wiberg") or not bond_orders or not coordinates:
+        return []
+    n = len(coordinates)
+    out: List[dict] = []
+    for bo in bond_orders:
+        try:
+            i, j = int(bo["i"]), int(bo["j"])
+            value = bo.get(index)
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+        if value is None or not (0 <= i < n and 0 <= j < n):
+            continue
+        value = float(value)
+        if value < min_value:
+            continue
+        a, b = coordinates[i], coordinates[j]
+        out.append(
+            {
+                "text": f"{value:.2f}",
+                "position": {
+                    "x": (float(a[0]) + float(b[0])) / 2.0,
+                    "y": (float(a[1]) + float(b[1])) / 2.0,
+                    "z": (float(a[2]) + float(b[2])) / 2.0,
+                },
+            }
+        )
+    return out
+
+
 def inject_populations_js(html: str, initial_payload: Optional[dict] = None) -> str:
     """Append the populations overlay bridge to py3Dmol Analysis HTML.
 
@@ -230,14 +304,20 @@ def build_overlay_payload(
     coordinates: Optional[Sequence[Sequence[float]]],
     vividness: float = 1.0,
     arrow_convention: str = "physics",
+    bond_orders: Optional[Sequence[dict]] = None,
+    bond_label_index: str = "off",
 ) -> dict:
     """Assemble the JSON payload for ``__quantuiPopulationsUpdate``.
 
     *arrow_convention* ``"physics"`` points the arrow head at the positive
     end (the IUPAC dipole vector, − → +); ``"chemistry"`` reverses it to the
     crossed-arrow convention (+ → −). Only the drawing changes.
+    *bond_label_index* ``"mayer"``/``"wiberg"`` labels bonds with that index.
     """
-    payload: dict = {"colors": None, "arrow": None}
+    payload: dict = {"colors": None, "arrow": None, "labels": None}
+    labels = bond_order_labels(bond_orders, coordinates, bond_label_index)
+    if labels:
+        payload["labels"] = labels
     if color_enabled and charges:
         payload["colors"] = charge_colors(charges, vividness=vividness)
     if (
@@ -337,10 +417,26 @@ def show_mulliken_viewer(
         app._set_html_output(out, _mulliken_viewer_unavailable_html())
 
 
+def active_charge_scheme(app: Any) -> str:
+    """``"npa"`` when the Mulliken/NPA toggle says NPA *and* NPA charges
+    exist for the shown result; otherwise ``"mulliken"``."""
+    value = getattr(getattr(app, "_pop_scheme_tb", None), "value", "mulliken")
+    if value == "npa" and getattr(app, "_last_npa_charges", None):
+        return "npa"
+    return "mulliken"
+
+
+def displayed_charges(app: Any) -> List[float]:
+    """Charges of the active scheme (chart, colours, summary sum)."""
+    if active_charge_scheme(app) == "npa":
+        return list(getattr(app, "_last_npa_charges", None) or [])
+    return list(getattr(app, "_last_mulliken_charges", None) or [])
+
+
 def overlay_payload(app: Any, mol: Any) -> dict:
     """Overlay payload for *mol* from the app's charges, dipole and checkboxes."""
     symbols = list(getattr(app, "_last_mulliken_symbols", None) or [])
-    charges = list(getattr(app, "_last_mulliken_charges", None) or [])
+    charges = displayed_charges(app)
     dip_vec = getattr(app, "_last_mulliken_dipole_vector", None)
     color_on = bool(getattr(getattr(app, "_mulliken_color_cb", None), "value", False))
     dip_on = bool(getattr(getattr(app, "_mulliken_dipole_cb", None), "value", False))
@@ -356,6 +452,10 @@ def overlay_payload(app: Any, mol: Any) -> dict:
         coordinates=coords or None,
         vividness=_mulliken_vividness(app),
         arrow_convention=dipole_arrow_convention(app),
+        bond_orders=getattr(app, "_last_bond_orders", None),
+        bond_label_index=str(
+            getattr(getattr(app, "_bond_label_dd", None), "value", "off") or "off"
+        ),
     )
 
 

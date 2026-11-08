@@ -17,8 +17,11 @@ def plot_mulliken_charges(
     charges: Sequence[float],
     *,
     height: int = 320,
+    scheme: str = "Mulliken",
 ) -> go.Figure:
-    """Return a Plotly bar chart of Mulliken partial charges.
+    """Return a Plotly bar chart of partial charges (Mulliken by default).
+
+    *scheme* only labels the y axis (``"Mulliken"`` or ``"NPA"``).
 
     Bars are coloured by sign (negative = more electron density / red-ish,
     positive = electron deficient / blue-ish) so students can read polarity
@@ -41,7 +44,7 @@ def plot_mulliken_charges(
         layout=dict(
             xaxis=dict(title="Atom", showgrid=False),
             yaxis=dict(
-                title="Mulliken charge (e)",
+                title=f"{scheme} charge (e)",
                 zeroline=True,
                 zerolinewidth=1.5,
                 zerolinecolor="#9ca3af",

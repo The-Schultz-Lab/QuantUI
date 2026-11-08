@@ -157,6 +157,33 @@ def _opt_int(x: object) -> Optional[int]:
         return None
 
 
+def _opt_bond_orders(x: object) -> Optional[list]:
+    """JSON-safe ``[{"i", "j", "mayer", "wiberg"}, …]`` or ``None``.
+
+    Malformed entries are dropped rather than failing the save.
+    """
+    if x is None:
+        return None
+    out: list = []
+    try:
+        for item in x:  # type: ignore[attr-defined]
+            try:
+                w = item.get("wiberg")
+                out.append(
+                    {
+                        "i": int(item["i"]),
+                        "j": int(item["j"]),
+                        "mayer": float(item["mayer"]),
+                        "wiberg": None if w is None else float(w),
+                    }
+                )
+            except (KeyError, TypeError, ValueError, AttributeError):
+                continue
+    except TypeError:
+        return None
+    return out
+
+
 def _opt_float_list(x: object) -> Optional[list]:
     """Coerce an optional iterable of numbers to a JSON-safe list of floats."""
     if x is None:
@@ -389,6 +416,11 @@ def save_result(
             getattr(result, "dipole_vector_debye", None)
         ),
         "mulliken_charges": _opt_float_list(getattr(result, "mulliken_charges", None)),
+        # Natural (NPA) charges — additive; absent/None on older results and
+        # on engines without NAO analysis (the Populations panel says so).
+        "npa_charges": _opt_float_list(getattr(result, "npa_charges", None)),
+        # Mayer / Wiberg bond orders (CHEM.3) — additive, like npa_charges.
+        "bond_orders": _opt_bond_orders(getattr(result, "bond_orders", None)),
         "atom_symbols": _opt_str_list(getattr(result, "atom_symbols", None)),
         # The actual PySCF class dispatched (RHF/UHF/RKS/
         # UKS), so a saved/History result can also confirm which one ran.

@@ -75,6 +75,8 @@ def session_result_payload(result) -> Dict[str, Any]:
         # NotImplemented and these are already None on the object itself)
         # still serializes cleanly.
         "mulliken_charges": getattr(result, "mulliken_charges", None),
+        "npa_charges": getattr(result, "npa_charges", None),
+        "bond_orders": getattr(result, "bond_orders", None),
         "dipole_moment_debye": getattr(result, "dipole_moment_debye", None),
         "dipole_vector_debye": getattr(result, "dipole_vector_debye", None),
         "atom_symbols": getattr(result, "atom_symbols", None),
@@ -143,6 +145,8 @@ def _ground_state_fields(result) -> Dict[str, Any]:
     return {
         "atom_symbols": getattr(result, "atom_symbols", None),
         "mulliken_charges": getattr(result, "mulliken_charges", None),
+        "npa_charges": getattr(result, "npa_charges", None),
+        "bond_orders": getattr(result, "bond_orders", None),
         "dipole_moment_debye": getattr(result, "dipole_moment_debye", None),
         "dipole_vector_debye": getattr(result, "dipole_vector_debye", None),
         "spin_square": getattr(result, "spin_square", None),

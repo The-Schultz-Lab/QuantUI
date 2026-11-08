@@ -9,6 +9,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **NPA charges and bond orders** (M-CHEM CHEM.2/CHEM.3). The Populations
+  panel (now *Populations & Bond Orders*) shows natural population analysis
+  (NPA) charges beside Mulliken, with a Mulliken/NPA toggle for the chart and
+  3D colours, plus Mayer and Wiberg bond orders in a table and, optionally,
+  as labels on the bonds in 3D. NPA comes from PySCF's natural atomic
+  orbitals (the NAO/NPA step of NBO, not full NBO); Wiberg indices are
+  computed in the NAO basis, as NBO programs report them. NPA charges change
+  far less with basis set than Mulliken charges (water's O: −0.92 to −0.96
+  across 6-31G…def2-TZVP vs −0.31 to −0.90). Saved with results and batch
+  jobs; for MP2/CCSD they come from the HF reference density.
 - **Transition-state guess from a reactant and a product** (M-TS TS.4,
   QST2-style). On the Transition State calc type, pick a *Product* (a saved
   Geometry Opt result with the same atoms, or pasted XYZ): QuantUI aligns it
