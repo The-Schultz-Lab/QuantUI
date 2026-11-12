@@ -86,6 +86,31 @@ class TestP1Orientation:
 
 
 class TestB1GpuBadge:
+    @pytest.fixture
+    def app(self, tmp_path, monkeypatch):
+        """An app whose background GPU probe has already updated the badge.
+
+        Construction starts a ``quantui-gpu-detect`` thread that sets
+        ``_status_html.value`` when it finishes. If that lands after the test
+        patches ``send_state``, it records an extra send and the test flakes.
+        Stub the probe so it is instant and hardware-independent, then join
+        this app's detect thread before handing the app to the test.
+        """
+        import threading
+
+        from quantui import gpu_offload
+
+        monkeypatch.setenv("QUANTUI_SETTINGS_PATH", str(tmp_path / "settings.json"))
+        monkeypatch.setattr(gpu_offload, "probe_gpu", lambda: (False, None, "stub"))
+        before = set(threading.enumerate())
+        app = QuantUIApp()
+        # The stubbed probe may already be done (then it is not listed).
+        for t in threading.enumerate():
+            if t.name == "quantui-gpu-detect" and t not in before:
+                t.join(timeout=30)
+                assert not t.is_alive(), "GPU probe thread did not finish"
+        return app
+
     def test_settings_tab_resends_the_badge(self, app, monkeypatch):
         sent = []
         monkeypatch.setattr(
