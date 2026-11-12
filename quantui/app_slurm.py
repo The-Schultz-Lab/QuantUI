@@ -35,6 +35,8 @@ from quantui.security import SecurityError
 logger = logging.getLogger(__name__)
 
 _POLL_INTERVAL_S = 2.0
+# Consecutive failed monitor polls before the monitor gives up (and releases Run).
+_MONITOR_MAX_FAILURES = 3
 _SUPPORTED_SLURM_CALC_TYPES = frozenset(CALC_TYPES)
 _ACTIVE_SLURM_STATUSES = frozenset({"queued", "pending", "running", "submitted"})
 _DISMISSABLE_SLURM_STATUSES = frozenset({"success", "error", "cancelled", "prepared"})
@@ -260,7 +262,9 @@ def submit_slurm_run(app: Any) -> None:
         refresh_slurm_jobs_tab(app)
         _update_slurm_jobs_tab_title(app)
         return
-    except RuntimeError as exc:
+    except (RuntimeError, OSError) as exc:
+        # OSError: the job folder or record could not be written (disk
+        # full, permissions); the Run button must come back either way.
         _reset_run_ui_after_submit_failure(app)
         app.run_status.value = "SLURM submission failed."
         _append_run_html(app, format_error_html(str(exc)))
@@ -673,52 +677,90 @@ def attach_slurm_job(app: Any, request_id: str) -> None:
 
 
 def _monitor_slurm_job(app: Any, request_id: str) -> None:
+    # Whatever happens in the loop, the UI must be released at the end:
+    # an exception escaping this thread used to leave _calc_running True
+    # (Run disabled) for the rest of the session.
+    try:
+        _monitor_slurm_loop(app, request_id)
+    except Exception:  # noqa: BLE001 — logged; the finally releases the UI
+        logger.exception("SLURM monitor for %s stopped on an error", request_id)
+    finally:
+        app._queue_main_thread_callback(_finish_slurm_monitor, app)
+
+
+def _monitor_slurm_loop(app: Any, request_id: str) -> None:
     backend = slurm_backend_for_app(app)
     stop = getattr(app, "_slurm_monitor_stop", threading.Event())
     last_log_size = 0
+    failures = 0
 
     while not stop.is_set():
-        backend.refresh_registry_statuses()
-        record = app._job_registry.load(request_id)
-        if record is None:
-            break
-
-        log_path = record.live_log_path
-        if log_path.exists():
-            try:
-                text = log_path.read_text(encoding="utf-8", errors="replace")
-                if len(text) > last_log_size:
-                    chunk = text[last_log_size:]
-                    last_log_size = len(text)
-                    app._queue_main_thread_callback(_append_run_stdout, app, chunk)
-            except OSError:
-                pass
-
-        progress_path = record.progress_path
-        if progress_path.exists():
-            try:
-                prog = json.loads(progress_path.read_text(encoding="utf-8"))
-                msg = prog.get("message", "")
-                pct = prog.get("percent")
-                if msg:
-                    status = f"SLURM: {msg}"
-                    if pct is not None:
-                        status += f" ({pct:.0f}%)"
-                    app._queue_main_thread_callback(_set_run_status, app, status)
-            except (OSError, json.JSONDecodeError):
-                pass
-
-        if record.status in ("success", "error", "cancelled"):
-            app._queue_main_thread_callback(_ingest_terminal_job, app, record)
-            break
-
-        slurm_id = record.slurm_job_id or "?"
-        status_line = f"SLURM job {slurm_id}: {record.status}"
-        app._queue_main_thread_callback(_set_run_status, app, status_line)
-
+        try:
+            done, last_log_size = _monitor_slurm_poll(
+                app, backend, request_id, last_log_size
+            )
+            failures = 0
+        except Exception:  # noqa: BLE001 — one bad poll must not end monitoring
+            failures += 1
+            logger.exception(
+                "SLURM monitor poll %d for %s failed", failures, request_id
+            )
+            if failures >= _MONITOR_MAX_FAILURES:
+                app._queue_main_thread_callback(
+                    _set_run_status,
+                    app,
+                    "Stopped following the SLURM job after repeated errors; "
+                    "check it on the Cluster Jobs tab.",
+                )
+                return
+            done = False
+        if done:
+            return
         time.sleep(_POLL_INTERVAL_S)
 
-    app._queue_main_thread_callback(_finish_slurm_monitor, app)
+
+def _monitor_slurm_poll(
+    app: Any, backend: Any, request_id: str, last_log_size: int
+) -> tuple[bool, int]:
+    """One monitor pass. Returns (finished, new live.log offset)."""
+    backend.refresh_registry_statuses()
+    record = app._job_registry.load(request_id)
+    if record is None:
+        return True, last_log_size
+
+    log_path = record.live_log_path
+    if log_path.exists():
+        try:
+            text = log_path.read_text(encoding="utf-8", errors="replace")
+            if len(text) > last_log_size:
+                chunk = text[last_log_size:]
+                last_log_size = len(text)
+                app._queue_main_thread_callback(_append_run_stdout, app, chunk)
+        except OSError:
+            pass
+
+    progress_path = record.progress_path
+    if progress_path.exists():
+        try:
+            prog = json.loads(progress_path.read_text(encoding="utf-8"))
+            msg = prog.get("message", "")
+            pct = prog.get("percent")
+            if msg:
+                status = f"SLURM: {msg}"
+                if pct is not None:
+                    status += f" ({pct:.0f}%)"
+                app._queue_main_thread_callback(_set_run_status, app, status)
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+
+    if record.status in ("success", "error", "cancelled"):
+        app._queue_main_thread_callback(_ingest_terminal_job, app, record)
+        return True, last_log_size
+
+    slurm_id = record.slurm_job_id or "?"
+    status_line = f"SLURM job {slurm_id}: {record.status}"
+    app._queue_main_thread_callback(_set_run_status, app, status_line)
+    return False, last_log_size
 
 
 def _ingest_terminal_job(app: Any, record: Any) -> None:

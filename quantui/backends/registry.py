@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +36,9 @@ from .cluster_security import safe_join
 logger = logging.getLogger(__name__)
 
 _ACTIVE_STATUSES = frozenset({"queued", "pending", "running", "submitted"})
+# load(): how often to try a record that does not parse, and the pause between.
+_LOAD_ATTEMPTS = 3
+_LOAD_RETRY_DELAY_S = 0.05
 
 
 _ATTEMPT_DIR_RE = re.compile(r"^attempt-(\d+)_job(.+)$")
@@ -225,19 +230,45 @@ class JobRegistry:
         return record
 
     def save(self, record: JobRecord) -> None:
+        """Write *record* atomically (temp file + ``os.replace``).
+
+        The app's main thread, its monitor thread and the worker on the
+        compute node all write records; a truncate-and-write let a
+        concurrent reader see an empty or half-written file.
+        """
         record.updated_at = _utc_now()
         path = self._record_path(record.request_id)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(record.to_dict(), fh, indent=2)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(record.to_dict(), fh, indent=2)
+            os.replace(tmp, path)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
         logger.debug("Saved job record %s", record.request_id)
 
     def load(self, request_id: str) -> Optional[JobRecord]:
+        """The record for *request_id*, or None when missing or unreadable.
+
+        A record that cannot be parsed (e.g. written by an older,
+        non-atomic writer while we read it) is retried briefly, then
+        treated as unreadable instead of raising into a polling thread.
+        """
         path = self._record_path(request_id)
-        if not path.exists():
-            return None
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-        return JobRecord.from_dict(data)
+        for attempt in range(_LOAD_ATTEMPTS):
+            if not path.exists():
+                return None
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    data = json.load(fh)
+                return JobRecord.from_dict(data)
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                if attempt + 1 < _LOAD_ATTEMPTS:
+                    time.sleep(_LOAD_RETRY_DELAY_S)
+                    continue
+                logger.warning("Could not read job record %s: %s", path, exc)
+        return None
 
     def delete(self, request_id: str) -> bool:
         path = self._record_path(request_id)
@@ -252,8 +283,8 @@ class JobRegistry:
             try:
                 with open(path, encoding="utf-8") as fh:
                     records.append(JobRecord.from_dict(json.load(fh)))
-            except (json.JSONDecodeError, KeyError) as exc:
-                logger.warning("Skipping corrupt job record %s: %s", path, exc)
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                logger.warning("Skipping unreadable job record %s: %s", path, exc)
         records.sort(key=lambda r: r.created_at, reverse=True)
         return records
 
