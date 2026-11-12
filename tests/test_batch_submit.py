@@ -1377,6 +1377,89 @@ class TestChainedJobs:
             and "FAILED" in r.stderr
         )
 
+    # audit HPC-7: the chained job keeps the source's solvent, and an
+    # unconverged optimization is not a starting point.
+    def _solvated_opt(self, cluster):
+        src = self._opt_job_with(cluster, "--solvent", "Water")
+        _finish(
+            src,
+            "attempt-01_job1001",
+            {"calc_type": "geometry_opt", "converged": True},
+            _OPT_TRAJ,
+        )
+        return src
+
+    def _opt_job_with(self, cluster, *extra, name="opt"):
+        r = cluster.run(
+            "submit",
+            "water.xyz",
+            "--calc",
+            "geometry_opt",
+            "--method",
+            "RHF",
+            "--basis",
+            "STO-3G",
+            "--job-name",
+            name,
+            *extra,
+        )
+        assert r.returncode == 0, r.stderr
+        return cluster.staging / name
+
+    def test_from_inherits_the_source_solvent(self, cluster):
+        self._solvated_opt(cluster)
+        r = cluster.run(
+            "submit", "--from", "opt", "--calc", "frequency", "--job-name", "f"
+        )
+        assert r.returncode == 0, r.stderr
+        assert _request_of(cluster.staging / "f")["solvent"] == "Water"
+        assert "solvent Water taken from opt" in r.stderr
+
+    def test_no_solvent_runs_gas_phase(self, cluster):
+        self._solvated_opt(cluster)
+        r = cluster.run(
+            "submit",
+            "--from",
+            "opt",
+            "--calc",
+            "frequency",
+            "--no-solvent",
+            "--job-name",
+            "f",
+        )
+        assert r.returncode == 0, r.stderr
+        assert _request_of(cluster.staging / "f")["solvent"] is None
+
+    def test_inherited_solvent_on_a_gas_phase_only_calc_needs_a_choice(self, cluster):
+        self._solvated_opt(cluster)
+        r = cluster.run("submit", "--from", "opt", "--calc", "nmr")
+        assert r.returncode == 1 and "--no-solvent" in r.stderr
+        r = cluster.run("submit", "--from", "opt", "--calc", "nmr", "--no-solvent")
+        assert r.returncode == 0, r.stderr
+
+    def test_solvent_and_no_solvent_conflict(self, cluster):
+        r = cluster.run(
+            "submit",
+            "water.xyz",
+            "--calc",
+            "single_point",
+            "--solvent",
+            "Water",
+            "--no-solvent",
+        )
+        assert r.returncode == 2
+
+    def test_from_refuses_an_unconverged_optimization(self, cluster):
+        src = self._opt_job(cluster)
+        _finish(
+            src,
+            "attempt-01_job1001",
+            {"calc_type": "geometry_opt", "converged": False},
+            _OPT_TRAJ,
+        )
+        r = cluster.run("submit", "--from", "opt", "--calc", "frequency")
+        assert r.returncode == 1 and "did not converge" in r.stderr
+
     def test_from_with_files_is_a_usage_error(self, cluster):
         r = cluster.run("submit", "water.xyz", "--from", "opt", "--calc", "frequency")
         assert r.returncode == 2
@@ -1442,6 +1525,18 @@ class TestFinalGeometry:
             final_geometry(job)
         _finish(job, "attempt-01_job1", {}, _OPT_TRAJ, name="preopt_trajectory.json")
         assert final_geometry(job)["coords"] == _OPT_TRAJ["steps"][-1]["coords"]
+
+    def test_unconverged_optimization_is_refused_at_run_time(self, tmp_path):
+        # audit HPC-7: afterok lets the chained job start after an
+        # unconverged optimization (the worker exits 0); the worker refuses.
+        from quantui.backends.batch_chain import final_geometry
+
+        job = self._job(tmp_path, "geometry_opt")
+        _finish(job, "attempt-01_job1", {"converged": False}, _OPT_TRAJ)
+        with pytest.raises(ValueError, match="did not converge"):
+            final_geometry(job)
+        _finish(job, "attempt-02_job2", {"converged": True}, _OPT_TRAJ)
+        assert final_geometry(job)["source"] == "job/attempt-02_job2"
 
     def test_no_finished_attempt(self, tmp_path):
         from quantui.backends.batch_chain import final_geometry
