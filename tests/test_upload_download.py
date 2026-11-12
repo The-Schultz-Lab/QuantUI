@@ -146,6 +146,35 @@ M  END
         assert 0.9 < math.dist(o, h1) < 1.05  # O-H ~0.97 A, not the 2-D 1.50
         assert any("2-D" in n for n in up.notes)
 
+    def test_mol_without_charge_or_radicals_keeps_setup_values(self):
+        # audit DATA-4: an O2 drawing has no radical marks; the user's triplet
+        # must survive instead of being overwritten with "from file" singlet.
+        pytest.importorskip("rdkit")
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+
+        rd = Chem.MolFromSmiles("O=O")
+        AllChem.Compute2DCoords(rd)
+        up = read_uploaded_structure(
+            "o2.mol", Chem.MolToMolBlock(rd).encode(), charge=0, multiplicity=3
+        )
+        assert up.molecule.multiplicity == 3
+        assert not up.charge_mult_from_file
+        assert any("Calculation Setup" in n for n in up.notes)
+
+    def test_mol_radical_sets_multiplicity_from_file(self):
+        pytest.importorskip("rdkit")
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+
+        rd = Chem.AddHs(Chem.MolFromSmiles("[CH3]"))
+        AllChem.EmbedMolecule(rd, randomSeed=1)
+        up = read_uploaded_structure(
+            "me.mol", Chem.MolToMolBlock(rd).encode(), charge=1, multiplicity=1
+        )
+        assert (up.molecule.charge, up.molecule.multiplicity) == (0, 2)
+        assert up.charge_mult_from_file
+
     def test_pdb(self):
         pytest.importorskip("rdkit")
         from rdkit import Chem
