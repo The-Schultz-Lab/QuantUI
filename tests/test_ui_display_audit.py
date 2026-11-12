@@ -94,3 +94,81 @@ class TestWidgetChromeCss:
         assert all("}" not in p for p in preludes), preludes
         assert any(".lm-TabBar-tab, .p-TabBar-tab" in p for p in preludes)
         assert any(".quantui-info-box small" in p for p in preludes)
+
+
+# ── UI-4 ──────────────────────────────────────────────────────────────────────
+
+
+class TestPastResultEscaping:
+    def _data(self, **overrides):
+        data = {
+            "calc_type": "single_point",
+            "formula": "H2O",
+            "method": "RHF",
+            "basis": "STO-3G",
+            "timestamp": "2026-11-10_10-00-00-000001",
+            "energy_hartree": -75.0,
+            "converged": True,
+            "n_iterations": 5,
+        }
+        data.update(overrides)
+        return data
+
+    def test_free_text_fields_are_escaped(self):
+        from quantui.app_formatters import format_past_result
+
+        for key in ("formula", "method", "basis", "timestamp", "solvent"):
+            html_out = format_past_result(self._data(**{key: _XSS}))
+            assert _XSS not in html_out, key
+            assert "&lt;img" in html_out, key
+
+    def test_gpu_name_scf_variant_and_calc_type_are_escaped(self):
+        from quantui.app_formatters import format_past_result
+
+        cases = [
+            {"gpu_used": True, "gpu_name": _XSS},
+            {"scf_variant": _XSS},
+            {"calc_type": _XSS},
+            {"mulliken_charges": [0.1], "atom_symbols": [_XSS]},
+        ]
+        for extra in cases:
+            html_out = format_past_result(self._data(**extra))
+            assert _XSS not in html_out, extra
+
+    def test_reorg_channels_and_comparison_are_escaped(self):
+        from quantui.app_formatters import (
+            reorg_channels_html,
+            reorg_comparison_html,
+        )
+
+        ch = {"kind": _XSS, "lambda_hartree": 0.01, "ion_multiplicity": 2}
+        assert _XSS not in reorg_channels_html([ch])
+        out = reorg_comparison_html(
+            [(_XSS, {"method": _XSS, "basis": "b", "reorg_channels": [ch]})]
+        )
+        assert _XSS not in out
+
+    def test_nmr_reference_strings_are_escaped(self):
+        from types import SimpleNamespace
+
+        from quantui.app_formatters import format_nmr_result
+
+        r = SimpleNamespace(
+            converged=True,
+            reference_compound=_XSS,
+            method="B3LYP",
+            basis="6-31G*",
+            formula="CH4",
+            is_fallback_reference=True,
+            reference_key=_XSS,
+            h_shifts=lambda: [],
+            c_shifts=lambda: [],
+        )
+        assert _XSS not in format_nmr_result(r)
+
+    def test_plain_values_render_unchanged(self):
+        from quantui.app_formatters import format_past_result
+
+        out = format_past_result(self._data(basis="6-31G*", solvent="water"))
+        assert "RHF/6-31G*" in out
+        assert "water" in out

@@ -42,6 +42,21 @@ def display_formula(formula: Any) -> str:
     return text
 
 
+def _esc(value: Any) -> str:
+    """HTML-escape *value* for a result card.
+
+    Cards render strings read from ``result.json`` (History, the Viewer, and
+    shared or imported result folders), so every free-text value is escaped
+    here rather than trusted.
+    """
+    return html.escape(str(value))
+
+
+def _formula_html(formula: Any) -> str:
+    """:func:`display_formula`, escaped for HTML."""
+    return _esc(display_formula(formula))
+
+
 def friendly_timestamp(ts: Any) -> str:
     """``"2026-10-25_04-31-58-600504"`` → ``"2026-10-25 04:31"``.
 
@@ -74,9 +89,9 @@ def _method_basis_label(method: str, basis: str, scf_variant: str | None) -> str
     set ``scf_variant``.
     """
     label = f"{method}/{basis}"
-    if scf_variant and scf_variant.upper() != method.upper():
+    if scf_variant and str(scf_variant).upper() != str(method).upper():
         label += f" ({scf_variant})"
-    return label
+    return _esc(label)
 
 
 # Open-shell SCF variants whose orbitals split into separate alpha/beta
@@ -221,7 +236,7 @@ def _result_extra_rows(get: Any) -> str:
 
     _solvent = get("solvent")
     if _solvent is not None:
-        rows += _num("Solvent (PCM)", str(_solvent))
+        rows += _num("Solvent (PCM)", _esc(_solvent))
 
     _s2 = get("spin_square")
     if _s2 is not None:
@@ -238,7 +253,7 @@ def _result_extra_rows(get: Any) -> str:
         _name = get("gpu_name")
         _device = (
             f'<span style="color:{_theme.css.ACCENT_SUCCESS}">🚀 GPU</span>'
-            f' &mdash; <span style="font-family:monospace">{_name}</span>'
+            f' &mdash; <span style="font-family:monospace">{_esc(_name)}</span>'
             if _name
             else f'<span style="color:{_theme.css.ACCENT_SUCCESS}">🚀 GPU</span>'
         )
@@ -297,7 +312,7 @@ def _result_extra_rows(get: Any) -> str:
     _chg = get("mulliken_charges")
     _syms = get("atom_symbols")
     if _chg is not None and _syms is not None:
-        _charge_str = "  ".join(f"{sym}:{c:+.3f}" for sym, c in zip(_syms, _chg))
+        _charge_str = "  ".join(f"{_esc(sym)}:{c:+.3f}" for sym, c in zip(_syms, _chg))
         rows += (
             f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL};vertical-align:top">'
             f"Mulliken charges</td>"
@@ -348,7 +363,7 @@ def format_result(r: Any) -> str:
     )
     _extra = _result_extra_rows(lambda k, d=None: getattr(r, k, d))
     return (
-        _result_card_open() + f"<b>{display_formula(r.formula)} &mdash; "
+        _result_card_open() + f"<b>{_formula_html(r.formula)} &mdash; "
         f"{_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))}</b>"
         + _result_card_table_open()
         + f"{_rows}{_extra}</table>"
@@ -379,7 +394,7 @@ def format_opt_result(r: Any) -> str:
     )
     return (
         _result_card_open()
-        + f"<b>Geometry Optimisation &mdash; {display_formula(r.formula)} ({r.method}/{r.basis})</b>"
+        + f"<b>Geometry Optimisation &mdash; {_formula_html(r.formula)} ({_method_basis_label(r.method, r.basis, None)})</b>"
         + _result_card_table_open()
         + f"{_rows}"
         + _solvent_row(getattr(r, "solvent", None), "optimized in solvent")
@@ -460,7 +475,7 @@ def _solvent_row(solvent: Any, note: str) -> str:
         return ""
     return (
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Solvent (PCM)</td>'
-        f'<td style="color:{_theme.css.TEXT_HEADING}">{solvent}'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{_esc(solvent)}'
         f'<span style="color:{_theme.css.TEXT_MUTED}"> &mdash; {note}</span></td></tr>'
     )
 
@@ -487,7 +502,7 @@ def saddle_retry_rows(block: Optional[dict]) -> str:
     return (
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Saddle-point retry</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">first pass had {followed} cm⁻¹; '
-        f"displaced, re-optimized ({block.get('reopt_steps', '?')} steps) "
+        f"displaced, re-optimized ({_esc(block.get('reopt_steps', '?'))} steps) "
         f"and recomputed &mdash; {outcome}</td></tr>"
     )
 
@@ -743,7 +758,7 @@ def format_freq_result(r: Any) -> str:
         )
     return (
         _result_card_open()
-        + f"<b>Frequency Analysis &mdash; {display_formula(r.formula)} &middot; "
+        + f"<b>Frequency Analysis &mdash; {_formula_html(r.formula)} &middot; "
         f"{_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))}</b>"
         + _result_card_table_open()
         + f"{_rows}{_thermo_rows}</table>"
@@ -834,8 +849,7 @@ def format_ts_result(r: Any) -> str:
         _point_group_html(lambda k, d=None: getattr(r, k, d))
     )
     return (
-        _result_card_open()
-        + f"<b>Transition State &mdash; {display_formula(r.formula)} "
+        _result_card_open() + f"<b>Transition State &mdash; {_formula_html(r.formula)} "
         f"({_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))})</b>"
         + _result_card_table_open()
         + f"{_rows}</table>"
@@ -898,7 +912,7 @@ def format_irc_result(r: Any) -> str:
         + _solvent_row(getattr(r, "solvent", None), "every step in solvent")
     )
     return (
-        _result_card_open() + f"<b>IRC &mdash; {display_formula(r.formula)} "
+        _result_card_open() + f"<b>IRC &mdash; {_formula_html(r.formula)} "
         f"({_method_basis_label(r.method, r.basis, None)})</b>"
         + _result_card_table_open()
         + f"{_rows}</table>"
@@ -957,8 +971,7 @@ def format_tddft_result(r: Any) -> str:
             + "".join(exc_rows)
         )
     return (
-        _result_card_open()
-        + f"<b>TD-DFT / UV-Vis &mdash; {display_formula(r.formula)} "
+        _result_card_open() + f"<b>TD-DFT / UV-Vis &mdash; {_formula_html(r.formula)} "
         f"({_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))})</b>"
         + _result_card_table_open()
         + f"{header_rows}{exc_table}</table>"
@@ -974,7 +987,7 @@ def format_nmr_result(r: Any) -> str:
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Reference</td>'
-        f'<td style="color:{_theme.css.TEXT_HEADING}">{r.reference_compound} ({r.method}/{r.basis})</td></tr>'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{_esc(r.reference_compound)} ({_method_basis_label(r.method, r.basis, None)})</td></tr>'
     ) + _scf_provenance_rows(lambda k, d=None: getattr(r, k, d))
     # Surface a fallback-reference substitution explicitly
     # rather than letting the row above imply an exact-match reference.
@@ -983,7 +996,8 @@ def format_nmr_result(r: Any) -> str:
         header_rows += (
             f'<tr><td colspan="2" style="padding:3px 0 0">'
             f'<span style="color:{_theme.css.ACCENT_WARNING};font-size:12px">'
-            f"⚠ No reference at {r.method}/{r.basis} — shifts use {_ref_key} "
+            f"⚠ No reference at {_method_basis_label(r.method, r.basis, None)} — "
+            f"shifts use {_esc(_ref_key)} "
             "constants instead.</span></td></tr>"
         )
 
@@ -1014,7 +1028,7 @@ def format_nmr_result(r: Any) -> str:
         _basis_warn = (
             '<tr><td colspan="2" style="padding:6px 0 0">'
             f'<span style="color:{_theme.css.ACCENT_WARNING};font-size:12px">'
-            f"⚠ {r.basis} gives qualitative NMR only — use 6-31G* or better.</span>"
+            f"⚠ {_esc(r.basis)} gives qualitative NMR only — use 6-31G* or better.</span>"
             "</td></tr>"
         )
 
@@ -1028,8 +1042,9 @@ def format_nmr_result(r: Any) -> str:
         _ref_warn = (
             '<tr><td colspan="2" style="padding:6px 0 0">'
             f'<span style="color:{_theme.css.ACCENT_WARNING};font-size:12px">'
-            f"⚠ No calibrated TMS reference for {r.method}/{r.basis} — using "
-            f"{getattr(r, 'reference_key', 'B3LYP/6-31G*')} constants instead. "
+            f"⚠ No calibrated TMS reference for "
+            f"{_method_basis_label(r.method, r.basis, None)} — using "
+            f"{_esc(getattr(r, 'reference_key', 'B3LYP/6-31G*'))} constants instead. "
             "Shifts may be off by a few ppm.</span>"
             "</td></tr>"
         )
@@ -1042,7 +1057,7 @@ def format_nmr_result(r: Any) -> str:
         )
 
     return (
-        _result_card_open() + f"<b>NMR Shielding &mdash; {display_formula(r.formula)} "
+        _result_card_open() + f"<b>NMR Shielding &mdash; {_formula_html(r.formula)} "
         f"({_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))})</b>"
         + _result_card_table_open()
         + f"{header_rows}{h_table}{c_table}{_empty}{_basis_warn}{_ref_warn}</table>"
@@ -1088,7 +1103,7 @@ def format_pes_scan_result(r: Any) -> str:
 
     return (
         _result_card_open()
-        + f"<b>PES Scan &mdash; {display_formula(r.formula)} ({r.method}/{r.basis})</b>"
+        + f"<b>PES Scan &mdash; {_formula_html(r.formula)} ({_method_basis_label(r.method, r.basis, None)})</b>"
         + _result_card_table_open()
         + f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Scan type</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.scan_type.capitalize()} ({_idx_str})</td></tr>'
@@ -1209,7 +1224,7 @@ def reorg_comparison_html(entries: list[tuple[str, dict]]) -> str:
     td = f"padding:5px 12px;border-bottom:1px solid {_theme.css.BORDER}"
     head = (
         f'<th style="{th}">Result</th><th style="{th}">Method / basis</th>'
-        + "".join(f'<th style="{th}">λ {k} (eV)</th>' for k in kinds)
+        + "".join(f'<th style="{th}">λ {_esc(k)} (eV)</th>' for k in kinds)
         + f'<th style="{th}">Relaxation (Å)</th>'
     )
 
@@ -1218,7 +1233,7 @@ def reorg_comparison_html(entries: list[tuple[str, dict]]) -> str:
         channels = data.get("reorg_channels") or []
         if not channels:
             rows.append(
-                f'<tr><td style="{td}">{label}</td>'
+                f'<tr><td style="{td}">{_esc(label)}</td>'
                 f'<td style="{td}" colspan="{len(kinds) + 2}">'
                 '<span style="color:#92400e">λ not saved — re-run to compare'
                 "</span></td></tr>"
@@ -1238,8 +1253,9 @@ def reorg_comparison_html(entries: list[tuple[str, dict]]) -> str:
         rmsds = [c["relaxation"]["rmsd"] for c in channels if c.get("relaxation")]
         relax = f"{max(rmsds):.4f}" if rmsds else "—"
         rows.append(
-            f'<tr><td style="{td}">{label}</td>'
-            f'<td style="{td}">{data.get("method", "?")}/{data.get("basis", "?")}</td>'
+            f'<tr><td style="{td}">{_esc(label)}</td>'
+            f'<td style="{td}">'
+            f'{_method_basis_label(data.get("method", "?"), data.get("basis", "?"), None)}</td>'
             + "".join(cells)
             + f'<td style="{td};font-family:monospace">{relax}</td></tr>'
         )
@@ -1273,7 +1289,7 @@ def reorg_channels_html(channels: list[dict]) -> str:
         return {
             "hole": "Hole transfer (cation)",
             "electron": "Electron transfer (anion)",
-        }.get(kind, str(kind).title())
+        }.get(kind, _esc(str(kind).title()))
 
     blocks = []
     for ch in channels:
@@ -1293,7 +1309,7 @@ def reorg_channels_html(channels: list[dict]) -> str:
             (
                 "Ion state",
                 f"charge {ch.get('ion_charge', 0):+d}, "
-                f"mult {ch.get('ion_multiplicity', '?')}",
+                f"mult {_esc(ch.get('ion_multiplicity', '?'))}",
             ),
         ]
         # Geometry relaxation: what λ physically measures. Only
@@ -1386,7 +1402,7 @@ def format_reorg_result(r: Any) -> str:
     _channels_html = reorg_channels_html(_payload)
     return (
         _result_card_open() + f"<b>Reorganization Energy (Marcus 4-point) &mdash; "
-        f"{display_formula(r.formula)} ({r.method}/{r.basis})</b>"
+        f"{_formula_html(r.formula)} ({_method_basis_label(r.method, r.basis, None)})</b>"
         + _result_card_table_open()
         + f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Neutral energy</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.neutral_energy_hartree:.8f} Ha</td></tr>'
@@ -1486,7 +1502,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     _ct_badge = (
         f'<span style="display:inline-block;padding:2px 10px;border-radius:12px;'
         f"background:{_ct_bg};color:{_ct_fg};font-size:12px;font-weight:700;"
-        f'letter-spacing:0.03em;margin-bottom:6px">{_ct_label}</span>'
+        f'letter-spacing:0.03em;margin-bottom:6px">{_esc(_ct_label)}</span>'
     )
     _conv = "Yes" if data.get("converged") else "No (treat results with caution)"
     _cc = _converged_color(bool(data.get("converged")))
@@ -1569,9 +1585,9 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         _result_card_open(extra_style="overflow:hidden")
         + f"{_thumb_html}"
         + f"{_ct_badge}<br>"
-        + f'<b>{display_formula(data["formula"])} &mdash; '
+        + f'<b>{_formula_html(data["formula"])} &mdash; '
         f'{_method_basis_label(data["method"], data["basis"], data.get("scf_variant"))}</b>'
-        f'&ensp;<small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{ts}</small>'
+        f'&ensp;<small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{_esc(ts)}</small>'
         + _result_card_table_open()
         + f"{_rows}{_ts_html}{_extra}{_thermo_html}</table>{_reorg_html}"
         + _RESULT_CARD_CLOSE
