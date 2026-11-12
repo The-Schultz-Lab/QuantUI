@@ -118,3 +118,93 @@ def test_terminate_worker_tree_kills_grandchildren():
     finally:
         if worker.is_alive():
             os.killpg(worker.pid, 9)
+
+
+# ---------------------------------------------------------------------------
+# DATA-11 — save_result / save_trajectory robustness
+# ---------------------------------------------------------------------------
+
+
+def _fake_result(**kw):
+    from types import SimpleNamespace
+
+    base = dict(
+        formula="H2",
+        method="RHF",
+        basis="STO-3G",
+        energy_hartree=-1.117,
+        converged=True,
+        n_iterations=5,
+    )
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_save_result_numpy_fields_are_serialised(tmp_path):
+    import json
+
+    import numpy as np
+
+    from quantui.results_storage import save_result
+
+    res = _fake_result(cc_converged=np.bool_(True), solvent=np.str_("water"))
+    d = save_result(
+        res,
+        results_dir=tmp_path,
+        spectra={"ir": {"freqs": np.array([1.0, 2.0], dtype=np.float32)}},
+        extras={"flag": np.bool_(False), "where": tmp_path},
+    )
+    data = json.loads((d / "result.json").read_text())
+    assert data["cc_converged"] is True
+    assert data["spectra"]["ir"]["freqs"] == [1.0, 2.0]
+    assert data["flag"] is False
+    assert data["where"] == str(tmp_path)
+
+
+def test_save_result_failure_leaves_no_empty_dir(tmp_path, monkeypatch):
+    from quantui import results_storage
+
+    def _boom(*_a, **_k):
+        raise TypeError("unserialisable")
+
+    monkeypatch.setattr(results_storage, "_dumps_json_safe", _boom)
+    with pytest.raises(TypeError):
+        results_storage.save_result(_fake_result(), results_dir=tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_save_result_nan_written_as_null(tmp_path):
+    import json
+
+    from quantui.results_storage import save_result
+
+    res = _fake_result(energy_hartree=float("nan"), homo_lumo_gap_ev=float("inf"))
+    d = save_result(res, results_dir=tmp_path)
+    text = (d / "result.json").read_text()
+    assert "NaN" not in text and "Infinity" not in text
+    data = json.loads(text)
+    assert data["energy_hartree"] is None
+    assert data["homo_lumo_gap_ev"] is None
+
+
+def test_save_result_truncates_long_basis_name(tmp_path):
+    from quantui.results_storage import save_result
+
+    d = save_result(_fake_result(basis="x" * 300), results_dir=tmp_path)
+    assert len(d.name) < 255
+    assert (d / "result.json").is_file()
+    assert not list(d.glob("*.tmp"))
+
+
+def test_save_trajectory_float32(tmp_path):
+    import numpy as np
+
+    from quantui.molecule import Molecule
+    from quantui.results_storage import load_trajectory, save_trajectory
+
+    mol = Molecule(["H", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]])
+    mol.coordinates = np.asarray(mol.coordinates, dtype=np.float32)
+    save_trajectory(tmp_path, [mol, mol], [np.float32(-1.1), np.float32(-1.12)])
+    mols, energies = load_trajectory(tmp_path)
+    assert len(mols) == 2
+    assert energies[1] == pytest.approx(-1.12, abs=1e-6)

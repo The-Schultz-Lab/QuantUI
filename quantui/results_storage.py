@@ -24,6 +24,7 @@ directory (which is bind-mounted and writable).
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from datetime import datetime
@@ -129,6 +130,58 @@ def _default_results_dir() -> Path:
 def _safe_name(s: str) -> str:
     """Replace characters that are unsafe in directory names with 'x'."""
     return re.sub(r"[^\w\-]", "x", s)
+
+
+# Cap on each formula/method/basis component of a result directory name: a
+# long custom basis string otherwise pushed the name past the 255-byte
+# filename limit and save_result raised OSError (audit DATA-11).
+_MAX_NAME_COMPONENT = 48
+
+
+def _json_safe(obj: Any) -> Any:
+    """Recursively convert *obj* into strict-JSON-serialisable plain data.
+
+    numpy scalars/arrays become Python numbers/lists, ``Path`` becomes
+    ``str``, and non-finite floats (NaN/inf) become ``None`` — ``json.dumps``
+    would otherwise write bare ``NaN``, which strict JSON readers reject.
+    Anything else unknown is left for ``json.dumps(default=str)``.
+    """
+    if isinstance(obj, dict):
+        return {str(k): _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, bool) or obj is None or isinstance(obj, str):
+        return obj
+    if isinstance(obj, Path):
+        return str(obj)
+    if hasattr(obj, "tolist") and callable(obj.tolist):
+        # numpy ndarray or numpy scalar (np.bool_, np.int64, np.float32, ...)
+        try:
+            return _json_safe(obj.tolist())
+        except Exception:  # noqa: BLE001 — fall through to default=str
+            return obj
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    return obj
+
+
+def _dumps_json_safe(data: Any, **kwargs: Any) -> str:
+    """``json.dumps`` after :func:`_json_safe`; raises nothing for odd values."""
+    return json.dumps(_json_safe(data), allow_nan=False, default=str, **kwargs)
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write *text* to *path* via a sibling temp file + ``os.replace``."""
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def _opt_float(x: object) -> Optional[float]:
@@ -333,19 +386,13 @@ def save_result(
     dirname = "_".join(
         [
             ts,
-            _safe_name(getattr(result, "formula", "unknown")),
-            _safe_name(getattr(result, "method", "unknown")),
-            _safe_name(getattr(result, "basis", "unknown")),
+            _safe_name(str(getattr(result, "formula", "unknown")))[
+                :_MAX_NAME_COMPONENT
+            ],
+            _safe_name(str(getattr(result, "method", "unknown")))[:_MAX_NAME_COMPONENT],
+            _safe_name(str(getattr(result, "basis", "unknown")))[:_MAX_NAME_COMPONENT],
         ]
     )
-    dest = base / dirname
-    # Windows timer resolution can produce identical microsecond timestamps for
-    # back-to-back calls; append a counter to guarantee a unique directory.
-    _collision = 1
-    while dest.exists():
-        dest = base / f"{dirname}_{_collision}"
-        _collision += 1
-    dest.mkdir(parents=True)
 
     _e_ha_raw = getattr(result, "energy_hartree", float("nan"))
     _e_ha = _opt_float(_e_ha_raw)
@@ -439,7 +486,27 @@ def save_result(
         data["geometry"] = _geom
     if extras:
         data.update(extras)
-    (dest / "result.json").write_text(json.dumps(data, indent=2))
+    # Serialise BEFORE creating the directory: a numpy bool/array or other
+    # non-JSON value used to raise TypeError after mkdir, leaving an empty
+    # result directory and losing the save (audit DATA-11).
+    payload = _dumps_json_safe(data, indent=2)
+
+    dest = base / dirname
+    # Windows timer resolution can produce identical microsecond timestamps for
+    # back-to-back calls; append a counter to guarantee a unique directory.
+    _collision = 1
+    while dest.exists():
+        dest = base / f"{dirname}_{_collision}"
+        _collision += 1
+    dest.mkdir(parents=True)
+    try:
+        _atomic_write_text(dest / "result.json", payload)
+    except BaseException:
+        try:
+            dest.rmdir()
+        except OSError:
+            pass
+        raise
 
     if pyscf_log:
         (dest / "pyscf.log").write_text(pyscf_log)
@@ -1037,7 +1104,8 @@ def save_trajectory(
             for i, mol in enumerate(trajectory)
         ],
     }
-    (result_dir / filename).write_text(json.dumps(data))
+    # numpy float32 coordinates/energies are not JSON-serialisable as-is.
+    (result_dir / filename).write_text(_dumps_json_safe(data))
 
 
 def load_trajectory(result_dir: Path, filename: str = "trajectory.json"):
