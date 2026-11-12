@@ -636,15 +636,41 @@ def _saved_freq_accessor(data: dict[str, Any]) -> Any:
     return lambda k, d=None: values.get(k, d)
 
 
-def _basic_rows(get: Any, conv_label: str, conv_text: str, conv_color: str) -> str:
-    """Energy / gap / convergence / iterations — first rows of every card."""
-    energy = get("energy_hartree")
-    gap = get("homo_lumo_gap_ev")
+def _finite_or_none(value: Any) -> Optional[float]:
+    """*value* as a finite float, or None (missing, null, NaN or junk)."""
+    import math
+
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return None
+    return x if math.isfinite(x) else None
+
+
+def _basic_rows(
+    get: Any,
+    conv_label: str,
+    conv_text: str,
+    conv_color: str,
+    *,
+    energy_label: str = "Total energy",
+) -> str:
+    """Energy / gap / convergence / iterations — first rows of every card.
+
+    Missing or non-finite values (older result.json schemas, a PES scan whose
+    points all failed) render as "—" rather than raising or showing "nan".
+    """
+    energy = _finite_or_none(get("energy_hartree"))
+    gap = _finite_or_none(get("homo_lumo_gap_ev"))
     n_iter = get("n_iterations")
     rows = [
         (
-            "Total energy",
-            f"{energy:.8f} Ha &ensp;({energy * 27.211386245988:.4f} eV)",
+            energy_label,
+            (
+                "—"
+                if energy is None
+                else f"{energy:.8f} Ha &ensp;({energy * 27.211386245988:.4f} eV)"
+            ),
             _theme.css.TEXT_HEADING,
         ),
         (
@@ -655,7 +681,7 @@ def _basic_rows(get: Any, conv_label: str, conv_text: str, conv_color: str) -> s
         (conv_label, conv_text, conv_color),
         (
             "SCF iterations",
-            "—" if n_iter in (None, -1) else str(n_iter),
+            "—" if n_iter in (None, -1) else _esc(n_iter),
             _theme.css.TEXT_HEADING,
         ),
     ]
@@ -1490,11 +1516,11 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         ),
         "irc": ("IRC", _theme.css.ACCENT_PURPLE, _theme.css.SURFACE_PURPLE_BG),
     }
-    ct = data.get("calc_type", "")
+    ct = str(data.get("calc_type") or "")
     _ct_label, _ct_fg, _ct_bg = _ct_labels.get(
         ct,
         (
-            ct.replace("_", " ").title(),
+            ct.replace("_", " ").title() or "Result",
             _theme.css.TEXT_SECONDARY,
             _theme.css.SURFACE_MUTED_BG,
         ),
@@ -1506,6 +1532,7 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     )
     _conv = "Yes" if data.get("converged") else "No (treat results with caution)"
     _cc = _converged_color(bool(data.get("converged")))
+    _energy_label = "Total energy"
     # data["converged"] already
     # folds in CC-amplitude (post-HF), TD-root (tddft), or Hessian
     # (frequency) convergence on top of the reference SCF's own status,
@@ -1513,7 +1540,25 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     # format_tddft_result). A bare "SCF converged" label here would blame
     # the SCF for a CC/TD/Hessian-only failure whose reference SCF was
     # fine — mirror each live formatter's label choice.
-    if ct in ("frequency", "transition_state", "irc"):
+    # Non-SCF calc types use the live cards' own labels (audit UI-8): an
+    # unconverged optimization is not an SCF failure, and a PES scan's
+    # energy_hartree is the scan minimum, not a single total energy.
+    if ct == "geometry_opt":
+        _conv_label = "Opt converged"
+        _energy_label = "Final energy"
+        if not data.get("converged"):
+            _conv = "No (max steps reached)"
+    elif ct == "pes_scan":
+        _conv_label = "All converged"
+        _energy_label = "Min energy"
+        if not data.get("converged"):
+            _conv = "No (some scan points failed)"
+    elif ct == "reorganization_energy":
+        _conv_label = "All converged"
+        _energy_label = "Neutral energy"
+        if not data.get("converged"):
+            _conv = "No (some steps did not converge)"
+    elif ct in ("frequency", "transition_state", "irc"):
         _conv_label = "Converged"
     elif ct == "tddft":
         _conv_label = "Converged"
@@ -1521,7 +1566,15 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         _conv_label = "Converged"
     else:
         _conv_label = "SCF converged"
-    _rows = _basic_rows(lambda k, d=None: data.get(k, d), _conv_label, _conv, _cc)
+    if data.get("converged") is None:
+        _conv, _cc = "—", _theme.css.TEXT_HEADING
+    _rows = _basic_rows(
+        lambda k, d=None: data.get(k, d),
+        _conv_label,
+        _conv,
+        _cc,
+        energy_label=_energy_label,
+    )
     ts = data.get("timestamp", "")
 
     # Shared 'extra' rows (correlation breakdown / solvent / device / dipole /
@@ -1585,8 +1638,8 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         _result_card_open(extra_style="overflow:hidden")
         + f"{_thumb_html}"
         + f"{_ct_badge}<br>"
-        + f'<b>{_formula_html(data["formula"])} &mdash; '
-        f'{_method_basis_label(data["method"], data["basis"], data.get("scf_variant"))}</b>'
+        + f'<b>{_formula_html(data.get("formula") or "—")} &mdash; '
+        f'{_method_basis_label(data.get("method") or "—", data.get("basis") or "—", data.get("scf_variant"))}</b>'
         f'&ensp;<small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{_esc(ts)}</small>'
         + _result_card_table_open()
         + f"{_rows}{_ts_html}{_extra}{_thermo_html}</table>{_reorg_html}"

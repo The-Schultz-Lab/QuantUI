@@ -241,3 +241,58 @@ class TestWidgetHtmlEscaping:
         assert evil_html.lower().count("</script") == ok_html.lower().count("</script")
         assert _XSS not in evil_html
         assert "3D structure preview" in app._files_status_html.value
+
+
+# ── UI-8 ──────────────────────────────────────────────────────────────────────
+
+
+class TestHistoryCardLabels:
+    def _card(self, **data):
+        from quantui.app_formatters import format_past_result
+
+        return format_past_result(data)
+
+    def test_unconverged_geometry_opt_is_not_an_scf_failure(self):
+        out = self._card(
+            calc_type="geometry_opt",
+            formula="H2O",
+            method="RHF",
+            basis="STO-3G",
+            energy_hartree=-74.9,
+            converged=False,
+        )
+        assert "SCF converged" not in out
+        assert "Opt converged" in out
+        assert "max steps reached" in out
+        assert "Final energy" in out
+
+    def test_pes_card_labels_minimum_and_handles_all_failed(self):
+        out = self._card(
+            calc_type="pes_scan",
+            formula="H2",
+            method="RHF",
+            basis="STO-3G",
+            energy_hartree=float("nan"),
+            converged=False,
+        )
+        assert "Total energy" not in out
+        assert "Min energy" in out
+        assert "All converged" in out
+        assert "nan" not in out.lower()
+
+    def test_old_schema_without_energy_or_formula_renders(self):
+        out = self._card(calc_type="single_point", method="RHF", basis="STO-3G")
+        assert "Total energy" in out
+        assert "—" in out
+
+    def test_single_point_label_unchanged(self):
+        out = self._card(
+            calc_type="single_point",
+            formula="H2O",
+            method="RHF",
+            basis="STO-3G",
+            energy_hartree=-75.0,
+            converged=True,
+        )
+        assert "SCF converged" in out
+        assert "-75.00000000 Ha" in out
