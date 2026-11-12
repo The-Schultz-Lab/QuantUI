@@ -49,8 +49,10 @@ class TestImpossibleSpinStates:
         with pytest.raises(ValueError, match="Charge"):
             Molecule(["H", "H"], H2, charge=4)
 
-    def test_bare_proton_is_allowed(self):
-        assert Molecule(["H"], [[0.0, 0.0, 0.0]], charge=1).get_electron_count() == 0
+    def test_bare_proton_is_refused(self):
+        # Zero electrons: nothing to calculate (same rule as the pre-run guard).
+        with pytest.raises(ValueError, match="Charge"):
+            Molecule(["H"], [[0.0, 0.0, 0.0]], charge=1)
 
     def test_geometry_only_load_still_skips_spin_checks(self):
         # validate_spin=False (XYZ/upload loads) keeps editing charge/mult

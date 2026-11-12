@@ -102,10 +102,19 @@ def check_basis_coverage(elements: Iterable[str], basis: str) -> Optional[str]:
 def check_charge_multiplicity(n_electrons: int, multiplicity: int) -> Optional[str]:
     """Message if ``multiplicity`` is impossible for ``n_electrons``, else ``None``.
 
-    The number of unpaired electrons is ``multiplicity - 1``; it cannot exceed
-    the electron count, and it must have the same parity as it (an odd electron
+    The molecule must keep at least one electron (a charge that removes them
+    all, e.g. H₂ at +4 or a bare H⁺, leaves nothing to calculate). The number
+    of unpaired electrons is ``multiplicity - 1``; it cannot exceed the
+    electron count, and it must have the same parity as it (an odd electron
     count is only compatible with an even multiplicity, and vice versa).
     """
+    if n_electrons < 1:
+        return (
+            f"This charge leaves the molecule with {n_electrons} electrons — "
+            f"there is nothing to calculate. The charge removes more electrons "
+            f"than the atoms have; lower the charge (a bare H⁺ has no "
+            f"electrons at all)."
+        )
     if multiplicity < 1:
         return f"Multiplicity must be at least 1 (got {multiplicity})."
     n_unpaired = multiplicity - 1

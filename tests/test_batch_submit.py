@@ -626,7 +626,14 @@ class TestLauncherMatchesQuantUI:
         from quantui.inorganic_guards import check_charge_multiplicity
         from quantui.xyz_input import electron_count
 
-        for atoms in (["O", "H", "H"], ["Mn"] + ["O"] * 6, ["N"], ["Fe", "Cl"]):
+        # ["H"] at +1..+3 covers the no-electrons-left rule (audit DATA-8).
+        for atoms in (
+            ["O", "H", "H"],
+            ["Mn"] + ["O"] * 6,
+            ["N"],
+            ["Fe", "Cl"],
+            ["H"],
+        ):
             for charge in (-1, 0, 1, 2, 3):
                 for mult in range(0, 8):
                     ours = launcher.charge_mult_problem(atoms, charge, mult)

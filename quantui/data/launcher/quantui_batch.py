@@ -291,6 +291,11 @@ def parse_xyz(text):
 def charge_mult_problem(atoms, charge, mult):
     """Why charge/multiplicity cannot fit this molecule, or None."""
     n_electrons = sum(SITE["atomic_numbers"].get(a, 0) for a in atoms) - charge
+    if n_electrons < 1:
+        return (
+            f"charge {charge:+d} leaves {n_electrons} electrons; the charge "
+            "removes more electrons than the atoms have"
+        )
     if mult < 1:
         return f"multiplicity must be at least 1 (got {mult})"
     unpaired = mult - 1

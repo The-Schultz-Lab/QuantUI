@@ -138,11 +138,11 @@ class Molecule:
             return
 
         num_electrons = self.get_electron_count()
-        if num_electrons < 0:
+        if num_electrons < 1:
             raise ValueError(
-                f"❌ Charge Error: charge {self.charge:+d} removes more "
-                f"electrons than this molecule has "
-                f"({num_electrons + self.charge}). Lower the charge."
+                f"❌ Charge Error: charge {self.charge:+d} leaves "
+                f"{num_electrons} electrons — the atoms only have "
+                f"{num_electrons + self.charge}. Lower the charge."
             )
         # Same bound as inorganic_guards.check_charge_multiplicity: the
         # multiplicity - 1 unpaired electrons cannot exceed the electron count
