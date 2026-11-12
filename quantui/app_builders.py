@@ -393,8 +393,8 @@ def build_status_panel(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:12px;'
         'margin-bottom:0px">Density fitting (RI) '
         f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:12px">'
-        "(faster TD-DFT / large systems, "
-        "~0.008 kcal/mol accuracy cost)</span></div>"
+        "(faster TD-DFT / large systems; a small integral approximation "
+        "— see Help → Density fitting)</span></div>"
     )
     app.density_fit_enabled_cb = widgets.Checkbox(
         value=density_fit_enabled,

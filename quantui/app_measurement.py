@@ -384,9 +384,10 @@ def reset_picks(app: Any) -> None:
 
     A fresh render is a brand-new ``<canvas>`` with none of the old
     highlights, so there is nothing to push to the browser here; only the
-    Python-side state and the readout text need clearing. Switching
-    molecules or leaving the Analysis tab clears stale picks, so no
-    measurement is ever silently computed against the wrong structure.
+    Python-side state and the readout text need clearing. Every redraw
+    of the Analysis viewer (a new result, a backend switch) clears stale
+    picks, so no measurement is ever silently computed against the wrong
+    structure.
     """
     app._measure_picks = []
     _set_readout(app, _PLACEHOLDER_TEXT)
