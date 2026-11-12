@@ -72,6 +72,9 @@ def cmd_sacct(argv: list[str]) -> int:
     state_dir = _state_dir()
     for job_id, data, _path in _iter_jobs(state_dir, ids):
         status = str(data.get("status", "PENDING")).upper()
+        if status == "CANCELLED":
+            # Real sacct names who cancelled the job.
+            status = f"CANCELLED by {os.getuid() if hasattr(os, 'getuid') else 0}"
         exit_code = str(data.get("exit_code", "0:0"))
         elapsed = str(data.get("elapsed", "00:00:01"))
         print(f"{job_id}|{status}|{exit_code}|{elapsed}")

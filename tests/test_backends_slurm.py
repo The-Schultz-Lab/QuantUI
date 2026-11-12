@@ -596,6 +596,46 @@ class TestSlurmBackendCancel:
         assert record.status == "cancelled"
 
 
+class TestRealSlurmStateStrings:
+    """sacct reports ``CANCELLED by <uid>``; finished states beyond the
+    common six must end a job instead of leaving it ``submitted``."""
+
+    @pytest.mark.parametrize(
+        "state, expected",
+        [
+            ("CANCELLED by 1000", "cancelled"),
+            ("CANCELLED+", "cancelled"),
+            ("PREEMPTED", "error"),
+            ("BOOT_FAIL", "error"),
+            ("DEADLINE", "error"),
+            ("COMPLETING", "running"),
+            ("SUSPENDED", "running"),
+            ("REQUEUED", "pending"),
+        ],
+    )
+    def test_map_slurm_status(self, state, expected):
+        from quantui.backends.slurm import _map_slurm_status
+
+        assert _map_slurm_status(state) == expected
+
+    def test_cancelled_job_out_of_squeue_leaves_the_active_count(self, slurm_backend):
+        slurm_backend.registry.create(_request("gone"), "cluster_slurm")
+        slurm_backend.registry.update_status("gone", "submitted", slurm_job_id="900077")
+
+        def _fake_run(args, **_kwargs):
+            from unittest.mock import MagicMock
+
+            res = MagicMock(returncode=0, stderr="")
+            res.stdout = (
+                "900077|CANCELLED by 1000|0:15|00:00:04\n" if args[0] == "sacct" else ""
+            )
+            return res
+
+        with patch("quantui.backends.slurm.subprocess.run", side_effect=_fake_run):
+            slurm_backend.refresh_registry_statuses()
+        assert slurm_backend.registry.load("gone").status == "cancelled"
+
+
 class TestDependsOn:
     """``--depends-on`` accepts a request id or a SLURM job id, nothing else."""
 
