@@ -14,8 +14,20 @@ if not exist "%SIFDIR%quantui.sif" (
     exit /b 1
 )
 
-REM Convert the folder holding the .sif to a WSL path for portability
+REM Convert the folder holding the .sif to a WSL path for portability. Not
+REM "%SIFDIR%" itself: it ends in "\", which escapes the closing quote.
+for %%i in ("%SIFDIR%.") do set "SIFDIR=%%~fi"
 for /f "delims=" %%i in ('wsl wslpath -a "%SIFDIR%"') do set WSLPATH=%%i
+
+REM Something already serving on 8866 (an earlier run, another app) would be
+REM opened in the browser instead of this one, so refuse to start.
+powershell -NoProfile -Command "$c = New-Object Net.Sockets.TcpClient; try { $c.Connect('127.0.0.1', 8866); $c.Close(); exit 0 } catch { exit 1 }" > nul 2>&1
+if not errorlevel 1 (
+    echo ERROR: port 8866 is already in use - is QuantUI already running?
+    echo Close that window or program first, then run this again.
+    pause
+    exit /b 1
+)
 
 REM Per-run login token: without one, any other local user or process could
 REM drive the app. WSLENV hands QUANTUI_APP_TOKEN to the WSL side through the
@@ -29,12 +41,15 @@ if not defined QUANTUI_APP_TOKEN (
 )
 if defined WSLENV (set "WSLENV=%WSLENV%:QUANTUI_APP_TOKEN") else (set "WSLENV=QUANTUI_APP_TOKEN")
 
-REM Launch Voila in a new WSL window (stays open so you can see logs)
-start "QuantUI" wsl -d Ubuntu -- bash -c "cd '%WSLPATH%' && apptainer run quantui.sif app"
+REM Launch Voila in a new WSL window (stays open so you can see logs). --cd
+REM rather than a "cd '...'" inside bash -c, which broke on an apostrophe in
+REM the folder path.
+start "QuantUI" wsl -d Ubuntu --cd "%WSLPATH%" -- bash -c "apptainer run quantui.sif app"
 
-REM Wait for Voila to start, then open the browser
+REM Wait (up to 90 s) for Voila to answer on the port, then open the browser
 echo Waiting for Voila to start...
-timeout /t 6 /nobreak > nul
+powershell -NoProfile -Command "for ($i = 0; $i -lt 90; $i++) { $c = New-Object Net.Sockets.TcpClient; try { $c.Connect('127.0.0.1', 8866); $c.Close(); exit 0 } catch { Start-Sleep -Seconds 1 } }; exit 1" > nul 2>&1
+if errorlevel 1 echo Voila did not answer within 90 s - check the QuantUI WSL window.
 start http://localhost:8866/?token=%QUANTUI_APP_TOKEN%
 
 echo.

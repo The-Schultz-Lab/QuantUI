@@ -50,9 +50,13 @@ if [ -z "$CONDA_SH" ]; then
     echo "       https://github.com/conda-forge/miniforge"
     exit 1
 fi
+# conda's activation scripts read unset variables, which `set -u` turns
+# into a fatal error, so nounset is off for these two lines only.
+set +u
 # shellcheck disable=SC1090
 source "$CONDA_SH"
 conda activate quantui
+set -u
 
 echo "Using Python: $(command -v python)"
 echo "Using Jupyter: $(command -v jupyter)"
