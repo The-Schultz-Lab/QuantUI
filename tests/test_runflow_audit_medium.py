@@ -446,3 +446,24 @@ def test_script_export_follows_the_run_not_a_history_view(
     assert [f.name for f in cwd.glob("*.py")] == ["H2O_RHF_STO-3G.py"]
     assert not list(viewed.glob("*.py"))
     assert not list(optimized_h2.glob("H2O*.py"))
+
+
+def test_preopt_preview_render_failure_is_shown_escaped(app):
+    # The failure path escaped the error with the `html` module while a local
+    # variable named `html` held the preview, so it raised instead (CI mypy).
+    from quantui import app_runflow
+
+    shown_parts: list = []
+    with (
+        patch(
+            "quantui.app_visualization.build_preopt_preview_html",
+            side_effect=RuntimeError("<b>boom</b>"),
+        ),
+        patch.object(
+            app_runflow, "display", side_effect=lambda obj: shown_parts.append(obj.data)
+        ),
+    ):
+        app_runflow._preopt_preview_done(app, _h2(), 1.0, [_h2(), _h2()])
+    shown = "".join(shown_parts)
+    assert "Preview render failed" in shown
+    assert "&lt;b&gt;boom&lt;/b&gt;" in shown

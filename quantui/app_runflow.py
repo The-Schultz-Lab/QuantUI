@@ -1826,8 +1826,8 @@ def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> No
     except Exception:
         bg = "white"
     try:
-        html = build_preopt_preview_html(list(relaxed.atoms), frames, bgcolor=bg)
-        app._set_html_output(app.preopt_preview_output, html)
+        preview = build_preopt_preview_html(list(relaxed.atoms), frames, bgcolor=bg)
+        app._set_html_output(app.preopt_preview_output, preview)
     except Exception as exc:  # noqa: BLE001
         app.preopt_preview_output.clear_output()
         with app.preopt_preview_output:
