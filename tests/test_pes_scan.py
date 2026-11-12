@@ -864,6 +864,7 @@ def test_scan_calculator_gets_the_progress_stream(monkeypatch):
     """Audit GEOM-11: D3-missing and SCF-rescue notices come from the shared
     calculator, which used to be built without the scan's stream."""
     pytest.importorskip("ase")
+    pytest.importorskip("pyscf")  # run_pes_scan checks for PySCF first
     import io
 
     import quantui.pes_scan as pes_scan

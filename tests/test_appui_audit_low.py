@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from quantui.app import QuantUIApp
@@ -72,8 +74,9 @@ def test_saved_result_comparison_still_shows_chart(app, shown, monkeypatch):
 
     plt.close("all")
     rows = {"/a": _sr(-1.11), "/b": _sr(-1.12, "B3LYP")}
+    # Key by the path as given: str(Path("/a")) is "\\a" on Windows.
     monkeypatch.setattr(
-        "quantui.results_storage.load_result", lambda p: {"key": str(p)}
+        "quantui.results_storage.load_result", lambda p: {"key": Path(p).as_posix()}
     )
     monkeypatch.setattr(
         "quantui.summary_from_saved_result",

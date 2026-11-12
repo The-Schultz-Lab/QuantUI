@@ -576,7 +576,7 @@ class TestPollingCost:
         assert _read_new_log_text(log, offset3)[0] == "é\n"
 
         # A shorter file (a new attempt's log) is read from the start.
-        log.write_text("new\n")
+        log.write_bytes(b"new\n")  # bytes: write_text gives CRLF on Windows
         assert _read_new_log_text(log, offset3) == ("new\n", 4)
 
     def test_backend_is_reused_per_app(self, registry):
