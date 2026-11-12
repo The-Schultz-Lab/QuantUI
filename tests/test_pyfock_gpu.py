@@ -53,6 +53,16 @@ def test_process_opt_out_wins_over_cupy(monkeypatch):
     assert "QUANTUI_DISABLE_GPU" in probe_pyfock_gpu()[2]
 
 
+def test_process_opt_out_accepts_yes(monkeypatch):
+    """Audit SCF-13: same truthy values as the gpu4pyscf probe."""
+    monkeypatch.setitem(sys.modules, "cupy", _fake_cupy())
+    monkeypatch.setenv("QUANTUI_DISABLE_GPU", "yes")
+    clear_pyfock_gpu_probe_cache()
+
+    assert probe_pyfock_gpu()[0] is False
+    assert "QUANTUI_DISABLE_GPU" in probe_pyfock_gpu()[2]
+
+
 def test_per_calculation_opt_out_does_not_probe(monkeypatch):
     def fail_probe():
         raise AssertionError("GPU probe should not run for explicit opt-out")

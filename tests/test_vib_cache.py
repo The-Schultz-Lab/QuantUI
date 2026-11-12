@@ -138,6 +138,42 @@ class TestSaveAndLoadRoundtrip:
             )
             assert loaded == f"<html>mode {mode}</html>"
 
+    def test_concurrent_saves_keep_every_mode(self, tmp_path, monkeypatch):
+        """Audit SCF-13: the index read-modify-write is serialised, so modes
+        saved from concurrent threads don't drop each other's entry."""
+        import threading
+        import time
+
+        rd = _make_result_dir(tmp_path)
+        real_load = vib_cache.load_index
+
+        def _slow_load(result_dir):
+            idx = real_load(result_dir)
+            time.sleep(0.05)  # widen the read-modify-write window
+            return idx
+
+        monkeypatch.setattr(vib_cache, "load_index", _slow_load)
+
+        def _save(mode):
+            vib_cache.save_cached_html(
+                rd,
+                mode,
+                f"<html>mode {mode}</html>",
+                freq_cm1=1000.0 + mode,
+                n_frames=24,
+                amplitude=0.4,
+                renderer="py3dmol",
+                fps=10,
+            )
+
+        threads = [threading.Thread(target=_save, args=(m,)) for m in range(1, 5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        idx = real_load(rd)
+        assert set(idx["modes"].keys()) == {"1", "2", "3", "4"}
+
 
 class TestHasCachedMatching:
     def setup_method(self):

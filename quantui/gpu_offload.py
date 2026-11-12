@@ -93,6 +93,17 @@ _STRONG_FP64_MARKERS: tuple = (
     "TITAN V",
 )
 
+
+def env_gpu_disabled() -> bool:
+    """True when ``QUANTUI_DISABLE_GPU`` is set to a truthy value.
+
+    Accepts ``1``/``true``/``yes``/``on`` in any case — the same convention as
+    the other ``QUANTUI_*`` switches (``freq_ir_workers._truthy``).
+    """
+    value = os.environ.get("QUANTUI_DISABLE_GPU", "")
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
 # Reason strings for the "GPU not in use" cases, surfaced by `quantui gpu check`
 # and the System Settings tab. Kept here so the CLI and the UI can't drift from the
 # probe's actual logic (they previously re-derived it, which is how a broken
@@ -158,7 +169,7 @@ def _probe_gpu() -> Tuple[bool, Optional[str], str]:
 
     Failures at any step are swallowed and logged; this never raises.
     """
-    if os.environ.get("QUANTUI_DISABLE_GPU", "").strip() in ("1", "true", "True"):
+    if env_gpu_disabled():
         return (False, None, _REASON_ENV_DISABLED)
     if not _gpu_enabled_in_settings():
         return (False, None, _REASON_SETTINGS_DISABLED)

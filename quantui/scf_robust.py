@@ -150,6 +150,9 @@ def run_scf_with_rescue(
     mol = mf.mol
     bootstrap = _scf.UHF(mol) if mol.spin != 0 else _scf.RHF(mol)
     bootstrap.verbose = 0
+    # Same per-cycle hook as the target (cancel/progress), so a Cancel click
+    # also stops the bootstrap SCF instead of waiting for it to finish.
+    bootstrap.callback = getattr(mf, "callback", None)
     bootstrap.kernel()
     energy = float(mf.kernel(dm0=bootstrap.make_rdm1(), **kernel_kwargs))
     if mf.converged:
