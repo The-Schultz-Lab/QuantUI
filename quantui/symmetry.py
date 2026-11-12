@@ -29,6 +29,7 @@ the input orientation, so no rotation is needed).
 
 from __future__ import annotations
 
+import html as _html
 import logging
 import re
 import threading
@@ -140,7 +141,8 @@ def pretty_group(name: str) -> str:
 
 def html_group(name: str) -> str:
     """Schoenflies symbol with the subscript as HTML (``C<sub>2v</sub>``)."""
-    pretty = pretty_group(name)
+    # Escaped: the name can come from a saved result.json.
+    pretty = _html.escape(pretty_group(name))
     if len(pretty) <= 1 or pretty.startswith("SO"):
         return pretty
     return f"{pretty[0]}<sub>{pretty[1:]}</sub>"
@@ -694,13 +696,19 @@ def html_irrep(label: str) -> str:
     Primes (Cs) and ⁺/⁻ (Σ) follow the subscript; joined labels
     (``"b1+b2"``) are rendered per part.
     """
+    # Labels come from saved results (a shared results folder too), so
+    # every piece is escaped; only the <sub> tags added here are markup.
     out = []
     for part in label.split("+"):
-        m = re.fullmatch(r"(.)([0-9gu]*)(.*)", part)
+        m = re.fullmatch(r"(.)([0-9gu]*)(.*)", part, flags=re.DOTALL)
         if not m:
-            return label
+            return _html.escape(label)
         head, sub, rest = m.groups()
-        out.append(head + (f"<sub>{sub}</sub>" if sub else "") + rest)
+        out.append(
+            _html.escape(head)
+            + (f"<sub>{sub}</sub>" if sub else "")
+            + _html.escape(rest)
+        )
     return "+".join(out)
 
 
@@ -708,7 +716,7 @@ def html_gamma(gamma: str) -> str:
     """``"2A1 + 2E"`` with HTML subscripts."""
     terms = []
     for term in gamma.split(" + "):
-        m = re.fullmatch(r"(\d*)(\(?)(.*?)(\)?)", term)
+        m = re.fullmatch(r"(\d*)(\(?)(.*?)(\)?)", term, flags=re.DOTALL)
         count, lp, body, rp = m.groups() if m else ("", "", term, "")
         terms.append(f"{count}{lp}{html_irrep(body)}{rp}")
     return " + ".join(terms)
