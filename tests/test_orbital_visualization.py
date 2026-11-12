@@ -214,11 +214,15 @@ class TestLoadOrbitalInfo:
         info = load_orbital_info(simple_mo_data)
         assert info.homo_lumo_gap_ev > 0
 
-    def test_uhf_uses_alpha(self, uhf_mo_data):
+    def test_uhf_uses_frontier_over_both_spins(self, uhf_mo_data):
+        # Audit VIZ-4: HOMO = max(alpha -0.4, beta -0.35) = -0.35 Ha;
+        # LUMO = min(alpha 0.1, beta 0.15) = 0.1 Ha. The MO list stays alpha.
         info = load_orbital_info(uhf_mo_data)
-        # Alpha HOMO is at index 1 = -0.4 Ha
-        expected_homo = -0.4 * HARTREE_TO_EV
-        assert abs(info.homo_energy_ev - expected_homo) < 1e-6
+        assert abs(info.homo_energy_ev - (-0.35 * HARTREE_TO_EV)) < 1e-6
+        assert abs(info.lumo_energy_ev - (0.1 * HARTREE_TO_EV)) < 1e-6
+        assert abs(info.homo_lumo_gap_ev - 0.45 * HARTREE_TO_EV) < 1e-6
+        assert info.n_occupied == 2 and info.n_occupied_beta == 2
+        assert abs(info.mo_energies_ev[1] - (-0.4 * HARTREE_TO_EV)) < 1e-6
 
     def test_formula_fallback_to_stem(self, simple_mo_data):
         info = load_orbital_info(simple_mo_data)

@@ -738,21 +738,15 @@ def _run_freq_calc_body(
     try:
         import numpy as _np
 
-        from .session_calc import _host_array
+        from .session_calc import _host_array, homo_lumo_gap_hartree
 
-        mo_occ = _host_array(mf.mo_occ)
-        mo_energy = _host_array(mf.mo_energy)
-        if isinstance(mo_energy, (list, _np.ndarray)) and hasattr(
-            mo_energy[0], "__len__"
-        ):
-            mo_e_ref, mo_occ_ref = mo_energy[0], mo_occ[0]
-        else:
-            mo_e_ref, mo_occ_ref = mo_energy, mo_occ
-        n_occ = int((_np.array(mo_occ_ref) > 0).sum())
-        if 0 < n_occ < len(mo_e_ref):
-            homo_lumo_gap_ev = float(
-                (mo_e_ref[n_occ] - mo_e_ref[n_occ - 1]) * HARTREE_TO_EV
-            )
+        # UHF/UKS: the gap spans both spin channels (audit VIZ-4).
+        _gap_ha = homo_lumo_gap_hartree(
+            _np.asarray(_host_array(mf.mo_energy), dtype=float),
+            _np.asarray(_host_array(mf.mo_occ), dtype=float),
+        )
+        if _gap_ha is not None:
+            homo_lumo_gap_ev = float(_gap_ha * HARTREE_TO_EV)
     except Exception as exc:
         logger.debug("HOMO-LUMO gap extraction failed in freq calc: %s", exc)
 

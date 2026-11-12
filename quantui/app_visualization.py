@@ -1656,7 +1656,8 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
 
     app._last_orb_info = info
     # Full orbital energies (both spin channels for UHF), for the gallery's
-    # captions; the diagram's ``info`` is alpha-only.
+    # captions. ``info``'s MO list / n_occupied are alpha (beta alongside);
+    # its HOMO/LUMO/gap are the frontier values over both channels.
     app._last_orb_mo_energy = mo_energy
     app._last_orb_mo_coeff = getattr(result, "mo_coeff", None)
     app._last_orb_mo_occ = mo_occ

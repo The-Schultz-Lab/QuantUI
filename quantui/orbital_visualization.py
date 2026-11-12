@@ -97,10 +97,29 @@ class OrbitalInfo:
     # caption naming their group (quantui.symmetry.label_mo_irreps).
     irreps: Optional[List[str]] = None
     irrep_caption: Optional[str] = None
+    # Unrestricted (UHF/UKS) results: ``mo_energies_ev`` / ``n_occupied``
+    # describe the alpha channel and these the beta channel. HOMO/LUMO/gap
+    # are then the frontier values over BOTH channels:
+    # max(HOMO_a, HOMO_b), min(LUMO_a, LUMO_b) (audit VIZ-4).
+    mo_energies_beta_ev: Optional[np.ndarray] = None
+    n_occupied_beta: Optional[int] = None
+
+    @property
+    def unrestricted(self) -> bool:
+        return _is_unrestricted(self)
 
     @property
     def n_virtual(self) -> int:
         return len(self.mo_energies_ev) - self.n_occupied
+
+
+def _is_unrestricted(info: Any) -> bool:
+    """True when ``info`` carries a beta channel (duck-typed: callers and
+    tests may pass a plain namespace with only the restricted fields)."""
+    return (
+        getattr(info, "mo_energies_beta_ev", None) is not None
+        and getattr(info, "n_occupied_beta", None) is not None
+    )
 
 
 def load_orbital_info(
@@ -130,42 +149,20 @@ def load_orbital_info(
     OrbitalInfo
     """
     data = np.load(results_path, allow_pickle=False)
-    mo_energy_ha: np.ndarray = data["mo_energy"]
-
-    # Handle UHF (2, n_mo) — use alpha spin
-    if mo_energy_ha.ndim == 2:
-        mo_energy_ha = mo_energy_ha[0]
-
-    mo_energy_ev = mo_energy_ha * HARTREE_TO_EV
+    mo_energy_ha: np.ndarray = np.asarray(data["mo_energy"])
 
     # Determine occupation
     if mo_occ is not None:
         occ = np.asarray(mo_occ)
     elif "mo_occ" in data:
-        occ = data["mo_occ"]
-        if occ.ndim == 2:
-            occ = occ[0]
+        occ = np.asarray(data["mo_occ"])
     else:
-        # Fallback: assume first n orbitals with energy < 0 are occupied
+        # Fallback: assume orbitals with energy < 0 are occupied
         occ = (mo_energy_ha < 0).astype(float)
 
-    n_occ = int((occ > 0).sum())
-    if n_occ == 0 or n_occ >= len(mo_energy_ev):
-        raise ValueError(
-            f"Cannot determine HOMO/LUMO: n_occupied={n_occ}, n_total={len(mo_energy_ev)}"
-        )
-
-    homo_ev = float(mo_energy_ev[n_occ - 1])
-    lumo_ev = float(mo_energy_ev[n_occ])
-    gap_ev = lumo_ev - homo_ev
-
-    return OrbitalInfo(
-        mo_energies_ev=mo_energy_ev,
-        n_occupied=n_occ,
-        homo_energy_ev=homo_ev,
-        lumo_energy_ev=lumo_ev,
-        homo_lumo_gap_ev=gap_ev,
-        formula=formula or results_path.stem,
+    # UHF (2, n_mo) is handled per spin channel by orbital_info_from_arrays.
+    return orbital_info_from_arrays(
+        mo_energy_ha, occ, formula=formula or results_path.stem
     )
 
 
@@ -180,10 +177,16 @@ def orbital_info_from_arrays(
     Useful when working with a live ``SessionResult`` where the data is
     already in memory (no ``.npz`` on disk).
     """
-    mo_energy = np.asarray(mo_energy)
-    mo_occ = np.asarray(mo_occ)
+    mo_energy = np.asarray(mo_energy, dtype=float)
+    mo_occ = np.asarray(mo_occ, dtype=float)
 
+    beta_ev: Optional[np.ndarray] = None
+    n_occ_b: Optional[int] = None
     if mo_energy.ndim == 2:
+        # UHF/UKS: alpha in the primary fields, beta alongside (audit VIZ-4).
+        occ_b = mo_occ[1] if mo_occ.ndim == 2 else mo_occ
+        beta_ev = mo_energy[1] * HARTREE_TO_EV
+        n_occ_b = int((occ_b > 0).sum())
         mo_energy = mo_energy[0]
     if mo_occ.ndim == 2:
         mo_occ = mo_occ[0]
@@ -196,13 +199,23 @@ def orbital_info_from_arrays(
             f"Cannot determine HOMO/LUMO: n_occupied={n_occ}, n_total={len(mo_ev)}"
         )
 
+    homo = float(mo_ev[n_occ - 1])
+    lumo = float(mo_ev[n_occ])
+    if beta_ev is not None and n_occ_b is not None:
+        if n_occ_b > 0:
+            homo = max(homo, float(beta_ev[n_occ_b - 1]))
+        if n_occ_b < len(beta_ev):
+            lumo = min(lumo, float(beta_ev[n_occ_b]))
+
     return OrbitalInfo(
         mo_energies_ev=mo_ev,
         n_occupied=n_occ,
-        homo_energy_ev=float(mo_ev[n_occ - 1]),
-        lumo_energy_ev=float(mo_ev[n_occ]),
-        homo_lumo_gap_ev=float(mo_ev[n_occ] - mo_ev[n_occ - 1]),
+        homo_energy_ev=homo,
+        lumo_energy_ev=lumo,
+        homo_lumo_gap_ev=lumo - homo,
         formula=formula,
+        mo_energies_beta_ev=beta_ev,
+        n_occupied_beta=n_occ_b,
     )
 
 
@@ -272,6 +285,27 @@ def plot_orbital_diagram(
             solid_capstyle="round",
         )
 
+    # Unrestricted (UHF/UKS): beta levels in a second column to the right;
+    # the HOMO/LUMO labels and gap arrow then mark the frontier orbitals over
+    # both channels (audit VIZ-4).
+    beta_dx = 0.0
+    if _is_unrestricted(info):
+        beta_dx = 2 * line_half_width + 0.3
+        e_b = np.asarray(info.mo_energies_beta_ev, dtype=float)
+        n_occ_b = int(info.n_occupied_beta or 0)
+        b_start = max(0, n_occ_b - half)
+        b_end = min(len(e_b), n_occ_b + half)
+        for j in range(b_start, b_end):
+            ax.plot(
+                [beta_dx - line_half_width, beta_dx + line_half_width],
+                [e_b[j], e_b[j]],
+                color="#2171b5" if j < n_occ_b else "#bdbdbd",
+                linewidth=2.5 if j in (n_occ_b - 1, n_occ_b) else 1.5,
+                solid_capstyle="round",
+            )
+        ax.set_xticks([0.0, beta_dx])
+        ax.set_xticklabels(["α", "β"])
+
     # HOMO / LUMO labels
     homo_idx_in_subset = n_occ - 1 - start
     lumo_idx_in_subset = n_occ - start
@@ -279,7 +313,7 @@ def plot_orbital_diagram(
     if 0 <= homo_idx_in_subset < len(subset):
         ax.annotate(
             "HOMO",
-            xy=(line_half_width + 0.05, subset[homo_idx_in_subset]),
+            xy=(beta_dx + line_half_width + 0.05, info.homo_energy_ev),
             fontsize=10,
             fontweight="bold",
             color="#2171b5",
@@ -289,7 +323,7 @@ def plot_orbital_diagram(
     if 0 <= lumo_idx_in_subset < len(subset):
         ax.annotate(
             "LUMO",
-            xy=(line_half_width + 0.05, subset[lumo_idx_in_subset]),
+            xy=(beta_dx + line_half_width + 0.05, info.lumo_energy_ev),
             fontsize=10,
             fontweight="bold",
             color="#e6550d",
@@ -319,8 +353,9 @@ def plot_orbital_diagram(
 
     # Axis labels and styling
     ax.set_ylabel("Energy (eV)", fontsize=12)
-    ax.set_xlim(-0.9, 1.0)
-    ax.set_xticks([])
+    ax.set_xlim(-0.9, 1.0 + beta_dx)
+    if not _is_unrestricted(info):
+        ax.set_xticks([])
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.spines["bottom"].set_visible(False)
@@ -412,59 +447,99 @@ def plot_orbital_diagram_plotly(
     energies = info.mo_energies_ev
     n_occ = info.n_occupied
     n_total = len(energies)
-
     half = max_orbitals // 2
-    start = max(0, n_occ - half)
-    end = min(n_total, n_occ + half)
-    n_core_hidden = 0
-    if not show_core:
-        n_core = count_core_orbitals(info)
-        n_core_hidden = max(0, n_core - start)
-        start = max(start, n_core)
 
-    LHW = 0.3  # half-width of each horizontal line in x
+    def _window(n_tot: int, n_oc: int, n_core: int) -> Tuple[int, int, int]:
+        start_ = max(0, n_oc - half)
+        end_ = min(n_tot, n_oc + half)
+        hidden = 0
+        if not show_core:
+            hidden = max(0, n_core - start_)
+            start_ = max(start_, n_core)
+        return start_, end_, hidden
+
+    start, end, n_core_hidden = _window(n_total, n_occ, count_core_orbitals(info))
 
     irreps = info.irreps if info.irreps and len(info.irreps) == n_total else None
 
     def _sym(idx: int) -> str:
         return f" ({irreps[idx]})" if irreps else ""
 
+    # One column per spin channel. Restricted: a single centred column.
+    # Unrestricted (UHF/UKS): alpha left, beta right, each with its own
+    # occupied/virtual levels; the HOMO/LUMO labels and the gap arrow mark the
+    # frontier orbitals over both channels (audit VIZ-4).
+    if _is_unrestricted(info):
+        LHW = 0.25
+        e_b = np.asarray(info.mo_energies_beta_ev, dtype=float)
+        n_occ_b = int(info.n_occupied_beta or 0)
+        cut = float(info.homo_energy_ev) - CORE_ORBITAL_GAP_EV
+        n_core_b = int(sum(1 for e in e_b[:n_occ_b] if e < cut))
+        start_b, end_b, _ = _window(len(e_b), n_occ_b, n_core_b)
+        columns = [
+            ("α", energies, n_occ, start, end, -0.35, _sym),
+            ("β", e_b, n_occ_b, start_b, end_b, 0.35, lambda _i: ""),
+        ]
+    else:
+        LHW = 0.3  # half-width of each horizontal line in x
+        columns = [("", energies, n_occ, start, end, 0.0, _sym)]
+
     traces = []
-    for idx in range(start, end):
-        e = float(energies[idx])
-        is_homo = idx == n_occ - 1
-        is_lumo = idx == n_occ
-        is_occ = idx < n_occ
+    shown: List[float] = []
+    for spin, ch_e, ch_nocc, ch_start, ch_end, cx, ch_sym in columns:
+        tag = f" {spin}" if spin else ""
+        for idx in range(ch_start, ch_end):
+            e = float(ch_e[idx])
+            shown.append(e)
+            is_homo = idx == ch_nocc - 1
+            is_lumo = idx == ch_nocc
+            is_occ = idx < ch_nocc
+            name = f"MO #{idx + 1}{tag}{ch_sym(idx)}"
 
-        if is_homo:
-            color, lw = "#2171b5", 3.0
-            hover = f"MO #{idx + 1}{_sym(idx)} — HOMO<br>{e:+.4f} eV"
-        elif is_lumo:
-            color, lw = "#e6550d", 3.0
-            hover = f"MO #{idx + 1}{_sym(idx)} — LUMO<br>{e:+.4f} eV"
-        elif is_occ:
-            color, lw = "#2171b5", 1.5
-            hover = f"MO #{idx + 1}{_sym(idx)} (occupied)<br>{e:+.4f} eV"
-        else:
-            color, lw = "#9e9e9e", 1.5
-            hover = f"MO #{idx + 1}{_sym(idx)} (virtual)<br>{e:+.4f} eV"
+            if is_homo:
+                color, lw = "#2171b5", 3.0
+                hover = f"{name} — HOMO<br>{e:+.4f} eV"
+            elif is_lumo:
+                color, lw = "#e6550d", 3.0
+                hover = f"{name} — LUMO<br>{e:+.4f} eV"
+            elif is_occ:
+                color, lw = "#2171b5", 1.5
+                hover = f"{name} (occupied)<br>{e:+.4f} eV"
+            else:
+                color, lw = "#9e9e9e", 1.5
+                hover = f"{name} (virtual)<br>{e:+.4f} eV"
 
-        traces.append(
-            go.Scatter(
-                x=[-LHW, LHW],
-                y=[e, e],
-                mode="lines",
-                line=dict(color=color, width=lw),
-                hovertemplate=hover + "<extra></extra>",
-                showlegend=False,
-                name="",
+            traces.append(
+                go.Scatter(
+                    x=[cx - LHW, cx + LHW],
+                    y=[e, e],
+                    mode="lines",
+                    line=dict(color=color, width=lw),
+                    hovertemplate=hover + "<extra></extra>",
+                    showlegend=False,
+                    name="",
+                )
             )
-        )
 
     homo_e = info.homo_energy_ev
     lumo_e = info.lumo_energy_ev
     gap = info.homo_lumo_gap_ev
-    bracket_x = -LHW - 0.15
+    bracket_x = columns[0][5] - LHW - 0.15
+    x_right = columns[-1][5] + LHW + 0.05
+
+    if _is_unrestricted(info):
+        # Name the channel holding each frontier orbital (alpha on a tie).
+        homo_from_a = float(energies[n_occ - 1]) >= homo_e - 1e-12
+        lumo_from_a = float(energies[n_occ]) <= lumo_e + 1e-12
+        homo_lbl = (
+            f"{_sym(n_occ - 1) if homo_from_a else ''} ({'α' if homo_from_a else 'β'})"
+        )
+        lumo_lbl = (
+            f"{_sym(n_occ) if lumo_from_a else ''} ({'α' if lumo_from_a else 'β'})"
+        )
+    else:
+        homo_lbl = _sym(n_occ - 1)
+        lumo_lbl = _sym(n_occ)
 
     annotations = [
         dict(
@@ -475,7 +550,7 @@ def plot_orbital_diagram_plotly(
             y=homo_e,
             xref="paper",
             yref="y",
-            text=f"<b>HOMO</b>{_sym(n_occ - 1)}",
+            text=f"<b>HOMO</b>{homo_lbl}",
             showarrow=False,
             font=dict(size=fs_label, color="#2171b5"),
             xanchor="left",
@@ -489,7 +564,7 @@ def plot_orbital_diagram_plotly(
             y=lumo_e,
             xref="paper",
             yref="y",
-            text=f"<b>LUMO</b>{_sym(n_occ)}",
+            text=f"<b>LUMO</b>{lumo_lbl}",
             showarrow=False,
             font=dict(size=fs_label, color="#e6550d"),
             xanchor="left",
@@ -512,13 +587,26 @@ def plot_orbital_diagram_plotly(
             xanchor="right",
         ),
     ]
+    if _is_unrestricted(info):
+        for col in columns:  # spin-channel header under each column
+            annotations.append(
+                dict(
+                    x=col[5],
+                    y=0.0,
+                    xref="x",
+                    yref="paper",
+                    text=f"<b>{col[0]}</b>",
+                    showarrow=False,
+                    font=dict(size=fs_label),
+                    yanchor="top",
+                )
+            )
 
-    subset = energies[start:end]
-    span = float(subset.max()) - float(subset.min())
+    span = max(shown) - min(shown)
     margin = max(0.5, span * 0.08 + 0.5)
     if yrange is None:
-        y_min = float(subset.min()) - margin
-        y_max = float(subset.max()) + margin
+        y_min = min(shown) - margin
+        y_max = max(shown) + margin
     else:
         y_min, y_max = yrange
 
@@ -548,7 +636,7 @@ def plot_orbital_diagram_plotly(
             # at the arrow; at [-0.9, 0.9] it ran over the Y tick labels.
             # Ends just past the level lines; HOMO/LUMO labels sit in the
             # right margin beyond it.
-            range=[-1.2 - 0.3 * (scale - 1.0), LHW + 0.05],
+            range=[bracket_x - 0.75 - 0.3 * (scale - 1.0), x_right],
             showticklabels=False,
             showgrid=False,
             zeroline=False,
@@ -581,14 +669,21 @@ def orbital_summary_html(info: OrbitalInfo) -> str:
 
     Designed for ``IPython.display.HTML`` inside a Jupyter cell.
     """
+    a = " (α)" if _is_unrestricted(info) else ""  # counts below are alpha-only
     return (
         '<div style="background:#f8f9fa; padding:12px; border-radius:6px; '
         'border-left:4px solid #2171b5; margin:8px 0; font-family:monospace;">'
         f"<b>Orbital Summary — {info.formula}</b><br>"
-        f"Occupied MOs: {info.n_occupied} &nbsp;|&nbsp; "
-        f"Virtual MOs: {info.n_virtual} &nbsp;|&nbsp; "
-        f"Total: {len(info.mo_energies_ev)}<br>"
-        f"HOMO energy: {info.homo_energy_ev:+.4f} eV &nbsp;|&nbsp; "
+        f"Occupied MOs{a}: {info.n_occupied} &nbsp;|&nbsp; "
+        f"Virtual MOs{a}: {info.n_virtual} &nbsp;|&nbsp; "
+        f"Total{a}: {len(info.mo_energies_ev)}<br>"
+        + (
+            f"β occupied: {info.n_occupied_beta}; "
+            "HOMO/LUMO below are the frontier values over α and β<br>"
+            if _is_unrestricted(info)
+            else ""
+        )
+        + f"HOMO energy: {info.homo_energy_ev:+.4f} eV &nbsp;|&nbsp; "
         f"LUMO energy: {info.lumo_energy_ev:+.4f} eV<br>"
         f"<b>HOMO–LUMO gap: {info.homo_lumo_gap_ev:.4f} eV</b>"
         "</div>"

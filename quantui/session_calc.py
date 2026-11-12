@@ -33,6 +33,43 @@ logger = logging.getLogger(__name__)
 HARTREE_TO_EV: float = 27.211386245988
 
 
+def frontier_orbital_energies(mo_energy: Any, mo_occ: Any) -> Optional[tuple]:
+    """Return ``(homo, lumo)`` (input units) over every spin channel, or None.
+
+    Restricted input is 1-D. Unrestricted input (UHF/UKS) is ``(2, n_mo)``;
+    the frontier orbitals are then ``max(HOMO_a, HOMO_b)`` and
+    ``min(LUMO_a, LUMO_b)`` -- using the alpha channel alone overstates the
+    gap of a radical (OH, UHF/STO-3G: 28.6 eV alpha-only vs 20.1 eV), audit
+    VIZ-4. A channel's HOMO/LUMO follow the aufbau count of occupied
+    orbitals (energies are sorted per channel), matching the orbital diagram.
+    """
+    import numpy as _np
+
+    e = _np.asarray(mo_energy, dtype=float)
+    o = _np.asarray(mo_occ, dtype=float)
+    if e.ndim == 1:
+        channels = [(e, o)]
+    else:
+        channels = [(e[k], o[k]) for k in range(e.shape[0])]
+    homos: list = []
+    lumos: list = []
+    for ec, oc in channels:
+        n = int((oc > 0).sum())
+        if n > 0:
+            homos.append(float(ec[n - 1]))
+        if n < len(ec):
+            lumos.append(float(ec[n]))
+    if not homos or not lumos:
+        return None
+    return max(homos), min(lumos)
+
+
+def homo_lumo_gap_hartree(mo_energy: Any, mo_occ: Any) -> Optional[float]:
+    """Frontier HOMO-LUMO gap in the input units (spin-aware, see above)."""
+    fr = frontier_orbital_energies(mo_energy, mo_occ)
+    return None if fr is None else fr[1] - fr[0]
+
+
 # ============================================================================
 # Result dataclass
 # ============================================================================
@@ -1061,21 +1098,12 @@ def _run_session_calc_body(
         # mo_energy are CuPy arrays, and the old ``_np.array(mo_occ_ref)`` here
         # raised (silently → gap None). Same CuPy fix the MO-array extraction
         # below already had; this block was overlooked.
-        mo_energy = _to_numpy_array(mf.mo_energy)
-        mo_occ = _to_numpy_array(mf.mo_occ)
-        if mo_energy.ndim == 2:
-            # UHF: mo_energy is (2, n_mo) — use alpha spin for the gap estimate
-            mo_energy_ref = mo_energy[0]
-            mo_occ_ref = mo_occ[0]
-        else:
-            mo_energy_ref = mo_energy
-            mo_occ_ref = mo_occ
-
-        n_occ = int((mo_occ_ref > 0).sum())
-        if 0 < n_occ < len(mo_energy_ref):
-            homo_lumo_gap_ev = float(
-                (mo_energy_ref[n_occ] - mo_energy_ref[n_occ - 1]) * HARTREE_TO_EV
-            )
+        # UHF/UKS: (2, n_mo) -- the gap spans both spin channels.
+        _gap_ha = homo_lumo_gap_hartree(
+            _to_numpy_array(mf.mo_energy), _to_numpy_array(mf.mo_occ)
+        )
+        if _gap_ha is not None:
+            homo_lumo_gap_ev = float(_gap_ha * HARTREE_TO_EV)
     except Exception as exc:
         logger.debug("HOMO-LUMO gap extraction failed (non-fatal): %s", exc)
 

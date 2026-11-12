@@ -2,6 +2,7 @@
 
 - VIZ-3: a theme toggle must keep the persistent single vib viewer (and the
   vib HTML cache must not serve the other theme's background).
+- VIZ-4: UHF/UKS HOMO-LUMO gap and orbital diagram span both spin channels.
 """
 
 from __future__ import annotations
@@ -102,3 +103,89 @@ class TestThemeToggleKeepsSingleVibViewer:
 
         assert "#1e293b" in dark and "#1e293b" not in light
         assert "#1e293b" not in light_again
+
+
+# ── VIZ-4 ────────────────────────────────────────────────────────────────
+
+
+def _oh_uhf():
+    """OH radical, UHF/STO-3G (from a real PySCF run, Hartree).
+
+    alpha-only gap 28.56 eV; frontier gap min(LUMO) - max(HOMO) 20.08 eV.
+    """
+    pyscf = pytest.importorskip("pyscf")
+    mol = pyscf.gto.M(atom="O 0 0 0; H 0 0 0.97", basis="sto-3g", spin=1, verbose=0)
+    mf = pyscf.scf.UHF(mol).run()
+    return mf
+
+
+class TestUnrestrictedFrontierGap:
+    def test_helper_uses_both_spin_channels(self):
+        from quantui.session_calc import homo_lumo_gap_hartree
+
+        e = np.array([[-1.0, -0.5, 0.4], [-1.0, -0.2, 0.1]])
+        occ = np.array([[1.0, 1.0, 0.0], [1.0, 0.0, 0.0]])
+        # HOMO = max(-0.5 a, -1.0 b) = -0.5; LUMO = min(0.4 a, -0.2 b) = -0.2
+        assert homo_lumo_gap_hartree(e, occ) == pytest.approx(0.3)
+        # Restricted input is unchanged.
+        assert homo_lumo_gap_hartree(e[0], occ[0]) == pytest.approx(0.9)
+
+    def test_orbital_info_gap_is_frontier_gap(self):
+        from quantui.orbital_visualization import orbital_info_from_arrays
+
+        mf = _oh_uhf()
+        info = orbital_info_from_arrays(mf.mo_energy, mf.mo_occ, "OH")
+        assert info.unrestricted
+        assert info.n_occupied == 5 and info.n_occupied_beta == 4
+        assert info.homo_lumo_gap_ev == pytest.approx(20.08, abs=0.02)
+
+    def test_session_result_gap_is_frontier_gap(self):
+        pytest.importorskip("pyscf")
+        from quantui.session_calc import run_in_session
+
+        mol = Molecule(
+            atoms=["O", "H"],
+            coordinates=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.97]],
+            multiplicity=2,
+        )
+        res = run_in_session(mol, method="UHF", basis="STO-3G", verbose=0)
+        assert res.homo_lumo_gap_ev == pytest.approx(20.08, abs=0.02)
+
+    def test_diagram_draws_alpha_and_beta_columns(self):
+        from quantui.orbital_visualization import (
+            orbital_info_from_arrays,
+            orbital_summary_html,
+            plot_orbital_diagram_plotly,
+        )
+
+        mf = _oh_uhf()
+        info = orbital_info_from_arrays(mf.mo_energy, mf.mo_occ, "OH")
+        fig = plot_orbital_diagram_plotly(info)
+        # 6 alpha + 6 beta MOs, in two columns.
+        assert len(fig.data) == 12
+        xs = sorted({round(float(np.mean(t.x)), 3) for t in fig.data})
+        assert len(xs) == 2
+        hovers = " ".join(t.hovertemplate for t in fig.data)
+        assert " α" in hovers and " β" in hovers
+        texts = [a.text for a in fig.layout.annotations]
+        assert "<b>20.08 eV</b>" in texts
+        assert any("HOMO" in t and "β" in t for t in texts)
+        assert "(α)" in orbital_summary_html(info)
+
+    def test_restricted_diagram_unchanged(self):
+        from quantui.orbital_visualization import (
+            orbital_info_from_arrays,
+            plot_orbital_diagram_plotly,
+        )
+
+        e = np.array([-1.0, -0.5, 0.4, 0.9])
+        occ = np.array([2.0, 2.0, 0.0, 0.0])
+        info = orbital_info_from_arrays(e, occ, "X")
+        assert not info.unrestricted
+        fig = plot_orbital_diagram_plotly(info)
+        assert len(fig.data) == 4
+        assert {tuple(t.x) for t in fig.data} == {(-0.3, 0.3)}
+        assert [a.text for a in fig.layout.annotations][:2] == [
+            "<b>HOMO</b>",
+            "<b>LUMO</b>",
+        ]
