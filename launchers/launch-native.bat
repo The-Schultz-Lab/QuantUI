@@ -8,6 +8,18 @@ REM path for portability.
 for %%i in ("%~dp0..") do set "REPO=%%~fi"
 for /f "delims=" %%i in ('wsl wslpath -a "%REPO%"') do set WSLPATH=%%i
 
+REM Per-run login token: without one, any other local user or process could
+REM drive the app. WSLENV hands QUANTUI_APP_TOKEN to the WSL side through the
+REM environment, not a command line.
+set "QUANTUI_APP_TOKEN="
+for /f "delims=" %%t in ('powershell -NoProfile -Command "[guid]::NewGuid().Guid + [guid]::NewGuid().Guid"') do set "QUANTUI_APP_TOKEN=%%t"
+if not defined QUANTUI_APP_TOKEN (
+    echo ERROR: could not create a login token ^(is PowerShell available?^)
+    pause
+    exit /b 1
+)
+if defined WSLENV (set "WSLENV=%WSLENV%:QUANTUI_APP_TOKEN") else (set "WSLENV=QUANTUI_APP_TOKEN")
+
 REM Runs Voila directly from the quantui conda env inside WSL.
 REM pip install -e . is skipped when pyproject.toml has not changed since the
 REM last install (.dev_install_stamp). quantui/*.py changes are always live in
@@ -27,13 +39,13 @@ REM make EVERY subsequent offline launch retry (and re-delay on) pip — the
 REM reinstall is attempted once, then skipped. quantui/*.py + package-data are
 REM live in editable mode, so a skipped reinstall is harmless offline; re-run
 REM `pip install -e .` manually when online if you add a real dependency.
-start "QuantUI [native]" wsl -d Ubuntu -- bash -c "cd '%WSLPATH%' && for c in ~/miniforge3 ~/miniconda3 ~/anaconda3 /opt/conda; do [ -f $c/etc/profile.d/conda.sh ] && . $c/etc/profile.d/conda.sh && break; done && conda activate quantui && if [ pyproject.toml -nt .dev_install_stamp ] || ! python -c 'import quantui' 2>/dev/null; then pip install -e . -q --timeout=5 --retries=0 && touch .dev_install_stamp || { echo '[QuantUI] editable reinstall skipped (offline?) - using live source'; touch .dev_install_stamp; }; fi; rm -rf quantui/__pycache__ && PYTHONDONTWRITEBYTECODE=1 voila notebooks/molecule_computations.ipynb --no-browser --port=8867 --ServerApp.disable_check_xsrf=True"
+start "QuantUI [native]" wsl -d Ubuntu -- bash -c "cd '%WSLPATH%' && for c in ~/miniforge3 ~/miniconda3 ~/anaconda3 /opt/conda; do [ -f $c/etc/profile.d/conda.sh ] && . $c/etc/profile.d/conda.sh && break; done && conda activate quantui && if [ pyproject.toml -nt .dev_install_stamp ] || ! python -c 'import quantui' 2>/dev/null; then pip install -e . -q --timeout=5 --retries=0 && touch .dev_install_stamp || { echo '[QuantUI] editable reinstall skipped (offline?) - using live source'; touch .dev_install_stamp; }; fi; rm -rf quantui/__pycache__ && PYTHONDONTWRITEBYTECODE=1 voila notebooks/molecule_computations.ipynb --no-browser --port=8867 --Voila.ip=127.0.0.1 --Voila.token=$QUANTUI_APP_TOKEN --ServerApp.disable_check_xsrf=True"
 
 echo Waiting for Voila to start...
 timeout /t 6 /nobreak > nul
-start http://localhost:8867
+start http://localhost:8867/?token=%QUANTUI_APP_TOKEN%
 
 echo.
-echo Native dev server running at http://localhost:8867
+echo Native dev server running at http://localhost:8867/?token=%QUANTUI_APP_TOKEN%
 echo All local quantui/*.py changes are live — no rebuild needed.
 echo Close the WSL window to stop.

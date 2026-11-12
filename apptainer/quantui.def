@@ -194,8 +194,18 @@ EOF
   MODE="${1:-lab}"
   shift 2>/dev/null || true
   if [ "$MODE" = "app" ]; then
+    # Loopback only, with a per-run token (QUANTUI_APP_TOKEN when a launcher
+    # sets it), so other users on the host cannot drive the session.
+    # Standalone Voila reads no token from the environment, hence the option.
+    TOKEN="${QUANTUI_APP_TOKEN:-$(python -c 'import secrets; print(secrets.token_urlsafe(24))')}"
+    PORT=8866
+    for a in "$@"; do
+      case "$a" in --port=*) PORT="${a#--port=}" ;; esac
+    done
+    echo "QuantUI: open http://127.0.0.1:${PORT}/?token=${TOKEN}"
     exec voila /opt/quantui/notebooks/molecule_computations.ipynb \
-         --no-browser --port=8866 "${@}"
+         --no-browser --port=8866 --Voila.ip=127.0.0.1 \
+         "--Voila.token=${TOKEN}" "${@}"
   else
     exec jupyter lab --ip=0.0.0.0 --no-browser --allow-root "${@}"
   fi

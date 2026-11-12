@@ -395,3 +395,124 @@ class TestIngestKeepsGeometry:
         assert geometry["atoms"] == ["H", "H"]
         assert geometry["coordinates"][1] == pytest.approx([0.0, 0.0, 0.74])
         assert geometry["multiplicity"] == 1
+
+
+# ---------------------------------------------------------------------------
+# HPC-8: every Voila launch gets a per-run token and binds to loopback
+# ---------------------------------------------------------------------------
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+class TestRunAppToken:
+    def _run(self, monkeypatch, tmp_path, open_browser):
+        from quantui import app_launcher
+
+        monkeypatch.setenv("QUANTUI_HOME", str(tmp_path / "home"))
+        monkeypatch.setattr(app_launcher, "is_hpc_jupyterlab_session", lambda: False)
+        monkeypatch.setattr(app_launcher, "voila_executable", lambda: "/x/voila")
+        monkeypatch.setattr(
+            app_launcher, "ensure_app_notebook", lambda force=False: tmp_path / "a"
+        )
+        runs, opened = [], []
+
+        class _Proc:
+            def __init__(self, argv):
+                runs.append(argv)
+
+            def wait(self, timeout=None):
+                return 0
+
+        monkeypatch.setattr(app_launcher.subprocess, "Popen", _Proc)
+        monkeypatch.setattr(
+            app_launcher.os, "execvp", lambda _f, argv: runs.append(argv)
+        )
+        monkeypatch.setattr(app_launcher.time, "sleep", lambda _s: None)
+        monkeypatch.setattr(app_launcher, "_open_url_best_effort", opened.append)
+        app_launcher.run_voila_app(open_browser=open_browser)
+        return runs[0], opened
+
+    @pytest.mark.parametrize("open_browser", [True, False])
+    def test_run_app_uses_a_fresh_token_on_loopback(
+        self, monkeypatch, tmp_path, open_browser
+    ):
+        monkeypatch.delenv("QUANTUI_APP_TOKEN", raising=False)
+        argv, opened = self._run(monkeypatch, tmp_path, open_browser)
+        tokens = [a.split("=", 1)[1] for a in argv if a.startswith("--Voila.token=")]
+        assert len(tokens) == 1 and len(tokens[0]) >= 24
+        assert "--Voila.ip=127.0.0.1" in argv
+        if open_browser:
+            assert len(opened) == 1 and opened[0].startswith("http://127.0.0.1:")
+            assert opened[0].endswith(f"/?token={tokens[0]}")
+
+    def test_run_app_honours_quantui_app_token(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("QUANTUI_APP_TOKEN", "chosen-token")
+        argv, opened = self._run(monkeypatch, tmp_path, True)
+        assert "--Voila.token=chosen-token" in argv
+        assert opened[0].endswith("/?token=chosen-token")
+
+
+class TestLaunchersUseTokens:
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "launchers/launch-native.sh",
+            "launchers/launch-native.command",
+            "launchers/launch-native.bat",
+            "launchers/launch-dev.bat",
+            "apptainer/quantui.def",
+        ],
+    )
+    def test_voila_launchers_pass_a_token_and_bind_loopback(self, name):
+        text = (REPO / name).read_text(encoding="utf-8")
+        assert "--Voila.token=" in text and "--Voila.ip=127.0.0.1" in text
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "launchers/launch-native.bat",
+            "launchers/launch-dev.bat",
+            "launchers/launch-app.bat",
+            "launchers/launch-native-jupyter.bat",
+        ],
+    )
+    def test_windows_launchers_open_the_tokenised_url(self, name):
+        text = (REPO / name).read_text(encoding="utf-8")
+        assert "WSLENV" in text and "token=%QUANTUI_APP_TOKEN%" in text
+
+    def test_jupyter_launcher_has_no_empty_token_or_password(self):
+        text = (REPO / "launchers/launch-native-jupyter.sh").read_text(encoding="utf-8")
+        assert "token=''" not in text and "password=''" not in text
+        assert "export JUPYTER_TOKEN" in text and "--ip=127.0.0.1" in text
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="runs bash")
+    def test_apptainer_app_runscript_prints_and_passes_the_token(self, tmp_path):
+        lines, inside = [], False
+        for line in (REPO / "apptainer/quantui.def").read_text().splitlines():
+            if line.startswith("%"):
+                inside = line.startswith("%runscript")
+                continue
+            if inside:
+                lines.append(line)
+        script = tmp_path / "runscript.sh"
+        script.write_text("\n".join(lines) + "\n")
+        fake = tmp_path / "bin"
+        fake.mkdir()
+        (fake / "voila").write_text(
+            '#!/bin/sh\nfor a in "$@"; do echo "ARG:$a"; done\n'
+        )
+        (fake / "voila").chmod(0o755)
+        env = {
+            "PATH": f"{fake}:{Path(sys.executable).parent}:/usr/bin:/bin",
+            "QUANTUI_APP_TOKEN": "tok123",
+        }
+        out = subprocess.run(
+            ["bash", str(script), "app", "--port=9000"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True,
+        ).stdout
+        assert "http://127.0.0.1:9000/?token=tok123" in out
+        assert "ARG:--Voila.token=tok123" in out
+        assert "ARG:--Voila.ip=127.0.0.1" in out

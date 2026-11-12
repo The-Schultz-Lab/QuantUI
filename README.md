@@ -365,12 +365,12 @@ no rebuild.
 
 | Platform | File | Action |
 | --- | --- | --- |
-| Windows | [`launchers/launch-native.bat`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/launchers/launch-native.bat) | Activates the `quantui` conda env inside WSL Ubuntu, runs Voilà, and opens `http://localhost:8867` |
+| Windows | [`launchers/launch-native.bat`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/launchers/launch-native.bat) | Activates the `quantui` conda env inside WSL Ubuntu, runs Voilà, and opens `http://localhost:8867/?token=…` (a new login token each launch) |
 | macOS | [`launchers/launch-native.command`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/launchers/launch-native.command) | Activates the local `quantui` conda env directly (no WSL needed) and does the same |
 | Linux / WSL | [`launchers/launch-native.sh`](https://github.com/The-Schultz-Lab/QuantUI/blob/main/launchers/launch-native.sh) | Run `./launchers/launch-native.sh` from a Linux or WSL terminal; activates `quantui` and does the same |
 
-All launchers reuse port `8867`, so you can keep the same browser tab pinned
-across platforms. They **auto-detect your conda installation** — miniforge
+All launchers reuse port `8867` and open the app with a fresh per-launch login
+token, so other users on the machine cannot reach your session. They **auto-detect your conda installation** — miniforge
 (recommended), miniconda, or anaconda, in your home directory or a system
 prefix — so no path editing is needed regardless of which you installed.
 
