@@ -40,7 +40,9 @@ updates:
       - dependency-name: pyscf
         update-types: ["version-update:semver-major"]
 
-  # GitHub Actions pinned to SHA via Dependabot — keeps runners current
+  # GitHub Actions are referenced by version tag (e.g. actions/checkout@v7,
+  # pypa/gh-action-pypi-publish@release/v1), NOT pinned to commit SHAs;
+  # Dependabot bumps those tags weekly.
   - package-ecosystem: github-actions
     directory: /
     schedule:

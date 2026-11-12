@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: every job here only checks out and tests the code.
+# (Caches and artifacts use the runner's own token, not GITHUB_TOKEN, and
+# Codecov uploads with its own token.)
+permissions:
+  contents: read
+
 jobs:
   # ── Linux: full suite including PySCF-dependent tests ─────────────────────
   test-linux:
