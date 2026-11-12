@@ -2,8 +2,8 @@
 
 QuantUI is an educational teaching tool designed for classroom and local
 research use. By default it runs calculations inside your own Python session —
-there is no hosted server and no user accounts, and results stay on the
-machine (or cluster account) you run it on. The optional SLURM batch mode
+there is no hosted server and no user accounts, and results, logs, settings
+and checkpoints stay on the machine (or cluster account) you run it on. The optional SLURM batch mode
 writes job folders under your own cluster home and submits them with your own
 `sbatch`.
 
@@ -41,10 +41,35 @@ within **30 days** for confirmed vulnerabilities.
 ## Scope
 
 This project is a local teaching tool. The threat model is limited — there is
-no multi-user server, no authentication layer, and no persistent user data.
+no multi-user server and no user accounts. It does keep **persistent data in
+the user's own account**, protected only by its file permissions: saved
+results (`./results/` by default, `QUANTUI_RESULTS_DIR` in the Apptainer
+image and Viewer), and under `~/.quantui/` logs (`logs/perf_log.jsonl`,
+`logs/event_log.jsonl`), user settings (`settings.json`), calculation
+checkpoints (`checkpoints/`), SLURM job folders and staging (`jobs/`,
+`staging/`) and the generated launcher notebook. The log, settings and
+checkpoint paths can be redirected with `QUANTUI_LOG_DIR`,
+`QUANTUI_SETTINGS_PATH` and `QUANTUI_CHECKPOINT_DIR`.
+
 The primary security concerns are:
 
-- **Path traversal** in file I/O (molecule XYZ parsing, script export)
+- **Access to the running app.** `quantui run app`, `quantui view`, the native
+  launchers and the Apptainer image's `app` runscript bind Voilà to
+  `127.0.0.1` and require a per-run token (`QUANTUI_APP_TOKEN` when set,
+  otherwise a fresh random one); the printed/opened URL carries it
+  (`?token=...`). Standalone Voilà reads no token from the environment, so on
+  a shared host the token is visible to other local users in the process
+  list (`ps`). `launch-native-jupyter.sh` uses `JUPYTER_TOKEN` (off the
+  command line). The Apptainer image's default JupyterLab mode keeps
+  Jupyter's own token handling. Anyone holding the token can drive the
+  session as you — read History, submit SLURM jobs with your account.
+- **Untrusted files the app reads:** the Viewer's `.zip` upload of a results
+  folder (`quantui/app_viewer.py`), structure-file upload
+  (`quantui/structure_upload.py`: XYZ/PDB/CIF/MOL/SDF/MOL2/Gaussian), and
+  ingestion of SLURM job folders and result data written outside the session
+  (`quantui/backends/slurm_ingest.py`, `quantui/results_storage.py`).
+- **Path traversal** in file I/O (the uploads/ingest above, molecule XYZ
+  parsing, script and bundle export)
 - **Unsafe subprocess calls** — PySCF runs in-process via the Python API, but
   `subprocess` is used for SLURM (`sbatch`, `squeue`, `sacct`, `scancel`; see
   `quantui/backends/slurm.py` and the `quantui-batch` launcher), for starting
