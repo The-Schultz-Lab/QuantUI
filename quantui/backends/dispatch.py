@@ -210,6 +210,20 @@ def build_calculation_request(
 
 
 def slurm_backend_for_app(app: Any) -> SlurmBackend:
-    """Construct a :class:`SlurmBackend` sharing the app's job registry."""
+    """The app's :class:`SlurmBackend`, sharing the app's job registry.
+
+    One backend per app (kept on ``app._slurm_backend`` while the registry
+    is the same), so its short-lived squeue/sacct status cache is reused
+    across refreshes instead of starting empty on every call.
+    """
     registry = getattr(app, "_job_registry", None)
-    return SlurmBackend(registry=registry)
+    cached = getattr(app, "_slurm_backend", None)
+    if registry is not None and getattr(cached, "registry", None) is registry:
+        return cached
+    backend = SlurmBackend(registry=registry)
+    if registry is not None:
+        try:
+            app._slurm_backend = backend
+        except AttributeError:  # an object that takes no new attributes
+            pass
+    return backend

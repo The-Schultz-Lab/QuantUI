@@ -533,3 +533,63 @@ def subprocess_result(code, out="", err=""):
     import subprocess
 
     return subprocess.CompletedProcess([], code, out, err)
+
+
+# ---------------------------------------------------------------------------
+# HPC-21: polling reads only new log bytes and reuses the app's backend
+# ---------------------------------------------------------------------------
+
+
+class TestPollingCost:
+    def test_live_log_is_read_incrementally(self, tmp_path, monkeypatch):
+        from quantui.app_slurm import _read_new_log_text
+
+        log = tmp_path / "live.log"
+        log.write_bytes("SCF 1 ✓\n".encode())
+        text, offset = _read_new_log_text(log, 0)
+        assert text == "SCF 1 ✓\n" and offset == log.stat().st_size
+
+        # Only the appended bytes are read on the next poll.
+        reads = []
+        real_open = open
+
+        def _spy(path, mode="r", *a, **kw):
+            fh = real_open(path, mode, *a, **kw)
+            real_read = fh.read
+            fh.read = lambda n=-1: reads.append(n) or real_read(n)
+            return fh
+
+        monkeypatch.setattr("builtins.open", _spy)
+        with real_open(log, "ab") as fh:
+            fh.write(b"SCF 2\n")
+        text, offset2 = _read_new_log_text(log, offset)
+        assert text == "SCF 2\n" and reads == [6]
+        monkeypatch.undo()
+
+        # A character split across two writes is not garbled.
+        with open(log, "ab") as fh:
+            fh.write("é".encode()[:1])
+        text, offset3 = _read_new_log_text(log, offset2)
+        assert text == "" and offset3 == offset2
+        with open(log, "ab") as fh:
+            fh.write("é".encode()[1:] + b"\n")
+        assert _read_new_log_text(log, offset3)[0] == "é\n"
+
+        # A shorter file (a new attempt's log) is read from the start.
+        log.write_text("new\n")
+        assert _read_new_log_text(log, offset3) == ("new\n", 4)
+
+    def test_backend_is_reused_per_app(self, registry):
+        from types import SimpleNamespace
+
+        from quantui.backends.dispatch import slurm_backend_for_app
+
+        app = SimpleNamespace(_job_registry=registry)
+        first = slurm_backend_for_app(app)
+        assert slurm_backend_for_app(app) is first
+        app._job_registry = JobRegistry(
+            jobs_root=registry.jobs_root / "other",
+            staging_root=registry.staging_root / "other",
+        )
+        second = slurm_backend_for_app(app)
+        assert second is not first and second.registry is app._job_registry
