@@ -1996,12 +1996,47 @@ def on_orb_range_changed(app: Any, _change: Any = None) -> None:
         pass
 
 
+def _iso_temp_dir(result_dir: Path) -> Path:
+    """Per-result scratch folder for cubes that must not go in the result.
+
+    Used when the result folder is read-only (the Viewer on a shared folder)
+    and for cubes decompressed from ``frontier_cubes/`` (derived copies of
+    files already in the result). Keyed on the result path, so one result's
+    cubes never shadow another's (audit VIZ-6).
+    """
+    import hashlib
+    import tempfile
+
+    key = hashlib.sha256(str(Path(result_dir).resolve()).encode()).hexdigest()[:16]
+    d = Path(tempfile.gettempdir()) / "quantui-isosurfaces" / key
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _iso_cube_dir(result_dir: Path) -> Path:
+    """``<result_dir>/isosurfaces`` when writable, else :func:`_iso_temp_dir`.
+
+    Cubes written here use deterministic names (formula + orbital/surface),
+    so regenerating a surface overwrites its cube instead of adding another
+    multi-MB timestamped file to the result and its export bundle (VIZ-6).
+    """
+    import os
+
+    d = Path(result_dir) / "isosurfaces"
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        if os.access(d, os.W_OK):
+            return d
+    except OSError:
+        pass
+    return _iso_temp_dir(result_dir)
+
+
 def render_orbital_isosurface(
     app: Any, orbital_label: str, render_token: int | None = None
 ) -> None:
     """Generate cube file and render orbital isosurface (Linux/WSL only)."""
     import re as _re
-    from datetime import datetime as _dt
 
     def _is_stale() -> bool:
         return render_token is not None and render_token != int(
@@ -2088,8 +2123,7 @@ def render_orbital_isosurface(
             except Exception:
                 result_dir = Path.cwd()
 
-        cube_dir = Path(result_dir) / "isosurfaces"
-        cube_dir.mkdir(parents=True, exist_ok=True)
+        cube_dir = _iso_cube_dir(Path(result_dir))
 
         formula = str(getattr(orb_info, "formula", "") or "molecule")
         safe_formula = _re.sub(r"[^A-Za-z0-9_.-]+", "_", formula).strip("._")
@@ -2098,8 +2132,8 @@ def render_orbital_isosurface(
         safe_orb = _re.sub(r"[^A-Za-z0-9_.-]+", "_", orbital_label).strip("._")
         if not safe_orb:
             safe_orb = "orbital"
-        ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
-        cube_path = cube_dir / f"{safe_formula}_{safe_orb}_{ts}.cube"
+        # Deterministic: regenerating this orbital overwrites its cube.
+        cube_path = cube_dir / f"{safe_formula}_{safe_orb}.cube"
 
         # Charge/spin aren't carried on the app's orbital-state attributes —
         # infer them from the MO occupations so charged/open-shell molecules
@@ -2164,11 +2198,15 @@ def render_orbital_isosurface(
             )
         except ImportError:
             # The Viewer has no PySCF: draw the HOMO/LUMO cube saved
-            # with the calculation, if this is one of them.
+            # with the calculation, if this is one of them. Decompress it to
+            # scratch, not into the result folder: the folder may be a
+            # read-only share, and the copy is derived data (audit VIZ-6).
             from quantui.orbital_visualization import (
                 frontier_cube_labels,
                 load_frontier_cube,
             )
+
+            cube_path = _iso_temp_dir(Path(result_dir)) / cube_path.name
 
             if not load_frontier_cube(result_dir, orb_idx, beta=_beta, dest=cube_path):
                 saved = frontier_cube_labels(result_dir)
@@ -2304,7 +2342,6 @@ def render_density_surface(
     sliders, PNG capture and cube export.
     """
     import re as _re
-    from datetime import datetime as _dt
 
     import numpy as _np
 
@@ -2368,15 +2405,14 @@ def render_density_surface(
                 result_dir = app._get_results_dir()
             except Exception:
                 result_dir = Path.cwd()
-        cube_dir = Path(result_dir) / "isosurfaces"
-        cube_dir.mkdir(parents=True, exist_ok=True)
+        cube_dir = _iso_cube_dir(Path(result_dir))
         orb_info = getattr(app, "_last_orb_info", None)
         formula = str(getattr(orb_info, "formula", "") or "molecule")
         safe_formula = (
             _re.sub(r"[^A-Za-z0-9_.-]+", "_", formula).strip("._") or "molecule"
         )
-        ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
-        stem = f"{safe_formula}_{mode}_{ts}"
+        # Deterministic: regenerating this surface overwrites its cube(s).
+        stem = f"{safe_formula}_{mode}"
         cube_path = cube_dir / f"{stem}.cube"
 
         _charge, _spin = infer_charge_and_spin(mol_atom, occ, basis=mol_basis)
@@ -4769,7 +4805,6 @@ def build_gallery_for_app(app: Any, each_side: int = 3) -> str:
     for unrestricted results and the current isovalue / colour scheme.
     """
     import re as _re
-    from datetime import datetime as _dt
 
     import numpy as _np
 
@@ -4835,11 +4870,9 @@ def build_gallery_for_app(app: Any, each_side: int = 3) -> str:
             result_dir = app._get_results_dir()
         except Exception:  # noqa: BLE001 — fall back to the working directory
             result_dir = Path.cwd()
-    out_dir = (
-        Path(result_dir)
-        / "isosurfaces"
-        / f"gallery_{_dt.now().strftime('%Y-%m-%d_%H-%M-%S-%f')}"
-    )
+    # One gallery folder per result; tiles are named by orbital, so a new
+    # gallery overwrites the last one instead of accumulating (VIZ-6).
+    out_dir = _iso_cube_dir(Path(result_dir)) / "gallery"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     tiles = []

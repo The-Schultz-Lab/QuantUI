@@ -4,6 +4,8 @@
   vib HTML cache must not serve the other theme's background).
 - VIZ-4: UHF/UKS HOMO-LUMO gap and orbital diagram span both spin channels.
 - VIZ-5: MO numbers the user sees or types are 1-based everywhere.
+- VIZ-6: the Viewer shows saved HOMO/LUMO cubes without writing to the
+  result folder; regenerated isosurface cubes overwrite, not accumulate.
 """
 
 from __future__ import annotations
@@ -249,3 +251,125 @@ class TestOneBasedMoNumbers:
 
         # 0-based index 4 is the water HOMO, MO #5 in the diagram hover.
         assert gallery_caption("HOMO", 4, None) == ("HOMO", "MO 5")
+
+
+# ── VIZ-6 ────────────────────────────────────────────────────────────────
+
+
+def _files_under(root):
+    return sorted(p.relative_to(root) for p in root.rglob("*") if p.is_file())
+
+
+class TestIsosurfaceCubesStayOutOfTheResult:
+    @pytest.fixture
+    def water_result_dir(self, tmp_path):
+        pytest.importorskip("pyscf")
+        from quantui.results_storage import save_orbitals
+        from quantui.session_calc import run_in_session
+
+        res = run_in_session(
+            Molecule(
+                ["O", "H", "H"],
+                [[0, 0, 0.117], [0, 0.757, -0.469], [0, -0.757, -0.469]],
+            ),
+            "RHF",
+            "STO-3G",
+            verbose=0,
+        )
+        rd = tmp_path / "result"
+        rd.mkdir()
+        save_orbitals(rd, res)
+        return rd, res
+
+    @staticmethod
+    def _orbital_app(rd, res):
+        from unittest.mock import MagicMock
+
+        app = QuantUIApp(viewer=True, results_dir=rd)
+        app._last_result_dir = rd
+        app._last_orb_info = MagicMock(
+            n_occupied=5, mo_energies_ev=[0.0] * 7, formula="H2O"
+        )
+        app._last_orb_mo_coeff = res.mo_coeff
+        app._last_orb_mol_atom = res.pyscf_mol_atom
+        app._last_orb_mol_basis = res.pyscf_mol_basis
+        app._last_orb_mo_occ = res.mo_occ
+        app._resolve_backend = lambda task: "plotlymol"
+        return app
+
+    @staticmethod
+    def _render(app, label, generator):
+        from unittest.mock import MagicMock, patch
+
+        with (
+            patch(
+                "quantui.orbital_visualization.generate_cube_from_arrays",
+                side_effect=generator,
+            ),
+            patch(
+                "quantui.orbital_visualization.plot_cube_isosurface",
+                return_value=MagicMock(),
+            ),
+            patch("plotly.io.to_html", return_value="<div>iso</div>"),
+        ):
+            app._render_orbital_isosurface(label)
+
+    def test_viewer_shows_saved_homo_from_a_read_only_folder(
+        self, water_result_dir, monkeypatch
+    ):
+        import os
+
+        rd, res = water_result_dir
+        before = _files_under(rd)
+        real_access = os.access
+        # Root ignores chmod, so make the result folder read-only by fiat.
+        monkeypatch.setattr(
+            os,
+            "access",
+            lambda p, mode, *a, **k: (
+                False
+                if mode & os.W_OK and str(p).startswith(str(rd))
+                else real_access(p, mode, *a, **k)
+            ),
+        )
+
+        def _no_pyscf(*a, **k):
+            raise ImportError("PySCF is required for cube file generation")
+
+        app = self._orbital_app(rd, res)
+        self._render(app, "HOMO", _no_pyscf)
+
+        cube = app._last_cube_path
+        assert cube is not None and cube.exists()
+        assert not str(cube).startswith(str(rd))
+        # Nothing new in the result folder (an empty isosurfaces/ dir at
+        # most, created by the mkdir probe).
+        assert _files_under(rd) == before
+
+    def test_frontier_cube_is_not_copied_into_a_writable_result(self, water_result_dir):
+        rd, res = water_result_dir
+        before = _files_under(rd)
+
+        def _no_pyscf(*a, **k):
+            raise ImportError("PySCF is required for cube file generation")
+
+        app = self._orbital_app(rd, res)
+        self._render(app, "HOMO", _no_pyscf)
+        assert app._last_cube_path is not None
+        assert _files_under(rd) == before
+
+    def test_regenerating_an_orbital_overwrites_its_cube(self, water_result_dir):
+        rd, res = water_result_dir
+        app = self._orbital_app(rd, res)
+        from quantui.orbital_visualization import load_frontier_cube
+
+        def _fake_cubegen(_atom, _basis, _coeff, idx, path, *a, **k):
+            assert load_frontier_cube(rd, 4, beta=False, dest=path)
+
+        self._render(app, "HOMO", _fake_cubegen)
+        first = app._last_cube_path
+        self._render(app, "HOMO", _fake_cubegen)
+        self._render(app, "LUMO", _fake_cubegen)
+        cubes = sorted((rd / "isosurfaces").glob("*.cube"))
+        assert first in cubes
+        assert [c.name for c in cubes] == ["H2O_HOMO.cube", "H2O_LUMO.cube"]
