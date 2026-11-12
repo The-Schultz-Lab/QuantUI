@@ -25,6 +25,31 @@ NH3 = (
         [-0.4689, -0.8121, -0.27],
     ],
 )
+# NH3 off C3v by ~0.0006 Å (still C3v within 0.01 Å): its e pairs split
+# by 0.2-0.8 mHa.
+NOISY_NH3 = (
+    ["N", "H", "H", "H"],
+    [
+        [0.00016, -0.00028, 0.09945],
+        [0.93712, 0.00038, -0.2695],
+        [-0.46877, 0.81238, -0.26995],
+        [-0.46838, -0.81172, -0.2706],
+    ],
+)
+# Staggered CH3CF3 (C3v), with a genuine occupied a2 F lone-pair level.
+CH3CF3 = (
+    ["C", "C", "F", "F", "F", "H", "H", "H"],
+    [
+        [0, 0, 0],
+        [0, 0, 1.53],
+        [1.26033, 0.0, 2.0138],
+        [-0.63017, 1.09148, 2.0138],
+        [-0.63017, -1.09148, 2.0138],
+        [0.51213, 0.88704, -0.3728],
+        [-1.02426, 0.0, -0.3728],
+        [0.51213, -0.88704, -0.3728],
+    ],
+)
 CO2 = (["O", "C", "O"], [[0, 0, -1.16], [0, 0, 0], [0, 0, 1.16]])
 CHFCLBR = (
     ["C", "H", "F", "Cl", "Br"],
@@ -177,46 +202,140 @@ class TestOrbitalLabels:
         (audit GEOM-5)."""
         from quantui.symmetry import label_mo_irreps
 
-        noisy = (
-            NH3[0],
-            [
-                [0.00016, -0.00028, 0.09945],
-                [0.93712, 0.00038, -0.2695],
-                [-0.46877, 0.81238, -0.26995],
-                [-0.46838, -0.81172, -0.2706],
-            ],
-        )
-        mol_atom, mf = self._scf(noisy, "6-31g")
+        mol_atom, mf = self._scf(NOISY_NH3, "6-31g")
         ir = label_mo_irreps(mol_atom, "6-31g", mf.mo_coeff, mo_energy=mf.mo_energy)
         assert ir.group == "C3v"
-        # The occupied labels are the defect (an occupied "1a2" instead of
-        # 1e). Higher virtuals on this deliberately distorted geometry
-        # include a pair split by ~0.8 mHa whose eigenvectors are an
-        # arbitrary, LAPACK-dependent mixture; asserting on those failed on
-        # one CI platform only (py3.9 runner) while passing on 3.9/3.11
-        # locally, so they are not pinned here.
         assert ir.labels[:5] == ["1a1", "2a1", "1e", "1e", "3a1"]
-        assert not any("a2" in lab for lab in ir.labels[:5])
+        # NH3 in 6-31G has no A2 SALCs at all. A virtual pair split by
+        # ~0.8 mHa once came out "a2" on one CI runner only, when
+        # PySCF's symmetrize_space picked a LAPACK-dependent basis.
+        assert not any("a2" in lab for lab in ir.labels)
+
+    @pytest.mark.parametrize("theta", [0.3, 0.7854, 1.2, 1.5708, 2.5])
+    def test_mixed_near_degenerate_pairs_keep_labels(self, theta):
+        """Rotating the two orbitals of every split e pair into each other
+        (any mixture an SCF on another platform could return) leaves the
+        labels unchanged."""
+        import numpy as np
+
+        from quantui.symmetry import label_mo_irreps
+
+        mol_atom, mf = self._scf(NOISY_NH3, "6-31g")
+        e, c = mf.mo_energy, mf.mo_coeff
+        ref = label_mo_irreps(mol_atom, "6-31g", c, mo_energy=e).labels
+        pairs = [i for i in range(len(e) - 1) if e[i + 1] - e[i] < 2e-3]
+        # 1e, 2e, 3e and the 4e virtual pair split by ~0.8 mHa.
+        assert len(pairs) == 4 and pairs[-1] > int((mf.mo_occ > 0).sum())
+        mixed = c.copy()
+        cos, sin = np.cos(theta), np.sin(theta)
+        for i in pairs:
+            mixed[:, i] = cos * c[:, i] + sin * c[:, i + 1]
+            mixed[:, i + 1] = -sin * c[:, i] + cos * c[:, i + 1]
+        ir = label_mo_irreps(mol_atom, "6-31g", mixed, mo_energy=e)
+        assert ir.group == "C3v"
+        assert ir.labels == ref
+        assert not any("a2" in lab for lab in ir.labels)
+
+    def test_labels_independent_of_degenerate_eigenbasis(self, monkeypatch):
+        """Emulate other LAPACK builds: every eigh call returns a random
+        (seeded) basis inside each degenerate eigenspace, which is equally
+        valid. The labels must not change and never include an a2 (the
+        old symmetrize_space path gave "a2" for ~1 seed in 5)."""
+        import numpy as np
+        import scipy.linalg
+
+        from quantui.symmetry import label_mo_irreps
+
+        mol_atom, mf = self._scf(NOISY_NH3, "6-31g")
+        args = (mol_atom, "6-31g", mf.mo_coeff)
+        ref = label_mo_irreps(*args, mo_energy=mf.mo_energy).labels
+        rng = np.random.default_rng(1)
+
+        def scrambled(orig):
+            def eigh(*a, **k):
+                w, v = orig(*a, **k)
+                v = np.array(v, copy=True)
+                start = 0
+                for stop in range(1, len(w) + 1):
+                    if stop == len(w) or abs(w[stop] - w[start]) > 1e-6:
+                        if stop - start > 1:
+                            q, _ = np.linalg.qr(
+                                rng.standard_normal((stop - start,) * 2)
+                            )
+                            v[:, start:stop] = v[:, start:stop] @ q
+                        start = stop
+                return w, v
+
+            return eigh
+
+        monkeypatch.setattr(np.linalg, "eigh", scrambled(np.linalg.eigh))
+        monkeypatch.setattr(scipy.linalg, "eigh", scrambled(scipy.linalg.eigh))
+        for _ in range(20):
+            ir = label_mo_irreps(*args, mo_energy=mf.mo_energy)
+            assert ir.labels == ref
+            assert not any("a2" in lab for lab in ir.labels)
+
+    def test_labels_do_not_use_symmetrize_space_with_energies(self, monkeypatch):
+        """symmetrize_space rebuilds each irrep from an arbitrary,
+        LAPACK-dependent basis; with energies the labelling must not
+        depend on it."""
+        from pyscf import symm
+
+        from quantui.symmetry import label_mo_irreps
+
+        mol_atom, mf = self._scf(NOISY_NH3, "6-31g")
+
+        def boom(*a, **k):
+            raise AssertionError("symmetrize_space called")
+
+        monkeypatch.setattr(symm, "symmetrize_space", boom)
+        ir = label_mo_irreps(mol_atom, "6-31g", mf.mo_coeff, mo_energy=mf.mo_energy)
+        assert ir is not None and ir.group == "C3v"
+
+    def test_c3v_salc_counts(self):
+        """A2 SALC counts from the AO characters: none for NH3/6-31G,
+        five in cc-pVTZ (H d and N f functions), one for CH3CF3/STO-3G."""
+        from pyscf import gto
+
+        from quantui.symmetry import (
+            BOHR_PER_ANGSTROM,
+            _c3v_salc_counts,
+            detection_tolerance,
+        )
+
+        tol = 0.01 * BOHR_PER_ANGSTROM
+
+        def counts(geom, basis, cart=False):
+            with detection_tolerance(0.01):
+                mol = gto.M(
+                    atom=list(zip(*geom)),
+                    basis=basis,
+                    cart=cart,
+                    symmetry=True,
+                    verbose=0,
+                )
+            return _c3v_salc_counts(mol, tol)
+
+        assert counts(NOISY_NH3, "6-31g") == {"a1": 7, "a2": 0, "e": 4}
+        assert counts(NOISY_NH3, "6-31g*", cart=True) == {"a1": 9, "a2": 0, "e": 6}
+        assert counts(NH3, "cc-pvtz") == {"a1": 21, "a2": 5, "e": 23}
+        assert counts(CH3CF3, "sto-3g") == {"a1": 11, "a2": 1, "e": 8}
+
+    def test_c3v_labels_capped_by_salc_counts(self):
+        from quantui.symmetry import _c3v_counts_fit
+
+        counts = {"a1": 7, "a2": 0, "e": 4}
+        good = ["1a1", "2a1", "1e", "1e", "3a1", "4a1", "2e", "2e"]
+        assert _c3v_counts_fit(good, counts)
+        assert not _c3v_counts_fit(good[:6] + ["1a2", "2a2"], counts)
+        assert _c3v_counts_fit(good, None)
 
     def test_genuine_a2_keeps_c3v_labels(self):
         """CH3CF3 (staggered, C3v) has an occupied a2 F lone-pair combination
         with no A' level near it: labelled 1a2, not dropped to Cs."""
         from quantui.symmetry import label_mo_irreps
 
-        geom = (
-            ["C", "C", "F", "F", "F", "H", "H", "H"],
-            [
-                [0, 0, 0],
-                [0, 0, 1.53],
-                [1.26033, 0.0, 2.0138],
-                [-0.63017, 1.09148, 2.0138],
-                [-0.63017, -1.09148, 2.0138],
-                [0.51213, 0.88704, -0.3728],
-                [-1.02426, 0.0, -0.3728],
-                [0.51213, -0.88704, -0.3728],
-            ],
-        )
-        mol_atom, mf = self._scf(geom)
+        mol_atom, mf = self._scf(CH3CF3)
         ir = label_mo_irreps(mol_atom, "sto-3g", mf.mo_coeff, mo_energy=mf.mo_energy)
         assert ir.group == "C3v"
         n_occ = int((mf.mo_occ > 0).sum())

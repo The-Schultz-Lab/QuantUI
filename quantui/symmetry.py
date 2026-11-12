@@ -481,6 +481,12 @@ def _numbered_linear(raw: Sequence[str]) -> List[str]:
 #: 0.4 mHa), so 1e-4 Ha was too tight.
 _C3V_E_PAIR_TOL = 5e-3
 
+#: Orbitals whose energies chain together within this gap (Hartree) form
+#: one near-degenerate cluster, which is rotated onto symmetry-pure
+#: combinations before labelling (:func:`_unmix_clusters`). The same window
+#: as the C3v pairing, so both halves of any pair it accepts were unmixed.
+_MO_CLUSTER_TOL = _C3V_E_PAIR_TOL
+
 
 def _c3v_from_cs(raw: Sequence[str], mo_energy: Sequence[float]) -> Optional[List[str]]:
     """Cs labels of a C3v molecule → C3v labels (a1, a2, e) via degeneracy.
@@ -527,6 +533,113 @@ def _c3v_from_cs(raw: Sequence[str], mo_energy: Sequence[float]) -> Optional[Lis
         out += [label, label] if pair else [label]
         i += 2 if pair else 1
     return out
+
+
+def _irrep_components(mol: Any, s: Any, coeff: Any) -> List[Any]:
+    """Per irrep Γ, ``Y_Γ`` with ``|Y_Γ[:, i]|²`` the weight of orbital i in Γ.
+
+    ``Y_Γ = L⁻¹ Σ_Γᵀ S C``, where ``Σ_Γ`` are the irrep's SALCs and
+    ``L Lᵀ = Σ_Γᵀ S Σ_Γ``. Linear in the columns of *coeff*, so rotating
+    orbitals rotates the matching columns of every ``Y_Γ``.
+    """
+    import numpy as np
+
+    out = []
+    for so in mol.symm_orb:
+        chol = np.linalg.cholesky(so.T @ s @ so)
+        out.append(np.linalg.solve(chol, so.T @ s @ coeff))
+    return out
+
+
+def _unmix_clusters(ys: List[Any], mo_energy: Any, tol: float) -> None:
+    """Rotate each near-degenerate cluster of orbitals onto irrep-pure ones.
+
+    A pair split by less than *tol* (e.g. a C3v e level on a geometry
+    symmetric only to within the detection tolerance) is an arbitrary,
+    LAPACK-dependent mixture of its two irreps. Within each cluster this
+    diagonalizes ``Σ_Γ γ·P_Γ`` (one Hermitian matrix, so the result stays
+    orthonormal and each eigenvector sits in one irrep Γ), then
+    diagonalizes the orbital energies inside each irrep's block so the
+    rotated orbitals keep an energy order. Applied to *ys* in place
+    (see :func:`_irrep_components`); labels then do not depend on how the
+    cluster was mixed.
+    """
+    import numpy as np
+
+    e = np.asarray(mo_energy, dtype=float)
+    order = np.argsort(e, kind="stable")
+    breaks: Any = np.nonzero(np.diff(e[order]) >= tol)[0] + 1
+    for idx in np.split(order, breaks):
+        if len(idx) < 2:
+            continue
+        w = [y[:, idx].T @ y[:, idx] for y in ys]
+        _, v = np.linalg.eigh(sum(g * wg for g, wg in enumerate(w)))
+        weights = np.array([np.einsum("ik,ij,jk->k", v, wg, v) for wg in w])
+        owner = weights.argmax(axis=0)
+        cols, energies = [], []
+        for g in np.unique(owner):
+            vg = v[:, owner == g]
+            eg, r = np.linalg.eigh(vg.T @ (e[idx][:, None] * vg))
+            cols.append(vg @ r)
+            energies.append(eg)
+        u = np.hstack(cols)[:, np.argsort(np.concatenate(energies), kind="stable")]
+        for y in ys:
+            y[:, idx] = y[:, idx] @ u
+
+
+def _c3_shell_character(ang: int, cart: bool) -> int:
+    """Trace of a 120° rotation on one shell of angular momentum *ang*."""
+    # Spherical l: sin((2l+1)π/3) / sin(π/3) = 1, 0, -1 for l ≡ 0, 1, 2 (mod 3).
+    # A Cartesian shell spans l ⊕ (l-2) ⊕ ...
+    ls = range(ang % 2, ang + 1, 2) if cart else (ang,)
+    return sum((1, 0, -1)[k % 3] for k in ls)
+
+
+def _c3v_salc_counts(mol: Any, tol_bohr: float) -> Optional[dict]:
+    """``{"a1", "a2", "e"}`` counts of C3v SALCs in *mol*'s AO basis.
+
+    From the characters of the AO representation: χ(E) = nao, χ(σv) from
+    the A′/A″ split of PySCF's Cs SALCs, and χ(C3) from the atoms on the C3
+    axis (only they map onto themselves). ``None`` when the axis cannot be
+    found or the counts do not come out as non-negative integers.
+    """
+    import numpy as np
+
+    group, orig, axes = _detect_full(mol._atom, tol_bohr)
+    if group != "C3v":
+        return None
+    axis = np.asarray(axes, dtype=float)[2]
+    rel = mol.atom_coords() - np.asarray(orig, dtype=float)
+    off_axis = np.linalg.norm(rel - np.outer(rel @ axis, axis), axis=1)
+    on_axis = set(np.nonzero(off_axis < tol_bohr)[0].tolist())
+    chi_c3 = sum(
+        mol.bas_nctr(b) * _c3_shell_character(mol.bas_angular(b), bool(mol.cart))
+        for b in range(mol.nbas)
+        if mol.bas_atom(b) in on_axis
+    )
+    sizes = {str(n): so.shape[1] for n, so in zip(mol.irrep_name, mol.symm_orb)}
+    if set(sizes) != {"A'", 'A"'}:
+        return None
+    chi_sigma = sizes["A'"] - sizes['A"']
+    nao = int(mol.nao)
+    num = {
+        "a1": nao + 2 * chi_c3 + 3 * chi_sigma,
+        "a2": nao + 2 * chi_c3 - 3 * chi_sigma,
+        "e": 2 * nao - 2 * chi_c3,
+    }
+    if any(v < 0 or v % 6 for v in num.values()):
+        return None
+    return {k: v // 6 for k, v in num.items()}
+
+
+def _c3v_counts_fit(labels: Sequence[str], counts: Optional[dict]) -> bool:
+    """No more distinct a1 / a2 / e levels in *labels* than SALCs allow."""
+    if counts is None:
+        return True
+    return all(
+        len({lab for lab in labels if lab.endswith(name)}) <= n
+        for name, n in counts.items()
+    )
 
 
 def label_mo_irreps(
@@ -585,20 +698,25 @@ def label_mo_irreps(
         if mol is None or mol.groupname == "C1" or mol.nao != coeff.shape[0]:
             return None
         s = mol.intor_symmetric("int1e_ovlp")
+        energies = None
+        if mo_energy is not None and len(mo_energy) == coeff.shape[1]:
+            energies = [float(e) for e in mo_energy]
         # Degenerate partners (e.g. the E pair of NH3) come out of an
-        # unsymmetrized SCF as arbitrary mixtures; rotate each degenerate
-        # space onto symmetry-pure combinations first.
-        coeff = symm.symmetrize_space(mol, coeff, s=s, check=False)
-        raw = symm.label_orb_symm(
-            mol, mol.irrep_name, mol.symm_orb, coeff, s=s, check=False
-        )
+        # unsymmetrized SCF as arbitrary mixtures. With energies, rotate
+        # each near-degenerate cluster onto symmetry-pure combinations.
+        # Without, fall back to PySCF's symmetrize_space; it rebuilds each
+        # irrep from an arbitrary (LAPACK-dependent) basis and matches it
+        # greedily, which mislabelled a split NH3 e pair as A″/A″ on one
+        # CI platform only, so it is not used when energies are known.
+        if energies is None:
+            coeff = symm.symmetrize_space(mol, coeff, s=s, check=False)
+        ys = _irrep_components(mol, s, coeff)
+        if energies is not None:
+            _unmix_clusters(ys, energies, _MO_CLUSTER_TOL)
+        weights = np.array([np.einsum("ki,ki->i", y, y) for y in ys])
+        raw = [str(mol.irrep_name[g]) for g in weights.argmax(axis=0)]
         # Purity: weight of each orbital in its assigned irrep's subspace.
-        purity = []
-        for i, name in enumerate(raw):
-            so = mol.symm_orb[list(mol.irrep_name).index(name)]
-            proj = so.T @ s @ coeff[:, i]
-            sso = so.T @ s @ so
-            purity.append(float(proj @ np.linalg.solve(sso, proj)))
+        purity = weights.max(axis=0).tolist()
         if min(purity) < min_purity:
             logger.debug(
                 "MO irreps skipped: min purity %.3f < %.2f", min(purity), min_purity
@@ -610,8 +728,16 @@ def label_mo_irreps(
             labels = _numbered_linear(names)
         else:
             c3v = None
-            if top == "C3v" and group == "Cs" and mo_energy is not None:
-                c3v = _c3v_from_cs(names, [float(e) for e in mo_energy])
+            if top == "C3v" and group == "Cs" and energies is not None:
+                c3v = _c3v_from_cs(names, energies)
+                # Belt and braces: never more a2 (or a1, e) levels than the
+                # AO basis has SALCs of that irrep (NH3 in 6-31G has no a2).
+                if c3v is not None:
+                    tol_bohr = tolerance_angstrom * BOHR_PER_ANGSTROM
+                    counts = _c3v_salc_counts(mol, tol_bohr)
+                    if not _c3v_counts_fit(c3v, counts):
+                        logger.debug("C3v labels exceed SALC counts %s", counts)
+                        c3v = None
             if c3v is not None:
                 labels, group = c3v, "C3v"
             else:
