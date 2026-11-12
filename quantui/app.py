@@ -6189,6 +6189,125 @@ class QuantUIApp:
             render_html_fn=_render_molecule_html,
         )
 
+    def _persist_result_extras(
+        self, saved_dir: Path, result, ct: str, calc_mol, pre_opt, ana_ctx
+    ) -> None:
+        """Write the files that accompany a saved result (thumbnail,
+        trajectories, orbitals, Molden).
+
+        Each is guarded on its own: the result itself is already saved, so a
+        failure here costs that one extra file, never the others, and never
+        marks the run unsaved (audit APP-5). Failures are recorded in the
+        event log.
+        """
+        from quantui.results_storage import (
+            save_orbitals,
+            save_thumbnail,
+            save_trajectory,
+        )
+
+        def _guarded(step: str, fn) -> None:
+            try:
+                fn()
+            except Exception as exc:  # noqa: BLE001 — one extra, not the save
+                try:
+                    _calc_log.log_event(
+                        "save_extra_error",
+                        f"{step}: {type(exc).__name__}: {exc}"[:300],
+                    )
+                except Exception:  # noqa: BLE001 — telemetry self-guard
+                    pass
+
+        def _thumbnail() -> None:
+            from quantui import load_result
+
+            saved_data = load_result(saved_dir)
+            ana_ctx.timestamp = str(saved_data.get("timestamp", ""))
+            save_thumbnail(saved_dir, saved_data)
+
+        _guarded("thumbnail", _thumbnail)
+
+        # Persist trajectory so the history viewer can replay it, plus the
+        # external-tool-friendly formats: multi-frame XYZ (any viewer) and ASE
+        # .traj (ASE-GUI + ASE Python post-processing).
+        if ct in ("Geometry Opt", "Transition State", "IRC", "PES Scan"):
+            traj = getattr(
+                result,
+                "coordinates_list" if ct == "PES Scan" else "trajectory",
+                None,
+            )
+            e_list = getattr(result, "energies_hartree", []) or []
+            if traj:
+                _guarded(
+                    "trajectory",
+                    lambda: save_trajectory(saved_dir, traj, e_list),
+                )
+
+                def _external_traj() -> None:
+                    from quantui.results_storage import (
+                        save_trajectory_ase as _save_traj_ase,
+                    )
+                    from quantui.results_storage import (
+                        save_trajectory_xyz as _save_traj_xyz,
+                    )
+
+                    _save_traj_xyz(saved_dir, frames=traj, energies=e_list)
+                    _save_traj_ase(saved_dir, frames=traj, energies=e_list)
+
+                _guarded("trajectory export", _external_traj)
+        # Persist pre-opt geometry trajectory for Frequency runs.
+        if ct == "Frequency" and pre_opt is not None:
+            pre_traj = getattr(pre_opt, "trajectory", None)
+            pre_e = list(getattr(pre_opt, "energies_hartree", []))
+            if pre_traj:
+                _guarded(
+                    "pre-opt trajectory",
+                    lambda: save_trajectory(
+                        saved_dir,
+                        pre_traj,
+                        pre_e,
+                        filename="preopt_trajectory.json",
+                    ),
+                )
+        # Persist MO data for orbital diagram + isosurface replay.
+        if ct in (
+            "Single Point",
+            "Geometry Opt",
+            "Transition State",
+            "Frequency",
+            "UV-Vis (TD-DFT)",
+        ):
+            _guarded("orbitals", lambda: save_orbitals(saved_dir, result))
+        # A Molden companion file so users can open results in Avogadro /
+        # IQmol / Jmol. For SP / GeoOpt this writes orbitals + structure; for
+        # Frequency it writes structure + [FREQ] / [FR-NORM-COORD] blocks so
+        # Avogadro can animate vibrations directly (for a Transition State,
+        # including the imaginary mode).
+        if ct in (
+            "Single Point",
+            "Geometry Opt",
+            "Transition State",
+            "Frequency",
+        ):
+
+            def _molden() -> None:
+                from quantui.results_storage import save_molden as _save_molden
+
+                _save_molden(
+                    saved_dir,
+                    mo_energy_hartree=getattr(result, "mo_energy_hartree", None),
+                    mo_occ=getattr(result, "mo_occ", None),
+                    mo_coeff=getattr(result, "mo_coeff", None),
+                    pyscf_mol_atom=getattr(result, "pyscf_mol_atom", None),
+                    pyscf_mol_basis=getattr(result, "pyscf_mol_basis", None),
+                    charge=int(getattr(calc_mol, "charge", 0)),
+                    multiplicity=int(getattr(calc_mol, "multiplicity", 1)),
+                    frequencies_cm1=getattr(result, "frequencies_cm1", None),
+                    normal_modes=getattr(result, "displacements", None),
+                )
+
+            _guarded("molden", _molden)
+
     def _show_result_log(self, saved_dir: Path, log_text: str) -> None:
         """Populate the result-directory label and output-log accordion.
 
@@ -7539,15 +7658,16 @@ class QuantUIApp:
             except Exception:
                 pass
 
-            # Persist to disk
+            # Persist to disk. The save itself and the extras written next to
+            # it are guarded separately: a failed save_result means nothing
+            # reached History, and the student must be told so (audit APP-5);
+            # a failed thumbnail/trajectory/Molden extra does not unsave the
+            # result.
             _mark("persist_begin")
+            _save_error: Optional[str] = None
+            _saved_dir: Optional[Path] = None
             try:
-                from quantui import load_result, save_result
-                from quantui.results_storage import (
-                    save_orbitals,
-                    save_thumbnail,
-                    save_trajectory,
-                )
+                from quantui import save_result
 
                 _saved_dir = save_result(
                     result,
@@ -7556,109 +7676,53 @@ class QuantUIApp:
                     spectra=save_spectra,
                     molecule=calc_mol,
                 )
+            except Exception as _save_exc:
+                _saved_dir = None
+                _save_error = f"{type(_save_exc).__name__}: {_save_exc}"
+                # Nothing of this run is on disk: exports must not land in
+                # the previous run's folder.
+                self._last_result_dir = None
+                try:
+                    self._export_bundle_btn.disabled = True
+                except Exception:
+                    pass
+                try:
+                    from quantui import calc_log as _clog
+
+                    _clog.log_event("save_error", _save_error[:300])
+                except Exception:
+                    pass
+                try:
+                    log.write(f"\n⚠ The result could not be saved: {_save_error}\n")
+                except Exception:
+                    pass
+                self.result_output.append_display_data(
+                    HTML(
+                        '<div style="background:#fef2f2;border:1px solid #fca5a5;'
+                        'border-radius:8px;padding:14px;margin:8px 0">'
+                        f'<b style="color:{_theme.css.ACCENT_ERROR}">'
+                        "&#9888; Result NOT saved</b><br>"
+                        '<small style="color:#7f1d1d">The calculation finished, '
+                        "but writing it to the results folder failed: "
+                        f"<code>{_html.escape(_save_error)}</code>. It is not in "
+                        "History, and the export buttons have no results folder "
+                        "to write to. Free some disk space (or fix the folder's "
+                        "permissions) and run again.</small></div>"
+                    )
+                )
+            if _saved_dir is not None:
                 _run_saved = True
                 self._last_result_dir = _saved_dir
+                _ana_ctx.result_dir = _saved_dir
                 # Result folder is now on disk —
                 # the "Export bundle (.zip)" button has something to zip.
                 try:
                     self._export_bundle_btn.disabled = False
                 except Exception:
                     pass
-                _saved_data = load_result(_saved_dir)
-                save_thumbnail(_saved_dir, _saved_data)
-                _ana_ctx.result_dir = _saved_dir
-                _ana_ctx.timestamp = str(_saved_data.get("timestamp", ""))
-                # Persist trajectory so history viewer can replay it.
-                if ct in ("Geometry Opt", "Transition State", "IRC", "PES Scan"):
-                    _traj = getattr(
-                        result,
-                        "coordinates_list" if ct == "PES Scan" else "trajectory",
-                        None,
-                    )
-                    _e_list = getattr(result, "energies_hartree", [])
-                    if _traj:
-                        save_trajectory(_saved_dir, _traj, _e_list or [])
-                        # Also write
-                        # external-tool-friendly trajectory formats.
-                        # Multi-frame XYZ (any viewer) and ASE .traj
-                        # (ASE-GUI + ASE Python post-processing). Both
-                        # best-effort: failures are caught by the outer
-                        # save try/except so the calc still completes.
-                        try:
-                            from quantui.results_storage import (
-                                save_trajectory_ase as _save_traj_ase,
-                            )
-                            from quantui.results_storage import (
-                                save_trajectory_xyz as _save_traj_xyz,
-                            )
-
-                            _save_traj_xyz(
-                                _saved_dir,
-                                frames=_traj,
-                                energies=_e_list or [],
-                            )
-                            _save_traj_ase(
-                                _saved_dir,
-                                frames=_traj,
-                                energies=_e_list or [],
-                            )
-                        except Exception:
-                            pass
-                # Persist pre-opt geometry trajectory for Frequency runs.
-                if ct == "Frequency" and _pre_opt is not None:
-                    _pre_traj = getattr(_pre_opt, "trajectory", None)
-                    _pre_e = list(getattr(_pre_opt, "energies_hartree", []))
-                    if _pre_traj:
-                        save_trajectory(
-                            _saved_dir,
-                            _pre_traj,
-                            _pre_e,
-                            filename="preopt_trajectory.json",
-                        )
-                # Persist MO data for orbital diagram + isosurface replay.
-                if ct in (
-                    "Single Point",
-                    "Geometry Opt",
-                    "Transition State",
-                    "Frequency",
-                    "UV-Vis (TD-DFT)",
-                ):
-                    save_orbitals(_saved_dir, result)
-                # Write a Molden-format companion
-                # file so users can open results in Avogadro / IQmol /
-                # Jmol. Best-effort — failures are swallowed by the
-                # outer try block above and the calc still completes.
-                # For SP / GeoOpt this writes orbitals + structure; for
-                # Frequency it writes structure + [FREQ] / [FR-NORM-COORD]
-                # blocks so Avogadro can animate vibrations directly
-                # (for a Transition State, including the imaginary mode).
-                if ct in (
-                    "Single Point",
-                    "Geometry Opt",
-                    "Transition State",
-                    "Frequency",
-                ):
-                    try:
-                        from quantui.results_storage import (
-                            save_molden as _save_molden,
-                        )
-
-                        _save_molden(
-                            _saved_dir,
-                            mo_energy_hartree=getattr(
-                                result, "mo_energy_hartree", None
-                            ),
-                            mo_occ=getattr(result, "mo_occ", None),
-                            mo_coeff=getattr(result, "mo_coeff", None),
-                            pyscf_mol_atom=getattr(result, "pyscf_mol_atom", None),
-                            pyscf_mol_basis=getattr(result, "pyscf_mol_basis", None),
-                            charge=int(getattr(calc_mol, "charge", 0)),
-                            multiplicity=int(getattr(calc_mol, "multiplicity", 1)),
-                            frequencies_cm1=getattr(result, "frequencies_cm1", None),
-                            normal_modes=getattr(result, "displacements", None),
-                        )
-                    except Exception:
-                        pass
+                self._persist_result_extras(
+                    _saved_dir, result, ct, calc_mol, _pre_opt, _ana_ctx
+                )
                 self._queue_main_thread_callback(self._refresh_results_browser)
                 self._queue_main_thread_callback(self._populate_compare_list)
                 self._queue_main_thread_callback(
@@ -7671,16 +7735,6 @@ class QuantUIApp:
                     _saved_dir,
                     log.getvalue(),
                 )
-            except Exception as _save_exc:
-                try:
-                    from quantui import calc_log as _clog
-
-                    _clog.log_event(
-                        "save_error",
-                        f"{type(_save_exc).__name__}: {_save_exc}"[:300],
-                    )
-                except Exception:
-                    pass
             _mark("persist_done")
 
             # Activate analysis panels after scheduling refresh/update callbacks.
@@ -7755,7 +7809,12 @@ class QuantUIApp:
 
             _mark("success_done")
             _elapsed_total = _tail_marks["success_done"] - _run_wall_t
-            self.run_status.value = f"Done in {_elapsed_total:.1f} s."
+            if _save_error is None:
+                self.run_status.value = f"Done in {_elapsed_total:.1f} s."
+            else:
+                self.run_status.value = (
+                    f"Finished in {_elapsed_total:.1f} s — NOT saved: {_save_error}"
+                )
 
             try:
                 _tail_end = _tail_marks.get("success_done")
