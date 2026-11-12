@@ -516,3 +516,38 @@ def test_calibration_worker_reports_opt_steps(monkeypatch, tmp_path):
     assert msg["status"] == "ok", msg
     assert msg["n_steps"] == 5
     assert msg["n_iterations"] is None
+
+
+# ---------------------------------------------------------------------------
+# DATA-15 — checkpoint retention / resume key
+# ---------------------------------------------------------------------------
+
+
+def test_coords_digest_ignores_sign_of_zero():
+    from quantui.checkpoint import _coords_digest
+
+    a = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]]
+    b = [[-0.0, 0.0, -0.0], [0.0, -0.0000001, 0.74]]
+    assert _coords_digest(a) == _coords_digest(b)
+    assert _coords_digest(a) != _coords_digest([[0.0, 0.0, 0.0], [0.0, 0.0, 0.75]])
+
+
+def test_prune_removes_old_unreadable_checkpoint_dirs(tmp_path):
+    from quantui import checkpoint as C
+
+    old = time.time() - 60 * 86400
+    missing = tmp_path / ("a" * 16)
+    missing.mkdir()
+    corrupt = tmp_path / ("b" * 16)
+    corrupt.mkdir()
+    (corrupt / "meta.json").write_text("{not json")
+    fresh = tmp_path / ("c" * 16)
+    fresh.mkdir()  # e.g. a checkpoint being created right now
+    foreign = tmp_path / "not-a-checkpoint"
+    foreign.mkdir()
+    for p in (missing, corrupt / "meta.json", corrupt, foreign):
+        os.utime(p, (old, old))
+
+    assert C.prune(tmp_path, max_age_days=14) == 2
+    assert not missing.exists() and not corrupt.exists()
+    assert fresh.exists() and foreign.exists()
