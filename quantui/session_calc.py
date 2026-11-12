@@ -29,7 +29,8 @@ from .molecule import Molecule
 
 logger = logging.getLogger(__name__)
 
-# NIST 2018 CODATA — consistent with PySCF's internal constant
+# CODATA 2018. PySCF's ``pyscf.data.nist.HARTREE2EV`` is the CODATA 2014
+# value 27.21138602; the difference (~6e-8 eV/Ha) is negligible here.
 HARTREE_TO_EV: float = 27.211386245988
 
 

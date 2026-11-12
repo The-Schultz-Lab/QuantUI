@@ -23,8 +23,11 @@ Layout
       "n_frames": 24,
       "amplitude": 0.4,
       "renderer": "py3dmol",
+      "fps": 12,
+      "bgcolor": "#ffffff",
       "modes": {
-        "1": {"cached": true, "file": "mode_001.html", "freq_cm1": 1623.4},
+        "1": {"cached": true, "file": "mode_001.html", "mac": "<hex>",
+              "freq_cm1": 1623.4},
         "2": {"cached": false}
       }
     }
