@@ -42,6 +42,11 @@ def frontier_orbital_energies(mo_energy: Any, mo_occ: Any) -> Optional[tuple]:
     gap of a radical (OH, UHF/STO-3G: 28.6 eV alpha-only vs 20.1 eV), audit
     VIZ-4. A channel's HOMO/LUMO follow the aufbau count of occupied
     orbitals (energies are sorted per channel), matching the orbital diagram.
+
+    One-electron systems (H atom, H2+): PySCF sets the two-electron potential
+    to zero when ``mol.nelectron <= 1``, so the empty beta orbitals merely
+    duplicate the alpha ones and would give a spurious zero gap. Only the
+    occupied channel is used then (the alpha gap).
     """
     import numpy as _np
 
@@ -51,6 +56,8 @@ def frontier_orbital_energies(mo_energy: Any, mo_occ: Any) -> Optional[tuple]:
         channels = [(e, o)]
     else:
         channels = [(e[k], o[k]) for k in range(e.shape[0])]
+        if float(o.sum()) <= 1.0 + 1e-8:
+            channels = [(ec, oc) for ec, oc in channels if (oc > 0).any()]
     homos: list = []
     lumos: list = []
     for ec, oc in channels:

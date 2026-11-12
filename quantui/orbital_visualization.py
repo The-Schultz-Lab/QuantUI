@@ -185,8 +185,12 @@ def orbital_info_from_arrays(
     if mo_energy.ndim == 2:
         # UHF/UKS: alpha in the primary fields, beta alongside (audit VIZ-4).
         occ_b = mo_occ[1] if mo_occ.ndim == 2 else mo_occ
-        beta_ev = mo_energy[1] * HARTREE_TO_EV
-        n_occ_b = int((occ_b > 0).sum())
+        # One-electron systems: PySCF's empty beta orbitals just duplicate
+        # alpha (zero two-electron potential), so show alpha alone
+        # (see session_calc.frontier_orbital_energies).
+        if float(mo_occ.sum() if mo_occ.ndim == 2 else 2 * mo_occ.sum()) > 1.0 + 1e-8:
+            beta_ev = mo_energy[1] * HARTREE_TO_EV
+            n_occ_b = int((occ_b > 0).sum())
         mo_energy = mo_energy[0]
     if mo_occ.ndim == 2:
         mo_occ = mo_occ[0]

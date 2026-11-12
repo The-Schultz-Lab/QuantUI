@@ -133,6 +133,24 @@ class TestUnrestrictedFrontierGap:
         # Restricted input is unchanged.
         assert homo_lumo_gap_hartree(e[0], occ[0]) == pytest.approx(0.9)
 
+    def test_one_electron_uhf_uses_the_alpha_gap(self):
+        # PySCF zeroes the two-electron potential for nelectron <= 1, so the
+        # empty beta orbitals duplicate alpha; the frontier rule would give 0.
+        pyscf = pytest.importorskip("pyscf")
+        from quantui.orbital_visualization import orbital_info_from_arrays
+        from quantui.session_calc import HARTREE_TO_EV, homo_lumo_gap_hartree
+
+        mol = pyscf.gto.M(atom="H 0 0 0", basis="6-31g", spin=1, verbose=0)
+        mf = pyscf.scf.UHF(mol).run()
+        alpha_gap = float(mf.mo_energy[0][1] - mf.mo_energy[0][0])
+        assert alpha_gap == pytest.approx(0.959, abs=0.002)
+        assert homo_lumo_gap_hartree(mf.mo_energy, mf.mo_occ) == pytest.approx(
+            alpha_gap
+        )
+        info = orbital_info_from_arrays(mf.mo_energy, mf.mo_occ, "H")
+        assert not info.unrestricted
+        assert info.homo_lumo_gap_ev == pytest.approx(alpha_gap * HARTREE_TO_EV)
+
     def test_orbital_info_gap_is_frontier_gap(self):
         from quantui.orbital_visualization import orbital_info_from_arrays
 
