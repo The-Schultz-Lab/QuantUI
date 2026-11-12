@@ -89,6 +89,17 @@ def _group_leader_with_child(pids):  # pragma: no cover - runs in a fork child
     time.sleep(60)
 
 
+def _running(pid):
+    """True while *pid* exists and is not a zombie. The process can vanish
+    between any two /proc reads (ENOENT, or ESRCH from a stat file whose
+    process was just reaped); either way it is gone."""
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            return "Z" not in fh.read().split()[2]
+    except OSError:
+        return False
+
+
 @pytest.mark.skipif(not hasattr(os, "killpg"), reason="POSIX process groups")
 def test_terminate_worker_tree_kills_grandchildren():
     """Stop/Skip/timeout must not orphan the worker's pool processes."""
@@ -105,12 +116,7 @@ def test_terminate_worker_tree_kills_grandchildren():
         assert not worker.is_alive()
         deadline = time.time() + 10
         while time.time() < deadline:
-            alive = [
-                k
-                for k in kids
-                if os.path.exists(f"/proc/{k}")
-                and "Z" not in open(f"/proc/{k}/stat").read().split()[2]
-            ]
+            alive = [k for k in kids if _running(k)]
             if not alive:
                 break
             time.sleep(0.1)
