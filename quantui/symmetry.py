@@ -475,22 +475,44 @@ def _numbered_linear(raw: Sequence[str]) -> List[str]:
     return out
 
 
-def _c3v_from_cs(raw: Sequence[str], mo_energy: Sequence[float]) -> List[str]:
+#: Largest energy gap (Hartree) between the A' and A'' halves of a C3v e
+#: pair. A geometry symmetric only to within the 0.01 Å detection
+#: tolerance splits an e pair by a few tenths of a mHa (NH3, ±0.0006 Å:
+#: 0.4 mHa), so 1e-4 Ha was too tight.
+_C3V_E_PAIR_TOL = 5e-3
+
+
+def _c3v_from_cs(raw: Sequence[str], mo_energy: Sequence[float]) -> Optional[List[str]]:
     """Cs labels of a C3v molecule → C3v labels (a1, a2, e) via degeneracy.
 
-    C3v → Cs correlation: A1 → A', A2 → A'', E → A' + A''. A degenerate
-    pair is an e level; a lone A' is a1, a lone A'' is a2. Unambiguous,
-    unlike most other non-abelian groups (e.g. Td → D2 cannot separate
-    A1 from A2), which keep their subgroup labels.
+    C3v → Cs correlation: A1 → A', A2 → A'', E → A' + A''. An e level is
+    an adjacent A'/A'' pair (one of each) within ``_C3V_E_PAIR_TOL``; a
+    lone A' is a1. A lone A'' would be a2, but it is far more often half
+    of an e pair split by an imperfect geometry, so the mapping is
+    refused (``None``: keep the Cs labels) rather than invent an a2.
+    Unambiguous otherwise, unlike most other non-abelian groups (e.g.
+    Td → D2 cannot separate A1 from A2), which keep their subgroup labels.
     """
-    tol = 1e-4  # Hartree
+    n = len(raw)
+
+    def gap(i: int) -> Optional[float]:
+        """|ΔE| of orbitals i, i+1 when they can form an e pair, else None."""
+        if i + 1 >= n or {raw[i], raw[i + 1]} != {"A'", 'A"'}:
+            return None
+        d = abs(mo_energy[i + 1] - mo_energy[i])
+        return d if d < _C3V_E_PAIR_TOL else None
+
     counts: dict = {}
     out: List[str] = []
     i = 0
-    n = len(raw)
     while i < n:
-        pair = i + 1 < n and abs(mo_energy[i + 1] - mo_energy[i]) < tol
-        name = "e" if pair else ("a1" if raw[i] == "A'" else "a2")
+        g = gap(i)
+        g_next = gap(i + 1)
+        # A' A'' A' with the closer pair second: orbital i is the lone a1.
+        pair = g is not None and (g_next is None or g <= g_next)
+        if not pair and raw[i] != "A'":
+            return None
+        name = "e" if pair else "a1"
         counts[name] = counts.get(name, 0) + 1
         label = f"{counts[name]}{name}"
         out += [label, label] if pair else [label]
@@ -577,11 +599,14 @@ def label_mo_irreps(
         group, top = str(mol.groupname), str(mol.topgroup)
         if group in ("Dooh", "Coov"):
             labels = _numbered_linear(names)
-        elif top == "C3v" and group == "Cs" and mo_energy is not None:
-            labels = _c3v_from_cs(names, [float(e) for e in mo_energy])
-            group = "C3v"
         else:
-            labels = _numbered(names)
+            c3v = None
+            if top == "C3v" and group == "Cs" and mo_energy is not None:
+                c3v = _c3v_from_cs(names, [float(e) for e in mo_energy])
+            if c3v is not None:
+                labels, group = c3v, "C3v"
+            else:
+                labels = _numbered(names)
         return MOIrreps(labels=labels, group=group, top_group=top)
     except ImportError:
         return None
