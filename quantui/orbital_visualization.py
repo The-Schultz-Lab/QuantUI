@@ -903,7 +903,10 @@ def generate_cube_file(
             "  conda install -c conda-forge pyscf"
         ) from exc
 
-    data = np.load(results_path, allow_pickle=True)
+    # allow_pickle=False: results.npz may come from someone else's folder, and
+    # unpickling an object array runs arbitrary code. Every key read here is a
+    # plain numeric or string array (mol_atom/mol_basis are saved as str).
+    data = np.load(results_path, allow_pickle=False)
     mo_coeff = data["mo_coeff"]
     mo_occ = data["mo_occ"] if "mo_occ" in data else None
     if mo_coeff.ndim == 3:
