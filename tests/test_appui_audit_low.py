@@ -4,6 +4,7 @@
 - APP-15: calc-type switching leaks no widgets; Cancel during error
   handling; TS/IRC badges and History chips; Files-tab default selection;
   platform-specific dependency hint.
+- UI-10: a reloaded PES/IRC profile whose first point failed is plotted.
 """
 
 from __future__ import annotations
@@ -173,3 +174,66 @@ def test_dependency_hint_is_platform_specific():
     linux = _dependency_hint("linux")
     assert "Windows" not in linux and "Apptainer" not in linux
     assert "pip install" in linux
+
+
+# ── UI-10 ─────────────────────────────────────────────────────────────────
+
+
+def _capture_pes(app, monkeypatch) -> list:
+    shown_results: list = []
+    monkeypatch.setattr(
+        app,
+        "_show_pes_scan_result",
+        lambda r: shown_results.append(r) or True,
+    )
+    return shown_results
+
+
+@pytest.mark.parametrize("failed", [float("nan"), None])
+def test_reloaded_pes_scan_with_failed_first_point_is_plotted(app, monkeypatch, failed):
+    import math
+    from types import SimpleNamespace
+
+    from quantui.app_analysis import pop_pes_plot
+
+    got = _capture_pes(app, monkeypatch)
+    ctx = SimpleNamespace(
+        live_result=None,
+        result_dir=None,
+        spectra_data={
+            "pes_scan": {
+                "scan_type": "bond",
+                "atom_indices": [0, 1],
+                "scan_parameter_values": [0.6, 0.7, 0.8],
+                "energies_hartree": [failed, -1.10, -1.11],
+            }
+        },
+    )
+    assert pop_pes_plot(app, ctx)
+    rel = got[0].energies_relative_kcal
+    assert math.isnan(rel[0])
+    assert rel[2] == pytest.approx(0.0)
+    assert rel[1] == pytest.approx(0.01 * 627.5094740631)
+
+
+def test_reloaded_irc_with_failed_first_point_is_plotted(app, monkeypatch):
+    import math
+    from types import SimpleNamespace
+
+    from quantui.app_analysis import pop_irc_profile
+
+    got = _capture_pes(app, monkeypatch)
+    ctx = SimpleNamespace(
+        live_result=None,
+        result_dir=None,
+        spectra_data={
+            "irc": {
+                "energies_hartree": [float("nan"), -1.0, -1.02],
+                "reaction_coordinate": [-1.0, 0.0, 1.0],
+            }
+        },
+    )
+    assert pop_irc_profile(app, ctx)
+    rel = got[0].energies_relative_kcal
+    assert math.isnan(rel[0])
+    assert rel[2] == pytest.approx(0.0)

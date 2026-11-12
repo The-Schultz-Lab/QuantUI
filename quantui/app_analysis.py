@@ -1482,11 +1482,18 @@ def pop_pes_plot(app: Any, ctx: Any) -> bool:
         scan = ctx.spectra_data.get("pes_scan", {})
         if not scan or not scan.get("energies_hartree"):
             return False
-        energies_ha = scan["energies_hartree"]
+        # Failed scan points are saved as NaN (or null): a NaN first element
+        # would make plain min() return NaN and blank the whole profile.
+        energies_ha = [
+            float("nan") if e is None else float(e) for e in scan["energies_hartree"]
+        ]
+        finite = [e for e in energies_ha if e == e]
+        if not finite:
+            return False
         atom_indices = scan.get("atom_indices", [])
         scan_type = scan.get("scan_type", "bond")
         x_vals = scan.get("scan_parameter_values", [])
-        e_min = min(energies_ha)
+        e_min = min(finite)
         hartree_to_kcal = 627.5094740631
         e_rel = [(e - e_min) * hartree_to_kcal for e in energies_ha]
         idx = [i + 1 for i in atom_indices]
@@ -1524,9 +1531,13 @@ def pop_irc_profile(app: Any, ctx: Any) -> bool:
         block = ctx.live_result.to_spectra()
     if block is None:
         block = (ctx.spectra_data or {}).get("irc") or {}
-    energies = list(block.get("energies_hartree") or [])
+    energies = [
+        float("nan") if e is None else float(e)
+        for e in (block.get("energies_hartree") or [])
+    ]
     s_vals = list(block.get("reaction_coordinate") or [])
-    if len(energies) < 2 or len(s_vals) != len(energies):
+    finite = [e for e in energies if e == e]
+    if len(energies) < 2 or len(s_vals) != len(energies) or not finite:
         _set_panel_unavailable_message(
             app, "PES Scan", "Not available: this IRC result has no path data."
         )
@@ -1543,7 +1554,7 @@ def pop_irc_profile(app: Any, ctx: Any) -> bool:
         except Exception:  # noqa: BLE001 — the plot does not need them
             frames = []
     hartree_to_kcal = 627.5094740631
-    e_min = min(energies)
+    e_min = min(finite)  # NaN-safe: a NaN first point no longer poisons min()
     result = _types_mod.SimpleNamespace(
         scan_type="irc",
         atom_indices=[],
