@@ -1148,6 +1148,19 @@ def _calibration_log_path(timestamp: str) -> Path:
     return base / f"calibration_{safe_ts}.log"
 
 
+def _calibration_json_path() -> Path:
+    """Return the path of the last-calibration summary file.
+
+    ``~/.quantui/calibration.json`` by default; ``QUANTUI_CALIBRATION_PATH``
+    overrides it (the test suite points it at a temp file so a test run never
+    replaces the developer's real calibration record).
+    """
+    import os as _os
+
+    env = _os.environ.get("QUANTUI_CALIBRATION_PATH")
+    return Path(env) if env else Path.home() / ".quantui" / "calibration.json"
+
+
 def _save_calibration_json(result: CalibrationResult, log_path: Path) -> None:
     """Persist the current ``CalibrationResult`` snapshot to disk.
 
@@ -1158,7 +1171,7 @@ def _save_calibration_json(result: CalibrationResult, log_path: Path) -> None:
     """
     import json as _json
 
-    cal_path = Path.home() / ".quantui" / "calibration.json"
+    cal_path = _calibration_json_path()
     try:
         cal_path.parent.mkdir(parents=True, exist_ok=True)
         cal_path.write_text(
@@ -1543,7 +1556,7 @@ def load_last_calibration() -> Optional[dict]:
     """Return the last calibration summary dict, or ``None`` if absent."""
     import json
 
-    path = Path.home() / ".quantui" / "calibration.json"
+    path = _calibration_json_path()
     if not path.exists():
         return None
     try:

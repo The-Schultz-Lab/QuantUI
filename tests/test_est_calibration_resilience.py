@@ -127,6 +127,9 @@ class TestSaveCalibrationJson:
         from pathlib import Path as _Path
 
         monkeypatch.setattr(_Path, "home", lambda: tmp_path)
+        # The suite pins QUANTUI_CALIBRATION_PATH (conftest); this test
+        # checks the built-in default location, so drop the override.
+        monkeypatch.delenv("QUANTUI_CALIBRATION_PATH", raising=False)
 
         result = CalibrationResult(timestamp="2026-05-25T12:00:00+00:00", mode="tier1")
         result.steps.append(
@@ -160,6 +163,7 @@ class TestSaveCalibrationJson:
         from pathlib import Path as _Path
 
         monkeypatch.setattr(_Path, "home", lambda: tmp_path)
+        monkeypatch.delenv("QUANTUI_CALIBRATION_PATH", raising=False)
 
         result = CalibrationResult(
             timestamp="2026-05-25T12:00:00+00:00",
