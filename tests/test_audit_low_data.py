@@ -551,3 +551,111 @@ def test_prune_removes_old_unreadable_checkpoint_dirs(tmp_path):
     assert C.prune(tmp_path, max_age_days=14) == 2
     assert not missing.exists() and not corrupt.exists()
     assert fresh.exists() and foreign.exists()
+
+
+# ---------------------------------------------------------------------------
+# DATA-16 — parser gaps for real-world files
+# ---------------------------------------------------------------------------
+
+_WATER = "3\nwater\nO 0 0 0.117\nH 0 0.757 -0.467\nH 0 -0.757 -0.467\n"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "﻿" + _WATER,
+        _WATER.replace("\n", "\r"),
+        _WATER.replace("0.117", "1.17D-01"),
+        _WATER.replace("-0.467", "−0.467"),
+        "O 0 0 0.117\nD 0 0.757 -0.467\nT 0 -0.757 -0.467\n",
+    ],
+    ids=["bom", "old-mac-cr", "fortran-d", "unicode-minus", "isotopes"],
+)
+def test_paste_parser_accepts_real_world_quirks(text):
+    from quantui.molecule import parse_xyz_input
+
+    atoms, coords = parse_xyz_input(text)
+    assert atoms == ["O", "H", "H"]
+    assert coords[0][2] == pytest.approx(0.117)
+    assert coords[1][2] == pytest.approx(-0.467)
+
+
+def test_has_isotope_labels():
+    from quantui.molecule import has_isotope_labels
+
+    assert has_isotope_labels("O 0 0 0\nD 0 0 1\n")
+    assert not has_isotope_labels(_WATER)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"\xef\xbb\xbf" + _WATER.encode(),
+        _WATER.encode("utf-16"),
+        _WATER.replace("\n", "\r").encode(),
+        _WATER.replace("0.117", "1.17D-01").encode(),
+        _WATER.replace("-0.467", "−0.467").encode(),
+        b"O 0 0 0.117\nH 0 0.757 -0.467\nH 0 -0.757 -0.467\n",
+    ],
+    ids=["bom", "utf16", "old-mac-cr", "fortran-d", "unicode-minus", "headerless"],
+)
+def test_upload_xyz_accepts_real_world_quirks(content):
+    pytest.importorskip("ase")
+    from quantui.structure_upload import read_uploaded_structure
+
+    up = read_uploaded_structure("water.xyz", content)
+    assert up.molecule.atoms == ["O", "H", "H"]
+    assert up.molecule.coordinates[0][2] == pytest.approx(0.117)
+
+
+def test_upload_xyz_isotopes_mapped_with_note():
+    pytest.importorskip("ase")
+    from quantui.molecule import ISOTOPE_NOTE
+    from quantui.structure_upload import read_uploaded_structure
+
+    up = read_uploaded_structure(
+        "d2o.xyz", _WATER.replace("H 0 0.757", "D 0 0.757").encode()
+    )
+    assert up.molecule.atoms == ["O", "H", "H"]
+    assert ISOTOPE_NOTE in up.notes
+
+
+def test_upload_xyz_charge_comment_from_last_frame():
+    pytest.importorskip("ase")
+    from quantui.structure_upload import read_uploaded_structure
+
+    content = (
+        b"2\ncharge=0 multiplicity=1\nH 0 0 0\nH 0 0 0.74\n"
+        b"2\ncharge=1 multiplicity=2\nH 0 0 0\nH 0 0 1.0\n"
+    )
+    up = read_uploaded_structure("traj.xyz", content)
+    assert up.molecule.coordinates[1][2] == pytest.approx(1.0)
+    assert (up.molecule.charge, up.molecule.multiplicity) == (1, 2)
+
+
+def test_upload_pdb_altlocs_keep_one_conformer():
+    pytest.importorskip("ase")
+    from quantui.structure_upload import read_uploaded_structure
+
+    pdb = (
+        "ATOM      1  O  AHOH A   1       0.000   0.000   0.117  0.50  0.00"
+        "           O\n"
+        "ATOM      2  O  BHOH A   1       0.100   0.000   0.117  0.50  0.00"
+        "           O\n"
+        "ATOM      3  H1  HOH A   1       0.000   0.757  -0.467  1.00  0.00"
+        "           H\n"
+        "ATOM      4  H2  HOH A   1       0.000  -0.757  -0.467  1.00  0.00"
+        "           H\n"
+        "END\n"
+    )
+    up = read_uploaded_structure("w.pdb", pdb.encode())
+    assert sorted(up.molecule.atoms) == ["H", "H", "O"]
+    assert any("alternate" in n for n in up.notes)
+
+
+def test_upload_overlong_filename():
+    pytest.importorskip("ase")
+    from quantui.structure_upload import read_uploaded_structure
+
+    up = read_uploaded_structure("x" * 300 + ".xyz", _WATER.encode())
+    assert up.molecule.atoms == ["O", "H", "H"]
