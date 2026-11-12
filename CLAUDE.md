@@ -43,8 +43,9 @@ pip install -e ".[pyscf,ase,dev,xtb,ts]"
 This mirrors the Linux job in `.github/workflows/ci.yml`. A `SessionStart`
 hook (`.claude/hooks/`) does this automatically on cloud sessions so the suite
 and linters are runnable immediately. If the container's default `python` is
-outside 3.9–3.11 (e.g. 3.13), that install can fail (`pyscf-properties` does
-not build); create a 3.11 env instead, e.g.
+outside 3.9–3.11 (e.g. 3.13), a plain install fails (`pyscf-properties` does
+not build), so the hook creates a 3.11 venv in `.venv` (via `uv`, else
+`python3.11`), installs there and puts it on `PATH` for the session. By hand:
 `uv venv -p python3.11 .venv && . .venv/bin/activate` and install as above.
 
 **Local (conda):** use [`local-setup/environment.yml`](local-setup/environment.yml)
