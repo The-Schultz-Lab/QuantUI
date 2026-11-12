@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from .base import CalculationRequest
@@ -219,7 +219,7 @@ def slurm_backend_for_app(app: Any) -> SlurmBackend:
     registry = getattr(app, "_job_registry", None)
     cached = getattr(app, "_slurm_backend", None)
     if registry is not None and getattr(cached, "registry", None) is registry:
-        return cached
+        return cast(SlurmBackend, cached)
     backend = SlurmBackend(registry=registry)
     if registry is not None:
         try:
