@@ -1005,6 +1005,8 @@ def _calibration_worker(
             # (_save_calibration_step) takes it untyped. Annotate Any so mypy
             # doesn't pin the variable to whichever branch it sees first.
             res: Any
+            n_iterations: Optional[int]
+            n_steps: Optional[int] = None
             if calc_type == "geometry_opt":
                 from quantui.optimizer import optimize_geometry as _opt
 
@@ -1017,7 +1019,11 @@ def _calibration_worker(
                 )
                 formula = res.molecule.get_formula()
                 converged = bool(res.converged)
-                n_iterations = int(getattr(res, "n_steps", -1))
+                # Optimizer steps are n_steps, not SCF iterations: logged
+                # under the same key the app uses, so calibration records
+                # feed estimate_opt_steps (audit DATA-14).
+                n_iterations = None
+                n_steps = int(getattr(res, "n_steps", -1))
             elif calc_type == "frequency":
                 from quantui.freq_calc import run_freq_calc as _freq
 
@@ -1075,12 +1081,16 @@ def _calibration_worker(
                 mol=mol,
             )
 
+            from quantui import calc_log as _calc_log_mod
+
             result_queue.put(
                 {
                     "status": "ok",
                     "formula": formula,
                     "converged": converged,
                     "n_iterations": n_iterations,
+                    "n_steps": n_steps,
+                    "n_threads": _calc_log_mod.current_thread_count(),
                     "elapsed_s": elapsed,
                     "import_s": import_s,
                     # Device / DF provenance, so GPU and forced-CPU probe
@@ -1568,11 +1578,12 @@ def run_calibration(
                     n_electrons=step.n_electrons,
                     method=method,
                     basis=basis,
-                    n_iterations=int(msg.get("n_iterations", -1)),
+                    n_iterations=msg.get("n_iterations"),
                     elapsed_s=float(msg["elapsed_s"]),
                     converged=bool(msg["converged"]),
                     n_basis=step.n_basis,
-                    n_cores=1,
+                    n_threads=msg.get("n_threads"),
+                    n_steps=msg.get("n_steps"),
                     calc_type=calc_type,
                     source="calibration",
                     import_s=msg.get("import_s"),

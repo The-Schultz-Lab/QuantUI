@@ -327,3 +327,192 @@ def test_read_all_cache_not_poisoned_by_caller_mutation(_calc_log_dir):
     calc_log.log_event("a", "first")
     calc_log.get_recent_events()[0]["event"] = "mutated"
     assert calc_log.get_recent_events()[0]["event"] == "a"
+
+
+# ---------------------------------------------------------------------------
+# DATA-14 — time estimator
+# ---------------------------------------------------------------------------
+
+
+def _perf(**kw):
+    rec = dict(
+        converged=True,
+        method="RHF",
+        basis="STO-3G",
+        n_atoms=3,
+        n_electrons=10,
+        n_basis=7,
+        calc_type="single_point",
+        source="app",
+        gpu_used=False,
+    )
+    rec.update(kw)
+    return rec
+
+
+def test_frequency_cost_model_partitions_by_density_fit():
+    from quantui import calc_log
+
+    records = [_perf(elapsed_s=2.0, density_fit=True) for _ in range(3)] + [
+        _perf(elapsed_s=200.0, density_fit=False) for _ in range(3)
+    ]
+    kw = dict(
+        n_atoms=3,
+        n_electrons=10,
+        method="RHF",
+        basis="STO-3G",
+        n_basis=7,
+        calc_type="frequency",
+        gpu_used=False,
+        source="app",
+    )
+    fast = calc_log.estimate_time_from_records(records, density_fit=True, **kw)
+    slow = calc_log.estimate_time_from_records(records, density_fit=False, **kw)
+    assert fast is not None and slow is not None
+    assert slow["seconds"] > 50 * fast["seconds"]
+
+
+def test_replay_passes_density_fit(monkeypatch):
+    from quantui import calc_log, estimator_eval
+
+    seen = []
+
+    def _spy(history, **kw):
+        seen.append(kw.get("density_fit"))
+        return None
+
+    monkeypatch.setattr(calc_log, "estimate_time_from_records", _spy)
+    estimator_eval.replay(
+        [_perf(elapsed_s=3.0, density_fit=True, timestamp="2026-01-01")]
+    )
+    assert seen == [True]
+
+
+def test_sub_second_records_do_not_drive_power_law():
+    """Overhead-dominated runs must not be extrapolated by n_basis^3.5."""
+    from quantui import calc_log
+
+    records = [
+        _perf(elapsed_s=0.05, n_basis=2, n_electrons=2),
+        _perf(elapsed_s=0.06, n_basis=7, n_electrons=10),
+        _perf(elapsed_s=0.07, n_basis=7, n_electrons=10),
+        _perf(elapsed_s=0.08, n_basis=2, n_electrons=2),
+    ]
+    est = calc_log.estimate_time_from_records(
+        records,
+        n_atoms=40,
+        n_electrons=160,
+        method="RHF",
+        basis="STO-3G",
+        n_basis=200,
+        calc_type="single_point",
+    )
+    assert est is not None
+    # Power law gave ~51 min here; electron-count scaling is minutes at most.
+    assert est["seconds"] < 600
+
+
+def test_log_calculation_records_n_threads(tmp_path, monkeypatch):
+    from quantui import calc_log
+
+    monkeypatch.setenv("QUANTUI_LOG_DIR", str(tmp_path))
+    calc_log._READ_ALL_CACHE.clear()
+    calc_log.log_calculation(
+        formula="H2",
+        n_atoms=2,
+        n_electrons=2,
+        method="RHF",
+        basis="STO-3G",
+        n_iterations=3,
+        elapsed_s=1.0,
+        converged=True,
+        n_threads=4,
+    )
+    (rec,) = calc_log.get_perf_history()
+    assert rec["n_threads"] == 4
+    assert "n_cores" not in rec
+    calc_log._READ_ALL_CACHE.clear()
+
+
+def test_calibration_logs_opt_steps_and_threads(monkeypatch, tmp_path):
+    pytest.importorskip("pyscf")
+    import multiprocessing
+
+    entry = tuple(benchmarks._MODE_TO_SUITE["tier1"][0]) + ("geometry_opt",)
+    monkeypatch.setitem(benchmarks._MODE_TO_SUITE, "tier1", [entry])
+
+    class _Proc(_RecordingProcess):
+        def start(self):
+            self.args[8].put(
+                {
+                    "status": "ok",
+                    "formula": "H2",
+                    "converged": True,
+                    "n_iterations": None,
+                    "n_steps": 4,
+                    "n_threads": 2,
+                    "elapsed_s": 1.5,
+                    "result_dir": None,
+                }
+            )
+
+    class _Ctx(_RecordingCtx):
+        Process = _Proc
+
+    monkeypatch.setattr(multiprocessing, "get_context", lambda *_a: _Ctx())
+    monkeypatch.setattr(
+        benchmarks, "_calibration_log_path", lambda ts: tmp_path / "cal.log"
+    )
+    monkeypatch.setattr(benchmarks, "_save_calibration_json", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "quantui.gpu_offload.is_gpu_available", lambda: (False, None), raising=False
+    )
+    logged = []
+    monkeypatch.setattr(
+        "quantui.calc_log.log_calculation", lambda **kw: logged.append(kw)
+    )
+    benchmarks.run_calibration(mode="tier1")
+    (rec,) = logged
+    assert rec["n_steps"] == 4
+    assert rec["n_iterations"] is None
+    assert rec["n_threads"] == 2
+    assert "n_cores" not in rec
+
+
+def test_calibration_worker_reports_opt_steps(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    fake = SimpleNamespace(
+        molecule=SimpleNamespace(get_formula=lambda: "H2"),
+        converged=True,
+        n_steps=5,
+    )
+    monkeypatch.setattr("quantui.optimizer.optimize_geometry", lambda **k: fake)
+    monkeypatch.setattr(benchmarks, "_save_calibration_step", lambda *a, **k: None)
+    log = tmp_path / "cal.log"
+    log.write_text("")
+
+    class _Q:
+        items: list = []
+
+        def put(self, item):
+            self.items.append(item)
+
+    q = _Q()
+    benchmarks._calibration_worker(
+        ["H", "H"],
+        [[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]],
+        0,
+        1,
+        "RHF",
+        "STO-3G",
+        "geometry_opt",
+        str(log),
+        q,
+        "rid",
+        False,
+    )
+    (msg,) = q.items
+    assert msg["status"] == "ok", msg
+    assert msg["n_steps"] == 5
+    assert msg["n_iterations"] is None

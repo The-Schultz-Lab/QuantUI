@@ -582,6 +582,7 @@ def log_calculation(
     import_s: Optional[float] = None,
     stages: Optional[dict] = None,
     density_fit: Optional[bool] = None,
+    n_threads: Optional[int] = None,
 ) -> None:
     """Append one performance record to ``perf_log.jsonl``.
 
@@ -616,6 +617,13 @@ def log_calculation(
     partitioned in :func:`estimate_time` exactly as ``gpu_used`` is — mixing
     fitted and unfitted runs of the same chemistry under one key would give the
     estimator a bimodal distribution it cannot see.
+
+    ``n_threads`` (audit DATA-14) is the BLAS/OpenMP thread count the
+    calculation actually ran with (:func:`current_thread_count`). It is
+    provenance only — the estimator does not read it. ``n_cores`` is the
+    estimator's normalisation input; callers used to hard-code it to 1, so
+    they now leave it unset (read back as 1, same estimate) rather than
+    record a value that was never measured.
     """
     record: dict = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -640,6 +648,8 @@ def log_calculation(
         record["gpu_name"] = gpu_name
     if density_fit is not None:
         record["density_fit"] = bool(density_fit)
+    if n_threads is not None:
+        record["n_threads"] = int(n_threads)
     # Outer-loop step count (geom-opt BFGS steps / PES scan points). Enables
     # a history-based "step k / ~N" prior for the live progress fraction.
     if n_steps is not None:
@@ -653,6 +663,16 @@ def log_calculation(
     if stages:
         record["stages"] = {str(k): round(float(v), 3) for k, v in stages.items()}
     _append(_perf_path(), record)
+
+
+def current_thread_count() -> Optional[int]:
+    """BLAS/OpenMP threads PySCF will use in this process, or ``None``."""
+    try:
+        from pyscf import lib as _pyscf_lib
+
+        return int(_pyscf_lib.num_threads())
+    except Exception:  # noqa: BLE001 — provenance only; never fail a log
+        return None
 
 
 #: Hessian-cost multipliers used by the frequency cost model.
@@ -670,6 +690,12 @@ _POST_HF_METHODS: frozenset = frozenset({"MP2", "CCSD", "CCSD(T)"})
 # Minimum tagged frequency records carrying ``stages`` before learned stage
 # ratios replace the fixed Hessian / IR multipliers.
 _MIN_FREQ_STAGE_SAMPLES: int = 2
+# Records faster than this are kept out of the n_basis^β power-law fit
+# (strategies 1 and 3 of estimate_time_from_records): sub-second runs are
+# dominated by fixed per-calc overhead, so extrapolating them by n_basis^β
+# grossly over-predicts larger systems. They still feed the electron-count
+# strategies, which scale far more gently.
+_MIN_POWER_LAW_ELAPSED_S: float = 1.0
 
 
 def _bucket_freq_stages(stages: dict[str, float]) -> dict[str, float]:
@@ -765,6 +791,7 @@ def _estimate_frequency_cost(
     n_cores: Optional[int] = None,
     gpu_used: Optional[bool] = None,
     source: Optional[str] = None,
+    density_fit: Optional[bool] = None,
 ) -> Optional[dict]:
     """Structured frequency-time estimate from an SP anchor.
 
@@ -815,6 +842,7 @@ def _estimate_frequency_cost(
         calc_type="single_point",
         gpu_used=gpu_used,
         source=source,
+        density_fit=density_fit,
     )
     if sp_est is None:
         return None
@@ -1092,14 +1120,24 @@ def estimate_time_from_records(
     n_cores_current = n_cores if n_cores is not None else 1
 
     def _eff(r: dict) -> Optional[float]:
-        """Normalised efficiency: elapsed_s × n_cores / n_basis^β."""
+        """Normalised efficiency: elapsed_s × n_cores / n_basis^β.
+
+        ``None`` (record left out of the power-law fit) for records under
+        :data:`_MIN_POWER_LAW_ELAPSED_S`: their wall time is mostly fixed
+        overhead, not the n_basis^β work, so scaling them up by n_basis^β
+        wildly over-predicts large systems (audit DATA-14: four sub-0.1 s
+        STO-3G runs predicted 51 min for n_basis = 200). When too few
+        records survive, the electron-count strategies below take over.
+        """
         nb: float = float(r.get("n_basis") or 0)
         if not nb:
+            return None
+        elapsed: float = float(r["elapsed_s"])
+        if elapsed < _MIN_POWER_LAW_ELAPSED_S:
             return None
         rc: float = float(r.get("n_cores") or 1)
         r_method: str = str(r.get("method") or method)
         beta: float = _METHOD_SCALE_EXP.get(r_method, 3.5)
-        elapsed: float = float(r["elapsed_s"])
         return float(elapsed * rc / (nb**beta))
 
     # ── Strategy 1: exact method + basis, basis-function efficiency ──────────
@@ -1210,6 +1248,7 @@ def estimate_time_from_records(
             n_cores=n_cores,
             gpu_used=gpu_used,
             source=source,
+            density_fit=density_fit,
         )
         if cost_est is not None:
             return cost_est

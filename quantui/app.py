@@ -7845,7 +7845,7 @@ class QuantUIApp:
                     n_basis=_calc_log.count_basis_functions(
                         calc_mol.atoms, result.basis
                     ),
-                    n_cores=1,
+                    n_threads=_calc_log.current_thread_count(),
                     calc_type=save_type,
                     gpu_used=getattr(result, "gpu_used", None),
                     gpu_name=getattr(result, "gpu_name", None),

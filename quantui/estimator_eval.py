@@ -185,6 +185,7 @@ def replay(
             calc_type=record.get("calc_type"),
             gpu_used=record.get("gpu_used"),
             source=record.get("source") if use_source else None,
+            density_fit=record.get("density_fit"),
         )
         history.append(record)
         if predicted is None or float(predicted["seconds"]) <= 0:
