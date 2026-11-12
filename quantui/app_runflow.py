@@ -201,6 +201,39 @@ def on_run_clicked(app: Any, btn: Any) -> None:
                 pass
             return
 
+    if mol is not None and app.calc_type_dd.value == "NMR Shielding":
+        # Open-shell references and meta-GGA functionals cannot run the GIAO
+        # step; say so here instead of failing after the SCF (audit SCF-3).
+        try:
+            from quantui.nmr_calc import nmr_unsupported_reason
+
+            nmr_reason = nmr_unsupported_reason(
+                app.method_dd.value, int(app.mult_si.value)
+            )
+        except Exception:  # noqa: BLE001 — a guard failure must not block a run
+            nmr_reason = ""
+        if nmr_reason:
+            _set_run_output(
+                app,
+                (
+                    {
+                        "output_type": "stream",
+                        "name": "stdout",
+                        "text": (
+                            "⚠  NMR shielding was not started:\n\n"
+                            f"  • {nmr_reason}\n"
+                        ),
+                    },
+                ),
+            )
+            try:
+                app.run_status.value = (
+                    "Adjust the method or multiplicity, then Run again."
+                )
+            except Exception:  # noqa: BLE001 — status label is best-effort
+                pass
+            return
+
     # Write the header FIRST (atomic, main thread) — this also clears the
     # previous run's log via the single ``outputs`` assignment.
     _write_run_header(app)
