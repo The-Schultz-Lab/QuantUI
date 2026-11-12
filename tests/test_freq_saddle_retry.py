@@ -160,6 +160,16 @@ class TestRetry:
 
 
 class TestWorker:
+    @pytest.fixture(autouse=True)
+    def _stub_required_single_point(self):
+        # The worker runs the app's required single point after the pre-opt
+        # (audit HPC-14); keep these tests PySCF-free.
+        with patch(
+            "quantui.session_calc.run_in_session",
+            return_value=SimpleNamespace(converged=True, energy_hartree=-1.1),
+        ):
+            yield
+
     @pytest.fixture
     def request_path(self, tmp_path):
         from quantui.backends.base import CalculationRequest
