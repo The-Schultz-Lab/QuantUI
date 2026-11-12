@@ -930,7 +930,9 @@ def _run_freq_calc_body(
                 # -Δ steps so the +/-/half-loop logic stays compact.
                 from quantui.gpu_offload import try_to_gpu as _try_to_gpu_inner
 
-                def _displaced_scf_dipole() -> _np_ir.ndarray:
+                from .scf_robust import DisplacedSCFNotConverged, require_converged
+
+                def _displaced_scf_dipole(label: str = "") -> _np_ir.ndarray:
                     if _xc is not None:
                         _mf_d = dft.UKS(mol) if _dm0_is_unrestricted else dft.RKS(mol)
                         _mf_d.xc = _xc
@@ -951,6 +953,9 @@ def _run_freq_calc_body(
                     # failure, so this is safe to call unconditionally.
                     _mf_d, _used_gpu, _gpu_name = _try_to_gpu_inner(_mf_d, "RHF")
                     run_scf_with_rescue(_mf_d, dm0=_dm0, rescue=scf_rescue)
+                    # An unconverged displaced SCF must never feed (or be
+                    # banked for) the dipole derivative (audit SCF-8).
+                    require_converged(_mf_d, label)
                     # pyscf has no type stubs (ignore_missing_imports), so
                     # dip_moment()'s Any return defeats asarray's overload
                     # resolution too; dip_moment() genuinely returns an
@@ -1101,6 +1106,10 @@ def _run_freq_calc_body(
                                     os.unlink(_dm0_handle.name)
                                 except OSError:
                                     pass
+                        except DisplacedSCFNotConverged:
+                            # Not a pool failure: serially it would not
+                            # converge either.
+                            raise
                         except Exception as _par_exc:
                             logger.warning(
                                 "Parallel IR-intensity computation failed (%s); falling back to serial.",
@@ -1129,7 +1138,7 @@ def _run_freq_calc_body(
                             _c = _coords0.copy()
                             _c[_I, _ax] += _DELTA * _sign
                             mol.set_geom_(_c, unit="Bohr")
-                            _mu = _displaced_scf_dipole()
+                            _mu = _displaced_scf_dipole(displacement_id(_I, _ax, _sign))
                             _dipoles[_key] = _mu
                             if checkpoint is not None:
                                 checkpoint.mark_item_done(
@@ -1170,6 +1179,13 @@ def _run_freq_calc_body(
                     ir_intensities = _ir
                 _status(
                     "Numerical IR intensities complete. Computing thermochemistry..."
+                )
+            except DisplacedSCFNotConverged as _nc_exc:
+                logger.warning("Numerical IR intensities abandoned: %s", _nc_exc)
+                _status(
+                    f"IR intensities unavailable: {_nc_exc}, so the "
+                    "finite-difference dipole derivative would be unreliable; "
+                    "continuing without IR intensities."
                 )
             except Exception as _ir_exc:
                 logger.warning("Numerical IR intensities failed: %s", _ir_exc)

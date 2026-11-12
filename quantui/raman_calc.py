@@ -28,6 +28,7 @@ import numpy as np
 
 from quantui.config import BOHR_TO_ANGSTROM as _BOHR_TO_ANG
 from quantui.gpu_offload import is_gpu_available
+from quantui.scf_robust import DisplacedSCFNotConverged
 
 logger = logging.getLogger(__name__)
 
@@ -237,9 +238,11 @@ def _cpu_raman_activities_fd(
         _mf_d.stdout = stream
         _mf_d, _ = _try_density_fit(_mf_d, enabled=density_fit_used)
         _mf_d, _, _ = _try_to_gpu_inner(_mf_d, "RHF")
-        from .scf_robust import run_scf_with_rescue
+        from .scf_robust import require_converged, run_scf_with_rescue
 
         run_scf_with_rescue(_mf_d, dm0=dm0, rescue=scf_rescue)
+        # Never feed or bank an unconverged displaced SCF (audit SCF-8).
+        require_converged(_mf_d, _disp_id(atom_idx, ax, sign))
         alpha = pol_mod.polarizability(pol_mod.Polarizability(_mf_d))
         _done += 1
         status(
@@ -358,6 +361,8 @@ def _cpu_raman_activities_fd(
                         os.unlink(_dm0_handle.name)
                     except OSError:
                         pass
+            except DisplacedSCFNotConverged:
+                raise  # not a pool failure: a serial retry would not converge either
             except Exception as _par_exc:
                 logger.warning(
                     "Parallel Raman computation failed (%s); falling back to serial.",
@@ -491,4 +496,11 @@ def compute_raman_activities(
     except ImportError as exc:
         logger.warning("pyscf-properties polarizability unavailable: %s", exc)
         status("Raman activities unavailable (pyscf-properties not installed).")
+        return []
+    except DisplacedSCFNotConverged as exc:
+        logger.warning("Raman activities abandoned: %s", exc)
+        status(
+            f"Raman activities unavailable: {exc}, so the finite-difference "
+            "polarizability derivative would be unreliable."
+        )
         return []

@@ -242,6 +242,11 @@ def run_displaced_scf(item_id: str, coords_bohr_flat) -> Any:
     # taking run_scf_with_rescue's default (True); the serial loop already
     # threads scf_rescue through as `rescue=scf_rescue`.
     run_scf_with_rescue(mf, dm0=dm0, rescue=bool(state.get("scf_rescue", True)))
+    # An unconverged displaced SCF must never feed (or be banked for) the
+    # dipole derivative; the parent abandons IR intensities (audit SCF-8).
+    from .scf_robust import require_converged
+
+    require_converged(mf, item_id)
     dipole = np.array(mf.dip_moment(verbose=0))
 
     items_dir = state.get("checkpoint_items_dir")
