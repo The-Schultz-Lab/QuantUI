@@ -9,6 +9,7 @@ Author: Jonathan Schultz, NCCU
 Created: 2026-02-17
 """
 
+import html as _html
 import logging
 import os
 import tempfile
@@ -675,7 +676,7 @@ def render_molecule_html(
         logger.error(f"Render failed for {molecule.get_formula()}: {e}")
         parts.append(
             '<div style="color:#b91c1c;padding:8px;">'
-            f"❌ Visualization failed: {e}</div>"
+            f"❌ Visualization failed: {_html.escape(str(e))}</div>"
         )
     # Frame the fragment at the viewer's own width — see theme.frame_viewer_html
     # for why the border cannot live on the hosting Output widget's CSS class.

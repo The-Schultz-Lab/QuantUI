@@ -7,6 +7,7 @@ import logging
 import threading
 import time
 from contextlib import contextmanager
+from html import escape as _escape  # for scopes where `html` is a local str
 from pathlib import Path
 from typing import Any, List, Optional, cast
 
@@ -281,7 +282,7 @@ def on_traj_expand(app: Any, change: dict[str, Any]) -> None:
             widgets.HTML(
                 value=(
                     f'<p style="color:#b91c1c;padding:8px">'
-                    f"⚠ Trajectory rendering failed: {exc}</p>"
+                    f"⚠ Trajectory rendering failed: {html.escape(str(exc))}</p>"
                 )
             ),
         )
@@ -418,7 +419,7 @@ def show_opt_trajectory(
                 "data": {
                     "text/html": (
                         '<p style="color:#b91c1c;padding:8px">'
-                        f"Trajectory viewer failed: {exc}</p>"
+                        f"Trajectory viewer failed: {_escape(str(exc))}</p>"
                     )
                 },
                 "metadata": {},
@@ -475,7 +476,8 @@ def show_opt_trajectory(
                     "value",
                     (
                         f'<span style="color:#16a34a;font-size:12px">'
-                        f"✓ Saved: {out_path}</span> " + _download_link_html(out_path)
+                        f"✓ Saved: {_escape(str(out_path))}</span> "
+                        + _download_link_html(out_path)
                     ),
                 )
             except Exception as exc:
@@ -483,7 +485,8 @@ def show_opt_trajectory(
                     setattr,
                     export_status,
                     "value",
-                    f'<span style="color:#b91c1c">Export failed: {exc}</span>',
+                    '<span style="color:#b91c1c">Export failed: '
+                    f"{_escape(str(exc))}</span>",
                 )
             finally:
                 app._queue_main_thread_callback(setattr, _btn, "disabled", False)
@@ -595,7 +598,8 @@ def render_traj_frame(app: Any, molecule: Any, output_widget: Any) -> None:
         with output_widget:
             display(
                 HTML(
-                    f'<p style="color:#b91c1c;padding:8px">Frame render failed: {exc}</p>'
+                    '<p style="color:#b91c1c;padding:8px">Frame render failed: '
+                    f"{html.escape(str(exc))}</p>"
                 )
             )
 
@@ -2304,7 +2308,7 @@ def render_orbital_isosurface(
             app._set_html_output(
                 app._orb_iso_output,
                 f'<p style="color:#b91c1c;padding:8px">'
-                f"⚠ Orbital isosurface failed: {msg}</p>",
+                f"⚠ Orbital isosurface failed: {html.escape(msg)}</p>",
             )
 
         app._queue_main_thread_callback(_show_err)
@@ -2377,7 +2381,8 @@ def render_density_surface(
         app._queue_main_thread_callback(
             app._set_html_output,
             app._orb_iso_output,
-            f'<p style="color:#b91c1c;padding:8px">⚠ {msg}</p>',
+            # Plain text: messages carry exception text (audit VIZ-12).
+            f'<p style="color:#b91c1c;padding:8px">⚠ {html.escape(msg)}</p>',
         )
 
     mo_coeff = getattr(app, "_last_orb_mo_coeff", None)
@@ -2547,8 +2552,12 @@ def _swap_vib_output(app: Any, html_str: str) -> None:
 
 
 def _vib_err(app: Any, msg: str) -> None:
-    """Show an error message in the vibrational animation output panel."""
-    _swap_vib_output(app, f'<p style="color:#b91c1c;padding:8px">⚠ {msg}</p>')
+    """Show a plain-text error message in the vibrational animation panel.
+
+    Escaped: callers pass exception text (audit VIZ-12)."""
+    _swap_vib_output(
+        app, f'<p style="color:#b91c1c;padding:8px">⚠ {html.escape(msg)}</p>'
+    )
 
 
 # JS snippet appended to every py3Dmol vib HTML payload. Patches
@@ -2930,8 +2939,8 @@ def _render_vib_mode_plotlymol(
         if not _is_vib_stale(app, render_token):
             _vib_err(
                 app,
-                f"PlotlyMol vibrational animation requires plotlymol3d "
-                f"(<code>pip install plotlymol3d</code>): {exc}",
+                "PlotlyMol vibrational animation requires plotlymol3d "
+                f"(pip install plotlymol3d): {exc}",
             )
         return
 

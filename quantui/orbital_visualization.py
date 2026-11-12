@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from html import escape as _html_escape
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
@@ -677,7 +678,7 @@ def orbital_summary_html(info: OrbitalInfo) -> str:
     return (
         '<div style="background:#f8f9fa; padding:12px; border-radius:6px; '
         'border-left:4px solid #2171b5; margin:8px 0; font-family:monospace;">'
-        f"<b>Orbital Summary — {info.formula}</b><br>"
+        f"<b>Orbital Summary — {_html_escape(info.formula)}</b><br>"
         f"Occupied MOs{a}: {info.n_occupied} &nbsp;|&nbsp; "
         f"Virtual MOs{a}: {info.n_virtual} &nbsp;|&nbsp; "
         f"Total{a}: {len(info.mo_energies_ev)}<br>"

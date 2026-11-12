@@ -335,3 +335,84 @@ class TestFailedPlotsReplaceTheStaleFigure:
         assert (
             "PES energy profile could not be plotted" in shown[id(app._pes_plot_html)]
         )
+
+
+# ── VIZ-12: exception/path text is escaped before it reaches HTML ─────────
+
+_EVIL = "<img src=x onerror=alert(1)>"
+
+
+class TestErrorTextIsEscaped:
+    def test_vib_error_message(self, monkeypatch):
+        from unittest.mock import Mock
+
+        from quantui import app_visualization as av
+
+        seen = []
+        monkeypatch.setattr(av, "_swap_vib_output", lambda app, h: seen.append(h))
+        av._vib_err(Mock(), f"render failed: {_EVIL}")
+        assert _EVIL not in seen[0]
+        assert "&lt;img" in seen[0]
+
+    def test_standalone_export_title(self):
+        from quantui.viz_assets import standalone_html
+
+        doc = standalone_html("<div></div>", title=f"Geo Opt: {_EVIL}")
+        assert _EVIL not in doc
+        assert "<div></div>" in doc  # the body itself is not escaped
+
+    def test_orbital_summary_formula(self):
+        from quantui.orbital_visualization import OrbitalInfo, orbital_summary_html
+
+        info = OrbitalInfo(
+            mo_energies_ev=np.array([-10.0, 2.0]),
+            n_occupied=1,
+            homo_energy_ev=-10.0,
+            lumo_energy_ev=2.0,
+            homo_lumo_gap_ev=12.0,
+            formula=_EVIL,
+        )
+        assert _EVIL not in orbital_summary_html(info)
+
+    def test_molecule_viewer_failure(self, monkeypatch):
+        from quantui import visualization_py3dmol as vp
+
+        def boom(*a, **k):
+            raise RuntimeError(_EVIL)
+
+        monkeypatch.setattr(vp, "is_visualization_available", lambda: True)
+        monkeypatch.setattr(vp, "visualize_molecule", boom)
+        html = vp.render_molecule_html(_h2_molecule(), show_info=False)
+        assert "Visualization failed" in html
+        assert _EVIL not in html
+
+    def test_trajectory_viewer_failure(self, monkeypatch):
+        # Inside show_opt_trajectory a local ``html`` string shadows the
+        # module, so the message must not be built with html.escape there.
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        import ipywidgets as widgets
+
+        from quantui import app_visualization as av
+
+        def boom(*a, **k):
+            raise RuntimeError(_EVIL)
+
+        monkeypatch.setattr(av, "build_trajectory_viewer_html", boom)
+        app = Mock()
+        app._traj_render_token = 0
+        app._plotly_theme_colors.return_value = {"scene_bgcolor": "white"}
+        h2 = _h2_molecule()
+        result = SimpleNamespace(
+            trajectory=[h2, h2], energies_hartree=[-1.0, -1.1], formula="H2"
+        )
+        av.show_opt_trajectory(app, result, layout_fn=widgets.Layout)
+        outs = [
+            c
+            for c in app.traj_output.children
+            if isinstance(c, widgets.Output) and c.outputs
+        ]
+        page = " ".join(o.outputs[0]["data"]["text/html"] for o in outs)
+        assert "Trajectory viewer failed" in page
+        assert _EVIL not in page

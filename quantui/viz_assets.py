@@ -39,6 +39,7 @@ Created: 2026-06-15
 from __future__ import annotations
 
 import base64
+import html
 import logging
 from functools import lru_cache
 from pathlib import Path
@@ -114,7 +115,8 @@ def standalone_html(view_html: str, *, title: str = "QuantUI animation") -> str:
         '<html lang="en">\n<head>\n'
         '<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
-        f"<title>{title}</title>\n"
+        # Escaped: titles carry formulas that can come from a saved result.
+        f"<title>{html.escape(title)}</title>\n"
         "<style>body{margin:0;padding:16px;background:#fff;"
         "font-family:system-ui,-apple-system,'Segoe UI',sans-serif}</style>\n"
         "</head>\n<body>\n" + view_html + "\n</body>\n</html>\n"
