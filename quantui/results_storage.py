@@ -427,6 +427,11 @@ def save_result(
         # ``None`` for a calc type that doesn't set it (geometry_opt,
         # pes_scan, reorganization_energy) or an older saved result.
         "scf_variant": getattr(result, "scf_variant", None) or None,
+        # Dispersion / SCF-rescue provenance (audit SCF-7): a "PBE-D3" run
+        # without a D3 backend, or an SCF that only converged after a rescue,
+        # must still say so when reloaded. None/"none" when not applicable.
+        "dispersion_applied": getattr(result, "dispersion_applied", None),
+        "scf_rescue_stage": getattr(result, "scf_rescue_stage", None) or None,
         "spectra": spectra if spectra is not None else {},
     }
     _geom = geometry_payload_for_result(result, molecule=molecule)

@@ -140,6 +140,47 @@ def _s2_html(s2: Any, multiplicity: Any) -> str:
     return text
 
 
+_RESCUE_TEXT = {
+    "bootstrap": "converged after a rescue (HF/UHF starting density)",
+    "level_shift": "converged after a rescue (level shift, atomic guess)",
+    "failed": "rescue tried, still not converged",
+}
+
+
+def _scf_provenance_rows(get: Any) -> str:
+    """Dispersion / SCF-rescue warnings shared by every result card.
+
+    ``dispersion_applied is False``: the method (e.g. PBE-D3) needs a D3
+    term but no backend was installed, so the result has none although the
+    label says otherwise. A non-"none" ``scf_rescue_stage``: the reference
+    SCF only converged (or still failed) after QuantUI's rescue. Both are
+    absent on older saved results and on runs where they do not apply.
+    """
+    rows = ""
+    if get("dispersion_applied") is False:
+        rows += (
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">'
+            "Dispersion</td>"
+            f'<td style="color:{_theme.css.ACCENT_WARNING}">⚠ NOT applied &mdash; '
+            "no D3 backend (pyscf-dispersion) was installed, so this result "
+            f"has no dispersion correction despite the {html.escape(str(get('method', '') or ''))} "
+            "label.</td></tr>"
+        )
+    _stage = str(get("scf_rescue_stage") or "none")
+    if _stage in _RESCUE_TEXT:
+        _color = (
+            _theme.css.ACCENT_ERROR_ALT
+            if _stage == "failed"
+            else _theme.css.ACCENT_WARNING
+        )
+        rows += (
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">'
+            "SCF rescue</td>"
+            f'<td style="color:{_color}">⚠ {_RESCUE_TEXT[_stage]}</td></tr>'
+        )
+    return rows
+
+
 def _result_extra_rows(get: Any) -> str:
     """Build the shared 'extra' result-card rows from an accessor.
 
@@ -158,7 +199,7 @@ def _result_extra_rows(get: Any) -> str:
             f'<td style="color:{_theme.css.TEXT_HEADING}">{value}</td></tr>'
         )
 
-    rows = ""
+    rows = _scf_provenance_rows(get)
     energy = get("energy_hartree", 0.0)
 
     _engine_id = str(get("engine_id", "pyscf") or "pyscf")
@@ -934,7 +975,7 @@ def format_nmr_result(r: Any) -> str:
         f'<td style="color:{_cc}">{_conv}</td></tr>'
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Reference</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.reference_compound} ({r.method}/{r.basis})</td></tr>'
-    )
+    ) + _scf_provenance_rows(lambda k, d=None: getattr(r, k, d))
     # Surface a fallback-reference substitution explicitly
     # rather than letting the row above imply an exact-match reference.
     if getattr(r, "is_fallback_reference", False):

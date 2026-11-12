@@ -328,6 +328,12 @@ class FreqResult:
     # at, from the reference SCF's analytic gradient; None when the gradient
     # was unavailable. See is_stationary().
     max_force_ev_per_ang: Optional[float] = None
+    # Same meaning as SessionResult's fields (audit SCF-7): None = method
+    # has no D3 term, False = it needs D3 but no backend was installed (the
+    # result has NO dispersion although the label says e.g. "PBE-D3").
+    dispersion_applied: Optional[bool] = None
+    # quantui.scf_robust.SCF_RESCUE_* stage of the reference SCF.
+    scf_rescue_stage: str = "none"
 
     @property
     def energy_ev(self) -> float:
@@ -646,6 +652,7 @@ def _run_freq_calc_body(
 
     # ── SCF ──────────────────────────────────────────────────────────────────
     method_upper = method.upper()
+    dispersion_applied: Optional[bool] = None
     if method_upper == "RHF":
         mf = scf.RHF(mol)
         scf_variant = type(mf).__name__
@@ -662,7 +669,7 @@ def _run_freq_calc_body(
         # Capture before maybe_apply_d3 can wrap/rename it.
         scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
-        mf, _ = maybe_apply_d3(mf, method, progress_stream=stream)
+        mf, dispersion_applied = maybe_apply_d3(mf, method, progress_stream=stream)
 
     # Density fitting (RI), opt-in. Off by default. Applied to the main
     # SCF; the per-displacement inner SCFs below get the same treatment so the
@@ -715,6 +722,7 @@ def _run_freq_calc_body(
     _status("SCF converged. Computing analytical Hessian...")
 
     converged = bool(getattr(mf, "converged", False))
+    scf_rescue_stage = str(getattr(mf, "scf_rescue_stage", "none") or "none")
     n_iterations = int(getattr(mf, "cycles", -1))
 
     # ── HOMO-LUMO gap (non-fatal) ────────────────────────────────────────────
@@ -1288,6 +1296,8 @@ def _run_freq_calc_body(
         gpu_used=gpu_used,
         gpu_name=gpu_name,
         max_force_ev_per_ang=max_force_ev_per_ang,
+        dispersion_applied=dispersion_applied,
+        scf_rescue_stage=scf_rescue_stage,
     )
 
 

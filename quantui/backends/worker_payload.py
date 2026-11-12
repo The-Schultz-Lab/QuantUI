@@ -227,6 +227,8 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
         # See session_result_payload's matching field.
         "scf_variant": getattr(result, "scf_variant", "") or None,
         # FreqResult carries it, so serialize it.
+        "dispersion_applied": getattr(result, "dispersion_applied", None),
+        "scf_rescue_stage": getattr(result, "scf_rescue_stage", "none"),
         "density_fit": bool(getattr(result, "density_fit", False)),
         "solvent": getattr(result, "solvent", None),
         "gpu_used": bool(getattr(result, "gpu_used", False)),
@@ -357,6 +359,8 @@ def nmr_result_payload(result) -> Dict[str, Any]:
         # See session_result_payload's matching field.
         "scf_variant": getattr(result, "scf_variant", "") or None,
         # NMRResult carries it, so serialize it.
+        "dispersion_applied": getattr(result, "dispersion_applied", None),
+        "scf_rescue_stage": getattr(result, "scf_rescue_stage", "none"),
         "density_fit": bool(getattr(result, "density_fit", False)),
         "spectra": {
             "nmr": {

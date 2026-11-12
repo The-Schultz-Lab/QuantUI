@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .molecule import Molecule
 
@@ -51,6 +51,9 @@ class NMRResult:
     # The actual PySCF class dispatched for the SCF (e.g.
     # "RHF", "UHF", "RKS", "UKS"); "" for an older saved result.
     scf_variant: str = ""
+    # Same meaning as SessionResult's fields (audit SCF-7).
+    dispersion_applied: Optional[bool] = None
+    scf_rescue_stage: str = "none"
 
     def h_shifts(self) -> List[Tuple[int, float]]:
         """(atom_index, δ ppm) pairs for all H atoms in molecule order."""
@@ -410,6 +413,7 @@ def _run_nmr_calc_body(
     build_mole(mol)
 
     method_upper = method.upper()
+    dispersion_applied: Optional[bool] = None
     if method_upper == "RHF":
         mf = scf.RHF(mol)
         scf_variant = type(mf).__name__
@@ -432,7 +436,7 @@ def _run_nmr_calc_body(
         # Capture the SCF class name before maybe_apply_d3 can wrap/rename it.
         scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
-        mf, _ = maybe_apply_d3(mf, method, progress_stream=stream)
+        mf, dispersion_applied = maybe_apply_d3(mf, method, progress_stream=stream)
 
     # Density fitting (RI), opt-in. Off by default. DF shifts
     # absolute shieldings, but chemical shifts are differences so the error
@@ -459,6 +463,7 @@ def _run_nmr_calc_body(
         ) from exc
 
     converged = bool(getattr(mf, "converged", False))
+    scf_rescue_stage = str(getattr(mf, "scf_rescue_stage", "none") or "none")
 
     # pyscf.nmr does not exist in released pyscf; use pyscf.prop.nmr (pyscf-properties).
     _pyscf_nmr: Any = None
@@ -524,4 +529,6 @@ def _run_nmr_calc_body(
         is_fallback_reference=is_fallback_ref,
         density_fit=density_fit_used,
         scf_variant=scf_variant,
+        dispersion_applied=dispersion_applied,
+        scf_rescue_stage=scf_rescue_stage,
     )
