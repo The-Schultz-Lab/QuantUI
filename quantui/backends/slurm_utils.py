@@ -105,6 +105,18 @@ def parse_slurm_job_id(sbatch_output: str) -> Optional[str]:
     return None
 
 
+def normalize_slurm_state(state: str) -> str:
+    """Reduce a SLURM state string to its bare upper-case state name.
+
+    ``sacct`` reports a cancel as ``CANCELLED by <uid>`` and may append ``+``
+    to a state (``CANCELLED+``); ``squeue`` long forms can carry a reason in
+    the same way. Every consumer compares against bare names
+    (``CANCELLED``, ``COMPLETED``, ...), so the extra text is dropped here.
+    """
+    parts = str(state or "").strip().upper().split()
+    return parts[0].rstrip("+") if parts else ""
+
+
 def parse_sacct_accounting(sacct_output: str) -> Dict[str, SlurmJobAccounting]:
     """Parse ``sacct -P --format=JobID,State,ExitCode,Elapsed`` output."""
     rows: Dict[str, SlurmJobAccounting] = {}
@@ -116,7 +128,7 @@ def parse_sacct_accounting(sacct_output: str) -> Dict[str, SlurmJobAccounting]:
         if len(parts) < 2:
             continue
         job_id = parts[0].strip()
-        state = parts[1].strip().upper()
+        state = normalize_slurm_state(parts[1])
         if not job_id or not state or "." in job_id:
             continue
         exit_code = parts[2].strip() if len(parts) > 2 else ""

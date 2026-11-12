@@ -77,6 +77,7 @@ def _from_metadata(xyz: str, meta: Dict[str, Any], *, source: str) -> ResolvedSt
         num_atoms=int(meta.get("num_atoms", 0) or 0),
         num_heavy_atoms=int(meta.get("num_heavy_atoms", 0) or 0),
         charge=int(meta.get("charge", 0) or 0),
+        multiplicity=int(meta.get("multiplicity", 1) or 1),
         molecular_weight=meta.get("molecular_weight"),
         conformer_origin=meta.get("conformer_origin", meta.get("source", "")),
         identifiers=identifiers,
@@ -209,19 +210,15 @@ def search_candidates(query: str) -> List[Dict[str, Any]]:
         return []
 
 
-def resolve_structure_with_message(
+def resolve_structure_with_details(
     query: str,
-) -> Tuple[Optional[str], str, Optional[str], bool]:
-    """Chain-backed resolve that also reports provenance.
+) -> Tuple[Optional[ResolvedStructure], str]:
+    """Chain-backed resolve returning the full :class:`ResolvedStructure`.
 
-    Returns ``(xyz_or_None, message, source_or_None, is_offline)``. ``source``
-    is the raw provider key (``"pubchem"`` / ``"cactus"`` / ``"library"`` /
-    ``"library-offline-fallback"`` / ``"rdkit-smiles"`` / ``"rdkit-inchi"``) so
-    the UI can label the loaded molecule by where it *actually* came from
-    rather than always saying "PubChem". ``is_offline`` is True when the
-    structure was produced without a network call (local RDKit or the bundled
-    library) — the UI surfaces a no-network note for the offline *fallback*
-    (network was attempted and failed).
+    Returns ``(structure_or_None, message)``. Unlike the XYZ text alone, the
+    structure carries the resolver's charge and multiplicity, which the
+    caller must keep: an ion or radical rebuilt from coordinates alone
+    loads as a neutral singlet, or fails the electron-count check.
     """
     try:
         result = resolve_structure(query, conformer_3d=True)
@@ -235,13 +232,14 @@ def resolve_structure_with_message(
                 f"number, or check spelling.\n"
                 f"   Search manually at: https://pubchem.ncbi.nlm.nih.gov/"
             ),
-            None,
-            False,
         )
     except Exception as exc:  # pragma: no cover - unexpected
         logger.error(f"Unexpected error resolving '{query}': {exc}", exc_info=True)
-        return None, f"❌ Error resolving '{query}': {exc}", None, False
+        return None, f"❌ Error resolving '{query}': {exc}"
+    return result, _resolved_message(query, result)
 
+
+def _resolved_message(query: str, result: ResolvedStructure) -> str:
     source_label = {
         "rdkit-smiles": "generated locally from SMILES",
         "rdkit-inchi": "generated locally from InChI",
@@ -258,12 +256,58 @@ def resolve_structure_with_message(
         else ""
     )
     mw = f"{result.molecular_weight:.2f} g/mol" if result.molecular_weight else "—"
-    message = (
+    state = ""
+    if result.charge or result.multiplicity != 1:
+        state = (
+            f"\n  Charge {result.charge:+d}, multiplicity {result.multiplicity}"
+            if result.charge
+            else f"\n  Multiplicity {result.multiplicity}"
+        )
+    return (
         f"✓ Resolved '{query}' via {source_label}.\n"
         f"  Formula: {result.formula}\n"
         f"  Atoms: {result.num_atoms} ({result.num_heavy_atoms} heavy)\n"
-        f"  Molecular weight: {mw}{embedded}"
+        f"  Molecular weight: {mw}{embedded}{state}"
     )
+
+
+def molecule_from_resolved(result: ResolvedStructure) -> Any:
+    """A :class:`~quantui.molecule.Molecule` with the resolver's charge and spin.
+
+    The multiplicity comes from the resolver (bundled-library entry, or the
+    radical electrons RDKit perceives). If it is impossible for the electron
+    count (a resolver that knows the charge but not the spin), the lowest
+    consistent multiplicity is used instead: 1 for an even electron count,
+    2 for an odd one.
+    """
+    from .molecule import Molecule, parse_xyz_input
+
+    atoms, coords = parse_xyz_input(result.xyz)
+    charge = int(result.charge)
+    mult = max(1, int(result.multiplicity))
+    n_electrons = config.electron_count(atoms, charge)
+    if (n_electrons - (mult - 1)) % 2 != 0 or mult - 1 > n_electrons:
+        mult = 2 if n_electrons % 2 else 1
+    return Molecule(atoms=atoms, coordinates=coords, charge=charge, multiplicity=mult)
+
+
+def resolve_structure_with_message(
+    query: str,
+) -> Tuple[Optional[str], str, Optional[str], bool]:
+    """Chain-backed resolve that also reports provenance.
+
+    Returns ``(xyz_or_None, message, source_or_None, is_offline)``. ``source``
+    is the raw provider key (``"pubchem"`` / ``"cactus"`` / ``"library"`` /
+    ``"library-offline-fallback"`` / ``"rdkit-smiles"`` / ``"rdkit-inchi"``) so
+    the UI can label the loaded molecule by where it *actually* came from
+    rather than always saying "PubChem". ``is_offline`` is True when the
+    structure was produced without a network call (local RDKit or the bundled
+    library) — the UI surfaces a no-network note for the offline *fallback*
+    (network was attempted and failed).
+    """
+    result, message = resolve_structure_with_details(query)
+    if result is None:
+        return None, message, None, False
     return result.xyz, message, result.source, result.is_offline
 
 

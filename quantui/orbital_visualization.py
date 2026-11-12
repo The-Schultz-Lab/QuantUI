@@ -25,6 +25,7 @@ from typing import Any, List, Optional, Tuple
 import numpy as np
 
 from quantui import theme as _theme
+from quantui.viz_assets import script_json as _script_json
 
 logger = logging.getLogger(__name__)
 
@@ -1801,7 +1802,6 @@ def _build_iso_viewer(
     voldata_text: Optional[str] = None,
     vol_range: float = 0.05,
 ) -> str:
-    import json
 
     from quantui.viz_assets import coords_from_model_text, make_view, orient_js
 
@@ -1818,19 +1818,19 @@ def _build_iso_viewer(
 
     js = (
         _ISO_VIEWER_JS.replace("__UID__", uid)
-        .replace("__DATA__", json.dumps(data_text))
-        .replace("__FMT__", json.dumps(data_format))
+        .replace("__DATA__", _script_json(data_text))
+        .replace("__FMT__", _script_json(data_format))
         .replace("__WITH_SURFACES__", "true" if with_surfaces else "false")
-        .replace("__SCENE__", json.dumps(scene_key))
+        .replace("__SCENE__", _script_json(scene_key))
         .replace("__ISO__", repr(float(isovalue)))
         .replace("__OP__", repr(float(opacity)))
         .replace("__WF__", "true" if wireframe else "false")
-        .replace("__POS__", json.dumps(pos_color))
-        .replace("__NEG__", json.dumps(neg_color))
-        .replace("__BG__", json.dumps(bgcolor))
+        .replace("__POS__", _script_json(pos_color))
+        .replace("__NEG__", _script_json(neg_color))
+        .replace("__BG__", _script_json(bgcolor))
         .replace("__STYLE__", style)
-        .replace("__MODE__", json.dumps(mode))
-        .replace("__VOL__", json.dumps(voldata_text))
+        .replace("__MODE__", _script_json(mode))
+        .replace("__VOL__", _script_json(voldata_text))
         .replace("__RANGE__", repr(float(vol_range)))
         .replace(
             "__ORIENT__",
@@ -2299,7 +2299,6 @@ def build_orbital_gallery_html(
     even split), at most four.
     """
     import html as _html
-    import json
     import uuid
 
     from quantui.viz_assets import coords_from_model_text, make_view, orient_js
@@ -2327,17 +2326,17 @@ def build_orbital_gallery_html(
                 f'<div id="3dmolviewer_{uid}" style="position:relative;'
                 f'width:{int(tile_px)}px;height:{int(tile_px)}px"></div>'
                 + _GALLERY_VIEWER_JS.replace("__UID__", uid).replace(
-                    "__BG__", json.dumps(bgcolor)
+                    "__BG__", _script_json(bgcolor)
                 )
             )
         js = (
             _GALLERY_TILE_JS.replace("__UID__", uid)
             .replace("__GROUP__", group)
-            .replace("__DATA__", json.dumps(tile.cube_text))
+            .replace("__DATA__", _script_json(tile.cube_text))
             .replace("__ISO__", repr(float(isovalue)))
-            .replace("__POS__", json.dumps(pos))
-            .replace("__NEG__", json.dumps(neg))
-            .replace("__BG__", json.dumps(bgcolor))
+            .replace("__POS__", _script_json(pos))
+            .replace("__NEG__", _script_json(neg))
+            .replace("__BG__", _script_json(bgcolor))
             .replace(
                 "__ORIENT__",
                 orient_js("vw", coords_from_model_text(tile.cube_text, "cube")),
@@ -2488,10 +2487,13 @@ def load_frontier_cube(
             continue
         if entry.get("spin", "") not in spins:
             continue
+        name = str(entry.get("file", ""))
+        if not name or Path(name).name != name or name in (".", ".."):
+            # index.json comes with the results folder; a path in it must
+            # not reach outside frontier_cubes/.
+            return False
         try:
-            raw = (
-                Path(result_dir) / FRONTIER_CUBES_DIR / str(entry["file"])
-            ).read_bytes()
+            raw = (Path(result_dir) / FRONTIER_CUBES_DIR / name).read_bytes()
             Path(dest).write_text(gzip.decompress(raw).decode())
         except (OSError, KeyError, ValueError):
             return False

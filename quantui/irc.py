@@ -388,21 +388,28 @@ def run_irc(
                 f"  Sella's IRC step did not converge after {irc_steps} steps; "
                 "finishing this direction by descending from here.\n"
             )
+            # Sella leaves the atoms at its last inner-loop geometry, which
+            # no observer recorded. Record it, so the branch's last frame is
+            # always the geometry the minimization below actually ends at
+            # (when the descent finds that point already converged, it takes
+            # no step and records nothing, and the branch used to end on the
+            # previous IRC point while reporting a minimum).
+            _record()
             # Steepest descent first: near the saddle a quasi-Newton step
             # can jump the ridge into the other valley (both directions then
             # end at the same minimum); descent steps only go downhill on
             # this side. BFGS with short steps finishes from the valley.
             converged = _steepest_descent(atoms, _record, fmax=fmax)
             if not converged:
+                n_before_bfgs = len(current["frames"])
                 opt = BFGS(atoms, logfile=io.StringIO(), maxstep=0.05)
                 opt.attach(_record, interval=1)
                 converged = bool(opt.run(fmax=fmax, steps=steps))
-            # The minimization's first observer call repeats the last point.
-            if len(current["frames"]) > irc_steps + 1:
-                del current["frames"][irc_steps + 1]
-                del current["energies"][irc_steps + 1]
-            if len(current["frames"]) == irc_steps + 1:
-                irc_steps = None  # it was already at the minimum
+                # BFGS's first observer call repeats the geometry it started
+                # from, which is already the last recorded frame.
+                if len(current["frames"]) > n_before_bfgs:
+                    del current["frames"][n_before_bfgs]
+                    del current["energies"][n_before_bfgs]
         if not current["frames"]:  # nothing recorded: keep the start at least
             _record()
         branches[direction] = IRCBranch(

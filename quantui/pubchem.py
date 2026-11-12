@@ -40,6 +40,20 @@ _request_lock = threading.Lock()
 _last_request_time = 0.0
 
 
+def _multiplicity_from_radicals(mol: Any) -> int:
+    """Spin multiplicity implied by the structure's radical electrons.
+
+    Each unpaired (radical) electron RDKit perceives counts toward a
+    high-spin multiplicity ``n_unpaired + 1``; a structure with none is a
+    singlet. Formal charges are carried separately (``charge``).
+    """
+    try:
+        n = sum(int(a.GetNumRadicalElectrons()) for a in mol.GetAtoms())
+    except Exception:  # noqa: BLE001 — metadata is best-effort
+        n = 0
+    return n + 1
+
+
 def _throttle() -> None:
     """Block just long enough to honor the client-side minimum request gap."""
     global _last_request_time
@@ -425,6 +439,7 @@ def sdf_to_xyz(sdf_content: str) -> Tuple[str, Dict[str, Any]]:
             "formula": formula,
             "molecular_weight": Descriptors.MolWt(mol),
             "charge": Chem.GetFormalCharge(mol),
+            "multiplicity": _multiplicity_from_radicals(mol),
             "num_atoms": mol.GetNumAtoms(),
             "num_heavy_atoms": mol.GetNumHeavyAtoms(),
             "coords_embedded": coords_embedded,
@@ -669,6 +684,7 @@ def smiles_to_xyz(smiles: str, optimize_3d: bool = True) -> Tuple[str, Dict[str,
             "formula": formula,
             "molecular_weight": Descriptors.MolWt(mol),
             "charge": Chem.GetFormalCharge(mol),
+            "multiplicity": _multiplicity_from_radicals(mol),
             "num_atoms": mol.GetNumAtoms(),
             "num_heavy_atoms": mol.GetNumHeavyAtoms(),
             "smiles": smiles,
@@ -726,6 +742,7 @@ def inchi_to_xyz(inchi: str, optimize_3d: bool = True) -> Tuple[str, Dict[str, A
             "formula": formula,
             "molecular_weight": Descriptors.MolWt(mol),
             "charge": Chem.GetFormalCharge(mol),
+            "multiplicity": _multiplicity_from_radicals(mol),
             "num_atoms": mol.GetNumAtoms(),
             "num_heavy_atoms": mol.GetNumHeavyAtoms(),
             "inchi": inchi,

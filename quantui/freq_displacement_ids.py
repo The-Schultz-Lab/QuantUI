@@ -20,7 +20,9 @@ already depends on elsewhere in the checkpoint layer.
 
 from __future__ import annotations
 
-from typing import List, Tuple
+import hashlib
+import json
+from typing import Any, List, Optional, Tuple
 
 _AXIS_LABELS = ("x", "y", "z")
 _SIGN_LABELS = {1: "+", -1: "-"}
@@ -76,3 +78,50 @@ def required_displacement_ids(n_atoms: int) -> List[str]:
             ids.append(displacement_id(atom_index, axis, 1))
             ids.append(displacement_id(atom_index, axis, -1))
     return ids
+
+
+def displacement_set_name(
+    prefix: str,
+    mol: Any,
+    *,
+    xc: Optional[str],
+    density_fit: bool,
+    solvent: Optional[str],
+    delta_bohr: float,
+    unrestricted: bool,
+) -> str:
+    """Checkpoint item-set name for one reference geometry and setup.
+
+    The ids above say *which* displacement a banked result is, not *what it
+    was displaced from*. A resumed Frequency run whose reference geometry
+    changed (pre-optimization ticked on the second attempt, a different
+    seed or mode displacement) or whose SCF setup changed (density fitting,
+    functional, solvent) used to splice the old geometry's dipoles into the
+    new finite difference, giving wrong IR intensities with no warning. The
+    set name now carries a digest of everything a displaced SCF depends on,
+    so results banked for anything else are simply not found.
+
+    *mol* is the PySCF ``Mole`` of the reference SCF.
+    """
+    coords = [
+        [round(float(v), 6) + 0.0 for v in row] for row in mol.atom_coords().tolist()
+    ]
+    basis = mol.basis if isinstance(mol.basis, str) else repr(mol.basis)
+    ecp = mol.ecp if isinstance(mol.ecp, str) else repr(sorted(dict(mol.ecp or {})))
+    key = {
+        "atoms": [mol.atom_symbol(i) for i in range(mol.natm)],
+        "coords_bohr": coords,
+        "charge": int(mol.charge),
+        "spin": int(mol.spin),
+        "basis": basis,
+        "ecp": ecp,
+        "xc": xc,
+        "density_fit": bool(density_fit),
+        "solvent": solvent,
+        "delta_bohr": float(delta_bohr),
+        "unrestricted": bool(unrestricted),
+    }
+    digest = hashlib.sha256(
+        json.dumps(key, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()[:16]
+    return f"{prefix}-{digest}"

@@ -14,8 +14,10 @@ module in tests or tutorials does not pollute the IPython display.
 from __future__ import annotations
 
 import asyncio
+import copy
 import html as _html
 import io
+import logging
 import re
 import threading
 import time
@@ -425,6 +427,9 @@ from quantui.app_runflow import (
     resolve_ts_product as _run_resolve_ts_product,
 )
 from quantui.app_runflow import (
+    seed_with_run_charge as _run_seed_with_run_charge,
+)
+from quantui.app_runflow import (
     update_estimate as _run_update_estimate,
 )
 from quantui.app_runflow import (
@@ -669,7 +674,7 @@ from quantui.freq_ir_workers import (
     freq_parallel_opt_in,
 )
 from quantui.help_content import HELP_TOPICS, VIEWER_HELP_TOPICS
-from quantui.molecule import Molecule, parse_xyz_input
+from quantui.molecule import Molecule
 from quantui.progress import StepProgress
 from quantui.user_settings import UserSettings
 from quantui.utils import get_session_resources
@@ -680,6 +685,8 @@ from quantui.viz_backend_router import (
     VizTask,
     select_backend,
 )
+
+logger = logging.getLogger(__name__)
 
 # ── Availability flags (computed once at import, not per-instantiation) ───────
 try:
@@ -741,7 +748,10 @@ try:
         RDKIT_AVAILABLE as _PUBCHEM_RDKIT_AVAILABLE,
     )
     from quantui.structure_providers import (
-        resolve_structure_with_message as _resolve_structure_with_message,
+        molecule_from_resolved as _molecule_from_resolved,
+    )
+    from quantui.structure_providers import (
+        resolve_structure_with_details as _resolve_structure_with_details,
     )
     from quantui.structure_providers import (
         search_candidates as _struct_search_candidates,
@@ -754,7 +764,8 @@ try:
 except ImportError:
     PUBCHEM_AVAILABLE = False
     _student_friendly_resolve = None  # type: ignore[assignment]
-    _resolve_structure_with_message = None  # type: ignore[assignment]
+    _resolve_structure_with_details = None  # type: ignore[assignment]
+    _molecule_from_resolved = None  # type: ignore[assignment]
     _struct_search_candidates = None  # type: ignore[assignment]
 
 
@@ -4829,13 +4840,19 @@ class QuantUIApp:
     def _resolve_and_apply(self, query: str, loop) -> None:
         """Resolve a single query (background thread) and apply on the main loop."""
         try:
-            xyz_str, _msg, source, _is_offline = _resolve_structure_with_message(query)
-            if xyz_str is None:
+            resolved, _msg = _resolve_structure_with_details(query)
+            if resolved is None:
                 raise ValueError(_msg)
-            atoms, coords = parse_xyz_input(xyz_str)
-            mol = Molecule(atoms=atoms, coordinates=coords)
+            # Keep the resolver's charge and multiplicity: rebuilt from the
+            # coordinates alone, an ion or radical loaded as a neutral
+            # singlet or failed the electron-count check (audit DATA-1).
+            mol = _molecule_from_resolved(resolved)
             loop.call_soon_threadsafe(
-                self._apply_pubchem_search_result, query, mol, None, source
+                self._apply_pubchem_search_result,
+                query,
+                mol,
+                None,
+                resolved.source,
             )
         except Exception as exc:
             loop.call_soon_threadsafe(
@@ -5932,7 +5949,8 @@ class QuantUIApp:
     ) -> None:
         """Update shared state and refresh dependent widgets."""
         self._molecule = mol
-        self.run_btn.disabled = False
+        # Loading a molecule mid-run must not re-arm Run (audit APP-4).
+        self.run_btn.disabled = bool(getattr(self, "_calc_running", False))
         self.export_btn.disabled = False
         self.export_xyz_btn.disabled = False
         self.export_mol_btn.disabled = not _RDKIT_AVAILABLE
@@ -6388,12 +6406,121 @@ class QuantUIApp:
                 self.vib_mode_dd.value = opts[i + 1][1]
                 return
 
+    # ── Run lock: one calculation at a time, setup frozen while it runs ──
+
+    def _run_input_widgets(self) -> List[Any]:
+        """Every control whose value a run reads (the Calculation Setup panel,
+        the molecule's charge/multiplicity, the calculation type)."""
+        found: List[Any] = []
+        seen: set = set()
+        help_buttons = {
+            id(w)
+            for name, w in vars(self).items()
+            if name.endswith("_help_btn") and w is not None
+        }
+
+        def _walk(w: Any) -> None:
+            if w is None or id(w) in seen:
+                return
+            seen.add(id(w))
+            children = getattr(w, "children", None)
+            if children:
+                for child in children:
+                    _walk(child)
+                return
+            if hasattr(w, "disabled") and id(w) not in help_buttons:
+                found.append(w)
+
+        _walk(getattr(self, "calc_setup_panel", None))
+        for name in ("charge_si", "mult_si", "calc_type_dd"):
+            _walk(getattr(self, name, None))
+        return found
+
+    def _freeze_run_inputs(self) -> None:
+        """Disable the run's input controls, remembering their prior state."""
+        frozen = getattr(self, "_frozen_run_inputs", None) or {}
+        for w in self._run_input_widgets():
+            if id(w) in frozen:
+                continue
+            try:
+                frozen[id(w)] = (w, bool(w.disabled))
+                w.disabled = True
+            except Exception:  # noqa: BLE001 — a widget without the trait
+                frozen.pop(id(w), None)
+        self._frozen_run_inputs = frozen
+
+    def _restore_run_inputs(self) -> None:
+        """Re-enable what :meth:`_freeze_run_inputs` disabled."""
+        frozen = getattr(self, "_frozen_run_inputs", None) or {}
+        self._frozen_run_inputs = {}
+        for w, was_disabled in frozen.values():
+            try:
+                w.disabled = was_disabled
+            except Exception:  # noqa: BLE001 — closed widget
+                pass
+
+    def _begin_run_lock(self) -> None:
+        """Mark a run in flight (main thread, before the worker starts)."""
+        self._calc_running = True
+        self.run_btn.disabled = True
+        self._freeze_run_inputs()
+
+    def _end_run_lock(self) -> None:
+        """Release the run lock taken by :meth:`_begin_run_lock`."""
+        self._calc_running = False
+        self.run_btn.disabled = False
+        self._restore_run_inputs()
+
+    def _run_in_thread(self) -> None:
+        """Worker-thread entry: :meth:`_do_run`, plus a guaranteed unlock.
+
+        ``_do_run`` releases the run state in its own ``finally``, but that
+        block starts after its setup; an error before it (an unwritable log
+        directory, say) used to leave Run disabled for the session.
+        """
+        error: Optional[BaseException] = None
+        try:
+            self._do_run()
+        except Exception as exc:  # noqa: BLE001 — reported below
+            logger.exception("Calculation run failed before it started")
+            error = exc
+        finally:
+            if getattr(self, "_calc_running", False):
+                self._cancel_event.clear()
+                self.cancel_btn.disabled = True
+                self.log_clear_btn.disabled = False
+                try:
+                    self._stop_elapsed_ticker()
+                    self._activity_end(kind="compute")
+                except Exception:  # noqa: BLE001 — teardown is best-effort
+                    pass
+                self._end_run_lock()
+                self.run_status.value = (
+                    f"The run could not start: {error}"
+                    if error is not None
+                    else "The run stopped unexpectedly."
+                )
+            else:
+                self._restore_run_inputs()
+
     def _do_run(self) -> None:
         """Main calculation dispatch — runs in a background thread."""
-        mol = self._molecule
-        if mol is None:
+        if self._molecule is None:
             self.run_status.value = "Load a molecule first."
+            self._end_run_lock()
             return
+        # Everything the run depends on is read once, here. The run lasts
+        # minutes and the setup widgets (and the active molecule, whose
+        # charge/multiplicity the Charge/Multiplicity fields write into)
+        # stay live: a later read would mix two levels of theory in one
+        # saved result (audit APP-2).
+        mol = copy.deepcopy(self._molecule)
+        _run_method = self.method_dd.value
+        _run_basis = self.basis_dd.value
+        _run_solvent_opt = self.solvent_dd.value if self.solvent_cb.value else None
+        _run_fmax = self.fmax_fi.value
+        _run_max_steps = self.max_steps_si.value
+        _run_preopt = bool(self._freq_preopt_cb.value)
         self._activity_begin(
             "Running compute operations...",
             kind="compute",
@@ -6412,7 +6539,7 @@ class QuantUIApp:
 
         _calc_log.log_event(
             "calc_start",
-            f"{self.method_dd.value}/{self.basis_dd.value} on {mol.get_formula()}",
+            f"{_run_method}/{_run_basis} on {mol.get_formula()}",
             n_atoms=len(mol.atoms),
         )
         _run_wall_t = time.perf_counter()
@@ -6432,9 +6559,7 @@ class QuantUIApp:
         _predicted_run_confidence: str = "unknown"
         try:
             _ct_for_est = _run_calc_type_key(self)
-            _nb_for_est = _calc_log.count_basis_functions(
-                mol.atoms, self.basis_dd.value
-            )
+            _nb_for_est = _calc_log.count_basis_functions(mol.atoms, _run_basis)
             # Match _update_estimate's GPU-prediction logic so the
             # recorded predicted_s is what the user SAW in the UI
             # before they hit Run.
@@ -6448,7 +6573,7 @@ class QuantUIApp:
                 )
 
                 _gpu_avail, _ = is_gpu_available()
-                if _gpu_avail and self.method_dd.value.upper() not in _GPU_NO:
+                if _gpu_avail and _run_method.upper() not in _GPU_NO:
                     _predicted_gpu_used = True
                 else:
                     _predicted_gpu_used = False
@@ -6460,7 +6585,7 @@ class QuantUIApp:
             # references are never fitted, so predict False for them.
             _predicted_density_fit: Optional[bool] = None
             try:
-                if self.method_dd.value.upper() in ("MP2", "CCSD", "CCSD(T)"):
+                if _run_method.upper() in ("MP2", "CCSD", "CCSD(T)"):
                     _predicted_density_fit = False
                 else:
                     _predicted_density_fit = bool(
@@ -6472,8 +6597,8 @@ class QuantUIApp:
             _est = _calc_log.estimate_time(
                 n_atoms=len(mol.atoms),
                 n_electrons=mol.get_electron_count(),
-                method=self.method_dd.value,
-                basis=self.basis_dd.value,
+                method=_run_method,
+                basis=_run_basis,
                 n_basis=_nb_for_est,
                 calc_type=_ct_for_est,
                 gpu_used=_predicted_gpu_used,
@@ -6516,7 +6641,7 @@ class QuantUIApp:
             """Run a required post-optimization single point on target geometry."""
             from quantui.engines import EnginePreference, EngineRequest, run_calc
 
-            _solvent = self.solvent_dd.value if self.solvent_cb.value else None
+            _solvent = _run_solvent_opt
             self.run_status.value = (
                 "Running required single-point on optimized geometry..."
             )
@@ -6528,8 +6653,8 @@ class QuantUIApp:
                 EngineRequest(
                     request_id=_uuid.uuid4().hex,
                     calc_type="single_point",
-                    method=self.method_dd.value,
-                    basis=self.basis_dd.value,
+                    method=_run_method,
+                    basis=_run_basis,
                     charge=int(target_mol.charge),
                     multiplicity=int(target_mol.multiplicity),
                     molecule={
@@ -6621,7 +6746,7 @@ class QuantUIApp:
             ct = self.calc_type_dd.value
             # PCM solvent for this run (None = gas phase). The checkbox is
             # disabled for calc types without solvent support.
-            _run_solvent = self.solvent_dd.value if self.solvent_cb.value else None
+            _run_solvent = _run_solvent_opt
             result: Any = None
             result_html: str = ""
             save_spectra: dict = {}
@@ -6632,7 +6757,7 @@ class QuantUIApp:
             # Frequency and UV-Vis (TD-DFT) both have dedicated seed/pre-opt
             # handling in their own branches so they can layer a seed
             # geometry under the pre-opt step.
-            if self._freq_preopt_cb.value and ct not in (
+            if _run_preopt and ct not in (
                 "Geometry Opt",
                 "Frequency",
                 "UV-Vis (TD-DFT)",
@@ -6656,8 +6781,8 @@ class QuantUIApp:
                 try:
                     _pre_opt = optimize_geometry(
                         molecule=calc_mol,
-                        method=self.method_dd.value,
-                        basis=self.basis_dd.value,
+                        method=_run_method,
+                        basis=_run_basis,
                         progress_stream=log,  # type: ignore[arg-type]
                         solvent=_run_solvent,
                     )
@@ -6697,7 +6822,7 @@ class QuantUIApp:
 
                     self.run_status.value = "Loading seed geometry from history…"
                     _geo_seed_traj, _ = load_trajectory(Path(_geo_seed_path))
-                    calc_mol = _geo_seed_traj[-1]
+                    calc_mol = _run_seed_with_run_charge(_geo_seed_traj[-1], mol)
                     log.write(
                         f"\nSeed geometry loaded from: "
                         f"{Path(_geo_seed_path).name}\n"
@@ -6711,20 +6836,18 @@ class QuantUIApp:
 
                 # History-based expected step count → "step k/~N" + a floor
                 # for the live progress fraction. None on cold history.
-                _expected_steps = _calc_log.estimate_opt_steps(
-                    self.method_dd.value, self.basis_dd.value
-                )
+                _expected_steps = _calc_log.estimate_opt_steps(_run_method, _run_basis)
                 log.opt_expected_steps = (
                     int(round(_expected_steps)) if _expected_steps else None
                 )
-                log.opt_fmax_target = float(self.fmax_fi.value)
+                log.opt_fmax_target = float(_run_fmax)
                 log.opt_fmax0 = None
                 result = run_calc(
                     EngineRequest(
                         request_id=_uuid.uuid4().hex,
                         calc_type="geometry_opt",
-                        method=self.method_dd.value,
-                        basis=self.basis_dd.value,
+                        method=_run_method,
+                        basis=_run_basis,
                         charge=int(calc_mol.charge),
                         multiplicity=int(calc_mol.multiplicity),
                         molecule={
@@ -6732,8 +6855,8 @@ class QuantUIApp:
                             "coordinates": [list(c) for c in calc_mol.coordinates],
                         },
                         options={
-                            "fmax": self.fmax_fi.value,
-                            "steps": self.max_steps_si.value,
+                            "fmax": _run_fmax,
+                            "steps": _run_max_steps,
                             "expected_steps": (
                                 int(round(_expected_steps)) if _expected_steps else None
                             ),
@@ -6816,15 +6939,15 @@ class QuantUIApp:
                         check_search_possible,
                     )
 
-                    check_search_possible(self.method_dd.value)
+                    check_search_possible(_run_method)
                     self.run_status.value = (
                         "Building a transition-state guess from reactant + product…"
                     )
                     _ts_guess = build_ts_guess(
                         calc_mol,
                         _ts_product,
-                        self.method_dd.value,
-                        self.basis_dd.value,
+                        _run_method,
+                        _run_basis,
                         n_images=int(self._ts_n_images_si.value),
                         solvent=_run_solvent,
                         progress_stream=log,  # type: ignore[arg-type]
@@ -6835,10 +6958,10 @@ class QuantUIApp:
                 self.run_status.value = "Searching for a transition state…"
                 result = run_ts_search(
                     calc_mol,
-                    self.method_dd.value,
-                    self.basis_dd.value,
+                    _run_method,
+                    _run_basis,
                     fmax=float(self._ts_fmax_fi.value),
-                    steps=int(self.max_steps_si.value),
+                    steps=int(_run_max_steps),
                     progress_stream=log,  # type: ignore[arg-type]
                     solvent=_run_solvent,
                     cancel_check=self._cancel_event.is_set,
@@ -6886,9 +7009,9 @@ class QuantUIApp:
                 self.run_status.value = "Following the reaction path…"
                 result = run_irc(
                     calc_mol,
-                    self.method_dd.value,
-                    self.basis_dd.value,
-                    steps=int(self.max_steps_si.value),
+                    _run_method,
+                    _run_basis,
+                    steps=int(_run_max_steps),
                     progress_stream=log,  # type: ignore[arg-type]
                     solvent=_run_solvent,
                     cancel_check=self._cancel_event.is_set,
@@ -6917,7 +7040,7 @@ class QuantUIApp:
                 # any failure log to the user log, keep ``calc_mol`` as
                 # the input geometry, and proceed to the freq analysis —
                 # the user can iterate if their input was actually wrong.
-                if self._freq_preopt_cb.value:
+                if _run_preopt:
                     from quantui import optimize_geometry
                     from quantui.optimizer import FREQ_PREOPT_FMAX
 
@@ -6930,8 +7053,8 @@ class QuantUIApp:
                     try:
                         _pre_opt = optimize_geometry(
                             molecule=calc_mol,
-                            method=self.method_dd.value,
-                            basis=self.basis_dd.value,
+                            method=_run_method,
+                            basis=_run_basis,
                             fmax=FREQ_PREOPT_FMAX,
                             progress_stream=log,  # type: ignore[arg-type]
                             solvent=_run_solvent,
@@ -6964,7 +7087,7 @@ class QuantUIApp:
                         )
 
                 # ── Step 3: frequency analysis ────────────────────────────────
-                if _run_solvent and not self._freq_preopt_cb.value:
+                if _run_solvent and not _run_preopt:
                     log.write(
                         f"\nNote: PCM ({_run_solvent}) frequencies are only "
                         "meaningful at a geometry optimized in the same "
@@ -6976,8 +7099,8 @@ class QuantUIApp:
                 self.run_status.value = "Computing frequencies (SCF + Hessian)…"
                 result = run_freq_calc(
                     molecule=calc_mol,
-                    method=self.method_dd.value,
-                    basis=self.basis_dd.value,
+                    method=_run_method,
+                    basis=_run_basis,
                     progress_stream=log,  # type: ignore[arg-type]
                     # The app opens _ckpt and resolves _resume
                     # above (used by Geometry Opt / PES Scan / Reorganization
@@ -7009,8 +7132,8 @@ class QuantUIApp:
                         _retried = retry_frequency_off_saddle(
                             calc_mol,
                             result,
-                            method=self.method_dd.value,
-                            basis=self.basis_dd.value,
+                            method=_run_method,
+                            basis=_run_basis,
                             solvent=_run_solvent,
                             progress_stream=log,  # type: ignore[arg-type]
                         )
@@ -7037,7 +7160,7 @@ class QuantUIApp:
 
                     self.run_status.value = "Loading seed geometry from history…"
                     _seed_traj, _ = load_trajectory(Path(_tddft_seed_path))
-                    calc_mol = _seed_traj[-1]
+                    calc_mol = _run_seed_with_run_charge(_seed_traj[-1], mol)
                     log.write(
                         f"\nSeed geometry loaded from: {Path(_tddft_seed_path).name}\n"
                         f"  Formula: {calc_mol.get_formula()}  "
@@ -7047,7 +7170,7 @@ class QuantUIApp:
                 # ── Step 2: optional geometry optimization ────────────────────
                 # Renamed from
                 # "pre-optimisation" — DFT geom-opt is just geom-opt.
-                if self._freq_preopt_cb.value:
+                if _run_preopt:
                     from quantui import optimize_geometry
 
                     self.run_status.value = (
@@ -7063,8 +7186,8 @@ class QuantUIApp:
                     try:
                         _pre_opt = optimize_geometry(
                             molecule=calc_mol,
-                            method=self.method_dd.value,
-                            basis=self.basis_dd.value,
+                            method=_run_method,
+                            basis=_run_basis,
                             progress_stream=log,  # type: ignore[arg-type]
                             solvent=_run_solvent,
                         )
@@ -7097,8 +7220,8 @@ class QuantUIApp:
                 self.run_status.value = "Running TD-DFT excited states..."
                 result = run_tddft_calc(
                     molecule=calc_mol,
-                    method=self.method_dd.value,
-                    basis=self.basis_dd.value,
+                    method=_run_method,
+                    basis=_run_basis,
                     nstates=self.nstates_si.value,
                     progress_stream=log,  # type: ignore[arg-type]
                     solvent=_run_solvent,
@@ -7127,7 +7250,7 @@ class QuantUIApp:
 
                     self.run_status.value = "Loading seed geometry from history…"
                     _nmr_seed_traj, _ = load_trajectory(Path(_nmr_seed_path))
-                    calc_mol = _nmr_seed_traj[-1]
+                    calc_mol = _run_seed_with_run_charge(_nmr_seed_traj[-1], mol)
                     log.write(
                         f"\nSeed geometry loaded from: {Path(_nmr_seed_path).name}\n"
                         f"  Formula: {calc_mol.get_formula()}  "
@@ -7139,8 +7262,8 @@ class QuantUIApp:
 
                 result = run_nmr_calc(
                     molecule=calc_mol,
-                    method=self.method_dd.value,
-                    basis=self.basis_dd.value,
+                    method=_run_method,
+                    basis=_run_basis,
                     progress_stream=log,  # type: ignore[arg-type]
                 )
                 result_html = self._format_nmr_result(result)
@@ -7179,7 +7302,7 @@ class QuantUIApp:
                     self.run_status.value = "Loading seed geometry from history…"
                     _seed_traj, _ = load_trajectory(Path(_scan_seed.value))
                     if _seed_traj:
-                        calc_mol = _seed_traj[-1]
+                        calc_mol = _run_seed_with_run_charge(_seed_traj[-1], mol)
                         log.write(
                             f"\nSeed geometry loaded from: "
                             f"{Path(_scan_seed.value).name}\n"
@@ -7199,16 +7322,16 @@ class QuantUIApp:
 
                 result = run_pes_scan(
                     molecule=calc_mol,
-                    method=self.method_dd.value,
-                    basis=self.basis_dd.value,
+                    method=_run_method,
+                    basis=_run_basis,
                     scan_type=_st,
                     atom_indices=_atom_idx,
                     start=self._scan_start.value,
                     stop=self._scan_stop.value,
                     steps=self._scan_steps.value,
                     grid=str(getattr(self._scan_grid_dd, "value", "linear")),
-                    fmax=self.fmax_fi.value,
-                    max_opt_steps=self.max_steps_si.value,
+                    fmax=_run_fmax,
+                    max_opt_steps=_run_max_steps,
                     progress_stream=log,  # type: ignore[arg-type]
                     checkpoint=_ckpt,
                     resume=_resume,
@@ -7229,14 +7352,14 @@ class QuantUIApp:
                     run_reorganization_energy,
                 )
 
-                _solvent = self.solvent_dd.value if self.solvent_cb.value else None
+                _solvent = _run_solvent_opt
                 result = run_reorganization_energy(
                     molecule=calc_mol,
                     mode=self._reorg_mode_dd.value,
-                    method=self.method_dd.value,
-                    basis=self.basis_dd.value,
-                    fmax=self.fmax_fi.value,
-                    steps=self.max_steps_si.value,
+                    method=_run_method,
+                    basis=_run_basis,
+                    fmax=_run_fmax,
+                    steps=_run_max_steps,
                     progress_stream=log,  # type: ignore[arg-type]
                     solvent=_solvent,
                     checkpoint=_ckpt,
@@ -7250,7 +7373,7 @@ class QuantUIApp:
                 from quantui.engines import EnginePreference, EngineRequest, run_calc
 
                 # MP2 heavy-atom warning
-                if self.method_dd.value.upper() == "MP2":
+                if _run_method.upper() == "MP2":
                     _n_heavy = sum(1 for a in calc_mol.atoms if a != "H")
                     if _n_heavy > 20:
                         self.result_output.append_display_data(
@@ -7262,13 +7385,13 @@ class QuantUIApp:
                             )
                         )
 
-                _solvent = self.solvent_dd.value if self.solvent_cb.value else None
+                _solvent = _run_solvent_opt
                 engine_result = run_calc(
                     EngineRequest(
                         request_id=_uuid.uuid4().hex,
                         calc_type="single_point",
-                        method=self.method_dd.value,
-                        basis=self.basis_dd.value,
+                        method=_run_method,
+                        basis=_run_basis,
                         charge=int(calc_mol.charge),
                         multiplicity=int(calc_mol.multiplicity),
                         molecule={
@@ -7345,8 +7468,8 @@ class QuantUIApp:
             _ana_ctx = _AnalysisContext(
                 calc_type=save_type,
                 formula=result.formula,
-                method=self.method_dd.value,
-                basis=self.basis_dd.value,
+                method=_run_method,
+                basis=_run_basis,
                 live_result=result,
                 molecule=calc_mol,
                 spectra_data=save_spectra,
@@ -7507,7 +7630,7 @@ class QuantUIApp:
                 self._queue_main_thread_callback(
                     self._update_log_panel,
                     log.getvalue(),
-                    f"{result.formula}  {self.method_dd.value}/{self.basis_dd.value}",
+                    f"{result.formula}  {_run_method}/{_run_basis}",
                 )
                 self._queue_main_thread_callback(
                     self._show_result_log,
@@ -7680,7 +7803,7 @@ class QuantUIApp:
             try:
                 _calc_log.log_event(
                     "calc_cancelled",
-                    f"{mol.get_formula()} {self.method_dd.value}/{self.basis_dd.value}",
+                    f"{mol.get_formula()} {_run_method}/{_run_basis}",
                     elapsed_s=round(_elapsed, 2),
                 )
             except OSError:
@@ -7723,8 +7846,8 @@ class QuantUIApp:
                 _log_dir.mkdir(parents=True, exist_ok=True)
                 _ts = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 _formula = mol.get_formula() if mol is not None else "unknown"
-                _method = self.method_dd.value
-                _basis = self.basis_dd.value
+                _method = _run_method
+                _basis = _run_basis
                 with open(_log_dir / "error_log.txt", "a") as _ef:
                     _ef.write(
                         f"\n{'='*60}\n"
@@ -7755,6 +7878,7 @@ class QuantUIApp:
 
         finally:
             self.run_btn.disabled = False
+            self._restore_run_inputs()
             # Disarm Cancel, re-enable Clear, clear run-in-flight state.
             self._calc_running = False
             self._cancel_event.clear()

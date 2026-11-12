@@ -15,6 +15,7 @@ import tempfile
 from typing import Literal, Sequence, cast
 
 from quantui import theme as _theme
+from quantui.viz_assets import script_json as _script_json
 
 logger = logging.getLogger(__name__)
 
@@ -635,7 +636,6 @@ def render_molecule_html(
         if callable(make_html):
             view_html = viz._make_html()
             if capture_class:
-                import json
                 import re
 
                 from quantui.orbital_visualization import (
@@ -650,7 +650,7 @@ def render_molecule_html(
                     capture_js = (
                         _GENERIC_CAPTURE_JS.replace("__UID__", uid)
                         .replace("__CAPFN__", capture_fn)
-                        .replace("__BG__", json.dumps(bgcolor))
+                        .replace("__BG__", _script_json(bgcolor))
                     )
                     view_html = (
                         view_html

@@ -87,6 +87,13 @@ class TestSlurmUtils:
         states = parse_sacct_states(output)
         assert states == {"123456": "COMPLETED", "789": "CANCELLED"}
 
+    def test_parse_sacct_states_drops_who_cancelled(self):
+        # Real sacct output for a cancelled job names the canceller; a
+        # trailing ``+`` can follow a truncated state.
+        output = "789|CANCELLED by 1000|0:15|00:00:04\n790|CANCELLED+|0:15|00:00:01\n"
+        states = parse_sacct_states(output)
+        assert states == {"789": "CANCELLED", "790": "CANCELLED"}
+
     def test_parse_sacct_accounting(self):
         output = "123456|FAILED|1:0|00:00:42\n"
         rows = parse_sacct_accounting(output)

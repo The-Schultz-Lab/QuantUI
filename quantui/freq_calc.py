@@ -621,9 +621,9 @@ def _run_freq_calc_body(
         mf = scf.UHF(mol)
         scf_variant = type(mf).__name__
     else:
-        # Route through resolve_xc + maybe_apply_d3 so
-        # methods like wB97X-D (PySCF rejects "wb97x-d") map to the
-        # bare functional + external D3 dispersion.
+        # Route through resolve_xc + maybe_apply_d3: display names map to
+        # LibXC (PySCF rejects "wb97x-d"), PBE-D3 gets D3, and wB97X-D gets
+        # its own dispersion term (quantui.chg_dispersion) in the Hessian.
         from .session_calc import maybe_apply_d3, resolve_xc
 
         mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
@@ -800,6 +800,7 @@ def _run_freq_calc_body(
                 from .config import BOHR_TO_ANGSTROM as _BOHR_TO_ANG
                 from .freq_displacement_ids import (
                     displacement_id,
+                    displacement_set_name,
                     parse_displacement_id,
                 )
 
@@ -835,7 +836,17 @@ def _run_freq_calc_body(
                 # assembly step itself a proper gate: it only runs
                 # once every required id is present here, regardless of how
                 # it got there.
-                _ITEM_SET_NAME = "freq_displacements"
+                # Named for this reference geometry and SCF setup, so a
+                # resume never reuses dipoles displaced from anything else.
+                _ITEM_SET_NAME = displacement_set_name(
+                    "freq_displacements",
+                    mol,
+                    xc=_xc,
+                    density_fit=_density_fit_used,
+                    solvent=_pcm_solvent,
+                    delta_bohr=_DELTA,
+                    unrestricted=_dm0_is_unrestricted,
+                )
                 _dipoles: dict = {}
                 if checkpoint is not None and resume:
                     for _item_id, _payload in checkpoint.completed_items(

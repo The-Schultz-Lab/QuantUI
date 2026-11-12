@@ -78,6 +78,17 @@ def _water():
 # ============================================================================
 
 
+def _item_set(ckpt, prefix):
+    """The one item set named ``<prefix>-<geometry digest>`` in *ckpt*."""
+    names = [
+        p.name
+        for p in (ckpt.dir / "items").iterdir()
+        if p.name.startswith(prefix + "-")
+    ]
+    assert len(names) == 1, names
+    return names[0]
+
+
 class TestThermoData:
     def test_fields_stored(self):
         td = _make_thermo()
@@ -797,7 +808,7 @@ class TestChk4DisplacementCheckpointing:
         ckpt = self._checkpoint(tmp_path, molecule)
         run_freq_calc(molecule, method="RHF", basis="STO-3G", checkpoint=ckpt)
         # 3 atoms x 3 axes x 2 signs = 18.
-        assert len(ckpt.completed_item_ids("freq_displacements")) == 18
+        assert len(ckpt.completed_item_ids(_item_set(ckpt, "freq_displacements"))) == 18
 
     def test_successful_run_marks_the_checkpoint_complete(self, tmp_path, monkeypatch):
         """A successful frequency run must not linger forever in the
@@ -861,15 +872,17 @@ class TestChk4DisplacementCheckpointing:
             molecule, method="RHF", basis="STO-3G", checkpoint=ckpt
         )
         all_ids = required_displacement_ids(3)
-        assert ckpt.completed_item_ids("freq_displacements") == set(all_ids)
+        assert ckpt.completed_item_ids(_item_set(ckpt, "freq_displacements")) == set(
+            all_ids
+        )
 
         # Simulate an interrupted run: keep only the first 3 banked.
         keep = set(all_ids[:3])
-        items_dir = ckpt.items_dir("freq_displacements")
+        items_dir = ckpt.items_dir(_item_set(ckpt, "freq_displacements"))
         for item_id in all_ids:
             if item_id not in keep:
                 (items_dir / f"{item_id}.json").unlink()
-        assert ckpt.completed_item_ids("freq_displacements") == keep
+        assert ckpt.completed_item_ids(_item_set(ckpt, "freq_displacements")) == keep
 
         ckpt.begin()  # a real resubmission calls .begin() again — must not erase items
         calls = self._count_rescue_calls(monkeypatch)
@@ -878,10 +891,41 @@ class TestChk4DisplacementCheckpointing:
         )
         # reference SCF + the 15 displacements that were NOT kept.
         assert len(calls) == 1 + (len(all_ids) - len(keep))
-        assert ckpt.completed_item_ids("freq_displacements") == set(all_ids)
+        assert ckpt.completed_item_ids(_item_set(ckpt, "freq_displacements")) == set(
+            all_ids
+        )
         assert resumed.ir_intensities == pytest.approx(
             baseline.ir_intensities, abs=1e-6
         )
+
+    @pyscf_only
+    def test_resume_at_a_different_geometry_does_not_reuse_dipoles(
+        self, tmp_path, monkeypatch
+    ):
+        """Audit APP-1: the app's resume key is the *input* geometry, but the
+        displacements are taken around the geometry actually used (after an
+        optional pre-optimization or seed). Resuming after that changed used
+        to splice the old geometry's dipoles into the new finite difference
+        (water: IR 12632 / 22014 / 17598 km/mol instead of 7 / 44 / 30)."""
+        from quantui.freq_calc import run_freq_calc
+        from quantui.molecule import Molecule
+
+        monkeypatch.setenv("QUANTUI_RAMAN", "0")
+        monkeypatch.setenv("QUANTUI_FREQ_PARALLEL", "0")
+        start = _water()
+        ckpt = self._checkpoint(tmp_path, start)
+        run_freq_calc(start, method="RHF", basis="STO-3G", checkpoint=ckpt)
+
+        moved = Molecule(
+            start.atoms,
+            [[0.0, 0.0, 0.0], [0.80, 0.62, 0.0], [-0.80, 0.62, 0.0]],
+        )
+        clean = run_freq_calc(moved, method="RHF", basis="STO-3G")
+        ckpt.begin()
+        resumed = run_freq_calc(
+            moved, method="RHF", basis="STO-3G", checkpoint=ckpt, resume=True
+        )
+        assert resumed.ir_intensities == pytest.approx(clean.ir_intensities, abs=1e-6)
 
     def test_resume_false_ignores_a_populated_checkpoint(self, tmp_path, monkeypatch):
         """resume=False must behave like no checkpoint was ever passed for
@@ -895,7 +939,7 @@ class TestChk4DisplacementCheckpointing:
         molecule = _water()
         ckpt = self._checkpoint(tmp_path, molecule)
         run_freq_calc(molecule, method="RHF", basis="STO-3G", checkpoint=ckpt)
-        assert len(ckpt.completed_item_ids("freq_displacements")) == 18
+        assert len(ckpt.completed_item_ids(_item_set(ckpt, "freq_displacements"))) == 18
 
         ckpt.begin()
         calls = self._count_rescue_calls(monkeypatch)
@@ -920,10 +964,12 @@ class TestChk4DisplacementCheckpointing:
         run_freq_calc(molecule, method="RHF", basis="STO-3G", checkpoint=ckpt)
 
         all_ids = required_displacement_ids(3)
-        items_dir = ckpt.items_dir("freq_displacements")
+        items_dir = ckpt.items_dir(_item_set(ckpt, "freq_displacements"))
         corrupt_id = all_ids[0]
         (items_dir / f"{corrupt_id}.json").write_text("{not json", encoding="utf-8")
-        assert corrupt_id not in ckpt.completed_item_ids("freq_displacements")
+        assert corrupt_id not in ckpt.completed_item_ids(
+            _item_set(ckpt, "freq_displacements")
+        )
 
         ckpt.begin()
         calls = self._count_rescue_calls(monkeypatch)
@@ -933,7 +979,9 @@ class TestChk4DisplacementCheckpointing:
         # reference SCF + the one corrupted (and therefore recomputed) displacement.
         assert len(calls) == 2
         assert resumed.ir_intensities, "must still produce a usable result"
-        assert corrupt_id in ckpt.completed_item_ids("freq_displacements")
+        assert corrupt_id in ckpt.completed_item_ids(
+            _item_set(ckpt, "freq_displacements")
+        )
 
 
 if __name__ == "__main__":

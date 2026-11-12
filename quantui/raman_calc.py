@@ -176,8 +176,20 @@ def _cpu_raman_activities_fd(
     )
     from quantui.gpu_offload import try_to_gpu as _try_to_gpu_inner
 
-    _ITEM_SET_NAME = "raman_displacements"
     _xc = getattr(mf, "xc", None)
+    # Named for this reference geometry and SCF setup, so a resume never
+    # reuses polarizabilities displaced from anything else.
+    from quantui.freq_displacement_ids import displacement_set_name
+
+    _ITEM_SET_NAME = displacement_set_name(
+        "raman_displacements",
+        mol,
+        xc=_xc,
+        density_fit=density_fit_used,
+        solvent=None,  # Raman is skipped for solvated runs
+        delta_bohr=_DELTA_BOHR,
+        unrestricted=dm0_is_unrestricted,
+    )
     _n_atoms = mol.natm
     _coords0 = mol.atom_coords().copy()
     _total = _n_atoms * 3 * 2

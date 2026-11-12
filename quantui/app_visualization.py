@@ -25,6 +25,7 @@ from quantui.downloads import download_link_html as _download_link_html
 from quantui.orbital_visualization import _GENERIC_CAPTURE_JS, _png_capture_controls
 from quantui.symmetry import html_irrep
 from quantui.viz_assets import orient_js, orient_view
+from quantui.viz_assets import script_json as _script_json
 
 logger = logging.getLogger(__name__)
 
@@ -3116,11 +3117,10 @@ def iso_bridge_update(app: Any, **opts: Any) -> None:
     bridge = getattr(app, "_iso_js_bridge", None)
     if bridge is None:
         return
-    import json
 
     from IPython.display import Javascript, display
 
-    payload = json.dumps(opts)
+    payload = _script_json(opts)
     # Retry-until-present mirrors _vib_bridge_set_mode: at the moment a slider
     # fires, the viewer may still be loading its async 3Dmol bundle.
     js = (
@@ -3446,7 +3446,6 @@ def _frame_stepper_controls(
     (e.g. per-frame energy arrays). ``loop`` makes Play cycle forever, else it
     runs once and stops on the last frame.
     """
-    import json
 
     btn = _STEPPER_BTN_STYLE
     start = (n - 1) if start_index is None else start_index
@@ -3483,8 +3482,8 @@ def _frame_stepper_controls(
         .replace("__IV__", str(interval_ms))
         .replace("__LOOP__", "1" if loop else "0")
         .replace("__START__", str(start))
-        .replace("__AB_START__", json.dumps(ab_at_start or ""))
-        .replace("__AB_OTHER__", json.dumps(ab_other or ""))
+        .replace("__AB_START__", _script_json(ab_at_start or ""))
+        .replace("__AB_OTHER__", _script_json(ab_other or ""))
         .replace("__EXTRA__", extra_decls)
         .replace("__LABEL_BODY__", label_js)
     )
@@ -3520,7 +3519,6 @@ def build_reorg_geometry_viewer_html(
     the isosurface viewer's capture bridge but with a uid-scoped
     capture function — see ``_GENERIC_CAPTURE_JS``. Empty omits the button.
     """
-    import json
     import re
 
     from quantui.viz_assets import make_view
@@ -3549,7 +3547,7 @@ def build_reorg_geometry_viewer_html(
         return _theme.frame_viewer_html(view_html, width=width)
     uid = m.group(1)
 
-    slugs = json.dumps(
+    slugs = _script_json(
         [
             g.get("label", f"geometry_{i + 1}").split(" — ")[0]
             for i, g in enumerate(geometries)
@@ -3561,7 +3559,7 @@ def build_reorg_geometry_viewer_html(
         capture_js = (
             _GENERIC_CAPTURE_JS.replace("__UID__", uid)
             .replace("__CAPFN__", capture_fn)
-            .replace("__BG__", json.dumps(bgcolor))
+            .replace("__BG__", _script_json(bgcolor))
         )
         bridge_js = (
             _REORG_PNG_BRIDGE_JS.replace("__UID__", uid)
@@ -3583,10 +3581,10 @@ def build_reorg_geometry_viewer_html(
     if len(geometries) < 2:
         return _theme.frame_viewer_html(view_html, width=width)
 
-    labels = json.dumps(
+    labels = _script_json(
         [g.get("label", f"Geometry {i + 1}") for i, g in enumerate(geometries)]
     )
-    notes = json.dumps([g.get("note", "") for g in geometries])
+    notes = _script_json([g.get("note", "") for g in geometries])
     controls = _frame_stepper_controls(
         uid,
         len(geometries),
@@ -3826,7 +3824,6 @@ def build_trajectory_viewer_html(
     displayed in it — nothing trajectory-specific needed). Empty omits the
     button.
     """
-    import json
     import re
 
     from quantui.viz_assets import make_view
@@ -3850,7 +3847,7 @@ def build_trajectory_viewer_html(
         capture_js = (
             _GENERIC_CAPTURE_JS.replace("__UID__", uid)
             .replace("__CAPFN__", capture_fn)
-            .replace("__BG__", json.dumps(bgcolor))
+            .replace("__BG__", _script_json(bgcolor))
         )
         view_html = (
             view_html
@@ -3864,9 +3861,9 @@ def build_trajectory_viewer_html(
         return _theme.frame_viewer_html(view_html, width=width)
 
     interval_ms = max(1, int(round(1000.0 / max(1, fps))))
-    eabs = json.dumps([float(e) for e in energies]) if energies else "null"
-    erel = json.dumps([float(e) for e in rel_e]) if rel_e else "null"
-    fjs = json.dumps(formula or "")
+    eabs = _script_json([float(e) for e in energies]) if energies else "null"
+    erel = _script_json([float(e) for e in rel_e]) if rel_e else "null"
+    fjs = _script_json(formula or "")
     label_js = (
         'var s="Step "+i+" / "+(N-1);'
         f'if({fjs}) s+=" \\u00b7 "+{fjs};'
@@ -4022,7 +4019,6 @@ def build_vib_viewer_html(
     equivalent client-side capture global, same reasoning as the main molecule
     viewer.
     """
-    import json
     import re
 
     import numpy as np
@@ -4056,14 +4052,14 @@ def build_vib_viewer_html(
     interval_ms = max(1, int(round(1000.0 / max(1, fps))))
     js = (
         _VIB_VIEWER_JS.replace("__UID__", uid)
-        .replace("__SYM__", json.dumps(atoms))
-        .replace("__BASE__", json.dumps(base.tolist()))
-        .replace("__DISPL__", json.dumps(displ_map))
+        .replace("__SYM__", _script_json(atoms))
+        .replace("__BASE__", _script_json(base.tolist()))
+        .replace("__DISPL__", _script_json(displ_map))
         .replace("__NAT__", str(n_atoms))
         .replace("__NF__", str(int(n_frames)))
         .replace("__AMP__", repr(float(amplitude)))
         .replace("__IV__", str(interval_ms))
-        .replace("__BG__", json.dumps(bgcolor))
+        .replace("__BG__", _script_json(bgcolor))
         .replace("__INIT__", str(int(initial_mode)))
         .replace("__ARROWS__", "true" if arrows else "false")
         .replace("__ORIENT__", orient_js("v", base))
@@ -4074,7 +4070,7 @@ def build_vib_viewer_html(
         capture_js = (
             _GENERIC_CAPTURE_JS.replace("__UID__", uid)
             .replace("__CAPFN__", capture_fn)
-            .replace("__BG__", json.dumps(bgcolor))
+            .replace("__BG__", _script_json(bgcolor))
         )
         body = (
             body

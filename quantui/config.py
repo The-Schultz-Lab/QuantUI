@@ -103,11 +103,12 @@ METHOD_INFO = {
         "type": "dft",
         "label": "wB97X-D — Range-Separated Hybrid + Built-in Dispersion",
         "description": (
-            "Range-separated hybrid functional (Chai & Head-Gordon, 2008) with its "
-            "own empirical dispersion correction baked into the fit — not an "
-            "externally applied Grimme D3 correction. Excellent for non-covalent "
-            "interactions, charge-transfer excitations, and systems where "
-            "long-range exchange matters."
+            "Range-separated hybrid functional (Chai & Head-Gordon, 2008) fitted "
+            "together with its own atom-pair dispersion correction (Grimme-2006 "
+            "C6 coefficients, Chai–Head-Gordon damping) — not Grimme D3. QuantUI "
+            "adds that term to energies, forces and frequencies. Good for "
+            "non-covalent interactions, charge-transfer excitations, and systems "
+            "where long-range exchange matters. Dispersion parameters cover H–Xe."
         ),
         "use_for": "Non-covalent interactions, excited states, large organic molecules.",
     },
@@ -273,18 +274,24 @@ SOLVENT_OPTICAL_EPS: Dict[str, float] = {
 
 # TMS isotropic shielding reference constants for NMR chemical shift computation.
 # Key: "method/basis" → {element: σ_TMS (ppm)}.  δ = σ_TMS − σ_molecule.
-# Source: Cheeseman et al., J. Chem. Phys. 104 (1996) 5497; CCCBDB.
+# Computed with QuantUI itself (run_nmr_calc, PySCF GIAO) on TMS optimized at
+# the same level (optimize_geometry, fmax 0.01 eV/Å; Td), so TMS comes out at
+# δ = 0 and the table is consistent with the shieldings it is subtracted from.
+# The previous literature-style values did not match this GIAO code: TMS gave
+# δ(13C) = −7.7 ppm at B3LYP/6-31G* and −52 ppm at RHF/STO-3G (audit SCF-1).
+# Recompute every row if the NMR code, PySCF or pyscf-properties changes the
+# shieldings (tests/test_nmr_tms_reference.py checks the RHF/STO-3G row).
 NMR_REFERENCE_SHIELDINGS: Dict[str, Dict[str, float]] = {
-    "B3LYP/6-31G*": {"H": 31.72, "C": 183.71},
-    "B3LYP/6-311G**": {"H": 31.60, "C": 188.94},
-    "B3LYP/cc-pVDZ": {"H": 31.54, "C": 186.12},
-    "B3LYP/def2-SVP": {"H": 31.65, "C": 184.20},
-    "RHF/6-31G*": {"H": 32.00, "C": 196.00},
-    "RHF/STO-3G": {"H": 30.50, "C": 195.00},
-    "PBE0/6-31G*": {"H": 31.60, "C": 184.50},
-    "PBE/6-31G*": {"H": 31.50, "C": 185.00},
+    "B3LYP/6-31G*": {"H": 32.19, "C": 190.22},
+    "B3LYP/6-311G**": {"H": 32.01, "C": 184.49},
+    "B3LYP/cc-pVDZ": {"H": 31.31, "C": 192.19},
+    "B3LYP/def2-SVP": {"H": 31.37, "C": 189.07},
+    "RHF/6-31G*": {"H": 32.93, "C": 202.04},
+    "RHF/STO-3G": {"H": 33.75, "C": 249.43},
+    "PBE0/6-31G*": {"H": 32.12, "C": 195.06},
+    "PBE/6-31G*": {"H": 31.75, "C": 189.09},
 }
-NMR_DEFAULT_REFERENCE: Dict[str, float] = {"H": 31.72, "C": 183.71}  # B3LYP/6-31G*
+NMR_DEFAULT_REFERENCE: Dict[str, float] = dict(NMR_REFERENCE_SHIELDINGS["B3LYP/6-31G*"])
 
 # Default calculation settings
 DEFAULT_METHOD = "RHF"
@@ -646,7 +653,7 @@ import sys
 from pathlib import Path
 from pyscf import gto, scf, dft
 import numpy as np
-
+{chg_dispersion_block}
 
 def _run_scf_with_rescue(mf):
     # Standalone copy of QuantUI's shared SCF-rescue helper
@@ -715,9 +722,10 @@ def main():
         # Display name → PySCF xc string + external D3 dispersion where
         # needed. Matches quantui/session_calc.py resolve_xc + maybe_apply_d3.
         # wB97X-D maps to its full LibXC name (the actual Chai/Head-Gordon
-        # 2008 functional, built-in dispersion) because PySCF's short-alias
-        # parser black-lists 'wb97x-d'/'wb97x_d' as ambiguous; PBE-D3 adds
-        # zero-damping Grimme D3 through mf.disp (needs pyscf-dispersion).
+        # 2008 functional) because PySCF's short-alias parser black-lists
+        # 'wb97x-d'/'wb97x_d'; its own dispersion term is added below.
+        # PBE-D3 adds zero-damping Grimme D3 through mf.disp (needs
+        # pyscf-dispersion).
         _XC_ALIAS = {{
             'M06-L': 'm06l',
             'wB97X-D': 'hyb_gga_xc_wb97x_d',
@@ -752,6 +760,12 @@ def main():
                         "WARNING: pyscf-dispersion not installed; "
                         "running {{method}} without D3 dispersion."
                     )
+            if method == 'wB97X-D':
+                # LibXC's wb97x_d is only the XC part: add the functional's
+                # own atom-pair dispersion term (defined at the top of this
+                # script, a copy of quantui/chg_dispersion.py).
+                install()
+                mf.disp = CHG_DISP
 
 {density_fit_block}{solvent_block}
         energy = _run_scf_with_rescue(mf)

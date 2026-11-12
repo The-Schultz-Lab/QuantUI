@@ -38,6 +38,7 @@ from .slurm_utils import (
     SlurmJobAccounting,
     default_job_name,
     estimate_slurm_resources,
+    normalize_slurm_state,
     parse_sacct_accounting,
     parse_sacct_states,
     parse_slurm_job_id,
@@ -54,7 +55,18 @@ _TERMINAL_SLURM = frozenset(
         "TIMEOUT",
         "NODE_FAIL",
         "OUT_OF_MEMORY",
+        # Also final for this job id: a preempted job is not requeued
+        # under it unless the site requeues (then squeue reports it again).
+        "PREEMPTED",
+        "BOOT_FAIL",
+        "DEADLINE",
+        "REVOKED",
     }
+)
+# Non-terminal states that are not literally PENDING/RUNNING.
+_RUNNING_LIKE_SLURM = frozenset({"COMPLETING", "SUSPENDED", "STOPPED", "RESIZING"})
+_PENDING_LIKE_SLURM = frozenset(
+    {"PENDING", "CONFIGURING", "REQUEUED", "REQUEUE_HOLD", "REQUEUE_FED"}
 )
 _TERMINAL_RECORD = frozenset({"success", "error", "cancelled"})
 _ACTIVE_RECORD = frozenset({"queued", "pending", "running", "submitted"})
@@ -463,8 +475,8 @@ class SlurmBackend:
         ):
             return None
 
-        status = result.stdout.strip()
-        return status.upper() if status else None
+        status = normalize_slurm_state(result.stdout)
+        return status or None
 
     def _sacct_status(self, slurm_job_id: str) -> str | None:
         batch = self._batch_sacct([slurm_job_id])
@@ -566,8 +578,8 @@ class SlurmBackend:
             )
             for line in result.stdout.splitlines():
                 parts = line.strip().split()
-                if len(parts) == 2:
-                    statuses[parts[0]] = parts[1]
+                if len(parts) >= 2:
+                    statuses[parts[0]] = normalize_slurm_state(" ".join(parts[1:]))
         except (
             subprocess.TimeoutExpired,
             FileNotFoundError,
@@ -746,8 +758,8 @@ class SlurmBackend:
             )
             if status in _TERMINAL_SLURM:
                 return self._finalize_cancel_from_slurm_state(record, status)
-            if status and status not in ("PENDING", "RUNNING", "CONFIGURING"):
-                return self._finalize_cancel_from_slurm_state(record, status)
+            # Anything else (PENDING, RUNNING, COMPLETING, ...) is still on
+            # its way to CANCELLED: keep waiting until the deadline.
             time.sleep(cfg.CANCEL_POLL_INTERVAL_SECONDS)
 
         self._record_cancel_failure(
@@ -812,10 +824,10 @@ def _is_within(path: Path, parent: Path) -> bool:
 
 
 def _map_slurm_status(slurm_status: str) -> str:
-    upper = slurm_status.upper()
-    if upper in ("PENDING", "CONFIGURING"):
+    upper = normalize_slurm_state(slurm_status)
+    if upper in _PENDING_LIKE_SLURM:
         return "pending"
-    if upper == "RUNNING":
+    if upper == "RUNNING" or upper in _RUNNING_LIKE_SLURM:
         return "running"
     if upper in _TERMINAL_SLURM:
         if upper == "COMPLETED":

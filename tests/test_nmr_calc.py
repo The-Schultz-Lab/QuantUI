@@ -169,7 +169,9 @@ class TestResolveNmrReference:
         ref_map, key, is_fallback = resolve_nmr_reference("B3LYP", "6-31G*")
         assert key == "B3LYP/6-31G*"
         assert is_fallback is False
-        assert ref_map == {"H": 31.72, "C": 183.71}
+        from quantui.config import NMR_REFERENCE_SHIELDINGS
+
+        assert ref_map == NMR_REFERENCE_SHIELDINGS["B3LYP/6-31G*"]
 
     def test_unlisted_combination_is_fallback(self):
         from quantui.nmr_calc import resolve_nmr_reference

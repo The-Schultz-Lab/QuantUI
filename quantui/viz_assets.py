@@ -223,3 +223,16 @@ def plotly_camera(coords: Any, distance: float = 1.8) -> Optional[dict]:
         "eye": {k: float(v) * distance for k, v in zip("xyz", toward)},
         "up": {k: float(v) for k, v in zip("xyz", up)},
     }
+
+
+def script_json(value: object) -> str:
+    """``json.dumps(value)`` safe to paste inside an inline ``<script>``.
+
+    ``json.dumps`` leaves ``</script>`` and ``<!--`` alone, and either one in a
+    string value ends or breaks the surrounding script element: a cube file or
+    label read from a shared results folder could then inject markup. ``<\\/``
+    and ``\\u003c!--`` decode to the same text in JavaScript and JSON.
+    """
+    import json
+
+    return json.dumps(value).replace("</", "<\\/").replace("<!--", "\\u003c!--")

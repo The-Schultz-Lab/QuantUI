@@ -144,6 +144,11 @@ class PySCFCalculation:
             calc_type, solvent=solvent, density_fit=density_fit, nstates=nstates
         )
         script_content = config.PYSCF_SCRIPT_TEMPLATE.format(
+            chg_dispersion_block=(
+                chg_dispersion_script_block()
+                if self.method.upper() == "WB97X-D"
+                else ""
+            ),
             job_name=job_name,
             method=self.method,
             basis=self.basis,
@@ -293,6 +298,25 @@ _CALC_TYPE_LABELS = {
     "pes_scan": "PES Scan",
     "reorganization_energy": "Reorganization Energy",
 }
+
+
+def chg_dispersion_script_block() -> str:
+    """Source of :mod:`quantui.chg_dispersion` for a standalone script.
+
+    The exported script must reproduce wB97X-D's dispersion term without
+    importing QuantUI, so the (numpy + pyscf only) module is pasted in.
+    """
+    import inspect
+
+    from . import chg_dispersion
+
+    src = inspect.getsource(chg_dispersion)
+    # A __future__ import is only legal at the top of a file.
+    src = src.replace("from __future__ import annotations\n", "")
+    return (
+        "\n\n# ---- wB97X-D dispersion term (copy of quantui/chg_dispersion.py)"
+        " ----\n" + src + "# ---- end of wB97X-D dispersion term ----\n"
+    )
 
 
 def script_sections(

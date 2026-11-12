@@ -58,7 +58,10 @@ logger = logging.getLogger(__name__)
 #   short-circuits BEFORE the migration.
 # - Double-hybrids would belong here too, but QuantUI doesn't expose
 #   any double-hybrid methods today.
-_GPU_UNSUPPORTED_METHODS: frozenset = frozenset({"MP2", "CCSD", "CCSD(T)"})
+# - wB97X-D: its dispersion term is QuantUI's own PySCF hook
+#   (quantui.chg_dispersion), which gpu4pyscf objects do not carry, so a
+#   GPU run would silently drop it.
+_GPU_UNSUPPORTED_METHODS: frozenset = frozenset({"MP2", "CCSD", "CCSD(T)", "WB97X-D"})
 
 # Datacenter GPU families with usable double-precision throughput (FP64 at
 # roughly 1/2 of FP32). Everything else — GeForce, RTX/Quadro workstation, the
