@@ -315,6 +315,12 @@ echo "SLURM job ID: ${{SLURM_JOB_ID:-<none>}}"
 echo "Working directory: $(pwd)"
 
 export OMP_NUM_THREADS="${{SLURM_CPUS_PER_TASK:-{cores}}}"
+# PySCF memory cap (MB) = 80% of this job's allocation, so a big-memory job
+# is not held to PySCF's 4000 MB default. Slurm's SLURM_MEM_PER_NODE (MB)
+# reflects a --mem given on the sbatch command line (rerun --more-memory).
+_quantui_mem_mb="${{SLURM_MEM_PER_NODE:-}}"
+case "$_quantui_mem_mb" in ''|*[!0-9]*) _quantui_mem_mb=$(({memory} * 1024)) ;; esac
+export PYSCF_MAX_MEMORY="$((_quantui_mem_mb * 4 / 5))"
 {attempt_setup}
 {worker_command}
 
