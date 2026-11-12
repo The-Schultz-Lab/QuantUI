@@ -487,9 +487,10 @@ def _c3v_from_cs(raw: Sequence[str], mo_energy: Sequence[float]) -> Optional[Lis
 
     C3v → Cs correlation: A1 → A', A2 → A'', E → A' + A''. An e level is
     an adjacent A'/A'' pair (one of each) within ``_C3V_E_PAIR_TOL``; a
-    lone A' is a1. A lone A'' would be a2, but it is far more often half
-    of an e pair split by an imperfect geometry, so the mapping is
-    refused (``None``: keep the Cs labels) rather than invent an a2.
+    lone A' is a1. A lone A'' is a2 when no A' lies within the pairing
+    window of it. With an A' that close it may instead be half of an e
+    pair split by an imperfect geometry, so the mapping is refused
+    (``None``: keep the Cs labels) rather than guess.
     Unambiguous otherwise, unlike most other non-abelian groups (e.g.
     Td → D2 cannot separate A1 from A2), which keep their subgroup labels.
     """
@@ -510,9 +511,17 @@ def _c3v_from_cs(raw: Sequence[str], mo_energy: Sequence[float]) -> Optional[Lis
         g_next = gap(i + 1)
         # A' A'' A' with the closer pair second: orbital i is the lone a1.
         pair = g is not None and (g_next is None or g <= g_next)
-        if not pair and raw[i] != "A'":
-            return None
-        name = "e" if pair else "a1"
+        if pair:
+            name = "e"
+        elif raw[i] == "A'":
+            name = "a1"
+        elif any(
+            r == "A'" and abs(e - mo_energy[i]) < _C3V_E_PAIR_TOL
+            for r, e in zip(raw, mo_energy)
+        ):
+            return None  # ambiguous: maybe a split e pair
+        else:
+            name = "a2"
         counts[name] = counts.get(name, 0) + 1
         label = f"{counts[name]}{name}"
         out += [label, label] if pair else [label]
