@@ -249,6 +249,7 @@ class SlurmBackend:
         # nothing behind.
         try:
             site_lines = cfg.site_directives()
+            self.partition = cfg.validate_partition(self.partition)
         except ValueError as exc:
             raise SecurityError(str(exc)) from exc
         email = validate_email(email)

@@ -167,6 +167,22 @@ def site_directives() -> list[str]:
     return lines
 
 
+def validate_partition(value: str) -> str:
+    """Return *value* if it is safe on the ``#SBATCH --partition`` line.
+
+    The partition (``--partition`` or ``QUANTUI_SLURM_PARTITION``) is pasted
+    into the batch script like the account/QOS/GRES values, so a newline
+    would add ``#SBATCH`` lines or shell. Raises ``ValueError`` otherwise.
+    """
+    text = str(value or "").strip()
+    if not _SITE_DIRECTIVE_VALUE_RE.match(text):
+        raise ValueError(
+            f"SLURM partition {text!r} has characters not allowed in an "
+            "#SBATCH value (use letters, digits and _ . : , = + -)"
+        )
+    return text
+
+
 def gpu_requested() -> bool:
     """True when the worker should get ``apptainer exec --nv``.
 

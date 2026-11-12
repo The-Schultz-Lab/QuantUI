@@ -128,10 +128,6 @@ def image():
     return os.environ.get("QUANTUI_BATCH_IMAGE") or DEFAULT_IMAGE
 
 
-def partition():
-    return os.environ.get("QUANTUI_SLURM_PARTITION") or SITE["default_partition"]
-
-
 # Port of cluster_config.SITE_DIRECTIVE_ENV / site_directives() /
 # gpu_requested(): optional account/QOS/GRES lines, read per job.
 SITE_DIRECTIVE_ENV = (
@@ -155,6 +151,19 @@ def site_directives():
             )
         lines.append(f"#SBATCH --{flag}={value}")
     return lines
+
+
+def partition():
+    """Port of cluster_config.validate_partition(): it is pasted into the script."""
+    value = (
+        os.environ.get("QUANTUI_SLURM_PARTITION") or SITE["default_partition"]
+    ).strip()
+    if not _SITE_DIRECTIVE_VALUE_RE.match(value):
+        raise InputError(
+            f"SLURM partition {value!r} has characters not allowed in an "
+            "#SBATCH value (use letters, digits and _ . : , = + -)"
+        )
+    return value
 
 
 def gpu_requested():
@@ -679,6 +688,7 @@ def unique_request(request):
 def prepare_job(request, resources, job_name, email, image_path):
     """Write the job folder and its record, as SlurmBackend.prepare() does."""
     site_directives()  # a bad site setting fails before the job folder exists
+    partition()
     unique_request(request)
     root = staging_root()
     name = sanitize_job_name(job_name or "") or default_job_name(request)
