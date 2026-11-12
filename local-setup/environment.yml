@@ -24,7 +24,7 @@ dependencies:
                          # whereas the PyPI `xtb` wheel is Linux-only)
 
   # Visualization
-  - py3dmol>=2.0.0,<3   # Primary 3D molecular viewer
+  - py3dmol>=2.0.0,<2.6 # Primary 3D molecular viewer (minor = vendored 3Dmol.js)
   - matplotlib>=3.7.0,<4
   - plotly>=5.0.0,<8    # Orbital diagrams and comparison plots
   - kaleido>=0.2.1,<2   # Static PNG export for Plotly figures

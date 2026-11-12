@@ -61,7 +61,12 @@ dependencies = [
     "notebook>=7.0.0,<8",
     "numpy>=1.24.0,<3",
     "requests>=2.28.0,<3",
-    "py3Dmol>=2.0.0,<3",
+    # Capped at the MINOR of the vendored 3Dmol.js (quantui/viz_assets.py,
+    # THREEDMOL_VERSION): py3Dmol's version tracks the 3Dmol.js build its
+    # generated JS targets, and we serve our vendored copy instead of that
+    # build. Patch-level skew is tolerated; a new minor needs a re-vendor and
+    # a bump of this cap together (audit INFRA-16, tests/test_viz_assets_version.py).
+    "py3Dmol>=2.0.0,<2.6",
     "matplotlib>=3.7.0,<4",
     "plotly>=5.0.0,<8",
     "plotlymol>=0.2.1,<1",
