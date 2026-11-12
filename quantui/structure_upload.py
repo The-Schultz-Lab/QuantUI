@@ -91,6 +91,7 @@ def _from_rdkit(
     from rdkit import Chem
 
     text = path.read_text(encoding="utf-8", errors="replace")
+    rdmol: Optional[Chem.Mol]
     if suffix == ".mol2":
         rdmol = Chem.MolFromMol2Block(text, removeHs=False)
     elif suffix == ".sdf":

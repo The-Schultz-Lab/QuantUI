@@ -237,11 +237,13 @@ dev = [
     # uses this env's setuptools, which needs bdist_wheel built in (>= 70.1)
     # rather than the separate `wheel` package (audit INFRA-3).
     "setuptools>=70.1",
-    "mypy>=1.10,<2.5",  # pinned, not an open floor — same reasoning as
-    # black/ruff below: it must agree with .pre-commit-config.yaml's rev,
-    # which is what CI enforces (M-TYPECHECK TYPE.2). A newer mypy silently
-    # disagrees: 2.x drops support for python_version = "3.9" (this repo's
-    # floor) and reports a different error set than the pinned check.
+    "mypy~=1.10.0",  # pinned, not an open floor — same reasoning as
+    # black/ruff below: it must agree with .pre-commit-config.yaml's rev
+    # (v1.10.0) and CI's explicit mypy step (`mypy~=1.10.0`), which is what
+    # CI enforces (M-TYPECHECK TYPE.2). A newer mypy silently disagrees: 2.x
+    # drops support for python_version = "3.9" (this repo's floor) and
+    # reports a different error set than the pinned check (audit INFRA-4;
+    # tests/test_ci_hook_reachability.py keeps the three in step).
     "types-requests>=2.28.0",
     # Formatter/linter versions are pinned to a compatible range, NOT an open
     # floor: they must agree with the revs in .pre-commit-config.yaml, which is
