@@ -1608,17 +1608,30 @@ def more_memory(job_dir, last_options, last_id):
     candidates = [g for g in (current and current * 2, used and used * 1.5) if g]
     if not candidates:
         die(f"could not tell how much memory {job_dir.name} had; pass --mem=<GB>G")
-    return f"--mem={int(-(-max(candidates) // 1))}G"
+    # Clamped to the same per-job limit a submission is checked against.
+    limit = SITE["max_memory_gb"]
+    wanted = min(int(-(-max(candidates) // 1)), limit)
+    if current and wanted <= current:
+        die(
+            f"{job_dir.name} already had {current:g} GB; QuantUI's limit is "
+            f"{limit} GB per job (QUANTUI_SLURM_MAX_MEMORY_GB)."
+        )
+    return f"--mem={wanted}G"
 
 
 def more_time(job_dir, last_options):
     current = _option_value(last_options, "--time") or _script_value(job_dir, "--time")
     if not current:
         die(f"could not tell {job_dir.name}'s time limit; pass --time=HH:MM:SS")
-    options = SITE["walltime_options"]
-    if current in options and options.index(current) + 1 < len(options):
-        return "--time=" + options[options.index(current) + 1]
-    return f"--time={int(_hours(current) * 2)}:00:00"
+    # The next longer of the time limits a submission may use, never past
+    # the longest one.
+    longer = [w for w in SITE["walltime_options"] if _hours(w) > _hours(current)]
+    if not longer:
+        die(
+            f"{job_dir.name} already had {current}, the longest time limit "
+            f"QuantUI uses ({SITE['walltime_options'][-1]})."
+        )
+    return "--time=" + longer[0]
 
 
 def cmd_rerun(argv):

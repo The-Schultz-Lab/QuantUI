@@ -33,15 +33,19 @@ def _env_positive_int(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
-# Hard limits for a submission, site-configurable: NCShare's
-# `common` nodes have 512 GB, but the default stays at the classroom policy.
-# Read at import, like QUANTUI_SLURM_PARTITION; `quantui install-launcher`
-# copies the values into the launcher, so set them in the image environment.
+# Per-job resource limits QuantUI checks before it submits, site-configurable:
+# NCShare's `common` nodes have 512 GB, but the default stays at the
+# classroom policy. These are client-side defaults, not enforcement: the
+# values come from the user's own environment and a hand-run `sbatch` skips
+# them, so a site that needs a real cap sets it in Slurm (QOS/partition
+# limits). Read at import, like QUANTUI_SLURM_PARTITION; `quantui
+# install-launcher` copies the values into the launcher, so set them in the
+# image environment.
 MIN_CORES = 1
 MAX_CORES = _env_positive_int("QUANTUI_SLURM_MAX_CORES", 32)
 MIN_MEMORY_GB = 1
 MAX_MEMORY_GB = _env_positive_int("QUANTUI_SLURM_MAX_MEMORY_GB", 128)
-# The estimate's own ceiling, separate from the hard limit: a site can allow
+# The estimate's own ceiling, separate from the per-job limit: a site can allow
 # 512 GB on request while keeping automatic requests at 128 GB.
 ESTIMATE_MAX_MEMORY_GB = min(
     _env_positive_int("QUANTUI_SLURM_ESTIMATE_MAX_MEMORY_GB", MAX_MEMORY_GB),

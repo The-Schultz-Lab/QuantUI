@@ -1672,9 +1672,31 @@ class TestRerunMore:
         assert r.returncode == 0, r.stderr
         last = cluster.log("sbatch.log").splitlines()[-1]
         assert "--mem=20G" in last and "--time=01:00:00" in last  # 00:30:00 -> next
-        cluster.run("rerun", "slow", "--time=48:00:00")
+        cluster.run("rerun", "slow", "--time=05:00:00")
         cluster.run("rerun", "slow", "--more-time")
-        assert "--time=96:00:00" in cluster.log("sbatch.log").splitlines()[-1]
+        assert "--time=08:00:00" in cluster.log("sbatch.log").splitlines()[-1]
+        # Never past the longest time limit QuantUI uses (audit HPC-12).
+        cluster.run("rerun", "slow", "--time=48:00:00")
+        n = len(cluster.log("sbatch.log").splitlines())
+        r = cluster.run("rerun", "slow", "--more-time")
+        assert r.returncode == 1
+        assert "longest time limit" in r.stderr
+        assert len(cluster.log("sbatch.log").splitlines()) == n
+
+    def test_more_memory_stops_at_the_site_limit(self, cluster):
+        # audit HPC-12: --more-memory is clamped to QUANTUI_SLURM_MAX_MEMORY_GB.
+        from quantui.backends.cluster_config import MAX_MEMORY_GB as limit
+
+        assert cluster.submit_water("--job-name", "big").returncode == 0
+        assert cluster.run("rerun", "big", f"--mem={limit - 8}G").returncode == 0
+        r = cluster.run("rerun", "big", "--more-memory")
+        assert r.returncode == 0, r.stderr
+        assert f"--mem={limit}G" in cluster.log("sbatch.log").splitlines()[-1]
+        n = len(cluster.log("sbatch.log").splitlines())
+        r = cluster.run("rerun", "big", "--more-memory")
+        assert r.returncode == 1
+        assert f"limit is {limit} GB" in r.stderr
+        assert len(cluster.log("sbatch.log").splitlines()) == n
 
 
 @needs_posix
