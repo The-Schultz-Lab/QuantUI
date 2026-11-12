@@ -5995,10 +5995,28 @@ class QuantUIApp:
             self._molecule.multiplicity = int(self.mult_si.value)
 
     def _set_molecule(
-        self, mol: Molecule, label: str = "", *, sync_charge_mult: bool = True
+        self,
+        mol: Molecule,
+        label: str = "",
+        *,
+        sync_charge_mult: bool = True,
+        keep_edit_state: bool = False,
     ) -> None:
-        """Update shared state and refresh dependent widgets."""
+        """Update shared state and refresh dependent widgets.
+
+        ``keep_edit_state`` is for the Edit Structure panel's own apply/undo;
+        every other load resets that panel's undo stack, picks and (unless
+        the atoms are unchanged) the Freeze atoms list (audit UI-9).
+        """
+        _previous_mol = getattr(self, "_molecule", None)
         self._molecule = mol
+        if not keep_edit_state:
+            try:
+                from quantui.app_structure_edit import reset_edit_state
+
+                reset_edit_state(self, _previous_mol, mol)
+            except Exception:  # noqa: BLE001 — must not block a molecule load
+                logger.debug("edit-state reset failed", exc_info=True)
         # Loading a molecule mid-run (or mid-calibration) must not re-arm Run
         # (audit APP-4, APP-13).
         self.run_btn.disabled = bool(

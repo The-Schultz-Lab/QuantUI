@@ -320,3 +320,65 @@ def test_structure_export_after_loading_another_molecule(
     text = files[0].read_text()
     assert text.splitlines()[0] == "4"
     assert "B3LYP" in text.splitlines()[1]
+
+
+# ── UI-9 ──────────────────────────────────────────────────────────────────
+
+
+def _water() -> Molecule:
+    return Molecule(
+        ["O", "H", "H"],
+        [[0.0, 0.0, 0.117], [0.0, 0.757, -0.469], [0.0, -0.757, -0.469]],
+    )
+
+
+def test_loading_another_molecule_resets_the_edit_state(app):
+    from quantui.app_structure_edit import on_set_bond, on_undo
+
+    app._set_molecule(_water())
+    app._edit_atoms_txt.value = "1 2"
+    app._edit_value.value = 1.0
+    on_set_bond(app)
+    app.frozen_atoms_txt.value = "1, 3"
+    app._edit_atoms_txt.value = "2 3"
+    app._set_molecule(_h2(), "library")
+    assert app._edit_undo_stack == []
+    assert app._edit_atoms_txt.value == ""
+    assert app.frozen_atoms_txt.value == ""  # atom 3 does not even exist now
+    on_undo(app)  # used to swap the water back in
+    assert app._molecule.atoms == ["H", "H"]
+
+
+def test_same_atoms_reload_keeps_the_freeze_list(app):
+    app._set_molecule(_water())
+    app.frozen_atoms_txt.value = "1"
+    moved = _water()
+    moved.coordinates[0][2] = 0.2
+    app._set_molecule(moved, "Pre-optimized")
+    assert app.frozen_atoms_txt.value == "1"
+
+
+def test_delete_renumbers_the_freeze_list_and_undo_restores_it(app):
+    from quantui.app_structure_edit import on_delete, on_undo
+
+    mol = Molecule(
+        ["C", "H", "H", "H", "H"],
+        [
+            [0.0, 0.0, 0.0],
+            [0.63, 0.63, 0.63],
+            [-0.63, -0.63, 0.63],
+            [-0.63, 0.63, -0.63],
+            [0.63, -0.63, -0.63],
+        ],
+    )
+    app._set_molecule(mol)
+    app.frozen_atoms_txt.value = "2, 4"
+    app._edit_atoms_txt.value = "2 3"
+    on_delete(app)
+    assert app._molecule.atoms == ["C", "H", "H"]
+    # Atom 2 is gone; old atom 4 is now atom 2.
+    assert app.frozen_atoms_txt.value == "2"
+    assert "renumbered" in app._edit_msg.value
+    on_undo(app)
+    assert len(app._molecule.atoms) == 5
+    assert app.frozen_atoms_txt.value == "2, 4"

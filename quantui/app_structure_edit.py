@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import html as _html
 import logging
-from typing import Any, Callable, List, Sequence, Tuple
+from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 import ipywidgets as widgets
 
@@ -265,22 +265,92 @@ def on_edit_atoms_changed(app: Any, change: Any = None) -> None:
     )
 
 
-def _apply(app: Any, op: Callable[..., Tuple[Any, str]], *args: Any) -> None:
+def _freeze_text(app: Any) -> str:
+    field = getattr(app, "frozen_atoms_txt", None)
+    return str(getattr(field, "value", "") or "")
+
+
+def _set_freeze_text(app: Any, text: str) -> None:
+    field = getattr(app, "frozen_atoms_txt", None)
+    if field is not None:
+        field.value = text
+
+
+def reset_edit_state(app: Any, old_mol: Any, new_mol: Any) -> None:
+    """A molecule came from outside the editor: drop the editor's state.
+
+    Called by ``_set_molecule`` for every load except the editor's own
+    apply/undo (audit UI-9). The undo stack would otherwise swap the previous
+    molecule back in, and the picks point at atoms of a different structure.
+    The Freeze atoms list is kept only when the new structure has the same
+    atoms in the same order (a pre-optimized or checkpoint-restored geometry
+    of the same molecule); otherwise it would silently freeze other atoms.
+    """
+    stack = getattr(app, "_edit_undo_stack", None)
+    if stack:
+        stack.clear()
+    txt = getattr(app, "_edit_atoms_txt", None)
+    if txt is not None and txt.value:
+        txt.value = ""
+    same_atoms = (
+        old_mol is not None
+        and new_mol is not None
+        and list(getattr(old_mol, "atoms", [])) == list(getattr(new_mol, "atoms", []))
+    )
+    if not same_atoms and _freeze_text(app):
+        _set_freeze_text(app, "")
+
+
+def _remap_freeze_after_delete(app: Any, deleted: Sequence[int]) -> str:
+    """Renumber the Freeze atoms list after deleting *deleted* (0-based).
+
+    Deleted atoms leave the list; atoms after them move down. Returns a note
+    for the edit message ("" when nothing changed).
+    """
+    from .structure_edit import parse_atom_list
+
+    text = _freeze_text(app)
+    if not text.strip():
+        return ""
+    try:
+        frozen = parse_atom_list(text)
+    except ValueError:
+        return ""
+    gone = set(deleted)
+    remapped = [i - sum(1 for d in gone if d < i) for i in frozen if i not in gone]
+    new_text = ", ".join(str(i + 1) for i in remapped)
+    if new_text == ", ".join(str(i + 1) for i in frozen):
+        return ""
+    _set_freeze_text(app, new_text)
+    return (
+        f" Freeze atoms renumbered: {new_text}."
+        if new_text
+        else " Freeze atoms list cleared."
+    )
+
+
+def _apply(app: Any, op: Callable[..., Tuple[Any, str]], *args: Any) -> Optional[str]:
+    """Apply an edit; return its note, or None when it was refused."""
     mol = getattr(app, "_molecule", None)
     if mol is None:
         _msg(app, "Load a molecule first.", ok=False)
-        return
+        return None
     try:
         new_mol, note = op(mol, *args)
     except (ValueError, ZeroDivisionError) as exc:
         _msg(app, f"⚠ {_html.escape(str(exc))}", ok=False)
-        return
+        return None
     stack = app._edit_undo_stack
-    stack.append(mol)
+    # The Freeze list is saved with the molecule: a delete renumbers it, and
+    # Undo must bring back the numbering that matches the restored atoms.
+    stack.append((mol, _freeze_text(app)))
     del stack[:-_UNDO_DEPTH]
-    app._set_molecule(new_mol, "Edited structure", sync_charge_mult=False)
+    app._set_molecule(
+        new_mol, "Edited structure", sync_charge_mult=False, keep_edit_state=True
+    )
     _msg(app, _html.escape(note))
     on_edit_atoms_changed(app)
+    return note
 
 
 def _need(app: Any, n: int, what: str) -> List[int] | None:
@@ -323,7 +393,11 @@ def on_delete(app: Any) -> None:
         _msg(app, "Pick the atoms to delete.", ok=False)
         return
     _set_picks(app, [])
-    _apply(app, delete_atoms, picks)
+    note = _apply(app, delete_atoms, picks)
+    if note is not None:
+        freeze_note = _remap_freeze_after_delete(app, picks)
+        if freeze_note:
+            _msg(app, _html.escape(note + freeze_note))
 
 
 def on_add_h(app: Any) -> None:
@@ -392,8 +466,11 @@ def on_undo(app: Any) -> None:
     if not stack:
         _msg(app, "Nothing to undo.", ok=False)
         return
-    previous = stack.pop()
-    app._set_molecule(previous, "Undo structure edit", sync_charge_mult=False)
+    previous, freeze_text = stack.pop()
+    app._set_molecule(
+        previous, "Undo structure edit", sync_charge_mult=False, keep_edit_state=True
+    )
+    _set_freeze_text(app, freeze_text)
     _msg(app, "Undid the last edit.")
     on_edit_atoms_changed(app)
 
