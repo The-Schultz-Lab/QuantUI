@@ -151,6 +151,9 @@ class TestFrozenOptimization:
             optimize_geometry(WATER, "RHF", "STO-3G", frozen_atoms=[7])
         with pytest.raises(ValueError, match="nothing to optimize"):
             optimize_geometry(WATER, "RHF", "STO-3G", frozen_atoms=[0, 1, 2])
+        # Audit GEOM-11: a negative index names itself, not the last atom.
+        with pytest.raises(ValueError, match="Frozen atom 0 does not exist"):
+            optimize_geometry(WATER, "RHF", "STO-3G", frozen_atoms=[-1, 1])
 
 
 class TestEditPanel:
