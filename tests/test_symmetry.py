@@ -189,8 +189,14 @@ class TestOrbitalLabels:
         mol_atom, mf = self._scf(noisy, "6-31g")
         ir = label_mo_irreps(mol_atom, "6-31g", mf.mo_coeff, mo_energy=mf.mo_energy)
         assert ir.group == "C3v"
+        # The occupied labels are the defect (an occupied "1a2" instead of
+        # 1e). Higher virtuals on this deliberately distorted geometry
+        # include a pair split by ~0.8 mHa whose eigenvectors are an
+        # arbitrary, LAPACK-dependent mixture; asserting on those failed on
+        # one CI platform only (py3.9 runner) while passing on 3.9/3.11
+        # locally, so they are not pinned here.
         assert ir.labels[:5] == ["1a1", "2a1", "1e", "1e", "3a1"]
-        assert not any("a2" in lab for lab in ir.labels)
+        assert not any("a2" in lab for lab in ir.labels[:5])
 
     def test_genuine_a2_keeps_c3v_labels(self):
         """CH3CF3 (staggered, C3v) has an occupied a2 F lone-pair combination
