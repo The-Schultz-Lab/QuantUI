@@ -8,42 +8,49 @@ dependencies:
   - python=3.11
 
   # Core Jupyter and widgets
-  - jupyter>=1.0.0
-  - ipywidgets>=8.0.0
-  - notebook>=7.0.0
-  - ipykernel>=6.0.0
+  # Version ranges mirror pyproject.toml (runtime deps carry the same MAJOR caps;
+  # dev tools the same pins) — tests/test_environment_yml.py keeps them in step.
+  - jupyter>=1.0.0,<2
+  - ipywidgets>=8.0.0,<9
+  - notebook>=7.0.0,<8
+  - ipykernel>=6.0.0,<8
 
   # Scientific computing
-  - numpy>=1.24.0
-  - ase>=3.26.0          # Structure I/O, molecule library, geometry optimisation (Sella needs 3.26)
+  - numpy>=1.24.0,<3
+  - ase>=3.26.0,<4      # Structure I/O, molecule library, geometry optimisation (Sella needs 3.26)
   - rdkit>=2022.03.1     # PubChem SDF→XYZ conversion, SMILES input
   - xtb-python>=20.2     # GFN-FF metal-capable pre-optimization (the Python API +
                          # ASE calculator; conda-forge has Windows/macOS builds,
                          # whereas the PyPI `xtb` wheel is Linux-only)
 
   # Visualization
-  - py3dmol>=2.0.0       # Primary 3D molecular viewer
-  - matplotlib>=3.7.0
-  - plotly>=5.0.0        # Orbital diagrams and comparison plots
-  - kaleido>=0.2.1       # Static PNG export for Plotly figures
+  - py3dmol>=2.0.0,<3   # Primary 3D molecular viewer
+  - matplotlib>=3.7.0,<4
+  - plotly>=5.0.0,<8    # Orbital diagrams and comparison plots
+  - kaleido>=0.2.1,<2   # Static PNG export for Plotly figures
 
   # Web APIs (PubChem integration)
-  - requests>=2.28.0
+  - requests>=2.28.0,<3
 
   # Testing and development
   - pytest>=7.0.0
   - pytest-cov>=4.0.0
   - pytest-mock>=3.10.0
-  - mypy>=1.0.0
+  - pytest-xdist>=3.0.0  # pyproject addopts has -n=auto; bare `pytest` fails without it
+  - mypy>=1.10.0,<1.11   # = pyproject's mypy~=1.10.0 / CI's pinned mypy step
+  - types-requests>=2.28.0
+  - python-build>=1.0.0  # PyPI `build`; used by tests/test_packaging.py
+  - setuptools>=70.1     # --no-isolation wheel build needs built-in bdist_wheel
   - nbstripout>=0.7.0    # Strip notebook outputs before git commits
-  - pre-commit>=3.0.0
+  - pre-commit>=3.7.0
 
   # Package manager for pip dependencies
   - pip>=23.0
 
   - pip:
       # Voilà app server — clean widget-only UI for classroom demos
-      - voila>=0.5.0
+      # Capped like pyproject's [app] extra (Voila 0.6 is untested).
+      - voila>=0.5.0,<0.6
       # Notebook smoke testing
       - nbmake>=1.4.0
       # Code formatting and linting (not on conda-forge). Pinned to a compatible
@@ -60,7 +67,7 @@ dependencies:
       # from GitHub source until a new release lands on PyPI.
       - pyscf-properties @ git+https://github.com/pyscf/properties.git
       # Grimme D3 for PBE-D3 (PySCF mf.disp); Linux/macOS wheels on PyPI.
-      - pyscf-dispersion
+      - pyscf-dispersion>=1.0
       # Transition-state search (M-TS, DEC-024); pulls in jax (~380 MB).
       - sella>=2.6
       - -e ..
