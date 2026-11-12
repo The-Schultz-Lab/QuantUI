@@ -193,7 +193,7 @@ def on_export_mol(app: Any, btn: Any) -> None:
         mol_block = Chem.MolToMolBlock(rdmol)
         dest = _structure_export_dest(app, fname)
         dest.write_text(mol_block, encoding="utf-8")
-        app.struct_export_status.value = f"Saved: {dest}"
+        app.struct_export_status.value = _saved_status(dest, rdmol)
         offer_download(app, dest)
     except Exception as exc:
         app.struct_export_status.value = f"Error: {exc}"
@@ -216,7 +216,7 @@ def on_export_pdb(app: Any, btn: Any) -> None:
         pdb_block = Chem.MolToPDBBlock(rdmol)
         dest = _structure_export_dest(app, fname)
         dest.write_text(pdb_block, encoding="utf-8")
-        app.struct_export_status.value = f"Saved: {dest}"
+        app.struct_export_status.value = _saved_status(dest, rdmol)
         offer_download(app, dest)
     except Exception as exc:
         app.struct_export_status.value = f"Error: {exc}"
@@ -990,6 +990,17 @@ def on_export_bundle(app: Any, btn: Any) -> None:
     offer_download(app, out_path)
 
 
+_BOND_NOTE_PROP = "quantui_bond_note"
+
+
+def _saved_status(dest: Any, rdmol: Any) -> str:
+    """Status text for a saved MOL/PDB, with a warning if bonds were approximated."""
+    status = f"Saved: {dest}"
+    if rdmol.HasProp(_BOND_NOTE_PROP):
+        status += f" (warning: {rdmol.GetProp(_BOND_NOTE_PROP)})"
+    return status
+
+
 def molecule_to_rdkit(mol: Any) -> Any:
     """Convert a Molecule to an RDKit Mol with inferred bonds (best-effort)."""
     try:
@@ -999,12 +1010,26 @@ def molecule_to_rdkit(mol: Any) -> Any:
         rdmol = Chem.MolFromXYZBlock(xyz_block)
         if rdmol is None:
             return None
+        if len(mol.atoms) < 2:
+            return rdmol
         try:
             from rdkit.Chem import rdDetermineBonds
 
             rdDetermineBonds.DetermineBonds(rdmol, charge=mol.charge)
         except Exception:
-            pass
+            # Bond orders need a closed-shell Lewis structure (radicals,
+            # metals and some ions fail). Fall back to connectivity only and
+            # say so — the file used to be reported "Saved" with whatever
+            # the failed call left behind (audit UI-14).
+            rdmol = Chem.MolFromXYZBlock(xyz_block)
+            note = "bond orders could not be determined; bonds written as single"
+            try:
+                from rdkit.Chem import rdDetermineBonds
+
+                rdDetermineBonds.DetermineConnectivity(rdmol)
+            except Exception:
+                note = "bonds could not be determined; the file has atoms only"
+            rdmol.SetProp(_BOND_NOTE_PROP, note)
         return rdmol
     except Exception:
         return None

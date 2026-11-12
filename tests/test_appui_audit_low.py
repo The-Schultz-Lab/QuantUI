@@ -6,6 +6,8 @@
   platform-specific dependency hint.
 - UI-10: a reloaded PES/IRC profile whose first point failed is plotted.
 - UI-12: "unavailable" panel messages carry no escaped markup.
+- UI-14: MOL/PDB bond-perception warning; readable Freeze-list errors;
+  local strings escaped in HTML.
 """
 
 from __future__ import annotations
@@ -259,3 +261,60 @@ def test_unavailable_panel_messages_show_no_escaped_markup(app, calc_type):
         assert "Geometry optimization before calculation" in (
             app._ana_unavail_msgs["Trajectory"].value
         )
+
+
+# ── UI-14 ─────────────────────────────────────────────────────────────────
+
+
+def _no_radical():
+    from quantui.molecule import Molecule
+
+    return Molecule(["N", "O"], [[0, 0, 0], [0, 0, 1.15]], multiplicity=2)
+
+
+def test_mol_export_warns_when_bond_orders_cannot_be_determined(
+    app, tmp_path, monkeypatch
+):
+    pytest.importorskip("rdkit")
+    monkeypatch.chdir(tmp_path)
+    app._set_molecule(_no_radical())
+    app._on_export_mol(None)
+    status = app.struct_export_status.value
+    assert status.startswith("Saved:"), status
+    assert "bond orders could not be determined" in status
+    # Connectivity is still written.
+    block = next(tmp_path.glob("*.mol")).read_text()
+    counts = block.splitlines()[3]
+    assert int(counts[3:6]) == 1  # one bond
+
+
+def test_mol_export_of_a_closed_shell_molecule_has_no_warning(app):
+    pytest.importorskip("rdkit")
+    from quantui.app_exports import _saved_status, molecule_to_rdkit
+    from quantui.molecule import Molecule
+
+    water = Molecule(
+        ["O", "H", "H"], [[0, 0, 0.117], [0, 0.757, -0.467], [0, -0.757, -0.467]]
+    )
+    rd = molecule_to_rdkit(water)
+    assert rd.GetNumBonds() == 2
+    assert _saved_status("w.mol", rd) == "Saved: w.mol"
+
+
+def test_freeze_list_typo_gets_a_readable_message():
+    from quantui.structure_edit import parse_atom_list
+
+    with pytest.raises(ValueError, match="'1-' is not an atom number or range"):
+        parse_atom_list("1-")
+
+
+def test_local_strings_are_escaped_in_html(app):
+    from quantui.checklist_widget import CheckList
+
+    cl = CheckList(options=[("<b>none</b>", "")])
+    assert "&lt;b&gt;none" in cl.children[0].value
+
+    html = app._render_status_html((False, None, "import raised <libcublas>"))
+    assert "&lt;libcublas&gt;" in html and "<libcublas>" not in html
+    html = app._render_status_html((True, "Card <X>", ""))
+    assert "Card &lt;X&gt;" in html

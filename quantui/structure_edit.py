@@ -259,12 +259,18 @@ def parse_atom_list(text: str, n_atoms: Optional[int] = None) -> List[int]:
     """'1, 3 5-7' (1-based, ranges allowed) → sorted 0-based indices."""
     out: Set[int] = set()
     for token in text.replace(",", " ").split():
-        if "-" in token:
-            lo, hi = token.split("-", 1)
-            a, b = int(lo), int(hi)
-            out.update(range(min(a, b), max(a, b) + 1))
-        else:
-            out.add(int(token))
+        try:
+            if "-" in token:
+                lo, hi = token.split("-", 1)
+                a, b = int(lo), int(hi)
+                out.update(range(min(a, b), max(a, b) + 1))
+            else:
+                out.add(int(token))
+        except ValueError:
+            # int() alone said "invalid literal for int() with base 10".
+            raise ValueError(
+                f"'{token}' is not an atom number or range (e.g. 1, 3, 5-7)."
+            ) from None
     if any(n < 1 for n in out):
         raise ValueError("Atom numbers start at 1.")
     if n_atoms is not None and any(n > n_atoms for n in out):

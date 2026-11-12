@@ -117,6 +117,10 @@ class TestAtomEdits:
             se.parse_atom_list("0")
         with pytest.raises(ValueError):
             se.parse_atom_list("4", n_atoms=3)
+        # Audit UI-14: a typo gave int()'s raw "invalid literal" message.
+        for bad in ("x", "1-", "2-y"):
+            with pytest.raises(ValueError, match="not an atom number or range"):
+                se.parse_atom_list(bad)
 
 
 class TestFrozenOptimization:
