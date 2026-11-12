@@ -456,3 +456,80 @@ class TestMockSlurm:
             timeout=60,
         )
         assert r.returncode != 0 and "Invalid job id" in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# HPC-19: quantui-batch cancel/rerun, record path, failed states
+# ---------------------------------------------------------------------------
+
+
+def _app_queued_job(roots, name="appjob"):
+    """A job folder the app queued: no .quantui-batch-jobs, one attempt."""
+    job_dir = roots / "staging" / name
+    (job_dir / "attempt-01_job555").mkdir(parents=True)
+    (job_dir / "submit.slurm").write_text("#!/bin/bash\n#SBATCH --mem=4G\n")
+    return job_dir
+
+
+class TestLauncherSmallIssues:
+    def test_cancel_finds_ids_from_attempt_folders(self, launcher, roots, monkeypatch):
+        job_dir = _app_queued_job(roots)
+        calls = []
+        monkeypatch.setattr(launcher, "queue", lambda: {"555": ("RUNNING", "", "")})
+        monkeypatch.setattr(
+            launcher,
+            "run",
+            lambda cmd, **kw: calls.append(cmd) or subprocess_result(0),
+        )
+        assert launcher.cmd_cancel([str(job_dir)]) == 0
+        assert calls == [["scancel", "555"]]
+
+    def test_cancel_finds_a_pending_job_by_its_script(
+        self, launcher, roots, monkeypatch
+    ):
+        job_dir = roots / "staging" / "pending"
+        job_dir.mkdir(parents=True)
+        (job_dir / "submit.slurm").write_text("#!/bin/bash\n")
+        calls = []
+        monkeypatch.setattr(
+            launcher,
+            "queue",
+            lambda: {
+                "777": ("PENDING", str(job_dir / "submit.slurm"), "Priority"),
+                "778": ("PENDING", "/elsewhere/submit.slurm", "Priority"),
+            },
+        )
+        monkeypatch.setattr(
+            launcher,
+            "run",
+            lambda cmd, **kw: calls.append(cmd) or subprocess_result(0),
+        )
+        assert launcher.cmd_cancel([str(job_dir)]) == 0
+        assert calls == [["scancel", "777"]]
+
+    def test_rerun_refuses_while_an_app_queued_attempt_runs(
+        self, launcher, roots, monkeypatch
+    ):
+        job_dir = _app_queued_job(roots)
+        monkeypatch.setattr(launcher, "queue", lambda: {"555": ("RUNNING", "", "")})
+        monkeypatch.setattr(
+            launcher, "run", lambda cmd, **kw: pytest.fail(f"ran {cmd}")
+        )
+        with pytest.raises(SystemExit):
+            launcher.cmd_rerun([str(job_dir)])
+
+    @pytest.mark.parametrize("rid", ["../evil", "a/b", "..", ""])
+    def test_record_path_stays_in_jobs_root(self, launcher, rid):
+        with pytest.raises(launcher.InputError):
+            launcher.record_path(rid)
+        assert launcher.record_path("ok-1").parent == launcher.jobs_root()
+
+    def test_failed_states_cover_preemption_and_deadlines(self, launcher):
+        for state in ("PREEMPTED", "BOOT_FAIL", "DEADLINE"):
+            assert state in launcher.FAILED_STATES
+
+
+def subprocess_result(code, out="", err=""):
+    import subprocess
+
+    return subprocess.CompletedProcess([], code, out, err)

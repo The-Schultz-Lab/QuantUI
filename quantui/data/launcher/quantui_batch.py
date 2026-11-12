@@ -56,7 +56,16 @@ SITE = json.loads("@QUANTUI_SITE@")
 JOB_LOG = ".quantui-batch-jobs"
 ATTEMPT_RE = re.compile(r"^attempt-(\d+)_job(\w+)$")
 ACTIVE_STATES = ("PENDING", "RUNNING", "CONFIGURING", "COMPLETING", "SUSPENDED")
-FAILED_STATES = ("FAILED", "OUT_OF_MEMORY", "TIMEOUT", "CANCELLED", "NODE_FAIL")
+FAILED_STATES = (
+    "FAILED",
+    "OUT_OF_MEMORY",
+    "TIMEOUT",
+    "CANCELLED",
+    "NODE_FAIL",
+    "PREEMPTED",
+    "BOOT_FAIL",
+    "DEADLINE",
+)
 BACKEND_ID = "cluster_slurm"
 
 HELP = """\
@@ -779,6 +788,18 @@ def utc_now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def record_path(request_id):
+    """The job record file for *request_id*, which must stay in jobs_root().
+
+    Port of registry._record_path / safe_join: a "/" or ".." in the id
+    would write the record somewhere else.
+    """
+    rid = str(request_id or "")
+    if not REQUEST_ID_RE.match(rid) or ".." in rid:
+        raise InputError(f"request_id {rid!r} cannot name a job record file")
+    return jobs_root() / (rid + ".json")
+
+
 def unique_request(request):
     """Give *request* a fresh id when a job record already uses its id.
 
@@ -786,9 +807,8 @@ def unique_request(request):
     request .json submitted twice must not overwrite the record of a job
     that may still be running. The original id is kept in run_context.
     """
-    jobs = jobs_root()
     original = request["request_id"]
-    if (jobs / (original + ".json")).exists():
+    if record_path(original).exists():
         request["request_id"] = f"{original[:40]}-{uuid.uuid4().hex[:8]}"
         request["run_context"] = dict(
             request.get("run_context") or {}, source_request_id=original
@@ -827,9 +847,9 @@ def prepare_job(request, resources, job_name, email, image_path):
         "unknown_since": None,
         "unknown_polls": 0,
     }
-    jobs = jobs_root()
-    jobs.mkdir(parents=True, exist_ok=True)
-    with open(str(jobs / (request["request_id"] + ".json")), "w") as fh:
+    path = record_path(request["request_id"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(str(path), "w") as fh:
         json.dump(record, fh, indent=2)
     return script
 
@@ -919,6 +939,26 @@ def job_log(job_dir):
 
 def job_ids(job_dir):
     return [jid for jid, _opts in job_log(job_dir)]
+
+
+def all_job_ids(job_dir, q):
+    """Every Slurm id known for *job_dir*, oldest first.
+
+    JOB_LOG holds only what quantui-batch submitted; a job the app (or a
+    bare sbatch) queued shows up as an attempt folder once it starts, and
+    in the queue, with this folder's submit.slurm, before that.
+    """
+    ids = job_ids(job_dir)
+    ids += [jid for _n, jid, _p in attempts(job_dir) if jid.isdigit()]
+    script = job_dir / "submit.slurm"
+    for jid, (_state, path, _reason) in q.items():
+        try:
+            if path and Path(path).resolve() == script.resolve():
+                ids.append(jid)
+        except OSError:
+            continue
+    seen = set()
+    return [j for j in ids if not (j in seen or seen.add(j))]
 
 
 def record_job(job_dir, job_id, options=()):
@@ -1454,7 +1494,14 @@ def cmd_submit(argv):
             # `limit` of them ever run at once.
             waits_for = slots.pop(0)
             deps.append(f"afterany:{waits_for}")
-        script = prepare_job(request, resources, args.job_name, args.email, image_path)
+        try:
+            script = prepare_job(
+                request, resources, args.job_name, args.email, image_path
+            )
+        except InputError as exc:  # a bad site setting or record id
+            sys.stderr.write(f"{label}: {exc}\n")
+            code = 1
+            continue
         job_dir = script.parent
         options = []
         if deps:
@@ -1644,7 +1691,7 @@ def cmd_rerun(argv):
     rest = argv[1:]
     q = queue()
     log = job_log(job_dir)
-    for jid, _opts in log:
+    for jid in all_job_ids(job_dir, q):
         if jid in q and q[jid][0] in ACTIVE_STATES:
             die(
                 f"{job_dir.name} is still {q[jid][0].lower()} (job {jid}); "
@@ -1656,7 +1703,11 @@ def cmd_rerun(argv):
             f"you already have {active} QuantUI job(s) queued or running "
             f"(limit {max_jobs()})."
         )
-    last_id, last_options = log[-1] if log else (None, [])
+    if log:
+        last_id, last_options = log[-1]
+    else:  # queued by the app or a bare sbatch: its attempt folders say which
+        tried = [jid for _n, jid, _p in attempts(job_dir) if jid.isdigit()]
+        last_id, last_options = (tried[-1] if tried else None), []
     # Carry the previous attempt's resource overrides forward, then apply new ones.
     options = [
         o for o in last_options if o.startswith("--mem") or o.startswith("--time")
@@ -1695,7 +1746,7 @@ def cmd_cancel(argv):
         die("usage: quantui-batch cancel JOB", 2)
     job_dir = resolve_job(argv[0])
     q = queue()
-    live = [jid for jid in job_ids(job_dir) if jid in q]
+    live = [jid for jid in all_job_ids(job_dir, q) if jid in q]
     if not live:
         print(f"{job_dir.name} has no queued or running job.")
         return 0
