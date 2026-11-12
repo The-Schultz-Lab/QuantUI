@@ -1016,7 +1016,7 @@ def molecule_to_rdkit(mol: Any) -> Any:
             from rdkit.Chem import rdDetermineBonds
 
             rdDetermineBonds.DetermineBonds(rdmol, charge=mol.charge)
-        except Exception:
+        except Exception:  # noqa: BLE001 — optional probe; reported via the note
             # Bond orders need a closed-shell Lewis structure (radicals,
             # metals and some ions fail). Fall back to connectivity only and
             # say so — the file used to be reported "Saved" with whatever
@@ -1027,7 +1027,7 @@ def molecule_to_rdkit(mol: Any) -> Any:
                 from rdkit.Chem import rdDetermineBonds
 
                 rdDetermineBonds.DetermineConnectivity(rdmol)
-            except Exception:
+            except Exception:  # noqa: BLE001 — optional probe; reported via the note
                 note = "bonds could not be determined; the file has atoms only"
             rdmol.SetProp(_BOND_NOTE_PROP, note)
         return rdmol

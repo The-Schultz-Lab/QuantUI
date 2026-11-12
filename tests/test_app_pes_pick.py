@@ -152,19 +152,23 @@ class TestHighlightAndHtml:
             pp.push_scan_highlight(app, [0, 1])
         ph.assert_not_called()
 
-    def test_push_borrows_the_bridge_and_restores_it_on_error(self, app):
+    def test_push_targets_the_scan_bridge_without_touching_measure(self, app):
+        # The highlight is sent through the scan viewer's own bridge; the
+        # measure bridge is never swapped (audit LEAD-4), even on error.
         app._scan_pick_bridge = "scan-bridge"
         app._measure_js_bridge = "measure-bridge"
         seen = []
 
-        def _boom(a, indices, *, slot):
-            seen.append((a._measure_js_bridge, list(indices), slot))
+        def _boom(a, indices, *, slot, bridge):
+            seen.append((a._measure_js_bridge, list(indices), slot, bridge))
             raise RuntimeError("display failed")
 
         with patch.object(pp, "push_highlight", side_effect=_boom):
             with pytest.raises(RuntimeError):
                 pp.push_scan_highlight(app, [0, 1])
-        assert seen == [("scan-bridge", [0, 1], pp.PES_PICK_INBOX_CLASS)]
+        assert seen == [
+            ("measure-bridge", [0, 1], pp.PES_PICK_INBOX_CLASS, "scan-bridge")
+        ]
         assert app._measure_js_bridge == "measure-bridge"
 
     def test_finalize_wires_clicks_only_for_a_py3dmol_pes_scan(self, app):
