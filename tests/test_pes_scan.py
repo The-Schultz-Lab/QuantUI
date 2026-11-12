@@ -272,6 +272,142 @@ class TestAngleScanRange:
         assert atoms.get_angle(1, 0, 2) == pytest.approx(target, abs=1e-6)
 
 
+def _ethane():
+    """Staggered ethane: C0, C1, H2–H4 on C0, H5–H7 on C1."""
+    from quantui.molecule import Molecule
+
+    return Molecule(
+        ["C", "C", "H", "H", "H", "H", "H", "H"],
+        [
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.54],
+            [1.0176, 0.0, -0.3906],
+            [-0.5088, 0.8813, -0.3906],
+            [-0.5088, -0.8813, -0.3906],
+            [0.5088, 0.8813, 1.9306],
+            [-1.0176, 0.0, 1.9306],
+            [0.5088, -0.8813, 1.9306],
+        ],
+    )
+
+
+def _methanol():
+    """C0, O1, H2 on O, H3–H5 on C."""
+    from quantui.molecule import Molecule
+
+    return Molecule(
+        ["C", "O", "H", "H", "H", "H"],
+        [
+            [0.0, 0.0, 0.0],
+            [1.43, 0.0, 0.0],
+            [1.75, 0.90, 0.0],
+            [-0.36, -1.03, 0.0],
+            [-0.36, 0.51, 0.89],
+            [-0.36, 0.51, -0.89],
+        ],
+    )
+
+
+def _scan_geometries(monkeypatch, molecule, **kwargs):
+    """Run run_pes_scan with a zero-force stand-in calculator, so each
+    point's geometry is exactly where the scan driver put it."""
+    pytest.importorskip("ase")
+    from ase.calculators.calculator import Calculator, all_changes
+
+    import quantui.pes_scan as ps
+
+    class _Flat(Calculator):
+        implemented_properties = ["energy", "forces"]
+
+        def __init__(self, **_kw):
+            super().__init__()
+
+        def calculate(self, atoms=None, properties=None, changes=all_changes):
+            import numpy as np
+
+            super().calculate(atoms, properties, changes)
+            self.results = {"energy": 0.0, "forces": np.zeros((len(atoms), 3))}
+
+    monkeypatch.setattr(ps, "_QuantUIPySCFCalc", _Flat)
+    import io
+
+    result = ps.run_pes_scan(molecule, progress_stream=io.StringIO(), **kwargs)
+    return [m.coordinates for m in result.coordinates_list]
+
+
+def _min_distance(coords):
+    import numpy as np
+
+    x = np.asarray(coords, dtype=float)
+    d = np.linalg.norm(x[:, None] - x[None], axis=-1)
+    return float(d[np.triu_indices(len(x), 1)].min())
+
+
+class TestScanMovesWholeFragment:
+    """Audit GEOM-4: an angle/dihedral scan rotates the whole group on the
+    moving side, not a single atom through its own neighbours."""
+
+    def test_moving_fragment_dihedral_is_far_methyl(self):
+        from quantui.pes_scan import _moving_fragment
+
+        assert _moving_fragment(_ethane(), "dihedral", [2, 0, 1, 5]) == [1, 5, 6, 7]
+
+    def test_moving_fragment_angle_is_far_side(self):
+        from quantui.pes_scan import _moving_fragment
+
+        # H–O–C: everything on the carbon side moves.
+        assert _moving_fragment(_methanol(), "angle", [2, 1, 0]) == [0, 3, 4, 5]
+        # C–O–H: just the hydroxyl H.
+        assert _moving_fragment(_methanol(), "angle", [0, 1, 2]) == [2]
+
+    def test_ring_falls_back_to_last_atom(self):
+        from quantui.molecule import Molecule
+        from quantui.pes_scan import _moving_fragment
+
+        ring = Molecule(
+            ["C", "C", "C", "H", "H"],
+            [
+                [0.0, 0.0, 0.0],
+                [1.51, 0.0, 0.0],
+                [0.755, 1.308, 0.0],
+                [-0.9, -0.5, 0.0],
+                [2.4, -0.5, 0.0],
+            ],
+        )
+        assert _moving_fragment(ring, "dihedral", [3, 0, 1, 4]) == [4]
+
+    def test_ethane_dihedral_scan_has_no_atom_clash(self, monkeypatch):
+        frames = _scan_geometries(
+            monkeypatch,
+            _ethane(),
+            scan_type="dihedral",
+            atom_indices=[2, 0, 1, 5],
+            start=-180.0,
+            stop=180.0,
+            steps=7,
+        )
+        assert len(frames) == 7
+        for coords in frames:
+            assert _min_distance(coords) > 1.0  # was 6e-7 Å (H on top of H)
+
+    def test_angle_scan_keeps_moving_group_rigid(self, monkeypatch):
+        import numpy as np
+
+        frames = _scan_geometries(
+            monkeypatch,
+            _methanol(),
+            scan_type="angle",
+            atom_indices=[2, 1, 0],
+            start=100.0,
+            stop=150.0,
+            steps=3,
+        )
+        for coords in frames:
+            x = np.asarray(coords)
+            for h in (3, 4, 5):
+                assert np.linalg.norm(x[h] - x[0]) == pytest.approx(1.096, abs=0.01)
+
+
 # ── App widget integration ────────────────────────────────────────────────────
 
 
