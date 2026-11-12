@@ -103,11 +103,12 @@ METHOD_INFO = {
         "type": "dft",
         "label": "wB97X-D — Range-Separated Hybrid + Built-in Dispersion",
         "description": (
-            "Range-separated hybrid functional (Chai & Head-Gordon, 2008) with its "
-            "own empirical dispersion correction baked into the fit — not an "
-            "externally applied Grimme D3 correction. Excellent for non-covalent "
-            "interactions, charge-transfer excitations, and systems where "
-            "long-range exchange matters."
+            "Range-separated hybrid functional (Chai & Head-Gordon, 2008) fitted "
+            "together with its own atom-pair dispersion correction (Grimme-2006 "
+            "C6 coefficients, Chai–Head-Gordon damping) — not Grimme D3. QuantUI "
+            "adds that term to energies, forces and frequencies. Good for "
+            "non-covalent interactions, charge-transfer excitations, and systems "
+            "where long-range exchange matters. Dispersion parameters cover H–Xe."
         ),
         "use_for": "Non-covalent interactions, excited states, large organic molecules.",
     },
@@ -646,7 +647,7 @@ import sys
 from pathlib import Path
 from pyscf import gto, scf, dft
 import numpy as np
-
+{chg_dispersion_block}
 
 def _run_scf_with_rescue(mf):
     # Standalone copy of QuantUI's shared SCF-rescue helper
@@ -715,9 +716,10 @@ def main():
         # Display name → PySCF xc string + external D3 dispersion where
         # needed. Matches quantui/session_calc.py resolve_xc + maybe_apply_d3.
         # wB97X-D maps to its full LibXC name (the actual Chai/Head-Gordon
-        # 2008 functional, built-in dispersion) because PySCF's short-alias
-        # parser black-lists 'wb97x-d'/'wb97x_d' as ambiguous; PBE-D3 adds
-        # zero-damping Grimme D3 through mf.disp (needs pyscf-dispersion).
+        # 2008 functional) because PySCF's short-alias parser black-lists
+        # 'wb97x-d'/'wb97x_d'; its own dispersion term is added below.
+        # PBE-D3 adds zero-damping Grimme D3 through mf.disp (needs
+        # pyscf-dispersion).
         _XC_ALIAS = {{
             'M06-L': 'm06l',
             'wB97X-D': 'hyb_gga_xc_wb97x_d',
@@ -752,6 +754,12 @@ def main():
                         "WARNING: pyscf-dispersion not installed; "
                         "running {{method}} without D3 dispersion."
                     )
+            if method == 'wB97X-D':
+                # LibXC's wb97x_d is only the XC part: add the functional's
+                # own atom-pair dispersion term (defined at the top of this
+                # script, a copy of quantui/chg_dispersion.py).
+                install()
+                mf.disp = CHG_DISP
 
 {density_fit_block}{solvent_block}
         energy = _run_scf_with_rescue(mf)

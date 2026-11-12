@@ -149,14 +149,18 @@ class TestMaybeApplyD3:
         assert result_mf is mf
         assert dispersion_applied is None
 
-    def test_wb97x_d_returns_mf_unchanged_and_none_flag(self):
-        # AUDIT F03: wB97X-D's dispersion is already in the XC functional —
-        # maybe_apply_d3 must be a no-op for it (never imports pyscf.dftd3),
-        # and dispersion_applied is None (not applicable), not False.
+    def test_wb97x_d_gets_its_own_dispersion_term_not_d3(self):
+        # Audit SCF-2 (F03 follow-up): LibXC's wb97x_d is only the XC part;
+        # the functional's Chai/Head-Gordon dispersion term is added through
+        # quantui.chg_dispersion, never Grimme D3 (no pyscf.dftd3 import).
+        pytest.importorskip("pyscf")
+        from quantui.chg_dispersion import CHG_DISP
+
         mf = _FakeMf("wB97X-D")
         result_mf, dispersion_applied = maybe_apply_d3(mf, "wB97X-D")
         assert result_mf is mf
-        assert dispersion_applied is None
+        assert dispersion_applied is True
+        assert mf.disp == CHG_DISP
 
     def test_d3_method_without_backend_returns_mf_unchanged_and_false_flag(
         self, monkeypatch

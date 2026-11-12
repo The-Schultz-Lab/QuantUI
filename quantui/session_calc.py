@@ -221,8 +221,10 @@ class SessionResult:
 # ``pyscf.dft.libxc.rsh_coeff``) — not just a different dispersion model.
 #
 # The actual wB97X-D functional is available directly under its full LibXC
-# name, which PySCF's short-alias black-list does not intercept, and needs
-# no external D3 wrapper (see ``_NEEDS_D3`` below):
+# name, which PySCF's short-alias black-list does not intercept. LibXC holds
+# only its exchange-correlation part: the Chai/Head-Gordon atom-pair
+# dispersion term that completes wB97X-D is added by
+# :mod:`quantui.chg_dispersion` (see :func:`maybe_apply_d3`), not by D3.
 _XC_ALIAS: Dict[str, str] = {
     "M06-L": "m06l",
     "wB97X-D": "hyb_gga_xc_wb97x_d",  # true Chai/Head-Gordon 2008 functional
@@ -231,9 +233,9 @@ _XC_ALIAS: Dict[str, str] = {
 }
 # Methods that require Grimme D3 dispersion correction, mapped to PySCF's
 # ``mf.disp`` version string. "-D3" means zero damping (Grimme 2010; Gaussian
-# EmpiricalDispersion=GD3), not Becke-Johnson. wB97X-D is NOT here: its
-# dispersion is already part of the XC functional itself (see _XC_ALIAS
-# comment above) — adding D3 would double-count it.
+# EmpiricalDispersion=GD3), not Becke-Johnson. wB97X-D is NOT here: its own
+# dispersion term (CHG-damped, Grimme-2006 C6) is added by
+# quantui.chg_dispersion instead — D3 on top would double-count it.
 _D3_VERSION: Dict[str, str] = {"PBE-D3": "d3zero"}
 _NEEDS_D3: frozenset = frozenset(_D3_VERSION)
 
@@ -310,6 +312,16 @@ def maybe_apply_d3(mf, method: str, progress_stream=None):
     is visible in logs even without a progress stream), and additionally
     surfaces the warning via ``progress_stream`` when one is provided.
     """
+    if str(method).upper() == "WB97X-D":
+        # wB97X-D's own dispersion term (audit SCF-2): LibXC's wb97x_d holds
+        # only the XC part. Needs nothing beyond numpy/PySCF, so it is
+        # always applied; energy, gradients and Hessians all include it.
+        from .chg_dispersion import CHG_DISP
+        from .chg_dispersion import install as _install_chg
+
+        _install_chg()
+        mf.disp = CHG_DISP
+        return mf, True
     if not needs_d3(method):
         return mf, None
     backend = _d3_backend()
@@ -799,9 +811,9 @@ def _run_session_calc_body(
         mf = scf.RHF(mol)
         scf_variant = type(mf).__name__
     else:
-        # DFT: resolve alias then auto-select RKS / UKS. ``resolve_xc``
-        # handles the wB97X-D → wb97x + external D3 dispersion mapping
-        # (see _XC_ALIAS docstring).
+        # DFT: resolve alias then auto-select RKS / UKS. ``resolve_xc`` maps
+        # display names to LibXC; ``maybe_apply_d3`` adds PBE-D3's D3 or
+        # wB97X-D's own dispersion term (see _XC_ALIAS).
         if mol.spin == 0:
             mf = dft.RKS(mol)
         else:

@@ -621,9 +621,9 @@ def _run_freq_calc_body(
         mf = scf.UHF(mol)
         scf_variant = type(mf).__name__
     else:
-        # Route through resolve_xc + maybe_apply_d3 so
-        # methods like wB97X-D (PySCF rejects "wb97x-d") map to the
-        # bare functional + external D3 dispersion.
+        # Route through resolve_xc + maybe_apply_d3: display names map to
+        # LibXC (PySCF rejects "wb97x-d"), PBE-D3 gets D3, and wB97X-D gets
+        # its own dispersion term (quantui.chg_dispersion) in the Hessian.
         from .session_calc import maybe_apply_d3, resolve_xc
 
         mf = dft.RKS(mol) if mol.spin == 0 else dft.UKS(mol)
