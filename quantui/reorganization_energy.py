@@ -702,7 +702,8 @@ def run_reorganization_energy(
                 lambda1_hartree=lambda1,
                 lambda2_hartree=lambda2,
                 lambda_hartree=lambda_total,
-                converged=bool(ion_opt.converged),
+                # Both geometries feed λ: the shared neutral opt counts too.
+                converged=bool(neutral_opt.converged) and bool(ion_opt.converged),
                 ion_molecule=ion_mol,
                 s2_neutral_at_neutral=s2_neutral_at_neutral,
                 s2_ion_at_ion=s2_ion_at_ion,
