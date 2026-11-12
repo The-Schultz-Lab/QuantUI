@@ -296,3 +296,129 @@ class TestHistoryCardLabels:
         )
         assert "SCF converged" in out
         assert "-75.00000000 Ha" in out
+
+
+# ── UI-6 ──────────────────────────────────────────────────────────────────────
+
+
+def _injected_script(html: str) -> str:
+    start = html.rindex("<script>") + len("<script>")
+    return html[start : html.rindex("</script>")]
+
+
+class TestHighlightHooksArePerSlot:
+    def _scripts(self):
+        from quantui.app_measurement import MEASURE_INBOX_CLASS, inject_click_js
+        from quantui.app_structure_edit import EDIT_PICK_INBOX_CLASS
+
+        measure = inject_click_js(
+            '<div id="3dmolviewer_AAA"></div>', inbox_class=MEASURE_INBOX_CLASS
+        )
+        edit = inject_click_js(
+            '<div id="3dmolviewer_BBB"></div>', inbox_class=EDIT_PICK_INBOX_CLASS
+        )
+        return _injected_script(measure), _injected_script(edit)
+
+    def _pushed_js(self, slot):
+        from unittest.mock import MagicMock
+
+        from quantui import app_measurement
+
+        app = MagicMock()
+        sent = []
+        with patch("IPython.display.display", side_effect=sent.append):
+            app_measurement.push_highlight(app, [0, 1], slot=slot)
+        assert len(sent) == 1
+        return sent[0].data
+
+    def test_slots_register_distinct_hooks_and_no_shared_global(self):
+        from quantui.app_measurement import MEASURE_INBOX_CLASS, highlight_hook_name
+        from quantui.app_pes_pick import PES_PICK_INBOX_CLASS
+        from quantui.app_structure_edit import EDIT_PICK_INBOX_CLASS
+
+        names = {
+            highlight_hook_name(s)
+            for s in (MEASURE_INBOX_CLASS, EDIT_PICK_INBOX_CLASS, PES_PICK_INBOX_CLASS)
+        }
+        assert len(names) == 3
+        measure_js, edit_js = self._scripts()
+        assert highlight_hook_name(MEASURE_INBOX_CLASS) in measure_js
+        assert highlight_hook_name(EDIT_PICK_INBOX_CLASS) in edit_js
+        for js in (measure_js, edit_js):
+            assert "window.__quantuiMeasureHighlight =" not in js
+            assert "window.__quantuiMeasureHighlight=" not in js
+
+    def test_push_targets_its_own_slot(self):
+        from quantui.app_measurement import MEASURE_INBOX_CLASS, highlight_hook_name
+        from quantui.app_structure_edit import EDIT_PICK_INBOX_CLASS
+
+        js = self._pushed_js(EDIT_PICK_INBOX_CLASS)
+        assert highlight_hook_name(EDIT_PICK_INBOX_CLASS) in js
+        assert highlight_hook_name(MEASURE_INBOX_CLASS) not in js
+
+    def test_structure_edit_and_pes_pushes_use_their_slots(self):
+        from unittest.mock import MagicMock
+
+        from quantui import app_pes_pick, app_structure_edit
+
+        for mod, fn, slot in (
+            (
+                app_structure_edit,
+                "_push_edit_highlight",
+                app_structure_edit.EDIT_PICK_INBOX_CLASS,
+            ),
+            (app_pes_pick, "push_scan_highlight", app_pes_pick.PES_PICK_INBOX_CLASS),
+        ):
+            with patch.object(mod, "push_highlight") as ph:
+                getattr(mod, fn)(MagicMock(), [0])
+            assert ph.call_args.kwargs["slot"] == slot
+
+    def test_highlight_reaches_the_slot_viewer_in_js(self, tmp_path):
+        """Run both injected scripts, then an Edit push, under node."""
+        import shutil
+        import subprocess
+
+        import pytest
+
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not available")
+        from quantui.app_structure_edit import EDIT_PICK_INBOX_CLASS
+
+        measure_js, edit_js = self._scripts()
+        push_js = self._pushed_js(EDIT_PICK_INBOX_CLASS)
+        harness = """
+var window = globalThis; var calls = [];
+globalThis.document = {querySelector: function(){ return null; }};
+function fakeViewer(name){
+  return {
+    setClickable: function(){},
+    getModel: function(){ return {selectedAtoms: function(){
+      return [{x:0,y:0,z:0,elem:"H"}]; }}; },
+    addSphere: function(){ calls.push(name); return {}; },
+    addLine: function(){ return {}; },
+    removeShape: function(){}, render: function(){}
+  };
+}
+window.viewer_AAA = fakeViewer("measure");
+window.viewer_BBB = fakeViewer("edit");
+"""
+        script = (
+            harness
+            + measure_js
+            + "\n"
+            + edit_js
+            + "\n"
+            + measure_js  # the Measure viewer re-renders last
+            + "\n"
+            + push_js
+            + "\nsetTimeout(function(){ console.log(JSON.stringify(calls)); }, 10);"
+        )
+        path = tmp_path / "harness.js"
+        path.write_text(script, encoding="utf-8")
+        out = subprocess.run(
+            [node, str(path)], capture_output=True, text=True, timeout=30
+        )
+        assert out.returncode == 0, out.stderr
+        calls = json.loads(out.stdout.strip().splitlines()[-1])
+        assert calls and set(calls) == {"edit"}

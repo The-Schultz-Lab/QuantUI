@@ -41,7 +41,7 @@ def push_scan_highlight(app: Any, indices: Sequence[int]) -> None:
     orig = getattr(app, "_measure_js_bridge", None)
     try:
         app._measure_js_bridge = bridge
-        push_highlight(app, indices)
+        push_highlight(app, indices, slot=PES_PICK_INBOX_CLASS)
     finally:
         app._measure_js_bridge = orig
 
