@@ -23,6 +23,7 @@ from quantui.app_builders import (
 )
 from quantui.downloads import download_link_html as _download_link_html
 from quantui.orbital_visualization import _GENERIC_CAPTURE_JS, _png_capture_controls
+from quantui.plotly_embed import figure_html as _plotly_figure_html
 from quantui.symmetry import html_irrep
 from quantui.viz_assets import orient_js, orient_view
 from quantui.viz_assets import script_json as _script_json
@@ -477,12 +478,10 @@ def show_opt_trajectory(
         return
     new_children: list[Any] = []
     if has_plotly and rel_e:
-        import plotly.io as _pio_e
 
-        energy_html = _pio_e.to_html(
+        energy_html = _plotly_figure_html(
             energy_fig,
             full_html=False,
-            include_plotlyjs="require",
             config={"responsive": True},
         )
         energy_holder = widgets.Output()
@@ -876,7 +875,6 @@ def on_ir_fwhm_changed(app: Any, change: dict[str, Any]) -> None:
 def update_ir_figure(app: Any, mode: str, fwhm: float) -> None:
     """Re-render IR spectrum chart for mode and FWHM settings."""
     try:
-        import plotly.io as _pio
 
         from quantui.ir_plot import plot_ir_spectrum
 
@@ -899,9 +897,8 @@ def update_ir_figure(app: Any, mode: str, fwhm: float) -> None:
         app._last_ir_fig = fig
         app._set_html_output(
             app._ir_fig,
-            _pio.to_html(
+            _plotly_figure_html(
                 fig,
-                include_plotlyjs="require",
                 full_html=False,
                 config={"responsive": True},
             ),
@@ -1006,7 +1003,6 @@ def update_raman_figure(app: Any, mode: str, fwhm: float) -> None:
     if not getattr(app, "_last_raman_acts", None):
         return  # no activities: the panel holds raman_unavailable_html
     try:
-        import plotly.io as _pio
 
         from quantui.raman_plot import plot_raman_spectrum
 
@@ -1030,9 +1026,8 @@ def update_raman_figure(app: Any, mode: str, fwhm: float) -> None:
         app._last_raman_fig = fig
         app._set_html_output(
             app._raman_fig,
-            _pio.to_html(
+            _plotly_figure_html(
                 fig,
-                include_plotlyjs="require",
                 full_html=False,
                 config={"responsive": True},
             ),
@@ -1184,7 +1179,6 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
     try:
         import numpy as _np
         import plotly.graph_objects as _go
-        import plotly.io as _pio
 
         mode_name = str(mode or "Stick")
         mode_norm = mode_name.strip().lower()
@@ -1285,9 +1279,8 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
         )
         app._set_html_output(
             app._tddft_fig,
-            _pio.to_html(
+            _plotly_figure_html(
                 fig,
-                include_plotlyjs="require",
                 full_html=False,
                 config={"responsive": True},
             )
@@ -1419,7 +1412,6 @@ def update_ecd_figure(app: Any, mode: str, sigma_ev: float) -> None:
     if not energies or not rot:
         return
     try:
-        import plotly.io as _pio
 
         from quantui.ecd_plot import is_effectively_achiral, plot_ecd_spectrum
 
@@ -1443,9 +1435,8 @@ def update_ecd_figure(app: Any, mode: str, sigma_ev: float) -> None:
         app._set_html_output(
             app._ecd_fig,
             note
-            + _pio.to_html(
+            + _plotly_figure_html(
                 fig,
-                include_plotlyjs="require",
                 full_html=False,
                 config={"responsive": True},
             )
@@ -1574,7 +1565,6 @@ def update_nmr_figure(app: Any, nucleus: str) -> None:
         app._set_html_output(app._nmr_fig, "")
         return
     try:
-        import plotly.io as _pio
 
         from quantui.nmr_plot import plot_nmr_spectrum
 
@@ -1587,9 +1577,8 @@ def update_nmr_figure(app: Any, nucleus: str) -> None:
         app._last_nmr_fig = fig
         app._set_html_output(
             app._nmr_fig,
-            _pio.to_html(
+            _plotly_figure_html(
                 fig,
-                include_plotlyjs="require",
                 full_html=False,
                 config={"responsive": True},
             ),
@@ -1934,11 +1923,9 @@ def _sync_orb_range_inputs(app: Any, fig: Any) -> None:
 def _orb_screen_html(fig: Any) -> str:
     """Energy diagram HTML for the panel (fixed width; the panel scrolls
     sideways on a narrow window rather than clipping the levels)."""
-    import plotly.io as _pio
 
-    html_str = _pio.to_html(
+    html_str = _plotly_figure_html(
         fig,
-        include_plotlyjs="require",
         full_html=False,
         config={"responsive": True},
     )
@@ -2105,7 +2092,6 @@ def render_orbital_isosurface(
         return
 
     try:
-        import plotly.io as _pio
 
         from quantui.orbital_visualization import (
             generate_cube_from_arrays,
@@ -2259,9 +2245,8 @@ def render_orbital_isosurface(
                     title_color=title_color,
                     bond_color=bond_color,
                 )
-                html_str = _pio.to_html(
+                html_str = _plotly_figure_html(
                     fig,
-                    include_plotlyjs="require",
                     full_html=False,
                     config={"responsive": True},
                 )
@@ -2386,7 +2371,6 @@ def render_density_surface(
             return
 
     try:
-        import plotly.io as _pio
 
         from quantui.orbital_visualization import (
             DEFAULT_ISO_RESOLUTION,
@@ -2473,9 +2457,7 @@ def render_density_surface(
                     show_grid=False,
                     scene_bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
                 )
-                html_str = _pio.to_html(
-                    fig, include_plotlyjs="require", full_html=False
-                )
+                html_str = _plotly_figure_html(fig, full_html=False)
                 if mode == "esp":
                     html_str = (
                         '<p style="color:#92400e;padding:4px 8px">ESP colouring '
@@ -2948,12 +2930,9 @@ def _render_vib_mode_plotlymol(
             _vib_err(app, f"Animation generation failed: {exc}")
         raise
 
-    import plotly.io as _pio
-
-    anim_html = _pio.to_html(
+    anim_html = _plotly_figure_html(
         anim_fig,
         full_html=False,
-        include_plotlyjs="require",
         config={"responsive": True},
     )
     if _is_vib_stale(app, render_token):
@@ -4567,7 +4546,6 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
     app._last_pes_result = result
     try:
         import plotly.graph_objects as go
-        import plotly.io as pio
 
         e_rel = result.energies_relative_kcal
         x_vals = result.scan_parameter_values
@@ -4663,9 +4641,8 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
         fig.update_xaxes(showgrid=True)
         fig.update_yaxes(showgrid=True)
         app._last_pes_fig = fig
-        plot_html = pio.to_html(
+        plot_html = _plotly_figure_html(
             fig,
-            include_plotlyjs="require",
             full_html=False,
             config={"responsive": True},
             div_id="quantui-pes-plot",
@@ -4675,7 +4652,9 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
 (function(){
   function attach(){
     var gd=document.getElementById("quantui-pes-plot");
-    if(!gd){ setTimeout(attach,100); return; }
+    // gd.on exists once Plotly.newPlot has run; the figure may still be
+    // waiting for the page's plotly.js bootstrap (quantui.plotly_embed).
+    if(!gd || !gd.on){ setTimeout(attach,100); return; }
     gd.on("plotly_click", function(ev){
       if(!ev.points||!ev.points.length) return;
       var pt=ev.points[0];

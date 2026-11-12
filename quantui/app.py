@@ -2249,9 +2249,22 @@ class QuantUIApp:
         # one-time page bootstrap. A startup-time bootstrap ran py3Dmol's
         # exports/module-juggling loader during Voilà's RequireJS bootstrap and
         # broke widget startup offline — never reintroduce it here.
+        #
+        # plotly.js IS loaded once per page, but lazily: this empty Output is
+        # filled with the bundle by the first in-app figure
+        # (quantui.plotly_embed.figure_html), never at start-up, and is never
+        # cleared afterwards. Figures render with include_plotlyjs=False and
+        # wait for it (audit VIZ-2; amends DEC-010).
+        from quantui.plotly_embed import register_bootstrap_output
+
+        self._plotly_bootstrap_out = widgets.Output(
+            layout=_layout(height="0px", overflow="hidden", margin="0", padding="0")
+        )
+        register_bootstrap_output(self._plotly_bootstrap_out)
         display(
             widgets.VBox(
                 [
+                    self._plotly_bootstrap_out,
                     # Title and toolbar share one row; the toolbar wraps
                     # under the title on narrow windows.
                     widgets.HBox(

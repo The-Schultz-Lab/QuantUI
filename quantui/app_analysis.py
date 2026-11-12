@@ -10,6 +10,7 @@ from typing import Any, Optional
 import ipywidgets as widgets
 
 from . import theme as _theme
+from .plotly_embed import figure_html as _plotly_figure_html
 
 _PANEL_UNAVAILABLE_STYLE = (
     "padding:12px 16px;color:#6b7280;font-size:13px;font-style:italic"
@@ -1436,7 +1437,6 @@ def update_mulliken_figure(app: Any) -> None:
     if not symbols or not charges:
         return
     try:
-        import plotly.io as _pio
 
         from quantui.mulliken_plot import plot_mulliken_charges
 
@@ -1449,9 +1449,8 @@ def update_mulliken_figure(app: Any) -> None:
         app._last_mulliken_fig = fig
         app._set_html_output(
             app._mulliken_fig,
-            _pio.to_html(
+            _plotly_figure_html(
                 fig,
-                include_plotlyjs="require",
                 full_html=False,
                 config={"responsive": True},
             ),
