@@ -836,7 +836,10 @@ def _build_parser() -> argparse.ArgumentParser:
     input_group.add_argument(
         "--preopt",
         action="store_true",
-        help="Optimize the geometry first (frequency, tddft, pes_scan).",
+        help=(
+            "Optimize the geometry first (single_point, nmr, frequency, "
+            "tddft, pes_scan)."
+        ),
     )
     input_group.add_argument(
         "--option",

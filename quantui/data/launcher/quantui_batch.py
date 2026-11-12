@@ -34,6 +34,7 @@ Commands (``quantui-batch help`` for the full text):
 import argparse
 import getpass
 import json
+import math
 import os
 import re
 import shlex
@@ -340,7 +341,113 @@ def parse_option_pairs(pairs):
 
 
 def file_label(path):
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", path.stem).strip("_.-") or "molecule"
+    label = re.sub(r"[^A-Za-z0-9_.-]+", "_", path.stem)
+    return re.sub(r"\.{2,}", ".", label).strip("_.-") or "molecule"
+
+
+# Port of batch_input.REQUEST_ID_RE: the id names the job record file.
+REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$")
+
+
+def _valid_atom(atom):
+    return isinstance(atom, str) and atom.strip() in SITE["atomic_numbers"]
+
+
+def _valid_coords(row):
+    """Port of utils.validate_coordinates."""
+    if isinstance(row, (str, bytes)):
+        return False
+    try:
+        if len(row) != 3:
+            return False
+        return all(math.isfinite(float(x)) for x in row)
+    except (ValueError, TypeError):
+        return False
+
+
+def check_json_request(request):
+    """Port of batch_input.check_json_request."""
+    rid = request["request_id"]
+    if not isinstance(rid, str) or not REQUEST_ID_RE.match(rid):
+        raise InputError(
+            f"request_id {rid!r} may only use letters, digits and _ . - "
+            "(at most 64 characters)."
+        )
+    if ".." in rid:
+        raise InputError(f"request_id {rid!r} may not contain '..'.")
+    if request["calc_type"] not in SITE["calc_types"]:
+        raise InputError(
+            f"unknown calc_type {request['calc_type']!r}; choose one of "
+            f"{', '.join(SITE['calc_types'])}."
+        )
+    mol = request["molecule"]
+    atoms = mol.get("atoms")
+    coords = mol.get("coords") or mol.get("coordinates")
+    if not isinstance(atoms, list) or not atoms:
+        raise InputError("molecule.atoms must be a non-empty list.")
+    if not isinstance(coords, list) or len(coords) != len(atoms):
+        raise InputError(
+            "molecule.coords must list one [x, y, z] per atom " f"({len(atoms)} atoms)."
+        )
+    for i, (atom, row) in enumerate(zip(atoms, coords)):
+        if not _valid_atom(atom):
+            raise InputError(f"molecule.atoms[{i}]: unknown element {atom!r}.")
+        if not _valid_coords(row):
+            raise InputError(
+                f"molecule.coords[{i}] must be three finite numbers, got {row!r}."
+            )
+    charge = int(mol.get("charge", request["charge"]))
+    mult = int(mol.get("multiplicity", request["multiplicity"]))
+    problem = charge_mult_problem([a.strip() for a in atoms], charge, mult)
+    if problem:
+        raise InputError(
+            f"charge {charge} and multiplicity {mult} do not fit this "
+            f"molecule: {problem}"
+        )
+
+
+def check_options(request):
+    """Port of batch_input.check_options: bool options, warn on ignored keys."""
+    options = request["options"]
+    for key in SITE["boolean_option_keys"]:
+        if key not in options:
+            continue
+        value = options[key]
+        if isinstance(value, bool):
+            continue
+        word = str(value).strip().lower()
+        if word in ("true", "yes", "on", "1"):
+            options[key] = True
+        elif word in ("false", "no", "off", "0"):
+            options[key] = False
+        else:
+            raise InputError(
+                f"option {key}={value!r} must be true or false (yes/no also work)."
+            )
+    allowed = SITE["calc_option_keys"].get(request["calc_type"], ["scf_rescue"])
+    unknown = sorted(k for k in options if k not in allowed)
+    if not unknown:
+        return []
+    return [
+        f"option(s) {', '.join(unknown)} are ignored by a {request['calc_type']} "
+        f"job (it reads: {', '.join(allowed)})."
+    ]
+
+
+def check_basis(request):
+    """Port of batch_input.check_basis: normalise spelling, warn if unlisted."""
+    names = {b.lower(): b for b in SITE["known_basis_sets"]}
+    given = str(request.get("basis") or "").strip()
+    canonical = names.get(given.lower())
+    if canonical is not None:
+        request["basis"] = canonical
+        return []
+    if not given:
+        raise InputError("the request has no basis set; give --basis.")
+    return [
+        f"basis {given!r} is not one of QuantUI's basis sets; the job fails "
+        "if PySCF does not know it (check the spelling)."
+    ]
 
 
 def build_request(path, args, extra_options):
@@ -435,6 +542,9 @@ def build_request(path, args, extra_options):
     request["options"].update(extra_options)
     if args.preopt and request["calc_type"] in SITE["preopt_calc_types"]:
         request["options"]["preopt_before_run"] = True
+    if not request["request_id"]:
+        request["request_id"] = uuid.uuid4().hex[:12]
+    check_json_request(request)
     return request, warnings
 
 
@@ -555,8 +665,8 @@ def estimate(request):
 
 def resolve_resources(request, args):
     est = estimate(request)
-    cores = args.cores or est["cores"]
-    memory_gb = args.memory_gb or est["memory_gb"]
+    cores = est["cores"] if args.cores is None else args.cores
+    memory_gb = est["memory_gb"] if args.memory_gb is None else args.memory_gb
     walltime = args.walltime or est["walltime"]
     errors = []
     if not SITE["min_cores"] <= cores <= SITE["max_cores"]:
@@ -1284,6 +1394,7 @@ def requests_from_args(args, extra, q):
             request, warnings = chained_request(source_dir, source, args, extra)
             check_solvent(request)
             check_method(request)
+            warnings = warnings + check_basis(request) + check_options(request)
             out.append((f"--from {source_dir.name}", request, warnings, dep))
         except InputError as exc:
             sys.stderr.write(f"--from {source_dir.name}: {exc}\n")
@@ -1294,6 +1405,7 @@ def requests_from_args(args, extra, q):
             request, warnings = build_request(Path(name), args, extra)
             check_solvent(request)
             check_method(request)
+            warnings = warnings + check_basis(request) + check_options(request)
             out.append((name, request, warnings, None))
         except InputError as exc:
             sys.stderr.write(f"{name}: {exc}\n")
