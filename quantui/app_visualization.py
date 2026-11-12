@@ -1857,6 +1857,11 @@ def on_iso_generate(app: Any, btn: Any) -> None:
             if _sp is not None:
                 _sp.layout.display = "none"
 
+    # Cancel ends the activity through this same idempotent hook, so the
+    # worker's later completion cannot decrement the counter a second time
+    # and leave the toolbar showing Idle while something else runs (VIZ-9).
+    app._iso_finish_activity = _finish_activity
+
     def _reset_button() -> None:
         _finish_activity()
         if render_token != int(getattr(app, "_iso_render_token", 0)):
@@ -3114,10 +3119,16 @@ def on_iso_cancel(app: Any, btn: Any = None) -> None:
     sp = getattr(app, "_iso_spinner", None)
     if sp is not None:
         sp.layout.display = "none"
-    try:
-        app._activity_end(kind="compute")
-    except Exception:  # noqa: BLE001 — cancelling must never raise
-        pass
+    # End THIS generation's activity via its own once-only hook (set by
+    # on_iso_generate). Calling _activity_end directly decremented the
+    # counter here and again when the worker finished (audit VIZ-9).
+    finish = getattr(app, "_iso_finish_activity", None)
+    app._iso_finish_activity = None
+    if callable(finish):
+        try:
+            finish()
+        except Exception:  # noqa: BLE001 — cancelling must never raise
+            pass
     status = getattr(app, "_iso_export_status", None)
     if status is not None:
         status.value = '<span style="color:#555">Cancelled.</span>'

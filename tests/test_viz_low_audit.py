@@ -159,3 +159,59 @@ class TestPlaceholderIgnoresSurfaceUpdates:
             cube, data_format="cube", scene_key="k", with_surfaces=True
         )
         assert self._run(html, tmp_path) == 2  # + and - lobes
+
+
+# ── VIZ-9: Cancel must not double-decrement the activity counter ──────────
+
+
+class _CountingApp:
+    """Just enough of QuantUIApp for on_iso_generate / on_iso_cancel."""
+
+    def __init__(self):
+        from unittest.mock import Mock
+
+        self.count = 0
+        self._iso_render_token = 0
+        self._orb_toggle = Mock(value="HOMO")
+        self._iso_js_bridge = None
+        self._render_orbital_isosurface = Mock()
+
+    def _activity_begin(self, message="", kind="ui"):
+        self.count += 1
+
+    def _activity_end(self, kind="ui"):
+        self.count = max(0, self.count - 1)
+
+    def _queue_main_thread_callback(self, fn, *args):
+        fn(*args)
+
+
+class TestIsoCancelBalancesActivity:
+    def test_cancel_then_late_completion_ends_activity_once(self, monkeypatch):
+        from unittest.mock import Mock
+
+        from quantui import app_visualization as av
+
+        started = []
+        monkeypatch.setattr(av, "_start_daemon", lambda fn: started.append(fn) or True)
+        app = _CountingApp()
+        app._activity_begin("a calculation is running", kind="compute")
+
+        av.on_iso_generate(app, Mock())
+        assert app.count == 2
+        av.on_iso_cancel(app, None)
+        assert app.count == 1
+        started[0]()  # the abandoned cubegen worker finishes later
+        assert app.count == 1, "toolbar would show Idle while the calc runs"
+
+    def test_normal_completion_still_ends_activity(self, monkeypatch):
+        from unittest.mock import Mock
+
+        from quantui import app_visualization as av
+
+        started = []
+        monkeypatch.setattr(av, "_start_daemon", lambda fn: started.append(fn) or True)
+        app = _CountingApp()
+        av.on_iso_generate(app, Mock())
+        started[0]()
+        assert app.count == 0
