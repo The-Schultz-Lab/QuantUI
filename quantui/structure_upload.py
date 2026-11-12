@@ -7,7 +7,7 @@ Formats and readers:
   (final geometry): ASE.
 - ``.mol``, ``.sdf`` (first record), ``.mol2``: RDKit, which keeps formal
   charges and radical electrons, so charge and multiplicity come from the
-  file. 2-D MOL/SDF drawings are embedded in 3-D (ETKDG + MMFF).
+  file. Files RDKit flags as 2-D are embedded in 3-D (ETKDG + MMFF).
 
 Charge and multiplicity come from the file when it records them (Gaussian
 charge/multiplicity line, MOL/SDF formal charges and radicals, a QuantUI XYZ
@@ -101,10 +101,10 @@ def _from_rdkit(path: Path, suffix: str, notes: List[str]) -> Tuple[Molecule, bo
     if rdmol is None:
         raise ValueError("RDKit could not read this file.")
     conf = rdmol.GetConformer() if rdmol.GetNumConformers() else None
-    flat = conf is None or all(
-        abs(conf.GetAtomPosition(i).z) < 1e-4 for i in range(rdmol.GetNumAtoms())
-    )
-    if flat and rdmol.GetNumAtoms() > 3:
+    # Trust the file's own 2-D/3-D flag (as ``pubchem.sdf_to_xyz`` does): a
+    # planar molecule written as 3-D (benzene, formaldehyde) has all z == 0
+    # but real bond lengths, and must not be replaced by an RDKit geometry.
+    if conf is None or not conf.Is3D():
         from rdkit.Chem import AllChem
 
         rdmol = Chem.AddHs(rdmol, addCoords=True)
