@@ -1403,8 +1403,8 @@ def build_shared_widgets(
         style={"description_width": "40px"},
         layout=layout_fn(width="120px"),
         tooltip=(
-            "Fraction of the animation displacement amplitude (0.4 Å) "
-            "applied per atom along the selected mode"
+            "Fraction of 0.4 Å: the total length of the step taken along "
+            "the selected (normalised) mode"
         ),
     )
     app._freq_perturb_box = widgets.HBox(
@@ -2589,8 +2589,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             width="auto", margin="0 0 8px 0", align_self="flex-start", display="none"
         ),
         tooltip=(
-            "Displace the structure 75% along the selected normal mode "
-            "(same scale as the animation) and switch to a new Frequency run"
+            "Displace the structure 0.3 Å in total (75% of 0.4 Å) along the "
+            "selected normal mode and switch to a new Frequency run"
         ),
     )
     # Fixed-dimension Output container so the box never resizes between

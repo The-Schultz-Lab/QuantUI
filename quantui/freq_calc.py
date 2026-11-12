@@ -374,10 +374,13 @@ def perturb_along_mode(
 ) -> Molecule:
     """Return a copy of *molecule* displaced along one normal mode.
 
-    PySCF ``norm_mode`` vectors are unit-normalized; *amplitude* (Å) scales
-    them the same way as the Vibrational panel animation.  *fraction* is the
-    user-facing scale (default 75%).  Per-atom displacement is
-    ``sign * fraction * amplitude * mode_vector[atom]``.
+    The mode vector is first normalised to unit length over all atoms
+    (PySCF's ``norm_mode`` is *not*: its length is 1/sqrt(reduced mass in
+    amu), about 0.97 for a water mode and 0.38 for N2), so the whole
+    displacement has length ``fraction * amplitude`` Å whatever the mode's
+    reduced mass: ``sign * fraction * amplitude * v / |v|``. *amplitude* is
+    the Vibrational panel's animation scale; *fraction* is the user-facing
+    scale (default 75%, i.e. 0.3 Å).
 
     Args:
         molecule: Starting geometry (Å).
@@ -403,8 +406,13 @@ def perturb_along_mode(
         raise ValueError(
             f"displacement shape {disp.shape} != coordinates shape {coords.shape}"
         )
+    norm = float(np.linalg.norm(disp))
+    if not np.isfinite(norm) or norm <= 0.0:
+        raise ValueError(f"mode {mode_index} has a zero displacement vector")
 
-    scale = float(sign) * float(fraction) * float(amplitude)
+    # Normalised so the applied step is the recorded fraction * amplitude
+    # (audit SCF-10).
+    scale = float(sign) * float(fraction) * float(amplitude) / norm
     new_coords = (coords + scale * disp).tolist()
     return Molecule(
         atoms=list(molecule.atoms),
@@ -1417,7 +1425,7 @@ def displace_off_saddle(
 
     Displaces along every imaginary mode below
     :data:`IMAGINARY_RETRY_THRESHOLD_CM1` (:func:`perturb_along_mode`,
-    0.3 Å scale). At a saddle both directions lead downhill.
+    a 0.3 Å step per mode). At a saddle both directions lead downhill.
     """
     modes = imaginary_modes_to_follow(result)
     if not modes:
