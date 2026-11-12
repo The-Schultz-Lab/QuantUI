@@ -366,9 +366,37 @@ def _prediction_log_path() -> Path:
     return _log_dir() / "prediction_log.jsonl"
 
 
+def _json_default(obj: object) -> object:
+    """``json.dumps`` fallback: numpy scalars/arrays -> plain data, else str.
+
+    A numpy int/bool or a ``Path`` in a record used to raise TypeError out
+    of the logger (audit DATA-13).
+    """
+    tolist = getattr(obj, "tolist", None)
+    if callable(tolist):
+        try:
+            return tolist()
+        except Exception:  # noqa: BLE001 — fall back to str below
+            pass
+    return str(obj)
+
+
+def _dumps_record(record: dict) -> str:
+    return json.dumps(record, ensure_ascii=False, default=_json_default)
+
+
+def _parse_jsonl_line(raw: str) -> Optional[dict]:
+    """Parse one JSONL line; ``None`` for malformed or non-object lines."""
+    try:
+        rec = json.loads(raw)
+    except (ValueError, RecursionError):
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
 def _append(path: Path, record: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(record, ensure_ascii=False) + "\n"
+    line = _dumps_record(record) + "\n"
     with _LOCK:
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(line)
@@ -399,23 +427,26 @@ def _read_all(path: Path) -> list[dict]:
             and cached[0] == stat.st_mtime
             and cached[1] == stat.st_size
         ):
-            return list(cached[2])
+            # Copy each record, not just the list: a caller that mutates a
+            # returned dict must not poison the cache (audit DATA-13).
+            return [dict(r) for r in cached[2]]
         records: list[dict] = []
         # errors="replace": a concurrent/interrupted append can leave a partial
         # multibyte UTF-8 sequence at EOF; strict decoding would raise
         # UnicodeDecodeError and abort the whole read. Replacing the bad bytes
         # lets that one line fail json.loads and be skipped, matching the
         # deliberate malformed-entry tolerance below (and under pytest -n=auto).
+        # Non-object lines (e.g. a stray ``42``) are skipped too: callers
+        # index every record as a dict (audit DATA-13).
         with open(path, encoding="utf-8", errors="replace") as fh:
             for raw in fh:
                 raw = raw.strip()
                 if raw:
-                    try:
-                        records.append(json.loads(raw))
-                    except json.JSONDecodeError:
-                        pass
+                    rec = _parse_jsonl_line(raw)
+                    if rec is not None:
+                        records.append(rec)
         _READ_ALL_CACHE[key] = (stat.st_mtime, stat.st_size, records)
-        return list(records)
+        return [dict(r) for r in records]
 
 
 # ---------------------------------------------------------------------------
@@ -1428,35 +1459,49 @@ def prune_events(days: int = 7) -> None:
     with _LOCK:
         if not path.exists():
             return
-        records: list[dict] = []
         # errors="replace" for the same reason as _read_all: tolerate a partial
         # multibyte sequence from a concurrent/interrupted append rather than
         # abort the prune.
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            for raw in fh:
-                raw = raw.strip()
-                if raw:
-                    try:
-                        records.append(json.loads(raw))
-                    except json.JSONDecodeError:
-                        pass
+        with open(path, "rb") as fh:
+            data = fh.read()
+        read_size = len(data)
 
-        kept: list[dict] = []
-        for r in records:
+        kept: list[str] = []
+        for raw in data.decode("utf-8", errors="replace").splitlines():
+            raw = raw.strip()
+            if not raw:
+                continue
+            r = _parse_jsonl_line(raw)
+            if r is None:
+                continue  # junk line / non-object JSON (e.g. ``123``)
             try:
                 ts = datetime.fromisoformat(r["timestamp"])
                 # fromisoformat on Python < 3.11 doesn't handle 'Z' suffix
                 if ts.tzinfo is None:
                     ts = ts.replace(tzinfo=timezone.utc)
                 if ts >= cutoff:
-                    kept.append(r)
-            except (KeyError, ValueError):
-                kept.append(r)  # keep malformed entries rather than silently drop
+                    kept.append(raw)
+            except (KeyError, ValueError, TypeError):
+                kept.append(raw)  # keep malformed entries rather than silently drop
 
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            for r in kept:
-                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        # _LOCK is per-process: another kernel / worker process may have
+        # appended since the read. Carry those bytes over, then swap the
+        # file in atomically, so the window in which a foreign append can be
+        # lost shrinks from "the whole prune" to the final rename.
+        tmp = path.with_name(path.name + ".tmp")
+        try:
+            with open(path, "rb") as fh:
+                fh.seek(read_size)
+                tail = fh.read()
+            with open(tmp, "wb") as out:
+                out.write("".join(line + "\n" for line in kept).encode("utf-8"))
+                out.write(tail)
+            os.replace(tmp, path)
+        except OSError:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
 
 def get_recent_events(n: int = 100) -> list[dict]:

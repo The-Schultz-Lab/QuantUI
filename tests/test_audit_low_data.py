@@ -247,3 +247,83 @@ def test_settings_save_preserves_unknown_sections(tmp_path):
     assert saved["future_section"] == {"x": 1}
     assert saved["compute"]["future_key"] == "keep"
     assert saved["compute"]["density_fit"] is True
+
+
+# ---------------------------------------------------------------------------
+# DATA-13 — calc_log writers/readers robustness
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _calc_log_dir(tmp_path, monkeypatch):
+    from quantui import calc_log
+
+    monkeypatch.setenv("QUANTUI_LOG_DIR", str(tmp_path))
+    calc_log._READ_ALL_CACHE.clear()
+    yield tmp_path
+    calc_log._READ_ALL_CACHE.clear()
+
+
+def test_log_event_accepts_numpy_and_path(_calc_log_dir):
+    import numpy as np
+
+    from quantui import calc_log
+
+    calc_log.log_event(
+        "x", "msg", n=np.int64(3), ok=np.bool_(True), where=_calc_log_dir
+    )
+    (rec,) = calc_log.get_recent_events()
+    assert rec["n"] == 3 and rec["ok"] is True
+    assert rec["where"] == str(_calc_log_dir)
+
+
+def test_non_object_lines_are_skipped(_calc_log_dir):
+    from quantui import calc_log
+
+    calc_log.log_event("a", "first")
+    with open(calc_log._event_path(), "a", encoding="utf-8") as fh:
+        fh.write("123\n")
+    calc_log.prune_events()  # used to raise TypeError on the ``123`` line
+    events = calc_log.get_recent_events()
+    assert [e["event"] for e in events] == ["a"]
+
+    with open(calc_log._perf_path(), "a", encoding="utf-8") as fh:
+        fh.write("42\n")
+    assert calc_log.get_perf_history() == []
+    calc_log.estimate_time(n_atoms=2, n_electrons=2, method="RHF", basis="STO-3G")
+
+
+def test_prune_keeps_bytes_appended_after_read(_calc_log_dir, monkeypatch):
+    """An append from another process between read and rewrite survives."""
+    from quantui import calc_log
+
+    calc_log.log_event("a", "first")
+    path = calc_log._event_path()
+    real_open = open
+    state = {"n": 0}
+
+    def _open(file, mode="r", *a, **k):
+        fh = real_open(file, mode, *a, **k)
+        if str(file) == str(path) and mode == "rb":
+            state["n"] += 1
+            if state["n"] == 1:  # after the prune's first read
+                with real_open(path, "a", encoding="utf-8") as other:
+                    other.write(
+                        '{"timestamp": "2999-01-01T00:00:00+00:00",'
+                        ' "event": "foreign", "message": ""}\n'
+                    )
+        return fh
+
+    monkeypatch.setattr(calc_log, "open", _open, raising=False)
+    calc_log.prune_events()
+    monkeypatch.delattr(calc_log, "open")
+    calc_log._READ_ALL_CACHE.clear()
+    assert [e["event"] for e in calc_log.get_recent_events()] == ["a", "foreign"]
+
+
+def test_read_all_cache_not_poisoned_by_caller_mutation(_calc_log_dir):
+    from quantui import calc_log
+
+    calc_log.log_event("a", "first")
+    calc_log.get_recent_events()[0]["event"] = "mutated"
+    assert calc_log.get_recent_events()[0]["event"] == "a"
