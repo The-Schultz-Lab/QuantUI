@@ -1622,8 +1622,9 @@ _ISO_VIEWER_JS = """
     __ORIENT__
     // Restore the orientation the previous viewer had, but only for the same
     // scene: carrying a camera onto a different molecule would frame it
-    // arbitrarily. SCENE is the atom block, so switching ORBITALS keeps the
-    // view (the common case) while switching MOLECULES re-frames.
+    // arbitrarily. SCENE is the element sequence, so switching ORBITALS (or
+    // going from the molecule placeholder to the first surface) keeps the
+    // view while switching MOLECULES re-frames.
     // A freshly built viewer is never busy. Bumping the sequence invalidates
     // any in-flight busy(true) from the previous viewer, so a stale retry can
     // never land on this one and leave it dimmed with nothing to clear it.
@@ -1832,17 +1833,28 @@ def esp_legend_html(esp_range: float) -> str:
 
 def _scene_key(cube_text: str) -> str:
     """Identity of the molecule in a cube, used to decide whether a saved
-    camera still applies. The atom block only — a different orbital of the same
-    molecule must keep the user's orientation, a different molecule must not."""
-    import hashlib
+    camera still applies. A different orbital of the same molecule must keep
+    the user's orientation, a different molecule must not.
 
+    Keyed on the element sequence (atomic numbers in atom order), the one thing
+    a cube and the XYZ molecule placeholder share: cube atom records carry Bohr
+    coordinates, XYZ carries Angstrom, so hashing either form of the geometry
+    meant the placeholder's camera never carried into the first isosurface
+    (audit VIZ-10). See :func:`_scene_key_from_xyz`.
+    """
     lines = cube_text.splitlines()
     try:
         n_atoms = abs(int(lines[2].split()[0]))
-        block = "".join(lines[6 : 6 + n_atoms])
+        zs = [int(float(ln.split()[0])) for ln in lines[6 : 6 + n_atoms]]
     except Exception:  # noqa: BLE001 — a bad header only costs camera reuse
-        block = "".join(lines[:8])
-    return hashlib.sha1(block.encode()).hexdigest()[:16]
+        return _hash_key("".join(lines[:8]))
+    return _hash_key(",".join(str(z) for z in zs))
+
+
+def _hash_key(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha1(text.encode()).hexdigest()[:16]
 
 
 def render_molecule_placeholder_py3dmol(
@@ -1879,14 +1891,17 @@ def render_molecule_placeholder_py3dmol(
 
 
 def _scene_key_from_xyz(xyz: str) -> str:
-    import hashlib
+    """Same key as :func:`_scene_key` for an XYZ block: the element sequence
+    as atomic numbers, so a cube of this molecule matches it."""
+    from quantui.config import ATOMIC_NUMBERS
 
-    lines = xyz.splitlines()[2:]
-    # Cube atom records carry Z and Bohr coordinates while XYZ carries symbols
-    # and Angstrom, so the two cannot hash to the same value. Element count and
-    # ordering are enough to tell "same molecule" for camera reuse.
-    block = "".join(ln.split()[0] for ln in lines if ln.strip())
-    return hashlib.sha1(block.encode()).hexdigest()[:16]
+    zs = []
+    for ln in xyz.splitlines()[2:]:
+        if not ln.strip():
+            continue
+        sym = ln.split()[0]
+        zs.append(str(ATOMIC_NUMBERS.get(sym.capitalize(), sym)))
+    return _hash_key(",".join(zs))
 
 
 def _build_iso_viewer(

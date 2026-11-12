@@ -215,3 +215,64 @@ class TestIsoCancelBalancesActivity:
         av.on_iso_generate(app, Mock())
         started[0]()
         assert app.count == 0
+
+
+# ── VIZ-10: placeholder camera carries into the first isosurface ──────────
+
+
+def _water_molecule():
+    from quantui.molecule import Molecule
+
+    return Molecule(
+        ["O", "H", "H"],
+        [[0.0, 0.0, 0.0], [0.757, 0.587, 0.0], [-0.757, 0.587, 0.0]],
+    )
+
+
+def _cube_text_for(molecule, tmp_path) -> str:
+    gto = pytest.importorskip("pyscf.gto")
+    from pyscf import scf
+    from pyscf.tools import cubegen
+
+    mol = gto.M(
+        atom=[(s, c) for s, c in zip(molecule.atoms, molecule.coordinates)],
+        basis="sto-3g",
+        verbose=0,
+    )
+    mf = scf.RHF(mol).run()
+    path = tmp_path / "mo.cube"
+    cubegen.orbital(mol, str(path), mf.mo_coeff[:, 0], nx=4, ny=4, nz=4)
+    return path.read_text()
+
+
+class TestSceneKeysMatchAcrossPlaceholderAndCube:
+    def test_placeholder_and_cube_of_the_same_molecule_share_a_key(self, tmp_path):
+        from quantui.orbital_visualization import _scene_key, _scene_key_from_xyz
+
+        water = _water_molecule()
+        xyz = f"{len(water.atoms)}\n{water.get_formula()}\n{water.to_xyz_string()}"
+        assert _scene_key(_cube_text_for(water, tmp_path)) == _scene_key_from_xyz(xyz)
+
+    def test_a_different_molecule_does_not_match(self, tmp_path):
+        from quantui.orbital_visualization import _scene_key, _scene_key_from_xyz
+
+        assert _scene_key(_cube_text_for(_water_molecule(), tmp_path)) != (
+            _scene_key_from_xyz(_H2_XYZ)
+        )
+
+    def test_rendered_viewers_carry_the_same_scene(self, tmp_path):
+        pytest.importorskip("py3Dmol")
+        import re
+
+        from quantui.orbital_visualization import (
+            render_molecule_placeholder_py3dmol,
+            render_orbital_isosurface_py3dmol,
+        )
+
+        water = _water_molecule()
+        cube = tmp_path / "w.cube"
+        cube.write_text(_cube_text_for(water, tmp_path))
+        scene = re.compile(r"SCENE=(\"[0-9a-f]+\")")
+        a = scene.search(render_molecule_placeholder_py3dmol(water)).group(1)
+        b = scene.search(render_orbital_isosurface_py3dmol(cube)).group(1)
+        assert a == b
