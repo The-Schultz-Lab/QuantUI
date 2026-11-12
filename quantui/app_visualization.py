@@ -4345,6 +4345,7 @@ def _thermo_from_saved(saved: Any) -> Any:
         "Cv_jmolk",
         "Cp_jmolk",
         "symmetry_number",
+        "symmetry_group",
         "temperature_k",
     )
     ns = SimpleNamespace(**{f: saved.get(f) for f in fields})
@@ -4460,7 +4461,15 @@ def thermo_table_html(td: Any, energy_hartree: float) -> str:
     if td.Cp_jmolk is not None:
         rows.append(_row("Heat capacity Cp", f"{td.Cp_jmolk:.2f} J/(mol·K)"))
     if td.symmetry_number is not None:
-        rows.append(_row("Rotational symmetry number σ", str(td.symmetry_number)))
+        _sigma_note = ""
+        _sigma_group = getattr(td, "symmetry_group", None)
+        if _sigma_group:
+            from quantui.symmetry import html_group
+
+            _sigma_note = f"point group {html_group(_sigma_group)}"
+        rows.append(
+            _row("Rotational symmetry number σ", str(td.symmetry_number), _sigma_note)
+        )
     return (
         f"<div style='font-size:12px;margin:4px 0'><b>At {td.temperature_k:.2f} K, "
         f"{td.pressure_atm:g} atm</b> (ideal gas, rigid rotor, harmonic "

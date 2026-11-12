@@ -87,6 +87,9 @@ class ThermoData:
     Cp_jmolk: Optional[float] = None
     # Rotational symmetry number used for S_rot (2 for water, 3 for NH3).
     symmetry_number: Optional[int] = None
+    # Point group sigma was taken from (PySCF name, e.g. "D6h"); None when
+    # PySCF's own detection was used.
+    symmetry_group: Optional[str] = None
 
 
 def _cm1_to_thermo_au(frequencies_cm1: Any) -> Any:
@@ -125,12 +128,18 @@ def _run_thermo(
 ) -> ThermoData:
     """PySCF ``hessian.thermo.thermo`` → :class:`ThermoData`.
 
-    The rotational symmetry number comes from PySCF's own point-group
-    detection, run here at QuantUI's 0.01 Å tolerance: at PySCF's strict
-    default an optimized water or NH3 gets sigma = 1 instead of 2 or 3,
-    overstating the rotational entropy by R ln sigma.
+    The rotational symmetry number comes from QuantUI's own point group
+    (:func:`~quantui.symmetry.detect_point_group`, the group the UI shows):
+    at PySCF's strict default an optimized water or NH3 gets sigma = 1
+    instead of 2 or 3, and even at 0.01 Å PySCF's single-tolerance detection
+    gives the bundled benzene D2h (sigma 4, not 12; audit SCF-4/GEOM-7). The
+    entropy and G are corrected by -R ln(sigma / sigma_PySCF).
     """
-    from .symmetry import detection_tolerance
+    from .symmetry import (
+        detect_point_group,
+        detection_tolerance,
+        rotational_symmetry_number,
+    )
 
     pressure_pa = float(pressure_atm) * 101325.0
     with detection_tolerance():
@@ -162,6 +171,30 @@ def _run_thermo(
 
     u_raw = _first("E_tot")
     sigma_raw = _first("sym_number")
+    sigma = int(round(_thermo_value(sigma_raw))) if sigma_raw is not None else None
+    sigma_group: Optional[str] = None
+    if sigma is not None:
+        pg = None
+        try:
+            mol = getattr(model, "mol", model)
+            pg = detect_point_group(
+                [mol.atom_pure_symbol(i) for i in range(mol.natm)],
+                mol.atom_coords(unit="Angstrom").tolist(),
+            )
+        except Exception as exc:  # noqa: BLE001 — keep PySCF's sigma
+            logger.debug("Point group for sigma failed: %s", exc)
+        if pg is not None:
+            new_sigma = rotational_symmetry_number(pg.group)
+            if new_sigma != sigma:
+                # S_rot = R[... - ln sigma]; nothing else depends on sigma.
+                import math
+
+                from pyscf.data import nist
+
+                kb_eh = nist.BOLTZMANN / nist.HARTREE2J
+                s_eh -= kb_eh * math.log(new_sigma / sigma)
+                sigma = new_sigma
+            sigma_group = pg.group
     return ThermoData(
         zpve_hartree=_thermo_value(z_raw) if z_raw is not None else fallback_zpve,
         H_hartree=h,
@@ -172,9 +205,8 @@ def _run_thermo(
         E_thermal_hartree=_thermo_value(u_raw) if u_raw is not None else None,
         Cv_jmolk=_jmolk("Cv_tot"),
         Cp_jmolk=_jmolk("Cp_tot"),
-        symmetry_number=(
-            int(round(_thermo_value(sigma_raw))) if sigma_raw is not None else None
-        ),
+        symmetry_number=sigma,
+        symmetry_group=sigma_group,
     )
 
 

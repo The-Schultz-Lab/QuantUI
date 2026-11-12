@@ -181,7 +181,8 @@ def group_order(name: str) -> int:
     return 2 * n if not suffix else 4 * n  # Dn: 2n; Dnh, Dnd: 4n
 
 
-def _detect(atoms_bohr: list, tol_bohr: Optional[float]) -> str:
+def _detect_full(atoms_bohr: list, tol_bohr: Optional[float]) -> Tuple[str, Any, Any]:
+    """PySCF ``detect_symm`` at *tol_bohr*: ``(group, origin, axes)``."""
     from pyscf.symm import geom
 
     with _TOLERANCE_LOCK:
@@ -189,9 +190,158 @@ def _detect(atoms_bohr: list, tol_bohr: Optional[float]) -> str:
         try:
             if tol_bohr is not None:
                 geom.TOLERANCE = tol_bohr
-            return str(geom.detect_symm(atoms_bohr)[0])
+            group, orig, axes = geom.detect_symm(atoms_bohr)
+            return str(group), orig, axes
         finally:
             geom.TOLERANCE = old
+
+
+def _detect(atoms_bohr: list, tol_bohr: Optional[float]) -> str:
+    return _detect_full(atoms_bohr, tol_bohr)[0]
+
+
+#: Tolerances (Å) tried between PySCF's strict default and the loose hint.
+#: PySCF's detector rounds inertia moments and distances, so the group it
+#: finds is not monotonic in the tolerance (a 2-decimal benzene is D2h at
+#: 0.001-0.015 Å and D6h from 0.02 Å; noisy NH3/CH4/benzene drop to
+#: C1/C3/C2h at single tolerances). Taking the highest order over a ladder
+#: removes most of that noise.
+_LADDER_ANGSTROM = (
+    0.001,
+    0.003,
+    DEFAULT_TOLERANCE_ANGSTROM,
+    0.02,
+    0.03,
+    LOOSE_TOLERANCE_ANGSTROM,
+)
+
+#: Uniform scale factors the ladder is also run at. Scaling the geometry
+#: and the tolerance together changes nothing physically but moves PySCF's
+#: rounding boundaries; ±0.0005 Å noise on benzene gives C2h at every
+#: tolerance unscaled, D6h at most rungs scaled by 1.013.
+_LADDER_SCALES = (1.0, 1.013)
+
+
+def _rot(axis: Any, angle: float) -> Any:
+    import numpy as np
+
+    a = np.asarray(axis, dtype=float)
+    a = a / np.linalg.norm(a)
+    k = np.array([[0.0, -a[2], a[1]], [a[2], 0.0, -a[0]], [-a[1], a[0], 0.0]])
+    return np.eye(3) + np.sin(angle) * k + (1.0 - np.cos(angle)) * (k @ k)
+
+
+def _mirror(normal: Any) -> Any:
+    import numpy as np
+
+    n = np.asarray(normal, dtype=float)
+    n = n / np.linalg.norm(n)
+    return np.eye(3) - 2.0 * np.outer(n, n)
+
+
+def _generators(group: str) -> Optional[List[Any]]:
+    """Generators of *group* in PySCF's ``detect_symm`` axis frame.
+
+    PySCF puts the principal axis on z, a C2 axis (D groups) or a mirror
+    normal (Cnv, Cs) on x, and the cubic groups' C2/C4 axes on x, y, z.
+    ``None`` for a group that is not checked here (I, Ih).
+    """
+    import numpy as np
+
+    x, _y, z = np.eye(3)
+    inv = -np.eye(3)
+    if group in ("C1", "SO3", "Coov", "Dooh"):
+        return []
+    if group == "Ci":
+        return [inv]
+    if group == "Cs":
+        return [_mirror(z)]
+    c3 = _rot(np.ones(3), 2.0 * np.pi / 3.0)
+    s4 = _mirror(z) @ _rot(z, np.pi / 2.0)
+    cubic = {
+        "T": [_rot(z, np.pi), _rot(x, np.pi), c3],
+        "Td": [_rot(z, np.pi), _rot(x, np.pi), c3, s4],
+        "Th": [_rot(z, np.pi), _rot(x, np.pi), c3, inv],
+        "O": [_rot(z, np.pi / 2.0), c3],
+        "Oh": [_rot(z, np.pi / 2.0), c3, inv],
+    }
+    if group in cubic:
+        return cubic[group]
+    m = re.fullmatch(r"([CDS])(\d+)([vhd]?)", group)
+    if not m:
+        return None
+    kind, n_str, suffix = m.groups()
+    n = int(n_str)
+    if kind == "S":
+        return [_mirror(z) @ _rot(z, 2.0 * np.pi / n)]
+    gens = [_rot(z, 2.0 * np.pi / n)]
+    if kind == "D":
+        gens.append(_rot(x, np.pi))
+    if suffix == "v":
+        gens.append(_mirror(x))
+    elif suffix == "h":
+        gens.append(_mirror(z))
+    elif suffix == "d":
+        gens.append(_mirror(z) @ _rot(z, np.pi / n))
+    return gens
+
+
+def _holds_within(
+    group: str, atoms_bohr: list, orig: Any, axes: Any, tol_bohr: float
+) -> bool:
+    """True when every generator of *group* maps each atom onto an atom of
+    the same element no more than *tol_bohr* away (a real distance check,
+    unlike PySCF's rounded detection)."""
+    import numpy as np
+
+    gens = _generators(group)
+    if gens is None:
+        return False
+    syms = [a[0] for a in atoms_bohr]
+    coords = (np.array([a[1] for a in atoms_bohr], dtype=float) - orig) @ np.asarray(
+        axes
+    ).T
+    if group in ("Coov", "Dooh"):
+        if np.abs(coords[:, :2]).max() > tol_bohr:
+            return False
+        if group == "Dooh":
+            gens = [-np.eye(3)]
+    for op in gens:
+        moved = coords @ np.asarray(op).T
+        for i, sym in enumerate(syms):
+            same = coords[[j for j, s in enumerate(syms) if s == sym]]
+            if np.linalg.norm(same - moved[i], axis=1).min() > tol_bohr:
+                return False
+    return True
+
+
+def rotational_symmetry_number(group: str) -> int:
+    """Rotational symmetry number σ of a point group (PySCF names).
+
+    σ is the order of the group's proper-rotation subgroup: 2 for water
+    (C2v), 3 for NH3 (C3v), 12 for CH4 (Td) and benzene (D6h), 1 for C1/Cs/
+    Ci/C∞v, 2 for D∞h. Same table as PySCF's ``hessian.thermo``.
+    """
+    if group in ("SO3", "C1", "Ci", "Cs", "Coov"):
+        return 1
+    if group == "Dooh":
+        return 2
+    if group in ("T", "Td", "Th"):
+        return 12
+    if group in ("O", "Oh"):
+        return 24
+    if group in ("I", "Ih"):
+        return 60
+    m = re.fullmatch(r"([CDS])(\d+)([vhd]?)", group)
+    if not m:
+        return 1
+    kind, n_str, _ = m.groups()
+    n = int(n_str)
+    if kind == "C":
+        return n
+    if kind == "D":
+        return 2 * n
+    return max(1, n // 2)  # Sn (n even): proper subgroup C(n/2)
 
 
 def detect_point_group(
@@ -211,22 +361,53 @@ def detect_point_group(
             (str(sym), [float(v) * BOHR_PER_ANGSTROM for v in xyz])
             for sym, xyz in zip(atoms, coords_angstrom)
         ]
-        exact = _detect(atoms_bohr, None)
-        group = _detect(atoms_bohr, tolerance_angstrom * BOHR_PER_ANGSTROM)
-        loose = _detect(atoms_bohr, LOOSE_TOLERANCE_ANGSTROM * BOHR_PER_ANGSTROM)
+        exact = _detect_full(atoms_bohr, None)
     except ImportError:
         return None
     except Exception as exc:  # noqa: BLE001 — symmetry is informational only
         logger.debug("Point-group detection failed: %s", exc)
         return None
-    # The tolerance ladder must never report *less* symmetry at a looser
-    # tolerance; PySCF's detector rounds inertia moments, so guard it.
-    if group_order(exact) > group_order(group):
-        group = exact
+    # (tolerance Å, (group, origin, axes)); exact first.
+    candidates: List[Tuple[float, Tuple[str, Any, Any]]] = [(0.0, exact)]
+    ladder = sorted(
+        set(_LADDER_ANGSTROM) | {float(tolerance_angstrom), LOOSE_TOLERANCE_ANGSTROM}
+    )
+    for scale in _LADDER_SCALES:
+        scaled = [(sym, [v * scale for v in xyz]) for sym, xyz in atoms_bohr]
+        for tol in ladder:
+            try:
+                name, orig, axes = _detect_full(scaled, tol * BOHR_PER_ANGSTROM * scale)
+            except Exception as exc:  # noqa: BLE001 — skip one failed rung
+                logger.debug("Point-group detection at %g Å failed: %s", tol, exc)
+                continue
+            candidates.append((tol, (name, orig / scale, axes)))
+    # The group is the highest-order one found at or below the working
+    # tolerance: PySCF's detector rounds inertia moments, so a single
+    # tolerance can report *less* symmetry than a stricter one (audit GEOM-7).
+    group = exact[0]
+    for tol, (name, _o, _a) in candidates:
+        if tol <= tolerance_angstrom and group_order(name) > group_order(group):
+            group = name
+    # A higher group found only at a looser rung still counts when every
+    # atom really is within the working tolerance of its symmetric position
+    # (a 2-decimal benzene is D6h within 0.004 Å, but PySCF's rounding only
+    # finds D6h from 0.02 Å; audit SCF-4).
+    tol_bohr = tolerance_angstrom * BOHR_PER_ANGSTROM
+    for tol, (name, orig, axes) in candidates:
+        if (
+            tol > tolerance_angstrom
+            and group_order(name) > group_order(group)
+            and _holds_within(name, atoms_bohr, orig, axes, tol_bohr)
+        ):
+            group = name
+    loose = group
+    for tol, (name, _o, _a) in candidates:
+        if tol <= LOOSE_TOLERANCE_ANGSTROM and group_order(name) > group_order(loose):
+            loose = name
     return PointGroup(
         group=group,
         tolerance_angstrom=tolerance_angstrom,
-        exact_group=exact,
+        exact_group=exact[0],
         loose_group=loose if group_order(loose) > group_order(group) else None,
     )
 

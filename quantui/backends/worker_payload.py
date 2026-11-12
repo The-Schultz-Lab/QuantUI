@@ -205,6 +205,7 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
             "Cv_jmolk": getattr(_thermo, "Cv_jmolk", None),
             "Cp_jmolk": getattr(_thermo, "Cp_jmolk", None),
             "symmetry_number": getattr(_thermo, "symmetry_number", None),
+            "symmetry_group": getattr(_thermo, "symmetry_group", None),
             # Pressure and the thermo model itself are recorded explicitly;
             # both are fixed by the harmonic-oscillator/
             # rigid-rotor/ideal-gas model at 1 atm used in freq_calc.py.
