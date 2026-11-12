@@ -66,3 +66,31 @@ class TestHistoryLogPanelArgs:
         app._render_log("hello", _XSS)
         assert _XSS not in app._log_source_lbl.value
         assert "&lt;img" in app._log_source_lbl.value
+
+
+# ── UI-2 ──────────────────────────────────────────────────────────────────────
+
+
+class TestWidgetChromeCss:
+    def test_no_doubled_closing_braces(self):
+        from quantui import theme
+
+        css = theme._widget_chrome_css()
+        assert "}}" not in css
+        assert css.count("{") == css.count("}")
+
+    def test_every_rule_parses(self):
+        import pytest
+
+        tinycss2 = pytest.importorskip("tinycss2")
+        from quantui import theme
+
+        rules = tinycss2.parse_stylesheet(
+            theme._widget_chrome_css(), skip_whitespace=True, skip_comments=True
+        )
+        errors = [r for r in rules if r.type == "error"]
+        assert errors == []
+        preludes = [tinycss2.serialize(r.prelude) for r in rules]
+        assert all("}" not in p for p in preludes), preludes
+        assert any(".lm-TabBar-tab, .p-TabBar-tab" in p for p in preludes)
+        assert any(".quantui-info-box small" in p for p in preludes)
