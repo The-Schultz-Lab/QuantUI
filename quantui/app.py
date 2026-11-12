@@ -2081,6 +2081,8 @@ class QuantUIApp:
         # Clear button from wiping output mid-run.
         self._cancel_event = threading.Event()
         self._calc_running: bool = False
+        # Set once a run has its result in hand; Cancel is ignored from then on.
+        self._run_result_ready: bool = False
         # Stop signal for the live elapsed-time ticker thread.
         self._elapsed_stop_event: Optional[threading.Event] = None
         # Total run estimate the ticker turns into "time
@@ -5104,6 +5106,11 @@ class QuantUIApp:
             return
         if not self._calc_running:
             return
+        # The result is already in hand: cancelling now would only discard it
+        # (audit APP-10). The button is disabled at that point too; this
+        # covers a click that was already on its way.
+        if getattr(self, "_run_result_ready", False):
+            return
         self._cancel_event.set()
         self.cancel_btn.disabled = True
         self.cancel_btn.description = "Cancelling…"
@@ -6615,6 +6622,7 @@ class QuantUIApp:
     def _begin_run_lock(self) -> None:
         """Mark a run in flight (main thread, before the worker starts)."""
         self._calc_running = True
+        self._run_result_ready = False
         self.run_btn.disabled = True
         self._freeze_run_inputs()
 
@@ -6683,6 +6691,7 @@ class QuantUIApp:
         # Run-in-flight state: arm Cancel, lock out Clear (so it can't wipe the
         # live output mid-run), reset the cancel flag for this fresh run.
         self._calc_running = True
+        self._run_result_ready = False
         self._cancel_event.clear()
         self.cancel_btn.disabled = False
         self.log_clear_btn.disabled = True
@@ -7570,6 +7579,20 @@ class QuantUIApp:
                 save_spectra, save_type = {}, "single_point"
 
             _mark("result_ready")
+            # The calculation has finished: from here on a Cancel could only
+            # throw a finished result away, half-way through showing and
+            # saving it (audit APP-10). Disarm it, and stop the log from
+            # raising for a Cancel that arrived a moment too late.
+            self._run_result_ready = True
+            log._cancel_check = None
+            self.cancel_btn.disabled = True
+            self.cancel_btn.description = "Cancel"
+            if self._cancel_event.is_set():
+                self._cancel_event.clear()
+                log.write(
+                    "\nCancel arrived after the calculation had finished — "
+                    "the result is kept.\n"
+                )
             _elapsed = time.perf_counter() - _run_wall_t
             _elapsed_cpu = time.process_time() - _run_cpu_t
             self._last_result = result

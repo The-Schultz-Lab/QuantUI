@@ -2,6 +2,7 @@
 
 - APP-5: a failed save is reported, not swallowed; a failed extra file
   (thumbnail, Molden, ...) does not unsave the result.
+- APP-10: a Cancel that arrives once the result exists does not discard it.
 """
 
 from __future__ import annotations
@@ -64,15 +65,13 @@ def test_failed_save_is_reported_and_forgets_the_old_folder(app, tmp_path):
 def test_failed_extra_file_does_not_unsave_the_result(app, tmp_path):
     saved = tmp_path / "run"
     saved.mkdir()
-    with patch("quantui.save_result", return_value=saved), patch(
-        "quantui.load_result", return_value={"timestamp": "t"}
-    ), patch(
-        "quantui.results_storage.save_thumbnail", side_effect=OSError("boom")
-    ), patch(
-        "quantui.results_storage.save_orbitals"
-    ) as orbitals, patch(
-        "quantui.results_storage.save_molden"
-    ) as molden:
+    with (
+        patch("quantui.save_result", return_value=saved),
+        patch("quantui.load_result", return_value={"timestamp": "t"}),
+        patch("quantui.results_storage.save_thumbnail", side_effect=OSError("boom")),
+        patch("quantui.results_storage.save_orbitals") as orbitals,
+        patch("quantui.results_storage.save_molden") as molden,
+    ):
         _run(app)
     assert app.run_status.value.startswith("Done"), app.run_status.value
     assert app._last_result_dir == saved
@@ -81,3 +80,62 @@ def test_failed_extra_file_does_not_unsave_the_result(app, tmp_path):
     molden.assert_called_once()
     assert "NOT saved" not in _result_html(app)
     assert isinstance(app._last_result_dir, Path)
+
+
+# ── APP-10 ────────────────────────────────────────────────────────────────
+
+
+def test_cancel_after_the_result_exists_keeps_it(app, tmp_path):
+    # The click lands while the finished result is being saved (the slow,
+    # post-calculation part of a run). It used to raise out of the next log
+    # write: "Cancelled.", a cancelled card under the result card, nothing
+    # saved.
+    saved = tmp_path / "run"
+    saved.mkdir()
+
+    def _save(*a, **kw):
+        assert app.cancel_btn.disabled  # disarmed once the result exists
+        app._on_cancel(None)
+        return saved
+
+    with (
+        patch("quantui.save_result", side_effect=_save),
+        patch("quantui.load_result", return_value={"timestamp": "t"}),
+    ):
+        _run(app)
+    assert app.run_status.value.startswith("Done"), app.run_status.value
+    assert app._last_result_dir == saved
+    assert "Calculation cancelled" not in _result_html(app)
+    assert not app._cancel_event.is_set()
+
+
+def test_cancel_racing_the_end_of_the_calculation_keeps_the_result(app, tmp_path):
+    # The click arrived just before the result was in hand (the flag is set,
+    # nothing has raised yet): the result is kept, and the log says so.
+    saved = tmp_path / "run"
+    saved.mkdir()
+    real_format = app._format_result
+
+    def _format(result):
+        app._on_cancel(None)
+        assert app._cancel_event.is_set()
+        return real_format(result)
+
+    with (
+        patch.object(app, "_format_result", side_effect=_format),
+        patch("quantui.save_result", return_value=saved),
+        patch("quantui.load_result", return_value={"timestamp": "t"}),
+    ):
+        _run(app)
+    assert app.run_status.value.startswith("Done"), app.run_status.value
+    assert "Calculation cancelled" not in _result_html(app)
+    assert "the result is kept" in app._active_log.getvalue()
+
+
+def test_cancel_still_works_before_the_result(app):
+    app._begin_run_lock()
+    assert not app._run_result_ready
+    app._on_cancel(None)
+    assert app._cancel_event.is_set()
+    app._cancel_event.clear()
+    app._end_run_lock()
