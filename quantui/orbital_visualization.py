@@ -1575,6 +1575,10 @@ _ISO_VIEWER_JS = """
   // is exact; removeAllShapes() would also take out anything else ever added.
   var shapes=[];
   function surfaces(){
+    // The molecule placeholder (shown before the first Generate) carries XYZ
+    // text in DATA, not a cube: feeding that to addVolumetricData(...,"cube")
+    // when a slider moves would draw garbage or throw (audit VIZ-8).
+    if(!WITH_SURFACES){ return; }
     var vw=v(); if(!vw){ return; }
     for(var i=0;i<shapes.length;i++){
       try{ vw.removeShape(shapes[i]); }catch(e){}

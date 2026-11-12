@@ -3448,7 +3448,7 @@ _STEPPER_JS = """
   if(abB)   abB.onclick  =function(){ stop();draw(cur===0?N-1:0); };
   if(slider)slider.oninput=function(){ stop();draw(parseInt(slider.value,10)); };
   window["__quantuiTrajGoTo_"+UID]=function(i){ stop(); draw(i); };
-  window.__quantuiTrajGoTo=window["__quantuiTrajGoTo_"+UID];
+  __GOTO_GLOBAL__
   var t=0, poll=setInterval(function(){ t++;
     if(vw()){ clearInterval(poll); draw(cur); }
     else if(t>200){ clearInterval(poll);
@@ -3471,6 +3471,7 @@ def _frame_stepper_controls(
     scrub_title: str = "Scrub frames",
     start_index: int | None = None,
     extra_decls: str = "",
+    register_goto: bool = False,
 ) -> str:
     """Build in-HTML stepper controls (prev/play/next, scrub slider, optional
     A/B flip, live label) for a single multi-frame py3Dmol viewer.
@@ -3483,6 +3484,11 @@ def _frame_stepper_controls(
     HTML for frame ``i``; ``extra_decls`` is JS injected at the top of the IIFE
     (e.g. per-frame energy arrays). ``loop`` makes Play cycle forever, else it
     runs once and stops on the last frame.
+
+    ``register_goto`` also publishes the stepper as the unqualified
+    ``window.__quantuiTrajGoTo`` that a PES-plot click calls. Only the
+    trajectory panel's viewer sets it: when every stepper did, the click drove
+    whichever was built last (a reorg or pre-opt preview, say) (audit VIZ-8).
     """
 
     btn = _STEPPER_BTN_STYLE
@@ -3524,6 +3530,14 @@ def _frame_stepper_controls(
         .replace("__AB_OTHER__", _script_json(ab_other or ""))
         .replace("__EXTRA__", extra_decls)
         .replace("__LABEL_BODY__", label_js)
+        .replace(
+            "__GOTO_GLOBAL__",
+            (
+                'window.__quantuiTrajGoTo=window["__quantuiTrajGoTo_"+UID];'
+                if register_goto
+                else ""
+            ),
+        )
     )
     return bar + f"<script>{js}</script>"
 
@@ -3921,6 +3935,7 @@ def build_trajectory_viewer_html(
         ab_other="⇄ First step (input)",
         scrub_title="Scrub the optimization steps",
         extra_decls=f"var EABS={eabs}; var EREL={erel};",
+        register_goto=True,  # the PES plot's click target
     )
     return _theme.frame_viewer_html(view_html, width=width, controls=controls)
 
