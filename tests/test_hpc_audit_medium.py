@@ -142,3 +142,40 @@ class TestSubmitReleasesUiOnOSError:
         assert app._calc_running is False
         assert app.run_btn.disabled is False
         assert app.run_status.value == "SLURM submission failed."
+
+
+# ---------------------------------------------------------------------------
+# HPC-6: a requeued job (same SLURM id, new attempt dir) is tracked to the
+# newest attempt
+# ---------------------------------------------------------------------------
+
+
+class TestRequeuedAttempt:
+    def _requeued(self, registry):
+        record = registry.create(_request(), "cluster_slurm", job_name="h2-sp")
+        registry.start_attempt(record.request_id, "4242")
+        job = record.job_path
+        (job / "attempt-01_job4242").mkdir()  # died with the node
+        (job / "attempt-02_job4242").mkdir()  # the requeued run
+        (job / "attempt-02_job4242" / "result.json").write_text("{}")
+        return registry.load(record.request_id)
+
+    def test_attempt_dir_for_returns_the_newest_matching_attempt(self, registry):
+        record = self._requeued(registry)
+        assert record.attempt_dir_for("4242").name == "attempt-02_job4242"
+        assert record.staging_path.name == "attempt-02_job4242"
+
+    def test_completed_requeue_is_success_not_artifact_missing(self, registry):
+        from quantui.backends.slurm import SlurmBackend
+
+        record = self._requeued(registry)
+        backend = SlurmBackend(registry=registry, use_apptainer=False)
+        mapped, error = backend._terminal_registry_update(record, "COMPLETED")
+        assert (mapped, error) == ("success", None)
+
+    def test_batch_status_reads_the_newest_attempt(self, registry):
+        from quantui.backends.batch_status import job_view
+
+        record = self._requeued(registry)
+        view = job_view(record, queue={"4242": "COMPLETED"})
+        assert view.state == "done"

@@ -124,10 +124,15 @@ class JobRecord:
         return [path for _n, _name, path in sorted(found)]
 
     def attempt_dir_for(self, slurm_job_id: Optional[str]) -> Optional[Path]:
-        """The attempt dir created by SLURM job *slurm_job_id*, if it exists yet."""
+        """The attempt dir created by SLURM job *slurm_job_id*, if it exists yet.
+
+        A requeued job (node failure, preemption) reruns ``submit.slurm``
+        under the same job id, which makes a new attempt dir with the same
+        ``_job<id>`` suffix; the newest one is the live run.
+        """
         if not slurm_job_id:
             return None
-        for path in self.attempt_dirs():
+        for path in reversed(self.attempt_dirs()):
             parsed = parse_attempt_dir_name(path.name)
             if parsed is not None and parsed[1] == str(slurm_job_id):
                 return path
