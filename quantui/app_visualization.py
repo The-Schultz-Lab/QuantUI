@@ -1810,8 +1810,9 @@ def on_iso_surface_changed(app: Any, change: Any = None) -> None:
 def on_iso_generate(app: Any, btn: Any) -> None:
     """Generate orbital isosurface for currently selected orbital."""
     orbital_label = app._orb_toggle.value
-    # "By index" mode renders an arbitrary 0-based MO index. Encode it
-    # into the label as "MO <n>"; render_orbital_isosurface parses it back.
+    # "By index" mode renders an arbitrary MO. Encode its 1-based number (as
+    # typed, and as the diagram/gallery show it) into the label as "MO <n>";
+    # render_orbital_isosurface parses it back into a 0-based index.
     if orbital_label == "By index":
         orbital_label = f"MO {int(app._orb_index_input.value)}"
     _mode = _surface_mode(app)
@@ -2039,11 +2040,11 @@ def render_orbital_isosurface(
         "LUMO+1": n_occ + 1,
     }
     orb_idx = idx_map.get(orbital_label)
-    # "MO <n>" labels carry an explicit 0-based index from By-index mode.
+    # "MO <n>" labels carry a 1-based MO number from By-index mode.
     if orb_idx is None:
         _m = _re.match(r"MO\s+(\d+)$", orbital_label)
         if _m:
-            orb_idx = int(_m.group(1))
+            orb_idx = int(_m.group(1)) - 1
     if orb_idx is None or orb_idx < 0 or orb_idx >= n_total:
         # Out-of-range (now user-reachable via free index entry) — surface it
         # instead of silently leaving the "Generating…" placeholder in place.
@@ -2053,9 +2054,9 @@ def render_orbital_isosurface(
             app._set_html_output(
                 app._orb_iso_output,
                 '<p style="color:#b91c1c;padding:8px">'
-                f"⚠ Orbital index out of range. This calculation has "
-                f"{n_total} molecular orbitals (valid indices 0–"
-                f"{n_total - 1}; HOMO = {n_occ - 1}).</p>",
+                f"⚠ Orbital number out of range. This calculation has "
+                f"{n_total} molecular orbitals (valid MO numbers 1–"
+                f"{n_total}; HOMO = MO {n_occ}).</p>",
             )
 
         app._queue_main_thread_callback(_show_range_err)

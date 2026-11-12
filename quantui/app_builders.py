@@ -2854,8 +2854,10 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="100%"),
     )
     # Widen the preset buttons and add a "By index" mode that reveals a
-    # free-entry 0-based MO index input, so any orbital (not just the HOMO/LUMO
-    # neighbourhood) can be rendered as an isosurface.
+    # free-entry MO number input, so any orbital (not just the HOMO/LUMO
+    # neighbourhood) can be rendered as an isosurface. The number is 1-based,
+    # like the diagram's "MO #n" hover and the gallery captions (audit VIZ-5);
+    # on_iso_generate / render_orbital_isosurface convert it to an index.
     app._orb_toggle = widgets.ToggleButtons(
         options=["HOMO-1", "HOMO", "LUMO", "LUMO+1", "By index"],
         value="HOMO",
@@ -2863,11 +2865,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(margin="8px 0 4px 0"),
     )
     app._orb_index_input = widgets.BoundedIntText(
-        value=0,
-        min=0,
+        value=1,
+        min=1,
         max=100000,
         description="MO #",
-        tooltip="0-based molecular-orbital index (0 = lowest-energy MO)",
+        tooltip="Molecular-orbital number (1 = lowest-energy MO), as in the diagram",
         style={"description_width": "40px"},
         layout=layout_fn(display="none", width="150px", margin="0 0 4px 0"),
     )

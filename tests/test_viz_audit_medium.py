@@ -3,6 +3,7 @@
 - VIZ-3: a theme toggle must keep the persistent single vib viewer (and the
   vib HTML cache must not serve the other theme's background).
 - VIZ-4: UHF/UKS HOMO-LUMO gap and orbital diagram span both spin channels.
+- VIZ-5: MO numbers the user sees or types are 1-based everywhere.
 """
 
 from __future__ import annotations
@@ -189,3 +190,62 @@ class TestUnrestrictedFrontierGap:
             "<b>HOMO</b>",
             "<b>LUMO</b>",
         ]
+
+
+# ── VIZ-5 ────────────────────────────────────────────────────────────────
+
+
+def _water_orbital_state(app):
+    """Water-like restricted orbital state: 7 MOs, 5 occupied (HOMO = MO 5)."""
+    from quantui.orbital_visualization import orbital_info_from_arrays
+
+    e = np.array([-20.2, -1.27, -0.62, -0.45, -0.39, 0.58, 0.69])
+    occ = np.array([2.0, 2, 2, 2, 2, 0, 0])
+    app._last_orb_info = orbital_info_from_arrays(e, occ, "H2O")
+    app._last_orb_mo_energy = e
+    app._last_orb_mo_occ = occ
+    app._last_orb_mo_coeff = np.eye(7)
+    app._last_orb_mol_atom = [["O", (0, 0, 0)]]
+    app._last_orb_mol_basis = "sto-3g"
+
+
+class TestOneBasedMoNumbers:
+    def test_input_widget_is_one_based(self, app):
+        assert app._orb_index_input.min == 1
+        assert app._orb_index_input.value == 1
+
+    def test_typed_number_maps_to_the_same_mo_as_the_hover(
+        self, app, monkeypatch, tmp_path
+    ):
+        import quantui.orbital_visualization as ov
+        from quantui.app_visualization import render_orbital_isosurface
+
+        _water_orbital_state(app)
+        app._last_result_dir = tmp_path
+        seen = []
+
+        def _fake_cube(_atom, _basis, _coeff, idx, *_a, **_k):
+            seen.append(idx)
+            raise RuntimeError("stop after index check")
+
+        monkeypatch.setattr(ov, "generate_cube_from_arrays", _fake_cube)
+        # The diagram's hover calls the HOMO "MO #5"; typing 5 must draw it.
+        render_orbital_isosurface(app, "MO 5")
+        render_orbital_isosurface(app, "HOMO")
+        assert seen == [4, 4]
+
+    def test_out_of_range_error_uses_mo_numbers(self, app):
+        from quantui.app_visualization import render_orbital_isosurface
+
+        _water_orbital_state(app)
+        render_orbital_isosurface(app, "MO 8")
+        html = app._orb_iso_output.outputs[-1]["data"]["text/html"]
+        assert "1–7" in html and "HOMO = MO 5" in html
+        render_orbital_isosurface(app, "MO 0")  # below the 1-based range
+        assert "out of range" in app._orb_iso_output.outputs[-1]["data"]["text/html"]
+
+    def test_gallery_caption_is_one_based(self):
+        from quantui.orbital_visualization import gallery_caption
+
+        # 0-based index 4 is the water HOMO, MO #5 in the diagram hover.
+        assert gallery_caption("HOMO", 4, None) == ("HOMO", "MO 5")

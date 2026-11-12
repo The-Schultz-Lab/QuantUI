@@ -2325,13 +2325,17 @@ def gallery_caption(
     energy_hartree: Optional[float],
     irrep: Optional[str] = None,
 ) -> Tuple[str, str]:
-    """``("HOMO−1 · 3a₁", "−0.552 Eh (−15.02 eV) · MO 3")``; unknown parts omitted."""
+    """``("HOMO−1 · 3a₁", "−0.552 Eh (−15.02 eV) · MO 3")``; unknown parts omitted.
+
+    ``index`` is the 0-based array index; the caption shows the 1-based MO
+    number the diagram's hover and the "By index" input use (audit VIZ-5).
+    """
     title = f"{label} · {pretty_irrep(irrep)}" if irrep else label
     detail = []
     if energy_hartree is not None:
         e = float(energy_hartree)
         detail.append(f"{e:.3f} Eh ({e * 27.211386245988:.2f} eV)".replace("-", "−"))
-    detail.append(f"MO {index}")
+    detail.append(f"MO {int(index) + 1}")
     return title, " · ".join(detail)
 
 
