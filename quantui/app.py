@@ -674,7 +674,7 @@ from quantui.freq_ir_workers import (
     freq_parallel_opt_in,
 )
 from quantui.help_content import HELP_TOPICS, VIEWER_HELP_TOPICS
-from quantui.molecule import Molecule, parse_xyz_input
+from quantui.molecule import Molecule
 from quantui.progress import StepProgress
 from quantui.user_settings import UserSettings
 from quantui.utils import get_session_resources
@@ -748,7 +748,10 @@ try:
         RDKIT_AVAILABLE as _PUBCHEM_RDKIT_AVAILABLE,
     )
     from quantui.structure_providers import (
-        resolve_structure_with_message as _resolve_structure_with_message,
+        molecule_from_resolved as _molecule_from_resolved,
+    )
+    from quantui.structure_providers import (
+        resolve_structure_with_details as _resolve_structure_with_details,
     )
     from quantui.structure_providers import (
         search_candidates as _struct_search_candidates,
@@ -761,7 +764,8 @@ try:
 except ImportError:
     PUBCHEM_AVAILABLE = False
     _student_friendly_resolve = None  # type: ignore[assignment]
-    _resolve_structure_with_message = None  # type: ignore[assignment]
+    _resolve_structure_with_details = None  # type: ignore[assignment]
+    _molecule_from_resolved = None  # type: ignore[assignment]
     _struct_search_candidates = None  # type: ignore[assignment]
 
 
@@ -4836,13 +4840,19 @@ class QuantUIApp:
     def _resolve_and_apply(self, query: str, loop) -> None:
         """Resolve a single query (background thread) and apply on the main loop."""
         try:
-            xyz_str, _msg, source, _is_offline = _resolve_structure_with_message(query)
-            if xyz_str is None:
+            resolved, _msg = _resolve_structure_with_details(query)
+            if resolved is None:
                 raise ValueError(_msg)
-            atoms, coords = parse_xyz_input(xyz_str)
-            mol = Molecule(atoms=atoms, coordinates=coords)
+            # Keep the resolver's charge and multiplicity: rebuilt from the
+            # coordinates alone, an ion or radical loaded as a neutral
+            # singlet or failed the electron-count check (audit DATA-1).
+            mol = _molecule_from_resolved(resolved)
             loop.call_soon_threadsafe(
-                self._apply_pubchem_search_result, query, mol, None, source
+                self._apply_pubchem_search_result,
+                query,
+                mol,
+                None,
+                resolved.source,
             )
         except Exception as exc:
             loop.call_soon_threadsafe(
