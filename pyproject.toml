@@ -233,6 +233,10 @@ dev = [
     # that let quantui.engines silently vanish from the shipped package
     # while CI, always editable, stayed green).
     "build>=1.0.0",
+    # The packaging test builds with --no-isolation so it runs offline; that
+    # uses this env's setuptools, which needs bdist_wheel built in (>= 70.1)
+    # rather than the separate `wheel` package (audit INFRA-3).
+    "setuptools>=70.1",
     "mypy>=1.10,<2.5",  # pinned, not an open floor — same reasoning as
     # black/ruff below: it must agree with .pre-commit-config.yaml's rev,
     # which is what CI enforces (M-TYPECHECK TYPE.2). A newer mypy silently
