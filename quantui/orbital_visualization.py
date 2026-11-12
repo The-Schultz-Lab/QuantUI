@@ -2609,7 +2609,11 @@ def load_frontier_cube(
 
     spins = ("beta",) if beta else ("alpha", "")
     for entry in _frontier_index(result_dir):
-        if int(entry.get("index", -1)) != int(orbital_index):
+        try:
+            entry_index = int(entry.get("index", -1))
+        except (TypeError, ValueError):  # malformed index.json entry
+            continue
+        if entry_index != int(orbital_index):
             continue
         if entry.get("spin", "") not in spins:
             continue

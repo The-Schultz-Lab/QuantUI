@@ -468,10 +468,13 @@ def visualize_molecule(
     """
     # Determine backend
     if backend == "auto":
-        if PLOTLYMOL_AVAILABLE:
-            backend = "plotlymol"
-        elif PY3DMOL_AVAILABLE:
+        # py3Dmol first, as documented above and as the info box reports
+        # (get_available_backends()[0]); this used to pick PlotlyMol whenever
+        # it was installed (audit VIZ-14).
+        if PY3DMOL_AVAILABLE:
             backend = "py3dmol"
+        elif PLOTLYMOL_AVAILABLE:
+            backend = "plotlymol"
         else:
             raise ImportError(
                 "No visualization backend available. Install one of:\n"
@@ -773,27 +776,6 @@ def display_molecule(
     except Exception as e:
         print(f"❌ Visualization failed: {e}")
         logger.error(f"Display failed for {molecule.get_formula()}: {e}")
-
-
-def get_installation_message() -> str:
-    """
-    Get installation instructions for visualization backends.
-
-    Returns:
-        Formatted string with installation instructions
-    """
-    return """
-To enable 3D molecular visualization:
-
-Option 1 (Recommended): py3Dmol
-  pip install py3dmol
-
-Option 2 (Optional): PlotlyMol
-  conda install -c conda-forge rdkit plotly kaleido
-  pip install plotlymol
-
-For most users, py3Dmol is sufficient and more stable.
-"""
 
 
 # Module-level check and logging

@@ -16,6 +16,15 @@ _DEFAULT_XRANGE = {
     "¹³C": (0.0, 220.0),
 }
 
+# Shifts closer than this (ppm) are drawn as one stick (equivalent nuclei).
+# Scaled with each nucleus's shift range: ¹H shifts are quoted to 0.01 ppm,
+# ¹³C to 0.1 ppm, and symmetry-equivalent carbons in an unsymmetrised
+# geometry differ by more than ¹H's 0.05 ppm window (audit VIZ-14).
+_MERGE_WINDOW_PPM = {
+    "¹H": 0.05,
+    "¹³C": 0.5,
+}
+
 
 def plot_nmr_spectrum(
     shifts: Sequence[Tuple[int, float]],
@@ -23,6 +32,7 @@ def plot_nmr_spectrum(
     *,
     nucleus_label: str = "¹H",
     x_range: Optional[Tuple[float, float]] = None,
+    descending: bool = True,
 ) -> go.Figure:
     """Return a stick Plotly figure for isotropic chemical shifts (δ, ppm).
 
@@ -31,6 +41,8 @@ def plot_nmr_spectrum(
         atom_symbols: Full molecule atom list (for peak labels).
         nucleus_label: Display label (``"¹H"`` or ``"¹³C"``).
         x_range: Optional fixed ``(xmin, xmax)`` in ppm.
+        descending: Draw δ high → low, left to right (the NMR convention,
+            default); ``False`` gives an ascending axis.
     """
     pairs = [(int(i), float(d)) for i, d in shifts if i < len(atom_symbols)]
     pairs.sort(key=lambda p: p[1])
@@ -54,7 +66,7 @@ def plot_nmr_spectrum(
         layout=dict(
             xaxis=dict(
                 title="Chemical shift δ (ppm)",
-                range=[xmin, xmax],
+                range=[xmax, xmin] if descending else [xmin, xmax],
                 showgrid=True,
                 gridcolor="#e5e7eb",
             ),
@@ -76,13 +88,14 @@ def plot_nmr_spectrum(
     if not pairs:
         return fig
 
-    # Equivalent nuclei (same δ within 0.05 ppm) share one stick, labelled
-    # with every atom and as tall as their count — the integration a student
-    # reads off a real spectrum. Separate labels used to print on top of
-    # each other.
+    # Equivalent nuclei (same δ within the nucleus's merge window) share one
+    # stick, labelled with every atom and as tall as their count — the
+    # integration a student reads off a real spectrum. Separate labels used to
+    # print on top of each other.
+    window = _MERGE_WINDOW_PPM.get(nucleus_label, 0.05)
     groups: List[List[Tuple[int, float]]] = []
     for idx, delta in pairs:
-        if groups and abs(groups[-1][-1][1] - delta) < 0.05:
+        if groups and abs(groups[-1][-1][1] - delta) < window:
             groups[-1].append((idx, delta))
         else:
             groups.append([(idx, delta)])

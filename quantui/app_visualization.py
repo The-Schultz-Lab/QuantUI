@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, List, Optional, cast
 
 import ipywidgets as widgets
-from IPython.display import HTML, display
 
 from quantui import theme as _theme
 from quantui.app_builders import (
@@ -532,76 +531,6 @@ def show_opt_trajectory(
         _clog_sp.log_event("traj_show_panel", f"n={n} single_viewer=1")
     except Exception:
         pass
-
-
-def traj_step_html(
-    app: Any, step: int, traj: list[Any], energies: list[Any], rel_e: list[Any]
-) -> str:
-    """One-line info label for a trajectory step index."""
-    n = len(traj)
-    mol = traj[step]
-    e_abs = f"{energies[step]:.8f} Ha" if energies and step < len(energies) else "—"
-    delta = (
-        f" &nbsp;·&nbsp; ΔE = {rel_e[step]:+.3f} kcal/mol"
-        if rel_e and step < len(rel_e)
-        else ""
-    )
-    return (
-        f'<span style="font-size:12px;color:#666">'
-        f"Step {step} / {n - 1} &nbsp;·&nbsp; {mol.get_formula()}"
-        f" &nbsp;·&nbsp; E = {e_abs}{delta}</span>"
-    )
-
-
-def render_traj_frame(app: Any, molecule: Any, output_widget: Any) -> None:
-    """Render one trajectory frame into output widget."""
-    try:
-        from quantui.visualization_py3dmol import visualize_molecule_plotlymol
-
-        fig = visualize_molecule_plotlymol(
-            molecule, mode="ball+stick", resolution=8, width=460, height=340
-        )
-        scene_bg = app._plotly_theme_colors()["scene_bgcolor"]
-        fig.update_layout(paper_bgcolor="white", scene=dict(bgcolor=scene_bg))
-        output_widget.clear_output()
-        with output_widget:
-            display(fig)
-        return
-    except Exception:  # noqa: BLE001 — any PlotlyMol failure (missing
-        # backend, or the RDKit valence error a transition metal raises) must
-        # fall through to the py3Dmol renderer below, never crash the frame.
-        pass
-
-    # Fallback: py3Dmol
-    try:
-        from quantui.viz_assets import make_view
-
-        xyz = (
-            f"{len(molecule.atoms)}\n"
-            f"{molecule.get_formula()}\n"
-            f"{molecule.to_xyz_string()}"
-        )
-        view = make_view(width=460, height=340)
-        view.addModel(xyz, "xyz")
-        view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
-        from quantui.visualization_py3dmol import decorate_py3dmol_coordination_bonds
-
-        decorate_py3dmol_coordination_bonds(view, molecule.atoms, molecule.coordinates)
-        view.setBackgroundColor("white")
-        view.zoomTo()
-        orient_view(view, molecule.coordinates)
-        output_widget.clear_output()
-        with output_widget:
-            display(view)
-    except Exception as exc:
-        output_widget.clear_output()
-        with output_widget:
-            display(
-                HTML(
-                    '<p style="color:#b91c1c;padding:8px">Frame render failed: '
-                    f"{html.escape(str(exc))}</p>"
-                )
-            )
 
 
 def build_vib_data_from_freq_result(app: Any, freq_result: Any, molecule: Any) -> Any:

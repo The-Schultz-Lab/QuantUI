@@ -552,9 +552,6 @@ from quantui.app_visualization import (
     render_orbital_isosurface as _viz_render_orbital_isosurface,
 )
 from quantui.app_visualization import (
-    render_traj_frame as _viz_render_traj_frame,
-)
-from quantui.app_visualization import (
     render_vib_mode as _viz_render_vib_mode,
 )
 from quantui.app_visualization import (
@@ -589,9 +586,6 @@ from quantui.app_visualization import (
 )
 from quantui.app_visualization import (
     show_vib_animation as _viz_show_vib_animation,
-)
-from quantui.app_visualization import (
-    traj_step_html as _viz_traj_step_html,
 )
 from quantui.app_visualization import (
     update_ecd_figure as _viz_update_ecd_figure,
@@ -6393,12 +6387,6 @@ class QuantUIApp:
             layout_fn=_layout,
             render_token=render_token,
         )
-
-    def _traj_step_html(self, step: int, traj, energies, rel_e) -> str:
-        return _viz_traj_step_html(self, step, traj, energies, rel_e)
-
-    def _render_traj_frame(self, molecule, output_widget) -> None:
-        _viz_render_traj_frame(self, molecule, output_widget)
 
     def _build_vib_data_from_freq_result(self, freq_result, molecule):
         return _viz_build_vib_data_from_freq_result(self, freq_result, molecule)

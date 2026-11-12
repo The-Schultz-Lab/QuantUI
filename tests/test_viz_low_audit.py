@@ -416,3 +416,86 @@ class TestErrorTextIsEscaped:
         page = " ".join(o.outputs[0]["data"]["text/html"] for o in outs)
         assert "Trajectory viewer failed" in page
         assert _EVIL not in page
+
+
+# ── VIZ-14: smaller items ───────────────────────────────────────────────────
+
+
+class TestNmrPlotConventions:
+    def test_delta_axis_descends_left_to_right(self):
+        from quantui.nmr_plot import plot_nmr_spectrum
+
+        fig = plot_nmr_spectrum([(1, 1.0), (2, 7.0)], ["C", "H", "H"])
+        lo, hi = 0.0, 12.0
+        assert list(fig.layout.xaxis.range) == [hi, lo]
+        asc = plot_nmr_spectrum([(1, 1.0)], ["C", "H"], descending=False)
+        assert list(asc.layout.xaxis.range) == [lo, hi]
+
+    def test_carbon_merge_window_is_wider_than_proton(self):
+        from quantui.nmr_plot import plot_nmr_spectrum
+
+        # Two "equivalent" carbons 0.2 ppm apart in an unsymmetrised geometry.
+        c = plot_nmr_spectrum([(0, 128.0), (1, 128.2)], ["C", "C"], nucleus_label="¹³C")
+        assert list(c.data[-1].y) == [2.0]
+        # The same 0.2 ppm gap stays two ¹H sticks.
+        h = plot_nmr_spectrum([(0, 2.0), (1, 2.2)], ["H", "H"], nucleus_label="¹H")
+        assert list(h.data[-1].y) == [1.0, 1.0]
+
+
+class TestVizNits:
+    def test_auto_backend_prefers_py3dmol(self, monkeypatch):
+        from quantui import visualization_py3dmol as vp
+
+        calls = []
+        monkeypatch.setattr(vp, "PY3DMOL_AVAILABLE", True)
+        monkeypatch.setattr(vp, "PLOTLYMOL_AVAILABLE", True)
+        monkeypatch.setattr(
+            vp, "visualize_molecule_py3dmol", lambda *a, **k: calls.append("py3dmol")
+        )
+        monkeypatch.setattr(
+            vp, "visualize_molecule_plotlymol", lambda *a, **k: calls.append("plotly")
+        )
+        vp.visualize_molecule(_h2_molecule(), style="stick")
+        assert calls == ["py3dmol"]
+
+    def test_malformed_frontier_index_entry_is_skipped(self, tmp_path):
+        import gzip
+        import json
+
+        from quantui.orbital_visualization import FRONTIER_CUBES_DIR, load_frontier_cube
+
+        d = tmp_path / FRONTIER_CUBES_DIR
+        d.mkdir()
+        (d / "homo.cube.gz").write_bytes(gzip.compress(b"cube"))
+        (d / "index.json").write_text(
+            json.dumps(
+                {
+                    "orbitals": [
+                        {"index": "not-a-number", "file": "x.cube.gz"},
+                        {"index": None, "file": "x.cube.gz"},
+                        {"index": 4, "spin": "", "file": "homo.cube.gz"},
+                    ]
+                }
+            )
+        )
+        dest = tmp_path / "out.cube"
+        assert load_frontier_cube(tmp_path, 4, beta=False, dest=dest) is True
+        assert dest.read_text() == "cube"
+
+    def test_history_orbitals_carry_the_method(self, monkeypatch, tmp_path):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        from quantui import app_analysis, results_storage
+
+        monkeypatch.setattr(
+            results_storage, "load_orbitals", lambda d: SimpleNamespace(formula="")
+        )
+        app = Mock()
+        app._show_orbital_diagram.return_value = True
+        ctx = SimpleNamespace(
+            live_result=None, result_dir=tmp_path, formula="H2O", method="B3LYP"
+        )
+        assert app_analysis.pop_energies(app, ctx)
+        shown = app._show_orbital_diagram.call_args.args[0]
+        assert shown.method == "B3LYP"

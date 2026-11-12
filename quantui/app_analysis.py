@@ -429,6 +429,10 @@ def pop_energies(app: Any, ctx: Any) -> bool:
 
             orb = load_orbitals(ctx.result_dir)
             orb.formula = ctx.formula
+            # The cube provenance line names the method; the saved orbitals
+            # do not carry it, the history context does (audit VIZ-14).
+            if not getattr(orb, "method", ""):
+                orb.method = getattr(ctx, "method", "") or ""
             result = orb
         except Exception:
             return False
