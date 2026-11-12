@@ -1924,7 +1924,6 @@ def on_compare(app: Any, btn: Any, *, layout_fn: Any) -> None:
     app.compare_output.clear_output(wait=True)
     from quantui import (
         comparison_table_html,
-        plot_comparison,
         summary_from_saved_result,
     )
     from quantui.results_storage import load_result
@@ -1967,28 +1966,9 @@ def on_compare(app: Any, btn: Any, *, layout_fn: Any) -> None:
 
             display(HTML(reorg_comparison_html(_reorg_entries)))
         if len(summaries) > 1:
-            try:
-                import matplotlib.pyplot as plt
-
-                fig = plot_comparison(summaries)
-                # As a PNG: display(fig) printed "<Figure size 1000x500 with
-                # 2 Axes>" under Voila, where no inline backend is active.
-                import base64 as _b64
-                import io as _io
-
-                _buf = _io.BytesIO()
-                fig.savefig(_buf, format="png", dpi=100, bbox_inches="tight")
-                plt.close(fig)
-                _png = _b64.b64encode(_buf.getvalue()).decode("ascii")
-                display(
-                    HTML(
-                        f'<img src="data:image/png;base64,{_png}" '
-                        'style="max-width:100%;background:#ffffff;'
-                        'border-radius:6px;margin:10px 0" alt="Comparison chart">'
-                    )
-                )
-            except Exception:
-                pass
+            _chart = _comparison_chart_html(summaries)
+            if _chart:
+                display(HTML(_chart))
         if valid_dirs:
             btns = []
             for s, rdir in zip(summaries, valid_dirs):
@@ -3188,6 +3168,37 @@ def refresh_results_browser(app: Any) -> None:
         app._refresh_freq_seed_options()
 
 
+def _comparison_chart_html(summaries: Any) -> str:
+    """Render the comparison chart as an inline PNG ``<img>`` ("" on failure).
+
+    As a PNG: display(fig) printed "<Figure size 1000x500 with 2 Axes>" under
+    Voila, where no inline backend is active.  The figure is always closed so
+    repeated comparisons do not accumulate open matplotlib figures.
+    """
+    try:
+        import base64 as _b64
+        import io as _io
+
+        import matplotlib.pyplot as plt
+
+        from quantui import plot_comparison
+
+        fig = plot_comparison(summaries)
+        try:
+            _buf = _io.BytesIO()
+            fig.savefig(_buf, format="png", dpi=100, bbox_inches="tight")
+        finally:
+            plt.close(fig)
+        _png = _b64.b64encode(_buf.getvalue()).decode("ascii")
+    except Exception:  # noqa: BLE001 — chart is optional; the table is shown
+        return ""
+    return (
+        f'<img src="data:image/png;base64,{_png}" '
+        'style="max-width:100%;background:#ffffff;'
+        'border-radius:6px;margin:10px 0" alt="Comparison chart">'
+    )
+
+
 def refresh_comparison(app: Any) -> None:
     """Refresh in-session comparison output from accumulated results."""
     from quantui import comparison_table_html, summary_from_session_result
@@ -3199,12 +3210,9 @@ def refresh_comparison(app: Any) -> None:
     with app.comparison_output:
         display(HTML(comparison_table_html(summaries)))
         if len(summaries) > 1:
-            try:
-                from quantui import plot_comparison
-
-                plot_comparison(summaries)
-            except Exception:
-                pass
+            _chart = _comparison_chart_html(summaries)
+            if _chart:
+                display(HTML(_chart))
 
 
 def populate_compare_list(app: Any) -> None:
