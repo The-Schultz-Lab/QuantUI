@@ -64,6 +64,19 @@ def classify_stationary_point(frequencies_cm1: List[float]) -> tuple:
             f"({abs(imag[0]):.0f}i cm⁻¹). Animate that mode in the Vibrational "
             "panel to check it is the reaction you intended."
         )
+    elif n == 0 and small:
+        # A real soft TS (torsions, 20–50i cm⁻¹) and residual-rotation noise
+        # look the same here, so don't call it a minimum.
+        verdict = (
+            f"Inconclusive: no imaginary frequency above "
+            f"{IMAGINARY_NOISE_CM1:.0f} cm⁻¹, but a small one "
+            f"({abs(min(small)):.0f}i cm⁻¹). This is either a soft transition "
+            "state (e.g. a torsional barrier) or numerical noise. Animate that "
+            "mode in the Vibrational panel: if it is the motion you intended, "
+            "tighten convergence (smaller force threshold, finer grid) and "
+            "check again."
+        )
+        return n, imag, verdict
     elif n == 0:
         verdict = (
             "Not a transition state: no imaginary frequency, so the search "
@@ -391,6 +404,18 @@ def apply_frequency_check(
             imag,
             verdict,
         )
+    else:
+        # The check ran but produced no frequencies (e.g. the Hessian step
+        # failed): say so rather than leave "Frequency check skipped."
+        result.verdict = (
+            "The frequency check ran but returned no vibrational frequencies "
+            "(see the log above), so this geometry could not be classified."
+        )
+        if not result.search_converged:
+            result.verdict = (
+                "The search did NOT converge (forces still above the "
+                "threshold). " + result.verdict
+            )
     result.converged = bool(result.search_converged and freq.converged)
     stream.write(f"\n{result.verdict}\n")
     return result
