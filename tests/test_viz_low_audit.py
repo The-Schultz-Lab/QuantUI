@@ -276,3 +276,62 @@ class TestSceneKeysMatchAcrossPlaceholderAndCube:
         a = scene.search(render_molecule_placeholder_py3dmol(water)).group(1)
         b = scene.search(render_orbital_isosurface_py3dmol(cube)).group(1)
         assert a == b
+
+
+# ── VIZ-11: a failed plot must not leave the previous figure on screen ────
+
+
+def _html_sink_app(**attrs):
+    from unittest.mock import Mock
+
+    app = Mock()
+    shown = {}
+    app._set_html_output.side_effect = lambda out, html: shown.__setitem__(
+        id(out), html
+    )
+    for k, v in attrs.items():
+        setattr(app, k, v)
+    return app, shown
+
+
+class TestFailedPlotsReplaceTheStaleFigure:
+    def test_ir_failure_shows_an_escaped_error(self, monkeypatch):
+        from quantui import app_visualization as av
+        from quantui import ir_plot
+
+        def boom(*a, **k):
+            raise ValueError("bad <data>")
+
+        monkeypatch.setattr(ir_plot, "plot_ir_spectrum", boom)
+        app, shown = _html_sink_app(_last_ir_freqs=[1.0], _last_ir_ints=[1.0])
+        av.update_ir_figure(app, "stick", 10.0)
+        html = shown[id(app._ir_fig)]
+        assert "IR spectrum could not be plotted" in html
+        assert "bad &lt;data&gt;" in html
+        assert app._last_ir_fig is None
+
+    def test_nmr_failure_shows_an_error(self, monkeypatch):
+        from quantui import app_visualization as av
+        from quantui import nmr_plot
+
+        def boom(*a, **k):
+            raise RuntimeError("nope")
+
+        monkeypatch.setattr(nmr_plot, "plot_nmr_spectrum", boom)
+        app, shown = _html_sink_app(
+            _last_nmr_atom_symbols=["O", "H", "H"],
+            _last_nmr_h_shifts=[(1, 1.0)],
+        )
+        av.update_nmr_figure(app, "¹H")
+        assert "NMR spectrum could not be plotted" in shown[id(app._nmr_fig)]
+
+    def test_pes_failure_shows_an_error(self):
+        from types import SimpleNamespace
+
+        from quantui import app_visualization as av
+
+        app, shown = _html_sink_app()
+        av.show_pes_scan_result(app, SimpleNamespace())  # no energies at all
+        assert (
+            "PES energy profile could not be plotted" in shown[id(app._pes_plot_html)]
+        )

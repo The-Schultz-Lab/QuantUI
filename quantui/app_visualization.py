@@ -46,6 +46,26 @@ def _start_daemon(target: Any, *args: Any, **kwargs: Any) -> bool:
     return True
 
 
+def _show_plot_error(app: Any, out: Any, what: str, exc: BaseException) -> None:
+    """Replace a plot that failed to rebuild with a visible error.
+
+    The ``except`` paths used to log and null the stored figure but leave the
+    Output widget alone, so the previous result's plot stayed on screen as if
+    it belonged to this one (audit VIZ-11).
+    """
+    if out is None:
+        return
+    detail = html.escape(f"{type(exc).__name__}: {exc}")
+    try:
+        app._set_html_output(
+            out,
+            f'<p style="color:#b91c1c;padding:8px">⚠ {html.escape(what)} could '
+            f"not be plotted: {detail}</p>",
+        )
+    except Exception:  # noqa: BLE001 — error display must never raise
+        pass
+
+
 @contextmanager
 def _viz_render_event(app: Any, task: Any, backend: Any, **extras: Any):
     """Lifecycle telemetry context manager for one render-path execution.
@@ -911,6 +931,7 @@ def update_ir_figure(app: Any, mode: str, fwhm: float) -> None:
             _clog.log_event("ir_fig_error", f"{type(exc).__name__}: {exc}"[:300])
         except Exception:
             pass
+        _show_plot_error(app, getattr(app, "_ir_fig", None), "IR spectrum", exc)
 
 
 def show_raman_spectrum(app: Any, freq_result: Any) -> bool:
@@ -1040,6 +1061,7 @@ def update_raman_figure(app: Any, mode: str, fwhm: float) -> None:
             _clog.log_event("raman_fig_error", f"{type(exc).__name__}: {exc}"[:300])
         except Exception:
             pass
+        _show_plot_error(app, getattr(app, "_raman_fig", None), "Raman spectrum", exc)
 
 
 def show_uv_vis_spectrum(
@@ -1294,6 +1316,7 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
             _clog.log_event("uv_fig_error", f"{type(exc).__name__}: {exc}"[:300])
         except Exception:
             pass
+        _show_plot_error(app, getattr(app, "_tddft_fig", None), "UV-Vis spectrum", exc)
 
 
 # ── ECD (electronic circular dichroism) ─────────────────────────────────────
@@ -1454,6 +1477,7 @@ def update_ecd_figure(app: Any, mode: str, sigma_ev: float) -> None:
             _clog.log_event("ecd_fig_error", f"{type(exc).__name__}: {exc}"[:300])
         except Exception:
             pass
+        _show_plot_error(app, getattr(app, "_ecd_fig", None), "ECD spectrum", exc)
 
 
 def show_nmr_spectrum(
@@ -1591,6 +1615,7 @@ def update_nmr_figure(app: Any, nucleus: str) -> None:
             _clog.log_event("nmr_fig_error", f"{type(exc).__name__}: {exc}"[:300])
         except Exception:
             pass
+        _show_plot_error(app, getattr(app, "_nmr_fig", None), "NMR spectrum", exc)
 
 
 def _attach_mo_irreps(info: Any, result: Any) -> None:
@@ -1666,6 +1691,7 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
     sync_iso_surface_controls(app)
 
     plotly_rendered = False
+    plot_exc: Optional[BaseException] = None
     try:
 
         from quantui.orbital_visualization import plot_orbital_diagram_plotly
@@ -1681,8 +1707,8 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
         app._last_orb_fig = fig
         app._set_html_output(app._orb_diagram_html, _orb_screen_html(fig))
         plotly_rendered = True
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 — fall back to matplotlib below
+        plot_exc = exc
 
     if not plotly_rendered:
         app._last_orb_fig = None
@@ -1709,8 +1735,13 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
                     'style="max-width:100%;height:auto" />'
                 ),
             )
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            _show_plot_error(
+                app,
+                getattr(app, "_orb_diagram_html", None),
+                "Orbital energy diagram",
+                plot_exc or exc,
+            )
 
     if (
         app._last_orb_mo_coeff is not None
@@ -4692,9 +4723,11 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
 })();
 </script>"""
         app._set_html_output(app._pes_plot_html, plot_html + (link_js if _link else ""))
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
         app._last_pes_fig = None
-        pass
+        _show_plot_error(
+            app, getattr(app, "_pes_plot_html", None), "PES energy profile", exc
+        )
 
     return True
 
