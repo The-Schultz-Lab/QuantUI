@@ -961,8 +961,7 @@ def all_job_ids(job_dir, q):
                 ids.append(jid)
         except OSError:
             continue
-    seen = set()
-    return [j for j in ids if not (j in seen or seen.add(j))]
+    return list(dict.fromkeys(ids))  # unique, first-seen order
 
 
 def record_job(job_dir, job_id, options=()):
