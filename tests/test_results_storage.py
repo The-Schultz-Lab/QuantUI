@@ -504,12 +504,11 @@ class TestSaveThumbnail:
             )  # must not raise
 
         assert fake_fig.savefig.called
-        # plt.close() must still run on the figure even though savefig failed.
+        # The thumbnail figure is a bare Agg Figure, never registered with
+        # pyplot (audit DATA-17: no kernel-wide backend switch), so a failed
+        # save cannot leak an open pyplot figure either.
         import matplotlib.pyplot as plt
 
-        with patch.object(plt, "close") as mock_close:
-            with patch.object(rs, "_build_thumbnail_figure", return_value=fake_fig):
-                rs.save_thumbnail(
-                    tmp_path, {"calc_type": "single_point", "formula": "H2O"}
-                )
-            mock_close.assert_called_once_with(fake_fig)
+        before = list(plt.get_fignums())
+        rs.save_thumbnail(tmp_path, {"calc_type": "single_point", "formula": "H2O"})
+        assert plt.get_fignums() == before

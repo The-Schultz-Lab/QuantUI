@@ -965,6 +965,7 @@ def _calibration_worker(
     import os as _os
     import time as _t
     from datetime import datetime as _dt
+    from datetime import timezone as _tz
     from pathlib import Path as _P
 
     # Must run BEFORE any quantui / pyscf / gpu4pyscf import so
@@ -984,7 +985,7 @@ def _calibration_worker(
         # result dir's pyscf.log.
         with open(log_path, "a", encoding="utf-8", buffering=1) as log_fh:
             log_fh.write(
-                f"\n========= {_dt.utcnow().isoformat()} :: {label} =========\n"
+                f"\n========= {_dt.now(_tz.utc).isoformat()} :: {label} =========\n"
             )
             per_calc_buf = _io.StringIO()
             # _TeeStream implements only .write() — the one method any of

@@ -213,7 +213,7 @@ class TestMoleculeProperties:
 
         # Doublet (S=1/2)
         mol2 = Molecule(["H"], [[0, 0, 0]], multiplicity=2)
-        assert mol2.get_spin() == 0  # (2-1)//2 = 0 (integer division)
+        assert mol2.get_spin() == 0.5  # S = 1/2 (was 0 via integer division)
 
         # Triplet (S=1)
         mol3 = Molecule(["O", "O"], [[0, 0, 0], [2, 0, 0]], multiplicity=3)

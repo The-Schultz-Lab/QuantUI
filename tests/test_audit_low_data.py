@@ -659,3 +659,111 @@ def test_upload_overlong_filename():
 
     up = read_uploaded_structure("x" * 300 + ".xyz", _WATER.encode())
     assert up.molecule.atoms == ["O", "H", "H"]
+
+
+# ---------------------------------------------------------------------------
+# DATA-17 — smaller items
+# ---------------------------------------------------------------------------
+
+
+def test_package_exports():
+    import quantui
+
+    assert quantui.student_friendly_resolve.__module__ == (
+        "quantui.structure_providers"
+    )
+    assert "run_pes_scan" in quantui.__all__
+    assert "PESScanResult" in quantui.__all__
+
+
+def test_get_spin_doublet_is_half():
+    from quantui.molecule import Molecule
+
+    assert Molecule(["H"], [[0, 0, 0]], multiplicity=2).get_spin() == 0.5
+
+
+def test_parse_atom_list_bounds_checked_before_expanding():
+    from quantui.structure_edit import parse_atom_list
+
+    t0 = time.perf_counter()
+    with pytest.raises(ValueError, match="only 3 atoms"):
+        parse_atom_list("1-30000000", 3)
+    with pytest.raises(ValueError):
+        parse_atom_list("1-300000000000")
+    with pytest.raises(ValueError, match="start at 1"):
+        parse_atom_list("0-2", 3)
+    assert time.perf_counter() - t0 < 1.0
+    assert parse_atom_list("3-1, 5", 5) == [0, 1, 2, 4]
+
+
+def test_smiles_without_optimisation_and_atom_cap():
+    pytest.importorskip("rdkit")
+    from quantui.pubchem import MAX_LOCAL_EMBED_ATOMS, smiles_to_xyz
+
+    xyz, meta = smiles_to_xyz("CCO", optimize_3d=False)
+    assert xyz.splitlines()[0] == "9"
+    with pytest.raises(ValueError, match=str(MAX_LOCAL_EMBED_ATOMS)):
+        smiles_to_xyz("C" * 200)
+
+
+def test_issue_tracker_closes_connections(tmp_path, monkeypatch):
+    import sqlite3
+
+    from quantui import issue_tracker
+
+    monkeypatch.setenv("QUANTUI_LOG_DIR", str(tmp_path))
+    opened = []
+    real_connect = sqlite3.connect
+
+    def _connect(*a, **k):
+        conn = real_connect(*a, **k)
+        opened.append(conn)
+        return conn
+
+    monkeypatch.setattr(issue_tracker.sqlite3, "connect", _connect)
+    issue_tracker.log_issue("x")
+    assert issue_tracker.get_issues()[0]["description"] == "x"
+    issue_tracker.clear_issues()
+    assert opened
+    for conn in opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            conn.execute("SELECT 1")
+
+
+def test_save_thumbnail_keeps_matplotlib_backend(tmp_path):
+    matplotlib = pytest.importorskip("matplotlib")
+    from quantui.results_storage import save_thumbnail
+
+    orig = matplotlib.get_backend()
+    matplotlib.use("svg")
+    try:
+        save_thumbnail(tmp_path, {"calc_type": "single_point", "formula": "H2"})
+        assert matplotlib.get_backend() == "svg"
+        assert (tmp_path / "thumbnail.png").stat().st_size > 0
+    finally:
+        matplotlib.use(orig)
+
+
+def test_warnings_digest_matches_whole_words():
+    from quantui.log_utils import _extract_warnings
+
+    log = "\n".join(
+        [
+            "conv_tol = 1e-09   error_tol = 1e-05",
+            "WARN: HOMO-LUMO gap small",
+            "SCF not converged.",
+            "Error in DIIS",
+            "UserWarning: Module EFG is under testing",
+        ]
+    )
+    found = _extract_warnings(log)
+    assert "conv_tol = 1e-09   error_tol = 1e-05" not in found
+    assert len(found) == 4
+
+
+def test_library_search_treats_wildcards_literally():
+    from quantui import molecule_library
+
+    assert molecule_library.search("%") == []
+    assert molecule_library.search("_") == []
+    assert molecule_library.search("water")

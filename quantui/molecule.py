@@ -251,14 +251,16 @@ class Molecule:
         """
         return self.get_electron_count()
 
-    def get_spin(self) -> int:
+    def get_spin(self) -> float:
         """
         Get spin quantum number S from multiplicity (2S+1).
 
         Returns:
-            int: Number of unpaired electrons / 2
+            float: S = (multiplicity - 1) / 2 — 0.5 for a doublet. (Integer
+            division used to return 0 for a doublet; audit DATA-17.) PySCF's
+            ``mol.spin`` is 2S, i.e. ``multiplicity - 1``.
         """
-        return (self.multiplicity - 1) // 2
+        return (self.multiplicity - 1) / 2
 
     def to_dict(self) -> Dict[str, Any]:
         """

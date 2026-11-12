@@ -615,6 +615,21 @@ def check_pubchem_availability() -> bool:
 # ============================================================================
 
 
+#: Largest molecule (atoms incl. H) embedded locally from SMILES/InChI. RDKit
+#: embedding + UFF of a protein-sized string can tie up the kernel for
+#: minutes, far beyond anything QuantUI can then compute (audit DATA-17).
+MAX_LOCAL_EMBED_ATOMS = 500
+
+
+def _check_embed_size(mol: Any) -> None:
+    n = mol.GetNumAtoms()
+    if n > MAX_LOCAL_EMBED_ATOMS:
+        raise ValueError(
+            f"Structure has {n} atoms (with hydrogens); the limit for building "
+            f"3-D coordinates here is {MAX_LOCAL_EMBED_ATOMS}."
+        )
+
+
 def smiles_to_xyz(smiles: str, optimize_3d: bool = True) -> Tuple[str, Dict[str, Any]]:
     """
     Convert SMILES string to XYZ coordinates with 3D structure generation.
@@ -643,22 +658,24 @@ def smiles_to_xyz(smiles: str, optimize_3d: bool = True) -> Tuple[str, Dict[str,
 
         # Add hydrogens
         mol = Chem.AddHs(mol)
+        _check_embed_size(mol)
 
-        # Generate 3D coordinates
+        # Generate 3D coordinates. Always embed — the XYZ needs a conformer;
+        # ``optimize_3d=False`` only skips the UFF clean-up (it used to skip
+        # the embedding too, so it always raised — audit DATA-17).
+        result = AllChem.EmbedMolecule(mol, randomSeed=42)
+        if result != 0:
+            # Try with random coords if embedding fails
+            AllChem.EmbedMolecule(mol, randomSeed=42, useRandomCoords=True)
+
         if optimize_3d:
-            # Generate conformer
-            result = AllChem.EmbedMolecule(mol, randomSeed=42)
-            if result != 0:
-                # Try with random coords if embedding fails
-                AllChem.EmbedMolecule(mol, randomSeed=42, useRandomCoords=True)
-
             # Optimize with UFF force field
             try:
                 AllChem.UFFOptimizeMolecule(mol)
             except Exception:
                 logger.warning("UFF optimization failed, using unoptimized coordinates")
 
-            _separate_fragments(mol)  # keep salt counterions apart
+        _separate_fragments(mol)  # keep salt counterions apart
 
         # Extract coordinates
         if mol.GetNumConformers() == 0:
@@ -715,16 +732,17 @@ def inchi_to_xyz(inchi: str, optimize_3d: bool = True) -> Tuple[str, Dict[str, A
             raise ValueError(f"Invalid InChI string: {inchi}")
 
         mol = Chem.AddHs(mol)
+        _check_embed_size(mol)
+        result = AllChem.EmbedMolecule(mol, randomSeed=42)
+        if result != 0:
+            AllChem.EmbedMolecule(mol, randomSeed=42, useRandomCoords=True)
         if optimize_3d:
-            result = AllChem.EmbedMolecule(mol, randomSeed=42)
-            if result != 0:
-                AllChem.EmbedMolecule(mol, randomSeed=42, useRandomCoords=True)
             try:
                 AllChem.UFFOptimizeMolecule(mol)
             except Exception:
                 logger.warning("UFF optimization failed, using unoptimized coordinates")
 
-            _separate_fragments(mol)  # keep salt counterions apart
+        _separate_fragments(mol)  # keep salt counterions apart
 
         if mol.GetNumConformers() == 0:
             raise ValueError("Failed to generate 3D coordinates")

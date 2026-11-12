@@ -374,14 +374,22 @@ def search(
     materialize the chosen entry. Empty ``query`` lists entries (optionally
     filtered by ``category``).
     """
-    q = f"%{query.strip().lower()}%"
+    # Escape LIKE wildcards: a "%" or "_" typed by the user is a literal
+    # character, not "match anything" (audit DATA-17).
+    _needle = query.strip().lower()
+    q = (
+        "%"
+        + _needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        + "%"
+    )
     con = _connect_ro()
     if con is not None:
         try:
             sql = (
                 "SELECT id, name, formula, category, n_heavy, n_atoms, charge, "
                 "multiplicity, source FROM molecule WHERE "
-                "(lower(name) LIKE ? OR lower(formula) LIKE ? OR lower(synonyms) LIKE ?)"
+                "(lower(name) LIKE ? ESCAPE '\\' OR lower(formula) LIKE ? ESCAPE '\\' "
+                "OR lower(synonyms) LIKE ? ESCAPE '\\')"
             )
             params: List[Any] = [q, q, q]
             if category:

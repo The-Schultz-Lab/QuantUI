@@ -1148,21 +1148,35 @@ def save_thumbnail(result_dir: Path, data: dict) -> None:
     Silently skips if matplotlib is unavailable or any error occurs.
     """
     try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
     except ImportError:
         return
+
+    class _AggOnly:
+        """The one ``plt`` call the builder makes, without pyplot.
+
+        ``matplotlib.use("Agg")`` here switched the backend for the whole
+        kernel, breaking a student's inline/widget plots after the first
+        saved result (audit DATA-17). A bare Figure on its own Agg canvas
+        renders the PNG without touching pyplot's global state.
+        """
+
+        @staticmethod
+        def figure(**kwargs: Any) -> Any:
+            fig = Figure(**kwargs)
+            FigureCanvasAgg(fig)
+            return fig
+
+    plt = _AggOnly
 
     # Fix (2026-07-14): only the matplotlib import itself was
     # guarded — figure construction, text rendering, and fig.savefig() (a
     # real filesystem write, so it can hit disk-full / permission errors)
     # could all raise past this function despite the docstring's promise
     # to silently skip "any error". Wrap the whole body so that promise
-    # actually holds; fig.close() still runs via finally regardless of
-    # where in the body a failure happened.
-    fig = None
+    # actually holds. (The figure is not registered with pyplot, so there
+    # is nothing to close.)
     try:
         fig = _build_thumbnail_figure(plt, data)
         fig.savefig(
@@ -1174,9 +1188,6 @@ def save_thumbnail(result_dir: Path, data: dict) -> None:
         )
     except Exception:
         pass
-    finally:
-        if fig is not None:
-            plt.close(fig)
 
 
 def _build_thumbnail_figure(plt: Any, data: dict) -> Any:
