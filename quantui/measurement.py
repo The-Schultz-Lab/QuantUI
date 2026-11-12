@@ -66,8 +66,16 @@ def describe_picks(molecule: Molecule, picks: Sequence[int]) -> str:
         d = distance(molecule, picks[0], picks[1])
         parts.append(f"{atom_label(molecule, picks[1])} ({d:.3f} Å)")
     if len(picks) >= 3:
-        a = angle(molecule, picks[0], picks[1], picks[2])
-        parts.append(f"{atom_label(molecule, picks[2])} ({a:.1f}°)")
+        try:
+            a = angle(molecule, picks[0], picks[1], picks[2])
+            parts.append(f"{atom_label(molecule, picks[2])} ({a:.1f}°)")
+        except ZeroDivisionError:
+            # ASE: "Undefined angle" when the vertex coincides with a
+            # neighbour (zero-length bond vector).
+            parts.append(
+                f"{atom_label(molecule, picks[2])} "
+                "(angle undefined — two atoms coincide)"
+            )
     if len(picks) >= 4:
         try:
             dh = dihedral(molecule, picks[0], picks[1], picks[2], picks[3])

@@ -149,3 +149,13 @@ class TestDescribePicks:
         text = describe_picks(_linear_plus_one(), [0, 1, 2, 3])
         assert "undefined" in text.lower()
         assert "collinear" in text.lower()
+
+    def test_three_picks_with_coincident_atoms_report_undefined_angle(self):
+        # Audit LEAD-4: only the dihedral's ZeroDivisionError was caught.
+        mol = Molecule(
+            ["H", "H", "H", "H"],
+            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 1.0]],
+        )
+        text = describe_picks(mol, [0, 1, 2])
+        assert "angle undefined" in text
+        assert "undefined" in describe_picks(mol, [0, 1, 2, 3]).lower()

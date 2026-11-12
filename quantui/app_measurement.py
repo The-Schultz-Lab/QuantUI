@@ -265,15 +265,24 @@ def inject_click_js(html: str, *, inbox_class: str) -> str:
 
 
 def push_highlight(
-    app: Any, indices: Sequence[int], *, slot: str = MEASURE_INBOX_CLASS
+    app: Any,
+    indices: Sequence[int],
+    *,
+    slot: str = MEASURE_INBOX_CLASS,
+    bridge: Any = None,
 ) -> None:
     """Restyle the LIVE viewer's picked-atom highlights — no Python re-render.
 
     Same shape as ``app_visualization.iso_bridge_update``: re-rendering would
     replace the viewer wholesale and lose the camera orientation the user
     rotated into.
+
+    ``bridge`` is the Output widget the JS goes through; it defaults to the
+    Measure panel's ``app._measure_js_bridge``. The PES-pick and Edit-Structure
+    viewers pass their own instead of swapping that attribute.
     """
-    bridge = getattr(app, "_measure_js_bridge", None)
+    if bridge is None:
+        bridge = getattr(app, "_measure_js_bridge", None)
     if bridge is None:
         return
     from IPython.display import Javascript, display

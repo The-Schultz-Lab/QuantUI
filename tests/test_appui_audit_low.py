@@ -8,6 +8,7 @@
 - UI-12: "unavailable" panel messages carry no escaped markup.
 - UI-14: MOL/PDB bond-perception warning; readable Freeze-list errors;
   local strings escaped in HTML.
+- LEAD-4: PES-pick / Edit highlights pass their own JS bridge.
 """
 
 from __future__ import annotations
@@ -318,3 +319,30 @@ def test_local_strings_are_escaped_in_html(app):
     assert "&lt;libcublas&gt;" in html and "<libcublas>" not in html
     html = app._render_status_html((True, "Card <X>", ""))
     assert "Card &lt;X&gt;" in html
+
+
+# ── LEAD-4 ────────────────────────────────────────────────────────────────
+
+
+def test_scan_and_edit_highlights_do_not_swap_the_measure_bridge():
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from quantui import app_pes_pick, app_structure_edit
+
+    measure, scan, edit = object(), object(), object()
+    app = SimpleNamespace(
+        _measure_js_bridge=measure, _scan_pick_bridge=scan, _edit_pick_bridge=edit
+    )
+    seen: list = []
+
+    def _ph(a, indices, *, slot, bridge=None):
+        seen.append((a._measure_js_bridge, bridge))
+
+    for mod, fn in (
+        (app_pes_pick, "push_scan_highlight"),
+        (app_structure_edit, "_push_edit_highlight"),
+    ):
+        with patch.object(mod, "push_highlight", side_effect=_ph):
+            getattr(mod, fn)(app, [0])
+    assert seen == [(measure, scan), (measure, edit)]

@@ -170,12 +170,7 @@ def _push_edit_highlight(app: Any, indices: Sequence[int]) -> None:
     bridge = getattr(app, "_edit_pick_bridge", None)
     if bridge is None:
         return
-    orig = getattr(app, "_measure_js_bridge", None)
-    try:
-        app._measure_js_bridge = bridge
-        push_highlight(app, indices, slot=EDIT_PICK_INBOX_CLASS)
-    finally:
-        app._measure_js_bridge = orig
+    push_highlight(app, indices, slot=EDIT_PICK_INBOX_CLASS, bridge=bridge)
 
 
 def _msg(app: Any, text: str, ok: bool = True) -> None:
