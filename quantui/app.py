@@ -5519,7 +5519,8 @@ class QuantUIApp:
 
         try:
             if fmt == "png":
-                # Requires kaleido for static image export.
+                # Requires kaleido, and kaleido >= 1 also needs a Chrome or
+                # Chromium on the machine (docs/installation.md).
                 fig.write_image(str(dest), scale=2)
             else:
                 html_str = _pio.to_html(
@@ -5535,14 +5536,15 @@ class QuantUIApp:
                 f"Saved: {dest}</span> " + _download_link_html(dest)
             )
         except Exception as exc:
-            msg = str(exc)
-            if fmt == "png" and "kaleido" in msg.lower():
-                msg = (
-                    "PNG export requires kaleido. " "Install with: pip install kaleido"
-                )
+            # Show the real error. It used to be rewritten to "pip install
+            # kaleido" whenever it mentioned kaleido, which misdirected the
+            # usual failure on a fresh install: kaleido >= 1 is installed but
+            # finds no Chrome ("Kaleido requires Google Chrome ... run
+            # plotly_get_chrome"). Plotly's own messages already name the fix.
+            msg = " ".join(str(exc).split()) or type(exc).__name__
             status_widget.value = (
                 f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
-                f"Export failed: {msg}</span>"
+                f"Export failed: {_html.escape(msg)}</span>"
             )
 
     @staticmethod
