@@ -111,7 +111,8 @@ class TestRequestFromXyz:
         # B2.11: a cut-off file must not run unattended.
         path = tmp_path / "cut.xyz"
         path.write_text("3\nwater, cut off\nO 0 0 0\nH 0 0 0.96\n")
-        with pytest.raises(BatchInputError, match="first line says 3 atoms"):
+        # The shared XYZ parser now rejects the mismatch itself (audit DATA-8).
+        with pytest.raises(BatchInputError, match="header says 3 atoms"):
             request_from_xyz(
                 path, calc_type="single_point", method="RHF", basis="STO-3G"
             )
