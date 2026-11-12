@@ -90,6 +90,9 @@ class SlurmBackend:
         self.use_apptainer = use_apptainer
         self.apptainer_image = apptainer_image or cfg.APPTAINER_BATCH_IMAGE
         self._status_cache: Dict[str, Tuple[str, float]] = {}
+        # True when the last squeue call itself failed (not installed, timed
+        # out): its UNKNOWNs then say nothing about the jobs.
+        self._queue_unreachable = False
 
     def capabilities(self) -> BackendCapabilities:
         return BackendCapabilities(
@@ -585,7 +588,9 @@ class SlurmBackend:
             FileNotFoundError,
             subprocess.CalledProcessError,
         ):
+            self._queue_unreachable = True
             return {jid: "UNKNOWN" for jid in slurm_job_ids}
+        self._queue_unreachable = False
 
         missing = [jid for jid in slurm_job_ids if jid not in statuses]
         if missing:
@@ -621,10 +626,89 @@ class SlurmBackend:
                     self.registry.update_status(record.request_id, mapped, error=error)
                 continue
             if slurm_status == "UNKNOWN":
+                self._note_unknown(record)
                 continue
+            if record.unknown_since or record.unknown_polls:
+                self._clear_unknown(record.request_id)
             mapped = _map_slurm_status(slurm_status)
             if mapped != record.status and record.status not in _TERMINAL_RECORD:
                 self.registry.update_status(record.request_id, mapped)
+
+    def _note_unknown(self, record: JobRecord) -> None:
+        """Count one more UNKNOWN poll; give up on the job once it is stale.
+
+        UNKNOWN means neither squeue nor sacct reports the job: it has left
+        the queue and its accounting is gone or not visible. Without this,
+        such a record stayed active forever, held a concurrent-job slot,
+        and could be neither cancelled nor removed. A failed squeue call is
+        not counted.
+        """
+        if self._queue_unreachable:
+            return
+        current = self.registry.load(record.request_id)
+        if current is None or current.status.lower() not in _ACTIVE_RECORD:
+            return
+        now = datetime.now(timezone.utc)
+        if not current.unknown_since:
+            current.unknown_since = now.replace(microsecond=0).isoformat()
+            current.unknown_polls = 1
+            self.registry.save(current)
+            return
+        current.unknown_polls += 1
+        unknown_for = _record_age_seconds(current.unknown_since, now)
+        if (
+            current.unknown_polls >= cfg.STALE_UNKNOWN_POLLS
+            and unknown_for >= cfg.stale_unknown_seconds()
+        ):
+            self._finalize_unknown(current, unknown_for)
+        else:
+            self.registry.save(current)
+
+    def _clear_unknown(self, request_id: str) -> None:
+        current = self.registry.load(request_id)
+        if current is None:
+            return
+        current.unknown_since = None
+        current.unknown_polls = 0
+        self.registry.save(current)
+
+    def _finalize_unknown(self, record: JobRecord, unknown_for: float) -> None:
+        """Make a job Slurm no longer knows terminal, from what it left on disk."""
+        mapped, error = self._terminal_registry_update(record, "COMPLETED")
+        if mapped == "success":
+            # result.json is there: the run finished.
+            self.registry.update_status(record.request_id, "success")
+            return
+        progress: dict = {}
+        try:
+            progress = json.loads(record.progress_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+        if isinstance(progress, dict) and progress.get("stage") == "error":
+            message = str(progress.get("message") or "The calculation failed.")
+            error = {
+                "code": "EXECUTION_FAILED",
+                "user_message": message,
+                "technical_message": message,
+                "retryable": True,
+            }
+        else:
+            minutes = max(1, int(unknown_for // 60))
+            message = (
+                f"SLURM no longer reports job {record.slurm_job_id} (not in "
+                f"squeue or sacct for {minutes} min) and it left no result. "
+                "Check its job folder, then Resubmit or Remove it."
+            )
+            error = {
+                "code": "STALE_RECORD",
+                "user_message": message,
+                "technical_message": (
+                    f"squeue/sacct returned nothing for {record.slurm_job_id} "
+                    f"on {record.unknown_polls} polls since {record.unknown_since}"
+                ),
+                "retryable": True,
+            }
+        self.registry.update_status(record.request_id, "error", error=error)
 
     def _terminal_registry_update(
         self, record, slurm_status: str

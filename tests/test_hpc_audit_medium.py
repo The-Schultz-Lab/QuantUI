@@ -4,6 +4,11 @@ Regression tests for the Medium HPC findings of the 2026-11-10 audit
 requeued attempts, SLURM ingest geometry and ``quantui-batch submit --from``.
 """
 
+import json
+import subprocess
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -24,6 +29,28 @@ def _request(rid: str = "hpc001", calc_type: str = "single_point"):
         multiplicity=1,
         molecule={"atoms": ["H", "H"], "coords": [[0, 0, 0], [0, 0, 0.74]]},
     )
+
+
+MOCK_SLURM_CLI = (
+    Path(__file__).resolve().parents[1] / "testing" / "mock-slurm" / "mock_slurm_cli.py"
+)
+
+
+@pytest.fixture
+def mock_slurm(tmp_path, monkeypatch):
+    """Route squeue/sacct/scancel/sbatch to testing/mock-slurm."""
+    state = tmp_path / "mock_state"
+    state.mkdir()
+    monkeypatch.setenv("MOCK_SLURM_STATE", str(state))
+    real_run = subprocess.run
+
+    def _run(args, **kwargs):
+        if args and args[0] in ("squeue", "sacct", "scancel", "sbatch"):
+            args = [sys.executable, str(MOCK_SLURM_CLI), *args]
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr("quantui.backends.slurm.subprocess.run", _run)
+    return state
 
 
 @pytest.fixture
@@ -179,3 +206,114 @@ class TestRequeuedAttempt:
         record = self._requeued(registry)
         view = job_view(record, queue={"4242": "COMPLETED"})
         assert view.state == "done"
+
+
+# ---------------------------------------------------------------------------
+# HPC-2: a job Slurm no longer knows (UNKNOWN) eventually leaves the active set
+# ---------------------------------------------------------------------------
+
+
+class TestJobSlurmNoLongerKnows:
+    @pytest.fixture
+    def backend(self, registry, mock_slurm, monkeypatch):
+        from quantui.backends.slurm import SlurmBackend
+
+        monkeypatch.setenv("QUANTUI_SLURM_STALE_UNKNOWN_S", "60")
+        return SlurmBackend(registry=registry, use_apptainer=False)
+
+    def _tracked(self, registry, jid="777001"):
+        record = registry.create(_request(), "cluster_slurm", job_name="h2-sp")
+        registry.start_attempt(record.request_id, jid)
+        registry.update_status(record.request_id, "running")
+        return registry.load(record.request_id)
+
+    def _poll(self, backend, times=1):
+        for _ in range(times):
+            backend._status_cache.clear()  # every poll really asks Slurm
+            backend.refresh_registry_statuses()
+
+    def _age_unknown(self, registry, rid="hpc001", seconds=7200):
+        record = registry.load(rid)
+        record.unknown_since = (
+            (datetime.now(timezone.utc) - timedelta(seconds=seconds))
+            .replace(microsecond=0)
+            .isoformat()
+        )
+        registry.save(record)
+
+    def test_unknown_job_goes_stale_and_can_be_removed(self, backend, registry):
+        self._tracked(registry)
+        self._poll(backend, 3)
+        # Polls alone are not enough: the time margin has not passed.
+        record = registry.load("hpc001")
+        assert record.status == "running"
+        assert record.unknown_polls == 3
+
+        self._age_unknown(registry)
+        self._poll(backend)
+        record = registry.load("hpc001")
+        assert record.status == "error"
+        assert record.error["code"] == "STALE_RECORD"
+        assert "777001" in record.error["user_message"]
+        assert registry.list_active() == []
+
+        app = SimpleNamespace(_job_registry=registry, _slurm_active_request_id=None)
+        with patch("quantui.app_slurm.is_slurm_available", return_value=False):
+            assert app_slurm.remove_slurm_job_record(app, "hpc001") is True
+        assert registry.load("hpc001") is None
+
+    def test_time_alone_is_not_enough(self, backend, registry):
+        self._tracked(registry)
+        self._poll(backend)
+        self._age_unknown(registry)
+        self._poll(backend)  # 2 polls < STALE_UNKNOWN_POLLS
+        assert registry.load("hpc001").status == "running"
+
+    def test_result_json_on_disk_means_success(self, backend, registry):
+        record = self._tracked(registry)
+        attempt = record.job_path / "attempt-01_job777001"
+        attempt.mkdir()
+        (attempt / "result.json").write_text("{}")
+        self._poll(backend, 2)
+        self._age_unknown(registry)
+        self._poll(backend)
+        record = registry.load("hpc001")
+        assert (record.status, record.error) == ("success", None)
+
+    def test_progress_error_on_disk_is_reported(self, backend, registry):
+        record = self._tracked(registry)
+        attempt = record.job_path / "attempt-01_job777001"
+        attempt.mkdir()
+        (attempt / "progress.json").write_text(
+            json.dumps({"stage": "error", "message": "SCF did not converge"})
+        )
+        self._poll(backend, 2)
+        self._age_unknown(registry)
+        self._poll(backend)
+        record = registry.load("hpc001")
+        assert record.status == "error"
+        assert record.error["user_message"] == "SCF did not converge"
+
+    def test_squeue_failure_is_not_counted(self, backend, registry, monkeypatch):
+        self._tracked(registry)
+
+        def _no_squeue(args, **_kw):
+            raise FileNotFoundError(args[0])
+
+        monkeypatch.setattr("quantui.backends.slurm.subprocess.run", _no_squeue)
+        self._poll(backend, 5)
+        record = registry.load("hpc001")
+        assert (record.status, record.unknown_polls) == ("running", 0)
+
+    def test_streak_resets_when_slurm_sees_the_job_again(
+        self, backend, registry, mock_slurm
+    ):
+        self._tracked(registry)
+        self._poll(backend, 2)
+        (mock_slurm / "777001.json").write_text(
+            json.dumps({"job_id": "777001", "status": "RUNNING"})
+        )
+        self._poll(backend)
+        record = registry.load("hpc001")
+        assert (record.unknown_since, record.unknown_polls) == (None, 0)
+        assert record.status == "running"

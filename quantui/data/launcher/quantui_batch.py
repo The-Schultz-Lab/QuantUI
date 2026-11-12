@@ -682,6 +682,8 @@ def prepare_job(request, resources, job_name, email, image_path):
         "job_dir": str(job_dir),
         "attempts": [],
         "ingested_attempts": [],
+        "unknown_since": None,
+        "unknown_polls": 0,
     }
     jobs = jobs_root()
     jobs.mkdir(parents=True, exist_ok=True)

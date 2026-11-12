@@ -79,6 +79,11 @@ class JobRecord:
     # Names of attempt dirs (or, for legacy records, the staging dir) already
     # saved to History, so a result is never ingested twice.
     ingested_attempts: List[str] = field(default_factory=list)
+    # When the tracked SLURM job first read UNKNOWN (in neither squeue nor
+    # sacct) in the current streak, and how many polls have seen it since;
+    # cleared when Slurm reports the job again or a new attempt starts.
+    unknown_since: Optional[str] = None
+    unknown_polls: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -101,6 +106,8 @@ class JobRecord:
             job_dir=data.get("job_dir"),
             attempts=list(data.get("attempts") or []),
             ingested_attempts=list(data.get("ingested_attempts") or []),
+            unknown_since=data.get("unknown_since"),
+            unknown_polls=int(data.get("unknown_polls") or 0),
         )
 
     @property
@@ -333,6 +340,8 @@ class JobRegistry:
         record.status = "submitted"
         record.slurm_job_id = slurm_job_id
         record.error = None
+        record.unknown_since = None
+        record.unknown_polls = 0
         record.attempts.append(
             {
                 "slurm_job_id": slurm_job_id,
