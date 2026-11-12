@@ -6914,6 +6914,44 @@ class QuantUIApp:
             save_spectra: dict = {}
             save_type: str = "single_point"
             _pre_opt: Any = None  # OptimizationResult from Frequency pre-opt step
+            # A failed or unconverged "geometry optimization before the
+            # calculation" is shown on the result card, not only in the log:
+            # the run otherwise ends "Done" at a geometry the student did not
+            # ask for (audit APP-11).
+            _preopt_warning: Optional[str] = None
+
+            # NMR / PES Scan: the seed geometry (a previous result's final
+            # frame) is applied BEFORE the optional geometry optimization
+            # below, so that optimization starts from the seed instead of
+            # being overwritten by it afterwards (audit APP-11).
+            if ct == "NMR Shielding":
+                _nmr_seed_path = self._freq_seed_dd.value
+                if _nmr_seed_path:
+                    from quantui.results_storage import load_trajectory
+
+                    self.run_status.value = "Loading seed geometry from history…"
+                    _nmr_seed_traj, _ = load_trajectory(Path(_nmr_seed_path))
+                    calc_mol = _run_seed_with_run_charge(_nmr_seed_traj[-1], mol)
+                    log.write(
+                        f"\nSeed geometry loaded from: {Path(_nmr_seed_path).name}\n"
+                        f"  Formula: {calc_mol.get_formula()}  "
+                        f"Atoms: {len(calc_mol.atoms)}\n\n"
+                    )
+            elif ct == "PES Scan":
+                _scan_seed = getattr(self, "_scan_seed_dd", None)
+                if _scan_seed is not None and _scan_seed.value:
+                    from quantui.results_storage import load_trajectory
+
+                    self.run_status.value = "Loading seed geometry from history…"
+                    _seed_traj, _ = load_trajectory(Path(_scan_seed.value))
+                    if _seed_traj:
+                        calc_mol = _run_seed_with_run_charge(_seed_traj[-1], mol)
+                        log.write(
+                            f"\nSeed geometry loaded from: "
+                            f"{Path(_scan_seed.value).name}\n"
+                            f"  Formula: {calc_mol.get_formula()}  "
+                            f"Atoms: {len(calc_mol.atoms)}\n"
+                        )
 
             # Optional QM geometry optimization before non-frequency workflows.
             # Frequency and UV-Vis (TD-DFT) both have dedicated seed/pre-opt
@@ -6940,6 +6978,7 @@ class QuantUIApp:
                 # Catch numerical failures (e.g. singular matrix in
                 # cho_solve on tight rings) and fall back to the user's
                 # input geometry rather than killing the whole calc.
+                _preopt_start = calc_mol
                 try:
                     _pre_opt = optimize_geometry(
                         molecule=calc_mol,
@@ -6961,16 +7000,31 @@ class QuantUIApp:
                             "⚠ Geometry optimization did not fully converge — "
                             "proceeding with best available geometry.\n\n"
                         )
+                        _preopt_warning = (
+                            f"The geometry optimization before {ct} did not "
+                            f"fully converge ({_pre_opt.n_steps} steps); the "
+                            f"{ct} ran at the best geometry it reached."
+                        )
                     if ct != "Single Point":
                         _run_required_final_single_point(
                             calc_mol,
                             f"after geometry optimization before {ct}",
                         )
                 except Exception as _pre_exc:
+                    # Back to the starting geometry: the optimization may have
+                    # finished before its required single point failed, and
+                    # the log line below promises the input geometry.
+                    calc_mol = _preopt_start
+                    _pre_opt = None
                     log.write(
                         f"\n⚠ Geometry optimization failed: {_pre_exc}\n"
                         "  Proceeding with the user-provided geometry "
                         "as-is.\n\n"
+                    )
+                    _preopt_warning = (
+                        f"The geometry optimization before {ct} failed "
+                        f"({_pre_exc}); the {ct} ran at the starting geometry, "
+                        "not an optimized one."
                     )
 
             if ct == "Geometry Opt":
@@ -7212,6 +7266,7 @@ class QuantUIApp:
                         f"Force threshold {FREQ_PREOPT_FMAX} eV/Å (tighter than a plain "
                         "Geometry Opt: soft modes need a true stationary point).\n"
                     )
+                    _preopt_start = calc_mol
                     try:
                         _pre_opt = optimize_geometry(
                             molecule=calc_mol,
@@ -7236,11 +7291,25 @@ class QuantUIApp:
                                 "⚠ Geometry optimization did not fully converge — "
                                 "proceeding with best available geometry.\n\n"
                             )
+                            _preopt_warning = (
+                                "The geometry optimization before the "
+                                "frequency calculation did "
+                                f"not fully converge ({_pre_opt.n_steps} steps); "
+                                "it ran at the best geometry reached."
+                            )
                         _run_required_final_single_point(
                             calc_mol,
                             "after geometry optimization before frequency",
                         )
                     except Exception as _pre_exc:
+                        calc_mol = _preopt_start
+                        _pre_opt = None
+                        _preopt_warning = (
+                            "The geometry optimization before the "
+                            "frequency calculation "
+                            f"failed ({_pre_exc}); it ran at the starting "
+                            "geometry, not an optimized one."
+                        )
                         log.write(
                             f"\n⚠ Geometry optimization failed: {_pre_exc}\n"
                             "  Proceeding with the user-provided geometry "
@@ -7345,6 +7414,7 @@ class QuantUIApp:
                     # Catch numerical failures and fall back to the
                     # user's seed geometry rather than killing the whole
                     # TD-DFT calc.
+                    _preopt_start = calc_mol
                     try:
                         _pre_opt = optimize_geometry(
                             molecule=calc_mol,
@@ -7368,11 +7438,25 @@ class QuantUIApp:
                                 "⚠ Geometry optimization did not fully converge — "
                                 "proceeding with best available geometry.\n\n"
                             )
+                            _preopt_warning = (
+                                "The geometry optimization before the "
+                                "TD-DFT calculation did "
+                                f"not fully converge ({_pre_opt.n_steps} steps); "
+                                "it ran at the best geometry reached."
+                            )
                         _run_required_final_single_point(
                             calc_mol,
                             "after geometry optimization before UV-Vis",
                         )
                     except Exception as _pre_exc:
+                        calc_mol = _preopt_start
+                        _pre_opt = None
+                        _preopt_warning = (
+                            "The geometry optimization before the "
+                            "TD-DFT calculation "
+                            f"failed ({_pre_exc}); it ran at the starting "
+                            "geometry, not an optimized one."
+                        )
                         log.write(
                             f"\n⚠ Geometry optimization failed: {_pre_exc}\n"
                             "  Proceeding with the seed geometry as-is.\n\n"
@@ -7406,19 +7490,7 @@ class QuantUIApp:
                 }
                 save_type = "tddft"
             elif ct == "NMR Shielding":
-                _nmr_seed_path = self._freq_seed_dd.value
-                if _nmr_seed_path:
-                    from quantui.results_storage import load_trajectory
-
-                    self.run_status.value = "Loading seed geometry from history…"
-                    _nmr_seed_traj, _ = load_trajectory(Path(_nmr_seed_path))
-                    calc_mol = _run_seed_with_run_charge(_nmr_seed_traj[-1], mol)
-                    log.write(
-                        f"\nSeed geometry loaded from: {Path(_nmr_seed_path).name}\n"
-                        f"  Formula: {calc_mol.get_formula()}  "
-                        f"Atoms: {len(calc_mol.atoms)}\n\n"
-                    )
-
+                # (Seed geometry already applied, before any pre-optimization.)
                 self.run_status.value = "Running NMR shielding (SCF + GIAO)..."
                 from quantui.nmr_calc import run_nmr_calc
 
@@ -7457,21 +7529,7 @@ class QuantUIApp:
                 self.run_status.value = "Running PES scan…"
                 from quantui.pes_scan import run_pes_scan
 
-                _scan_seed = getattr(self, "_scan_seed_dd", None)
-                if _scan_seed is not None and _scan_seed.value:
-                    from quantui.results_storage import load_trajectory
-
-                    self.run_status.value = "Loading seed geometry from history…"
-                    _seed_traj, _ = load_trajectory(Path(_scan_seed.value))
-                    if _seed_traj:
-                        calc_mol = _run_seed_with_run_charge(_seed_traj[-1], mol)
-                        log.write(
-                            f"\nSeed geometry loaded from: "
-                            f"{Path(_scan_seed.value).name}\n"
-                            f"  Formula: {calc_mol.get_formula()}  "
-                            f"Atoms: {len(calc_mol.atoms)}\n"
-                        )
-
+                # (Seed geometry already applied, before any pre-optimization.)
                 _st = self._scan_type_dd.value.lower()
                 _atom_idx: list = [
                     self._scan_atom1.value - 1,
@@ -7599,6 +7657,13 @@ class QuantUIApp:
             self._last_calc_type = save_type
             self.accumulate_btn.disabled = False
 
+            if _preopt_warning:
+                result_html = (
+                    '<div style="background:#fffbeb;border:1px solid #fcd34d;'
+                    "border-radius:8px;padding:10px 14px;margin:8px 0;"
+                    'color:#92400e;font-size:13px">'
+                    f"&#9888; {_html.escape(_preopt_warning)}</div>" + result_html
+                )
             self.result_output.append_display_data(HTML(result_html))
             self.run_status.value = "Finalizing results..."
 

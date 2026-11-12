@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -139,3 +139,85 @@ def test_cancel_still_works_before_the_result(app):
     assert app._cancel_event.is_set()
     app._cancel_event.clear()
     app._end_run_lock()
+
+
+# ── APP-11 ────────────────────────────────────────────────────────────────
+
+
+def _moved_h2() -> Molecule:
+    return Molecule(["H", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 0.90]])
+
+
+def _sp_coords(run_calc_mock) -> list:
+    requests = [c.args[0] for c in run_calc_mock.call_args_list]
+    sp = [r for r in requests if r.calc_type == "single_point"]
+    assert sp, requests
+    return sp[-1].molecule["coordinates"]
+
+
+def test_preopt_failure_after_the_geometry_moved_runs_at_the_input(app):
+    # The optimization returns, then something after it fails (here: the
+    # summary line, on an empty energy list). The log promises "the
+    # user-provided geometry as-is"; calc_mol used to be the optimized one.
+    from quantui import engines
+
+    opt = MagicMock()
+    opt.molecule = _moved_h2()
+    opt.converged = True
+    opt.n_steps = 3
+    opt.energies_hartree = []
+    app._freq_preopt_cb.value = True
+    with (
+        patch("quantui.optimize_geometry", return_value=opt),
+        patch("quantui.engines.run_calc", side_effect=engines.run_calc) as run,
+        patch("quantui.save_result", side_effect=OSError("skip")),
+    ):
+        _run(app)
+    assert _sp_coords(run)[1][2] == pytest.approx(0.74)
+    html = _result_html(app)
+    assert "geometry optimization before Single Point failed" in html
+
+
+def test_preopt_failure_is_shown_on_the_result_card(app):
+    app._freq_preopt_cb.value = True
+    with (
+        patch("quantui.optimize_geometry", side_effect=RuntimeError("singular matrix")),
+        patch("quantui.save_result", side_effect=OSError("skip")),
+    ):
+        _run(app)
+    html = _result_html(app)
+    assert "failed (singular matrix)" in html
+    assert "starting geometry" in html
+
+
+def test_nmr_preopt_starts_from_the_seed_and_is_kept(app, tmp_path):
+    # NMR with a seed + pre-opt: the pre-opt used to run on the active
+    # molecule, then the seed overwrote its result.
+    seed = Molecule(["H", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 0.80]])
+    optimized = _moved_h2()
+    app.calc_type_dd.value = "NMR Shielding"
+    app._seed_dd.options = [("—", ""), ("seed", str(tmp_path))]
+    app._seed_dd.value = str(tmp_path)
+    app._freq_preopt_cb.value = True
+    opt = MagicMock()
+    opt.molecule = optimized
+    opt.converged = True
+    opt.n_steps = 2
+    opt.energies_hartree = [-1.1]
+    sp = MagicMock()
+    sp.converged = True
+    sp_engine = MagicMock()
+    sp_engine.to_session_result.return_value = sp
+    with (
+        patch("quantui.results_storage.load_trajectory", return_value=([seed], [-1.0])),
+        patch("quantui.optimize_geometry", return_value=opt) as optimize,
+        patch("quantui.engines.run_calc", return_value=sp_engine),
+        patch(
+            "quantui.nmr_calc.run_nmr_calc", side_effect=RuntimeError("stop here")
+        ) as nmr,
+    ):
+        _run(app)
+    start = optimize.call_args.kwargs["molecule"]
+    assert start.coordinates[1][2] == pytest.approx(0.80)  # the seed
+    ran_at = nmr.call_args.kwargs["molecule"]
+    assert ran_at.coordinates[1][2] == pytest.approx(0.90)  # the optimized one
