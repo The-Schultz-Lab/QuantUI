@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import html
+import html as _html
+import logging
 import threading
 import time
 from pathlib import Path
@@ -13,6 +15,8 @@ from IPython.display import HTML, Javascript, display
 
 from quantui import theme as _theme
 from quantui.app_builders import TS_PRODUCT_XYZ, mol_input_children
+
+logger = logging.getLogger(__name__)
 
 _METAL_FIX_BASIS = "def2-SVP"
 
@@ -132,6 +136,18 @@ def on_run_clicked(app: Any, btn: Any) -> None:
     # browser) still lands here; two runs would share the cancel flag, the
     # live log and the checkpoint directory (audit APP-4).
     if getattr(app, "_calc_running", False):
+        return
+    # Calibration and a run must not overlap: they share the CPU, so each
+    # would distort the other's timings, which calibration exists to record
+    # (audit APP-13).
+    if getattr(app, "_cal_running", False):
+        try:
+            app.run_status.value = (
+                "Calibration is running — wait for it to finish (or Stop it), "
+                "then Run."
+            )
+        except Exception:  # noqa: BLE001 — status label is best-effort
+            pass
         return
     # Pre-run guard: catch a basis with no parameters for an
     # element (e.g. 6-31G on Pt) or a charge/multiplicity inconsistent with the
@@ -2283,6 +2299,21 @@ def on_cal_run(
 ) -> None:
     """Start async calibration run and initialize calibration UI state."""
     _ = btn
+    if getattr(app, "_cal_running", False):
+        return
+    # Not while a calculation runs: the calibration would time steps on a
+    # busy machine and record those timings as the estimator's baseline
+    # (audit APP-13).
+    if getattr(app, "_calc_running", False) or getattr(
+        app, "_slurm_active_request_id", None
+    ):
+        app._cal_step_label.layout.display = ""
+        app._cal_step_label.value = (
+            f'<span style="font-size:12px;color:{_theme.css.ACCENT_WARNING}">'
+            "A calculation is running — calibrate once it has finished.</span>"
+            '<br><span style="font-size:12px;color:transparent">.</span>'
+        )
+        return
     mode = app._cal_mode_toggle.value
     # The old ``"short" else "long"`` two-tier dispatch silently routed
     # tier 3 / tier 4 (and tier 1!) to the tier-2 suite,
@@ -2311,6 +2342,8 @@ def on_cal_run(
         '<br><span style="font-size:12px;color:transparent">.</span>'
     )
     app._cal_results_html.value = ""
+    app._cal_running = True
+    app.run_btn.disabled = True
 
     threading.Thread(target=app._do_calibration, daemon=True).start()
 
@@ -2525,6 +2558,9 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
             _in_flight.clear()
             app._cal_results_html.value = _cal_table_html(_completed_steps, total)
 
+    # Every exit resets the panel and releases Run: an exception from
+    # run_calibration used to leave the panel disabled on "Starting…" for
+    # the rest of the session (audit APP-13).
     try:
         result = run_calibration(
             progress_cb=_progress,
@@ -2540,24 +2576,39 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
         app._cal_results_html.value = _cal_table_html(
             list(result.steps), result.n_total
         )
-    finally:
-        app._activity_end(kind="compute")
-
-    app._cal_step_label.value = (
-        f'<span style="font-size:12px;color:{_theme.css.ACCENT_SUCCESS}"><b>Calibration complete.</b> '
-        "Time estimates are now active.</span>"
-        '<br><span style="font-size:12px;color:transparent">.</span>'
-        if result.n_completed > 0
-        else (
-            '<span style="font-size:12px;color:#dc2626">No steps completed.</span>'
+        app._cal_step_label.value = (
+            f'<span style="font-size:12px;color:{_theme.css.ACCENT_SUCCESS}"><b>Calibration complete.</b> '
+            "Time estimates are now active.</span>"
+            '<br><span style="font-size:12px;color:transparent">.</span>'
+            if result.n_completed > 0
+            else (
+                '<span style="font-size:12px;color:#dc2626">No steps completed.</span>'
+                '<br><span style="font-size:12px;color:transparent">.</span>'
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — shown in the panel
+        logger.exception("Calibration failed")
+        app._cal_step_label.value = (
+            '<span style="font-size:12px;color:#dc2626"><b>Calibration failed:</b> '
+            f"{_html.escape(f'{type(exc).__name__}: {exc}')}</span>"
             '<br><span style="font-size:12px;color:transparent">.</span>'
         )
-    )
-    app._cal_stop_btn.layout.display = "none"
-    app._cal_skip_btn.layout.display = "none"
-    app._cal_run_btn.disabled = not pyscf_available
-    app._cal_mode_toggle.disabled = False
-    app._refresh_perf_stats()
+    finally:
+        app._cal_running = False
+        try:
+            app._activity_end(kind="compute")
+        except Exception:  # noqa: BLE001 — teardown is best-effort
+            pass
+        app._cal_stop_btn.layout.display = "none"
+        app._cal_skip_btn.layout.display = "none"
+        app._cal_run_btn.disabled = not pyscf_available
+        app._cal_mode_toggle.disabled = False
+        if not getattr(app, "_calc_running", False):
+            app.run_btn.disabled = getattr(app, "_molecule", None) is None
+    try:
+        app._refresh_perf_stats()
+    except Exception:  # noqa: BLE001 — stats refresh is cosmetic
+        logger.debug("perf stats refresh failed after calibration", exc_info=True)
 
 
 def update_notes(app: Any, change: Any = None) -> None:

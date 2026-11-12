@@ -221,3 +221,44 @@ def test_nmr_preopt_starts_from_the_seed_and_is_kept(app, tmp_path):
     assert start.coordinates[1][2] == pytest.approx(0.80)  # the seed
     ran_at = nmr.call_args.kwargs["molecule"]
     assert ran_at.coordinates[1][2] == pytest.approx(0.90)  # the optimized one
+
+
+# ── APP-13 ────────────────────────────────────────────────────────────────
+
+
+def test_calibration_error_resets_the_panel_and_releases_run(app):
+    with patch("threading.Thread"):
+        app._on_cal_run(None)  # panel set to "Starting…", Run disabled
+    assert app._cal_mode_toggle.disabled and app.run_btn.disabled
+    with patch(
+        "quantui.benchmarks.run_calibration", side_effect=RuntimeError("no pyscf")
+    ):
+        app._do_calibration()
+    assert "Calibration failed" in app._cal_step_label.value
+    assert "no pyscf" in app._cal_step_label.value
+    assert not app._cal_mode_toggle.disabled
+    assert app._cal_stop_btn.layout.display == "none"
+    assert not app._cal_running
+    assert not app.run_btn.disabled
+
+
+def test_run_is_refused_while_calibrating(app):
+    with patch("threading.Thread") as thread:
+        app._on_cal_run(None)
+    thread.return_value.start.assert_called_once()
+    assert app._cal_running and app.run_btn.disabled
+    with patch.object(app, "_run_in_thread") as worker:
+        app._on_run_clicked(None)
+    worker.assert_not_called()
+    assert not app._calc_running
+    assert "Calibration is running" in app.run_status.value
+
+
+def test_calibration_is_refused_while_a_run_is_in_flight(app):
+    app._begin_run_lock()
+    with patch("threading.Thread") as thread:
+        app._on_cal_run(None)
+    thread.assert_not_called()
+    assert not app._cal_running
+    assert "calculation is running" in app._cal_step_label.value
+    app._end_run_lock()

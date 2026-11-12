@@ -2083,6 +2083,9 @@ class QuantUIApp:
         self._calc_running: bool = False
         # Set once a run has its result in hand; Cancel is ignored from then on.
         self._run_result_ready: bool = False
+        # True while the calibration suite runs; Run and calibration exclude
+        # each other (audit APP-13).
+        self._cal_running: bool = False
         # Stop signal for the live elapsed-time ticker thread.
         self._elapsed_stop_event: Optional[threading.Event] = None
         # Total run estimate the ticker turns into "time
@@ -5990,8 +5993,12 @@ class QuantUIApp:
     ) -> None:
         """Update shared state and refresh dependent widgets."""
         self._molecule = mol
-        # Loading a molecule mid-run must not re-arm Run (audit APP-4).
-        self.run_btn.disabled = bool(getattr(self, "_calc_running", False))
+        # Loading a molecule mid-run (or mid-calibration) must not re-arm Run
+        # (audit APP-4, APP-13).
+        self.run_btn.disabled = bool(
+            getattr(self, "_calc_running", False)
+            or getattr(self, "_cal_running", False)
+        )
         self.export_btn.disabled = False
         self.export_xyz_btn.disabled = False
         self.export_mol_btn.disabled = not _RDKIT_AVAILABLE
