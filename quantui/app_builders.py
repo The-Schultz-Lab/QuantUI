@@ -887,7 +887,7 @@ def build_history_section(
         )
         app._history_recent_box.children = tuple([head] + rows) if rows else ()
 
-    app.past_dd.observe(_sync_recent, names="options")
+    app.past_dd.observe(app._safe_cb(_sync_recent), names="options")
 
     # The History tab is now purely the result-browser. Performance stats
     # + Calibrate accordions moved to the System Settings tab — see below —
@@ -1787,7 +1787,7 @@ def build_shared_widgets(
     def _cancel_style(change: Any) -> None:
         app.cancel_btn.button_style = "" if change["new"] else "danger"
 
-    app.cancel_btn.observe(_cancel_style, names="disabled")
+    app.cancel_btn.observe(app._safe_cb(_cancel_style), names="disabled")
 
     # One-click fix shown only when a metal's basis blocks the run.
     # Hidden until the pre-run guard reveals it; sets the basis to def2-SVP.
