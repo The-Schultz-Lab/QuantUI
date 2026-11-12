@@ -255,9 +255,9 @@ dev = [
     # rather than the separate `wheel` package (audit INFRA-3), and >= 77 for
     # the PEP 639 license metadata in [project] (audit INFRA-17).
     "setuptools>=77",
-    "mypy~=1.10.0",  # pinned, not an open floor — same reasoning as
+    "mypy>=1.10,<2.5",  # pinned, not an open floor — same reasoning as
     # black/ruff below: it must agree with .pre-commit-config.yaml's rev
-    # (v1.10.0) and CI's explicit mypy step (`mypy~=1.10.0`), which is what
+    # (v1.10.0) and CI's explicit mypy step (`mypy>=1.10,<2.5`), which is what
     # CI enforces (M-TYPECHECK TYPE.2). A newer mypy silently disagrees: 2.x
     # drops support for python_version = "3.9" (this repo's floor) and
     # reports a different error set than the pinned check (audit INFRA-4;
