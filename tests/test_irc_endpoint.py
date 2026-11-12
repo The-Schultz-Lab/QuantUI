@@ -108,3 +108,37 @@ def test_failure_near_the_minimum_ends_converged_without_duplicates(monkeypatch)
         xyz = [np.asarray(f.coordinates) for f in branch.trajectory]
         steps = [np.abs(b - a).max() for a, b in zip(xyz, xyz[1:])]
         assert min(steps) > 0, "a frame is repeated"
+
+
+def test_descent_then_bfgs_drops_only_the_repeated_frame(monkeypatch):
+    # Audit GEOM-8: far enough out that steepest descent runs out of steps
+    # (some accepted) and BFGS finishes. Only BFGS's repeated start frame
+    # may be dropped: no duplicate, and every descent point kept.
+    import quantui.irc as irc
+
+    descents = []  # per branch: positions of each accepted descent step
+    real_descent = irc._steepest_descent
+
+    def _short_descent(atoms, record, **kw):
+        seen = []
+        descents.append(seen)
+
+        def _rec():
+            seen.append(atoms.get_positions().copy())
+            record()
+
+        return real_descent(atoms, _rec, **{**kw, "max_steps": 3})
+
+    monkeypatch.setattr(irc, "_steepest_descent", _short_descent)
+    far = MINIMUM + np.array([[0, 0, 0], [0, 0, 0], [2.0, 0.0, 1.5]])
+    r = _run(monkeypatch, far)
+    assert len(descents) == 2 and all(descents), "descent must take steps"
+    for branch, seen in zip((r.forward, r.reverse), descents):
+        assert branch.converged
+        assert _end_force(branch) < 0.05
+        xyz = [np.asarray(f.coordinates) for f in branch.trajectory]
+        steps = [np.abs(b - a).max() for a, b in zip(xyz, xyz[1:])]
+        assert min(steps) > 0, "a frame is repeated"
+        # start, Sella's unrecorded end, then each descent step in order
+        for k, pos in enumerate(seen):
+            np.testing.assert_allclose(xyz[2 + k], pos, atol=1e-9)
