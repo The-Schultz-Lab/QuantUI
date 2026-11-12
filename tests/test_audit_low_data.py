@@ -82,42 +82,79 @@ def test_calibration_worker_is_not_daemonic(monkeypatch, tmp_path):
     assert proc.daemon is False
 
 
-def _group_leader_with_child(pids):  # pragma: no cover - runs in a fork child
-    os.setpgrp()
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
-    pids.put(child.pid)
-    time.sleep(60)
+class _PopenWorker:
+    """The slice of ``multiprocessing.Process`` that ``_terminate_worker_tree`` uses.
+
+    The worker is a fresh interpreter in its own session (so it leads its
+    process group, as the calibration worker does after ``os.setpgrp()``).
+    Forking the pytest process instead can hang the child before it reaches
+    ``setpgrp`` when xdist/coverage threads hold a lock at fork time.
+    """
+
+    def __init__(self, popen):
+        self._p = popen
+        self.pid = popen.pid
+
+    def is_alive(self):
+        return self._p.poll() is None
+
+    def terminate(self):
+        self._p.terminate()
+
+    def join(self, timeout=None):
+        try:
+            self._p.wait(timeout)
+        except subprocess.TimeoutExpired:
+            pass
 
 
-@pytest.mark.skipif(not hasattr(os, "killpg"), reason="POSIX process groups")
-def test_terminate_worker_tree_kills_grandchildren():
-    """Stop/Skip/timeout must not orphan the worker's pool processes."""
-    import multiprocessing
-
-    ctx = multiprocessing.get_context("fork")
-    pids = ctx.Queue()
-    worker = ctx.Process(target=_group_leader_with_child, args=(pids,))
-    worker.start()
+def _running(pid):
+    """True while ``pid`` exists and is not a zombie (tolerates it vanishing)."""
     try:
-        kids = [pids.get(timeout=20)]
+        with open(f"/proc/{pid}/stat") as fh:
+            return fh.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except (OSError, IndexError):
+        return False
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "killpg") or not os.path.isdir("/proc"),
+    reason="POSIX process groups + /proc",
+)
+def test_terminate_worker_tree_kills_grandchildren(tmp_path):
+    """Stop/Skip/timeout must not orphan the worker's pool processes."""
+    pid_file = tmp_path / "grandchild.pid"
+    script = (
+        "import subprocess, sys, time\n"
+        "c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        f"open({str(pid_file)!r}, 'w').write(str(c.pid))\n"
+        "time.sleep(60)\n"
+    )
+    worker = _PopenWorker(
+        subprocess.Popen([sys.executable, "-c", script], start_new_session=True)
+    )
+    try:
+        deadline = time.time() + 30
+        while not (pid_file.exists() and pid_file.read_text().strip()):
+            assert time.time() < deadline, "worker never started its child"
+            assert worker.is_alive(), "worker exited before starting its child"
+            time.sleep(0.05)
+        kid = int(pid_file.read_text())
+        assert os.getpgid(worker.pid) == worker.pid
+
         benchmarks._terminate_worker_tree(worker)
         worker.join(10)
         assert not worker.is_alive()
         deadline = time.time() + 10
-        while time.time() < deadline:
-            alive = [
-                k
-                for k in kids
-                if os.path.exists(f"/proc/{k}")
-                and "Z" not in open(f"/proc/{k}/stat").read().split()[2]
-            ]
-            if not alive:
-                break
+        while _running(kid) and time.time() < deadline:
             time.sleep(0.1)
-        assert not alive
+        assert not _running(kid)
     finally:
-        if worker.is_alive():
+        try:
             os.killpg(worker.pid, 9)
+        except ProcessLookupError:
+            pass
+        worker.join(5)
 
 
 # ---------------------------------------------------------------------------
