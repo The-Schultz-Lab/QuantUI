@@ -800,6 +800,7 @@ def _run_freq_calc_body(
                 from .config import BOHR_TO_ANGSTROM as _BOHR_TO_ANG
                 from .freq_displacement_ids import (
                     displacement_id,
+                    displacement_set_name,
                     parse_displacement_id,
                 )
 
@@ -835,7 +836,17 @@ def _run_freq_calc_body(
                 # assembly step itself a proper gate: it only runs
                 # once every required id is present here, regardless of how
                 # it got there.
-                _ITEM_SET_NAME = "freq_displacements"
+                # Named for this reference geometry and SCF setup, so a
+                # resume never reuses dipoles displaced from anything else.
+                _ITEM_SET_NAME = displacement_set_name(
+                    "freq_displacements",
+                    mol,
+                    xc=_xc,
+                    density_fit=_density_fit_used,
+                    solvent=_pcm_solvent,
+                    delta_bohr=_DELTA,
+                    unrestricted=_dm0_is_unrestricted,
+                )
                 _dipoles: dict = {}
                 if checkpoint is not None and resume:
                     for _item_id, _payload in checkpoint.completed_items(

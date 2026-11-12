@@ -13,6 +13,17 @@ from quantui.raman_calc import (
 )
 
 
+def _item_set(ckpt, prefix):
+    """The one item set named ``<prefix>-<geometry digest>`` in *ckpt*."""
+    names = [
+        p.name
+        for p in (ckpt.dir / "items").iterdir()
+        if p.name.startswith(prefix + "-")
+    ]
+    assert len(names) == 1, names
+    return names[0]
+
+
 class TestRamanInvariants:
     def test_isotropic_mode_gives_45_alpha_bar_squared(self):
         # ∂α/∂Q proportional to identity → γ² = 0
@@ -375,8 +386,8 @@ class TestChk4RamanDisplacementCheckpointing:
         ckpt = self._checkpoint(tmp_path, molecule)
         run_freq_calc(molecule, method="RHF", basis="STO-3G", checkpoint=ckpt)
 
-        ir_ids = ckpt.completed_item_ids("freq_displacements")
-        raman_ids = ckpt.completed_item_ids("raman_displacements")
+        ir_ids = ckpt.completed_item_ids(_item_set(ckpt, "freq_displacements"))
+        raman_ids = ckpt.completed_item_ids(_item_set(ckpt, "raman_displacements"))
         assert len(ir_ids) == 18
         assert len(raman_ids) == 18
         # Same displacement grid, but the two sets never collide — reading
