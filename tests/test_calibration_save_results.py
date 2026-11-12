@@ -275,13 +275,38 @@ class TestWorkerStructure:
         # And the queue payload now carries result_dir.
         assert "result_dir" in src
 
-    def test_save_calibration_json_includes_result_dir(self):
+    def test_save_calibration_json_includes_result_dir(self, tmp_path, monkeypatch):
         # The persisted calibration.json should expose result_dir per
-        # step so future tooling can find the saved results.
+        # step so future tooling can find the saved results. Write one and
+        # read it back (audit INFRA-19: was a source-text check).
         from quantui import benchmarks
 
-        src = inspect.getsource(benchmarks._save_calibration_json)
-        assert '"result_dir"' in src or "'result_dir'" in src
+        cal_path = tmp_path / "calibration.json"
+        monkeypatch.setenv("QUANTUI_CALIBRATION_PATH", str(cal_path))
+        step = benchmarks.BenchmarkStep(
+            label="H2O RHF/STO-3G",
+            method="RHF",
+            basis="STO-3G",
+            n_atoms=3,
+            n_electrons=10,
+            status=benchmarks._STATUS_OK,
+            elapsed_s=1.0,
+            result_dir=str(tmp_path / "results" / "h2o"),
+        )
+        failed = benchmarks.BenchmarkStep(
+            label="H2O B3LYP/STO-3G",
+            method="B3LYP",
+            basis="STO-3G",
+            n_atoms=3,
+            n_electrons=10,
+            status=benchmarks._STATUS_ERROR,
+        )
+        result = benchmarks.CalibrationResult(
+            timestamp="2026-11-12T00:00:00Z", steps=[step, failed]
+        )
+        benchmarks._save_calibration_json(result, tmp_path / "cal.log")
+        steps = json.loads(cal_path.read_text(encoding="utf-8"))["steps"]
+        assert [s["result_dir"] for s in steps] == [step.result_dir, None]
 
 
 class TestHistoryLabelMarker:
