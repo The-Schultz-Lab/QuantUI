@@ -2,7 +2,8 @@
 
 | Platform | Status | Notes |
 | --- | --- | --- |
-| **Linux / macOS** | :material-check-circle:{ .green } Full | PySCF via conda or pip |
+| **Linux** | :material-check-circle:{ .green } Full | PySCF via conda or pip; tested in CI |
+| **macOS** | :material-check-circle:{ .green } Full | PySCF via conda or pip; not covered by CI |
 | **WSL (Windows)** | :material-check-circle:{ .green } Full | Same as Linux |
 | **Windows native** | :material-alert-circle:{ .yellow } Partial | PyFock: neutral closed-shell PBE single points and optimizations |
 

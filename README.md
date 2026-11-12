@@ -77,7 +77,8 @@ Real output from QuantUI, straight from the app:
 - **In-session calculations** — RHF, UHF, 9 DFT functionals, MP2, CCSD,
   CCSD(T), NMR shielding, TD-DFT UV-Vis, 1D PES scans, Marcus reorganization
   energies, **transition-state searches** (Sella, with an automatic
-  frequency check that says whether it found a TS) and **IRC reaction paths**
+  frequency check that says whether it found a TS; the starting guess can be
+  built from a reactant and a product along an IDPP path) and **IRC reaction paths**
   via PySCF, running in your Python kernel. Optional PyFock (≥0.1.7) adds native-Windows PBE
   single points and geometry optimizations for neutral, closed-shell molecules
   with def2-SVP/def2-TZVP, including orbital and population analysis;
@@ -88,11 +89,12 @@ Real output from QuantUI, straight from the app:
   Hessian + IR; Raman is not computed in solvent), TD-DFT (non-equilibrium
   excitations) and reorganization energies (gas-phase optimizations, solvated
   single points). NMR and PES scans are gas-phase only
-- **Rich results** — total energy, HOMO-LUMO gap, Mulliken charges, dipole
+- **Rich results** — total energy, HOMO-LUMO gap, Mulliken and NPA charges,
+  Mayer and Wiberg bond orders, dipole
   moment, point group, ⟨S²⟩ with a spin-contamination flag for open-shell
   results, thermochemistry (U, H, S, G, Cv, Cp at any temperature and
   pressure), IR and Raman spectrum charts (stick and Lorentzian-broadened;
-  Raman in the gas phase), ¹H/¹³C NMR
+  Raman in the gas phase), UV-Vis and ECD spectra, ¹H/¹³C NMR
   chemical shifts, an orbital energy-level diagram with symmetry labels
   (1a₁, 1b₂ …), and a side-by-side comparison table for multiple calculations
 - **Surfaces** — any molecular orbital (α and β for unrestricted results), an
@@ -532,13 +534,13 @@ The notebooks are not in the PyPI package; clone the repository to run them.
 
 | Type | Output |
 | --- | --- |
-| Single Point | Energy, HOMO-LUMO gap, Mulliken charges, dipole moment |
+| Single Point | Energy, HOMO-LUMO gap, Mulliken and NPA charges, Mayer/Wiberg bond orders, dipole moment |
 | Geometry Opt | Optimised structure, trajectory animation; optional frozen atoms |
-| Transition State | Saddle point near the input geometry (Sella, optional `[ts]` extra), then a frequency check: transition state, minimum, or higher-order saddle point; animated imaginary mode |
+| Transition State | Saddle point near the input geometry, or from a reactant + product guess path (Sella, optional `[ts]` extra), then a frequency check: transition state, minimum, or higher-order saddle point; animated imaginary mode |
 | IRC | Reaction path from a Transition State result, downhill both ways to the minima it connects (Sella); barrier from each side, energy profile and animated path |
 | Frequency | Vibrational frequencies, ZPVE, IR intensities, thermochemistry at any temperature and pressure, animated normal modes, IR spectrum chart (stick / Lorentzian broadened) |
-| UV-Vis (TD-DFT) | Excitation energies, oscillator strengths, UV-Vis spectrum plot |
-| NMR Shielding | ¹H and ¹³C chemical shifts relative to TMS via GIAO; tabulated by element |
+| UV-Vis (TD-DFT) | Excitation energies, oscillator strengths, UV-Vis spectrum plot; rotatory strengths and ECD spectrum |
+| NMR Shielding | ¹H and ¹³C chemical shifts relative to TMS via GIAO (TMS reference shieldings computed by QuantUI at common levels; other levels fall back to B3LYP/6-31G\* and say so); closed-shell HF/DFT only, not meta-GGAs (M06-2X, M06-L); tabulated by element |
 | PES Scan | 1D potential energy surface along a bond, angle, or dihedral; energy profile chart; geometry animation at each scan point |
 | Reorganization Energy | Marcus four-point internal reorganization energy λ = λ₁ + λ₂ for hole (cation) and/or electron (anion) transfer |
 
@@ -629,7 +631,7 @@ quantui/                  Main package
 notebooks/
   molecule_computations.ipynb   Main user-facing interface (3-cell launcher)
   tutorials/                    Step-by-step guided notebooks (01–05)
-tests/                    pytest test suite (~4,700 tests; run in parallel via pytest-xdist)
+tests/                    pytest test suite (~4,900 tests; run in parallel via pytest-xdist)
 apptainer/                Container definition for reproducible deployment
 local-setup/              Conda environment definition
 pyproject.toml            Package metadata and tool config

@@ -6,13 +6,13 @@ Nine calculation types, fourteen methods, fourteen basis sets.
 
 | Calculation type | Output |
 | --- | --- |
-| **Single Point** | Energy, HOMO–LUMO gap, charges, dipole |
+| **Single Point** | Energy, HOMO–LUMO gap, Mulliken and NPA charges, bond orders, dipole |
 | **Geometry Opt** | Optimized structure and trajectory; optional frozen atoms |
-| **Transition State** | Saddle point (Sella, `quantui[ts]`) plus a frequency check |
+| **Transition State** | Saddle point (Sella, `quantui[ts]`) plus a frequency check; optional guess from a reactant + product |
 | **IRC** | Path from a transition state to the two minima it connects; barriers and energy profile |
 | **Frequency** | Frequencies, IR intensities, Raman activities (gas phase), ZPVE, thermochemistry, animated modes |
-| **UV-Vis (TD-DFT)** | Excitation energies, oscillator strengths, spectrum |
-| **NMR Shielding** | ¹H and ¹³C shifts vs TMS (GIAO) |
+| **UV-Vis (TD-DFT)** | Excitation energies, oscillator strengths, UV-Vis and ECD spectra |
+| **NMR Shielding** | ¹H and ¹³C shifts vs TMS (GIAO); closed-shell HF/DFT, not M06-2X/M06-L. TMS reference computed by QuantUI at common levels, flagged otherwise |
 | **PES Scan** | 1D bond, angle or dihedral scan |
 | **Reorganization Energy** | Marcus four-point λ for hole and/or electron transfer |
 

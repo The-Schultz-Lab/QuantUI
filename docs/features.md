@@ -43,7 +43,8 @@ Everything runs in your local Python kernel.
   <div class="feature-card__icon">📊</div>
   <div class="feature-card__title">Spectra &amp; Analysis</div>
   <p class="feature-card__body">
-    IR, Raman, UV-Vis and NMR spectra, point groups, orbital diagrams,
+    IR, Raman, UV-Vis, ECD and NMR spectra, NPA charges and bond orders,
+    point groups, orbital diagrams,
     density and ESP surfaces, thermochemistry, side-by-side comparisons.
   </p>
 </div>
