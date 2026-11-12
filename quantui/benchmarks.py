@@ -1081,6 +1081,12 @@ def _calibration_worker(
                     "n_iterations": n_iterations,
                     "elapsed_s": elapsed,
                     "import_s": import_s,
+                    # Device / DF provenance, so GPU and forced-CPU probe
+                    # records are distinguishable in perf_log.jsonl (the
+                    # speedup table and the CPU estimate pool key on them).
+                    "gpu_used": bool(getattr(res, "gpu_used", False)),
+                    "gpu_name": getattr(res, "gpu_name", None),
+                    "density_fit": bool(getattr(res, "density_fit", False)),
                     "result_dir": str(saved_dir) if saved_dir else None,
                 }
             )
@@ -1504,6 +1510,9 @@ def run_calibration(
                     calc_type=calc_type,
                     source="calibration",
                     import_s=msg.get("import_s"),
+                    gpu_used=msg.get("gpu_used"),
+                    gpu_name=msg.get("gpu_name"),
+                    density_fit=msg.get("density_fit"),
                 )
             else:
                 step.status = _STATUS_ERROR
