@@ -60,8 +60,13 @@ markdown_extensions:
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
+  # base_path is resolved against the working directory `mkdocs build` runs
+  # in (the repo root), not docs/. check_paths turns a missing snippet into a
+  # build error so --strict catches it instead of rendering an empty page
+  # (audit INFRA-5: `[".."]` + "../CHANGELOG.md" pointed outside the checkout).
   - pymdownx.snippets:
-      base_path: [".."]
+      base_path: ["."]
+      check_paths: true
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
