@@ -208,3 +208,42 @@ def test_save_trajectory_float32(tmp_path):
     mols, energies = load_trajectory(tmp_path)
     assert len(mols) == 2
     assert energies[1] == pytest.approx(-1.12, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# DATA-12 — corrupt settings.json must not crash; unknown sections survive
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [b"\xff\xfe\x00garbage\x80", b"[" * 100000],
+    ids=["non-utf8", "deeply-nested"],
+)
+def test_corrupt_settings_fall_back_to_defaults(tmp_path, raw):
+    from quantui.user_settings import UserSettings
+
+    p = tmp_path / "settings.json"
+    p.write_bytes(raw)
+    assert UserSettings.load(p) == UserSettings()
+
+
+def test_settings_save_preserves_unknown_sections(tmp_path):
+    import json
+
+    from quantui.user_settings import UserSettings
+
+    p = tmp_path / "settings.json"
+    data = UserSettings().to_dict()
+    data["future_section"] = {"x": 1}
+    data["compute"]["future_key"] = "keep"
+    p.write_text(json.dumps(data), encoding="utf-8")
+
+    s = UserSettings.load(p)
+    s.compute.density_fit = True
+    s.save(p)
+
+    saved = json.loads(p.read_text(encoding="utf-8"))
+    assert saved["future_section"] == {"x": 1}
+    assert saved["compute"]["future_key"] == "keep"
+    assert saved["compute"]["density_fit"] is True
