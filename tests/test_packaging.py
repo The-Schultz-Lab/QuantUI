@@ -216,6 +216,48 @@ class TestWheelContents:
         assert "quantui/data/library/library.sqlite" in names
         assert "quantui/data/js/3Dmol-min.js" in names
 
+    def test_launcher_manifests_and_licence_files_are_shipped(self, wheel_names):
+        """Audit INFRA-17 — the rest of the package data: the host-side
+        batch launcher (``quantui install-launcher``), the library manifests,
+        the vendored 3Dmol.js licence, and the provenance notes that used to
+        be left out of the wheel and sdist."""
+        names = set(wheel_names)
+        for rel in (
+            "data/launcher/quantui_batch.py",
+            "data/js/3Dmol-LICENSE.txt",
+            "data/js/3Dmol-min.js.LICENSE.txt",
+            "data/js/PROVENANCE.md",
+            "data/library/QM9-PROVENANCE.md",
+        ):
+            assert f"quantui/{rel}" in names, f"quantui/{rel} missing from wheel"
+        src_manifests = sorted(
+            p.name
+            for p in (REPO_ROOT / "quantui" / "data" / "manifests").glob("*.json")
+        )
+        assert src_manifests
+        for name in src_manifests:
+            assert f"quantui/data/manifests/{name}" in names
+
+    def test_metadata_licence_and_direct_dependencies(self, built_wheel):
+        """Audit INFRA-17 — PEP 639 licence metadata (SPDX expression + the
+        licence file) and the directly imported rdkit/psutil declared."""
+        with zipfile.ZipFile(built_wheel) as zf:
+            meta_name = next(
+                n for n in zf.namelist() if n.endswith(".dist-info/METADATA")
+            )
+            meta = zf.read(meta_name).decode("utf-8")
+            assert any(n.endswith(".dist-info/licenses/LICENSE") for n in zf.namelist())
+        assert "License-Expression: MIT" in meta
+        assert "License-File: LICENSE" in meta
+        requires = [
+            ln.split(":", 1)[1].strip()
+            for ln in meta.splitlines()
+            if ln.startswith("Requires-Dist:")
+        ]
+        base = [r for r in requires if "extra ==" not in r]
+        assert any(r.startswith("rdkit") for r in base), base
+        assert any(r.startswith("psutil") for r in base), base
+
 
 @pytest.mark.slow
 class TestWheelUnpackedImport:

@@ -29,7 +29,8 @@ from .molecule import Molecule
 
 logger = logging.getLogger(__name__)
 
-# NIST 2018 CODATA — consistent with PySCF's internal constant
+# CODATA 2018. PySCF's ``pyscf.data.nist.HARTREE2EV`` is the CODATA 2014
+# value 27.21138602; the difference (~6e-8 eV/Ha) is negligible here.
 HARTREE_TO_EV: float = 27.211386245988
 
 
@@ -1079,35 +1080,15 @@ def _run_session_calc_body(
         converged = scf_converged and bool(cc_converged)
     n_iterations = int(getattr(mf, "cycles", -1))
 
-    import numpy as _np
-
-    def _to_numpy_array(arr: Any) -> Any:
-        """Convert ``arr`` to a NumPy array, transferring from GPU if needed.
-
-        gpu4pyscf returns CuPy arrays (``mf.mo_occ`` / ``mo_energy`` / ``mo_coeff``
-        on a GPU-offloaded run). ``numpy.array(cupy_array)`` raises (NumPy refuses
-        implicit device→host transfers), so probe for CuPy's ``.get()`` host copy
-        first. Returns ``None`` unchanged.
-        """
-        if arr is None:
-            return None
-        # CuPy arrays have a ``.get()`` method (synchronous device→host copy).
-        # Probe for it rather than importing cupy, so the CPU-only path doesn't
-        # pull cupy onto the import graph.
-        get = getattr(arr, "get", None)
-        if callable(get) and type(arr).__module__.startswith("cupy"):
-            return _np.asarray(get())
-        return _np.asarray(arr)
-
     homo_lumo_gap_ev: Optional[float] = None
     try:
-        # Route through _to_numpy_array: on a GPU-offloaded run mf.mo_occ /
-        # mo_energy are CuPy arrays, and the old ``_np.array(mo_occ_ref)`` here
+        # Route through _host_array: on a GPU-offloaded run mf.mo_occ /
+        # mo_energy are CuPy arrays, and the old ``np.array(mo_occ_ref)`` here
         # raised (silently → gap None). Same CuPy fix the MO-array extraction
         # below already had; this block was overlooked.
         # UHF/UKS: (2, n_mo) -- the gap spans both spin channels.
         _gap_ha = homo_lumo_gap_hartree(
-            _to_numpy_array(mf.mo_energy), _to_numpy_array(mf.mo_occ)
+            _host_array(mf.mo_energy), _host_array(mf.mo_occ)
         )
         if _gap_ha is not None:
             homo_lumo_gap_ev = float(_gap_ha * HARTREE_TO_EV)

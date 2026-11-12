@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from html import escape as _html_escape
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
@@ -677,7 +678,7 @@ def orbital_summary_html(info: OrbitalInfo) -> str:
     return (
         '<div style="background:#f8f9fa; padding:12px; border-radius:6px; '
         'border-left:4px solid #2171b5; margin:8px 0; font-family:monospace;">'
-        f"<b>Orbital Summary — {info.formula}</b><br>"
+        f"<b>Orbital Summary — {_html_escape(info.formula)}</b><br>"
         f"Occupied MOs{a}: {info.n_occupied} &nbsp;|&nbsp; "
         f"Virtual MOs{a}: {info.n_virtual} &nbsp;|&nbsp; "
         f"Total{a}: {len(info.mo_energies_ev)}<br>"
@@ -903,7 +904,10 @@ def generate_cube_file(
             "  conda install -c conda-forge pyscf"
         ) from exc
 
-    data = np.load(results_path, allow_pickle=True)
+    # allow_pickle=False: results.npz may come from someone else's folder, and
+    # unpickling an object array runs arbitrary code. Every key read here is a
+    # plain numeric or string array (mol_atom/mol_basis are saved as str).
+    data = np.load(results_path, allow_pickle=False)
     mo_coeff = data["mo_coeff"]
     mo_occ = data["mo_occ"] if "mo_occ" in data else None
     if mo_coeff.ndim == 3:
@@ -1572,6 +1576,10 @@ _ISO_VIEWER_JS = """
   // is exact; removeAllShapes() would also take out anything else ever added.
   var shapes=[];
   function surfaces(){
+    // The molecule placeholder (shown before the first Generate) carries XYZ
+    // text in DATA, not a cube: feeding that to addVolumetricData(...,"cube")
+    // when a slider moves would draw garbage or throw (audit VIZ-8).
+    if(!WITH_SURFACES){ return; }
     var vw=v(); if(!vw){ return; }
     for(var i=0;i<shapes.length;i++){
       try{ vw.removeShape(shapes[i]); }catch(e){}
@@ -1615,8 +1623,9 @@ _ISO_VIEWER_JS = """
     __ORIENT__
     // Restore the orientation the previous viewer had, but only for the same
     // scene: carrying a camera onto a different molecule would frame it
-    // arbitrarily. SCENE is the atom block, so switching ORBITALS keeps the
-    // view (the common case) while switching MOLECULES re-frames.
+    // arbitrarily. SCENE is the element sequence, so switching ORBITALS (or
+    // going from the molecule placeholder to the first surface) keeps the
+    // view while switching MOLECULES re-frames.
     // A freshly built viewer is never busy. Bumping the sequence invalidates
     // any in-flight busy(true) from the previous viewer, so a stale retry can
     // never land on this one and leave it dimmed with nothing to clear it.
@@ -1825,17 +1834,28 @@ def esp_legend_html(esp_range: float) -> str:
 
 def _scene_key(cube_text: str) -> str:
     """Identity of the molecule in a cube, used to decide whether a saved
-    camera still applies. The atom block only — a different orbital of the same
-    molecule must keep the user's orientation, a different molecule must not."""
-    import hashlib
+    camera still applies. A different orbital of the same molecule must keep
+    the user's orientation, a different molecule must not.
 
+    Keyed on the element sequence (atomic numbers in atom order), the one thing
+    a cube and the XYZ molecule placeholder share: cube atom records carry Bohr
+    coordinates, XYZ carries Angstrom, so hashing either form of the geometry
+    meant the placeholder's camera never carried into the first isosurface
+    (audit VIZ-10). See :func:`_scene_key_from_xyz`.
+    """
     lines = cube_text.splitlines()
     try:
         n_atoms = abs(int(lines[2].split()[0]))
-        block = "".join(lines[6 : 6 + n_atoms])
+        zs = [int(float(ln.split()[0])) for ln in lines[6 : 6 + n_atoms]]
     except Exception:  # noqa: BLE001 — a bad header only costs camera reuse
-        block = "".join(lines[:8])
-    return hashlib.sha1(block.encode()).hexdigest()[:16]
+        return _hash_key("".join(lines[:8]))
+    return _hash_key(",".join(str(z) for z in zs))
+
+
+def _hash_key(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha1(text.encode()).hexdigest()[:16]
 
 
 def render_molecule_placeholder_py3dmol(
@@ -1872,14 +1892,17 @@ def render_molecule_placeholder_py3dmol(
 
 
 def _scene_key_from_xyz(xyz: str) -> str:
-    import hashlib
+    """Same key as :func:`_scene_key` for an XYZ block: the element sequence
+    as atomic numbers, so a cube of this molecule matches it."""
+    from quantui.config import ATOMIC_NUMBERS
 
-    lines = xyz.splitlines()[2:]
-    # Cube atom records carry Z and Bohr coordinates while XYZ carries symbols
-    # and Angstrom, so the two cannot hash to the same value. Element count and
-    # ordering are enough to tell "same molecule" for camera reuse.
-    block = "".join(ln.split()[0] for ln in lines if ln.strip())
-    return hashlib.sha1(block.encode()).hexdigest()[:16]
+    zs = []
+    for ln in xyz.splitlines()[2:]:
+        if not ln.strip():
+            continue
+        sym = ln.split()[0]
+        zs.append(str(ATOMIC_NUMBERS.get(sym.capitalize(), sym)))
+    return _hash_key(",".join(zs))
 
 
 def _build_iso_viewer(
@@ -2586,7 +2609,11 @@ def load_frontier_cube(
 
     spins = ("beta",) if beta else ("alpha", "")
     for entry in _frontier_index(result_dir):
-        if int(entry.get("index", -1)) != int(orbital_index):
+        try:
+            entry_index = int(entry.get("index", -1))
+        except (TypeError, ValueError):  # malformed index.json entry
+            continue
+        if entry_index != int(orbital_index):
             continue
         if entry.get("spin", "") not in spins:
             continue

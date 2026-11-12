@@ -86,7 +86,7 @@ QuantUI/
 ├── notebooks/
 │   ├── molecule_computations.ipynb  ← Student-facing Voilà app (thin launcher)
 │   └── tutorials/                   ← 01–05 step-by-step tutorial notebooks
-├── tests/                    ← pytest suite (~4,100 tests; PySCF-gated tests skip on native Windows)
+├── tests/                    ← pytest suite (~4,700 tests; PySCF-gated tests skip on native Windows)
 ├── .github/
 │   └── copilot-instructions.md  ← This file
 ├── apptainer/
@@ -224,7 +224,8 @@ _PANEL_REGISTRY = {
     "single_point":   [Energies, Isosurface, Populations],
     "geometry_opt":   [Energies(False), Isosurface(True), Trajectory(True), Populations],
     "frequency":      [Vibrational, IR Spectrum, Raman Spectrum, Trajectory (pre-opt), Energies, Isosurface, Populations],
-    "transition_state": [Vibrational, IR Spectrum, Trajectory, Energies, Isosurface, Populations],
+    "transition_state": [Vibrational, IR Spectrum, Trajectory, Energies, Isosurface, Populations,
+                         PES Scan (_pop_ts_guess_profile — reactant+product searches only)],
     "irc":            [PES Scan (energy profile via _pop_irc_profile), Trajectory],
     "tddft":          [UV-Vis, ECD, Energies, Isosurface, Populations],
     "nmr":            [NMR],
@@ -399,8 +400,6 @@ Unavailable panels show a "Not available — run a X calculation first" placehol
 `_activate_ana_panel()` swaps the placeholder for real content and expands the accordion.
 `_deactivate_all_ana_panels()` restores placeholders and collapses — never hides.
 
-| Panel | Accordion attr | Activated by calc types |
-|---|---|---|
 Source of truth: `_PANEL_META` / `_PANEL_REGISTRY` in `app.py`.
 
 | Panel | Accordion attr | Activated by calc types |
@@ -411,7 +410,7 @@ Source of truth: `_PANEL_META` / `_PANEL_REGISTRY` in `app.py`.
 | Vibrational | `vib_accordion` | Frequency, Transition State |
 | IR Spectrum | `_ir_accordion` | Frequency, Transition State |
 | Raman Spectrum | `_raman_accordion` | Frequency |
-| PES Scan | `_pes_scan_accordion` | PES Scan, IRC (energy profile) |
+| PES Scan | `_pes_scan_accordion` | PES Scan, IRC (energy profile), Transition State (interpolated-path profile, reactant + product searches only) |
 | Isosurface | `_iso_accordion` | Single Point, Geometry Opt, Frequency, Transition State, UV-Vis, Reorganization Energy (Linux/WSL) |
 | Geometries | `_reorg_geom_accordion` | Reorganization Energy |
 | UV-Vis | `_tddft_accordion` | UV-Vis (TD-DFT) |
@@ -482,8 +481,10 @@ Source of truth: `_PANEL_META` / `_PANEL_REGISTRY` in `app.py`.
    It loads the installed package's plotly.js once per page and embeds each
    figure with `include_plotlyjs=False`. Never use `"cdn"` (fails silently
    offline) or `"require"` (plotly ≥ 6 has no such mode: it inlines the full
-   ~4.8 MB bundle per figure). Standalone exported HTML files keep
-   `include_plotlyjs=True` so they work on their own. Enforced by
+   ~4.8 MB bundle per figure). Inlining plotly.js (`include_plotlyjs=True`)
+   is allowed **only** for standalone exported files (which must work on
+   their own) and `plotly_embed`'s own no-app fallback — the same rule as
+   `CLAUDE.md` (DEC-010 as amended 2026-11-12). Enforced by
    `tests/test_code_quality.py`.
 
 9. **All `.observe()` callbacks must be wrapped with `_safe_cb`.** Exceptions in
@@ -687,8 +688,9 @@ jupyter lab notebooks/molecule_computations.ipynb
 # Run tests
 python -m pytest tests/ -q --no-cov
 
-# Install/update package
-pip install -e ".[dev]"
+# Install/update package (same extras as CI; without pyscf/xtb/ts the PySCF,
+# GFN-FF and Sella tests skip silently)
+pip install -e ".[pyscf,ase,dev,xtb,ts]"
 
 # Verify app.py import
 python -c "from quantui.app import QuantUIApp; print('OK')"
@@ -742,32 +744,31 @@ The table above lists the core files only; `tests/` has many more (one per
 feature area, e.g. `test_backends_worker.py`, `test_checkpoint_*.py`,
 `test_ts_search.py`, `test_irc.py`, `test_cli.py`).
 
-**Baseline (Linux, Python 3.11, 2026-11; `pytest -m "not network"`):** ~4120
-passed, 24 skipped.
+**Baseline (Linux, Python 3.11, 2026-11; `pytest -m "not network"`):** ~4680
+passed, 11 skipped.
 
 ---
 
 ## Dependency Groups
 
-| Group | Packages | Notes |
-| --- | --- | --- |
 Source of truth: `pyproject.toml`.
 
 | Group | Packages | Notes |
 | --- | --- | --- |
-| Core (always installed) | `jupyter`, `ipywidgets`, `notebook`, `numpy`, `requests`, `matplotlib`, `plotly`, `plotlymol`, `kaleido`, `py3Dmol` | Base UI + visualization stack |
+| Core (always installed) | `jupyter`, `ipywidgets`, `notebook`, `numpy`, `requests`, `matplotlib`, `plotly`, `plotlymol`, `kaleido`, `py3Dmol<2.6`, `rdkit`, `psutil` | Base UI + visualization stack; py3Dmol capped at the vendored 3Dmol.js minor |
 | `pyscf` extra | `pyscf>=2.13.0`, `pyscf-properties`, `pyscf-dispersion` | SCF/frequency/TDDFT/NMR/PES backends; NMR + Raman; PBE-D3 |
 | `pyfock` extra | `pyfock>=0.1.7,<0.3` (+ ase, scipy, numba) | Native-Windows PBE subset |
 | `ase` extra | `ase>=3.22.0` | Geometry optimization and structure I/O |
-| `xtb` extra | `xtb` | GFN-FF pre-optimization for metals (Linux wheels) |
-| `ts` extra | `sella>=2.6`, `ase>=3.26` | Transition State and IRC |
+| `xtb` extra | `xtb>=22.1,<23`, `ase` | GFN-FF pre-optimization for metals (Linux wheels) |
+| `ts` extra | `sella>=2.6,<3`, `ase>=3.26` | Transition State and IRC |
 | `app` extra | `voila>=0.5.0,<0.6`, `ipykernel>=6.0.0` | Student-facing Voilà deployment |
 | `gpu-cuda12x` / `gpu-cuda13x` | gpu4pyscf + cupy + cutensor | GPU offload (match the driver's CUDA version) |
 | `pyfock-gpu-cuda12x` / `-cuda13x` | cupy | PyFock GPU path |
 | `notebook` extra | `nbmake>=1.4.0`, `ipykernel>=6.0.0` | Notebook smoke-testing support |
-| `dev` extra | `pytest`, `pytest-cov`, `pytest-mock`, `pytest-xdist`, `build`, `mypy`, `types-requests`, `ruff`, `black`, `pre-commit` | Development tooling |
+| `dev` extra | `pytest`, `pytest-cov`, `pytest-mock`, `pytest-xdist`, `build`, `setuptools>=77`, `mypy~=1.10.0`, `types-requests`, `ruff`, `black`, `pre-commit` | Development tooling |
 
-Install all runtime + dev extras: `pip install -e ".[pyscf,ase,app,notebook,dev]"`
+CI / cloud install (what the SessionStart hook runs): `pip install -e ".[pyscf,ase,dev,xtb,ts]"`.
+Everything incl. the app server and notebook smoke tests: `pip install -e ".[pyscf,ase,xtb,ts,app,notebook,dev]"`.
 
 ---
 

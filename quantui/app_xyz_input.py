@@ -8,7 +8,7 @@ from typing import Any, List, Tuple
 import ipywidgets as widgets
 
 from quantui import theme as _theme
-from quantui.molecule import parse_xyz_input
+from quantui.molecule import ISOTOPE_NOTE, has_isotope_labels, parse_xyz_input
 from quantui.xyz_input import (
     format_xyz_body,
     load_molecule_from_xyz_text,
@@ -264,6 +264,8 @@ def on_load_xyz(app: Any, _btn: Any = None) -> None:
             )
         else:
             app.xyz_msg.value = f"Loaded {mol.get_formula()} ({len(mol.atoms)} atoms)."
+        if has_isotope_labels(text):
+            app.xyz_msg.value += f" {ISOTOPE_NOTE}"
     except Exception as exc:
         app.xyz_msg.value = f"Parse error: {exc}"
 

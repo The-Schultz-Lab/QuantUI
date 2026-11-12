@@ -727,9 +727,12 @@ def _run_freq_calc_body(
             f"SCF failed for {molecule.get_formula()} ({method}/{basis}): {exc}"
         ) from exc
 
-    _status("SCF converged. Computing analytical Hessian...")
-
     converged = bool(getattr(mf, "converged", False))
+    _status(
+        "SCF converged. Computing analytical Hessian..."
+        if converged
+        else "SCF did not converge. Computing analytical Hessian anyway..."
+    )
     scf_rescue_stage = str(getattr(mf, "scf_rescue_stage", "none") or "none")
     n_iterations = int(getattr(mf, "cycles", -1))
 

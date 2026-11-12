@@ -279,14 +279,16 @@ try:
 
                 mf, _gpu_used, _gpu_name = try_to_gpu(mf, method_upper)
                 if _gpu_used:
+                    # Announce once per run, not on every force evaluation.
+                    if not self.gpu_used:
+                        try:
+                            self.progress_stream.write(
+                                f"\n🚀  GPU offload active — running on {_gpu_name}\n"
+                            )
+                        except Exception:  # noqa: BLE001 — stream is user-owned
+                            pass
                     self.gpu_used = True
                     self.gpu_name = _gpu_name
-                    try:
-                        self.progress_stream.write(
-                            f"\n🚀  GPU offload active — running on {_gpu_name}\n"
-                        )
-                    except Exception:  # noqa: BLE001 — stream is user-owned
-                        pass
 
             mf.verbose = 0
             mf.stdout = _sink
@@ -720,9 +722,12 @@ def optimize_geometry(
     atoms = molecule_to_atoms(start_molecule)
     _frozen = sorted({int(i) for i in (frozen_atoms or [])})
     if _frozen:
-        if _frozen[0] < 0 or _frozen[-1] >= len(atoms):
+        _bad = [i for i in _frozen if i < 0 or i >= len(atoms)]
+        if _bad:
+            # Report the offending (0-based) index as a 1-based atom number;
+            # a negative index used to report the last atom instead.
             raise ValueError(
-                f"Frozen atom {_frozen[-1] + 1} does not exist "
+                f"Frozen atom {_bad[0] + 1} does not exist "
                 f"(this structure has {len(atoms)} atoms)."
             )
         if len(_frozen) >= len(atoms):

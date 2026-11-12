@@ -946,6 +946,26 @@ def format_irc_result(r: Any) -> str:
     )
 
 
+def tddft_state_prefix(r: Any) -> str:
+    """Label prefix for TD-DFT excited states: ``"S"`` only for a singlet manifold.
+
+    A closed-shell restricted reference (RHF/RKS) gives singlet excitations,
+    so S1, S2, ... is correct. From an unrestricted or restricted-open-shell
+    reference the states are not singlets (and are spin-mixed), so they are
+    numbered without the "S".
+    """
+    variant = str(getattr(r, "scf_variant", "") or "").upper()
+    if variant.startswith(("U", "RO")):
+        return ""
+    if not variant:
+        # Older saved results lack scf_variant; <S²> is saved only for an
+        # open-shell / unrestricted reference.
+        s2 = getattr(r, "spin_square", None)
+        if s2 is not None and s2 > 1e-3:
+            return ""
+    return "S"
+
+
 def format_tddft_result(r: Any) -> str:
     """Format a TD-DFT / UV-Vis result card."""
     # r.converged now folds in per-root TD convergence, so the
@@ -968,6 +988,7 @@ def format_tddft_result(r: Any) -> str:
     exc_table = ""
     if r.excitation_energies_ev:
         wl = r.wavelengths_nm()
+        _prefix = tddft_state_prefix(r)
         exc_rows = []
         for i, (e_ev, f_osc) in enumerate(
             zip(r.excitation_energies_ev[:8], r.oscillator_strengths[:8]), 1
@@ -975,7 +996,7 @@ def format_tddft_result(r: Any) -> str:
             bold = "font-weight:bold" if f_osc > 0.05 else ""
             exc_rows.append(
                 f'<tr style="{bold}">'
-                f'<td style="padding:2px 12px 2px 0;color:{_theme.css.TEXT_SECONDARY}">S{i}</td>'
+                f'<td style="padding:2px 12px 2px 0;color:{_theme.css.TEXT_SECONDARY}">{_prefix}{i}</td>'
                 f'<td style="padding:2px 12px 2px 0;color:{_theme.css.TEXT_HEADING}">{e_ev:.3f} eV</td>'
                 f'<td style="padding:2px 12px 2px 0;color:{_theme.css.TEXT_HEADING}">{wl[i - 1]:.1f} nm</td>'
                 f'<td style="padding:2px 4px 2px 0;color:{_theme.css.TEXT_HEADING}">f = {f_osc:.4f}</td>'

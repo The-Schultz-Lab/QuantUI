@@ -38,6 +38,38 @@ SOLVENT_CALC_TYPES = frozenset(
 # Calc types driven by analytic gradients: a post-HF method (no gradients
 # here) is refused before the job queues, not after it starts.
 GRADIENT_CALC_TYPES = frozenset({"transition_state", "irc"})
+# The request options each calc type's worker runner reads
+# (backends/worker.py); any other key is stored in request.json and ignored,
+# so it gets a warning at submit. ``preopt_before_run`` is added for
+# PREOPT_CALC_TYPES below.
+CALC_OPTION_KEYS: Dict[str, frozenset] = {
+    "single_point": frozenset(),
+    "geometry_opt": frozenset({"fmax", "max_steps", "frozen_atoms"}),
+    "transition_state": frozenset({"fmax", "max_steps"}),
+    "irc": frozenset({"max_steps", "dx", "fmax"}),
+    "frequency": frozenset(),
+    "tddft": frozenset({"nstates"}),
+    "nmr": frozenset(),
+    "pes_scan": frozenset(
+        {
+            "scan_type",
+            "atom_indices",
+            "start",
+            "stop",
+            "steps",
+            "grid",
+            "fmax",
+            "max_opt_steps",
+        }
+    ),
+    "reorganization_energy": frozenset({"mode", "fmax", "max_steps"}),
+}
+# Options the worker reads with bool(): the string "no" would be True.
+BOOLEAN_OPTION_KEYS = frozenset({"scf_rescue", "preopt_before_run"})
+_TRUE_WORDS = frozenset({"true", "yes", "on", "1"})
+_FALSE_WORDS = frozenset({"false", "no", "off", "0"})
+# A request id names the job record file, so no path separators or "..".
+REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$")
 
 
 class BatchInputError(ValueError):
@@ -66,7 +98,9 @@ def parse_option_pairs(pairs: Optional[Sequence[str]]) -> Dict[str, Any]:
 
 def _file_label(path: Path) -> str:
     """The file's stem, made safe for ids and folder names."""
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", path.stem).strip("_.-") or "molecule"
+    label = re.sub(r"[^A-Za-z0-9_.-]+", "_", path.stem)
+    # A ".." in the stem would be refused as a path component later.
+    return re.sub(r"\.{2,}", ".", label).strip("_.-") or "molecule"
 
 
 def _request_id_for(path: Path) -> str:
@@ -242,6 +276,128 @@ def check_method(request: CalculationRequest) -> None:
         )
 
 
+def option_keys_for(calc_type: str) -> frozenset:
+    """The request option keys the worker reads for *calc_type*."""
+    keys = {"scf_rescue"} | set(CALC_OPTION_KEYS.get(calc_type, ()))
+    if calc_type in PREOPT_CALC_TYPES:
+        keys.add("preopt_before_run")
+    return frozenset(keys)
+
+
+def check_options(request: CalculationRequest) -> List[str]:
+    """Normalise boolean options; return warnings for keys the job ignores.
+
+    ``scf_rescue=no`` arrives as the string ``"no"``, which the worker's
+    ``bool()`` reads as True, so yes/no/on/off/true/false/1/0 are turned into
+    booleans and anything else is refused.
+    """
+    for key in BOOLEAN_OPTION_KEYS:
+        if key not in request.options:
+            continue
+        value = request.options[key]
+        word = str(value).strip().lower()
+        if isinstance(value, bool):
+            continue
+        if word in _TRUE_WORDS:
+            request.options[key] = True
+        elif word in _FALSE_WORDS:
+            request.options[key] = False
+        else:
+            raise BatchInputError(
+                f"option {key}={value!r} must be true or false (yes/no also work)."
+            )
+    allowed = option_keys_for(request.calc_type)
+    unknown = sorted(k for k in request.options if k not in allowed)
+    if not unknown:
+        return []
+    return [
+        f"option(s) {', '.join(unknown)} are ignored by a {request.calc_type} "
+        f"job (it reads: {', '.join(sorted(allowed))})."
+    ]
+
+
+def known_basis_sets() -> List[str]:
+    """QuantUI's basis sets, plus the parenthesis spelling of starred Pople sets."""
+    from quantui import config
+
+    names = list(config.SUPPORTED_BASIS_SETS)
+    names += [config.pople_notation_alias(b) for b in config.SUPPORTED_BASIS_SETS]
+    return [n for n in names if n]
+
+
+def check_basis(request: CalculationRequest) -> List[str]:
+    """Normalise the basis spelling; warn about one QuantUI does not list.
+
+    Same policy as ``calculator``: a basis outside the list is allowed (PySCF
+    knows many more), but the job fails if PySCF does not know it, so the
+    user is told at submit rather than after the queue wait.
+    """
+    names = {b.lower(): b for b in known_basis_sets()}
+    given = str(request.basis or "").strip()
+    canonical = names.get(given.lower())
+    if canonical is not None:
+        request.basis = canonical
+        return []
+    if not given:
+        raise BatchInputError("the request has no basis set; give --basis.")
+    return [
+        f"basis {given!r} is not one of QuantUI's basis sets; the job fails "
+        "if PySCF does not know it (check the spelling)."
+    ]
+
+
+def check_json_request(request: CalculationRequest) -> None:
+    """The checks an ``.xyz`` input gets while it is parsed, for request JSON.
+
+    Request id (it names the job record file), calc type, atoms and
+    coordinates, and a charge/multiplicity that fit the electron count. The
+    worker takes charge and multiplicity from the molecule when it has
+    them, so those are the values checked.
+    """
+    from quantui.utils import validate_atom_symbol, validate_coordinates
+    from quantui.xyz_input import spin_compatibility_note
+
+    rid = request.request_id
+    if rid and (not isinstance(rid, str) or not REQUEST_ID_RE.match(rid)):
+        raise BatchInputError(
+            f"request_id {rid!r} may only use letters, digits and _ . - "
+            "(at most 64 characters)."
+        )
+    if rid and ".." in rid:
+        raise BatchInputError(f"request_id {rid!r} may not contain '..'.")
+    if request.calc_type not in CALC_TYPES:
+        raise BatchInputError(
+            f"unknown calc_type {request.calc_type!r}; choose one of "
+            f"{', '.join(CALC_TYPES)}."
+        )
+    mol = request.molecule
+    atoms = mol.get("atoms")
+    coords = mol.get("coords") or mol.get("coordinates")
+    if not isinstance(atoms, list) or not atoms:
+        raise BatchInputError("molecule.atoms must be a non-empty list.")
+    if not isinstance(coords, list) or len(coords) != len(atoms):
+        raise BatchInputError(
+            "molecule.coords must list one [x, y, z] per atom " f"({len(atoms)} atoms)."
+        )
+    # The worker's Molecule() rules (utils.validate_atom_symbol /
+    # validate_coordinates).
+    for i, (atom, row) in enumerate(zip(atoms, coords)):
+        if not isinstance(atom, str) or not validate_atom_symbol(atom):
+            raise BatchInputError(f"molecule.atoms[{i}]: unknown element {atom!r}.")
+        if not validate_coordinates(row):
+            raise BatchInputError(
+                f"molecule.coords[{i}] must be three finite numbers, got {row!r}."
+            )
+    charge = int(mol.get("charge", request.charge))
+    mult = int(mol.get("multiplicity", request.multiplicity))
+    note = spin_compatibility_note(atoms, charge, mult)
+    if note:
+        raise BatchInputError(
+            f"charge {charge} and multiplicity {mult} do not fit this "
+            f"molecule. {note}"
+        )
+
+
 def load_request(
     path: Path,
     *,
@@ -276,6 +432,8 @@ def load_request(
         )
         check_solvent(request)
         check_method(request)
+        warnings += check_basis(request)
+        warnings += check_options(request)
         return request, warnings
 
     data = json.loads(path.read_text())
@@ -303,6 +461,9 @@ def load_request(
         request.options.update(options)
     if preopt and request.calc_type in PREOPT_CALC_TYPES:
         request.options["preopt_before_run"] = True
+    check_json_request(request)
     check_solvent(request)
     check_method(request)
+    warnings += check_basis(request)
+    warnings += check_options(request)
     return request, warnings

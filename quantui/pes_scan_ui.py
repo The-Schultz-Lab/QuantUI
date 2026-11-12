@@ -260,15 +260,10 @@ def build_scan_grid(
         and stop > 0
         and start != stop
     ):
-        lo, hi = (start, stop) if start < stop else (stop, start)
-        return [float(v) for v in np.geomspace(lo, hi, steps).tolist()]
+        # geomspace keeps the requested direction (a descending range stays
+        # descending; it used to be silently reversed).
+        return [float(v) for v in np.geomspace(start, stop, steps).tolist()]
     return [float(v) for v in np.linspace(start, stop, steps).tolist()]
-
-
-def _clamp_selection(values: Sequence[int], n_atoms: int) -> List[int]:
-    if n_atoms < 1:
-        return list(values)
-    return [max(1, min(int(v), n_atoms)) for v in values]
 
 
 def scan_range_bounds(scan_type: str) -> Tuple[Optional[float], Optional[float]]:

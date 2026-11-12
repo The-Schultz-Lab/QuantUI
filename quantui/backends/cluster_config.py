@@ -33,15 +33,19 @@ def _env_positive_int(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
-# Hard limits for a submission, site-configurable: NCShare's
-# `common` nodes have 512 GB, but the default stays at the classroom policy.
-# Read at import, like QUANTUI_SLURM_PARTITION; `quantui install-launcher`
-# copies the values into the launcher, so set them in the image environment.
+# Per-job resource limits QuantUI checks before it submits, site-configurable:
+# NCShare's `common` nodes have 512 GB, but the default stays at the
+# classroom policy. These are client-side defaults, not enforcement: the
+# values come from the user's own environment and a hand-run `sbatch` skips
+# them, so a site that needs a real cap sets it in Slurm (QOS/partition
+# limits). Read at import, like QUANTUI_SLURM_PARTITION; `quantui
+# install-launcher` copies the values into the launcher, so set them in the
+# image environment.
 MIN_CORES = 1
 MAX_CORES = _env_positive_int("QUANTUI_SLURM_MAX_CORES", 32)
 MIN_MEMORY_GB = 1
 MAX_MEMORY_GB = _env_positive_int("QUANTUI_SLURM_MAX_MEMORY_GB", 128)
-# The estimate's own ceiling, separate from the hard limit: a site can allow
+# The estimate's own ceiling, separate from the per-job limit: a site can allow
 # 512 GB on request while keeping automatic requests at 128 GB.
 ESTIMATE_MAX_MEMORY_GB = min(
     _env_positive_int("QUANTUI_SLURM_ESTIMATE_MAX_MEMORY_GB", MAX_MEMORY_GB),
@@ -165,6 +169,22 @@ def site_directives() -> list[str]:
             )
         lines.append(f"#SBATCH --{flag}={value}")
     return lines
+
+
+def validate_partition(value: str) -> str:
+    """Return *value* if it is safe on the ``#SBATCH --partition`` line.
+
+    The partition (``--partition`` or ``QUANTUI_SLURM_PARTITION``) is pasted
+    into the batch script like the account/QOS/GRES values, so a newline
+    would add ``#SBATCH`` lines or shell. Raises ``ValueError`` otherwise.
+    """
+    text = str(value or "").strip()
+    if not _SITE_DIRECTIVE_VALUE_RE.match(text):
+        raise ValueError(
+            f"SLURM partition {text!r} has characters not allowed in an "
+            "#SBATCH value (use letters, digits and _ . : , = + -)"
+        )
+    return text
 
 
 def gpu_requested() -> bool:
@@ -315,6 +335,12 @@ echo "SLURM job ID: ${{SLURM_JOB_ID:-<none>}}"
 echo "Working directory: $(pwd)"
 
 export OMP_NUM_THREADS="${{SLURM_CPUS_PER_TASK:-{cores}}}"
+# PySCF memory cap (MB) = 80% of this job's allocation, so a big-memory job
+# is not held to PySCF's 4000 MB default. Slurm's SLURM_MEM_PER_NODE (MB)
+# reflects a --mem given on the sbatch command line (rerun --more-memory).
+_quantui_mem_mb="${{SLURM_MEM_PER_NODE:-}}"
+case "$_quantui_mem_mb" in ''|*[!0-9]*) _quantui_mem_mb=$(({memory} * 1024)) ;; esac
+export PYSCF_MAX_MEMORY="$((_quantui_mem_mb * 4 / 5))"
 {attempt_setup}
 {worker_command}
 

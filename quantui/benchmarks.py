@@ -52,6 +52,8 @@ Typical usage (from the UI)::
 
 from __future__ import annotations
 
+import atexit
+import functools
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -963,6 +965,7 @@ def _calibration_worker(
     import os as _os
     import time as _t
     from datetime import datetime as _dt
+    from datetime import timezone as _tz
     from pathlib import Path as _P
 
     # Must run BEFORE any quantui / pyscf / gpu4pyscf import so
@@ -982,7 +985,7 @@ def _calibration_worker(
         # result dir's pyscf.log.
         with open(log_path, "a", encoding="utf-8", buffering=1) as log_fh:
             log_fh.write(
-                f"\n========= {_dt.utcnow().isoformat()} :: {label} =========\n"
+                f"\n========= {_dt.now(_tz.utc).isoformat()} :: {label} =========\n"
             )
             per_calc_buf = _io.StringIO()
             # _TeeStream implements only .write() — the one method any of
@@ -1003,6 +1006,8 @@ def _calibration_worker(
             # (_save_calibration_step) takes it untyped. Annotate Any so mypy
             # doesn't pin the variable to whichever branch it sees first.
             res: Any
+            n_iterations: Optional[int]
+            n_steps: Optional[int] = None
             if calc_type == "geometry_opt":
                 from quantui.optimizer import optimize_geometry as _opt
 
@@ -1015,7 +1020,11 @@ def _calibration_worker(
                 )
                 formula = res.molecule.get_formula()
                 converged = bool(res.converged)
-                n_iterations = int(getattr(res, "n_steps", -1))
+                # Optimizer steps are n_steps, not SCF iterations: logged
+                # under the same key the app uses, so calibration records
+                # feed estimate_opt_steps (audit DATA-14).
+                n_iterations = None
+                n_steps = int(getattr(res, "n_steps", -1))
             elif calc_type == "frequency":
                 from quantui.freq_calc import run_freq_calc as _freq
 
@@ -1073,12 +1082,16 @@ def _calibration_worker(
                 mol=mol,
             )
 
+            from quantui import calc_log as _calc_log_mod
+
             result_queue.put(
                 {
                     "status": "ok",
                     "formula": formula,
                     "converged": converged,
                     "n_iterations": n_iterations,
+                    "n_steps": n_steps,
+                    "n_threads": _calc_log_mod.current_thread_count(),
                     "elapsed_s": elapsed,
                     "import_s": import_s,
                     # Device / DF provenance, so GPU and forced-CPU probe
@@ -1099,6 +1112,46 @@ def _calibration_worker(
                 "result_dir": None,
             }
         )
+
+
+def _calibration_worker_main(*args) -> None:
+    """Spawn target: lead a fresh process group, then run the worker.
+
+    The worker is not daemonic (so a frequency step can start its parallel
+    IR-intensity pool — audit DATA-10), and that pool's processes would
+    survive a plain ``terminate()`` of the worker. Leading its own process
+    group lets :func:`_terminate_worker_tree` signal the worker and every
+    process it started in one go (POSIX only; elsewhere it degrades to a
+    plain ``terminate()``). Skipped when not in a child process, so tests
+    that drive the worker inline never re-group the test runner.
+    """
+    import multiprocessing as _mp
+    import os as _os
+
+    if _mp.parent_process() is not None and hasattr(_os, "setpgrp"):
+        try:
+            _os.setpgrp()
+        except OSError:
+            pass
+    _calibration_worker(*args)
+
+
+def _terminate_worker_tree(worker) -> None:
+    """Terminate a calibration worker and any processes it spawned."""
+    if not worker.is_alive():
+        return
+    import os as _os
+    import signal as _signal
+
+    pid = getattr(worker, "pid", None)
+    if pid and hasattr(_os, "killpg"):
+        try:
+            if _os.getpgid(pid) == pid:
+                _os.killpg(pid, _signal.SIGTERM)
+                return
+        except OSError:
+            pass
+    worker.terminate()
 
 
 def _tail_last_status_line(log_path) -> str:
@@ -1400,7 +1453,7 @@ def run_calibration(
         # Spawn the worker.
         result_queue = _ctx.Queue()
         worker = _ctx.Process(
-            target=_calibration_worker,
+            target=_calibration_worker_main,
             args=(
                 atoms,
                 coords,
@@ -1414,10 +1467,19 @@ def run_calibration(
                 timestamp,  # calibration_run_id — the parent's run timestamp
                 force_cpu,  # cross-device probe flag
             ),
-            daemon=True,
+            # NOT daemonic: a daemonic process may not have children, so a
+            # frequency step's parallel IR-intensity ProcessPoolExecutor
+            # always fell back to serial and the tier-4 "parallel-IR" entry
+            # measured the serial path (audit DATA-10). Every exit path of
+            # the poll loop below terminates the worker, and an atexit hook
+            # covers interpreter shutdown mid-step — multiprocessing would
+            # otherwise *join* a live non-daemonic child at exit.
+            daemon=False,
         )
         t_start = time.perf_counter()
         worker.start()
+        _reap = functools.partial(_terminate_worker_tree, worker)
+        atexit.register(_reap)
 
         # Poll loop — finish naturally OR hit timeout OR stop OR skip.
         poll_interval = 0.5
@@ -1434,7 +1496,7 @@ def run_calibration(
             # cut off a near-finishing benzene freq).
             # ``None`` means "user controls; never auto-kill".
             if timeout_per_step is not None and elapsed > timeout_per_step:
-                worker.terminate()
+                _terminate_worker_tree(worker)
                 worker.join(timeout=5)
                 step.status = _STATUS_TIMEOUT
                 step.elapsed_s = elapsed
@@ -1442,7 +1504,7 @@ def run_calibration(
                 break
 
             if stop_event is not None and stop_event.is_set():
-                worker.terminate()
+                _terminate_worker_tree(worker)
                 worker.join(timeout=5)
                 step.status = _STATUS_STOPPED
                 step.elapsed_s = elapsed
@@ -1456,7 +1518,7 @@ def run_calibration(
             # Skip again. (Replaces the hard timeout that was cutting
             # off near-finishing calcs.)
             if skip_event is not None and skip_event.is_set():
-                worker.terminate()
+                _terminate_worker_tree(worker)
                 worker.join(timeout=5)
                 step.status = _STATUS_SKIPPED
                 step.elapsed_s = elapsed
@@ -1469,6 +1531,8 @@ def run_calibration(
             _emit_progress(
                 step_n, total, label, "running", elapsed, live_message=live_msg
             )
+
+        atexit.unregister(_reap)
 
         if worker_done_normally:
             try:
@@ -1515,11 +1579,12 @@ def run_calibration(
                     n_electrons=step.n_electrons,
                     method=method,
                     basis=basis,
-                    n_iterations=int(msg.get("n_iterations", -1)),
+                    n_iterations=msg.get("n_iterations"),
                     elapsed_s=float(msg["elapsed_s"]),
                     converged=bool(msg["converged"]),
                     n_basis=step.n_basis,
-                    n_cores=1,
+                    n_threads=msg.get("n_threads"),
+                    n_steps=msg.get("n_steps"),
                     calc_type=calc_type,
                     source="calibration",
                     import_s=msg.get("import_s"),

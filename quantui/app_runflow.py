@@ -24,6 +24,8 @@ def _calc_type_badge(calc_type: str) -> str:
     return {
         "single_point": "SP",
         "geometry_opt": "GeoOpt",
+        "transition_state": "TS",
+        "irc": "IRC",
         "frequency": "Freq",
         "tddft": "UV-Vis",
         "nmr": "NMR",
@@ -539,9 +541,36 @@ def _update_solvent_control_for_calc_type(app: Any, ct: str) -> None:
         cb.description = f"Implicit solvent (PCM) — not supported for {ct}"
 
 
+def _close_transient_extra_opts(app: Any, old_children: Any) -> None:
+    """Close the wrapper widgets a previous calc-type switch built.
+
+    ``on_calc_type_changed`` builds fresh HBox/HTML wrappers (and their
+    Layout/Style models) around the app's persistent widgets on every switch.
+    Without this, each switch leaked those models into the kernel.  Persistent
+    widgets (attributes of *app*, or still shown) are never closed.
+    """
+    keep = {id(c) for c in app.calc_extra_opts.children}
+    keep.update(id(v) for v in vars(app).values() if isinstance(v, widgets.Widget))
+
+    def _close(w: Any) -> None:
+        if id(w) in keep or not isinstance(w, widgets.Widget):
+            return
+        keep.add(id(w))
+        for child in getattr(w, "children", None) or ():
+            _close(child)
+        for sub in (getattr(w, "layout", None), getattr(w, "style", None)):
+            if isinstance(sub, widgets.Widget) and id(sub) not in keep:
+                sub.close()
+        w.close()
+
+    for w in old_children:
+        _close(w)
+
+
 def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     """Update extra options panel based on selected calculation type."""
     ct = change["new"]
+    _old_extra_children = tuple(app.calc_extra_opts.children)
 
     _update_solvent_control_for_calc_type(app, ct)
 
@@ -733,6 +762,7 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
         ]
     else:
         app.calc_extra_opts.children = []
+    _close_transient_extra_opts(app, _old_extra_children)
 
     # Both the runtime estimate and the resume offer are per-calc-type, and
     # neither was being refreshed here — so switching type left a Frequency
@@ -1924,7 +1954,6 @@ def on_compare(app: Any, btn: Any, *, layout_fn: Any) -> None:
     app.compare_output.clear_output(wait=True)
     from quantui import (
         comparison_table_html,
-        plot_comparison,
         summary_from_saved_result,
     )
     from quantui.results_storage import load_result
@@ -1967,28 +1996,9 @@ def on_compare(app: Any, btn: Any, *, layout_fn: Any) -> None:
 
             display(HTML(reorg_comparison_html(_reorg_entries)))
         if len(summaries) > 1:
-            try:
-                import matplotlib.pyplot as plt
-
-                fig = plot_comparison(summaries)
-                # As a PNG: display(fig) printed "<Figure size 1000x500 with
-                # 2 Axes>" under Voila, where no inline backend is active.
-                import base64 as _b64
-                import io as _io
-
-                _buf = _io.BytesIO()
-                fig.savefig(_buf, format="png", dpi=100, bbox_inches="tight")
-                plt.close(fig)
-                _png = _b64.b64encode(_buf.getvalue()).decode("ascii")
-                display(
-                    HTML(
-                        f'<img src="data:image/png;base64,{_png}" '
-                        'style="max-width:100%;background:#ffffff;'
-                        'border-radius:6px;margin:10px 0" alt="Comparison chart">'
-                    )
-                )
-            except Exception:
-                pass
+            _chart = _comparison_chart_html(summaries)
+            if _chart:
+                display(HTML(_chart))
         if valid_dirs:
             btns = []
             for s, rdir in zip(summaries, valid_dirs):
@@ -2034,8 +2044,12 @@ def on_copy_results_path(app: Any, btn: Any) -> None:
     p.mkdir(parents=True, exist_ok=True)
     path_str = str(p).replace("\\", "\\\\").replace("'", "\\'")
     display(Javascript(f"navigator.clipboard.writeText('{path_str}')"))
+    # The kernel cannot see whether the browser allowed the clipboard write
+    # (it needs a secure context), so do not claim success outright.
     app.results_path_lbl.value = (
-        f'<span style="color:#22c55e;font-size:13px">Copied: {p}</span>'
+        '<span style="color:#22c55e;font-size:13px">'
+        f"Copied to clipboard (if the browser allowed it): {html.escape(str(p))}"
+        "</span>"
     )
 
     def _reset() -> None:
@@ -2208,9 +2222,16 @@ def _arm_exit(app: Any) -> None:
     app._exit_btn.button_style = "danger"
     app._exit_btn.tooltip = "Click again to stop the server and end this session"
     app._exit_btn.layout.width = "150px"
+    _warn = "This stops the server and ends your session."
+    if getattr(app, "_calc_running", False) or getattr(app, "_cal_running", False):
+        # Shutdown kills the kernel mid-run; say so before the second click.
+        _warn = (
+            "A calculation is still running — it will be stopped and its "
+            "result lost. " + _warn
+        )
     app._exit_warn_html.value = (
         f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px;align-self:center;'
-        'margin-right:4px">This stops the server and ends your session.</span>'
+        f'margin-right:4px">{_warn}</span>'
     )
     app._exit_warn_html.layout.display = ""
     app._exit_cancel_btn.layout.display = ""
@@ -3188,6 +3209,37 @@ def refresh_results_browser(app: Any) -> None:
         app._refresh_freq_seed_options()
 
 
+def _comparison_chart_html(summaries: Any) -> str:
+    """Render the comparison chart as an inline PNG ``<img>`` ("" on failure).
+
+    As a PNG: display(fig) printed "<Figure size 1000x500 with 2 Axes>" under
+    Voila, where no inline backend is active.  The figure is always closed so
+    repeated comparisons do not accumulate open matplotlib figures.
+    """
+    try:
+        import base64 as _b64
+        import io as _io
+
+        import matplotlib.pyplot as plt
+
+        from quantui import plot_comparison
+
+        fig = plot_comparison(summaries)
+        try:
+            _buf = _io.BytesIO()
+            fig.savefig(_buf, format="png", dpi=100, bbox_inches="tight")
+        finally:
+            plt.close(fig)
+        _png = _b64.b64encode(_buf.getvalue()).decode("ascii")
+    except Exception:  # noqa: BLE001 — chart is optional; the table is shown
+        return ""
+    return (
+        f'<img src="data:image/png;base64,{_png}" '
+        'style="max-width:100%;background:#ffffff;'
+        'border-radius:6px;margin:10px 0" alt="Comparison chart">'
+    )
+
+
 def refresh_comparison(app: Any) -> None:
     """Refresh in-session comparison output from accumulated results."""
     from quantui import comparison_table_html, summary_from_session_result
@@ -3199,12 +3251,9 @@ def refresh_comparison(app: Any) -> None:
     with app.comparison_output:
         display(HTML(comparison_table_html(summaries)))
         if len(summaries) > 1:
-            try:
-                from quantui import plot_comparison
-
-                plot_comparison(summaries)
-            except Exception:
-                pass
+            _chart = _comparison_chart_html(summaries)
+            if _chart:
+                display(HTML(_chart))
 
 
 def populate_compare_list(app: Any) -> None:

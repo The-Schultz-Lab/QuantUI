@@ -8,6 +8,7 @@ pairs, ``value`` as a tuple of the checked values) so callers are unchanged.
 
 from __future__ import annotations
 
+import html
 from typing import Any, List, Sequence, Tuple
 
 import ipywidgets as widgets
@@ -37,7 +38,7 @@ class CheckList(widgets.VBox):
         self._boxes = []
         for label, value in self._options:
             if value in ("", None):
-                rows.append(widgets.HTML(f"<i>{label}</i>"))
+                rows.append(widgets.HTML(f"<i>{html.escape(label)}</i>"))
                 continue
             box = widgets.Checkbox(
                 value=False,

@@ -316,3 +316,21 @@ class TestRealPySCFIntegration:
         assert mf.converged is True
         assert mf.scf_rescue_stage == SCF_RESCUE_BOOTSTRAP
         assert energy == pytest.approx(reference_energy, abs=1e-6)
+
+    def test_bootstrap_scf_inherits_the_cancel_callback(self):
+        """Audit SCF-13: the per-cycle cancel/progress hook must reach the
+        bootstrap SCF too, so a Cancel click stops it."""
+        from pyscf import scf
+
+        from quantui.cancellation import attach_scf_cancel_callback
+
+        mf = scf.RHF(self._water_mol())
+        mf.verbose = 0
+        mf.max_cycle = 1  # force the bootstrap stage
+        seen = []
+        attach_scf_cancel_callback(
+            mf, lambda: False, progress_cb=lambda envs: seen.append(envs.get("mf"))
+        )
+        run_scf_with_rescue(mf)
+        assert mf.scf_rescue_stage == SCF_RESCUE_BOOTSTRAP
+        assert any(obj is not None and obj is not mf for obj in seen)

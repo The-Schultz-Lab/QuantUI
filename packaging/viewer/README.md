@@ -30,7 +30,7 @@ Where students get them:
 | Results folder | Any folder on disk (type the path, **Open**) | Upload a `.zip` of it (**Upload .zip**) |
 | Offline | Yes | Only if Pyodide is self-hosted (see below) |
 | Size | Installer download ~185–225 MB (CI build 2026-11-08: Windows 208, Linux 223, macOS 185 MB; was 338 / 247 / 213 MB in v0.11.1) | ~20–60 MB first load from CDN; ~550 MB site if self-hosted |
-| Isosurfaces | Not available (needs PySCF) | Not available (needs PySCF) |
+| Isosurfaces | HOMO/LUMO saved with the result (QuantUI 0.11.0+); others need PySCF | Same as the installer |
 | Signing | **Unsigned** — see below | None needed |
 
 ## Desktop installer
@@ -52,6 +52,11 @@ The installers are **not code-signed**. First run:
   installer creates is made on your Mac, not downloaded, so it should open
   without a further prompt (not yet confirmed on a real Mac).
 - **Linux** — `bash QuantUI-Viewer-*.sh` (needs a terminal once).
+
+Each release also carries `SHA256SUMS.txt` for the installers; check a
+download with `sha256sum -c SHA256SUMS.txt --ignore-missing` (Linux),
+`shasum -a 256 -c SHA256SUMS.txt --ignore-missing` (macOS) or
+`Get-FileHash` (Windows).
 
 Free signing for the Windows installer is available to open-source projects
 through the [SignPath Foundation](https://signpath.org/); macOS notarization has
@@ -91,10 +96,10 @@ load under `voici` 0.10.0 (built against a newer JupyterLab); 0.7.0 does.
 
 ## Known gaps
 
-- Orbital isosurfaces need PySCF to compute the cube file, so they are not
-  available in either build yet (the panel says so). Fix: have the full app
-  save HOMO/LUMO cubes at calculation time, or evaluate orbitals on a grid
-  with numpy alone.
+- Only the HOMO and LUMO isosurfaces the full app saved with the result
+  (`frontier_cubes/`, QuantUI 0.11.0 or later) can be drawn. Other orbitals,
+  density and ESP surfaces need PySCF to compute the cube, so neither build
+  offers them (the panel says so).
 - Thermochemistry is shown as saved with the result; recomputing at another
   T / P needs PySCF. Mode symmetry labels are likewise saved at calc time.
 - The **Upload .zip** button shows a file count, e.g. "(0)": ipywidgets'

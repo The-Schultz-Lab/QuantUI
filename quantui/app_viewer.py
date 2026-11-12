@@ -97,7 +97,8 @@ def build_viewer_folder_bar(app: Any, *, layout_fn: Any) -> None:
             layout=layout_fn(width="150px", flex="0 0 auto"),
         )
         app._viewer_upload.observe(
-            lambda change: on_upload_zip(app, change["new"]), names="value"
+            app._safe_cb(lambda change: on_upload_zip(app, change["new"])),
+            names="value",
         )
         children.append(app._viewer_upload)
         # There is no disk to type a path for: the box only names the folder

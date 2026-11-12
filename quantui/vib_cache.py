@@ -23,8 +23,11 @@ Layout
       "n_frames": 24,
       "amplitude": 0.4,
       "renderer": "py3dmol",
+      "fps": 12,
+      "bgcolor": "#ffffff",
       "modes": {
-        "1": {"cached": true, "file": "mode_001.html", "freq_cm1": 1623.4},
+        "1": {"cached": true, "file": "mode_001.html", "mac": "<hex>",
+              "freq_cm1": 1623.4},
         "2": {"cached": false}
       }
     }
@@ -67,11 +70,17 @@ import logging
 import os
 import re
 import secrets
+import threading
 from pathlib import Path
 from typing import Optional, cast
 
 _SCHEMA_VERSION = 1
 _LOG = logging.getLogger(__name__)
+
+# Serialises the index read-modify-write in save_cached_html, so two modes
+# saved concurrently (e.g. from a background render thread) can't drop each
+# other's manifest entry. In-process only.
+_INDEX_LOCK = threading.Lock()
 
 # Floating-point tolerance when comparing saved vs requested amplitude. Avoids
 # spurious cache misses when 0.4 round-trips through JSON serialization.
@@ -256,71 +265,72 @@ def save_cached_html(
         )
         return
 
-    idx = load_index(result_dir)
-    if (
-        idx.get("_schema_version") != _SCHEMA_VERSION
-        or idx.get("n_frames") != n_frames
-        or not _amplitude_matches(idx.get("amplitude"), amplitude)
-        or idx.get("renderer") != renderer
-        or idx.get("fps") != fps
-        or idx.get("bgcolor") != bgcolor
-    ):
-        idx = {
-            "_schema_version": _SCHEMA_VERSION,
-            "n_frames": n_frames,
-            "amplitude": amplitude,
-            "renderer": renderer,
-            "fps": fps,
-            "bgcolor": bgcolor,
-            "modes": {},
+    with _INDEX_LOCK:
+        idx = load_index(result_dir)
+        if (
+            idx.get("_schema_version") != _SCHEMA_VERSION
+            or idx.get("n_frames") != n_frames
+            or not _amplitude_matches(idx.get("amplitude"), amplitude)
+            or idx.get("renderer") != renderer
+            or idx.get("fps") != fps
+            or idx.get("bgcolor") != bgcolor
+        ):
+            idx = {
+                "_schema_version": _SCHEMA_VERSION,
+                "n_frames": n_frames,
+                "amplitude": amplitude,
+                "renderer": renderer,
+                "fps": fps,
+                "bgcolor": bgcolor,
+                "modes": {},
+            }
+
+        fname = f"mode_{mode_number:03d}.html"
+        html_path = cdir / fname
+        tmp_html = html_path.with_suffix(html_path.suffix + ".tmp")
+        try:
+            tmp_html.write_text(html, encoding="utf-8")
+            os.replace(tmp_html, html_path)
+        except OSError as exc:
+            _LOG.warning(
+                "Failed to save cached html to %s (%s)",
+                html_path,
+                exc,
+            )
+            try:
+                if tmp_html.exists():
+                    tmp_html.unlink()
+            except OSError:
+                pass
+            return
+
+        mac = _mac(html)
+        if mac is None:
+            return
+        modes = idx.setdefault("modes", {})
+        modes[str(mode_number)] = {
+            "cached": True,
+            "file": fname,
+            "mac": mac,
+            "freq_cm1": float(freq_cm1) if freq_cm1 is not None else None,
         }
 
-    fname = f"mode_{mode_number:03d}.html"
-    html_path = cdir / fname
-    tmp_html = html_path.with_suffix(html_path.suffix + ".tmp")
-    try:
-        tmp_html.write_text(html, encoding="utf-8")
-        os.replace(tmp_html, html_path)
-    except OSError as exc:
-        _LOG.warning(
-            "Failed to save cached html to %s (%s)",
-            html_path,
-            exc,
-        )
+        index_path = cdir / "index.json"
+        tmp_idx = index_path.with_suffix(index_path.suffix + ".tmp")
         try:
-            if tmp_html.exists():
-                tmp_html.unlink()
-        except OSError:
-            pass
-        return
-
-    mac = _mac(html)
-    if mac is None:
-        return
-    modes = idx.setdefault("modes", {})
-    modes[str(mode_number)] = {
-        "cached": True,
-        "file": fname,
-        "mac": mac,
-        "freq_cm1": float(freq_cm1) if freq_cm1 is not None else None,
-    }
-
-    index_path = cdir / "index.json"
-    tmp_idx = index_path.with_suffix(index_path.suffix + ".tmp")
-    try:
-        tmp_idx.write_text(json.dumps(idx, indent=2), encoding="utf-8")
-        os.replace(tmp_idx, index_path)
-    except OSError as exc:
-        _LOG.warning(
-            "Failed to save cache index to %s (%s)",
-            index_path,
-            exc,
-        )
-        try:
-            if tmp_idx.exists():
-                tmp_idx.unlink()
-        except OSError:
-            pass
+            tmp_idx.write_text(json.dumps(idx, indent=2), encoding="utf-8")
+            os.replace(tmp_idx, index_path)
+        except OSError as exc:
+            _LOG.warning(
+                "Failed to save cache index to %s (%s)",
+                index_path,
+                exc,
+            )
+            try:
+                if tmp_idx.exists():
+                    tmp_idx.unlink()
+            except OSError:
+                pass
 
 
 def _amplitude_matches(saved: object, requested: float) -> bool:

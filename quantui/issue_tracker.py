@@ -29,9 +29,10 @@ import json
 import os
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 _LOCK = threading.Lock()
 
@@ -64,10 +65,25 @@ CREATE TABLE IF NOT EXISTS issues (
 """
 
 
+@contextmanager
+def _connect(path: Path) -> Iterator[sqlite3.Connection]:
+    """Open *path*, commit on success, and always CLOSE the connection.
+
+    ``sqlite3.connect`` used as a context manager only commits/rolls back;
+    it never closes, so every call leaked a connection (audit DATA-17).
+    """
+    conn = sqlite3.connect(str(path))
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
+
+
 def _init_db() -> None:
     db = _db_path()
     db.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(str(db)) as conn:
+    with _connect(db) as conn:
         conn.execute(_CREATE_TABLE)
         conn.commit()
 
@@ -98,7 +114,7 @@ def log_issue(
     ts = datetime.now(timezone.utc).isoformat()
     ctx_json = json.dumps(context or {}, ensure_ascii=False)
     with _LOCK:
-        with sqlite3.connect(str(_db_path())) as conn:
+        with _connect(_db_path()) as conn:
             cursor = conn.execute(
                 "INSERT INTO issues (timestamp, description, session_id, context_json)"
                 " VALUES (?, ?, ?, ?)",
@@ -136,7 +152,7 @@ def get_issues(n: int = 50) -> list[dict]:
     db = _db_path()
     if not db.exists():
         return []
-    with sqlite3.connect(str(db)) as conn:
+    with _connect(db) as conn:
         rows = conn.execute(
             "SELECT id, timestamp, description, session_id, context_json"
             " FROM issues ORDER BY id DESC LIMIT ?",
@@ -164,7 +180,7 @@ def clear_issues() -> None:
     if not db.exists():
         return
     with _LOCK:
-        with sqlite3.connect(str(db)) as conn:
+        with _connect(db) as conn:
             conn.execute("DROP TABLE IF EXISTS issues")
             conn.execute(_CREATE_TABLE)
             conn.commit()

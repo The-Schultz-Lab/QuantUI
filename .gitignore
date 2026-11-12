@@ -65,3 +65,7 @@ nul
 .claudeignore
 .apptainer-build-tmp/
 quantui-gpu.sif
+
+# Local symlink to the private planning repo (see CLAUDE.md / DEV-ENVIRONMENT);
+# never commit it — `git add -A` would otherwise add the symlink (audit INFRA-20).
+.plans

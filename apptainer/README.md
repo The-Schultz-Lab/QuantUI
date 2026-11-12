@@ -25,7 +25,6 @@ air-gapped or restricted-network classroom.
 | `verify-gpu.sh` | Seven-step (0–6) check that a GPU image really reaches the GPU |
 | `_build_env.sh` | Shared build-scratch setup sourced by both build scripts (moves scratch off a small `/tmp`) |
 | `slurm/quantui-gpu-test.sbatch` | Batch template for verifying on a cluster |
-| `slurm/quantui-batch.sbatch` | Batch template for running a QuantUI calculation |
 | `slurm/README.md` | SLURM batch guide: `quantui-batch`, job folders, operator variables |
 | `ncshare-gpu-diagnostic.ipynb` | Interactive diagnostic to run **inside** the image on a GPU node |
 | `make_ncshare_diagnostic.py` | Generates that notebook (edit here, not the `.ipynb`) |

@@ -197,6 +197,8 @@ class PyfockEngine:
             gpu_name=_gpu_name,
         )
         native = result.to_session_result()
+        # EngineResult carries no spin; PyFock only runs closed-shell singlets.
+        native.multiplicity = request.multiplicity
         _attach_analysis(native, mol, basis, dft, density, atoms, coordinates, warnings)
         result.native_result = native
         return result
@@ -283,7 +285,34 @@ class PyfockEngine:
                 "PyFock solvent models are not enabled.",
                 user_message="Implicit solvent is not available with PyFock.",
             )
-        _molecule_arrays(request.molecule)
+        atoms, _coords = _molecule_arrays(request.molecule)
+        heavy = _ecp_elements(atoms)
+        if heavy:
+            raise UnsupportedCapabilityError(
+                f"PyFock has no ECP support for {', '.join(heavy)}.",
+                user_message=(
+                    f"{', '.join(heavy)} need an effective core potential "
+                    "(ECP) with the def2 basis sets, which PyFock does not "
+                    "apply. Select PySCF for elements beyond krypton."
+                ),
+            )
+
+
+# def2 basis sets put an ECP on every element after Kr (Z > 36); PyFock would
+# run those all-electron against a valence-only basis (garbage energies).
+_MAX_ALL_ELECTRON_Z = 36
+
+
+def _ecp_elements(atoms) -> list:
+    """Element symbols in ``atoms`` that need a def2 ECP, sorted, unique."""
+    from quantui.config import ATOMIC_NUMBERS
+
+    found = set()
+    for atom in atoms:
+        sym = str(atom).strip().title()
+        if ATOMIC_NUMBERS.get(sym, 0) > _MAX_ALL_ELECTRON_Z:
+            found.add(sym)
+    return sorted(found)
 
 
 def _load_pyfock_api():

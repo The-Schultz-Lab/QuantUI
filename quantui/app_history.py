@@ -26,6 +26,8 @@ from . import theme as _theme
 HISTORY_CALC_TYPE_FACETS = [
     ("SP", "single_point"),
     ("GeoOpt", "geometry_opt"),
+    ("TS", "transition_state"),
+    ("IRC", "irc"),
     ("Freq", "frequency"),
     ("UV-Vis", "tddft"),
     ("NMR", "nmr"),

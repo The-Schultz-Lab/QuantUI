@@ -145,7 +145,9 @@ class PESScanResult:
             return "No scan points computed."
         e_min = min(finite)
         e_max = max(finite)
-        barrier = (e_max - e_min) * _HARTREE_TO_KCAL
+        # max − min over the scan: not a barrier unless the scan runs from a
+        # minimum over the barrier top (the result card says "Energy range").
+        e_range = (e_max - e_min) * _HARTREE_TO_KCAL
         min_idx = self.energies_hartree.index(e_min)
         lines = [
             "=" * 60,
@@ -158,7 +160,7 @@ class PESScanResult:
             f" → {self.scan_parameter_values[-1]:.3f} {self.scan_unit}",
             f"  Scan points    : {self.n_steps}",
             f"  Min energy     : {e_min:.8f} Ha  (point {min_idx + 1})",
-            f"  Barrier height : {barrier:.2f} kcal/mol",
+            f"  Energy range   : {e_range:.2f} kcal/mol",
             f"  All converged  : {'Yes' if self.converged_all else 'No'}",
             "=" * 60,
         ]
@@ -476,15 +478,19 @@ def run_pes_scan(
 
     # --- Set up ASE atoms + PySCF calculator ---
     atoms = molecule_to_atoms(molecule)
+    _stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
+    # The stream lets the calculator's D3-missing and SCF-rescue notices
+    # reach the scan log (they were dropped without it).
     atoms.calc = _QuantUIPySCFCalc(
         method=method,
         basis=basis,
         charge=molecule.charge,
         spin=molecule.multiplicity - 1,
         scf_rescue=scf_rescue,
+        progress_stream=_stream,
+        status_label="PES scan",
     )
 
-    _stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
     _null = io.StringIO()
 
     # Cooperative cancel — checked between scan points, per BFGS step,
@@ -504,8 +510,8 @@ def run_pes_scan(
         and stop > 0
         and start != stop
     ):
-        lo, hi = (start, stop) if start < stop else (stop, start)
-        scan_values = np.geomspace(lo, hi, steps).tolist()
+        # Keep the requested direction (descending stays descending).
+        scan_values = np.geomspace(start, stop, steps).tolist()
     else:
         scan_values = np.linspace(start, stop, steps).tolist()
 

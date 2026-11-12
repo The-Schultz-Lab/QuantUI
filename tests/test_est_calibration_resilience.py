@@ -238,7 +238,10 @@ class TestRunCalibrationStructure:
         # button reaches the worker within poll_interval (500 ms).
         assert "stop_event" in src
         assert "is_set()" in src
-        assert ".terminate()" in src
+        # Termination goes through _terminate_worker_tree so the worker's
+        # own child processes (parallel IR pool) die with it (audit DATA-10).
+        assert "_terminate_worker_tree(worker)" in src
+        assert ".terminate()" in inspect.getsource(benchmarks._terminate_worker_tree)
 
     def test_saves_calibration_after_every_step(self):
         src = inspect.getsource(benchmarks.run_calibration)

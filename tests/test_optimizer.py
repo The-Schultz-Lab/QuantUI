@@ -628,6 +628,10 @@ class TestPyscfOnlyGateNotObsolete:
     both genuinely installed and working — 16 tests, per the audit.
     """
 
+    @pytest.mark.skipif(
+        not (ASE_AVAILABLE and _PYSCF_AVAILABLE),
+        reason="needs real ASE + PySCF (the gate is closed without them)",
+    )
     def test_gate_does_not_require_ase_calculators_pyscf(self):
         import importlib.util
 
@@ -651,3 +655,26 @@ class TestPyscfOnlyGateNotObsolete:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
+
+
+def test_gpu_banner_is_written_once_per_run(monkeypatch):
+    """Audit GEOM-11: the GPU banner used to repeat on every force call."""
+    pytest.importorskip("pyscf")
+    if not ASE_AVAILABLE:
+        pytest.skip("ASE not installed")
+    import quantui.gpu_offload as gpu_offload
+    from quantui.optimizer import optimize_geometry
+
+    monkeypatch.setattr(
+        gpu_offload, "try_to_gpu", lambda mf, method=None: (mf, True, "Fake GPU")
+    )
+    stream = io.StringIO()
+    res = optimize_geometry(
+        Molecule(["H", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 0.9]]),
+        "RHF",
+        "STO-3G",
+        progress_stream=stream,
+        steps=5,
+    )
+    assert res.n_steps >= 2
+    assert stream.getvalue().count("GPU offload active") == 1

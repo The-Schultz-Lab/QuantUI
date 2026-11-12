@@ -8,6 +8,7 @@ Provides classes and functions for representing molecular systems.
 import logging
 import math
 import numbers
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import config, utils
@@ -250,14 +251,16 @@ class Molecule:
         """
         return self.get_electron_count()
 
-    def get_spin(self) -> int:
+    def get_spin(self) -> float:
         """
         Get spin quantum number S from multiplicity (2S+1).
 
         Returns:
-            int: Number of unpaired electrons / 2
+            float: S = (multiplicity - 1) / 2 — 0.5 for a doublet. (Integer
+            division used to return 0 for a doublet; audit DATA-17.) PySCF's
+            ``mol.spin`` is 2S, i.e. ``multiplicity - 1``.
         """
-        return (self.multiplicity - 1) // 2
+        return (self.multiplicity - 1) / 2
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -329,15 +332,57 @@ def _count_xyz_frames(lines: List[str], count_idx: int, n_atoms: int) -> int:
     return max(frames, 1)
 
 
+#: Hydrogen isotope labels read as plain H (audit DATA-16).
+_ISOTOPE_LABELS = frozenset({"D", "T"})
+ISOTOPE_NOTE = (
+    "Hydrogen isotope labels (D/T) were read as H. QuantUI uses standard "
+    "isotope masses, so vibrational frequencies are those of the ordinary-H "
+    "molecule."
+)
+# Fortran double-precision exponent: 1.17D-01 -> 1.17e-01.
+_FORTRAN_EXP = re.compile(r"(?<=[\d.])[dD](?=[+-]?\d)")
+
+
+def normalize_xyz_text(text: str) -> str:
+    """Undo common text-encoding quirks in coordinate text (audit DATA-16).
+
+    Strips a UTF-8 byte-order mark (Windows Notepad), converts CRLF and
+    old-Mac CR line endings to LF, and turns the Unicode minus sign (U+2212,
+    from word processors and web pages) into an ASCII hyphen-minus.
+    """
+    text = text.lstrip("\ufeff")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text.replace("\u2212", "-")
+
+
+def _xyz_float(token: str) -> float:
+    """``float`` that also accepts Fortran ``D`` exponents."""
+    return float(_FORTRAN_EXP.sub("e", token))
+
+
+def _xyz_symbol(symbol: str) -> str:
+    """Element symbol with the D/T isotope labels mapped to H."""
+    return "H" if symbol in _ISOTOPE_LABELS else symbol
+
+
+def has_isotope_labels(xyz_text: str) -> bool:
+    """Whether any coordinate row of *xyz_text* uses a D or T label."""
+    for line in normalize_xyz_text(xyz_text).split("\n"):
+        parts = line.split()
+        if len(parts) >= 4 and parts[0] in _ISOTOPE_LABELS and _is_atom_row(line):
+            return True
+    return False
+
+
 def _is_atom_row(line: str) -> bool:
     """True if *line* reads as ``SYMBOL X Y Z`` (inline comments ignored)."""
     for comment_char in ("#", "!"):
         line = line.split(comment_char)[0]
     parts = line.split()
-    if len(parts) < 4 or not utils.validate_atom_symbol(parts[0]):
+    if len(parts) < 4 or not utils.validate_atom_symbol(_xyz_symbol(parts[0])):
         return False
     try:
-        float(parts[1]), float(parts[2]), float(parts[3])
+        _xyz_float(parts[1]), _xyz_float(parts[2]), _xyz_float(parts[3])
     except ValueError:
         return False
     return True
@@ -399,6 +444,8 @@ def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
     Raises:
         ValueError: If input format is invalid
     """
+    if xyz_text:
+        xyz_text = normalize_xyz_text(xyz_text)
     if not xyz_text or not xyz_text.strip():
         raise ValueError(
             "❌ Empty Input: Please provide XYZ coordinates.\n\n"
@@ -514,7 +561,7 @@ def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
                 f"  2. Three coordinate values (X, Y, Z)"
             )
 
-        atom_symbol = parts[0]
+        atom_symbol = _xyz_symbol(parts[0])
 
         # Validate atom symbol with helpful suggestions
         if not utils.validate_atom_symbol(atom_symbol):
@@ -581,7 +628,7 @@ def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
 
         # Parse coordinates
         try:
-            x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
+            x, y, z = _xyz_float(parts[1]), _xyz_float(parts[2]), _xyz_float(parts[3])
         except ValueError as e:
             raise ValueError(
                 f"❌ Line {orig_line_num}: Could not parse coordinates as numbers.\n\n"

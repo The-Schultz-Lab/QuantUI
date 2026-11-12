@@ -1087,15 +1087,17 @@ class TestResumedRunsGetTheirOwnResultDirectory:
     def test_directory_name_is_timestamped(self):
         import quantui.results_storage as R
 
-        src = Path(R.__file__).read_text(encoding="utf-8")
-        body = src[src.index("def save_result") :][:4000]
+        # Whole function: since audit DATA-11 the mkdir comes after the
+        # payload is serialised, past the first few thousand characters.
+        body = inspect.getsource(R.save_result)
         assert "%Y-%m-%d_%H-%M-%S-%f" in body
 
     def test_a_collision_never_reuses_an_existing_directory(self):
         import quantui.results_storage as R
 
-        src = Path(R.__file__).read_text(encoding="utf-8")
-        body = src[src.index("def save_result") :][:4000]
+        # Whole function: since audit DATA-11 the mkdir comes after the
+        # payload is serialised, past the first few thousand characters.
+        body = inspect.getsource(R.save_result)
         assert "while dest.exists():" in body
         assert "dest.mkdir(parents=True)" in body
         assert "exist_ok" not in body.split("dest.mkdir(parents=True)")[0][-200:]

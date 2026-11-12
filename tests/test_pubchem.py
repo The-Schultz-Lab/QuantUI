@@ -471,14 +471,19 @@ class TestPubChemIntegration:
             pytest.skip("PubChem not accessible")
 
     def test_real_student_friendly_glucose(self):
-        """Test student-friendly fetch of glucose."""
-        try:
-            xyz_string, message = student_friendly_fetch("glucose")
+        """Test student-friendly fetch of glucose.
 
-            assert xyz_string is not None
-            assert "Found 'glucose' in PubChem" in message
-        except Exception:
+        ``student_friendly_fetch`` never raises: it reports a failed
+        connection in its message. Skip only on that message. (Audit
+        INFRA-14: the asserts used to sit inside ``except Exception:
+        pytest.skip``, which turned every assertion failure into a skip.)
+        """
+        xyz_string, message = student_friendly_fetch("glucose")
+        if xyz_string is None and "Connection to PubChem failed" in message:
             pytest.skip("PubChem not accessible")
+
+        assert xyz_string is not None, message
+        assert "Found 'glucose' in PubChem" in message
 
 
 # ============================================================================

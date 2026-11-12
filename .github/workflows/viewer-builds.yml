@@ -168,5 +168,8 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           ls -la installers
-          gh release upload "$TAG" installers/QuantUI-Viewer-* \
+          # Unsigned installers: publish checksums so a download can at least
+          # be checked against what CI built.
+          (cd installers && sha256sum QuantUI-Viewer-* > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          gh release upload "$TAG" installers/QuantUI-Viewer-* installers/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --clobber

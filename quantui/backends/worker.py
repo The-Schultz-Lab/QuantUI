@@ -30,6 +30,7 @@ import logging
 import os
 import sys
 import time
+import traceback
 from pathlib import Path
 from typing import Any, Callable
 
@@ -293,6 +294,20 @@ def _maybe_run_preopt(
             staging_dir,
             f"Geometry optimization {conv} in {pre_opt.n_steps} steps.  E = {energy:.8f} Ha",
         )
+        # The app runs a required single point on the pre-optimized geometry
+        # before every calc type except Single Point (which is itself that
+        # single point); if it does not converge, the whole pre-opt is
+        # abandoned and the calculation runs at the input geometry. Same
+        # here, before the geometry is cached, so a reused cache has passed
+        # it (audit HPC-14).
+        if request.calc_type != "single_point":
+            _run_required_single_point(
+                request,
+                pre_opt.molecule,
+                staging_dir,
+                log_stream,
+                reason=f"after geometry optimization before {stage_label}",
+            )
         if write_preopt_trajectory and getattr(pre_opt, "trajectory", None):
             write_trajectory_json(
                 staging_dir,
@@ -423,6 +438,54 @@ def _ran_at(result: Any, molecule: Any) -> Any:
     return result
 
 
+# Fields app.py's "Geometry Opt" branch copies from the required final single
+# point onto the optimization result.
+_FINAL_SP_FIELDS = (
+    "mo_energy_hartree",
+    "mo_occ",
+    "mo_coeff",
+    "pyscf_mol_atom",
+    "pyscf_mol_basis",
+    "atom_symbols",
+    "mulliken_charges",
+    "npa_charges",
+    "bond_orders",
+    "dipole_moment_debye",
+    "dipole_vector_debye",
+)
+
+
+def _run_required_single_point(
+    request: CalculationRequest,
+    molecule,
+    staging_dir: Path,
+    log_stream,
+    *,
+    reason: str,
+) -> Any:
+    """Required single point on an optimized geometry (app.py's
+    ``_run_required_final_single_point``): raises if it does not converge."""
+    from quantui.session_calc import run_in_session
+
+    _append_log(
+        staging_dir,
+        f"\n-- Required single-point ({reason}) "
+        "on optimized geometry --------------------------------",
+    )
+    sp_result = run_in_session(
+        molecule=molecule,
+        method=request.method,
+        basis=request.basis,
+        progress_stream=log_stream,
+        solvent=request.solvent,
+        scf_rescue=bool((request.options or {}).get("scf_rescue", True)),
+    )
+    if not bool(getattr(sp_result, "converged", False)):
+        raise RuntimeError("Required post-optimization single-point did not converge.")
+    _append_log(staging_dir, "Required single-point converged on optimized geometry.")
+    return sp_result
+
+
 def _run_single_point(
     request: CalculationRequest, staging_dir: Path, log_stream
 ) -> Any:
@@ -503,50 +566,40 @@ def _run_geometry_opt(
         frozen_atoms=frozen,
     )
 
-    # Mirror app.py's interactive "Geometry Opt" + solvent handling: the
-    # optimization itself is solvated (every step), then a required PCM
-    # single point on the final geometry supplies the orbitals, populations
-    # and final energy, exactly as the app's _run_required_final_single_point.
-    if request.solvent:
-        _write_progress(
-            staging_dir, "running", "Running required solvated single point", 90.0
-        )
-        _append_log(
-            staging_dir,
-            "\n-- Required single-point (after geometry optimisation) "
-            "on optimized geometry --------------------------------",
-        )
-        from quantui.session_calc import run_in_session
-
-        sp_result = run_in_session(
-            molecule=result.molecule,
-            method=request.method,
-            basis=request.basis,
-            progress_stream=log_stream,
-            solvent=request.solvent,
-            scf_rescue=scf_rescue,
-        )
-        if not bool(getattr(sp_result, "converged", False)):
-            raise RuntimeError(
-                "Required post-optimization single-point did not converge."
+    # Mirror app.py's interactive "Geometry Opt": a required single point
+    # (solvated when the optimization was) on the final geometry always
+    # follows, and supplies the final energy, orbitals, populations and
+    # dipole — exactly as the app's _run_required_final_single_point, with
+    # or without a solvent (audit HPC-14).
+    _write_progress(staging_dir, "running", "Running required single point", 90.0)
+    sp_result = _run_required_single_point(
+        request,
+        result.molecule,
+        staging_dir,
+        log_stream,
+        reason="after geometry optimisation",
+    )
+    # ``energy_hartree`` is a read-only property derived from
+    # ``energies_hartree[-1]`` (there is no ``homo_lumo_gap_ev`` field on
+    # ``OptimizationResult`` either) — updating the last trajectory
+    # energy is how app.py's interactive path folds the result in too, so
+    # both surfaces agree on what "the" final energy is.
+    sp_energy = getattr(sp_result, "energy_hartree", None)
+    if (
+        isinstance(getattr(result, "energies_hartree", None), list)
+        and result.energies_hartree
+        and isinstance(sp_energy, (int, float))
+    ):
+        result.energies_hartree[-1] = float(sp_energy)
+    result.converged = bool(result.converged) and bool(sp_result.converged)
+    # Same fields, same fallbacks as app.py's Geometry Opt branch.
+    for field in _FINAL_SP_FIELDS:
+        try:
+            setattr(
+                result, field, getattr(sp_result, field, getattr(result, field, None))
             )
-        _append_log(
-            staging_dir,
-            "Required single-point converged on optimized geometry.",
-        )
-        # ``energy_hartree`` is a read-only property derived from
-        # ``energies_hartree[-1]`` (there is no ``homo_lumo_gap_ev`` field on
-        # ``OptimizationResult`` either) — updating the last trajectory
-        # energy is how app.py's interactive path folds the solvated result
-        # in too, so both surfaces agree on what "the" final energy is.
-        sp_energy = getattr(sp_result, "energy_hartree", None)
-        if (
-            isinstance(getattr(result, "energies_hartree", None), list)
-            and result.energies_hartree
-            and isinstance(sp_energy, (int, float))
-        ):
-            result.energies_hartree[-1] = float(sp_energy)
-        result.converged = bool(result.converged) and bool(sp_result.converged)
+        except (AttributeError, TypeError):
+            pass
 
     return result
 
@@ -1401,6 +1454,9 @@ def run_worker_request(
     except Exception as exc:  # noqa: BLE001 — worker boundary
         elapsed = time.perf_counter() - t0
         msg = str(exc)
+        # The full traceback goes to live.log (the only record a batch job
+        # leaves); the job record keeps the one-line message (audit HPC-14).
+        _append_log(staging_dir, traceback.format_exc().rstrip())
         _append_log(staging_dir, msg)
         return _error_result(
             request,
@@ -1414,6 +1470,13 @@ def run_worker_request(
 
     elapsed = time.perf_counter() - t0
     payload = _build_payload(calc_type, outcome, staging_dir, request)
+    warnings: list[str] = []
+    if not bool(payload.get("converged", False)):
+        warnings.append("Calculation did not fully converge")
+    # Kept in result.json too, not only on the in-memory CalculationResult
+    # that nothing reads after the job ends (audit HPC-14).
+    payload["elapsed_s"] = round(elapsed, 3)
+    payload["warnings"] = list(warnings)
     if attempt_dir is not None:
         # Before result.json: its presence is what marks the attempt done.
         names = _apply_descriptive_names(staging_dir, request_path.parent.name)
@@ -1423,11 +1486,6 @@ def run_worker_request(
 
     _update_tracked_record(request, "success", result_dir=str(staging_dir))
     _write_progress(staging_dir, "finalizing", "Calculation complete", 100.0)
-
-    warnings: list[str] = []
-    converged = bool(payload.get("converged", False))
-    if not converged:
-        warnings.append("Calculation did not fully converge")
 
     return CalculationResult(
         request_id=request.request_id,

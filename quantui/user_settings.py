@@ -165,7 +165,11 @@ class UserSettings:
             return cls()
         try:
             data = json.loads(resolved.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, ValueError, RecursionError) as exc:
+            # ValueError covers JSONDecodeError AND UnicodeDecodeError
+            # (non-UTF-8 bytes); RecursionError a pathologically nested
+            # file. Any of them used to escape and crash app construction
+            # (audit DATA-12).
             _LOG.warning(
                 "Failed to read settings at %s (%s); using defaults",
                 resolved,
@@ -390,10 +394,11 @@ class UserSettings:
             )
             return
 
+        payload = self._merge_unknown(self._read_existing(resolved), self.to_dict())
         tmp = resolved.with_suffix(resolved.suffix + ".tmp")
         try:
             tmp.write_text(
-                json.dumps(self.to_dict(), indent=2) + "\n",
+                json.dumps(payload, indent=2) + "\n",
                 encoding="utf-8",
             )
             os.replace(tmp, resolved)
@@ -408,6 +413,35 @@ class UserSettings:
                     tmp.unlink()
             except OSError:
                 pass
+
+    @staticmethod
+    def _read_existing(resolved: Path) -> dict:
+        """Return the settings file's current JSON object, or ``{}``."""
+        try:
+            data = json.loads(resolved.read_text(encoding="utf-8"))
+        except (OSError, ValueError, RecursionError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _merge_unknown(existing: dict, ours: dict) -> dict:
+        """Carry sections/keys this version does not know into *ours*.
+
+        A save used to rewrite the file from the three known sections only,
+        erasing anything a newer QuantUI (or a hand edit) had added (audit
+        DATA-12). Only a same-schema-version file is merged; known keys
+        always take this instance's values.
+        """
+        if existing.get("_schema_version") != ours.get("_schema_version"):
+            return ours
+        merged = dict(existing)
+        for key, value in ours.items():
+            old = existing.get(key)
+            if isinstance(value, dict) and isinstance(old, dict):
+                merged[key] = {**old, **value}
+            else:
+                merged[key] = value
+        return merged
 
     @classmethod
     def _resolve_path(cls, path: Path | None) -> Path:

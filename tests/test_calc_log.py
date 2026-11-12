@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 
 @pytest.fixture(autouse=True)
 def isolated_log_dir(tmp_path, monkeypatch):
-    """Point QUANTUI_LOG_DIR at a fresh temp directory for every test."""
+    """Point QUANTUI_LOG_DIR at a fresh temp directory for every test.
+
+    ``calc_log._log_dir()`` reads the env var on every call, so no
+    ``importlib.reload`` is needed (audit INFRA-18: reloading replaced the
+    module's globals under every other module holding a reference to it).
+    The one piece of per-process state a test depends on, the prune
+    throttle counter, is reset explicitly.
+    """
     monkeypatch.setenv("QUANTUI_LOG_DIR", str(tmp_path))
     import quantui.calc_log as clog
 
-    importlib.reload(clog)
+    monkeypatch.setattr(clog, "_events_since_prune", 0)
     yield tmp_path
 
 

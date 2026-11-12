@@ -43,8 +43,9 @@ pip install -e ".[pyscf,ase,dev,xtb,ts]"
 This mirrors the Linux job in `.github/workflows/ci.yml`. A `SessionStart`
 hook (`.claude/hooks/`) does this automatically on cloud sessions so the suite
 and linters are runnable immediately. If the container's default `python` is
-outside 3.9–3.11 (e.g. 3.13), that install can fail (`pyscf-properties` does
-not build); create a 3.11 env instead, e.g.
+outside 3.9–3.11 (e.g. 3.13), a plain install fails (`pyscf-properties` does
+not build), so the hook creates a 3.11 venv in `.venv` (via `uv`, else
+`python3.11`), installs there and puts it on `PATH` for the session. By hand:
 `uv venv -p python3.11 .venv && . .venv/bin/activate` and install as above.
 
 **Local (conda):** use [`local-setup/environment.yml`](local-setup/environment.yml)
@@ -62,7 +63,7 @@ pytest tests/test_foo.py -n0  # one test, serial (breakpoints work; -n=auto is o
 pre-commit run --all-files    # file hygiene + nbstripout + black (26.5.1) + ruff (v0.16.0); mypy runs on pre-push and in CI
 ```
 
-Test baseline (see STATUS): **~4120 passed / 24 skipped** for
+Test baseline (see STATUS): **~4680 passed / 11 skipped** for
 `pytest -m "not network"` (cloud, Python 3.11, 2026-11). `network`-marked tests
 need internet (live PubChem) — skip them in the cloud.
 

@@ -145,3 +145,26 @@ class TestRunValidation:
 
     def test_valid_modes_constant(self):
         assert set(VALID_MODES) == {"hole", "electron", "both"}
+
+
+def test_channel_converged_includes_the_neutral_optimization(monkeypatch):
+    """Audit GEOM-11: λ uses both geometries, so an unconverged neutral
+    optimization makes every channel unconverged, not just the overall flag."""
+    from types import SimpleNamespace
+
+    import quantui.reorganization_energy as R
+
+    def _fake_opt(*, molecule, **kw):
+        neutral = "neutral" in str(kw.get("status_label", ""))
+        return SimpleNamespace(molecule=molecule, n_steps=1, converged=not neutral)
+
+    monkeypatch.setattr(R, "optimize_geometry", _fake_opt)
+    monkeypatch.setattr(
+        R,
+        "run_in_session",
+        lambda **kw: SimpleNamespace(converged=True, energy_hartree=-1.0),
+    )
+    h2 = Molecule(["H", "H"], [[0, 0, 0], [0, 0, 0.74]])
+    res = R.run_reorganization_energy(h2, mode="both", method="RHF", basis="STO-3G")
+    assert res.converged is False
+    assert [ch.converged for ch in res.channels] == [False, False]

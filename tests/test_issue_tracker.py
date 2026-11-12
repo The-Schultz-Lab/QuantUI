@@ -2,21 +2,15 @@
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 
 @pytest.fixture(autouse=True)
 def isolated_log_dir(tmp_path, monkeypatch):
     """Point QUANTUI_LOG_DIR at a fresh tmp dir for every test."""
+    # issue_tracker._log_dir() (and calc_log's) read the env var on every
+    # call, so no importlib.reload is needed (audit INFRA-18).
     monkeypatch.setenv("QUANTUI_LOG_DIR", str(tmp_path))
-    # Reload so _log_dir() picks up the new env var via os.environ.get()
-    import quantui.calc_log as clog
-    import quantui.issue_tracker as tracker
-
-    importlib.reload(clog)
-    importlib.reload(tracker)
     yield tmp_path
 
 

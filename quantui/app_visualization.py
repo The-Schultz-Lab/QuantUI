@@ -7,11 +7,11 @@ import logging
 import threading
 import time
 from contextlib import contextmanager
+from html import escape as _escape  # for scopes where `html` is a local str
 from pathlib import Path
 from typing import Any, List, Optional, cast
 
 import ipywidgets as widgets
-from IPython.display import HTML, display
 
 from quantui import theme as _theme
 from quantui.app_builders import (
@@ -44,6 +44,26 @@ def _start_daemon(target: Any, *args: Any, **kwargs: Any) -> bool:
         target(*args, **kwargs)
         return False
     return True
+
+
+def _show_plot_error(app: Any, out: Any, what: str, exc: BaseException) -> None:
+    """Replace a plot that failed to rebuild with a visible error.
+
+    The ``except`` paths used to log and null the stored figure but leave the
+    Output widget alone, so the previous result's plot stayed on screen as if
+    it belonged to this one (audit VIZ-11).
+    """
+    if out is None:
+        return
+    detail = html.escape(f"{type(exc).__name__}: {exc}")
+    try:
+        app._set_html_output(
+            out,
+            f'<p style="color:#b91c1c;padding:8px">⚠ {html.escape(what)} could '
+            f"not be plotted: {detail}</p>",
+        )
+    except Exception:  # noqa: BLE001 — error display must never raise
+        pass
 
 
 @contextmanager
@@ -261,7 +281,7 @@ def on_traj_expand(app: Any, change: dict[str, Any]) -> None:
             widgets.HTML(
                 value=(
                     f'<p style="color:#b91c1c;padding:8px">'
-                    f"⚠ Trajectory rendering failed: {exc}</p>"
+                    f"⚠ Trajectory rendering failed: {html.escape(str(exc))}</p>"
                 )
             ),
         )
@@ -398,7 +418,7 @@ def show_opt_trajectory(
                 "data": {
                     "text/html": (
                         '<p style="color:#b91c1c;padding:8px">'
-                        f"Trajectory viewer failed: {exc}</p>"
+                        f"Trajectory viewer failed: {_escape(str(exc))}</p>"
                     )
                 },
                 "metadata": {},
@@ -455,7 +475,8 @@ def show_opt_trajectory(
                     "value",
                     (
                         f'<span style="color:#16a34a;font-size:12px">'
-                        f"✓ Saved: {out_path}</span> " + _download_link_html(out_path)
+                        f"✓ Saved: {_escape(str(out_path))}</span> "
+                        + _download_link_html(out_path)
                     ),
                 )
             except Exception as exc:
@@ -463,7 +484,8 @@ def show_opt_trajectory(
                     setattr,
                     export_status,
                     "value",
-                    f'<span style="color:#b91c1c">Export failed: {exc}</span>',
+                    '<span style="color:#b91c1c">Export failed: '
+                    f"{_escape(str(exc))}</span>",
                 )
             finally:
                 app._queue_main_thread_callback(setattr, _btn, "disabled", False)
@@ -509,75 +531,6 @@ def show_opt_trajectory(
         _clog_sp.log_event("traj_show_panel", f"n={n} single_viewer=1")
     except Exception:
         pass
-
-
-def traj_step_html(
-    app: Any, step: int, traj: list[Any], energies: list[Any], rel_e: list[Any]
-) -> str:
-    """One-line info label for a trajectory step index."""
-    n = len(traj)
-    mol = traj[step]
-    e_abs = f"{energies[step]:.8f} Ha" if energies and step < len(energies) else "—"
-    delta = (
-        f" &nbsp;·&nbsp; ΔE = {rel_e[step]:+.3f} kcal/mol"
-        if rel_e and step < len(rel_e)
-        else ""
-    )
-    return (
-        f'<span style="font-size:12px;color:#666">'
-        f"Step {step} / {n - 1} &nbsp;·&nbsp; {mol.get_formula()}"
-        f" &nbsp;·&nbsp; E = {e_abs}{delta}</span>"
-    )
-
-
-def render_traj_frame(app: Any, molecule: Any, output_widget: Any) -> None:
-    """Render one trajectory frame into output widget."""
-    try:
-        from quantui.visualization_py3dmol import visualize_molecule_plotlymol
-
-        fig = visualize_molecule_plotlymol(
-            molecule, mode="ball+stick", resolution=8, width=460, height=340
-        )
-        scene_bg = app._plotly_theme_colors()["scene_bgcolor"]
-        fig.update_layout(paper_bgcolor="white", scene=dict(bgcolor=scene_bg))
-        output_widget.clear_output()
-        with output_widget:
-            display(fig)
-        return
-    except Exception:  # noqa: BLE001 — any PlotlyMol failure (missing
-        # backend, or the RDKit valence error a transition metal raises) must
-        # fall through to the py3Dmol renderer below, never crash the frame.
-        pass
-
-    # Fallback: py3Dmol
-    try:
-        from quantui.viz_assets import make_view
-
-        xyz = (
-            f"{len(molecule.atoms)}\n"
-            f"{molecule.get_formula()}\n"
-            f"{molecule.to_xyz_string()}"
-        )
-        view = make_view(width=460, height=340)
-        view.addModel(xyz, "xyz")
-        view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
-        from quantui.visualization_py3dmol import decorate_py3dmol_coordination_bonds
-
-        decorate_py3dmol_coordination_bonds(view, molecule.atoms, molecule.coordinates)
-        view.setBackgroundColor("white")
-        view.zoomTo()
-        orient_view(view, molecule.coordinates)
-        output_widget.clear_output()
-        with output_widget:
-            display(view)
-    except Exception as exc:
-        output_widget.clear_output()
-        with output_widget:
-            display(
-                HTML(
-                    f'<p style="color:#b91c1c;padding:8px">Frame render failed: {exc}</p>'
-                )
-            )
 
 
 def build_vib_data_from_freq_result(app: Any, freq_result: Any, molecule: Any) -> Any:
@@ -911,6 +864,7 @@ def update_ir_figure(app: Any, mode: str, fwhm: float) -> None:
             _clog.log_event("ir_fig_error", f"{type(exc).__name__}: {exc}"[:300])
         except Exception:
             pass
+        _show_plot_error(app, getattr(app, "_ir_fig", None), "IR spectrum", exc)
 
 
 def show_raman_spectrum(app: Any, freq_result: Any) -> bool:
@@ -1040,6 +994,7 @@ def update_raman_figure(app: Any, mode: str, fwhm: float) -> None:
             _clog.log_event("raman_fig_error", f"{type(exc).__name__}: {exc}"[:300])
         except Exception:
             pass
+        _show_plot_error(app, getattr(app, "_raman_fig", None), "Raman spectrum", exc)
 
 
 def show_uv_vis_spectrum(
@@ -1118,14 +1073,20 @@ def uv_excitation_table_html(
     strengths: List[float],
     energies_ev: List[float],
     x_range: Optional[tuple[float, float]] = None,
+    state_prefix: str = "S",
 ) -> str:
-    """Excited states by energy: state, E (eV), λ (nm), f."""
+    """Excited states by energy: state, E (eV), λ (nm), f.
+
+    *state_prefix* is ``"S"`` only for a singlet manifold (closed-shell
+    restricted reference); open-shell states are numbered without it (see
+    ``app_formatters.tddft_state_prefix``).
+    """
     rows = sorted(zip(energies_ev, wavelengths_nm, strengths))
     if not rows:
         return ""
     cell = "padding:2px 12px;text-align:right"
     body = "".join(
-        f"<tr><td style='{cell}'>S{i}</td><td style='{cell}'>{e:.3f}</td>"
+        f"<tr><td style='{cell}'>{state_prefix}{i}</td><td style='{cell}'>{e:.3f}</td>"
         f"<td style='{cell}'>{w:.1f}</td><td style='{cell}'>{f:.4f}</td></tr>"
         for i, (e, w, f) in enumerate(rows, start=1)
     )
@@ -1276,6 +1237,7 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
             list(getattr(app, "_last_uv_energies_ev", []) or [])
             or [1239.84198 / w for w in wl],
             (x_min, x_max),
+            state_prefix=getattr(app, "_tddft_state_prefix", "S"),
         )
         app._set_html_output(
             app._tddft_fig,
@@ -1294,6 +1256,7 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
             _clog.log_event("uv_fig_error", f"{type(exc).__name__}: {exc}"[:300])
         except Exception:
             pass
+        _show_plot_error(app, getattr(app, "_tddft_fig", None), "UV-Vis spectrum", exc)
 
 
 # ── ECD (electronic circular dichroism) ─────────────────────────────────────
@@ -1366,8 +1329,12 @@ def ecd_state_table_html(
     energies_ev: List[float],
     rot_velocity: List[float],
     rot_length: List[Optional[float]],
+    state_prefix: str = "S",
 ) -> str:
-    """Excited states by energy: state, E (eV), λ (nm), R_vel, R_len."""
+    """Excited states by energy: state, E (eV), λ (nm), R_vel, R_len.
+
+    *state_prefix* as in :func:`uv_excitation_table_html`.
+    """
     if not energies_ev:
         return ""
     cell = "padding:2px 12px;text-align:right"
@@ -1377,7 +1344,7 @@ def ecd_state_table_html(
     ):
         rl_txt = f"{rl:.3f}" if rl is not None else "—"
         body += (
-            f"<tr><td style='{cell}'>S{i}</td><td style='{cell}'>{e:.3f}</td>"
+            f"<tr><td style='{cell}'>{state_prefix}{i}</td><td style='{cell}'>{e:.3f}</td>"
             f"<td style='{cell}'>{1239.84193 / e:.1f}</td>"
             f"<td style='{cell}'>{rv:.3f}</td><td style='{cell}'>{rl_txt}</td></tr>"
         )
@@ -1444,6 +1411,7 @@ def update_ecd_figure(app: Any, mode: str, sigma_ev: float) -> None:
                 energies,
                 rot,
                 list(getattr(app, "_last_ecd_rot_length", []) or [None] * len(rot)),
+                state_prefix=getattr(app, "_tddft_state_prefix", "S"),
             ),
         )
     except Exception as exc:
@@ -1454,6 +1422,7 @@ def update_ecd_figure(app: Any, mode: str, sigma_ev: float) -> None:
             _clog.log_event("ecd_fig_error", f"{type(exc).__name__}: {exc}"[:300])
         except Exception:
             pass
+        _show_plot_error(app, getattr(app, "_ecd_fig", None), "ECD spectrum", exc)
 
 
 def show_nmr_spectrum(
@@ -1591,6 +1560,7 @@ def update_nmr_figure(app: Any, nucleus: str) -> None:
             _clog.log_event("nmr_fig_error", f"{type(exc).__name__}: {exc}"[:300])
         except Exception:
             pass
+        _show_plot_error(app, getattr(app, "_nmr_fig", None), "NMR spectrum", exc)
 
 
 def _attach_mo_irreps(info: Any, result: Any) -> None:
@@ -1666,6 +1636,7 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
     sync_iso_surface_controls(app)
 
     plotly_rendered = False
+    plot_exc: Optional[BaseException] = None
     try:
 
         from quantui.orbital_visualization import plot_orbital_diagram_plotly
@@ -1681,8 +1652,8 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
         app._last_orb_fig = fig
         app._set_html_output(app._orb_diagram_html, _orb_screen_html(fig))
         plotly_rendered = True
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 — fall back to matplotlib below
+        plot_exc = exc
 
     if not plotly_rendered:
         app._last_orb_fig = None
@@ -1709,8 +1680,13 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
                     'style="max-width:100%;height:auto" />'
                 ),
             )
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            _show_plot_error(
+                app,
+                getattr(app, "_orb_diagram_html", None),
+                "Orbital energy diagram",
+                plot_exc or exc,
+            )
 
     if (
         app._last_orb_mo_coeff is not None
@@ -1856,6 +1832,11 @@ def on_iso_generate(app: Any, btn: Any) -> None:
             _sp = getattr(app, "_iso_spinner", None)
             if _sp is not None:
                 _sp.layout.display = "none"
+
+    # Cancel ends the activity through this same idempotent hook, so the
+    # worker's later completion cannot decrement the counter a second time
+    # and leave the toolbar showing Idle while something else runs (VIZ-9).
+    app._iso_finish_activity = _finish_activity
 
     def _reset_button() -> None:
         _finish_activity()
@@ -2268,7 +2249,7 @@ def render_orbital_isosurface(
             app._set_html_output(
                 app._orb_iso_output,
                 f'<p style="color:#b91c1c;padding:8px">'
-                f"⚠ Orbital isosurface failed: {msg}</p>",
+                f"⚠ Orbital isosurface failed: {html.escape(msg)}</p>",
             )
 
         app._queue_main_thread_callback(_show_err)
@@ -2341,7 +2322,8 @@ def render_density_surface(
         app._queue_main_thread_callback(
             app._set_html_output,
             app._orb_iso_output,
-            f'<p style="color:#b91c1c;padding:8px">⚠ {msg}</p>',
+            # Plain text: messages carry exception text (audit VIZ-12).
+            f'<p style="color:#b91c1c;padding:8px">⚠ {html.escape(msg)}</p>',
         )
 
     mo_coeff = getattr(app, "_last_orb_mo_coeff", None)
@@ -2511,8 +2493,12 @@ def _swap_vib_output(app: Any, html_str: str) -> None:
 
 
 def _vib_err(app: Any, msg: str) -> None:
-    """Show an error message in the vibrational animation output panel."""
-    _swap_vib_output(app, f'<p style="color:#b91c1c;padding:8px">⚠ {msg}</p>')
+    """Show a plain-text error message in the vibrational animation panel.
+
+    Escaped: callers pass exception text (audit VIZ-12)."""
+    _swap_vib_output(
+        app, f'<p style="color:#b91c1c;padding:8px">⚠ {html.escape(msg)}</p>'
+    )
 
 
 # JS snippet appended to every py3Dmol vib HTML payload. Patches
@@ -2894,8 +2880,8 @@ def _render_vib_mode_plotlymol(
         if not _is_vib_stale(app, render_token):
             _vib_err(
                 app,
-                f"PlotlyMol vibrational animation requires plotlymol3d "
-                f"(<code>pip install plotlymol3d</code>): {exc}",
+                "PlotlyMol vibrational animation requires plotlymol3d "
+                f"(pip install plotlymol3d): {exc}",
             )
         return
 
@@ -3114,10 +3100,16 @@ def on_iso_cancel(app: Any, btn: Any = None) -> None:
     sp = getattr(app, "_iso_spinner", None)
     if sp is not None:
         sp.layout.display = "none"
-    try:
-        app._activity_end(kind="compute")
-    except Exception:  # noqa: BLE001 — cancelling must never raise
-        pass
+    # End THIS generation's activity via its own once-only hook (set by
+    # on_iso_generate). Calling _activity_end directly decremented the
+    # counter here and again when the worker finished (audit VIZ-9).
+    finish = getattr(app, "_iso_finish_activity", None)
+    app._iso_finish_activity = None
+    if callable(finish):
+        try:
+            finish()
+        except Exception:  # noqa: BLE001 — cancelling must never raise
+            pass
     status = getattr(app, "_iso_export_status", None)
     if status is not None:
         status.value = '<span style="color:#555">Cancelled.</span>'
@@ -3448,7 +3440,7 @@ _STEPPER_JS = """
   if(abB)   abB.onclick  =function(){ stop();draw(cur===0?N-1:0); };
   if(slider)slider.oninput=function(){ stop();draw(parseInt(slider.value,10)); };
   window["__quantuiTrajGoTo_"+UID]=function(i){ stop(); draw(i); };
-  window.__quantuiTrajGoTo=window["__quantuiTrajGoTo_"+UID];
+  __GOTO_GLOBAL__
   var t=0, poll=setInterval(function(){ t++;
     if(vw()){ clearInterval(poll); draw(cur); }
     else if(t>200){ clearInterval(poll);
@@ -3471,6 +3463,7 @@ def _frame_stepper_controls(
     scrub_title: str = "Scrub frames",
     start_index: int | None = None,
     extra_decls: str = "",
+    register_goto: bool = False,
 ) -> str:
     """Build in-HTML stepper controls (prev/play/next, scrub slider, optional
     A/B flip, live label) for a single multi-frame py3Dmol viewer.
@@ -3483,6 +3476,11 @@ def _frame_stepper_controls(
     HTML for frame ``i``; ``extra_decls`` is JS injected at the top of the IIFE
     (e.g. per-frame energy arrays). ``loop`` makes Play cycle forever, else it
     runs once and stops on the last frame.
+
+    ``register_goto`` also publishes the stepper as the unqualified
+    ``window.__quantuiTrajGoTo`` that a PES-plot click calls. Only the
+    trajectory panel's viewer sets it: when every stepper did, the click drove
+    whichever was built last (a reorg or pre-opt preview, say) (audit VIZ-8).
     """
 
     btn = _STEPPER_BTN_STYLE
@@ -3524,6 +3522,14 @@ def _frame_stepper_controls(
         .replace("__AB_OTHER__", _script_json(ab_other or ""))
         .replace("__EXTRA__", extra_decls)
         .replace("__LABEL_BODY__", label_js)
+        .replace(
+            "__GOTO_GLOBAL__",
+            (
+                'window.__quantuiTrajGoTo=window["__quantuiTrajGoTo_"+UID];'
+                if register_goto
+                else ""
+            ),
+        )
     )
     return bar + f"<script>{js}</script>"
 
@@ -3921,6 +3927,7 @@ def build_trajectory_viewer_html(
         ab_other="⇄ First step (input)",
         scrub_title="Scrub the optimization steps",
         extra_decls=f"var EABS={eabs}; var EREL={erel};",
+        register_goto=True,  # the PES plot's click target
     )
     return _theme.frame_viewer_html(view_html, width=width, controls=controls)
 
@@ -4666,9 +4673,11 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
 })();
 </script>"""
         app._set_html_output(app._pes_plot_html, plot_html + (link_js if _link else ""))
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
         app._last_pes_fig = None
-        pass
+        _show_plot_error(
+            app, getattr(app, "_pes_plot_html", None), "PES energy profile", exc
+        )
 
     return True
 

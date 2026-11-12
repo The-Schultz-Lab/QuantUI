@@ -24,7 +24,7 @@ print(mol.to_xyz_string())
 # Test visualization
 print("\n5. Creating 3D visualization...")
 try:
-    fig = visualize_molecule(mol, mode="ball+stick")
+    fig = visualize_molecule(mol, backend="plotlymol", mode="ball+stick")
     print(f"   - Figure created: {fig is not None}")
     print(f"   - Number of traces: {len(fig.data)}")
     print(f"   - Figure title: {fig.layout.title.text}")

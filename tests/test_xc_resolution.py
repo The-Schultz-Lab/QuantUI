@@ -29,8 +29,6 @@ live in the other module suites that already gate on ``_PYSCF_AVAILABLE``.
 
 from __future__ import annotations
 
-import inspect
-
 import pytest
 
 from quantui.session_calc import (
@@ -249,54 +247,102 @@ class TestD3RealPySCF:
 # =====================================================================
 
 
-class TestEntryPointsUseHelpers:
-    """The bug bit because freq_calc / tddft_calc / optimizer / nmr_calc
-    bypassed the alias lookup. These source-level tests guard against
-    a regression that re-introduces ``mf.xc = method`` directly.
+class _ReachedD3(BaseException):
+    """Raised by the spy once an entry point reaches ``maybe_apply_d3``.
+
+    A BaseException so the entry points' own ``except Exception`` rescue /
+    fallback paths cannot swallow it; nothing after the SCF setup runs.
     """
 
-    def test_session_calc_uses_resolve_xc(self):
-        # The real DFT branch lives in ``_run_session_calc_body`` (inner
-        # function ``run_in_session`` calls), so grep the module source
-        # rather than just the public wrapper.
-        from quantui import session_calc
 
-        src = inspect.getsource(session_calc)
-        assert "resolve_xc(method)" in src
-        assert "maybe_apply_d3(" in src
-        assert "mf, method, progress_stream=progress_stream" in src
+try:
+    import pyscf  # noqa: F401
 
-    def test_freq_calc_uses_resolve_xc(self):
-        from quantui import freq_calc
+    _PYSCF_AVAILABLE = True
+except ImportError:
+    _PYSCF_AVAILABLE = False
 
-        # The full module source — covers both the outer SCF setup and
-        # any inner SCF helpers.
-        src = inspect.getsource(freq_calc)
-        assert "resolve_xc" in src
-        # The inner displaced-SCF helper reads mf.xc directly (which by
-        # then is already resolved), so maybe_apply_d3 only appears in
-        # the outer setup. One usage is enough.
 
-    def test_tddft_calc_uses_resolve_xc(self):
-        from quantui import tddft_calc
+class TestEntryPointsUseHelpers:
+    """The bug bit because freq_calc / tddft_calc / optimizer / nmr_calc
+    bypassed the alias lookup (``mf.xc = method``). Behavioural (audit
+    INFRA-19): each entry point is run with ``PBE-D3`` (a display name that
+    is not a valid PySCF xc) and must hand ``maybe_apply_d3`` an SCF object
+    whose ``xc`` is already ``resolve_xc("PBE-D3")``. The spy stops the run
+    there, so no SCF is solved. These used to be ``inspect.getsource``
+    string checks, which a dead copy of the call would also satisfy.
+    """
 
-        src = inspect.getsource(tddft_calc)
-        assert "resolve_xc" in src
-        assert "maybe_apply_d3" in src
+    @pytest.fixture
+    def spy(self, monkeypatch):
+        import quantui.session_calc as sc
 
-    def test_optimizer_uses_resolve_xc(self):
-        from quantui import optimizer
+        calls = {"resolve": [], "d3": []}
+        real_resolve = sc.resolve_xc
 
-        src = inspect.getsource(optimizer)
-        assert "resolve_xc" in src
-        assert "maybe_apply_d3" in src
+        def _resolve(method):
+            calls["resolve"].append(method)
+            return real_resolve(method)
 
-    def test_nmr_calc_uses_resolve_xc(self):
-        from quantui import nmr_calc
+        def _d3(mf, method, progress_stream=None):
+            calls["d3"].append((getattr(mf, "xc", None), method))
+            raise _ReachedD3()
 
-        src = inspect.getsource(nmr_calc)
-        assert "resolve_xc" in src
-        assert "maybe_apply_d3" in src
+        monkeypatch.setattr(sc, "resolve_xc", _resolve)
+        monkeypatch.setattr(sc, "maybe_apply_d3", _d3)
+        return calls
+
+    @staticmethod
+    def _h2():
+        from quantui.molecule import Molecule
+
+        return Molecule(["H", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]])
+
+    def _assert_resolved(self, calls):
+        assert "PBE-D3" in calls["resolve"]
+        assert calls["d3"], "maybe_apply_d3 was never reached"
+        assert calls["d3"][0] == (resolve_xc("PBE-D3"), "PBE-D3")
+
+    @pytest.mark.skipif(not _PYSCF_AVAILABLE, reason="needs PySCF")
+    def test_session_calc_uses_resolve_xc(self, spy):
+        from quantui.session_calc import run_in_session
+
+        with pytest.raises(_ReachedD3):
+            run_in_session(self._h2(), "PBE-D3", "STO-3G", verbose=0)
+        self._assert_resolved(spy)
+
+    @pytest.mark.skipif(not _PYSCF_AVAILABLE, reason="needs PySCF")
+    def test_freq_calc_uses_resolve_xc(self, spy):
+        from quantui.freq_calc import run_freq_calc
+
+        with pytest.raises(_ReachedD3):
+            run_freq_calc(self._h2(), "PBE-D3", "STO-3G")
+        self._assert_resolved(spy)
+
+    @pytest.mark.skipif(not _PYSCF_AVAILABLE, reason="needs PySCF")
+    def test_tddft_calc_uses_resolve_xc(self, spy):
+        from quantui.tddft_calc import run_tddft_calc
+
+        with pytest.raises(_ReachedD3):
+            run_tddft_calc(self._h2(), "PBE-D3", "STO-3G", nstates=1)
+        self._assert_resolved(spy)
+
+    @pytest.mark.skipif(not _PYSCF_AVAILABLE, reason="needs PySCF")
+    def test_optimizer_uses_resolve_xc(self, spy):
+        pytest.importorskip("ase")
+        from quantui.optimizer import optimize_geometry
+
+        with pytest.raises(_ReachedD3):
+            optimize_geometry(self._h2(), "PBE-D3", "STO-3G", steps=1)
+        self._assert_resolved(spy)
+
+    @pytest.mark.skipif(not _PYSCF_AVAILABLE, reason="needs PySCF")
+    def test_nmr_calc_uses_resolve_xc(self, spy):
+        from quantui.nmr_calc import run_nmr_calc
+
+        with pytest.raises(_ReachedD3):
+            run_nmr_calc(self._h2(), "PBE-D3", "STO-3G")
+        self._assert_resolved(spy)
 
     def test_script_template_embeds_alias_resolution(self):
         # The script-export template generates a standalone .py file

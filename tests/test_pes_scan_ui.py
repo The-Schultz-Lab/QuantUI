@@ -165,6 +165,13 @@ class TestBuildScanGrid:
         assert vals[-1] == pytest.approx(2.0)
         assert vals[1] > vals[0]
 
+    def test_descending_log_bond_grid_keeps_direction(self):
+        # Audit GEOM-11: a descending log range used to come back ascending.
+        vals = build_scan_grid(2.0, 0.5, 4, scan_type="bond", grid="log")
+        assert vals[0] == pytest.approx(2.0)
+        assert vals[-1] == pytest.approx(0.5)
+        assert vals == sorted(vals, reverse=True)
+
 
 class TestScanRangeAroundCurrent:
     def test_angle_window_around_current(self):

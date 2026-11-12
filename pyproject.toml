@@ -3,7 +3,10 @@
 # no [tool.setuptools_scm] table and `version` below is static, so nothing
 # consumed it. Dropped for the first PyPI release rather than shipping a
 # build dependency that does nothing.
-requires = ["setuptools>=64", "wheel"]
+# >= 77 for the PEP 639 `license = "MIT"` expression + `license-files` below
+# (the old `license = { file = ... }` table is deprecated and setuptools warns
+# it stops building after 2027-02-18; audit INFRA-17).
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -12,7 +15,8 @@ version = "0.11.1"
 description = "An open-source frontend for DFT and post-HF quantum chemistry with PySCF"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     {name = "Jonathan Schultz", email = "nccu-schultz-lab@users.noreply.github.com"},
 ]
@@ -27,9 +31,6 @@ classifiers = [
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
-    # PyPI shows the licence from this classifier in the sidebar; the
-    # [project] license table alone is not enough for the old-style display.
-    "License :: OSI Approved :: MIT License",
     # The complete PySCF feature set is Linux/macOS only. Native Windows has a
     # smaller optional PyFock backend, documented in README; add a Windows
     # classifier after its dedicated real-calculation CI gate is green.
@@ -61,11 +62,24 @@ dependencies = [
     "notebook>=7.0.0,<8",
     "numpy>=1.24.0,<3",
     "requests>=2.28.0,<3",
-    "py3Dmol>=2.0.0,<3",
+    # Capped at the MINOR of the vendored 3Dmol.js (quantui/viz_assets.py,
+    # THREEDMOL_VERSION): py3Dmol's version tracks the 3Dmol.js build its
+    # generated JS targets, and we serve our vendored copy instead of that
+    # build. Patch-level skew is tolerated; a new minor needs a re-vendor and
+    # a bump of this cap together (audit INFRA-16, tests/test_viz_assets_version.py).
+    "py3Dmol>=2.0.0,<2.6",
     "matplotlib>=3.7.0,<4",
     "plotly>=5.0.0,<8",
     "plotlymol>=0.2.1,<1",
     "kaleido>=0.2.1,<2",
+    # Imported directly (pubchem, preopt, structure_upload, app_exports;
+    # log_utils/utils) but previously only arrived transitively — rdkit via
+    # plotlymol, psutil via ipython (audit INFRA-17). Declared so a change in
+    # those packages cannot silently drop them. rdkit is calendar-versioned
+    # (YYYY.MM.patch), so there is no MAJOR boundary to cap at; the floor is
+    # plotlymol's own.
+    "rdkit>=2022.3.1",
+    "psutil>=5.0,<8",
 ]
 
 [project.urls]
@@ -110,6 +124,9 @@ quantui = [
     "data/js/*.txt",
     # Host-side quantui-batch launcher, written out by `quantui install-launcher`.
     "data/launcher/*.py",
+    # Provenance notes for the vendored 3Dmol.js and the QM9 library subset
+    # (data/js/PROVENANCE.md, data/library/QM9-PROVENANCE.md; audit INFRA-17).
+    "data/**/*.md",
 ]
 
 [project.optional-dependencies]
@@ -128,7 +145,7 @@ pyscf = [
     "pyscf-properties",
     # Grimme D3/D4 for PBE-D3 via PySCF's built-in mf.disp (energies,
     # gradients and Hessians). Without it PBE-D3 runs as plain PBE.
-    "pyscf-dispersion>=1.0",
+    "pyscf-dispersion>=1.0,<2",
 ]
 
 # Native-Windows-capable pure-Python DFT backend (M-PYFOCK). PyFock 0.1.7
@@ -157,7 +174,7 @@ ase = [
 # on Windows/macOS install it from conda-forge (see local-setup/environment.yml).
 # Depends on ase (the optimizer driving the relaxation).
 xtb = [
-    "xtb>=22.1",
+    "xtb>=22.1,<23",
     "ase>=3.22.0,<4",
 ]
 
@@ -166,7 +183,7 @@ xtb = [
 # in QuantUI). Pulls in jax/jaxlib (~380 MB; jax >= 0.10 needs numpy >= 2 on
 # Python 3.11, older jax resolves on 3.9/3.10). Sella 2.x needs ASE >= 3.26.
 ts = [
-    "sella>=2.6",
+    "sella>=2.6,<3",
     "ase>=3.26,<4",
 ]
 
@@ -235,8 +252,9 @@ dev = [
     "build>=1.0.0",
     # The packaging test builds with --no-isolation so it runs offline; that
     # uses this env's setuptools, which needs bdist_wheel built in (>= 70.1)
-    # rather than the separate `wheel` package (audit INFRA-3).
-    "setuptools>=70.1",
+    # rather than the separate `wheel` package (audit INFRA-3), and >= 77 for
+    # the PEP 639 license metadata in [project] (audit INFRA-17).
+    "setuptools>=77",
     "mypy~=1.10.0",  # pinned, not an open floor — same reasoning as
     # black/ruff below: it must agree with .pre-commit-config.yaml's rev
     # (v1.10.0) and CI's explicit mypy step (`mypy~=1.10.0`), which is what

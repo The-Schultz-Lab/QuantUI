@@ -255,16 +255,44 @@ def add_hydrogen(mol: Molecule, i: int) -> Tuple[Molecule, str]:
     )
 
 
+#: Ceiling for a range when the atom count is unknown (no molecule loaded).
+_MAX_ATOM_NUMBER = 100_000
+
+
+class _RangeError(Exception):
+    """An in-range check failed in parse_atom_list (kept apart from int())."""
+
+
 def parse_atom_list(text: str, n_atoms: Optional[int] = None) -> List[int]:
     """'1, 3 5-7' (1-based, ranges allowed) → sorted 0-based indices."""
     out: Set[int] = set()
     for token in text.replace(",", " ").split():
-        if "-" in token:
-            lo, hi = token.split("-", 1)
-            a, b = int(lo), int(hi)
-            out.update(range(min(a, b), max(a, b) + 1))
-        else:
-            out.add(int(token))
+        try:
+            if "-" in token:
+                lo, hi = token.split("-", 1)
+                a, b = sorted((int(lo), int(hi)))
+                # Bounds-check BEFORE expanding: "1-30000000" used to build
+                # the whole set first (seconds; larger ranges exhausted
+                # memory) only to be rejected afterwards (audit DATA-17).
+                if a < 1:
+                    raise _RangeError("Atom numbers start at 1.")
+                limit = n_atoms if n_atoms is not None else _MAX_ATOM_NUMBER
+                if b > limit:
+                    raise _RangeError(
+                        f"This structure has only {n_atoms} atoms."
+                        if n_atoms is not None
+                        else f"Atom number {b} is out of range."
+                    )
+                out.update(range(a, b + 1))
+            else:
+                out.add(int(token))
+        except _RangeError as exc:
+            raise ValueError(str(exc)) from None
+        except ValueError:
+            # int() alone said "invalid literal for int() with base 10".
+            raise ValueError(
+                f"'{token}' is not an atom number or range (e.g. 1, 3, 5-7)."
+            ) from None
     if any(n < 1 for n in out):
         raise ValueError("Atom numbers start at 1.")
     if n_atoms is not None and any(n > n_atoms for n in out):

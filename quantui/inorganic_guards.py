@@ -21,7 +21,8 @@ from __future__ import annotations
 from typing import Iterable, List, Optional
 
 # def2 basis sets QuantUI ships that carry effective core potentials for heavy
-# elements (so they cover the whole periodic table, unlike the Pople / cc sets).
+# elements: H–Rn except the lanthanides Ce–Lu (ECPs from Rb on), far wider
+# than the Pople / cc sets. No def2 set covers the actinides.
 _ECP_BASIS_SUGGESTION = "def2-SVP or def2-TZVP"
 
 
@@ -94,8 +95,9 @@ def check_basis_coverage(elements: Iterable[str], basis: str) -> Optional[str]:
     return (
         f"The basis set '{basis}' has no parameters for {els}. "
         f"Transition metals and other heavy elements need an ECP basis — switch "
-        f"to {_ECP_BASIS_SUGGESTION} (these cover the whole periodic table via "
-        f"effective core potentials) and run again."
+        f"to {_ECP_BASIS_SUGGESTION} (these cover hydrogen to radon, except the "
+        f"lanthanides Ce–Lu, using effective core potentials from rubidium on) "
+        f"and run again."
     )
 
 

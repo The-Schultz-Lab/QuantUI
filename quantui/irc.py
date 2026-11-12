@@ -316,6 +316,10 @@ def run_irc(
         raise ImportError("ASE calculator support is unavailable.")
     stream: IO[str] = progress_stream if progress_stream is not None else sys.stdout
     solvent = resolve_solvent(solvent)
+    # Open-shell + RHF would run ROHF: no analytic Hessian (audit GEOM-10).
+    from .reorganization_energy import promote_open_shell_hf
+
+    method = promote_open_shell_hf(method, molecule.multiplicity, stream)
     stream.write(
         "\n── Intrinsic reaction coordinate (Sella IRC, mass-weighted) ──\n"
         f"  {molecule.get_formula()}  {method}/{basis}"

@@ -39,6 +39,7 @@ Created: 2026-06-15
 from __future__ import annotations
 
 import base64
+import html
 import logging
 from functools import lru_cache
 from pathlib import Path
@@ -50,6 +51,10 @@ logger = logging.getLogger(__name__)
 # at, so the API the py3Dmol-generated JS calls (createViewer, addModel,
 # addVolumetricData, addModelsAsFrames, animate, ...) is guaranteed present.
 # Provenance + license: data/js/PROVENANCE.md, data/js/3Dmol-LICENSE.txt.
+# py3Dmol's own default may be a later PATCH of the same minor (py3Dmol 2.5.5
+# targets 3Dmol.js 2.5.5) — tolerated; pyproject caps py3Dmol below the next
+# minor and tests/test_viz_assets_version.py fails on a minor mismatch
+# (audit INFRA-16).
 THREEDMOL_VERSION = "2.5.4"
 _JS_PATH = Path(__file__).parent / "data" / "js" / "3Dmol-min.js"
 
@@ -110,7 +115,8 @@ def standalone_html(view_html: str, *, title: str = "QuantUI animation") -> str:
         '<html lang="en">\n<head>\n'
         '<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
-        f"<title>{title}</title>\n"
+        # Escaped: titles carry formulas that can come from a saved result.
+        f"<title>{html.escape(title)}</title>\n"
         "<style>body{margin:0;padding:16px;background:#fff;"
         "font-family:system-ui,-apple-system,'Segoe UI',sans-serif}</style>\n"
         "</head>\n<body>\n" + view_html + "\n</body>\n</html>\n"

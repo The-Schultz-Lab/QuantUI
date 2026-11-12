@@ -51,6 +51,16 @@ class TestExitConfirm:
         assert app._exit_warn_html.layout.display == ""
         assert "ends your session" in app._exit_warn_html.value
 
+    def test_arming_while_a_calculation_runs_warns_it_will_be_lost(self, app):
+        # Audit APP-15: shutdown kills the kernel mid-run with no warning.
+        app._calc_running = True
+        app._on_exit_clicked()
+        assert "calculation is still running" in app._exit_warn_html.value
+        app._on_exit_cancel()
+        app._calc_running = False
+        app._on_exit_clicked()
+        assert "still running" not in app._exit_warn_html.value
+
     def test_cancel_disarms(self, app):
         app._on_exit_clicked()  # arm
         assert app._exit_armed is True

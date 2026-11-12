@@ -50,9 +50,12 @@ def site_constants() -> Dict[str, Any]:
     from quantui.backends import slurm_utils
     from quantui.backends.base import CALC_TYPES
     from quantui.backends.batch_input import (
+        BOOLEAN_OPTION_KEYS,
         GRADIENT_CALC_TYPES,
         PREOPT_CALC_TYPES,
         SOLVENT_CALC_TYPES,
+        known_basis_sets,
+        option_keys_for,
     )
     from quantui.freq_ir_workers import freq_parallel_opt_in
 
@@ -85,6 +88,9 @@ def site_constants() -> Dict[str, Any]:
         "solvent_calc_types": sorted(SOLVENT_CALC_TYPES),
         "gradient_calc_types": sorted(GRADIENT_CALC_TYPES),
         "post_hf_methods": sorted(config.POST_HF_METHODS),
+        "known_basis_sets": known_basis_sets(),
+        "calc_option_keys": {c: sorted(option_keys_for(c)) for c in CALC_TYPES},
+        "boolean_option_keys": sorted(BOOLEAN_OPTION_KEYS),
     }
 
 
