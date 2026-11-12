@@ -422,3 +422,35 @@ window.viewer_BBB = fakeViewer("edit");
         assert out.returncode == 0, out.stderr
         calls = json.loads(out.stdout.strip().splitlines()[-1])
         assert calls and set(calls) == {"edit"}
+
+
+class TestExportAndDownloadErrorsEscaped:
+    def test_png_export_fail_message_is_escaped(self):
+        import base64
+        from types import SimpleNamespace
+
+        from quantui import app_exports
+
+        uri = "data:image/png;base64," + base64.b64encode(b"\x89PNG").decode()
+        app = SimpleNamespace(
+            _reorg_export_status=SimpleNamespace(value=""),
+            _reorg_png_inbox=SimpleNamespace(value=""),
+            _molecule=None,
+        )
+        with patch.object(
+            app_exports, "export_destination", side_effect=ValueError(_XSS)
+        ):
+            app_exports.on_reorg_png_captured(app, {"new": uri})
+        assert _XSS not in app._reorg_export_status.value
+        assert "&lt;img" in app._reorg_export_status.value
+
+    def test_offer_download_failure_is_escaped(self, tmp_path):
+        from types import SimpleNamespace
+
+        from quantui import downloads
+
+        app = SimpleNamespace(_download_html=SimpleNamespace(value=""))
+        with patch.object(downloads, "download_link_html", side_effect=OSError(_XSS)):
+            downloads.offer_download(app, tmp_path / "x.xyz")
+        assert _XSS not in app._download_html.value
+        assert "&lt;img" in app._download_html.value

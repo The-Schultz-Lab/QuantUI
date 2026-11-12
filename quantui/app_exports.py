@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html as _html
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -405,7 +406,7 @@ def on_orb_png_captured(app: Any, change: dict) -> None:
 
     def _fail(msg: str) -> None:
         app._iso_export_status.value = (
-            f'<span style="color:{_theme.css.ACCENT_ERROR}">{msg}</span>'
+            f'<span style="color:{_theme.css.ACCENT_ERROR}">{_html.escape(msg)}</span>'
         )
         # Clear even on failure, or a retry of the identical capture is silent.
         _clear_inbox(app)
@@ -509,7 +510,7 @@ def on_reorg_png_captured(app: Any, change: dict) -> None:
 
     def _fail(msg: str) -> None:
         if status is not None:
-            status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">{msg}</span>'
+            status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">{_html.escape(msg)}</span>'
         _clear_inbox(app)
 
     def _clear_inbox(a: Any) -> None:
@@ -585,7 +586,7 @@ def on_vib_png_captured(app: Any, change: dict) -> None:
 
     def _fail(msg: str) -> None:
         if status is not None:
-            status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">{msg}</span>'
+            status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">{_html.escape(msg)}</span>'
         _clear_inbox(app)
 
     def _clear_inbox(a: Any) -> None:
@@ -694,7 +695,7 @@ def _on_mol_png_captured(
 
     def _fail(msg: str) -> None:
         if status is not None:
-            status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">{msg}</span>'
+            status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">{_html.escape(msg)}</span>'
         _clear_inbox(app)
 
     def _clear_inbox(a: Any) -> None:
@@ -829,7 +830,7 @@ def on_traj_png_captured(
 
     def _fail(msg: str) -> None:
         if status is not None:
-            status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">{msg}</span>'
+            status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">{_html.escape(msg)}</span>'
         _clear_inbox()
 
     def _clear_inbox() -> None:
