@@ -11,8 +11,8 @@ writes job folders under your own cluster home and submits them with your own
 
 | Version | Supported |
 |---------|-----------|
-| 0.11.x  | Yes       |
-| < 0.11  | No        |
+| 0.12.x  | Yes       |
+| < 0.12  | No        |
 
 ## Reporting a Vulnerability
 

@@ -7,6 +7,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-12
+
+This release also includes the fixes from a full codebase audit
+(2026-11-10; PRs #169, #170, #172). The most important ones change
+computed numbers: NMR ¹³C shifts, wB97X-D energies, and the entropy of
+high-symmetry molecules. Results from earlier versions in those areas
+should be recomputed.
+
 ### Added
 
 - **ECD (electronic circular dichroism) spectra** (M-SPECTRA2 SPC2.3). UV-Vis
@@ -42,7 +50,76 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - The full 3Dmol.js BSD-3-Clause license now ships with the vendored copy
   (`quantui/data/js/3Dmol-LICENSE.txt`).
 
+### Security
+
+- **Every Voilà launch now needs a per-run token and listens on 127.0.0.1
+  only** (`quantui run app`, the native launchers and the Apptainer app
+  runscript), as `quantui view` already did; the JupyterLab launcher no
+  longer disables Jupyter's token. Another user on a shared machine could
+  otherwise drive your session.
+- **A results folder is treated as data, not page code.** Opening someone
+  else's results (Viewer zip, shared folder) could inject HTML/JavaScript
+  through cached vibrational animations, saved orbital cubes or symmetry
+  labels, and two index files allowed reading files outside the folder.
+  Cached animations are now signed per user; file names, script-embedded
+  JSON and all result text shown in History, Results and error cards are
+  checked or escaped.
+- **Batch job folders are created owner-only (0700)**, and the SLURM
+  partition name is validated like account/QOS before it reaches the batch
+  script.
+
 ### Fixed
+- **NMR chemical shifts were offset by up to 52 ppm (¹³C).** The TMS
+  reference table did not match QuantUI's own GIAO shieldings (TMS itself
+  came out at δ(¹³C) = −7.7 ppm at B3LYP/6-31G*, −52 ppm at RHF/STO-3G). The
+  table is now computed by QuantUI on TMS optimized at each level, so TMS
+  gives δ ≈ 0. NMR also refuses open-shell, post-HF and meta-GGA cases up
+  front instead of failing with a cryptic error.
+- **wB97X-D now includes its dispersion term.** LibXC's functional is only
+  the exchange-correlation part; QuantUI now adds the Chai–Head-Gordon
+  atom-pair dispersion to energies, forces, frequencies and exported
+  scripts (parameters for H–Xe).
+- **Thermochemistry uses the right symmetry number for slightly distorted
+  geometries** (e.g. benzene σ = 12, was 4; G was 2.7 kJ/mol too low). The
+  point group is shown in the thermo panel.
+- **Open-shell HOMO–LUMO gap and orbital diagram** use both spins
+  (min LUMO − max HOMO) and draw α and β levels; the gap was α-only.
+- **Structure search keeps charge and multiplicity**: ions and radicals
+  (sulfate, ammonium, OH⁻, CH₃·, O₂ triplet) no longer load as neutral
+  singlets or fail as "Not found". Search answers from the bundled library
+  first, offline.
+- **Calculation runs:** one run at a time (a double-click started two);
+  settings are read once at Run and frozen while it runs, so changing the
+  basis mid-run no longer mixes levels of theory; a seed geometry keeps the
+  current charge and multiplicity; a resumed Frequency run never reuses IR
+  or Raman displacements from a different geometry; a failed save, a late
+  Cancel and a failed pre-optimization are reported instead of looking
+  like success.
+- **IRC** reports the true end minimum when Sella's inner loop gives up (the
+  stored end point could be the previous path point, giving wrong
+  barriers), and mirror-image ends (NH₃ inversion) count as two minima.
+- **PES scans:** angle scans stay between 0° and 180° and start from linear
+  geometries; angle/dihedral scans rotate the whole moving group instead of
+  one atom.
+- **Frequencies:** an unconverged displaced SCF no longer corrupts IR or
+  Raman intensities (they are dropped with a message); the mode-following
+  restart from a saddle point moves the stated 0.3 Å.
+- **Batch/SLURM:** cancelled ("CANCELLED by …"), preempted and lost jobs are
+  recognised instead of holding a job slot forever; a reused request id no
+  longer overwrites a running job; requeued jobs follow the new attempt;
+  ingested results keep their structure; `quantui-batch submit --from`
+  keeps the source's solvent and refuses an unconverged source; the job
+  monitor can no longer leave Run disabled.
+- **Uploads and parsing:** planar 3-D MOL/SDF files keep their geometry;
+  charge/multiplicity are taken from a file only when it sets them;
+  non-finite coordinates, impossible spin states and truncated XYZ are
+  rejected; UTF-8 BOM, UTF-16, Fortran `D` exponents, D/T isotope labels
+  and PDB alternate locations are handled.
+- Many smaller fixes from the same audit: History cards, exports following
+  the run instead of the last-viewed History folder, theme CSS and Dark
+  contrast, 1-based MO numbers everywhere, open-shell TD states no longer
+  labelled S1…Sn, GFN-FF pre-optimization charge, C3v orbital labels,
+  calibration and estimator fixes, launcher robustness.
 
 - **Results Viewer (pre-release audit, VA.1–VA.12)** — the History + Analysis
   viewer (desktop installer and browser build, neither of which has PySCF):
@@ -122,6 +199,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   Frequency cannot be resumed, and now lists Reorganization Energy.
 
 ### Changed
+- **Plotly figures load plotly.js once per page** from the installed
+  package (still offline) instead of embedding ~4.8 MB in every figure and
+  slider redraw; in-app figures are now under 200 kB.
+- **Batch jobs match the app:** a geometry optimization or pre-optimization
+  is followed by the same required single point (one more SCF per job);
+  PySCF's memory follows the SLURM allocation; failures write a full
+  traceback to `live.log`; `result.json` records elapsed time and warnings.
+- NMR stick spectra run high → low in δ, as in the literature.
+- Packaging: `py3Dmol` capped below 2.6 (matches the vendored 3Dmol.js);
+  `rdkit` and `psutil` declared directly; SPDX licence metadata; provenance
+  files shipped in the wheel.
 
 - Documentation brought in line with the code: CLI reference (`quantui
   view`, `gpu check --engine`, `submit` requirements and flags,
@@ -1514,7 +1602,8 @@ Initial public scaffolding of the QuantUI package: `quantui` package with
 `calculator.py`, basic notebook launcher, Apptainer container definition,
 MIT license, and project metadata.
 
-[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/The-Schultz-Lab/QuantUI/compare/v0.9.0...v0.10.0
