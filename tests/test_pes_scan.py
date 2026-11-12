@@ -236,6 +236,7 @@ class TestAngleScanRange:
 
     @pytest.mark.parametrize("start, stop", [(160.0, 180.0), (170.0, 190.0), (-10, 90)])
     def test_angle_outside_0_180_raises(self, start, stop):
+        pytest.importorskip("pyscf")  # run_pes_scan checks for PySCF first
         from quantui.pes_scan import run_pes_scan
 
         with pytest.raises(ValueError, match="between 0° and 180°"):
@@ -377,6 +378,7 @@ class TestScanMovesWholeFragment:
         assert _moving_fragment(ring, "dihedral", [3, 0, 1, 4]) == [4]
 
     def test_ethane_dihedral_scan_has_no_atom_clash(self, monkeypatch):
+        pytest.importorskip("pyscf")  # run_pes_scan checks for PySCF first
         frames = _scan_geometries(
             monkeypatch,
             _ethane(),
@@ -391,6 +393,7 @@ class TestScanMovesWholeFragment:
             assert _min_distance(coords) > 1.0  # was 6e-7 Å (H on top of H)
 
     def test_angle_scan_keeps_moving_group_rigid(self, monkeypatch):
+        pytest.importorskip("pyscf")  # run_pes_scan checks for PySCF first
         import numpy as np
 
         frames = _scan_geometries(

@@ -227,7 +227,8 @@ def default_staging_root() -> Path:
     """Root for SLURM job folders.
 
     Precedence: ``QUANTUI_STAGING_DIR`` > the ``compute.slurm_job_root``
-    user setting > ``~/.quantui/staging``.
+    user setting > ``<QuantUI home>/staging`` (``$QUANTUI_HOME`` if set,
+    else ``~/.quantui``).
     """
     override = os.environ.get("QUANTUI_STAGING_DIR")
     if override:
@@ -240,6 +241,9 @@ def default_staging_root() -> Path:
         configured = ""
     if configured:
         return Path(configured).expanduser()
+    home = os.environ.get("QUANTUI_HOME")
+    if home:
+        return Path(home).expanduser() / "staging"
     return DEFAULT_STAGING_ROOT.expanduser()
 
 

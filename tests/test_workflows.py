@@ -68,7 +68,10 @@ def _run_tag_check(tag: str) -> subprocess.CompletedProcess:
     )
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+@pytest.mark.skipif(
+    shutil.which("bash") is None or sys.platform == "win32",
+    reason="needs a POSIX bash (Windows' bash.exe is the WSL launcher)",
+)
 @pytest.mark.skipif(sys.version_info < (3, 11), reason="step uses tomllib (3.11)")
 class TestReleaseTagCheck:
     def test_matching_tag_passes(self):

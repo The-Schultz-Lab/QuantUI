@@ -116,24 +116,18 @@ def _isolate_quantui_home():
     app would later offer to resume — plus ``jobs/`` and ``staging/``.
 
     Every location with an env override is redirected here. The SLURM job
-    root is the exception: setting ``QUANTUI_STAGING_DIR`` would *lock* the
-    job-root field in the UI (``staging_root_env_configured()``) and change
-    the behaviour under test, so its built-in default is moved instead. Tests
-    that need specific paths still monkeypatch per-test, which takes
-    precedence over these session defaults.
+    root follows ``QUANTUI_HOME`` (``<home>/staging``) rather than
+    ``QUANTUI_STAGING_DIR``, which would *lock* the job-root field in the UI
+    (``staging_root_env_configured()``) and change the behaviour under test.
+    (Patching the module constant instead did not survive tests that
+    ``importlib.reload`` cluster_config.) Tests that need specific paths
+    still monkeypatch per-test, which takes precedence over these defaults.
     """
-    from pathlib import Path
-
-    from quantui.backends import cluster_config
-
     prev = {name: os.environ.get(name) for name in _QUANTUI_HOME_ENV}
-    prev_staging = cluster_config.DEFAULT_STAGING_ROOT
     with tempfile.TemporaryDirectory(prefix="quantui_test_home_") as tmp:
         for name, rel in _QUANTUI_HOME_ENV.items():
             os.environ[name] = os.path.join(tmp, rel) if rel else tmp
-        cluster_config.DEFAULT_STAGING_ROOT = Path(tmp) / "staging"
         yield
-        cluster_config.DEFAULT_STAGING_ROOT = prev_staging
         for name, value in prev.items():
             if value is None:
                 os.environ.pop(name, None)

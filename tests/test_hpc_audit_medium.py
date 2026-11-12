@@ -366,6 +366,7 @@ class TestIngestKeepsGeometry:
     def test_worker_result_ingests_with_structure(
         self, tmp_path, monkeypatch, calc_type
     ):
+        pytest.importorskip("pyscf")
         from quantui.backends.slurm_ingest import ingest_attempt
         from quantui.backends.worker import run_worker_request
         from quantui.results_storage import load_result
