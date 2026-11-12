@@ -92,3 +92,19 @@ class TestReleaseTagCheck:
 def test_dependabot_does_not_claim_sha_pinning():
     text = (REPO_ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
     assert "pinned to SHA" not in text
+
+
+def test_viewer_tests_run_on_python_313_without_pyscf():
+    """INFRA-9: the browser Viewer runs on Pyodide's Python 3.13 without
+    PySCF; CI must run the viewer tests in that configuration."""
+    job = _load("ci.yml")["jobs"]["test-viewer-py313"]
+    setup = _step(job, "Set up Python")
+    assert str(setup["with"]["python-version"]) == "3.13"
+    install = _step(job, "Install QuantUI")["run"]
+    assert "pip install -e ." in install
+    assert "pyscf" not in install.lower()
+    assert "find_spec('pyscf') is not None" in _step(job, "Confirm PySCF")["run"]
+    run = _step(job, "Run viewer tests")["run"]
+    for test_file in ("tests/test_app_viewer.py", "tests/test_viewer_audit.py"):
+        assert test_file in run
+        assert (REPO_ROOT / test_file).is_file()
