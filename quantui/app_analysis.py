@@ -252,6 +252,12 @@ def deactivate_all_ana_panels(app: Any) -> None:
 def apply_analysis_context(app: Any, ctx: Any) -> None:
     """Populate Analysis panels from context and activate panels with data."""
     app._deactivate_all_ana_panels()
+    # The level of theory of the result now on display (live run or History),
+    # for export provenance; the setup dropdowns may describe a different one.
+    app._displayed_level = (
+        str(getattr(ctx, "method", "") or ""),
+        str(getattr(ctx, "basis", "") or ""),
+    )
     _reset_unavailable_messages_for_context(app, ctx)
     app._pending_traj_result = None
     # Safety-net cache so on_traj_expand can recover if the initial render's

@@ -382,3 +382,45 @@ def test_delete_renumbers_the_freeze_list_and_undo_restores_it(app):
     on_undo(app)
     assert len(app._molecule.atoms) == 5
     assert app.frozen_atoms_txt.value == "2, 4"
+
+
+# ── UI-14 (export provenance item) ────────────────────────────────────────
+
+
+def test_reorg_export_names_the_displayed_results_level(app, tmp_path):
+    # A History result at B3LYP/6-31G is on display while the setup
+    # dropdowns are at RHF/STO-3G: the exported files used to be named and
+    # stamped with the dropdowns.
+    from quantui.app import _AnalysisContext
+
+    app._apply_analysis_context(
+        _AnalysisContext(
+            calc_type="single_point",
+            formula="H2",
+            method="B3LYP",
+            basis="6-31G",
+            source="history",
+        )
+    )
+    app._last_result_dir = tmp_path
+    app._reorg_geometries = [
+        {
+            "label": "R_neutral — optimized neutral",
+            "atoms": ["H", "H"],
+            "coordinates": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]],
+            "charge": 0,
+            "multiplicity": 1,
+            "note": "",
+        }
+    ]
+    app._on_export_reorg_geometries(None)
+    files = [f.name for f in tmp_path.glob("*.xyz")]
+    assert files == ["H2_R_neutral_B3LYP_6-31G.xyz"], files
+    assert "B3LYP/6-31G" in (tmp_path / files[0]).read_text()
+
+
+def test_export_level_falls_back_to_the_setup_before_any_result(app):
+    from quantui.app_exports import displayed_level
+
+    app._displayed_level = None
+    assert displayed_level(app) == ("RHF", "STO-3G")

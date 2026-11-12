@@ -253,8 +253,7 @@ def on_export_reorg_geometries(app: Any, btn: Any) -> None:
 
     from quantui.molecule import Molecule
 
-    method = app.method_dd.value
-    basis = app.basis_dd.value
+    method, basis = displayed_level(app)
     saved: list[str] = []
     try:
         for g in geoms:
@@ -316,6 +315,22 @@ def _structure_export_dest(app: Any, fname: str) -> Path:
     if _current_run_result(app) is not None and isinstance(run_dir, Path):
         return run_dir / fname
     return Path(fname)
+
+
+def displayed_level(app: Any) -> tuple[str, str]:
+    """(method, basis) of the result shown in the Analysis panels.
+
+    Provenance for exports of what is on display: after a History load the
+    setup dropdowns describe the *next* run, not the result being exported
+    (audit UI-14). Falls back to the dropdowns before any result is shown.
+    """
+    level = getattr(app, "_displayed_level", None)
+    if isinstance(level, tuple) and len(level) == 2 and level[0]:
+        return str(level[0]), str(level[1])
+    return (
+        str(getattr(getattr(app, "method_dd", None), "value", "") or ""),
+        str(getattr(getattr(app, "basis_dd", None), "value", "") or ""),
+    )
 
 
 def export_molecule_and_label(app: Any) -> tuple[Any, str, str]:
@@ -493,8 +508,8 @@ def on_orb_png_captured(app: Any, change: dict) -> None:
     metadata = {
         "Software": "QuantUI",
         "Orbital": label,
-        "Method": str(getattr(getattr(app, "method_dd", None), "value", "") or ""),
-        "Basis": str(getattr(getattr(app, "basis_dd", None), "value", "") or ""),
+        "Method": displayed_level(app)[0],
+        "Basis": displayed_level(app)[1],
         "Isosurface resolution": str(
             getattr(getattr(app, "_iso_resolution_dd", None), "value", "") or ""
         ),
@@ -567,8 +582,7 @@ def on_reorg_png_captured(app: Any, change: dict) -> None:
 
     mol = getattr(app, "_molecule", None)
     formula = mol.get_formula() if mol is not None else "molecule"
-    method = str(getattr(getattr(app, "method_dd", None), "value", "") or "")
-    basis = str(getattr(getattr(app, "basis_dd", None), "value", "") or "")
+    method, basis = displayed_level(app)
 
     try:
         dest = export_destination(
@@ -659,8 +673,7 @@ def on_vib_png_captured(app: Any, change: dict) -> None:
     except (TypeError, ValueError):
         pass  # no mode selected yet — fall back to the generic "mode" label
 
-    method = str(getattr(getattr(app, "method_dd", None), "value", "") or "")
-    basis = str(getattr(getattr(app, "basis_dd", None), "value", "") or "")
+    method, basis = displayed_level(app)
 
     try:
         dest = export_destination(
@@ -755,8 +768,13 @@ def _on_mol_png_captured(
         return
 
     formula = molecule.get_formula() if molecule is not None else "molecule"
-    method = str(getattr(getattr(app, "method_dd", None), "value", "") or "")
-    basis = str(getattr(getattr(app, "basis_dd", None), "value", "") or "")
+    # The Analysis viewer shows the displayed result; the Calculate/Results
+    # previews show the loaded molecule, described by the current setup.
+    if slot_label == "analysis":
+        method, basis = displayed_level(app)
+    else:
+        method = str(getattr(getattr(app, "method_dd", None), "value", "") or "")
+        basis = str(getattr(getattr(app, "basis_dd", None), "value", "") or "")
 
     try:
         dest = export_destination(
@@ -887,8 +905,7 @@ def on_traj_png_captured(
         return
 
     formula = formula or "molecule"
-    method = str(getattr(getattr(app, "method_dd", None), "value", "") or "")
-    basis = str(getattr(getattr(app, "basis_dd", None), "value", "") or "")
+    method, basis = displayed_level(app)
 
     try:
         dest = export_destination(
