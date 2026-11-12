@@ -24,6 +24,8 @@ def _calc_type_badge(calc_type: str) -> str:
     return {
         "single_point": "SP",
         "geometry_opt": "GeoOpt",
+        "transition_state": "TS",
+        "irc": "IRC",
         "frequency": "Freq",
         "tddft": "UV-Vis",
         "nmr": "NMR",
@@ -539,9 +541,36 @@ def _update_solvent_control_for_calc_type(app: Any, ct: str) -> None:
         cb.description = f"Implicit solvent (PCM) — not supported for {ct}"
 
 
+def _close_transient_extra_opts(app: Any, old_children: Any) -> None:
+    """Close the wrapper widgets a previous calc-type switch built.
+
+    ``on_calc_type_changed`` builds fresh HBox/HTML wrappers (and their
+    Layout/Style models) around the app's persistent widgets on every switch.
+    Without this, each switch leaked those models into the kernel.  Persistent
+    widgets (attributes of *app*, or still shown) are never closed.
+    """
+    keep = {id(c) for c in app.calc_extra_opts.children}
+    keep.update(id(v) for v in vars(app).values() if isinstance(v, widgets.Widget))
+
+    def _close(w: Any) -> None:
+        if id(w) in keep or not isinstance(w, widgets.Widget):
+            return
+        keep.add(id(w))
+        for child in getattr(w, "children", None) or ():
+            _close(child)
+        for sub in (getattr(w, "layout", None), getattr(w, "style", None)):
+            if isinstance(sub, widgets.Widget) and id(sub) not in keep:
+                sub.close()
+        w.close()
+
+    for w in old_children:
+        _close(w)
+
+
 def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
     """Update extra options panel based on selected calculation type."""
     ct = change["new"]
+    _old_extra_children = tuple(app.calc_extra_opts.children)
 
     _update_solvent_control_for_calc_type(app, ct)
 
@@ -733,6 +762,7 @@ def on_calc_type_changed(app: Any, change: Any, *, layout_fn: Any) -> None:
         ]
     else:
         app.calc_extra_opts.children = []
+    _close_transient_extra_opts(app, _old_extra_children)
 
     # Both the runtime estimate and the resume offer are per-calc-type, and
     # neither was being refreshed here — so switching type left a Frequency
@@ -2014,8 +2044,12 @@ def on_copy_results_path(app: Any, btn: Any) -> None:
     p.mkdir(parents=True, exist_ok=True)
     path_str = str(p).replace("\\", "\\\\").replace("'", "\\'")
     display(Javascript(f"navigator.clipboard.writeText('{path_str}')"))
+    # The kernel cannot see whether the browser allowed the clipboard write
+    # (it needs a secure context), so do not claim success outright.
     app.results_path_lbl.value = (
-        f'<span style="color:#22c55e;font-size:13px">Copied: {p}</span>'
+        '<span style="color:#22c55e;font-size:13px">'
+        f"Copied to clipboard (if the browser allowed it): {html.escape(str(p))}"
+        "</span>"
     )
 
     def _reset() -> None:
@@ -2188,9 +2222,16 @@ def _arm_exit(app: Any) -> None:
     app._exit_btn.button_style = "danger"
     app._exit_btn.tooltip = "Click again to stop the server and end this session"
     app._exit_btn.layout.width = "150px"
+    _warn = "This stops the server and ends your session."
+    if getattr(app, "_calc_running", False) or getattr(app, "_cal_running", False):
+        # Shutdown kills the kernel mid-run; say so before the second click.
+        _warn = (
+            "A calculation is still running — it will be stopped and its "
+            "result lost. " + _warn
+        )
     app._exit_warn_html.value = (
         f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px;align-self:center;'
-        'margin-right:4px">This stops the server and ends your session.</span>'
+        f'margin-right:4px">{_warn}</span>'
     )
     app._exit_warn_html.layout.display = ""
     app._exit_cancel_btn.layout.display = ""

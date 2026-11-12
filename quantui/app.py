@@ -1105,6 +1105,22 @@ _RE_Q_STATUS = re.compile(r"\[QuantUI_STATUS\]\s*(.+)")
 _RE_LOG_HIDDEN = re.compile(r"^\[checkpoint\] saved.*(?:\n|$)", re.MULTILINE)
 
 
+def _dependency_hint(platform: Optional[str] = None) -> str:
+    """Platform-appropriate advice for a missing calculation dependency."""
+    import sys
+
+    platform = sys.platform if platform is None else platform
+    if platform.startswith("win"):
+        return (
+            "PySCF does not install on native Windows: run QuantUI under WSL "
+            "or in the Apptainer container (apptainer run quantui.sif)."
+        )
+    return (
+        "Install the missing package into the Python environment running "
+        'QuantUI (for PySCF: pip install "quantui[pyscf]").'
+    )
+
+
 def _friendly_log_text(text: str) -> str:
     """Text as shown in the live log: internal markers hidden or softened."""
     return _RE_LOG_HIDDEN.sub("", text).replace("[QuantUI_STATUS] ", "→ ")
@@ -2069,7 +2085,6 @@ class QuantUIApp:
         self._last_cube_path: Optional[Path] = None
         self._last_cube_orbital: Optional[str] = None
         self._last_pes_fig: Any = None
-        self._run_output_scroll_guard_installed: bool = False
         self._files_current_dir: Optional[Path] = None
         self._files_selected_path: Optional[Path] = None
         self._files_updating: bool = False
@@ -2114,7 +2129,6 @@ class QuantUIApp:
 
         # Availability (copied from module-level flags)
         self._pyscf_available: bool = _PYSCF_AVAILABLE
-        self._preopt_available: bool = _PREOPT_AVAILABLE
 
         # User settings (persisted in ~/.quantui/settings.json) + viz
         # backend availability snapshot. The router consumes these; render
@@ -2313,7 +2327,6 @@ class QuantUIApp:
                 ]
             )
         )
-        self._install_run_output_scroll_guard()
 
     @property
     def widget(self) -> widgets.Tab:
@@ -3674,7 +3687,9 @@ class QuantUIApp:
         valid_values = {value for _, value in options if value}
         new_selection = old_selection if old_selection in valid_values else ""
         if not new_selection and valid_values:
-            new_selection = next(iter(valid_values))
+            # The first entry as listed (newest folder / first file), not an
+            # arbitrary element of the set.
+            new_selection = next(value for _, value in options if value)
 
         self._files_updating = True
         try:
@@ -4235,23 +4250,6 @@ class QuantUIApp:
         if io_loop is not None:
             self._kernel_io_loop = io_loop
         return io_loop
-
-    def _render_plotly_figure(self, out: widgets.Output, fig) -> None:
-        """Render a Plotly figure through display() in an Output widget."""
-        self._clear_output_widget(out)
-        with out:
-            display(fig)
-
-    def _set_plotly_figure_output(self, out: widgets.Output, fig) -> None:
-        """Display a Plotly figure via the notebook display pipeline.
-
-        This mirrors the PlotlyMol path (display(fig) in Output) and avoids
-        reliance on raw HTML <script> execution inside widget content.
-        """
-        if threading.current_thread() is threading.main_thread():
-            self._render_plotly_figure(out, fig)
-        else:
-            self._queue_main_thread_callback(self._render_plotly_figure, out, fig)
 
     def _clear_output_widget(self, out: widgets.Output) -> None:
         """Clear an Output widget in a way that is deterministic in tests."""
@@ -5066,8 +5064,6 @@ class QuantUIApp:
     _refresh_freq_seed_options = _refresh_seed_options
     _refresh_tddft_seed_options = _refresh_seed_options
     _on_geo_seed_changed = _on_seed_changed
-    _on_freq_seed_changed = _on_seed_changed
-    _on_tddft_seed_changed = _on_seed_changed
 
     # ── Help buttons ──────────────────────────────────────────────────────
 
@@ -5686,7 +5682,8 @@ class QuantUIApp:
 
         status_widget.value = (
             f'<span style="color:{_theme.css.ACCENT_SUCCESS};font-size:12px">'
-            f"Saved CSV: {dest} &mdash; copied to clipboard"
+            f"Saved CSV: {_html.escape(str(dest))} &mdash; also copied to the "
+            "clipboard if the browser allowed it"
             "</span> " + _download_link_html(dest)
         )
 
@@ -6125,8 +6122,8 @@ class QuantUIApp:
 
         # Loading a new molecule makes the previous run/preopt status stale
         # ("Pre-optimized geometry accepted.", "Cancelled.", "Done in …") —
-        # clear it. Guarded on _calc_running so the mid-run pre-opt call to
-        # _set_molecule_threadsafe doesn't wipe the live "Pre-optimizing…"
+        # clear it. Guarded on _calc_running so a mid-run _set_molecule call
+        # doesn't wipe the live "Pre-optimizing…"
         # status. (Accept sets its own status right after this returns.)
         if not self._calc_running:
             self.run_status.value = ""
@@ -6183,35 +6180,6 @@ class QuantUIApp:
         # is available. This preserves existing behaviour, but the normal
         # notebook path above keeps rendering off the worker thread.
         callback(*args, **kwargs)
-
-    def _install_run_output_scroll_guard(self) -> None:
-        """No-op: superseded by :class:`quantui.live_log.LiveLog`.
-
-        This used to inject a ``requestAnimationFrame`` loop that re-pinned the
-        live log to the bottom every frame, to out-race ipywidgets' per-line
-        ``scrollTop = 0`` reset. That made the log follow output, but at the cost
-        of making it impossible to scroll up during a run — the reported bug.
-
-        Route C removed the reset instead of racing it: the log is now a
-        QuantUI-owned container that is appended to rather than re-rendered, so
-        native ``overflow-anchor`` preserves the user's scroll position and no
-        per-frame pinning is needed. Kept as a no-op because ``display()`` calls
-        it unconditionally; delete once nothing references it.
-        """
-        self._run_output_scroll_guard_installed = True
-
-    def _set_molecule_state_only(self, mol) -> None:
-        """Apply only thread-safe molecule state updates."""
-        self._molecule = mol
-
-    def _set_molecule_threadsafe(self, mol, status_message: str) -> None:
-        """Update molecule state safely and render on the main thread only."""
-        if threading.current_thread() is threading.main_thread():
-            self._set_molecule(mol, status_message)
-            return
-
-        self._set_molecule_state_only(mol)
-        self._queue_main_thread_callback(self._set_molecule, mol, status_message)
 
     def _show_result_3d(self, molecule, extra_output=None) -> None:
         _viz_show_result_3d(
@@ -7958,12 +7926,16 @@ class QuantUIApp:
                 pass
 
         except ImportError as _import_err:
+            # The run is already over: a Cancel clicked now has nothing to
+            # stop, and a still-set flag would make the log.write below raise
+            # _CalcCancelled out of this handler (no error card, status stuck
+            # on "Cancelling…").
+            self._cancel_event.clear()
             _err_detail = str(_import_err)
             _msg = (
                 f"Import error: {_err_detail}\n\n"
                 "A required calculation dependency could not be loaded.\n"
-                "On Windows: use the Apptainer container.\n"
-                "  apptainer run quantui.sif\n"
+                f"{_dependency_hint()}\n"
             )
             log.write(_msg)
             _err_html = (
@@ -7971,8 +7943,8 @@ class QuantUIApp:
                 'border-radius:8px;padding:16px;margin:8px 0">'
                 f'<b style="color:{_theme.css.ACCENT_ERROR}">&#9888; Dependency Not Available</b><br>'
                 f'<span style="color:#7f1d1d">{_html.escape(_err_detail)}</span><br><br>'
-                '<small style="color:#991b1b">On Windows, use the Apptainer container: '
-                "<code>apptainer run quantui.sif</code>. "
+                '<small style="color:#991b1b">'
+                f"{_html.escape(_dependency_hint())} "
                 "Full details are in the <b>Output</b> tab.</small>"
                 "</div>"
             )
@@ -8022,6 +7994,10 @@ class QuantUIApp:
             _elapsed = time.perf_counter() - _run_wall_t
             _elapsed_cpu = time.process_time() - _run_cpu_t
             _tb_str = _tb.format_exc()
+            # As for ImportError above: report the failure even if Cancel was
+            # clicked meanwhile — log.write would otherwise re-raise
+            # _CalcCancelled out of this handler.
+            self._cancel_event.clear()
             # Full details → the log panel (for debugging/instructors)
             log.write(f"\n--- Calculation Error ---\n{exc}\n\n{_tb_str}")
             # Structured failure footer

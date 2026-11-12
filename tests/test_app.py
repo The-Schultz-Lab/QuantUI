@@ -100,11 +100,6 @@ class TestInstantiation:
         app = QuantUIApp()
         assert app.export_btn.disabled is True
 
-    def test_scroll_guard_installer_method_exists(self):
-        app = QuantUIApp()
-        assert hasattr(app, "_install_run_output_scroll_guard")
-        assert callable(app._install_run_output_scroll_guard)
-
 
 # ---------------------------------------------------------------------------
 # Default widget values
@@ -631,12 +626,6 @@ class TestAvailabilityFlags:
 
         app = QuantUIApp()
         assert app._pyscf_available == _PYSCF_AVAILABLE
-
-    def test_preopt_flag_mirrors_module_level(self):
-        from quantui.app import _PREOPT_AVAILABLE
-
-        app = QuantUIApp()
-        assert app._preopt_available == _PREOPT_AVAILABLE
 
 
 class TestQuantumEngineGating:
