@@ -427,9 +427,10 @@ def _cmd_submit(args: argparse.Namespace) -> int:
         # interactive app from accidental rapid-fire submits). A batch of
         # N requests submitted in one invocation would otherwise trip that
         # cooldown between every pair and fail partway through a
-        # legitimate scripted run — sleep it out proactively instead
-        # (the motivating case for this command: an instructor running
-        # a whole class's worth of jobs, e.g. Lab 2's 30, from one script).
+        # legitimate scripted run — sleep it out proactively instead.
+        # The concurrent-job limit still applies: a batch larger than
+        # QUANTUI_MAX_CONCURRENT_JOBS needs that raised (documented in
+        # --help and docs/CLI.md) or --prepare-only.
         if submitted_count > 0:
             cooldown = submit_cooldown_seconds()
             if cooldown > 0:
@@ -706,6 +707,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Submit CalculationRequest JSON file(s) to the SLURM batch "
             "backend headlessly — no interactive app."
+        ),
+        description=(
+            "Submit calculations to SLURM without the app. Submissions count "
+            "toward the same limits as the app: QUANTUI_MAX_CONCURRENT_JOBS "
+            "(default 2) jobs queued or running at once, and "
+            "QUANTUI_SLURM_SUBMIT_COOLDOWN_S (default 30) seconds between "
+            "submits. The cooldown is waited out between input files; inputs "
+            "past the job limit are rejected, so raise "
+            "QUANTUI_MAX_CONCURRENT_JOBS for a larger batch or use "
+            "--prepare-only and run sbatch yourself."
         ),
     )
     submit_parser.add_argument(

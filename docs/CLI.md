@@ -421,6 +421,16 @@ A real submission needs `sbatch` on PATH **and** `QUANTUI_ENABLE_SLURM` set
 exits `1` with the reason. `--dry-run` and `--prepare-only` skip that check
 and cannot be combined (exit `2`).
 
+A real submission counts toward the same limits as the app: at most
+`QUANTUI_MAX_CONCURRENT_JOBS` (default `2`) QuantUI jobs queued or running at
+once, and `QUANTUI_SLURM_SUBMIT_COOLDOWN_S` (default `30`) seconds between
+submits. With several input files the command waits out the cooldown between
+them, but an input that would exceed the job limit is rejected (exit `1`) and
+the rest still run. For a larger batch, raise `QUANTUI_MAX_CONCURRENT_JOBS`
+for that command (e.g. `QUANTUI_MAX_CONCURRENT_JOBS=30 quantui submit
+lab2/*.xyz --calc frequency`), or use `--prepare-only` and run `sbatch` on the
+printed scripts yourself.
+
 ---
 
 ## `quantui results`
@@ -492,6 +502,8 @@ chaining, `--queue-rest`, `check`):
 | `QUANTUI_LOG_DIR` | Override the default `~/.quantui/logs/` location. The dashboard's default output (`~/.quantui/dashboard.html`) follows: it lives one level up from the active `QUANTUI_LOG_DIR`. |
 | `QUANTUI_DISABLE_GPU` | Force CPU mode even when gpu4pyscf is installed. `quantui gpu check` reports this as the reason. Accepted truthy values: `1`, `true`, `True`. |
 | `QUANTUI_ENABLE_SLURM` | Opt in to **SLURM batch (cluster)** on the System Settings → Execution backend dropdown. Requires `sbatch` on PATH. Off by default so student deployments stay in-kernel until an operator enables cluster mode in the Apptainer image, JupyterHub spawner, or shell. Accepted truthy values: `1`, `true`, `yes`, `on`. |
+| `QUANTUI_MAX_CONCURRENT_JOBS` | Most QuantUI SLURM jobs queued or running at once (app and `quantui submit`; default `2`). |
+| `QUANTUI_SLURM_SUBMIT_COOLDOWN_S` | Minimum seconds between SLURM submits (default `30`; `0` disables). `quantui submit` waits it out between input files. |
 | `QUANTUI_FREQ_PARALLEL` | Opt in to parallel **CPU** workers for the IR/Raman finite-difference displacement loops in frequency calculations (`6N` displaced SCFs). Same effect as the **Parallelize IR/Raman displacements (CPU)** checkbox on the System Settings tab; when this env var is set it overrides the saved setting. Reference SCF and Hessian still use gpu4pyscf when available. Requires ≥4 cores and ≥2 atoms. Off by default. Accepted truthy values: `1`, `true`, `yes`, `on`. |
 
 ---
