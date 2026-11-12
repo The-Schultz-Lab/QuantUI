@@ -5,6 +5,7 @@
   handling; TS/IRC badges and History chips; Files-tab default selection;
   platform-specific dependency hint.
 - UI-10: a reloaded PES/IRC profile whose first point failed is plotted.
+- UI-12: "unavailable" panel messages carry no escaped markup.
 """
 
 from __future__ import annotations
@@ -237,3 +238,24 @@ def test_reloaded_irc_with_failed_first_point_is_plotted(app, monkeypatch):
     rel = got[0].energies_relative_kcal
     assert math.isnan(rel[0])
     assert rel[2] == pytest.approx(0.0)
+
+
+# ── UI-12 ─────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "calc_type",
+    ["single_point", "geometry_opt", "frequency", "tddft", "nmr", "pes_scan"],
+)
+def test_unavailable_panel_messages_show_no_escaped_markup(app, calc_type):
+    from types import SimpleNamespace
+
+    from quantui.app_analysis import _reset_unavailable_messages_for_context
+
+    _reset_unavailable_messages_for_context(app, SimpleNamespace(calc_type=calc_type))
+    for name, msg in app._ana_unavail_msgs.items():
+        assert "&lt;" not in msg.value, (name, msg.value)
+    if calc_type == "frequency":
+        assert "Geometry optimization before calculation" in (
+            app._ana_unavail_msgs["Trajectory"].value
+        )

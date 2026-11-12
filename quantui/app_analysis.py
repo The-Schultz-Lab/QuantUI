@@ -84,9 +84,11 @@ def _reset_unavailable_messages_for_context(app: Any, ctx: Any) -> None:
             if panel_name == "Trajectory" and calc_label == "Frequency":
                 # Not an error: a Frequency run has a trajectory only when it
                 # optimized first.
+                # Plain text: the message is HTML-escaped on display, so
+                # markup here showed up as literal "<b>" tags (audit UI-12).
                 text = (
-                    "No optimization steps in this run. Tick <b>Geometry "
-                    "optimization before calculation</b> to record a trajectory."
+                    "No optimization steps in this run. Tick “Geometry "
+                    "optimization before calculation” to record a trajectory."
                 )
             elif panel_name == "ECD":
                 text = (
