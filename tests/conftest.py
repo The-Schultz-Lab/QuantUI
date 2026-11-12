@@ -95,6 +95,46 @@ def _isolate_log_dir():
             os.environ["QUANTUI_LOG_DIR"] = prev
 
 
+#: Env vars that each name a QuantUI state location under ``~/.quantui``.
+#: ``_isolate_quantui_home`` points every one of them into one temp dir.
+_QUANTUI_HOME_ENV = {
+    "QUANTUI_HOME": "",
+    "QUANTUI_CHECKPOINT_DIR": "checkpoints",
+    "QUANTUI_JOBS_DIR": "jobs",
+    "QUANTUI_CALIBRATION_PATH": "calibration.json",
+}
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_quantui_home():
+    """Keep the whole suite out of the developer's real ``~/.quantui``.
+
+    The results/settings/log fixtures above covered three locations; the rest
+    of ``~/.quantui`` was still live. An audit run (2026-11-10, INFRA-1) left a
+    ``calibration.json`` pointing at deleted temp dirs and seven checkpoint
+    dirs — one ``status: "running"`` H2O RHF/6-31G with ``scf.chk`` that the
+    app would later offer to resume — plus ``jobs/`` and ``staging/``.
+
+    Every location with an env override is redirected here. The SLURM job
+    root follows ``QUANTUI_HOME`` (``<home>/staging``) rather than
+    ``QUANTUI_STAGING_DIR``, which would *lock* the job-root field in the UI
+    (``staging_root_env_configured()``) and change the behaviour under test.
+    (Patching the module constant instead did not survive tests that
+    ``importlib.reload`` cluster_config.) Tests that need specific paths
+    still monkeypatch per-test, which takes precedence over these defaults.
+    """
+    prev = {name: os.environ.get(name) for name in _QUANTUI_HOME_ENV}
+    with tempfile.TemporaryDirectory(prefix="quantui_test_home_") as tmp:
+        for name, rel in _QUANTUI_HOME_ENV.items():
+            os.environ[name] = os.path.join(tmp, rel) if rel else tmp
+        yield
+        for name, value in prev.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _suppress_plotly_browser():
     """Prevent plotly from opening browser tabs during tests.

@@ -49,6 +49,22 @@ For everything else, use WSL or Apptainer ([Platform Support](platforms.md)).
 | `pyfock-gpu-cuda12x` / `pyfock-gpu-cuda13x` | CuPy for PyFock's GPU path |
 | `dev` | Tests and linters (pytest, ruff, black, mypy, pre-commit) |
 
+## PNG plot export
+
+Saving a spectrum or diagram as **PNG** uses Plotly's
+[Kaleido](https://github.com/plotly/Kaleido) engine (installed with QuantUI).
+Kaleido 1.x does not bundle a browser: it drives a **Chrome or Chromium**
+already on the machine. Without one, PNG export fails with
+"Kaleido requires Google Chrome to be installed". Either install Chrome or
+Chromium from your OS, or download a private copy with
+
+```bash
+plotly_get_chrome
+```
+
+HTML and CSV exports do not need a browser. The Apptainer image does not
+include Chrome yet, so use HTML or CSV export there.
+
 ## Next steps
 
 - [Tutorials](tutorials.md)

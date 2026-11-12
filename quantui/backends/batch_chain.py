@@ -93,6 +93,17 @@ def geometry_from_attempt(attempt: Path, calc_type: str) -> Optional[Dict[str, A
     return _last_step(attempt / "preopt_trajectory.json")
 
 
+def _result_converged(attempt: Path) -> Optional[bool]:
+    """``converged`` from an attempt's result.json (None when unreadable)."""
+    try:
+        value = json.loads((attempt / "result.json").read_text(encoding="utf-8"))[
+            "converged"
+        ]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return value if isinstance(value, bool) else None
+
+
 def final_geometry(job_dir: Path) -> Dict[str, Any]:
     """``{"atoms", "coords", "source"}`` from *job_dir*'s newest usable attempt.
 
@@ -111,6 +122,17 @@ def final_geometry(job_dir: Path) -> Dict[str, Any]:
     for attempt in attempts:
         geo = geometry_from_attempt(attempt, calc_type)
         if geo:
+            if calc_type in ("geometry_opt", "transition_state") and (
+                _result_converged(attempt) is False
+            ):
+                # Slurm's afterok lets this job start (the worker exits 0
+                # for an unconverged optimization), but a frequency or IRC
+                # at a non-stationary geometry gives wrong results.
+                raise ValueError(
+                    f"{job_dir.name}/{attempt.name} ({calc_type}) did not "
+                    "converge, so its final geometry is not a stationary "
+                    "point; rerun or continue that optimization first"
+                )
             geo["source"] = f"{job_dir.name}/{attempt.name}"
             return geo
     raise ValueError(

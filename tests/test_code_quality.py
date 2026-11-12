@@ -46,6 +46,74 @@ def test_no_cdn_plotlyjs():
     )
 
 
+def _enclosing_def(path: Path, lineno: int) -> str:
+    lines = path.read_text(encoding="utf-8").splitlines()[:lineno]
+    for line in reversed(lines):
+        m = re.match(r"\s*def (\w+)", line)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def test_in_app_plotly_figures_do_not_inline_plotlyjs():
+    """Audit VIZ-2 (amends DEC-010): plotly >= 6 has no "require" mode, so
+    ``include_plotlyjs="require"`` inlined the whole ~4.8 MB bundle into every
+    figure. In-app figures go through ``plotly_embed.figure_html``
+    (``include_plotlyjs=False`` + one lazy per-page bootstrap). Inline
+    (``True``/"inline") is only for standalone exported files, and for
+    ``plotly_embed``'s own no-app fallback."""
+    require = _grep(r'include_plotlyjs\s*=\s*["\']require["\']')
+    assert not require, "include_plotlyjs='require' inlines plotly.js:\n" + "\n".join(
+        require
+    )
+    bad = []
+    for path in SRC.rglob("*.py"):
+        text = path.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(text, 1):
+            if not re.search(r"include_plotlyjs\s*=\s*True\b", line):
+                continue
+            # plotly_embed: its own no-app fallback. analytics: writes a
+            # standalone dashboard file (inlines plotly.js once).
+            if path.name in ("plotly_embed.py", "analytics.py"):
+                continue
+            if "export" in _enclosing_def(path, i):
+                continue  # standalone exported file: must be self-contained
+            bad.append(f"{path.relative_to(SRC.parent)}:{i}: {line.strip()}")
+    assert not bad, "in-app figure inlines plotly.js:\n" + "\n".join(bad)
+
+
+def test_in_app_figure_payload_is_small():
+    """An in-app figure's HTML must not carry plotly.js (< 200 kB)."""
+    import ipywidgets as widgets
+    import numpy as np
+
+    from quantui import plotly_embed
+    from quantui.orbital_visualization import (
+        orbital_info_from_arrays,
+        plot_orbital_diagram_plotly,
+    )
+
+    out = widgets.Output()
+    plotly_embed.register_bootstrap_output(out)
+    try:
+        info = orbital_info_from_arrays(
+            np.linspace(-20.0, 2.0, 40), np.r_[np.full(10, 2.0), np.zeros(30)], "X"
+        )
+        html = plotly_embed.figure_html(
+            plot_orbital_diagram_plotly(info), config={"responsive": True}
+        )
+        assert len(html.encode("utf-8")) < 200_000
+        assert "plotly.js v" not in html
+        assert "window.__quantuiPlotly" in html  # waits for the bootstrap
+        # The page bootstrap was filled exactly once, with the bundle.
+        boot = out.outputs[0]["data"]["text/html"]
+        assert "plotly.js v" in boot and "if(!window.__quantuiPlotly)" in boot
+        plotly_embed.figure_html(plot_orbital_diagram_plotly(info))
+        assert len(out.outputs) == 1
+    finally:
+        plotly_embed._outputs.discard(out)
+
+
 def test_no_bare_py3dmol_view():
     """py3Dmol.view(...) defaults to a CDN js= URL that blanks views offline.
 

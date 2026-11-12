@@ -839,6 +839,32 @@ class TestResumableCheckpointsListing:
         _seed_checkpoint(calc_type="pes_scan", points=2)
         assert len(C.resumable_checkpoints()) == 2
 
+    def test_lists_a_frequency_run_with_banked_displacements(self, root):
+        # audit DATA-6: item-set progress (named "freq_displacements-<digest>")
+        # counted for has_progress() but not for the restart listing.
+        ckpt = _seed_checkpoint(calc_type="frequency")
+        assert C.resumable_checkpoints() == []
+        ckpt.mark_item_done("freq_displacements-0123abcd", "0+x", {"dip": [0, 0, 1]})
+        assert ckpt.has_progress()
+        (entry,) = C.resumable_checkpoints()
+        assert entry["calc_type"] == "frequency"
+
+    def test_lists_a_reorg_run_with_progress_only_in_a_leg(self, root):
+        # audit DATA-6: Reorganization Energy keeps all state in nested legs.
+        ckpt = _seed_checkpoint(calc_type="reorganization_energy")
+        leg = ckpt.sub(
+            "neutral_opt",
+            charge=0,
+            multiplicity=1,
+            coords=[[0.0, 0.0, 0.0], [0.76, 0.59, 0.0], [-0.76, 0.59, 0.0]],
+        )
+        leg.begin()
+        assert C.resumable_checkpoints() == []
+        leg.trajectory_path.write_bytes(b"frames")
+        assert ckpt.has_progress()
+        (entry,) = C.resumable_checkpoints()
+        assert entry["calc_type"] == "reorganization_energy"
+
     def test_a_truncated_points_tail_is_not_counted(self, root):
         ckpt = _seed_checkpoint(calc_type="pes_scan", points=2)
         with open(ckpt.points_path, "a", encoding="utf-8") as fh:

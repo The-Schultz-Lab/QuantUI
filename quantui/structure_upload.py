@@ -6,8 +6,8 @@ Formats and readers:
   Gaussian input ``.gjf``/``.com`` and Gaussian output ``.log``/``.out``
   (final geometry): ASE.
 - ``.mol``, ``.sdf`` (first record), ``.mol2``: RDKit, which keeps formal
-  charges and radical electrons, so charge and multiplicity come from the
-  file. 2-D MOL/SDF drawings are embedded in 3-D (ETKDG + MMFF).
+  charges and radical electrons (nonzero ones set charge and multiplicity).
+  Files RDKit flags as 2-D are embedded in 3-D (ETKDG + MMFF).
 
 Charge and multiplicity come from the file when it records them (Gaussian
 charge/multiplicity line, MOL/SDF formal charges and radicals, a QuantUI XYZ
@@ -85,10 +85,13 @@ def _gaussian_input_charge_mult(text: str) -> Optional[Tuple[int, int]]:
     return None
 
 
-def _from_rdkit(path: Path, suffix: str, notes: List[str]) -> Tuple[Molecule, bool]:
+def _from_rdkit(
+    path: Path, suffix: str, charge: int, multiplicity: int, notes: List[str]
+) -> Tuple[Molecule, bool]:
     from rdkit import Chem
 
     text = path.read_text(encoding="utf-8", errors="replace")
+    rdmol: Optional[Chem.Mol]
     if suffix == ".mol2":
         rdmol = Chem.MolFromMol2Block(text, removeHs=False)
     elif suffix == ".sdf":
@@ -101,10 +104,10 @@ def _from_rdkit(path: Path, suffix: str, notes: List[str]) -> Tuple[Molecule, bo
     if rdmol is None:
         raise ValueError("RDKit could not read this file.")
     conf = rdmol.GetConformer() if rdmol.GetNumConformers() else None
-    flat = conf is None or all(
-        abs(conf.GetAtomPosition(i).z) < 1e-4 for i in range(rdmol.GetNumAtoms())
-    )
-    if flat and rdmol.GetNumAtoms() > 3:
+    # Trust the file's own 2-D/3-D flag (as ``pubchem.sdf_to_xyz`` does): a
+    # planar molecule written as 3-D (benzene, formaldehyde) has all z == 0
+    # but real bond lengths, and must not be replaced by an RDKit geometry.
+    if conf is None or not conf.Is3D():
         from rdkit.Chem import AllChem
 
         rdmol = Chem.AddHs(rdmol, addCoords=True)
@@ -122,16 +125,22 @@ def _from_rdkit(path: Path, suffix: str, notes: List[str]) -> Tuple[Molecule, bo
     assert conf is not None
     atoms = [a.GetSymbol() for a in rdmol.GetAtoms()]
     coords = [list(conf.GetAtomPosition(i)) for i in range(rdmol.GetNumAtoms())]
-    charge = sum(a.GetFormalCharge() for a in rdmol.GetAtoms())
+    file_charge = sum(a.GetFormalCharge() for a in rdmol.GetAtoms())
     radicals = sum(a.GetNumRadicalElectrons() for a in rdmol.GetAtoms())
+    # A MOL/SDF/MOL2 file only *records* charge/spin through nonzero formal
+    # charges or radical electrons; all-zero means "not stated" (an O2 drawing
+    # has no radical marks), so keep the caller's Calculation Setup values.
+    from_file = bool(file_charge or radicals)
+    if from_file:
+        charge, multiplicity = int(file_charge), int(radicals) + 1
     mol = Molecule(
         atoms,
         coords,
         charge=int(charge),
-        multiplicity=int(radicals) + 1,
+        multiplicity=int(multiplicity),
         validate_spin=False,
     )
-    return mol, True
+    return mol, from_file
 
 
 def _from_ase(
@@ -213,7 +222,7 @@ def read_uploaded_structure(
         path.write_bytes(content)
         try:
             if suffix in (".mol", ".sdf", ".mol2"):
-                mol, from_file = _from_rdkit(path, suffix, notes)
+                mol, from_file = _from_rdkit(path, suffix, charge, multiplicity, notes)
             else:
                 mol, from_file = _from_ase(path, suffix, charge, multiplicity, notes)
         except ImportError as exc:

@@ -131,6 +131,10 @@ def run_displaced_polarizability(item_id: str, coords_bohr_flat) -> list[list[fl
     # Honor the caller's scf_rescue choice instead of always
     # taking run_scf_with_rescue's default (True).
     run_scf_with_rescue(mf, dm0=dm0, rescue=bool(state.get("scf_rescue", True)))
+    # Never feed or bank an unconverged displaced SCF (audit SCF-8).
+    from .scf_robust import require_converged
+
+    require_converged(mf, item_id)
 
     pol_mod = _polarizability_module(mol, dm0_is_unrestricted)
     alpha = np.asarray(pol_mod.polarizability(pol_mod.Polarizability(mf)), dtype=float)

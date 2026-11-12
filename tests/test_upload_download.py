@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import math
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -107,6 +108,72 @@ class TestReadUploads:
         assert up.molecule.atoms.count("H") == 6  # hydrogens added
         assert any(abs(c[2]) > 0.1 for c in up.molecule.coordinates)
         assert any("2-D" in n for n in up.notes)
+
+    def test_planar_3d_mol_keeps_its_geometry(self):
+        # audit DATA-3: a 3-D-flagged planar molecule (all z == 0) is not 2-D.
+        pytest.importorskip("rdkit")
+        from rdkit import Chem
+
+        mol = """formaldehyde
+     RDKit          3D
+
+  4  3  0  0  0  0  0  0  0  0999 V2000
+    0.0000    0.0000    0.0000 C   0  0
+    1.3470    0.0000    0.0000 O   0  0
+   -0.5500    0.9400    0.0000 H   0  0
+   -0.5500   -0.9400    0.0000 H   0  0
+  1  2  2  0
+  1  3  1  0
+  1  4  1  0
+M  END
+"""
+        assert Chem.MolFromMolBlock(mol, removeHs=False).GetConformer().Is3D()
+        up = read_uploaded_structure("h2co.mol", mol.encode())
+        assert up.molecule.atoms == ["C", "O", "H", "H"]
+        assert up.molecule.coordinates[1] == pytest.approx([1.347, 0.0, 0.0])
+        assert not any("2-D" in n for n in up.notes)
+
+    def test_small_2d_drawing_is_embedded(self):
+        # audit DATA-4: <= 3-atom 2-D drawings were loaded unembedded.
+        pytest.importorskip("rdkit")
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+
+        rd = Chem.AddHs(Chem.MolFromSmiles("O"))
+        AllChem.Compute2DCoords(rd)
+        up = read_uploaded_structure("w.mol", Chem.MolToMolBlock(rd).encode())
+        o, h1 = up.molecule.coordinates[0], up.molecule.coordinates[1]
+        assert 0.9 < math.dist(o, h1) < 1.05  # O-H ~0.97 A, not the 2-D 1.50
+        assert any("2-D" in n for n in up.notes)
+
+    def test_mol_without_charge_or_radicals_keeps_setup_values(self):
+        # audit DATA-4: an O2 drawing has no radical marks; the user's triplet
+        # must survive instead of being overwritten with "from file" singlet.
+        pytest.importorskip("rdkit")
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+
+        rd = Chem.MolFromSmiles("O=O")
+        AllChem.Compute2DCoords(rd)
+        up = read_uploaded_structure(
+            "o2.mol", Chem.MolToMolBlock(rd).encode(), charge=0, multiplicity=3
+        )
+        assert up.molecule.multiplicity == 3
+        assert not up.charge_mult_from_file
+        assert any("Calculation Setup" in n for n in up.notes)
+
+    def test_mol_radical_sets_multiplicity_from_file(self):
+        pytest.importorskip("rdkit")
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+
+        rd = Chem.AddHs(Chem.MolFromSmiles("[CH3]"))
+        AllChem.EmbedMolecule(rd, randomSeed=1)
+        up = read_uploaded_structure(
+            "me.mol", Chem.MolToMolBlock(rd).encode(), charge=1, multiplicity=1
+        )
+        assert (up.molecule.charge, up.molecule.multiplicity) == (0, 2)
+        assert up.charge_mult_from_file
 
     def test_pdb(self):
         pytest.importorskip("rdkit")
@@ -226,7 +293,10 @@ class TestAppWiring:
         app._set_molecule(
             Molecule(atoms=["H", "H"], coordinates=[[0, 0, 0], [0, 0, 0.74]]), "test"
         )
-        app._last_result_dir = tmp_path
+        # A saved run on this molecule: structure exports go to its folder.
+        app._last_result = object()
+        app._last_result_molecule = app._molecule
+        app._last_result_run_dir = app._last_result_dir = tmp_path
         app._on_export_xyz(None)
         assert (tmp_path / "H2_RHF_STO-3G.xyz").exists() or list(tmp_path.glob("*.xyz"))
         assert 'download="' in app._download_html.value

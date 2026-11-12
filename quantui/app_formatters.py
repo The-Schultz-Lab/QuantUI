@@ -42,6 +42,21 @@ def display_formula(formula: Any) -> str:
     return text
 
 
+def _esc(value: Any) -> str:
+    """HTML-escape *value* for a result card.
+
+    Cards render strings read from ``result.json`` (History, the Viewer, and
+    shared or imported result folders), so every free-text value is escaped
+    here rather than trusted.
+    """
+    return html.escape(str(value))
+
+
+def _formula_html(formula: Any) -> str:
+    """:func:`display_formula`, escaped for HTML."""
+    return _esc(display_formula(formula))
+
+
 def friendly_timestamp(ts: Any) -> str:
     """``"2026-10-25_04-31-58-600504"`` → ``"2026-10-25 04:31"``.
 
@@ -74,9 +89,9 @@ def _method_basis_label(method: str, basis: str, scf_variant: str | None) -> str
     set ``scf_variant``.
     """
     label = f"{method}/{basis}"
-    if scf_variant and scf_variant.upper() != method.upper():
+    if scf_variant and str(scf_variant).upper() != str(method).upper():
         label += f" ({scf_variant})"
-    return label
+    return _esc(label)
 
 
 # Open-shell SCF variants whose orbitals split into separate alpha/beta
@@ -140,6 +155,47 @@ def _s2_html(s2: Any, multiplicity: Any) -> str:
     return text
 
 
+_RESCUE_TEXT = {
+    "bootstrap": "converged after a rescue (HF/UHF starting density)",
+    "level_shift": "converged after a rescue (level shift, atomic guess)",
+    "failed": "rescue tried, still not converged",
+}
+
+
+def _scf_provenance_rows(get: Any) -> str:
+    """Dispersion / SCF-rescue warnings shared by every result card.
+
+    ``dispersion_applied is False``: the method (e.g. PBE-D3) needs a D3
+    term but no backend was installed, so the result has none although the
+    label says otherwise. A non-"none" ``scf_rescue_stage``: the reference
+    SCF only converged (or still failed) after QuantUI's rescue. Both are
+    absent on older saved results and on runs where they do not apply.
+    """
+    rows = ""
+    if get("dispersion_applied") is False:
+        rows += (
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">'
+            "Dispersion</td>"
+            f'<td style="color:{_theme.css.ACCENT_WARNING}">⚠ NOT applied &mdash; '
+            "no D3 backend (pyscf-dispersion) was installed, so this result "
+            f"has no dispersion correction despite the {html.escape(str(get('method', '') or ''))} "
+            "label.</td></tr>"
+        )
+    _stage = str(get("scf_rescue_stage") or "none")
+    if _stage in _RESCUE_TEXT:
+        _color = (
+            _theme.css.ACCENT_ERROR_ALT
+            if _stage == "failed"
+            else _theme.css.ACCENT_WARNING
+        )
+        rows += (
+            f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">'
+            "SCF rescue</td>"
+            f'<td style="color:{_color}">⚠ {_RESCUE_TEXT[_stage]}</td></tr>'
+        )
+    return rows
+
+
 def _result_extra_rows(get: Any) -> str:
     """Build the shared 'extra' result-card rows from an accessor.
 
@@ -158,7 +214,7 @@ def _result_extra_rows(get: Any) -> str:
             f'<td style="color:{_theme.css.TEXT_HEADING}">{value}</td></tr>'
         )
 
-    rows = ""
+    rows = _scf_provenance_rows(get)
     energy = get("energy_hartree", 0.0)
 
     _engine_id = str(get("engine_id", "pyscf") or "pyscf")
@@ -180,7 +236,7 @@ def _result_extra_rows(get: Any) -> str:
 
     _solvent = get("solvent")
     if _solvent is not None:
-        rows += _num("Solvent (PCM)", str(_solvent))
+        rows += _num("Solvent (PCM)", _esc(_solvent))
 
     _s2 = get("spin_square")
     if _s2 is not None:
@@ -197,7 +253,7 @@ def _result_extra_rows(get: Any) -> str:
         _name = get("gpu_name")
         _device = (
             f'<span style="color:{_theme.css.ACCENT_SUCCESS}">🚀 GPU</span>'
-            f' &mdash; <span style="font-family:monospace">{_name}</span>'
+            f' &mdash; <span style="font-family:monospace">{_esc(_name)}</span>'
             if _name
             else f'<span style="color:{_theme.css.ACCENT_SUCCESS}">🚀 GPU</span>'
         )
@@ -214,7 +270,7 @@ def _result_extra_rows(get: Any) -> str:
     if bool(get("density_fit", False)):
         rows += (
             f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Density fitting</td>'
-            '<td><span style="color:#0369a1">⚡ RI</span> '
+            f'<td><span style="color:{_theme.css.ACCENT_INFO}">⚡ RI</span> '
             f'<span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
             "(approximate 2-electron integrals)</span></td></tr>"
         )
@@ -256,7 +312,7 @@ def _result_extra_rows(get: Any) -> str:
     _chg = get("mulliken_charges")
     _syms = get("atom_symbols")
     if _chg is not None and _syms is not None:
-        _charge_str = "  ".join(f"{sym}:{c:+.3f}" for sym, c in zip(_syms, _chg))
+        _charge_str = "  ".join(f"{_esc(sym)}:{c:+.3f}" for sym, c in zip(_syms, _chg))
         rows += (
             f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL};vertical-align:top">'
             f"Mulliken charges</td>"
@@ -307,7 +363,7 @@ def format_result(r: Any) -> str:
     )
     _extra = _result_extra_rows(lambda k, d=None: getattr(r, k, d))
     return (
-        _result_card_open() + f"<b>{display_formula(r.formula)} &mdash; "
+        _result_card_open() + f"<b>{_formula_html(r.formula)} &mdash; "
         f"{_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))}</b>"
         + _result_card_table_open()
         + f"{_rows}{_extra}</table>"
@@ -338,7 +394,7 @@ def format_opt_result(r: Any) -> str:
     )
     return (
         _result_card_open()
-        + f"<b>Geometry Optimisation &mdash; {display_formula(r.formula)} ({r.method}/{r.basis})</b>"
+        + f"<b>Geometry Optimisation &mdash; {_formula_html(r.formula)} ({_method_basis_label(r.method, r.basis, None)})</b>"
         + _result_card_table_open()
         + f"{_rows}"
         + _solvent_row(getattr(r, "solvent", None), "optimized in solvent")
@@ -419,7 +475,7 @@ def _solvent_row(solvent: Any, note: str) -> str:
         return ""
     return (
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Solvent (PCM)</td>'
-        f'<td style="color:{_theme.css.TEXT_HEADING}">{solvent}'
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{_esc(solvent)}'
         f'<span style="color:{_theme.css.TEXT_MUTED}"> &mdash; {note}</span></td></tr>'
     )
 
@@ -446,7 +502,7 @@ def saddle_retry_rows(block: Optional[dict]) -> str:
     return (
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Saddle-point retry</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">first pass had {followed} cm⁻¹; '
-        f"displaced, re-optimized ({block.get('reopt_steps', '?')} steps) "
+        f"displaced, re-optimized ({_esc(block.get('reopt_steps', '?'))} steps) "
         f"and recomputed &mdash; {outcome}</td></tr>"
     )
 
@@ -580,15 +636,41 @@ def _saved_freq_accessor(data: dict[str, Any]) -> Any:
     return lambda k, d=None: values.get(k, d)
 
 
-def _basic_rows(get: Any, conv_label: str, conv_text: str, conv_color: str) -> str:
-    """Energy / gap / convergence / iterations — first rows of every card."""
-    energy = get("energy_hartree")
-    gap = get("homo_lumo_gap_ev")
+def _finite_or_none(value: Any) -> Optional[float]:
+    """*value* as a finite float, or None (missing, null, NaN or junk)."""
+    import math
+
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return None
+    return x if math.isfinite(x) else None
+
+
+def _basic_rows(
+    get: Any,
+    conv_label: str,
+    conv_text: str,
+    conv_color: str,
+    *,
+    energy_label: str = "Total energy",
+) -> str:
+    """Energy / gap / convergence / iterations — first rows of every card.
+
+    Missing or non-finite values (older result.json schemas, a PES scan whose
+    points all failed) render as "—" rather than raising or showing "nan".
+    """
+    energy = _finite_or_none(get("energy_hartree"))
+    gap = _finite_or_none(get("homo_lumo_gap_ev"))
     n_iter = get("n_iterations")
     rows = [
         (
-            "Total energy",
-            f"{energy:.8f} Ha &ensp;({energy * 27.211386245988:.4f} eV)",
+            energy_label,
+            (
+                "—"
+                if energy is None
+                else f"{energy:.8f} Ha &ensp;({energy * 27.211386245988:.4f} eV)"
+            ),
             _theme.css.TEXT_HEADING,
         ),
         (
@@ -599,7 +681,7 @@ def _basic_rows(get: Any, conv_label: str, conv_text: str, conv_color: str) -> s
         (conv_label, conv_text, conv_color),
         (
             "SCF iterations",
-            "—" if n_iter in (None, -1) else str(n_iter),
+            "—" if n_iter in (None, -1) else _esc(n_iter),
             _theme.css.TEXT_HEADING,
         ),
     ]
@@ -702,7 +784,7 @@ def format_freq_result(r: Any) -> str:
         )
     return (
         _result_card_open()
-        + f"<b>Frequency Analysis &mdash; {display_formula(r.formula)} &middot; "
+        + f"<b>Frequency Analysis &mdash; {_formula_html(r.formula)} &middot; "
         f"{_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))}</b>"
         + _result_card_table_open()
         + f"{_rows}{_thermo_rows}</table>"
@@ -793,8 +875,7 @@ def format_ts_result(r: Any) -> str:
         _point_group_html(lambda k, d=None: getattr(r, k, d))
     )
     return (
-        _result_card_open()
-        + f"<b>Transition State &mdash; {display_formula(r.formula)} "
+        _result_card_open() + f"<b>Transition State &mdash; {_formula_html(r.formula)} "
         f"({_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))})</b>"
         + _result_card_table_open()
         + f"{_rows}</table>"
@@ -857,7 +938,7 @@ def format_irc_result(r: Any) -> str:
         + _solvent_row(getattr(r, "solvent", None), "every step in solvent")
     )
     return (
-        _result_card_open() + f"<b>IRC &mdash; {display_formula(r.formula)} "
+        _result_card_open() + f"<b>IRC &mdash; {_formula_html(r.formula)} "
         f"({_method_basis_label(r.method, r.basis, None)})</b>"
         + _result_card_table_open()
         + f"{_rows}</table>"
@@ -916,8 +997,7 @@ def format_tddft_result(r: Any) -> str:
             + "".join(exc_rows)
         )
     return (
-        _result_card_open()
-        + f"<b>TD-DFT / UV-Vis &mdash; {display_formula(r.formula)} "
+        _result_card_open() + f"<b>TD-DFT / UV-Vis &mdash; {_formula_html(r.formula)} "
         f"({_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))})</b>"
         + _result_card_table_open()
         + f"{header_rows}{exc_table}</table>"
@@ -933,8 +1013,8 @@ def format_nmr_result(r: Any) -> str:
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">SCF converged</td>'
         f'<td style="color:{_cc}">{_conv}</td></tr>'
         f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Reference</td>'
-        f'<td style="color:{_theme.css.TEXT_HEADING}">{r.reference_compound} ({r.method}/{r.basis})</td></tr>'
-    )
+        f'<td style="color:{_theme.css.TEXT_HEADING}">{_esc(r.reference_compound)} ({_method_basis_label(r.method, r.basis, None)})</td></tr>'
+    ) + _scf_provenance_rows(lambda k, d=None: getattr(r, k, d))
     # Surface a fallback-reference substitution explicitly
     # rather than letting the row above imply an exact-match reference.
     if getattr(r, "is_fallback_reference", False):
@@ -942,7 +1022,8 @@ def format_nmr_result(r: Any) -> str:
         header_rows += (
             f'<tr><td colspan="2" style="padding:3px 0 0">'
             f'<span style="color:{_theme.css.ACCENT_WARNING};font-size:12px">'
-            f"⚠ No reference at {r.method}/{r.basis} — shifts use {_ref_key} "
+            f"⚠ No reference at {_method_basis_label(r.method, r.basis, None)} — "
+            f"shifts use {_esc(_ref_key)} "
             "constants instead.</span></td></tr>"
         )
 
@@ -973,7 +1054,7 @@ def format_nmr_result(r: Any) -> str:
         _basis_warn = (
             '<tr><td colspan="2" style="padding:6px 0 0">'
             f'<span style="color:{_theme.css.ACCENT_WARNING};font-size:12px">'
-            f"⚠ {r.basis} gives qualitative NMR only — use 6-31G* or better.</span>"
+            f"⚠ {_esc(r.basis)} gives qualitative NMR only — use 6-31G* or better.</span>"
             "</td></tr>"
         )
 
@@ -987,8 +1068,9 @@ def format_nmr_result(r: Any) -> str:
         _ref_warn = (
             '<tr><td colspan="2" style="padding:6px 0 0">'
             f'<span style="color:{_theme.css.ACCENT_WARNING};font-size:12px">'
-            f"⚠ No calibrated TMS reference for {r.method}/{r.basis} — using "
-            f"{getattr(r, 'reference_key', 'B3LYP/6-31G*')} constants instead. "
+            f"⚠ No calibrated TMS reference for "
+            f"{_method_basis_label(r.method, r.basis, None)} — using "
+            f"{_esc(getattr(r, 'reference_key', 'B3LYP/6-31G*'))} constants instead. "
             "Shifts may be off by a few ppm.</span>"
             "</td></tr>"
         )
@@ -1001,7 +1083,7 @@ def format_nmr_result(r: Any) -> str:
         )
 
     return (
-        _result_card_open() + f"<b>NMR Shielding &mdash; {display_formula(r.formula)} "
+        _result_card_open() + f"<b>NMR Shielding &mdash; {_formula_html(r.formula)} "
         f"({_method_basis_label(r.method, r.basis, getattr(r, 'scf_variant', None))})</b>"
         + _result_card_table_open()
         + f"{header_rows}{h_table}{c_table}{_empty}{_basis_warn}{_ref_warn}</table>"
@@ -1047,7 +1129,7 @@ def format_pes_scan_result(r: Any) -> str:
 
     return (
         _result_card_open()
-        + f"<b>PES Scan &mdash; {display_formula(r.formula)} ({r.method}/{r.basis})</b>"
+        + f"<b>PES Scan &mdash; {_formula_html(r.formula)} ({_method_basis_label(r.method, r.basis, None)})</b>"
         + _result_card_table_open()
         + f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Scan type</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.scan_type.capitalize()} ({_idx_str})</td></tr>'
@@ -1168,7 +1250,7 @@ def reorg_comparison_html(entries: list[tuple[str, dict]]) -> str:
     td = f"padding:5px 12px;border-bottom:1px solid {_theme.css.BORDER}"
     head = (
         f'<th style="{th}">Result</th><th style="{th}">Method / basis</th>'
-        + "".join(f'<th style="{th}">λ {k} (eV)</th>' for k in kinds)
+        + "".join(f'<th style="{th}">λ {_esc(k)} (eV)</th>' for k in kinds)
         + f'<th style="{th}">Relaxation (Å)</th>'
     )
 
@@ -1177,9 +1259,10 @@ def reorg_comparison_html(entries: list[tuple[str, dict]]) -> str:
         channels = data.get("reorg_channels") or []
         if not channels:
             rows.append(
-                f'<tr><td style="{td}">{label}</td>'
+                f'<tr><td style="{td}">{_esc(label)}</td>'
                 f'<td style="{td}" colspan="{len(kinds) + 2}">'
-                '<span style="color:#92400e">λ not saved — re-run to compare'
+                f'<span style="color:{_theme.css.ACCENT_WARNING}">'
+                "λ not saved — re-run to compare"
                 "</span></td></tr>"
             )
             continue
@@ -1197,8 +1280,9 @@ def reorg_comparison_html(entries: list[tuple[str, dict]]) -> str:
         rmsds = [c["relaxation"]["rmsd"] for c in channels if c.get("relaxation")]
         relax = f"{max(rmsds):.4f}" if rmsds else "—"
         rows.append(
-            f'<tr><td style="{td}">{label}</td>'
-            f'<td style="{td}">{data.get("method", "?")}/{data.get("basis", "?")}</td>'
+            f'<tr><td style="{td}">{_esc(label)}</td>'
+            f'<td style="{td}">'
+            f'{_method_basis_label(data.get("method", "?"), data.get("basis", "?"), None)}</td>'
             + "".join(cells)
             + f'<td style="{td};font-family:monospace">{relax}</td></tr>'
         )
@@ -1232,7 +1316,7 @@ def reorg_channels_html(channels: list[dict]) -> str:
         return {
             "hole": "Hole transfer (cation)",
             "electron": "Electron transfer (anion)",
-        }.get(kind, str(kind).title())
+        }.get(kind, _esc(str(kind).title()))
 
     blocks = []
     for ch in channels:
@@ -1252,7 +1336,7 @@ def reorg_channels_html(channels: list[dict]) -> str:
             (
                 "Ion state",
                 f"charge {ch.get('ion_charge', 0):+d}, "
-                f"mult {ch.get('ion_multiplicity', '?')}",
+                f"mult {_esc(ch.get('ion_multiplicity', '?'))}",
             ),
         ]
         # Geometry relaxation: what λ physically measures. Only
@@ -1280,7 +1364,7 @@ def reorg_channels_html(channels: list[dict]) -> str:
         )
         blocks.append(
             f'<div style="margin-top:8px">'
-            f'<b style="font-size:13px;color:#166534">{_label(ch.get("kind", ""))}</b>'
+            f'<b style="font-size:13px;color:{_theme.css.ACCENT_SUCCESS}">{_label(ch.get("kind", ""))}</b>'
             f'<table style="margin-top:2px;font-size:13px;border-collapse:collapse">'
             f"{body}</table></div>"
         )
@@ -1345,7 +1429,7 @@ def format_reorg_result(r: Any) -> str:
     _channels_html = reorg_channels_html(_payload)
     return (
         _result_card_open() + f"<b>Reorganization Energy (Marcus 4-point) &mdash; "
-        f"{display_formula(r.formula)} ({r.method}/{r.basis})</b>"
+        f"{_formula_html(r.formula)} ({_method_basis_label(r.method, r.basis, None)})</b>"
         + _result_card_table_open()
         + f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Neutral energy</td>'
         f'<td style="color:{_theme.css.TEXT_HEADING}">{r.neutral_energy_hartree:.8f} Ha</td></tr>'
@@ -1433,11 +1517,11 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         ),
         "irc": ("IRC", _theme.css.ACCENT_PURPLE, _theme.css.SURFACE_PURPLE_BG),
     }
-    ct = data.get("calc_type", "")
+    ct = str(data.get("calc_type") or "")
     _ct_label, _ct_fg, _ct_bg = _ct_labels.get(
         ct,
         (
-            ct.replace("_", " ").title(),
+            ct.replace("_", " ").title() or "Result",
             _theme.css.TEXT_SECONDARY,
             _theme.css.SURFACE_MUTED_BG,
         ),
@@ -1445,10 +1529,11 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     _ct_badge = (
         f'<span style="display:inline-block;padding:2px 10px;border-radius:12px;'
         f"background:{_ct_bg};color:{_ct_fg};font-size:12px;font-weight:700;"
-        f'letter-spacing:0.03em;margin-bottom:6px">{_ct_label}</span>'
+        f'letter-spacing:0.03em;margin-bottom:6px">{_esc(_ct_label)}</span>'
     )
     _conv = "Yes" if data.get("converged") else "No (treat results with caution)"
     _cc = _converged_color(bool(data.get("converged")))
+    _energy_label = "Total energy"
     # data["converged"] already
     # folds in CC-amplitude (post-HF), TD-root (tddft), or Hessian
     # (frequency) convergence on top of the reference SCF's own status,
@@ -1456,7 +1541,25 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
     # format_tddft_result). A bare "SCF converged" label here would blame
     # the SCF for a CC/TD/Hessian-only failure whose reference SCF was
     # fine — mirror each live formatter's label choice.
-    if ct in ("frequency", "transition_state", "irc"):
+    # Non-SCF calc types use the live cards' own labels (audit UI-8): an
+    # unconverged optimization is not an SCF failure, and a PES scan's
+    # energy_hartree is the scan minimum, not a single total energy.
+    if ct == "geometry_opt":
+        _conv_label = "Opt converged"
+        _energy_label = "Final energy"
+        if not data.get("converged"):
+            _conv = "No (max steps reached)"
+    elif ct == "pes_scan":
+        _conv_label = "All converged"
+        _energy_label = "Min energy"
+        if not data.get("converged"):
+            _conv = "No (some scan points failed)"
+    elif ct == "reorganization_energy":
+        _conv_label = "All converged"
+        _energy_label = "Neutral energy"
+        if not data.get("converged"):
+            _conv = "No (some steps did not converge)"
+    elif ct in ("frequency", "transition_state", "irc"):
         _conv_label = "Converged"
     elif ct == "tddft":
         _conv_label = "Converged"
@@ -1464,7 +1567,15 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         _conv_label = "Converged"
     else:
         _conv_label = "SCF converged"
-    _rows = _basic_rows(lambda k, d=None: data.get(k, d), _conv_label, _conv, _cc)
+    if data.get("converged") is None:
+        _conv, _cc = "—", _theme.css.TEXT_HEADING
+    _rows = _basic_rows(
+        lambda k, d=None: data.get(k, d),
+        _conv_label,
+        _conv,
+        _cc,
+        energy_label=_energy_label,
+    )
     ts = data.get("timestamp", "")
 
     # Shared 'extra' rows (correlation breakdown / solvent / device / dipole /
@@ -1528,9 +1639,9 @@ def format_past_result(data: dict[str, Any], result_dir: Optional[Path] = None) 
         _result_card_open(extra_style="overflow:hidden")
         + f"{_thumb_html}"
         + f"{_ct_badge}<br>"
-        + f'<b>{display_formula(data["formula"])} &mdash; '
-        f'{_method_basis_label(data["method"], data["basis"], data.get("scf_variant"))}</b>'
-        f'&ensp;<small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{ts}</small>'
+        + f'<b>{_formula_html(data.get("formula") or "—")} &mdash; '
+        f'{_method_basis_label(data.get("method") or "—", data.get("basis") or "—", data.get("scf_variant"))}</b>'
+        f'&ensp;<small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{_esc(ts)}</small>'
         + _result_card_table_open()
         + f"{_rows}{_ts_html}{_extra}{_thermo_html}</table>{_reorg_html}"
         + _RESULT_CARD_CLOSE

@@ -87,6 +87,9 @@ class ThermoData:
     Cp_jmolk: Optional[float] = None
     # Rotational symmetry number used for S_rot (2 for water, 3 for NH3).
     symmetry_number: Optional[int] = None
+    # Point group sigma was taken from (PySCF name, e.g. "D6h"); None when
+    # PySCF's own detection was used.
+    symmetry_group: Optional[str] = None
 
 
 def _cm1_to_thermo_au(frequencies_cm1: Any) -> Any:
@@ -125,12 +128,18 @@ def _run_thermo(
 ) -> ThermoData:
     """PySCF ``hessian.thermo.thermo`` → :class:`ThermoData`.
 
-    The rotational symmetry number comes from PySCF's own point-group
-    detection, run here at QuantUI's 0.01 Å tolerance: at PySCF's strict
-    default an optimized water or NH3 gets sigma = 1 instead of 2 or 3,
-    overstating the rotational entropy by R ln sigma.
+    The rotational symmetry number comes from QuantUI's own point group
+    (:func:`~quantui.symmetry.detect_point_group`, the group the UI shows):
+    at PySCF's strict default an optimized water or NH3 gets sigma = 1
+    instead of 2 or 3, and even at 0.01 Å PySCF's single-tolerance detection
+    gives the bundled benzene D2h (sigma 4, not 12; audit SCF-4/GEOM-7). The
+    entropy and G are corrected by -R ln(sigma / sigma_PySCF).
     """
-    from .symmetry import detection_tolerance
+    from .symmetry import (
+        detect_point_group,
+        detection_tolerance,
+        rotational_symmetry_number,
+    )
 
     pressure_pa = float(pressure_atm) * 101325.0
     with detection_tolerance():
@@ -162,6 +171,30 @@ def _run_thermo(
 
     u_raw = _first("E_tot")
     sigma_raw = _first("sym_number")
+    sigma = int(round(_thermo_value(sigma_raw))) if sigma_raw is not None else None
+    sigma_group: Optional[str] = None
+    if sigma is not None:
+        pg = None
+        try:
+            mol = getattr(model, "mol", model)
+            pg = detect_point_group(
+                [mol.atom_pure_symbol(i) for i in range(mol.natm)],
+                mol.atom_coords(unit="Angstrom").tolist(),
+            )
+        except Exception as exc:  # noqa: BLE001 — keep PySCF's sigma
+            logger.debug("Point group for sigma failed: %s", exc)
+        if pg is not None:
+            new_sigma = rotational_symmetry_number(pg.group)
+            if new_sigma != sigma:
+                # S_rot = R[... - ln sigma]; nothing else depends on sigma.
+                import math
+
+                from pyscf.data import nist
+
+                kb_eh = nist.BOLTZMANN / nist.HARTREE2J
+                s_eh -= kb_eh * math.log(new_sigma / sigma)
+                sigma = new_sigma
+            sigma_group = pg.group
     return ThermoData(
         zpve_hartree=_thermo_value(z_raw) if z_raw is not None else fallback_zpve,
         H_hartree=h,
@@ -172,9 +205,8 @@ def _run_thermo(
         E_thermal_hartree=_thermo_value(u_raw) if u_raw is not None else None,
         Cv_jmolk=_jmolk("Cv_tot"),
         Cp_jmolk=_jmolk("Cp_tot"),
-        symmetry_number=(
-            int(round(_thermo_value(sigma_raw))) if sigma_raw is not None else None
-        ),
+        symmetry_number=sigma,
+        symmetry_group=sigma_group,
     )
 
 
@@ -296,6 +328,12 @@ class FreqResult:
     # at, from the reference SCF's analytic gradient; None when the gradient
     # was unavailable. See is_stationary().
     max_force_ev_per_ang: Optional[float] = None
+    # Same meaning as SessionResult's fields (audit SCF-7): None = method
+    # has no D3 term, False = it needs D3 but no backend was installed (the
+    # result has NO dispersion although the label says e.g. "PBE-D3").
+    dispersion_applied: Optional[bool] = None
+    # quantui.scf_robust.SCF_RESCUE_* stage of the reference SCF.
+    scf_rescue_stage: str = "none"
 
     @property
     def energy_ev(self) -> float:
@@ -336,10 +374,13 @@ def perturb_along_mode(
 ) -> Molecule:
     """Return a copy of *molecule* displaced along one normal mode.
 
-    PySCF ``norm_mode`` vectors are unit-normalized; *amplitude* (Å) scales
-    them the same way as the Vibrational panel animation.  *fraction* is the
-    user-facing scale (default 75%).  Per-atom displacement is
-    ``sign * fraction * amplitude * mode_vector[atom]``.
+    The mode vector is first normalised to unit length over all atoms
+    (PySCF's ``norm_mode`` is *not*: its length is 1/sqrt(reduced mass in
+    amu), about 0.97 for a water mode and 0.38 for N2), so the whole
+    displacement has length ``fraction * amplitude`` Å whatever the mode's
+    reduced mass: ``sign * fraction * amplitude * v / |v|``. *amplitude* is
+    the Vibrational panel's animation scale; *fraction* is the user-facing
+    scale (default 75%, i.e. 0.3 Å).
 
     Args:
         molecule: Starting geometry (Å).
@@ -365,8 +406,13 @@ def perturb_along_mode(
         raise ValueError(
             f"displacement shape {disp.shape} != coordinates shape {coords.shape}"
         )
+    norm = float(np.linalg.norm(disp))
+    if not np.isfinite(norm) or norm <= 0.0:
+        raise ValueError(f"mode {mode_index} has a zero displacement vector")
 
-    scale = float(sign) * float(fraction) * float(amplitude)
+    # Normalised so the applied step is the recorded fraction * amplitude
+    # (audit SCF-10).
+    scale = float(sign) * float(fraction) * float(amplitude) / norm
     new_coords = (coords + scale * disp).tolist()
     return Molecule(
         atoms=list(molecule.atoms),
@@ -614,6 +660,7 @@ def _run_freq_calc_body(
 
     # ── SCF ──────────────────────────────────────────────────────────────────
     method_upper = method.upper()
+    dispersion_applied: Optional[bool] = None
     if method_upper == "RHF":
         mf = scf.RHF(mol)
         scf_variant = type(mf).__name__
@@ -630,7 +677,7 @@ def _run_freq_calc_body(
         # Capture before maybe_apply_d3 can wrap/rename it.
         scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
-        mf, _ = maybe_apply_d3(mf, method, progress_stream=stream)
+        mf, dispersion_applied = maybe_apply_d3(mf, method, progress_stream=stream)
 
     # Density fitting (RI), opt-in. Off by default. Applied to the main
     # SCF; the per-displacement inner SCFs below get the same treatment so the
@@ -683,6 +730,7 @@ def _run_freq_calc_body(
     _status("SCF converged. Computing analytical Hessian...")
 
     converged = bool(getattr(mf, "converged", False))
+    scf_rescue_stage = str(getattr(mf, "scf_rescue_stage", "none") or "none")
     n_iterations = int(getattr(mf, "cycles", -1))
 
     # ── HOMO-LUMO gap (non-fatal) ────────────────────────────────────────────
@@ -690,21 +738,15 @@ def _run_freq_calc_body(
     try:
         import numpy as _np
 
-        from .session_calc import _host_array
+        from .session_calc import _host_array, homo_lumo_gap_hartree
 
-        mo_occ = _host_array(mf.mo_occ)
-        mo_energy = _host_array(mf.mo_energy)
-        if isinstance(mo_energy, (list, _np.ndarray)) and hasattr(
-            mo_energy[0], "__len__"
-        ):
-            mo_e_ref, mo_occ_ref = mo_energy[0], mo_occ[0]
-        else:
-            mo_e_ref, mo_occ_ref = mo_energy, mo_occ
-        n_occ = int((_np.array(mo_occ_ref) > 0).sum())
-        if 0 < n_occ < len(mo_e_ref):
-            homo_lumo_gap_ev = float(
-                (mo_e_ref[n_occ] - mo_e_ref[n_occ - 1]) * HARTREE_TO_EV
-            )
+        # UHF/UKS: the gap spans both spin channels (audit VIZ-4).
+        _gap_ha = homo_lumo_gap_hartree(
+            _np.asarray(_host_array(mf.mo_energy), dtype=float),
+            _np.asarray(_host_array(mf.mo_occ), dtype=float),
+        )
+        if _gap_ha is not None:
+            homo_lumo_gap_ev = float(_gap_ha * HARTREE_TO_EV)
     except Exception as exc:
         logger.debug("HOMO-LUMO gap extraction failed in freq calc: %s", exc)
 
@@ -890,7 +932,9 @@ def _run_freq_calc_body(
                 # -Δ steps so the +/-/half-loop logic stays compact.
                 from quantui.gpu_offload import try_to_gpu as _try_to_gpu_inner
 
-                def _displaced_scf_dipole() -> _np_ir.ndarray:
+                from .scf_robust import DisplacedSCFNotConverged, require_converged
+
+                def _displaced_scf_dipole(label: str = "") -> _np_ir.ndarray:
                     if _xc is not None:
                         _mf_d = dft.UKS(mol) if _dm0_is_unrestricted else dft.RKS(mol)
                         _mf_d.xc = _xc
@@ -911,6 +955,9 @@ def _run_freq_calc_body(
                     # failure, so this is safe to call unconditionally.
                     _mf_d, _used_gpu, _gpu_name = _try_to_gpu_inner(_mf_d, "RHF")
                     run_scf_with_rescue(_mf_d, dm0=_dm0, rescue=scf_rescue)
+                    # An unconverged displaced SCF must never feed (or be
+                    # banked for) the dipole derivative (audit SCF-8).
+                    require_converged(_mf_d, label)
                     # pyscf has no type stubs (ignore_missing_imports), so
                     # dip_moment()'s Any return defeats asarray's overload
                     # resolution too; dip_moment() genuinely returns an
@@ -1061,6 +1108,10 @@ def _run_freq_calc_body(
                                     os.unlink(_dm0_handle.name)
                                 except OSError:
                                     pass
+                        except DisplacedSCFNotConverged:
+                            # Not a pool failure: serially it would not
+                            # converge either.
+                            raise
                         except Exception as _par_exc:
                             logger.warning(
                                 "Parallel IR-intensity computation failed (%s); falling back to serial.",
@@ -1089,7 +1140,7 @@ def _run_freq_calc_body(
                             _c = _coords0.copy()
                             _c[_I, _ax] += _DELTA * _sign
                             mol.set_geom_(_c, unit="Bohr")
-                            _mu = _displaced_scf_dipole()
+                            _mu = _displaced_scf_dipole(displacement_id(_I, _ax, _sign))
                             _dipoles[_key] = _mu
                             if checkpoint is not None:
                                 checkpoint.mark_item_done(
@@ -1130,6 +1181,13 @@ def _run_freq_calc_body(
                     ir_intensities = _ir
                 _status(
                     "Numerical IR intensities complete. Computing thermochemistry..."
+                )
+            except DisplacedSCFNotConverged as _nc_exc:
+                logger.warning("Numerical IR intensities abandoned: %s", _nc_exc)
+                _status(
+                    f"IR intensities unavailable: {_nc_exc}, so the "
+                    "finite-difference dipole derivative would be unreliable; "
+                    "continuing without IR intensities."
                 )
             except Exception as _ir_exc:
                 logger.warning("Numerical IR intensities failed: %s", _ir_exc)
@@ -1256,6 +1314,8 @@ def _run_freq_calc_body(
         gpu_used=gpu_used,
         gpu_name=gpu_name,
         max_force_ev_per_ang=max_force_ev_per_ang,
+        dispersion_applied=dispersion_applied,
+        scf_rescue_stage=scf_rescue_stage,
     )
 
 
@@ -1359,7 +1419,7 @@ def displace_off_saddle(
 
     Displaces along every imaginary mode below
     :data:`IMAGINARY_RETRY_THRESHOLD_CM1` (:func:`perturb_along_mode`,
-    0.3 Å scale). At a saddle both directions lead downhill.
+    a 0.3 Å step per mode). At a saddle both directions lead downhill.
     """
     modes = imaginary_modes_to_follow(result)
     if not modes:

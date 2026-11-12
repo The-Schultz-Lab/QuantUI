@@ -259,6 +259,89 @@ def _reuse_scan_point(
     return energy_ha, point_molecule
 
 
+def _moving_fragment(
+    molecule: Molecule, scan_type: str, atom_indices: Sequence[int]
+) -> List[int]:
+    """Atoms to move with the last scan atom when driving an angle/dihedral.
+
+    Moving only the last atom drags it through its own neighbours (ethane
+    H–C–C–H: an H lands on top of another H on the same carbon). Instead
+    the whole group on that side moves rigidly: for an angle i1–i2–i3 the
+    atoms still connected to i3 once the vertex i2 is removed; for a
+    dihedral i1–i2–i3–i4 the atoms on the i3 side of the i2–i3 bond.
+    Connectivity is by covalent radii (:mod:`quantui.connectivity`). When
+    the two sides are joined (a ring) there is no rigid group to rotate,
+    so this falls back to the single last atom.
+    """
+    from .connectivity import covalent_bonds
+
+    n = len(molecule.atoms)
+    last = int(atom_indices[-1])
+    if scan_type == "angle":
+        a1, vertex = int(atom_indices[0]), int(atom_indices[1])
+        cut_node: Optional[int] = vertex
+        cut_edge: Optional[frozenset] = None
+        seed, forbidden = last, {a1, vertex}
+    else:  # dihedral
+        a1, a2, a3 = (int(i) for i in atom_indices[:3])
+        cut_node = None
+        cut_edge = frozenset((a2, a3))
+        seed, forbidden = a3, {a1, a2}
+
+    neighbours: Dict[int, List[int]] = {i: [] for i in range(n)}
+    for i, j in covalent_bonds(molecule.atoms, molecule.coordinates):
+        if cut_node in (i, j) or frozenset((i, j)) == cut_edge:
+            continue
+        neighbours[i].append(j)
+        neighbours[j].append(i)
+
+    seen = {seed}
+    stack = [seed]
+    while stack:
+        for k in neighbours[stack.pop()]:
+            if k not in seen:
+                seen.add(k)
+                stack.append(k)
+    if last not in seen or seen & forbidden:
+        return [last]
+    return sorted(seen)
+
+
+def _set_bond_angle(
+    atoms: Any, i1: int, i2: int, i3: int, target: float, moving: Sequence[int]
+) -> None:
+    """Rotate the *moving* atoms about vertex *i2* so angle i1–i2–i3 = *target*.
+
+    Same rotation as ``ase.Atoms.set_angle`` with a mask, except that a
+    linear (or fully folded) starting angle — where the plane of the angle,
+    and so ASE's rotation axis, is undefined ("Cannot rotate: norm(v) ==
+    0") — is bent within an arbitrary plane containing the i2–i1 bond.
+    """
+    import numpy as np
+
+    pos = atoms.get_positions()
+    v1 = pos[i1] - pos[i2]
+    v3 = pos[i3] - pos[i2]
+    v1 = v1 / np.linalg.norm(v1)
+    v3 = v3 / np.linalg.norm(v3)
+    axis = np.cross(v1, v3)
+    if np.linalg.norm(axis) < 1e-6:
+        # Linear: any axis perpendicular to the bond defines a valid plane.
+        trial = np.eye(3)[int(np.argmin(np.abs(v1)))]
+        axis = np.cross(v1, trial)
+    axis = axis / np.linalg.norm(axis)
+    current = math.degrees(math.acos(float(np.clip(np.dot(v1, v3), -1.0, 1.0))))
+    theta = math.radians(float(target) - current)
+    # Rodrigues rotation about *axis* through the vertex.
+    k = np.array(
+        [[0.0, -axis[2], axis[1]], [axis[2], 0.0, -axis[0]], [-axis[1], axis[0], 0.0]]
+    )
+    rot = np.eye(3) + math.sin(theta) * k + (1.0 - math.cos(theta)) * (k @ k)
+    idx = list(moving)
+    pos[idx] = (pos[idx] - pos[i2]) @ rot.T + pos[i2]
+    atoms.set_positions(pos)
+
+
 def run_pes_scan(
     molecule: Molecule,
     method: str = "RHF",
@@ -383,6 +466,14 @@ def run_pes_scan(
     if steps < 2:
         raise ValueError("steps must be >= 2.")
 
+    if scan_type == "angle" and not (0.0 < start < 180.0 and 0.0 < stop < 180.0):
+        # 180° is linear (the angle constraint's gradient is undefined there)
+        # and a bond angle never exceeds 180°: "190°" is just 170° again.
+        raise ValueError(
+            "Angle scan Start and Stop must lie between 0° and 180° "
+            f"(exclusive), got {start}° to {stop}°."
+        )
+
     # --- Set up ASE atoms + PySCF calculator ---
     atoms = molecule_to_atoms(molecule)
     atoms.calc = _QuantUIPySCFCalc(
@@ -459,6 +550,11 @@ def run_pes_scan(
     i1, i2 = atom_indices[0], atom_indices[1]
     i3 = atom_indices[2] if len(atom_indices) >= 3 else 0
     i4 = atom_indices[3] if len(atom_indices) >= 4 else 0
+    _moving = (
+        _moving_fragment(molecule, scan_type, atom_indices)
+        if scan_type in ("angle", "dihedral")
+        else []
+    )
 
     for step_num, val in enumerate(scan_values, start=1):
         raise_if_cancelled(_cancel_check)
@@ -512,7 +608,7 @@ def run_pes_scan(
                 if scan_type == "bond":
                     constraint = FixInternals(bonds=[[val, [i1, i2]]])
                 elif scan_type == "angle":
-                    atoms.set_angle(i1, i2, i3, val)
+                    _set_bond_angle(atoms, i1, i2, i3, val, _moving)
                     # (2026-07-14): ASE's radian-based `angles=`
                     # kwarg is not just deprecated, it's flat-out broken with
                     # the currently-targeted ASE (>=3.22, verified against
@@ -527,7 +623,7 @@ def run_pes_scan(
                     # broken reshape entirely.
                     constraint = FixInternals(angles_deg=[[val, [i1, i2, i3]]])
                 else:  # dihedral
-                    atoms.set_dihedral(i1, i2, i3, i4, val)
+                    atoms.set_dihedral(i1, i2, i3, i4, val, indices=_moving)
                     constraint = FixInternals(dihedrals_deg=[[val, [i1, i2, i3, i4]]])
 
                 atoms.set_constraint(constraint)

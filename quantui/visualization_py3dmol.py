@@ -15,6 +15,7 @@ import tempfile
 from typing import Literal, Sequence, cast
 
 from quantui import theme as _theme
+from quantui.plotly_embed import figure_html as _plotly_figure_html
 from quantui.viz_assets import script_json as _script_json
 
 logger = logging.getLogger(__name__)
@@ -661,13 +662,11 @@ def render_molecule_html(
                     )
             parts.append(view_html)
         else:
-            import plotly.io as _pio
 
             parts.append(
-                _pio.to_html(
+                _plotly_figure_html(
                     viz,
                     full_html=False,
-                    include_plotlyjs="require",
                     config={"responsive": True},
                 )
             )

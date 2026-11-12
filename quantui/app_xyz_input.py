@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 from typing import Any, List, Tuple
 
 import ipywidgets as widgets
@@ -300,7 +301,7 @@ def load_structure_bytes(app: Any, filename: str, content: bytes) -> str:
         f"Loaded {mol.get_formula()} ({len(mol.atoms)} atoms, charge "
         f"{app._molecule.charge}, multiplicity {app._molecule.multiplicity})."
     )
-    return msg + "".join(f"<br>• {n}" for n in notes)
+    return html.escape(msg) + "".join(f"<br>• {html.escape(str(n))}" for n in notes)
 
 
 def on_structure_upload(app: Any, change: Any = None) -> None:
@@ -315,7 +316,7 @@ def on_structure_upload(app: Any, change: Any = None) -> None:
     try:
         app.upload_msg.value = load_structure_bytes(app, name, content)
     except ValueError as exc:
-        app.upload_msg.value = f'<span style="color:#b91c1c">⚠ {exc}</span>'
+        app.upload_msg.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">⚠ {html.escape(str(exc))}</span>'
     finally:
         # Clear so choosing the same file again fires the observer again.
         try:

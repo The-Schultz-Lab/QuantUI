@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .molecule import Molecule
 
@@ -51,6 +51,9 @@ class NMRResult:
     # The actual PySCF class dispatched for the SCF (e.g.
     # "RHF", "UHF", "RKS", "UKS"); "" for an older saved result.
     scf_variant: str = ""
+    # Same meaning as SessionResult's fields (audit SCF-7).
+    dispersion_applied: Optional[bool] = None
+    scf_rescue_stage: str = "none"
 
     def h_shifts(self) -> List[Tuple[int, float]]:
         """(atom_index, δ ppm) pairs for all H atoms in molecule order."""
@@ -96,6 +99,55 @@ def resolve_nmr_reference(
     return _config.NMR_DEFAULT_REFERENCE, "B3LYP/6-31G*", True
 
 
+# Meta-GGA functionals in QuantUI's method list, used when PySCF/libxc is not
+# importable to classify them (the GIAO XC kernel has no meta-GGA branch).
+_KNOWN_META_GGA_METHODS = frozenset({"M06-2X", "M06-L"})
+
+
+def _is_meta_gga_method(method: str) -> bool:
+    """True when ``method`` resolves to a meta-GGA (tau-dependent) functional."""
+    if method.strip().upper() in ("RHF", "UHF"):
+        return False
+    try:
+        from pyscf.dft import libxc
+
+        from .session_calc import resolve_xc
+
+        return bool(libxc.is_meta_gga(resolve_xc(method)))
+    except Exception:  # noqa: BLE001 — unknown xc / no PySCF: use the name list
+        return method.strip().upper() in _KNOWN_META_GGA_METHODS
+
+
+def nmr_unsupported_reason(method: str, multiplicity: int) -> str:
+    """Why GIAO NMR cannot run for ``method`` at ``multiplicity`` ("" if it can).
+
+    The pyscf-properties GIAO code QuantUI uses only works for closed-shell
+    references (UHF/UKS/ROHF shielding crashes with reshape/dimension errors)
+    and its XC kernel has no meta-GGA branch. A UHF singlet is *not* reported
+    here: :func:`run_nmr_calc` runs it as the identical RHF reference.
+    """
+    from . import config as _config
+
+    method_upper = method.strip().upper()
+    if method_upper in {m.upper() for m in _config.POST_HF_METHODS}:
+        return (
+            f"'{method}' is a post-HF method and cannot be used for NMR "
+            "shielding — use RHF, UHF, or a DFT functional instead."
+        )
+    if int(multiplicity) != 1:
+        return (
+            f"NMR shielding is available for closed-shell (singlet) molecules "
+            f"only; this molecule has multiplicity {int(multiplicity)}. "
+            "Open-shell GIAO shielding is not supported."
+        )
+    if _is_meta_gga_method(method):
+        return (
+            f"'{method}' is a meta-GGA functional, which the GIAO NMR step does "
+            "not support — use e.g. B3LYP, PBE0 or RHF instead."
+        )
+    return ""
+
+
 def run_nmr_calc(
     molecule: Molecule,
     method: str = "B3LYP",
@@ -130,13 +182,12 @@ def run_nmr_calc(
     # branch (sets mf.xc = "CCSD") and fails deep inside PySCF with a
     # cryptic "LibXCFunctional: name 'CCSD' not found" instead of a clear
     # message. GIAO-NMR shielding is not defined for these methods here.
-    from . import config as _config
-
-    if method.strip().upper() in _config.POST_HF_METHODS:
-        raise ValueError(
-            f"'{method}' is a post-HF method and cannot be used for NMR "
-            "shielding — use RHF, UHF, or a DFT functional instead."
-        )
+    # Open-shell references and meta-GGA functionals fail deep inside the
+    # GIAO code with cryptic errors (reshape / empty message / "meta-GGA");
+    # reject them here with a clear message (audit SCF-3).
+    _reason = nmr_unsupported_reason(method, molecule.multiplicity)
+    if _reason:
+        raise ValueError(_reason)
 
     try:
         from pyscf import dft, gto, scf
@@ -362,12 +413,20 @@ def _run_nmr_calc_body(
     build_mole(mol)
 
     method_upper = method.upper()
+    dispersion_applied: Optional[bool] = None
     if method_upper == "RHF":
         mf = scf.RHF(mol)
         scf_variant = type(mf).__name__
     elif method_upper == "UHF":
-        mf = scf.UHF(mol)
+        # run_nmr_calc only admits singlets, and a closed-shell UHF solution
+        # is the RHF one; the GIAO code cannot take a UHF object (audit
+        # SCF-3), so run the identical RHF reference instead.
+        mf = scf.RHF(mol)
         scf_variant = type(mf).__name__
+        stream.write(
+            "Note: UHF on a closed-shell singlet is identical to RHF; "
+            "running the GIAO NMR step on the RHF reference.\n"
+        )
     else:
         # Route through resolve_xc + maybe_apply_d3 so
         # wB97X-D / PBE-D3 work for NMR calcs (was using raw _XC_ALIAS
@@ -377,7 +436,7 @@ def _run_nmr_calc_body(
         # Capture the SCF class name before maybe_apply_d3 can wrap/rename it.
         scf_variant = type(mf).__name__
         mf.xc = resolve_xc(method)
-        mf, _ = maybe_apply_d3(mf, method, progress_stream=stream)
+        mf, dispersion_applied = maybe_apply_d3(mf, method, progress_stream=stream)
 
     # Density fitting (RI), opt-in. Off by default. DF shifts
     # absolute shieldings, but chemical shifts are differences so the error
@@ -404,6 +463,7 @@ def _run_nmr_calc_body(
         ) from exc
 
     converged = bool(getattr(mf, "converged", False))
+    scf_rescue_stage = str(getattr(mf, "scf_rescue_stage", "none") or "none")
 
     # pyscf.nmr does not exist in released pyscf; use pyscf.prop.nmr (pyscf-properties).
     _pyscf_nmr: Any = None
@@ -421,10 +481,8 @@ def _run_nmr_calc_body(
 
     emit_status(stream, "Computing NMR shielding tensors (GIAO)…")
     try:
-        if method_upper == "RHF":
+        if method_upper in ("RHF", "UHF"):
             nmr_obj = _pyscf_nmr.RHF(mf)
-        elif method_upper == "UHF":
-            nmr_obj = _pyscf_nmr.UHF(mf)
         else:
             nmr_obj = _pyscf_nmr.RKS(mf) if mol.spin == 0 else _pyscf_nmr.UKS(mf)
         # verbose=4 prints per-atom shielding blocks — parsed by _LogCapture
@@ -445,7 +503,9 @@ def _run_nmr_calc_body(
         else:
             shielding_iso.append(float(arr))
 
-    ref_map, matched_ref_key, is_fallback_ref = resolve_nmr_reference(method, basis)
+    # A UHF singlet ran as RHF above, so it takes the RHF reference.
+    ref_method = "RHF" if method_upper == "UHF" else method
+    ref_map, matched_ref_key, is_fallback_ref = resolve_nmr_reference(ref_method, basis)
     ref_H = float(ref_map.get("H", _config.NMR_DEFAULT_REFERENCE["H"]))
     ref_C = float(ref_map.get("C", _config.NMR_DEFAULT_REFERENCE["C"]))
 
@@ -469,4 +529,6 @@ def _run_nmr_calc_body(
         is_fallback_reference=is_fallback_ref,
         density_fit=density_fit_used,
         scf_variant=scf_variant,
+        dispersion_applied=dispersion_applied,
+        scf_rescue_stage=scf_rescue_stage,
     )

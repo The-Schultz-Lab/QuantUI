@@ -235,9 +235,21 @@ def _xtb_gfnff_relax(
         symbols=list(molecule.atoms),
         positions=np.asarray(molecule.coordinates, dtype=float),
     )
+    # xtb-python's ASE calculator takes the total charge from the sum of the
+    # initial charges and the unpaired-electron count from the sum of the
+    # initial magnetic moments; it has no ``charge`` keyword (ASE would store
+    # one silently and the complex would be relaxed as neutral). Only the
+    # sums matter, so put both on the first atom.
+    n_atoms = len(molecule.atoms)
+    charges = np.zeros(n_atoms)
+    charges[0] = float(molecule.charge)
+    magmoms = np.zeros(n_atoms)
+    magmoms[0] = float(int(molecule.multiplicity) - 1)
+    atoms.set_initial_charges(charges)
+    atoms.set_initial_magnetic_moments(magmoms)
     waypoints: List[List[List[float]]] = []
     with _contained_xtb_run():
-        atoms.calc = XTB(method="GFN-FF", charge=float(molecule.charge), verbosity=0)
+        atoms.calc = XTB(method="GFN-FF", verbosity=0)
         if capture_frames:
             waypoints.append(atoms.get_positions().tolist())
         opt = LBFGS(atoms, logfile=None)

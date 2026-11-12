@@ -23,6 +23,7 @@ from quantui.app_builders import (
 )
 from quantui.downloads import download_link_html as _download_link_html
 from quantui.orbital_visualization import _GENERIC_CAPTURE_JS, _png_capture_controls
+from quantui.plotly_embed import figure_html as _plotly_figure_html
 from quantui.symmetry import html_irrep
 from quantui.viz_assets import orient_js, orient_view
 from quantui.viz_assets import script_json as _script_json
@@ -477,12 +478,10 @@ def show_opt_trajectory(
         return
     new_children: list[Any] = []
     if has_plotly and rel_e:
-        import plotly.io as _pio_e
 
-        energy_html = _pio_e.to_html(
+        energy_html = _plotly_figure_html(
             energy_fig,
             full_html=False,
-            include_plotlyjs="require",
             config={"responsive": True},
         )
         energy_holder = widgets.Output()
@@ -876,7 +875,6 @@ def on_ir_fwhm_changed(app: Any, change: dict[str, Any]) -> None:
 def update_ir_figure(app: Any, mode: str, fwhm: float) -> None:
     """Re-render IR spectrum chart for mode and FWHM settings."""
     try:
-        import plotly.io as _pio
 
         from quantui.ir_plot import plot_ir_spectrum
 
@@ -899,9 +897,8 @@ def update_ir_figure(app: Any, mode: str, fwhm: float) -> None:
         app._last_ir_fig = fig
         app._set_html_output(
             app._ir_fig,
-            _pio.to_html(
+            _plotly_figure_html(
                 fig,
-                include_plotlyjs="require",
                 full_html=False,
                 config={"responsive": True},
             ),
@@ -1006,7 +1003,6 @@ def update_raman_figure(app: Any, mode: str, fwhm: float) -> None:
     if not getattr(app, "_last_raman_acts", None):
         return  # no activities: the panel holds raman_unavailable_html
     try:
-        import plotly.io as _pio
 
         from quantui.raman_plot import plot_raman_spectrum
 
@@ -1030,9 +1026,8 @@ def update_raman_figure(app: Any, mode: str, fwhm: float) -> None:
         app._last_raman_fig = fig
         app._set_html_output(
             app._raman_fig,
-            _pio.to_html(
+            _plotly_figure_html(
                 fig,
-                include_plotlyjs="require",
                 full_html=False,
                 config={"responsive": True},
             ),
@@ -1184,7 +1179,6 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
     try:
         import numpy as _np
         import plotly.graph_objects as _go
-        import plotly.io as _pio
 
         mode_name = str(mode or "Stick")
         mode_norm = mode_name.strip().lower()
@@ -1285,9 +1279,8 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
         )
         app._set_html_output(
             app._tddft_fig,
-            _pio.to_html(
+            _plotly_figure_html(
                 fig,
-                include_plotlyjs="require",
                 full_html=False,
                 config={"responsive": True},
             )
@@ -1419,7 +1412,6 @@ def update_ecd_figure(app: Any, mode: str, sigma_ev: float) -> None:
     if not energies or not rot:
         return
     try:
-        import plotly.io as _pio
 
         from quantui.ecd_plot import is_effectively_achiral, plot_ecd_spectrum
 
@@ -1443,9 +1435,8 @@ def update_ecd_figure(app: Any, mode: str, sigma_ev: float) -> None:
         app._set_html_output(
             app._ecd_fig,
             note
-            + _pio.to_html(
+            + _plotly_figure_html(
                 fig,
-                include_plotlyjs="require",
                 full_html=False,
                 config={"responsive": True},
             )
@@ -1574,7 +1565,6 @@ def update_nmr_figure(app: Any, nucleus: str) -> None:
         app._set_html_output(app._nmr_fig, "")
         return
     try:
-        import plotly.io as _pio
 
         from quantui.nmr_plot import plot_nmr_spectrum
 
@@ -1587,9 +1577,8 @@ def update_nmr_figure(app: Any, nucleus: str) -> None:
         app._last_nmr_fig = fig
         app._set_html_output(
             app._nmr_fig,
-            _pio.to_html(
+            _plotly_figure_html(
                 fig,
-                include_plotlyjs="require",
                 full_html=False,
                 config={"responsive": True},
             ),
@@ -1656,7 +1645,8 @@ def show_orbital_diagram(app: Any, result: Any) -> bool:
 
     app._last_orb_info = info
     # Full orbital energies (both spin channels for UHF), for the gallery's
-    # captions; the diagram's ``info`` is alpha-only.
+    # captions. ``info``'s MO list / n_occupied are alpha (beta alongside);
+    # its HOMO/LUMO/gap are the frontier values over both channels.
     app._last_orb_mo_energy = mo_energy
     app._last_orb_mo_coeff = getattr(result, "mo_coeff", None)
     app._last_orb_mo_occ = mo_occ
@@ -1809,8 +1799,9 @@ def on_iso_surface_changed(app: Any, change: Any = None) -> None:
 def on_iso_generate(app: Any, btn: Any) -> None:
     """Generate orbital isosurface for currently selected orbital."""
     orbital_label = app._orb_toggle.value
-    # "By index" mode renders an arbitrary 0-based MO index. Encode it
-    # into the label as "MO <n>"; render_orbital_isosurface parses it back.
+    # "By index" mode renders an arbitrary MO. Encode its 1-based number (as
+    # typed, and as the diagram/gallery show it) into the label as "MO <n>";
+    # render_orbital_isosurface parses it back into a 0-based index.
     if orbital_label == "By index":
         orbital_label = f"MO {int(app._orb_index_input.value)}"
     _mode = _surface_mode(app)
@@ -1932,11 +1923,9 @@ def _sync_orb_range_inputs(app: Any, fig: Any) -> None:
 def _orb_screen_html(fig: Any) -> str:
     """Energy diagram HTML for the panel (fixed width; the panel scrolls
     sideways on a narrow window rather than clipping the levels)."""
-    import plotly.io as _pio
 
-    html_str = _pio.to_html(
+    html_str = _plotly_figure_html(
         fig,
-        include_plotlyjs="require",
         full_html=False,
         config={"responsive": True},
     )
@@ -1994,12 +1983,47 @@ def on_orb_range_changed(app: Any, _change: Any = None) -> None:
         pass
 
 
+def _iso_temp_dir(result_dir: Path) -> Path:
+    """Per-result scratch folder for cubes that must not go in the result.
+
+    Used when the result folder is read-only (the Viewer on a shared folder)
+    and for cubes decompressed from ``frontier_cubes/`` (derived copies of
+    files already in the result). Keyed on the result path, so one result's
+    cubes never shadow another's (audit VIZ-6).
+    """
+    import hashlib
+    import tempfile
+
+    key = hashlib.sha256(str(Path(result_dir).resolve()).encode()).hexdigest()[:16]
+    d = Path(tempfile.gettempdir()) / "quantui-isosurfaces" / key
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _iso_cube_dir(result_dir: Path) -> Path:
+    """``<result_dir>/isosurfaces`` when writable, else :func:`_iso_temp_dir`.
+
+    Cubes written here use deterministic names (formula + orbital/surface),
+    so regenerating a surface overwrites its cube instead of adding another
+    multi-MB timestamped file to the result and its export bundle (VIZ-6).
+    """
+    import os
+
+    d = Path(result_dir) / "isosurfaces"
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        if os.access(d, os.W_OK):
+            return d
+    except OSError:
+        pass
+    return _iso_temp_dir(result_dir)
+
+
 def render_orbital_isosurface(
     app: Any, orbital_label: str, render_token: int | None = None
 ) -> None:
     """Generate cube file and render orbital isosurface (Linux/WSL only)."""
     import re as _re
-    from datetime import datetime as _dt
 
     def _is_stale() -> bool:
         return render_token is not None and render_token != int(
@@ -2038,11 +2062,11 @@ def render_orbital_isosurface(
         "LUMO+1": n_occ + 1,
     }
     orb_idx = idx_map.get(orbital_label)
-    # "MO <n>" labels carry an explicit 0-based index from By-index mode.
+    # "MO <n>" labels carry a 1-based MO number from By-index mode.
     if orb_idx is None:
         _m = _re.match(r"MO\s+(\d+)$", orbital_label)
         if _m:
-            orb_idx = int(_m.group(1))
+            orb_idx = int(_m.group(1)) - 1
     if orb_idx is None or orb_idx < 0 or orb_idx >= n_total:
         # Out-of-range (now user-reachable via free index entry) — surface it
         # instead of silently leaving the "Generating…" placeholder in place.
@@ -2052,9 +2076,9 @@ def render_orbital_isosurface(
             app._set_html_output(
                 app._orb_iso_output,
                 '<p style="color:#b91c1c;padding:8px">'
-                f"⚠ Orbital index out of range. This calculation has "
-                f"{n_total} molecular orbitals (valid indices 0–"
-                f"{n_total - 1}; HOMO = {n_occ - 1}).</p>",
+                f"⚠ Orbital number out of range. This calculation has "
+                f"{n_total} molecular orbitals (valid MO numbers 1–"
+                f"{n_total}; HOMO = MO {n_occ}).</p>",
             )
 
         app._queue_main_thread_callback(_show_range_err)
@@ -2068,7 +2092,6 @@ def render_orbital_isosurface(
         return
 
     try:
-        import plotly.io as _pio
 
         from quantui.orbital_visualization import (
             generate_cube_from_arrays,
@@ -2086,8 +2109,7 @@ def render_orbital_isosurface(
             except Exception:
                 result_dir = Path.cwd()
 
-        cube_dir = Path(result_dir) / "isosurfaces"
-        cube_dir.mkdir(parents=True, exist_ok=True)
+        cube_dir = _iso_cube_dir(Path(result_dir))
 
         formula = str(getattr(orb_info, "formula", "") or "molecule")
         safe_formula = _re.sub(r"[^A-Za-z0-9_.-]+", "_", formula).strip("._")
@@ -2096,8 +2118,8 @@ def render_orbital_isosurface(
         safe_orb = _re.sub(r"[^A-Za-z0-9_.-]+", "_", orbital_label).strip("._")
         if not safe_orb:
             safe_orb = "orbital"
-        ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
-        cube_path = cube_dir / f"{safe_formula}_{safe_orb}_{ts}.cube"
+        # Deterministic: regenerating this orbital overwrites its cube.
+        cube_path = cube_dir / f"{safe_formula}_{safe_orb}.cube"
 
         # Charge/spin aren't carried on the app's orbital-state attributes —
         # infer them from the MO occupations so charged/open-shell molecules
@@ -2162,11 +2184,15 @@ def render_orbital_isosurface(
             )
         except ImportError:
             # The Viewer has no PySCF: draw the HOMO/LUMO cube saved
-            # with the calculation, if this is one of them.
+            # with the calculation, if this is one of them. Decompress it to
+            # scratch, not into the result folder: the folder may be a
+            # read-only share, and the copy is derived data (audit VIZ-6).
             from quantui.orbital_visualization import (
                 frontier_cube_labels,
                 load_frontier_cube,
             )
+
+            cube_path = _iso_temp_dir(Path(result_dir)) / cube_path.name
 
             if not load_frontier_cube(result_dir, orb_idx, beta=_beta, dest=cube_path):
                 saved = frontier_cube_labels(result_dir)
@@ -2219,9 +2245,8 @@ def render_orbital_isosurface(
                     title_color=title_color,
                     bond_color=bond_color,
                 )
-                html_str = _pio.to_html(
+                html_str = _plotly_figure_html(
                     fig,
-                    include_plotlyjs="require",
                     full_html=False,
                     config={"responsive": True},
                 )
@@ -2302,7 +2327,6 @@ def render_density_surface(
     sliders, PNG capture and cube export.
     """
     import re as _re
-    from datetime import datetime as _dt
 
     import numpy as _np
 
@@ -2347,7 +2371,6 @@ def render_density_surface(
             return
 
     try:
-        import plotly.io as _pio
 
         from quantui.orbital_visualization import (
             DEFAULT_ISO_RESOLUTION,
@@ -2366,15 +2389,14 @@ def render_density_surface(
                 result_dir = app._get_results_dir()
             except Exception:
                 result_dir = Path.cwd()
-        cube_dir = Path(result_dir) / "isosurfaces"
-        cube_dir.mkdir(parents=True, exist_ok=True)
+        cube_dir = _iso_cube_dir(Path(result_dir))
         orb_info = getattr(app, "_last_orb_info", None)
         formula = str(getattr(orb_info, "formula", "") or "molecule")
         safe_formula = (
             _re.sub(r"[^A-Za-z0-9_.-]+", "_", formula).strip("._") or "molecule"
         )
-        ts = _dt.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
-        stem = f"{safe_formula}_{mode}_{ts}"
+        # Deterministic: regenerating this surface overwrites its cube(s).
+        stem = f"{safe_formula}_{mode}"
         cube_path = cube_dir / f"{stem}.cube"
 
         _charge, _spin = infer_charge_and_spin(mol_atom, occ, basis=mol_basis)
@@ -2435,9 +2457,7 @@ def render_density_surface(
                     show_grid=False,
                     scene_bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
                 )
-                html_str = _pio.to_html(
-                    fig, include_plotlyjs="require", full_html=False
-                )
+                html_str = _plotly_figure_html(fig, full_html=False)
                 if mode == "esp":
                     html_str = (
                         '<p style="color:#92400e;padding:4px 8px">ESP colouring '
@@ -2623,6 +2643,7 @@ def _try_vib_cache_hit_sync(
             amplitude=0.4,
             renderer="py3dmol",
             fps=fps,
+            bgcolor=_theme.plotly_colors(app.theme_btn.value)["scene_bgcolor"],
         )
     except Exception:
         return False
@@ -2705,9 +2726,10 @@ def _render_vib_mode_py3dmol(
             _vib_err(app, "No frequency result cached for vibrational animation.")
         return
 
-    # Cache hit short-circuit. The cache key now includes ``fps``
-    # so a user who changes the framerate will rebuild rather than play back
-    # a mismatched-interval HTML blob.
+    # Cache hit short-circuit. The cache key includes ``fps`` and the scene
+    # background, so a framerate change or a Light/Dark toggle rebuilds rather
+    # than playing back HTML baked with the old interval/background.
+    bg = _theme.plotly_colors(app.theme_btn.value)["scene_bgcolor"]
     result_dir = getattr(app, "_last_result_dir", None)
     if result_dir is not None:
         try:
@@ -2720,6 +2742,7 @@ def _render_vib_mode_py3dmol(
                 amplitude=amplitude,
                 renderer="py3dmol",
                 fps=fps,
+                bgcolor=bg,
             )
         except Exception:
             cached_html = None
@@ -2789,7 +2812,6 @@ def _render_vib_mode_py3dmol(
         view = make_view(width=vib_width, height=420)
         view.addModelsAsFrames(xyz_string, "xyz")
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
-        bg = _theme.plotly_colors(app.theme_btn.value)["scene_bgcolor"]
         view.setBackgroundColor(bg)
         view.zoomTo()  # not oriented: the camera hook below may restore a view
         view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
@@ -2832,6 +2854,7 @@ def _render_vib_mode_py3dmol(
                 amplitude=amplitude,
                 renderer="py3dmol",
                 fps=fps,
+                bgcolor=bg,
             )
         except Exception as exc:
             try:
@@ -2907,12 +2930,9 @@ def _render_vib_mode_plotlymol(
             _vib_err(app, f"Animation generation failed: {exc}")
         raise
 
-    import plotly.io as _pio
-
-    anim_html = _pio.to_html(
+    anim_html = _plotly_figure_html(
         anim_fig,
         full_html=False,
-        include_plotlyjs="require",
         config={"responsive": True},
     )
     if _is_vib_stale(app, render_token):
@@ -3280,6 +3300,24 @@ def rerender_3d_scenes_for_theme(app: Any) -> None:
     freq_result = getattr(app, "_last_vib_freq_result", None)
     mode_dd = getattr(app, "vib_mode_dd", None)
     if molecule is not None and freq_result is not None and mode_dd is not None:
+        # The persistent single viewer must be rebuilt as a single viewer:
+        # the mode/amplitude/fps observers keep calling its JS bridge while
+        # ``_vib_single_viewer_active`` is True, and the legacy one-mode HTML
+        # does not define it. On build failure the flag drops to False and
+        # the legacy renderer below takes over consistently.
+        if getattr(app, "_vib_single_viewer_active", False):
+            try:
+                if _render_vib_single_viewer(
+                    app,
+                    freq_result,
+                    molecule,
+                    int(mode_dd.value),
+                    [m for _, m in mode_dd.options],
+                ):
+                    return
+            except Exception as exc:  # noqa: BLE001 — same
+                logger.warning("vib single-viewer theme re-render failed: %s", exc)
+                app._vib_single_viewer_active = False
         try:
             render_vib_mode(
                 app,
@@ -4345,6 +4383,7 @@ def _thermo_from_saved(saved: Any) -> Any:
         "Cv_jmolk",
         "Cp_jmolk",
         "symmetry_number",
+        "symmetry_group",
         "temperature_k",
     )
     ns = SimpleNamespace(**{f: saved.get(f) for f in fields})
@@ -4460,7 +4499,15 @@ def thermo_table_html(td: Any, energy_hartree: float) -> str:
     if td.Cp_jmolk is not None:
         rows.append(_row("Heat capacity Cp", f"{td.Cp_jmolk:.2f} J/(mol·K)"))
     if td.symmetry_number is not None:
-        rows.append(_row("Rotational symmetry number σ", str(td.symmetry_number)))
+        _sigma_note = ""
+        _sigma_group = getattr(td, "symmetry_group", None)
+        if _sigma_group:
+            from quantui.symmetry import html_group
+
+            _sigma_note = f"point group {html_group(_sigma_group)}"
+        rows.append(
+            _row("Rotational symmetry number σ", str(td.symmetry_number), _sigma_note)
+        )
     return (
         f"<div style='font-size:12px;margin:4px 0'><b>At {td.temperature_k:.2f} K, "
         f"{td.pressure_atm:g} atm</b> (ideal gas, rigid rotor, harmonic "
@@ -4499,7 +4546,6 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
     app._last_pes_result = result
     try:
         import plotly.graph_objects as go
-        import plotly.io as pio
 
         e_rel = result.energies_relative_kcal
         x_vals = result.scan_parameter_values
@@ -4595,9 +4641,8 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
         fig.update_xaxes(showgrid=True)
         fig.update_yaxes(showgrid=True)
         app._last_pes_fig = fig
-        plot_html = pio.to_html(
+        plot_html = _plotly_figure_html(
             fig,
-            include_plotlyjs="require",
             full_html=False,
             config={"responsive": True},
             div_id="quantui-pes-plot",
@@ -4607,7 +4652,9 @@ def show_pes_scan_result(app: Any, result: Any) -> bool:
 (function(){
   function attach(){
     var gd=document.getElementById("quantui-pes-plot");
-    if(!gd){ setTimeout(attach,100); return; }
+    // gd.on exists once Plotly.newPlot has run; the figure may still be
+    // waiting for the page's plotly.js bootstrap (quantui.plotly_embed).
+    if(!gd || !gd.on){ setTimeout(attach,100); return; }
     gd.on("plotly_click", function(ev){
       if(!ev.points||!ev.points.length) return;
       var pt=ev.points[0];
@@ -4737,7 +4784,6 @@ def build_gallery_for_app(app: Any, each_side: int = 3) -> str:
     for unrestricted results and the current isovalue / colour scheme.
     """
     import re as _re
-    from datetime import datetime as _dt
 
     import numpy as _np
 
@@ -4803,11 +4849,9 @@ def build_gallery_for_app(app: Any, each_side: int = 3) -> str:
             result_dir = app._get_results_dir()
         except Exception:  # noqa: BLE001 — fall back to the working directory
             result_dir = Path.cwd()
-    out_dir = (
-        Path(result_dir)
-        / "isosurfaces"
-        / f"gallery_{_dt.now().strftime('%Y-%m-%d_%H-%M-%S-%f')}"
-    )
+    # One gallery folder per result; tiles are named by orbital, so a new
+    # gallery overwrites the last one instead of accumulating (VIZ-6).
+    out_dir = _iso_cube_dir(Path(result_dir)) / "gallery"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     tiles = []

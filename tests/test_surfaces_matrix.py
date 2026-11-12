@@ -354,7 +354,7 @@ class TestUhfBetaOrbitals:
 
 
 def _gallery_tiles(html: str) -> list[tuple[str, int]]:
-    """[(caption, MO index), …] in tile order."""
+    """[(caption, 1-based MO number shown in the caption), …] in tile order."""
     captions = re.findall(
         r'font-weight:600;margin:2px 0 0;text-align:center">([^<]+)<', html
     )
@@ -405,7 +405,7 @@ class TestGalleryOnRealResults:
         app = _app_with(_session(h2, "RHF"), h2, tmp_path)
         tiles = _gallery_tiles(build_gallery_for_app(app, 3))
         # D∞h labels: bonding σg, antibonding σu.
-        assert tiles == [("HOMO · 1σg", 0), ("LUMO · 1σu", 1)]
+        assert tiles == [("HOMO · 1σg", 1), ("LUMO · 1σu", 2)]
 
     def test_uhf_alpha_and_beta_windows_differ(self, tmp_path):
         from quantui.app_visualization import build_gallery_for_app
@@ -414,7 +414,7 @@ class TestGalleryOnRealResults:
         app = _app_with(_session(mol, "UHF"), mol, tmp_path)
         alpha = _gallery_tiles(build_gallery_for_app(app, 3))
         # α: 5 of 6 occupied → one virtual.
-        assert [i for _, i in alpha] == [2, 3, 4, 5]
+        assert [i for _, i in alpha] == [3, 4, 5, 6]
         assert [c.split(" · ")[0] for c, _ in alpha] == [
             "HOMO−2",
             "HOMO−1",
@@ -423,8 +423,8 @@ class TestGalleryOnRealResults:
         ]
         app._orb_spin_toggle.value = "beta"
         beta = _gallery_tiles(build_gallery_for_app(app, 3))
-        # β: 4 of 6 occupied → HOMO is MO 3, two virtuals.
-        assert [i for _, i in beta] == [1, 2, 3, 4, 5]
+        # β: 4 of 6 occupied → HOMO is MO 4, two virtuals.
+        assert [i for _, i in beta] == [2, 3, 4, 5, 6]
         assert [c for c, _ in beta] == [
             "HOMO−2 (β)",
             "HOMO−1 (β)",

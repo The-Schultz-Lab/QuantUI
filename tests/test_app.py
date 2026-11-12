@@ -791,13 +791,27 @@ class TestStructureExportButtons:
         assert app.advanced_accordion.get_title(0) == "Export"
 
 
+def _as_if_run_saved_to(app, folder):
+    """State after a run on the loaded molecule was saved to *folder*.
+
+    Structure exports go to the folder of the run whose result they export,
+    and only while that run's molecule is still loaded (audit APP-8 / UI-5);
+    setting ``_last_result_dir`` alone (the last result *viewed*) no longer
+    picks the destination.
+    """
+    app._last_result = object()
+    app._last_result_molecule = app._molecule
+    app._last_result_run_dir = folder
+    app._last_result_dir = folder
+
+
 class TestExportXYZCallback:
     """_on_export_xyz writes a valid XYZ file."""
 
     def test_xyz_file_written_to_result_dir(self, tmp_path):
         app = QuantUIApp()
         app._set_molecule(_water())
-        app._last_result_dir = tmp_path
+        _as_if_run_saved_to(app, tmp_path)
 
         app._on_export_xyz(None)
 
@@ -807,7 +821,7 @@ class TestExportXYZCallback:
     def test_xyz_file_contains_atom_count(self, tmp_path):
         app = QuantUIApp()
         app._set_molecule(_water())
-        app._last_result_dir = tmp_path
+        _as_if_run_saved_to(app, tmp_path)
 
         app._on_export_xyz(None)
 
@@ -818,7 +832,7 @@ class TestExportXYZCallback:
     def test_xyz_status_shows_saved_path(self, tmp_path):
         app = QuantUIApp()
         app._set_molecule(_water())
-        app._last_result_dir = tmp_path
+        _as_if_run_saved_to(app, tmp_path)
 
         app._on_export_xyz(None)
 
@@ -839,7 +853,7 @@ class TestExportXYZCallback:
         mol.charge = 1
         mol.multiplicity = 2
         app._set_molecule(mol)
-        app._last_result_dir = tmp_path
+        _as_if_run_saved_to(app, tmp_path)
 
         app._on_export_xyz(None)
 
@@ -856,7 +870,7 @@ class TestExportXYZCallback:
         """
         app = QuantUIApp()
         app._set_molecule(_water())
-        app._last_result_dir = tmp_path
+        _as_if_run_saved_to(app, tmp_path)
         app.basis_dd.value = "6-31G*"
 
         app._on_export_xyz(None)

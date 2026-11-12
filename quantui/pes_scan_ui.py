@@ -34,6 +34,19 @@ __all__ = [
 _BOND_MIN = 0.05  # Å — slightly below typical H–H equilibrium
 _ANGLE_MIN = -360.0
 _ANGLE_MAX = 360.0
+# A bond angle lives in (0°, 180°): a target of 180° is linear (the angle
+# constraint's gradient is undefined there) and "190°" is just 170° again,
+# so suggested ranges are clamped inside these limits.
+_BOND_ANGLE_MIN = 1.0
+_BOND_ANGLE_MAX = 179.0
+
+
+def _clamp_angle_range(lo: float, hi: float) -> Tuple[float, float]:
+    """Clamp a suggested bond-angle range into [1°, 179°]."""
+    return (
+        min(max(lo, _BOND_ANGLE_MIN), _BOND_ANGLE_MAX),
+        min(max(hi, _BOND_ANGLE_MIN), _BOND_ANGLE_MAX),
+    )
 
 
 def atom_dropdown_options(molecule: Optional[Molecule]) -> List[Tuple[str, int]]:
@@ -221,7 +234,7 @@ def scan_range_around_current(
         margin = max(0.2, bond_fraction * val)
         return (max(_BOND_MIN, val - margin), val + margin)
     if scan_type == "angle":
-        return (val - angle_delta, val + angle_delta)
+        return _clamp_angle_range(val - angle_delta, val + angle_delta)
     return (val - dihedral_delta, val + dihedral_delta)
 
 
@@ -262,6 +275,8 @@ def scan_range_bounds(scan_type: str) -> Tuple[Optional[float], Optional[float]]
     """``(min, max)`` for start/stop widgets; ``None`` means unbounded."""
     if scan_type.lower() == "bond":
         return (_BOND_MIN, 1000.0)
+    if scan_type.lower() == "angle":
+        return (_BOND_ANGLE_MIN, _BOND_ANGLE_MAX)
     return (_ANGLE_MIN, _ANGLE_MAX)
 
 
@@ -298,7 +313,7 @@ def suggest_scan_range(
             return (max(_BOND_MIN, d - margin), d + margin)
         if scan_type == "angle" and len(idx) >= 3:
             a = angle(molecule, idx[0], idx[1], idx[2])
-            return (a - 20.0, a + 20.0)
+            return _clamp_angle_range(a - 20.0, a + 20.0)
         if scan_type == "dihedral" and len(idx) >= 4:
             dh = dihedral(molecule, idx[0], idx[1], idx[2], idx[3])
             return (dh - 60.0, dh + 60.0)
@@ -379,6 +394,11 @@ def validate_pes_scan_inputs(
     else:
         if start == stop:
             problems.append("Angle/dihedral scan: Start and Stop must differ.")
+        if scan_type == "angle" and not (0.0 < start < 180.0 and 0.0 < stop < 180.0):
+            problems.append(
+                "Angle scan: Start and Stop must be between 0° and 180° "
+                "(not including 180°, which is a straight line)."
+            )
 
     if steps < 2:
         problems.append("Number of scan points must be at least 2.")

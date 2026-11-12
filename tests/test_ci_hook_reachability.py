@@ -152,3 +152,29 @@ def test_every_non_default_stage_hook_is_reachable_from_ci():
         "explicit `--hook-stage <name>` invocation that isn't just the bare "
         "`pre-commit run --all-files`."
     )
+
+
+def _mypy_versions() -> Tuple[str, str, str]:
+    """(pre-commit rev, CI pip spec, dev-extra spec) for mypy."""
+    precommit = _PRECOMMIT_CONFIG.read_text(encoding="utf-8")
+    rev = re.search(r"mirrors-mypy\s*\n\s*rev:\s*v?(\S+)", precommit)
+    ci = re.search(
+        r"""pip install[^\n]*["']?mypy(~=[\d.]+)""", _CI_WORKFLOW.read_text()
+    )
+    pyproject = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    dev = re.search(r'^\s*"mypy([^"]*)"', pyproject, re.MULTILINE)
+    assert rev and ci and dev, "could not find a mypy pin in one of the files"
+    return rev.group(1), ci.group(1), dev.group(1)
+
+
+def test_mypy_pins_agree_across_dev_extra_precommit_and_ci():
+    """Audit INFRA-4: the dev extra allowed mypy 2.x (`>=1.10,<2.5`) while
+    pre-commit and CI pin 1.10, so a local `mypy` reported 40 errors CI
+    never sees, and rejected the configured ``python_version = "3.9"``."""
+    rev, ci_spec, dev_spec = _mypy_versions()
+    assert (
+        dev_spec == ci_spec
+    ), f"pyproject dev extra pins mypy{dev_spec} but CI installs mypy{ci_spec}"
+    assert (
+        ci_spec == f"~={rev}"
+    ), f"CI installs mypy{ci_spec} but .pre-commit-config.yaml pins rev v{rev}"

@@ -81,7 +81,8 @@ class TestCandidateBackend:
         mock_cands.return_value = [
             {"cid": 1, "title": "x", "formula": "CH4", "mw": 16.0}
         ]
-        out = structure_providers.search_candidates("methane")
+        # Not a bundled-library name (those answer offline, no pick-list).
+        out = structure_providers.search_candidates("xylene")
         assert len(out) == 1
 
 

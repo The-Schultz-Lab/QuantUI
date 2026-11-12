@@ -141,7 +141,7 @@ automatically:
 | `launchers/launch-dev.bat` | Development mode — uses local `notebooks/` (no rebuild needed for notebook edits) |
 
 Double-click either file. The browser opens automatically at
-[http://localhost:8866](http://localhost:8866).
+`http://localhost:8866/?token=...` (a fresh login token each launch).
 
 ### Linux / WSL — command line
 
@@ -153,7 +153,9 @@ Launches the notebook as a clean widget-only interface. Students see no code.
 apptainer run quantui.sif app
 ```
 
-Then open a browser at [http://localhost:8866](http://localhost:8866).
+Then open the URL it prints, `http://127.0.0.1:8866/?token=...`. The token
+is new on every launch (set `QUANTUI_APP_TOKEN` to choose it); it keeps other
+users on the same machine out of your session.
 
 #### JupyterLab mode — for exploration or development
 
@@ -171,12 +173,13 @@ Note: changes to `quantui/` Python files still require a rebuild.
 
 ```bash
 cd /path/to/QuantUI
+TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
 apptainer exec quantui.sif voila notebooks/molecule_computations.ipynb \
-    --no-browser --port=8866 \
+    --no-browser --port=8866 --Voila.ip=127.0.0.1 "--Voila.token=$TOKEN" \
     --ServerApp.disable_check_xsrf=True
 ```
 
-Then open [http://localhost:8866](http://localhost:8866).
+Then open `http://127.0.0.1:8866/?token=$TOKEN` (`echo` it to see it).
 
 #### Results directory
 

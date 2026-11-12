@@ -97,9 +97,12 @@ class TestRetry:
                     progress_stream=io.StringIO(),
                 )
 
-        # Displaced along both imaginary modes (x and y), 0.3 Å each.
-        assert seen["start"][0] == pytest.approx([0.3, 0.3, 0.0])
-        assert seen["start"][1] == pytest.approx([-0.3, -0.3, 0.74])
+        # Displaced along both imaginary modes (x and y), a 0.3 Å step each:
+        # each mode vector has length sqrt(2), and is normalised (audit
+        # SCF-10), so each atom moves 0.3/sqrt(2) Å per mode.
+        d = 0.3 / 2**0.5
+        assert seen["start"][0] == pytest.approx([d, d, 0.0])
+        assert seen["start"][1] == pytest.approx([-d, -d, 0.74])
         assert seen["fmax"] == FREQ_PREOPT_FMAX
         assert seen["solvent"] == "water"
         assert m_freq.call_args.kwargs["molecule"] is reopt

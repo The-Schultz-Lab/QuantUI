@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import html as _html
 import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from . import theme as _theme
 from .downloads import offer_download, saved_with_download_html
 from .results_storage import _safe_name
 
@@ -107,11 +109,11 @@ def on_export(app: Any, btn: Any) -> None:
             f"{_safe_name(app._molecule.get_formula())}"
             f"_{_safe_name(app.method_dd.value)}_{_safe_name(app.basis_dd.value)}.py"
         )
-        # Next to the result files when there is a result folder (it used
-        # to go to the server's working directory, where a remote user
-        # could never find it).
-        result_dir = getattr(app, "_last_result_dir", None)
-        dest = (result_dir / fname) if isinstance(result_dir, Path) else Path(fname)
+        # Next to the result files of the run on this molecule; otherwise the
+        # working directory. Not ``_last_result_dir``, which follows the last
+        # result viewed (History included) and so could put this molecule's
+        # script into an unrelated result's folder (audit UI-5).
+        dest = _structure_export_dest(app, fname)
         # Follow the calc type, solvent and density fitting the
         # app would use, instead of always a gas-phase single point.
         from quantui.app_runflow import _CALC_TYPE_KEYS
@@ -166,7 +168,7 @@ def on_export_xyz(app: Any, btn: Any) -> None:
             f"{method}/{basis}"
         )
         full_xyz = f"{len(mol.atoms)}\n{comment}\n{xyz_body}\n"
-        dest = (app._last_result_dir / fname) if app._last_result_dir else Path(fname)
+        dest = _structure_export_dest(app, fname)
         dest.write_text(full_xyz, encoding="utf-8")
         app.struct_export_status.value = f"Saved: {dest}"
         offer_download(app, dest)
@@ -189,7 +191,7 @@ def on_export_mol(app: Any, btn: Any) -> None:
             app.struct_export_status.value = "RDKit could not parse the structure."
             return
         mol_block = Chem.MolToMolBlock(rdmol)
-        dest = (app._last_result_dir / fname) if app._last_result_dir else Path(fname)
+        dest = _structure_export_dest(app, fname)
         dest.write_text(mol_block, encoding="utf-8")
         app.struct_export_status.value = f"Saved: {dest}"
         offer_download(app, dest)
@@ -212,7 +214,7 @@ def on_export_pdb(app: Any, btn: Any) -> None:
             app.struct_export_status.value = "RDKit could not parse the structure."
             return
         pdb_block = Chem.MolToPDBBlock(rdmol)
-        dest = (app._last_result_dir / fname) if app._last_result_dir else Path(fname)
+        dest = _structure_export_dest(app, fname)
         dest.write_text(pdb_block, encoding="utf-8")
         app.struct_export_status.value = f"Saved: {dest}"
         offer_download(app, dest)
@@ -251,8 +253,7 @@ def on_export_reorg_geometries(app: Any, btn: Any) -> None:
 
     from quantui.molecule import Molecule
 
-    method = app.method_dd.value
-    basis = app.basis_dd.value
+    method, basis = displayed_level(app)
     saved: list[str] = []
     try:
         for g in geoms:
@@ -286,15 +287,63 @@ def on_export_reorg_geometries(app: Any, btn: Any) -> None:
     _set_status(f"Saved {len(saved)} file(s): " + ", ".join(saved))
 
 
+def _current_run_result(app: Any) -> Any:
+    """The last run's result, if it was computed for the active molecule.
+
+    ``_last_result`` outlives a molecule load: optimise A, load B, and an
+    export used to write A's geometry (or B's geometry under A's method and
+    basis). The run records which loaded molecule it started from; any load
+    or structure edit replaces that object (audit APP-8 / UI-5).
+    """
+    result = getattr(app, "_last_result", None)
+    if result is None:
+        return None
+    if getattr(app, "_last_result_molecule", None) is not app._molecule:
+        return None
+    return result
+
+
+def _structure_export_dest(app: Any, fname: str) -> Path:
+    """Where a structure export goes: the folder of the run that produced
+    the exported result, else the working directory.
+
+    Not ``_last_result_dir``: that follows the last result *viewed*, so a
+    History view used to send the export into an unrelated result's folder
+    (and its bundle zip).
+    """
+    run_dir = getattr(app, "_last_result_run_dir", None)
+    if _current_run_result(app) is not None and isinstance(run_dir, Path):
+        return run_dir / fname
+    return Path(fname)
+
+
+def displayed_level(app: Any) -> tuple[str, str]:
+    """(method, basis) of the result shown in the Analysis panels.
+
+    Provenance for exports of what is on display: after a History load the
+    setup dropdowns describe the *next* run, not the result being exported
+    (audit UI-14). Falls back to the dropdowns before any result is shown.
+    """
+    level = getattr(app, "_displayed_level", None)
+    if isinstance(level, tuple) and len(level) == 2 and level[0]:
+        return str(level[0]), str(level[1])
+    return (
+        str(getattr(getattr(app, "method_dd", None), "value", "") or ""),
+        str(getattr(getattr(app, "basis_dd", None), "value", "") or ""),
+    )
+
+
 def export_molecule_and_label(app: Any) -> tuple[Any, str, str]:
     """Return (molecule, method, basis) for structure export.
 
     For geometry optimization results, returns the final optimized geometry.
     Falls back to the currently loaded molecule for all other calculation types.
+    The last run's result is used only while its molecule is still the loaded
+    one; otherwise method/basis come from the current setup.
     """
     from quantui.optimizer import OptimizationResult
 
-    result = app._last_result
+    result = _current_run_result(app)
     if isinstance(result, OptimizationResult):
         mol = result.molecule
     else:
@@ -403,7 +452,9 @@ def on_orb_png_captured(app: Any, change: dict) -> None:
         return
 
     def _fail(msg: str) -> None:
-        app._iso_export_status.value = f'<span style="color:#b22">{msg}</span>'
+        app._iso_export_status.value = (
+            f'<span style="color:{_theme.css.ACCENT_ERROR}">{_html.escape(msg)}</span>'
+        )
         # Clear even on failure, or a retry of the identical capture is silent.
         _clear_inbox(app)
 
@@ -457,8 +508,8 @@ def on_orb_png_captured(app: Any, change: dict) -> None:
     metadata = {
         "Software": "QuantUI",
         "Orbital": label,
-        "Method": str(getattr(getattr(app, "method_dd", None), "value", "") or ""),
-        "Basis": str(getattr(getattr(app, "basis_dd", None), "value", "") or ""),
+        "Method": displayed_level(app)[0],
+        "Basis": displayed_level(app)[1],
         "Isosurface resolution": str(
             getattr(getattr(app, "_iso_resolution_dd", None), "value", "") or ""
         ),
@@ -506,7 +557,7 @@ def on_reorg_png_captured(app: Any, change: dict) -> None:
 
     def _fail(msg: str) -> None:
         if status is not None:
-            status.value = f'<span style="color:#b22">{msg}</span>'
+            status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">{_html.escape(msg)}</span>'
         _clear_inbox(app)
 
     def _clear_inbox(a: Any) -> None:
@@ -531,8 +582,7 @@ def on_reorg_png_captured(app: Any, change: dict) -> None:
 
     mol = getattr(app, "_molecule", None)
     formula = mol.get_formula() if mol is not None else "molecule"
-    method = str(getattr(getattr(app, "method_dd", None), "value", "") or "")
-    basis = str(getattr(getattr(app, "basis_dd", None), "value", "") or "")
+    method, basis = displayed_level(app)
 
     try:
         dest = export_destination(
@@ -582,7 +632,7 @@ def on_vib_png_captured(app: Any, change: dict) -> None:
 
     def _fail(msg: str) -> None:
         if status is not None:
-            status.value = f'<span style="color:#b22">{msg}</span>'
+            status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">{_html.escape(msg)}</span>'
         _clear_inbox(app)
 
     def _clear_inbox(a: Any) -> None:
@@ -623,8 +673,7 @@ def on_vib_png_captured(app: Any, change: dict) -> None:
     except (TypeError, ValueError):
         pass  # no mode selected yet — fall back to the generic "mode" label
 
-    method = str(getattr(getattr(app, "method_dd", None), "value", "") or "")
-    basis = str(getattr(getattr(app, "basis_dd", None), "value", "") or "")
+    method, basis = displayed_level(app)
 
     try:
         dest = export_destination(
@@ -691,7 +740,7 @@ def _on_mol_png_captured(
 
     def _fail(msg: str) -> None:
         if status is not None:
-            status.value = f'<span style="color:#b22">{msg}</span>'
+            status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">{_html.escape(msg)}</span>'
         _clear_inbox(app)
 
     def _clear_inbox(a: Any) -> None:
@@ -719,8 +768,13 @@ def _on_mol_png_captured(
         return
 
     formula = molecule.get_formula() if molecule is not None else "molecule"
-    method = str(getattr(getattr(app, "method_dd", None), "value", "") or "")
-    basis = str(getattr(getattr(app, "basis_dd", None), "value", "") or "")
+    # The Analysis viewer shows the displayed result; the Calculate/Results
+    # previews show the loaded molecule, described by the current setup.
+    if slot_label == "analysis":
+        method, basis = displayed_level(app)
+    else:
+        method = str(getattr(getattr(app, "method_dd", None), "value", "") or "")
+        basis = str(getattr(getattr(app, "basis_dd", None), "value", "") or "")
 
     try:
         dest = export_destination(
@@ -826,7 +880,7 @@ def on_traj_png_captured(
 
     def _fail(msg: str) -> None:
         if status is not None:
-            status.value = f'<span style="color:#b22">{msg}</span>'
+            status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">{_html.escape(msg)}</span>'
         _clear_inbox()
 
     def _clear_inbox() -> None:
@@ -851,8 +905,7 @@ def on_traj_png_captured(
         return
 
     formula = formula or "molecule"
-    method = str(getattr(getattr(app, "method_dd", None), "value", "") or "")
-    basis = str(getattr(getattr(app, "basis_dd", None), "value", "") or "")
+    method, basis = displayed_level(app)
 
     try:
         dest = export_destination(
@@ -897,20 +950,14 @@ def on_iso_export_cube(app: Any, btn: Any) -> None:
     label = getattr(app, "_last_cube_orbital", None) or "orbital"
     result_dir = getattr(app, "_last_result_dir", None)
     if src is None or not isinstance(src, Path) or not src.exists():
-        app._iso_export_status.value = (
-            '<span style="color:#b22">Generate an isosurface first.</span>'
-        )
+        app._iso_export_status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">Generate an isosurface first.</span>'
         return
     if result_dir is None or not isinstance(result_dir, Path):
-        app._iso_export_status.value = (
-            '<span style="color:#b22">No result folder available.</span>'
-        )
+        app._iso_export_status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">No result folder available.</span>'
         return
     dest = export_cube(src, result_dir, orbital_label=label)
     if dest is None:
-        app._iso_export_status.value = (
-            '<span style="color:#b22">Cube export failed (see log).</span>'
-        )
+        app._iso_export_status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">Cube export failed (see log).</span>'
         return
     saved = [dest.name]
     # An ESP map is two cubes: the density surface and the potential.

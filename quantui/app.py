@@ -779,6 +779,7 @@ _STRUCT_SOURCE_PREFIX = {
     "rdkit-inchi": "InChI",
     "library": "Library",
     "library-offline-fallback": "Library (offline)",
+    "library-no-online-match": "Library (closest match)",
 }
 
 _PYSCF_AVAILABLE = _is_pyscf_available()
@@ -2011,6 +2012,12 @@ class QuantUIApp:
         # ── Instance state ────────────────────────────────────────────────
         self._molecule: Optional[Molecule] = None
         self._last_result: Any = None
+        # The loaded molecule ``_last_result`` was computed for, and the
+        # folder that run was saved in. ``_last_result_dir`` follows the last
+        # result *viewed* (History included); structure exports must follow
+        # the run instead (audit APP-8 / UI-5).
+        self._last_result_molecule: Any = None
+        self._last_result_run_dir: Optional[Path] = None
         self._last_calc_type: Optional[str] = None  # e.g. "frequency", "single_point"
         self._results: List = []
         self._pending_traj_result: Any = None
@@ -2080,6 +2087,11 @@ class QuantUIApp:
         # Clear button from wiping output mid-run.
         self._cancel_event = threading.Event()
         self._calc_running: bool = False
+        # Set once a run has its result in hand; Cancel is ignored from then on.
+        self._run_result_ready: bool = False
+        # True while the calibration suite runs; Run and calibration exclude
+        # each other (audit APP-13).
+        self._cal_running: bool = False
         # Stop signal for the live elapsed-time ticker thread.
         self._elapsed_stop_event: Optional[threading.Event] = None
         # Total run estimate the ticker turns into "time
@@ -2248,9 +2260,22 @@ class QuantUIApp:
         # one-time page bootstrap. A startup-time bootstrap ran py3Dmol's
         # exports/module-juggling loader during Voilà's RequireJS bootstrap and
         # broke widget startup offline — never reintroduce it here.
+        #
+        # plotly.js IS loaded once per page, but lazily: this empty Output is
+        # filled with the bundle by the first in-app figure
+        # (quantui.plotly_embed.figure_html), never at start-up, and is never
+        # cleared afterwards. Figures render with include_plotlyjs=False and
+        # wait for it (audit VIZ-2; amends DEC-010).
+        from quantui.plotly_embed import register_bootstrap_output
+
+        self._plotly_bootstrap_out = widgets.Output(
+            layout=_layout(height="0px", overflow="hidden", margin="0", padding="0")
+        )
+        register_bootstrap_output(self._plotly_bootstrap_out)
         display(
             widgets.VBox(
                 [
+                    self._plotly_bootstrap_out,
                     # Title and toolbar share one row; the toolbar wraps
                     # under the title on narrow windows.
                     widgets.HBox(
@@ -3749,6 +3774,19 @@ class QuantUIApp:
                     viewer.setBackgroundColor("white")
                     viewer.zoomTo()
                     html_str = viewer._make_html()
+                    # py3Dmol embeds the file text as a JSON string inside an
+                    # inline <script>; a "</script>" in the file would end
+                    # that script early (audit APP-12). Escape every "<" in
+                    # the payload as \u003c (same string to JSON and JS).
+                    import json as _json_payload
+
+                    payload = _json_payload.dumps(raw_text)
+                    if "<" in raw_text:
+                        if payload not in html_str:
+                            raise ValueError("cannot locate model payload")
+                        html_str = html_str.replace(
+                            payload, payload.replace("<", "\\u003c")
+                        )
                     with self._files_preview_output:
                         display(HTML(html_str))
                     self._set_files_status(
@@ -4811,6 +4849,11 @@ class QuantUIApp:
                     "⚠ No network detected — resolved offline from the bundled "
                     f"library (not PubChem). {msg}"
                 )
+            elif source == "library-no-online-match":
+                msg = (
+                    "⚠ No exact match found online — loaded the closest "
+                    f"bundled-library match. Check it is what you meant. {msg}"
+                )
             # A fetched name can resolve to a disconnected ionic salt
             # (cisplatin → 2 NH₃ + 2 HCl + Pt²⁺) rather than the coordinated
             # complex. Warn rather than let a wrong geometry silently feed a run.
@@ -5071,6 +5114,11 @@ class QuantUIApp:
                 self.cancel_btn.description = "Cancelling…"
             return
         if not self._calc_running:
+            return
+        # The result is already in hand: cancelling now would only discard it
+        # (audit APP-10). The button is disabled at that point too; this
+        # covers a click that was already on its way.
+        if getattr(self, "_run_result_ready", False):
             return
         self._cancel_event.set()
         self.cancel_btn.disabled = True
@@ -5335,7 +5383,7 @@ class QuantUIApp:
         except Exception as exc:
             status.value = (
                 f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
-                f"Export failed: {exc}</span>"
+                f"Export failed: {_html.escape(str(exc))}</span>"
             )
             try:
                 _calc_log.log_event(
@@ -5363,7 +5411,7 @@ class QuantUIApp:
         except Exception as exc:
             status.value = (
                 f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
-                f"Write failed: {exc}</span>"
+                f"Write failed: {_html.escape(str(exc))}</span>"
             )
             return
 
@@ -5462,7 +5510,7 @@ class QuantUIApp:
             if status is not None:
                 status.value = (
                     f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
-                    f"Export failed: {exc}</span>"
+                    f"Export failed: {_html.escape(str(exc))}</span>"
                 )
 
     def _export_plot_figure(
@@ -5500,7 +5548,8 @@ class QuantUIApp:
 
         try:
             if fmt == "png":
-                # Requires kaleido for static image export.
+                # Requires kaleido, and kaleido >= 1 also needs a Chrome or
+                # Chromium on the machine (docs/installation.md).
                 fig.write_image(str(dest), scale=2)
             else:
                 html_str = _pio.to_html(
@@ -5516,14 +5565,15 @@ class QuantUIApp:
                 f"Saved: {dest}</span> " + _download_link_html(dest)
             )
         except Exception as exc:
-            msg = str(exc)
-            if fmt == "png" and "kaleido" in msg.lower():
-                msg = (
-                    "PNG export requires kaleido. " "Install with: pip install kaleido"
-                )
+            # Show the real error. It used to be rewritten to "pip install
+            # kaleido" whenever it mentioned kaleido, which misdirected the
+            # usual failure on a fresh install: kaleido >= 1 is installed but
+            # finds no Chrome ("Kaleido requires Google Chrome ... run
+            # plotly_get_chrome"). Plotly's own messages already name the fix.
+            msg = " ".join(str(exc).split()) or type(exc).__name__
             status_widget.value = (
                 f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
-                f"Export failed: {msg}</span>"
+                f"Export failed: {_html.escape(msg)}</span>"
             )
 
     @staticmethod
@@ -5620,7 +5670,7 @@ class QuantUIApp:
         except Exception as exc:
             status_widget.value = (
                 f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
-                f"Write failed: {exc}</span>"
+                f"Write failed: {_html.escape(str(exc))}</span>"
             )
             return
 
@@ -5945,12 +5995,34 @@ class QuantUIApp:
             self._molecule.multiplicity = int(self.mult_si.value)
 
     def _set_molecule(
-        self, mol: Molecule, label: str = "", *, sync_charge_mult: bool = True
+        self,
+        mol: Molecule,
+        label: str = "",
+        *,
+        sync_charge_mult: bool = True,
+        keep_edit_state: bool = False,
     ) -> None:
-        """Update shared state and refresh dependent widgets."""
+        """Update shared state and refresh dependent widgets.
+
+        ``keep_edit_state`` is for the Edit Structure panel's own apply/undo;
+        every other load resets that panel's undo stack, picks and (unless
+        the atoms are unchanged) the Freeze atoms list (audit UI-9).
+        """
+        _previous_mol = getattr(self, "_molecule", None)
         self._molecule = mol
-        # Loading a molecule mid-run must not re-arm Run (audit APP-4).
-        self.run_btn.disabled = bool(getattr(self, "_calc_running", False))
+        if not keep_edit_state:
+            try:
+                from quantui.app_structure_edit import reset_edit_state
+
+                reset_edit_state(self, _previous_mol, mol)
+            except Exception:  # noqa: BLE001 — must not block a molecule load
+                logger.debug("edit-state reset failed", exc_info=True)
+        # Loading a molecule mid-run (or mid-calibration) must not re-arm Run
+        # (audit APP-4, APP-13).
+        self.run_btn.disabled = bool(
+            getattr(self, "_calc_running", False)
+            or getattr(self, "_cal_running", False)
+        )
         self.export_btn.disabled = False
         self.export_xyz_btn.disabled = False
         self.export_mol_btn.disabled = not _RDKIT_AVAILABLE
@@ -5977,7 +6049,7 @@ class QuantUIApp:
             e_str = ""
 
         _lbl = (
-            f'<br><small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{label}</small>'
+            f'<br><small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{_html.escape(label)}</small>'
             if label
             else ""
         )
@@ -6154,6 +6226,125 @@ class QuantUIApp:
             extra_output,
             render_html_fn=_render_molecule_html,
         )
+
+    def _persist_result_extras(
+        self, saved_dir: Path, result, ct: str, calc_mol, pre_opt, ana_ctx
+    ) -> None:
+        """Write the files that accompany a saved result (thumbnail,
+        trajectories, orbitals, Molden).
+
+        Each is guarded on its own: the result itself is already saved, so a
+        failure here costs that one extra file, never the others, and never
+        marks the run unsaved (audit APP-5). Failures are recorded in the
+        event log.
+        """
+        from quantui.results_storage import (
+            save_orbitals,
+            save_thumbnail,
+            save_trajectory,
+        )
+
+        def _guarded(step: str, fn) -> None:
+            try:
+                fn()
+            except Exception as exc:  # noqa: BLE001 — one extra, not the save
+                try:
+                    _calc_log.log_event(
+                        "save_extra_error",
+                        f"{step}: {type(exc).__name__}: {exc}"[:300],
+                    )
+                except Exception:  # noqa: BLE001 — telemetry self-guard
+                    pass
+
+        def _thumbnail() -> None:
+            from quantui import load_result
+
+            saved_data = load_result(saved_dir)
+            ana_ctx.timestamp = str(saved_data.get("timestamp", ""))
+            save_thumbnail(saved_dir, saved_data)
+
+        _guarded("thumbnail", _thumbnail)
+
+        # Persist trajectory so the history viewer can replay it, plus the
+        # external-tool-friendly formats: multi-frame XYZ (any viewer) and ASE
+        # .traj (ASE-GUI + ASE Python post-processing).
+        if ct in ("Geometry Opt", "Transition State", "IRC", "PES Scan"):
+            traj = getattr(
+                result,
+                "coordinates_list" if ct == "PES Scan" else "trajectory",
+                None,
+            )
+            e_list = getattr(result, "energies_hartree", []) or []
+            if traj:
+                _guarded(
+                    "trajectory",
+                    lambda: save_trajectory(saved_dir, traj, e_list),
+                )
+
+                def _external_traj() -> None:
+                    from quantui.results_storage import (
+                        save_trajectory_ase as _save_traj_ase,
+                    )
+                    from quantui.results_storage import (
+                        save_trajectory_xyz as _save_traj_xyz,
+                    )
+
+                    _save_traj_xyz(saved_dir, frames=traj, energies=e_list)
+                    _save_traj_ase(saved_dir, frames=traj, energies=e_list)
+
+                _guarded("trajectory export", _external_traj)
+        # Persist pre-opt geometry trajectory for Frequency runs.
+        if ct == "Frequency" and pre_opt is not None:
+            pre_traj = getattr(pre_opt, "trajectory", None)
+            pre_e = list(getattr(pre_opt, "energies_hartree", []))
+            if pre_traj:
+                _guarded(
+                    "pre-opt trajectory",
+                    lambda: save_trajectory(
+                        saved_dir,
+                        pre_traj,
+                        pre_e,
+                        filename="preopt_trajectory.json",
+                    ),
+                )
+        # Persist MO data for orbital diagram + isosurface replay.
+        if ct in (
+            "Single Point",
+            "Geometry Opt",
+            "Transition State",
+            "Frequency",
+            "UV-Vis (TD-DFT)",
+        ):
+            _guarded("orbitals", lambda: save_orbitals(saved_dir, result))
+        # A Molden companion file so users can open results in Avogadro /
+        # IQmol / Jmol. For SP / GeoOpt this writes orbitals + structure; for
+        # Frequency it writes structure + [FREQ] / [FR-NORM-COORD] blocks so
+        # Avogadro can animate vibrations directly (for a Transition State,
+        # including the imaginary mode).
+        if ct in (
+            "Single Point",
+            "Geometry Opt",
+            "Transition State",
+            "Frequency",
+        ):
+
+            def _molden() -> None:
+                from quantui.results_storage import save_molden as _save_molden
+
+                _save_molden(
+                    saved_dir,
+                    mo_energy_hartree=getattr(result, "mo_energy_hartree", None),
+                    mo_occ=getattr(result, "mo_occ", None),
+                    mo_coeff=getattr(result, "mo_coeff", None),
+                    pyscf_mol_atom=getattr(result, "pyscf_mol_atom", None),
+                    pyscf_mol_basis=getattr(result, "pyscf_mol_basis", None),
+                    charge=int(getattr(calc_mol, "charge", 0)),
+                    multiplicity=int(getattr(calc_mol, "multiplicity", 1)),
+                    frequencies_cm1=getattr(result, "frequencies_cm1", None),
+                    normal_modes=getattr(result, "displacements", None),
+                )
+
+            _guarded("molden", _molden)
 
     def _show_result_log(self, saved_dir: Path, log_text: str) -> None:
         """Populate the result-directory label and output-log accordion.
@@ -6462,6 +6653,7 @@ class QuantUIApp:
     def _begin_run_lock(self) -> None:
         """Mark a run in flight (main thread, before the worker starts)."""
         self._calc_running = True
+        self._run_result_ready = False
         self.run_btn.disabled = True
         self._freeze_run_inputs()
 
@@ -6514,6 +6706,10 @@ class QuantUIApp:
         # charge/multiplicity the Charge/Multiplicity fields write into)
         # stay live: a later read would mix two levels of theory in one
         # saved result (audit APP-2).
+        # The loaded molecule this run was started from: structure exports
+        # use the run's result only while this is still the active molecule
+        # (audit APP-8 / UI-5).
+        _run_source_mol = self._molecule
         mol = copy.deepcopy(self._molecule)
         _run_method = self.method_dd.value
         _run_basis = self.basis_dd.value
@@ -6530,6 +6726,7 @@ class QuantUIApp:
         # Run-in-flight state: arm Cancel, lock out Clear (so it can't wipe the
         # live output mid-run), reset the cancel flag for this fresh run.
         self._calc_running = True
+        self._run_result_ready = False
         self._cancel_event.clear()
         self.cancel_btn.disabled = False
         self.log_clear_btn.disabled = True
@@ -6752,6 +6949,44 @@ class QuantUIApp:
             save_spectra: dict = {}
             save_type: str = "single_point"
             _pre_opt: Any = None  # OptimizationResult from Frequency pre-opt step
+            # A failed or unconverged "geometry optimization before the
+            # calculation" is shown on the result card, not only in the log:
+            # the run otherwise ends "Done" at a geometry the student did not
+            # ask for (audit APP-11).
+            _preopt_warning: Optional[str] = None
+
+            # NMR / PES Scan: the seed geometry (a previous result's final
+            # frame) is applied BEFORE the optional geometry optimization
+            # below, so that optimization starts from the seed instead of
+            # being overwritten by it afterwards (audit APP-11).
+            if ct == "NMR Shielding":
+                _nmr_seed_path = self._freq_seed_dd.value
+                if _nmr_seed_path:
+                    from quantui.results_storage import load_trajectory
+
+                    self.run_status.value = "Loading seed geometry from history…"
+                    _nmr_seed_traj, _ = load_trajectory(Path(_nmr_seed_path))
+                    calc_mol = _run_seed_with_run_charge(_nmr_seed_traj[-1], mol)
+                    log.write(
+                        f"\nSeed geometry loaded from: {Path(_nmr_seed_path).name}\n"
+                        f"  Formula: {calc_mol.get_formula()}  "
+                        f"Atoms: {len(calc_mol.atoms)}\n\n"
+                    )
+            elif ct == "PES Scan":
+                _scan_seed = getattr(self, "_scan_seed_dd", None)
+                if _scan_seed is not None and _scan_seed.value:
+                    from quantui.results_storage import load_trajectory
+
+                    self.run_status.value = "Loading seed geometry from history…"
+                    _seed_traj, _ = load_trajectory(Path(_scan_seed.value))
+                    if _seed_traj:
+                        calc_mol = _run_seed_with_run_charge(_seed_traj[-1], mol)
+                        log.write(
+                            f"\nSeed geometry loaded from: "
+                            f"{Path(_scan_seed.value).name}\n"
+                            f"  Formula: {calc_mol.get_formula()}  "
+                            f"Atoms: {len(calc_mol.atoms)}\n"
+                        )
 
             # Optional QM geometry optimization before non-frequency workflows.
             # Frequency and UV-Vis (TD-DFT) both have dedicated seed/pre-opt
@@ -6778,6 +7013,7 @@ class QuantUIApp:
                 # Catch numerical failures (e.g. singular matrix in
                 # cho_solve on tight rings) and fall back to the user's
                 # input geometry rather than killing the whole calc.
+                _preopt_start = calc_mol
                 try:
                     _pre_opt = optimize_geometry(
                         molecule=calc_mol,
@@ -6799,16 +7035,31 @@ class QuantUIApp:
                             "⚠ Geometry optimization did not fully converge — "
                             "proceeding with best available geometry.\n\n"
                         )
+                        _preopt_warning = (
+                            f"The geometry optimization before {ct} did not "
+                            f"fully converge ({_pre_opt.n_steps} steps); the "
+                            f"{ct} ran at the best geometry it reached."
+                        )
                     if ct != "Single Point":
                         _run_required_final_single_point(
                             calc_mol,
                             f"after geometry optimization before {ct}",
                         )
                 except Exception as _pre_exc:
+                    # Back to the starting geometry: the optimization may have
+                    # finished before its required single point failed, and
+                    # the log line below promises the input geometry.
+                    calc_mol = _preopt_start
+                    _pre_opt = None
                     log.write(
                         f"\n⚠ Geometry optimization failed: {_pre_exc}\n"
                         "  Proceeding with the user-provided geometry "
                         "as-is.\n\n"
+                    )
+                    _preopt_warning = (
+                        f"The geometry optimization before {ct} failed "
+                        f"({_pre_exc}); the {ct} ran at the starting geometry, "
+                        "not an optimized one."
                     )
 
             if ct == "Geometry Opt":
@@ -7050,6 +7301,7 @@ class QuantUIApp:
                         f"Force threshold {FREQ_PREOPT_FMAX} eV/Å (tighter than a plain "
                         "Geometry Opt: soft modes need a true stationary point).\n"
                     )
+                    _preopt_start = calc_mol
                     try:
                         _pre_opt = optimize_geometry(
                             molecule=calc_mol,
@@ -7074,11 +7326,25 @@ class QuantUIApp:
                                 "⚠ Geometry optimization did not fully converge — "
                                 "proceeding with best available geometry.\n\n"
                             )
+                            _preopt_warning = (
+                                "The geometry optimization before the "
+                                "frequency calculation did "
+                                f"not fully converge ({_pre_opt.n_steps} steps); "
+                                "it ran at the best geometry reached."
+                            )
                         _run_required_final_single_point(
                             calc_mol,
                             "after geometry optimization before frequency",
                         )
                     except Exception as _pre_exc:
+                        calc_mol = _preopt_start
+                        _pre_opt = None
+                        _preopt_warning = (
+                            "The geometry optimization before the "
+                            "frequency calculation "
+                            f"failed ({_pre_exc}); it ran at the starting "
+                            "geometry, not an optimized one."
+                        )
                         log.write(
                             f"\n⚠ Geometry optimization failed: {_pre_exc}\n"
                             "  Proceeding with the user-provided geometry "
@@ -7183,6 +7449,7 @@ class QuantUIApp:
                     # Catch numerical failures and fall back to the
                     # user's seed geometry rather than killing the whole
                     # TD-DFT calc.
+                    _preopt_start = calc_mol
                     try:
                         _pre_opt = optimize_geometry(
                             molecule=calc_mol,
@@ -7206,11 +7473,25 @@ class QuantUIApp:
                                 "⚠ Geometry optimization did not fully converge — "
                                 "proceeding with best available geometry.\n\n"
                             )
+                            _preopt_warning = (
+                                "The geometry optimization before the "
+                                "TD-DFT calculation did "
+                                f"not fully converge ({_pre_opt.n_steps} steps); "
+                                "it ran at the best geometry reached."
+                            )
                         _run_required_final_single_point(
                             calc_mol,
                             "after geometry optimization before UV-Vis",
                         )
                     except Exception as _pre_exc:
+                        calc_mol = _preopt_start
+                        _pre_opt = None
+                        _preopt_warning = (
+                            "The geometry optimization before the "
+                            "TD-DFT calculation "
+                            f"failed ({_pre_exc}); it ran at the starting "
+                            "geometry, not an optimized one."
+                        )
                         log.write(
                             f"\n⚠ Geometry optimization failed: {_pre_exc}\n"
                             "  Proceeding with the seed geometry as-is.\n\n"
@@ -7244,19 +7525,7 @@ class QuantUIApp:
                 }
                 save_type = "tddft"
             elif ct == "NMR Shielding":
-                _nmr_seed_path = self._freq_seed_dd.value
-                if _nmr_seed_path:
-                    from quantui.results_storage import load_trajectory
-
-                    self.run_status.value = "Loading seed geometry from history…"
-                    _nmr_seed_traj, _ = load_trajectory(Path(_nmr_seed_path))
-                    calc_mol = _run_seed_with_run_charge(_nmr_seed_traj[-1], mol)
-                    log.write(
-                        f"\nSeed geometry loaded from: {Path(_nmr_seed_path).name}\n"
-                        f"  Formula: {calc_mol.get_formula()}  "
-                        f"Atoms: {len(calc_mol.atoms)}\n\n"
-                    )
-
+                # (Seed geometry already applied, before any pre-optimization.)
                 self.run_status.value = "Running NMR shielding (SCF + GIAO)..."
                 from quantui.nmr_calc import run_nmr_calc
 
@@ -7295,21 +7564,7 @@ class QuantUIApp:
                 self.run_status.value = "Running PES scan…"
                 from quantui.pes_scan import run_pes_scan
 
-                _scan_seed = getattr(self, "_scan_seed_dd", None)
-                if _scan_seed is not None and _scan_seed.value:
-                    from quantui.results_storage import load_trajectory
-
-                    self.run_status.value = "Loading seed geometry from history…"
-                    _seed_traj, _ = load_trajectory(Path(_scan_seed.value))
-                    if _seed_traj:
-                        calc_mol = _run_seed_with_run_charge(_seed_traj[-1], mol)
-                        log.write(
-                            f"\nSeed geometry loaded from: "
-                            f"{Path(_scan_seed.value).name}\n"
-                            f"  Formula: {calc_mol.get_formula()}  "
-                            f"Atoms: {len(calc_mol.atoms)}\n"
-                        )
-
+                # (Seed geometry already applied, before any pre-optimization.)
                 _st = self._scan_type_dd.value.lower()
                 _atom_idx: list = [
                     self._scan_atom1.value - 1,
@@ -7417,12 +7672,35 @@ class QuantUIApp:
                 save_spectra, save_type = {}, "single_point"
 
             _mark("result_ready")
+            # The calculation has finished: from here on a Cancel could only
+            # throw a finished result away, half-way through showing and
+            # saving it (audit APP-10). Disarm it, and stop the log from
+            # raising for a Cancel that arrived a moment too late.
+            self._run_result_ready = True
+            log._cancel_check = None
+            self.cancel_btn.disabled = True
+            self.cancel_btn.description = "Cancel"
+            if self._cancel_event.is_set():
+                self._cancel_event.clear()
+                log.write(
+                    "\nCancel arrived after the calculation had finished — "
+                    "the result is kept.\n"
+                )
             _elapsed = time.perf_counter() - _run_wall_t
             _elapsed_cpu = time.process_time() - _run_cpu_t
             self._last_result = result
+            self._last_result_molecule = _run_source_mol
+            self._last_result_run_dir = None
             self._last_calc_type = save_type
             self.accumulate_btn.disabled = False
 
+            if _preopt_warning:
+                result_html = (
+                    '<div style="background:#fffbeb;border:1px solid #fcd34d;'
+                    "border-radius:8px;padding:10px 14px;margin:8px 0;"
+                    'color:#92400e;font-size:13px">'
+                    f"&#9888; {_html.escape(_preopt_warning)}</div>" + result_html
+                )
             self.result_output.append_display_data(HTML(result_html))
             self.run_status.value = "Finalizing results..."
 
@@ -7505,15 +7783,16 @@ class QuantUIApp:
             except Exception:
                 pass
 
-            # Persist to disk
+            # Persist to disk. The save itself and the extras written next to
+            # it are guarded separately: a failed save_result means nothing
+            # reached History, and the student must be told so (audit APP-5);
+            # a failed thumbnail/trajectory/Molden extra does not unsave the
+            # result.
             _mark("persist_begin")
+            _save_error: Optional[str] = None
+            _saved_dir: Optional[Path] = None
             try:
-                from quantui import load_result, save_result
-                from quantui.results_storage import (
-                    save_orbitals,
-                    save_thumbnail,
-                    save_trajectory,
-                )
+                from quantui import save_result
 
                 _saved_dir = save_result(
                     result,
@@ -7522,109 +7801,54 @@ class QuantUIApp:
                     spectra=save_spectra,
                     molecule=calc_mol,
                 )
+            except Exception as _save_exc:
+                _saved_dir = None
+                _save_error = f"{type(_save_exc).__name__}: {_save_exc}"
+                # Nothing of this run is on disk: exports must not land in
+                # the previous run's folder.
+                self._last_result_dir = None
+                try:
+                    self._export_bundle_btn.disabled = True
+                except Exception:
+                    pass
+                try:
+                    from quantui import calc_log as _clog
+
+                    _clog.log_event("save_error", _save_error[:300])
+                except Exception:
+                    pass
+                try:
+                    log.write(f"\n⚠ The result could not be saved: {_save_error}\n")
+                except Exception:
+                    pass
+                self.result_output.append_display_data(
+                    HTML(
+                        '<div style="background:#fef2f2;border:1px solid #fca5a5;'
+                        'border-radius:8px;padding:14px;margin:8px 0">'
+                        f'<b style="color:{_theme.css.ACCENT_ERROR}">'
+                        "&#9888; Result NOT saved</b><br>"
+                        '<small style="color:#7f1d1d">The calculation finished, '
+                        "but writing it to the results folder failed: "
+                        f"<code>{_html.escape(_save_error)}</code>. It is not in "
+                        "History, and the export buttons have no results folder "
+                        "to write to. Free some disk space (or fix the folder's "
+                        "permissions) and run again.</small></div>"
+                    )
+                )
+            if _saved_dir is not None:
                 _run_saved = True
                 self._last_result_dir = _saved_dir
+                self._last_result_run_dir = _saved_dir
+                _ana_ctx.result_dir = _saved_dir
                 # Result folder is now on disk —
                 # the "Export bundle (.zip)" button has something to zip.
                 try:
                     self._export_bundle_btn.disabled = False
                 except Exception:
                     pass
-                _saved_data = load_result(_saved_dir)
-                save_thumbnail(_saved_dir, _saved_data)
-                _ana_ctx.result_dir = _saved_dir
-                _ana_ctx.timestamp = str(_saved_data.get("timestamp", ""))
-                # Persist trajectory so history viewer can replay it.
-                if ct in ("Geometry Opt", "Transition State", "IRC", "PES Scan"):
-                    _traj = getattr(
-                        result,
-                        "coordinates_list" if ct == "PES Scan" else "trajectory",
-                        None,
-                    )
-                    _e_list = getattr(result, "energies_hartree", [])
-                    if _traj:
-                        save_trajectory(_saved_dir, _traj, _e_list or [])
-                        # Also write
-                        # external-tool-friendly trajectory formats.
-                        # Multi-frame XYZ (any viewer) and ASE .traj
-                        # (ASE-GUI + ASE Python post-processing). Both
-                        # best-effort: failures are caught by the outer
-                        # save try/except so the calc still completes.
-                        try:
-                            from quantui.results_storage import (
-                                save_trajectory_ase as _save_traj_ase,
-                            )
-                            from quantui.results_storage import (
-                                save_trajectory_xyz as _save_traj_xyz,
-                            )
-
-                            _save_traj_xyz(
-                                _saved_dir,
-                                frames=_traj,
-                                energies=_e_list or [],
-                            )
-                            _save_traj_ase(
-                                _saved_dir,
-                                frames=_traj,
-                                energies=_e_list or [],
-                            )
-                        except Exception:
-                            pass
-                # Persist pre-opt geometry trajectory for Frequency runs.
-                if ct == "Frequency" and _pre_opt is not None:
-                    _pre_traj = getattr(_pre_opt, "trajectory", None)
-                    _pre_e = list(getattr(_pre_opt, "energies_hartree", []))
-                    if _pre_traj:
-                        save_trajectory(
-                            _saved_dir,
-                            _pre_traj,
-                            _pre_e,
-                            filename="preopt_trajectory.json",
-                        )
-                # Persist MO data for orbital diagram + isosurface replay.
-                if ct in (
-                    "Single Point",
-                    "Geometry Opt",
-                    "Transition State",
-                    "Frequency",
-                    "UV-Vis (TD-DFT)",
-                ):
-                    save_orbitals(_saved_dir, result)
-                # Write a Molden-format companion
-                # file so users can open results in Avogadro / IQmol /
-                # Jmol. Best-effort — failures are swallowed by the
-                # outer try block above and the calc still completes.
-                # For SP / GeoOpt this writes orbitals + structure; for
-                # Frequency it writes structure + [FREQ] / [FR-NORM-COORD]
-                # blocks so Avogadro can animate vibrations directly
-                # (for a Transition State, including the imaginary mode).
-                if ct in (
-                    "Single Point",
-                    "Geometry Opt",
-                    "Transition State",
-                    "Frequency",
-                ):
-                    try:
-                        from quantui.results_storage import (
-                            save_molden as _save_molden,
-                        )
-
-                        _save_molden(
-                            _saved_dir,
-                            mo_energy_hartree=getattr(
-                                result, "mo_energy_hartree", None
-                            ),
-                            mo_occ=getattr(result, "mo_occ", None),
-                            mo_coeff=getattr(result, "mo_coeff", None),
-                            pyscf_mol_atom=getattr(result, "pyscf_mol_atom", None),
-                            pyscf_mol_basis=getattr(result, "pyscf_mol_basis", None),
-                            charge=int(getattr(calc_mol, "charge", 0)),
-                            multiplicity=int(getattr(calc_mol, "multiplicity", 1)),
-                            frequencies_cm1=getattr(result, "frequencies_cm1", None),
-                            normal_modes=getattr(result, "displacements", None),
-                        )
-                    except Exception:
-                        pass
+                self._persist_result_extras(
+                    _saved_dir, result, ct, calc_mol, _pre_opt, _ana_ctx
+                )
                 self._queue_main_thread_callback(self._refresh_results_browser)
                 self._queue_main_thread_callback(self._populate_compare_list)
                 self._queue_main_thread_callback(
@@ -7637,16 +7861,6 @@ class QuantUIApp:
                     _saved_dir,
                     log.getvalue(),
                 )
-            except Exception as _save_exc:
-                try:
-                    from quantui import calc_log as _clog
-
-                    _clog.log_event(
-                        "save_error",
-                        f"{type(_save_exc).__name__}: {_save_exc}"[:300],
-                    )
-                except Exception:
-                    pass
             _mark("persist_done")
 
             # Activate analysis panels after scheduling refresh/update callbacks.
@@ -7721,7 +7935,12 @@ class QuantUIApp:
 
             _mark("success_done")
             _elapsed_total = _tail_marks["success_done"] - _run_wall_t
-            self.run_status.value = f"Done in {_elapsed_total:.1f} s."
+            if _save_error is None:
+                self.run_status.value = f"Done in {_elapsed_total:.1f} s."
+            else:
+                self.run_status.value = (
+                    f"Finished in {_elapsed_total:.1f} s — NOT saved: {_save_error}"
+                )
 
             try:
                 _tail_end = _tail_marks.get("success_done")
@@ -7763,7 +7982,7 @@ class QuantUIApp:
                 '<div style="background:#fef2f2;border:1px solid #fca5a5;'
                 'border-radius:8px;padding:16px;margin:8px 0">'
                 f'<b style="color:{_theme.css.ACCENT_ERROR}">&#9888; Dependency Not Available</b><br>'
-                f'<span style="color:#7f1d1d">{_err_detail}</span><br><br>'
+                f'<span style="color:#7f1d1d">{_html.escape(_err_detail)}</span><br><br>'
                 '<small style="color:#991b1b">On Windows, use the Apptainer container: '
                 "<code>apptainer run quantui.sif</code>. "
                 "Full details are in the <b>Output</b> tab.</small>"
@@ -7861,7 +8080,7 @@ class QuantUIApp:
                 '<div style="background:#fef2f2;border:1px solid #fca5a5;'
                 'border-radius:8px;padding:16px;margin:8px 0">'
                 f'<b style="color:{_theme.css.ACCENT_ERROR}">&#9888; Calculation Failed</b><br>'
-                f'<code style="color:#7f1d1d">{exc}</code><br><br>'
+                f'<code style="color:#7f1d1d">{_html.escape(str(exc))}</code><br><br>'
                 '<small style="color:#991b1b">'
                 "Tips: try a smaller basis set (STO-3G), use a geometry-optimized "
                 "structure first, or check for unusually long/short bonds in your "
@@ -8340,7 +8559,7 @@ class QuantUIApp:
             + "</div>"
         )
         self._log_source_lbl.value = (
-            f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE}">Source: {source_label}</span>'
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE}">Source: {_html_mod.escape(source_label)}</span>'
             if source_label
             else ""
         )
@@ -8418,9 +8637,9 @@ class QuantUIApp:
             )
         rows = ""
         for e in reversed(events):
-            ts = e.get("timestamp", "")[:19].replace("T", " ")
-            evt = e.get("event", "")
-            msg = e.get("message", "")
+            ts = _html.escape(str(e.get("timestamp", ""))[:19].replace("T", " "))
+            evt = _html.escape(str(e.get("event", "")))
+            msg = _html.escape(str(e.get("message", "")))
             rows += (
                 "<tr>"
                 f'<td style="padding:1px 10px 1px 0;color:{_theme.css.TEXT_SUBTLE};font-size:12px;white-space:nowrap">{ts}</td>'

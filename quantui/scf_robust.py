@@ -60,6 +60,23 @@ SCF_RESCUE_FAILED = (
 )
 
 
+class DisplacedSCFNotConverged(RuntimeError):
+    """A finite-difference displaced-geometry SCF did not converge.
+
+    Its dipole / polarizability would feed a numerical derivative (IR
+    intensities, Raman activities) silently; callers abandon that property
+    instead and never checkpoint the value (audit SCF-8).
+    """
+
+
+def require_converged(mf: Any, what: str) -> None:
+    """Raise :class:`DisplacedSCFNotConverged` unless ``mf.converged``."""
+    if not bool(getattr(mf, "converged", False)):
+        raise DisplacedSCFNotConverged(
+            f"the SCF at displaced geometry {what} did not converge"
+        )
+
+
 def run_scf_with_rescue(
     mf: Any,
     dm0: Optional[Any] = None,

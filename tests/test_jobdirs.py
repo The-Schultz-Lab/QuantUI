@@ -746,10 +746,14 @@ class TestJobRoot:
         from quantui.user_settings import UserSettings
 
         monkeypatch.delenv("QUANTUI_STAGING_DIR", raising=False)
+        monkeypatch.delenv("QUANTUI_HOME", raising=False)
         settings = UserSettings.load()
         settings.compute.slurm_job_root = ""
         settings.save()
         assert cfg.default_staging_root() == cfg.DEFAULT_STAGING_ROOT.expanduser()
+
+        monkeypatch.setenv("QUANTUI_HOME", str(tmp_path / "qhome"))
+        assert cfg.default_staging_root() == tmp_path / "qhome" / "staging"
 
         settings.compute.slurm_job_root = str(tmp_path / "scratch")
         settings.save()

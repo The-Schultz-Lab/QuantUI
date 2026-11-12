@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from .base import CalculationRequest
 
@@ -19,6 +19,28 @@ def molecule_to_dict(molecule) -> dict[str, Any]:
         "charge": int(molecule.charge),
         "multiplicity": int(molecule.multiplicity),
     }
+
+
+def final_molecule_field(result, molecule=None) -> Optional[dict[str, Any]]:
+    """``final_molecule`` for a payload: the geometry the calculation ran at.
+
+    *molecule* if given, else ``result.molecule`` (optimizations, IRC,
+    reorganization energy), else ``result.calc_molecule`` (set by the
+    worker on results that do not carry their geometry: single point,
+    TD-DFT, NMR, PES scan). SLURM ingest passes it to ``save_result`` so
+    every History entry has a structure, as a local run does.
+    """
+    for mol in (
+        molecule,
+        getattr(result, "molecule", None),
+        getattr(result, "calc_molecule", None),
+    ):
+        if mol is not None:
+            try:
+                return molecule_to_dict(mol)
+            except (AttributeError, TypeError, ValueError):
+                continue
+    return None
 
 
 def molecule_from_dict(data: dict[str, Any]):
@@ -58,6 +80,7 @@ def write_trajectory_json(
 def session_result_payload(result) -> Dict[str, Any]:
     return {
         "calc_type": "single_point",
+        "final_molecule": final_molecule_field(result),
         "energy_hartree": result.energy_hartree,
         "homo_lumo_gap_ev": result.homo_lumo_gap_ev,
         "converged": result.converged,
@@ -205,6 +228,7 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
             "Cv_jmolk": getattr(_thermo, "Cv_jmolk", None),
             "Cp_jmolk": getattr(_thermo, "Cp_jmolk", None),
             "symmetry_number": getattr(_thermo, "symmetry_number", None),
+            "symmetry_group": getattr(_thermo, "symmetry_group", None),
             # Pressure and the thermo model itself are recorded explicitly;
             # both are fixed by the harmonic-oscillator/
             # rigid-rotor/ideal-gas model at 1 atm used in freq_calc.py.
@@ -216,6 +240,7 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
     )
     return {
         "calc_type": "frequency",
+        "final_molecule": final_molecule_field(result, molecule),
         "energy_hartree": result.energy_hartree,
         "homo_lumo_gap_ev": result.homo_lumo_gap_ev,
         "converged": result.converged,
@@ -226,6 +251,8 @@ def freq_result_payload(result, molecule) -> Dict[str, Any]:
         # See session_result_payload's matching field.
         "scf_variant": getattr(result, "scf_variant", "") or None,
         # FreqResult carries it, so serialize it.
+        "dispersion_applied": getattr(result, "dispersion_applied", None),
+        "scf_rescue_stage": getattr(result, "scf_rescue_stage", "none"),
         "density_fit": bool(getattr(result, "density_fit", False)),
         "solvent": getattr(result, "solvent", None),
         "gpu_used": bool(getattr(result, "gpu_used", False)),
@@ -282,6 +309,7 @@ def irc_result_payload(result, *, trajectory_file: str) -> Dict[str, Any]:
     """An IRC: the joined path and the ``irc`` block the app saves."""
     return {
         "calc_type": "irc",
+        "final_molecule": final_molecule_field(result),  # the transition state
         "energy_hartree": result.energy_hartree,  # the transition state
         "homo_lumo_gap_ev": None,
         "converged": bool(result.converged),
@@ -300,6 +328,7 @@ def tddft_result_payload(result) -> Dict[str, Any]:
     wavelengths = result.wavelengths_nm()
     return {
         "calc_type": "tddft",
+        "final_molecule": final_molecule_field(result),
         "energy_hartree": result.energy_hartree,
         "homo_lumo_gap_ev": result.homo_lumo_gap_ev,
         "converged": result.converged,
@@ -346,6 +375,7 @@ def tddft_result_payload(result) -> Dict[str, Any]:
 def nmr_result_payload(result) -> Dict[str, Any]:
     return {
         "calc_type": "nmr",
+        "final_molecule": final_molecule_field(result),
         "energy_hartree": float("nan"),
         "homo_lumo_gap_ev": None,
         "converged": result.converged,
@@ -356,6 +386,8 @@ def nmr_result_payload(result) -> Dict[str, Any]:
         # See session_result_payload's matching field.
         "scf_variant": getattr(result, "scf_variant", "") or None,
         # NMRResult carries it, so serialize it.
+        "dispersion_applied": getattr(result, "dispersion_applied", None),
+        "scf_rescue_stage": getattr(result, "scf_rescue_stage", "none"),
         "density_fit": bool(getattr(result, "density_fit", False)),
         "spectra": {
             "nmr": {
@@ -375,6 +407,7 @@ def nmr_result_payload(result) -> Dict[str, Any]:
 def pes_scan_result_payload(result, *, trajectory_file: str) -> Dict[str, Any]:
     return {
         "calc_type": "pes_scan",
+        "final_molecule": final_molecule_field(result),
         "energy_hartree": result.energy_hartree,
         "homo_lumo_gap_ev": None,
         "converged": result.converged_all,
@@ -419,6 +452,7 @@ def reorg_result_payload(result) -> Dict[str, Any]:
         channels.append(entry)
     return {
         "calc_type": "reorganization_energy",
+        "final_molecule": final_molecule_field(result),
         "energy_hartree": result.energy_hartree,
         "homo_lumo_gap_ev": None,
         "converged": result.converged,

@@ -19,6 +19,12 @@ on:
     types: [published]
   workflow_dispatch: {}
 
+# Least privilege by default: the build job only needs to read the repo. The
+# publish jobs set their own `permissions:` (id-token for OIDC), which
+# replaces this block for those jobs.
+permissions:
+  contents: read
+
 jobs:
   # ── Build once, reuse the same artifact everywhere ───────────────────────
   # Building only once (rather than in each publish job) guarantees the exact
@@ -53,6 +59,25 @@ jobs:
           /tmp/wheel-check/bin/pip install --quiet dist/*.whl
           /tmp/wheel-check/bin/python -c "import quantui; print(quantui.__version__)"
 
+      - name: Check the release tag matches the package version
+        # A Release tagged v0.12.0 on a tree still saying 0.11.1 would build
+        # and "succeed" on TestPyPI (skip-existing hides the duplicate) and
+        # only fail, or worse publish the wrong version, at the PyPI step.
+        # Compares the tag with both pyproject.toml and the __version__ of
+        # the wheel just built. Release events only: a workflow_dispatch
+        # rehearsal has no tag.
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          PYPROJECT_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          WHEEL_VERSION=$(/tmp/wheel-check/bin/python -c "import quantui; print(quantui.__version__)")
+          echo "tag=$TAG pyproject=$PYPROJECT_VERSION quantui.__version__=$WHEEL_VERSION"
+          if [ "$TAG" != "v$PYPROJECT_VERSION" ] || [ "$TAG" != "v$WHEEL_VERSION" ]; then
+            echo "::error::Release tag '$TAG' does not match v<version> (pyproject.toml: $PYPROJECT_VERSION, quantui.__version__: $WHEEL_VERSION). Bump the version or fix the tag."
+            exit 1
+          fi
+
       - uses: actions/upload-artifact@v7
         with:
           name: dist
@@ -86,14 +111,15 @@ jobs:
           # version. Skip rather than fail the job in that case.
           skip-existing: true
 
-  # ── PyPI — only for an actual published Release ──────────────────────────
+  # ── PyPI — only for an actual published, non-pre-release Release ─────────
   # workflow_dispatch intentionally has no path to this job: a manual
   # rehearsal run must NEVER be able to publish to production PyPI, so the
   # `if` below excludes it rather than relying on environment protection
-  # alone as the only safeguard.
+  # alone as the only safeguard. A GitHub *pre-release* also stops after
+  # TestPyPI: marking a Release as pre-release must not ship it to students.
   publish-pypi:
     name: Publish to PyPI
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' && !github.event.release.prerelease
     needs: [build, publish-testpypi]
     runs-on: ubuntu-latest
     environment:

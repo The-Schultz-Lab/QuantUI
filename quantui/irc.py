@@ -253,14 +253,18 @@ def _steepest_descent(
 
 
 def _same_structure(a: Molecule, b: Molecule, tol: float = 0.05) -> bool:
-    """True when *a* and *b* have the same interatomic distances (within *tol* Å)."""
-    import numpy as np
+    """True when *a* and *b* superimpose within *tol* Å RMSD.
 
-    def dists(m: Molecule) -> Any:
-        x = np.asarray(m.coordinates, dtype=float)
-        return np.linalg.norm(x[:, None] - x[None], axis=-1)
+    Kabsch superposition with proper rotations only, keeping the atom
+    labels: a mirror image (e.g. the two ends of NH3 umbrella inversion,
+    or of an enantiomerisation) has the same interatomic distances but is
+    a different minimum, so a distance-matrix test would wrongly call
+    the two ends of such a path "the same".
+    """
+    from .ts_guess import align_to_reference
 
-    return bool(np.abs(dists(a) - dists(b)).max() < tol)
+    _moved, rmsd = align_to_reference(a.coordinates, b.coordinates)
+    return rmsd < tol
 
 
 def run_irc(

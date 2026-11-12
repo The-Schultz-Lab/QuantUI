@@ -31,6 +31,18 @@ REM Clears quantui/__pycache__ on every launch to prevent stale .pyc bytecode
 REM (WSL2 DrvFs does not reliably propagate Windows-side mtime changes, so Python
 REM may load pre-edit bytecode even after source changes).
 REM PYTHONDONTWRITEBYTECODE=1 prevents a new stale cache from accumulating.
+REM Per-run login token: without one, any other local user or process could
+REM drive the app. WSLENV hands QUANTUI_APP_TOKEN to the WSL side through the
+REM environment, not a command line.
+set "QUANTUI_APP_TOKEN="
+for /f "delims=" %%t in ('powershell -NoProfile -Command "[guid]::NewGuid().Guid + [guid]::NewGuid().Guid"') do set "QUANTUI_APP_TOKEN=%%t"
+if not defined QUANTUI_APP_TOKEN (
+    echo ERROR: could not create a login token ^(is PowerShell available?^)
+    pause
+    exit /b 1
+)
+if defined WSLENV (set "WSLENV=%WSLENV%:QUANTUI_APP_TOKEN") else (set "WSLENV=QUANTUI_APP_TOKEN")
+
 start "QuantUI [native-jupyter]" wsl -d Ubuntu --cd "%WSLPATH%" -- bash ./launchers/launch-native-jupyter.sh
 
 echo Waiting for JupyterLab to start on localhost:8868...
@@ -57,13 +69,13 @@ goto done
 
 :open_browser
 set OPENED=1
-start http://127.0.0.1:8868/lab/tree/notebooks/molecule_computations.ipynb
+start http://127.0.0.1:8868/lab/tree/notebooks/molecule_computations.ipynb?token=%QUANTUI_APP_TOKEN%
 
 :done
 
 echo.
 if "%OPENED%"=="1" (
-	echo Native JupyterLab server running at http://127.0.0.1:8868/lab
+	echo Native JupyterLab server running at http://127.0.0.1:8868/lab?token=%QUANTUI_APP_TOKEN%
 	echo All local quantui/*.py changes are live -- no rebuild needed.
 	echo Close the WSL window to stop.
 ) else (

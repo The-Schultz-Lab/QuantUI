@@ -442,3 +442,17 @@ class TestGetCachedHtml:
             rd, 5, n_frames=24, amplitude=0.4, renderer="py3dmol", fps=10
         )
         assert result == "PAYLOAD"
+
+
+class TestBgcolorKey:
+    """Audit VIZ-3: the scene background is baked into the HTML, so a
+    Light/Dark toggle must miss rather than serve the other theme's blob."""
+
+    def test_different_bgcolor_misses(self, tmp_path):
+        rd = _make_result_dir(tmp_path)
+        kw = dict(n_frames=24, amplitude=0.4, renderer="py3dmol", fps=10)
+        vib_cache.save_cached_html(
+            rd, 1, "LIGHT", freq_cm1=1.0, bgcolor="#ffffff", **kw
+        )
+        assert vib_cache.get_cached_html(rd, 1, bgcolor="#ffffff", **kw) == "LIGHT"
+        assert vib_cache.get_cached_html(rd, 1, bgcolor="#1e293b", **kw) is None

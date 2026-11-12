@@ -57,6 +57,16 @@ class TestSourceLabel:
             )
         assert m.call_args[0][1] == "Library (offline): aspirin"
 
+    def test_online_miss_fallback_is_not_called_offline(self, app, water):
+        # audit DATA-7: a genuine online miss is not "no network".
+        with patch.object(app, "_set_molecule") as m:
+            app._apply_pubchem_search_result(
+                "glycol", water, None, "library-no-online-match"
+            )
+        assert "No network" not in app.pubchem_msg.value
+        assert "No exact match found online" in app.pubchem_msg.value
+        assert m.call_args[0][1] == "Library (closest match): glycol"
+
     def test_pubchem_source_label_no_warning(self, app, water):
         with patch.object(app, "_set_molecule") as m:
             app._apply_pubchem_search_result("benzene", water, None, "pubchem")

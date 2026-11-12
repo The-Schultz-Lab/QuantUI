@@ -651,7 +651,7 @@ def build_history_section(
         layout=layout_fn(width="230px"),
     )
     app._reset_confirm_html = widgets.HTML(
-        '<span style="color:#dc2626;font-size:13px">'
+        f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:13px">'
         "<b>Warning:</b> This will permanently delete all performance records. "
         "Time estimates will reset to &ldquo;no data&rdquo;.</span>"
     )
@@ -1403,8 +1403,8 @@ def build_shared_widgets(
         style={"description_width": "40px"},
         layout=layout_fn(width="120px"),
         tooltip=(
-            "Fraction of the animation displacement amplitude (0.4 Å) "
-            "applied per atom along the selected mode"
+            "Fraction of 0.4 Å: the total length of the step taken along "
+            "the selected (normalised) mode"
         ),
     )
     app._freq_perturb_box = widgets.HBox(
@@ -2589,8 +2589,8 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
             width="auto", margin="0 0 8px 0", align_self="flex-start", display="none"
         ),
         tooltip=(
-            "Displace the structure 75% along the selected normal mode "
-            "(same scale as the animation) and switch to a new Frequency run"
+            "Displace the structure 0.3 Å in total (75% of 0.4 Å) along the "
+            "selected normal mode and switch to a new Frequency run"
         ),
     )
     # Fixed-dimension Output container so the box never resizes between
@@ -2854,8 +2854,10 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(width="100%"),
     )
     # Widen the preset buttons and add a "By index" mode that reveals a
-    # free-entry 0-based MO index input, so any orbital (not just the HOMO/LUMO
-    # neighbourhood) can be rendered as an isosurface.
+    # free-entry MO number input, so any orbital (not just the HOMO/LUMO
+    # neighbourhood) can be rendered as an isosurface. The number is 1-based,
+    # like the diagram's "MO #n" hover and the gallery captions (audit VIZ-5);
+    # on_iso_generate / render_orbital_isosurface convert it to an index.
     app._orb_toggle = widgets.ToggleButtons(
         options=["HOMO-1", "HOMO", "LUMO", "LUMO+1", "By index"],
         value="HOMO",
@@ -2863,11 +2865,11 @@ def build_results_section(app: Any, *, layout_fn: Any) -> None:
         layout=layout_fn(margin="8px 0 4px 0"),
     )
     app._orb_index_input = widgets.BoundedIntText(
-        value=0,
-        min=0,
+        value=1,
+        min=1,
         max=100000,
         description="MO #",
-        tooltip="0-based molecular-orbital index (0 = lowest-energy MO)",
+        tooltip="Molecular-orbital number (1 = lowest-energy MO), as in the diagram",
         style={"description_width": "40px"},
         layout=layout_fn(display="none", width="150px", margin="0 0 4px 0"),
     )

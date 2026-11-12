@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: every job here only checks out and tests the code.
+# (Caches and artifacts use the runner's own token, not GITHUB_TOKEN, and
+# Codecov uploads with its own token.)
+permissions:
+  contents: read
+
 jobs:
   # ── Linux: full suite including PySCF-dependent tests ─────────────────────
   test-linux:
@@ -50,6 +56,35 @@ jobs:
         with:
           files: coverage.xml
           fail_ci_if_error: false
+
+  # ── Browser viewer: Python 3.13, no PySCF ─────────────────────────────────
+  # The browser Viewer (packaging/viewer/browser/build.sh, deployed by
+  # pages.yml) runs QuantUI on Pyodide's Python 3.13, outside the 3.9-3.11
+  # matrix above, and without PySCF. This job runs the viewer tests in that
+  # shape: core install only (no [pyscf] extra), on 3.13 (audit INFRA-9).
+  test-viewer-py313:
+    name: Viewer tests (Python 3.13, no PySCF)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install QuantUI (core only) and pytest
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . "pytest>=7.0.0" "pytest-xdist>=3.0.0" "pytest-mock>=3.10.0"
+
+      - name: Confirm PySCF is not installed
+        run: python -c "import importlib.util, sys; sys.exit(importlib.util.find_spec('pyscf') is not None)"
+
+      - name: Run viewer tests
+        run: pytest tests/test_app_viewer.py tests/test_viewer_audit.py --no-header -q -n0
 
   # ── Windows: non-PySCF suite ───────────────────────────────────────────────
   test-windows:

@@ -111,7 +111,8 @@ class TestRequestFromXyz:
         # B2.11: a cut-off file must not run unattended.
         path = tmp_path / "cut.xyz"
         path.write_text("3\nwater, cut off\nO 0 0 0\nH 0 0 0.96\n")
-        with pytest.raises(BatchInputError, match="first line says 3 atoms"):
+        # The shared XYZ parser now rejects the mismatch itself (audit DATA-8).
+        with pytest.raises(BatchInputError, match="header says 3 atoms"):
             request_from_xyz(
                 path, calc_type="single_point", method="RHF", basis="STO-3G"
             )
@@ -625,7 +626,14 @@ class TestLauncherMatchesQuantUI:
         from quantui.inorganic_guards import check_charge_multiplicity
         from quantui.xyz_input import electron_count
 
-        for atoms in (["O", "H", "H"], ["Mn"] + ["O"] * 6, ["N"], ["Fe", "Cl"]):
+        # ["H"] at +1..+3 covers the no-electrons-left rule (audit DATA-8).
+        for atoms in (
+            ["O", "H", "H"],
+            ["Mn"] + ["O"] * 6,
+            ["N"],
+            ["Fe", "Cl"],
+            ["H"],
+        ):
             for charge in (-1, 0, 1, 2, 3):
                 for mult in range(0, 8):
                     ours = launcher.charge_mult_problem(atoms, charge, mult)
@@ -737,8 +745,11 @@ class TestLauncherMatchesQuantUI:
         )
         res = launcher.resolve_resources(req, _args(launcher, [str(water)]))
         ours = launcher.prepare_job(req, res, "jobA", email, launcher.TEST_IMAGE)
-        # Read our record now: QuantUI's prepare() below reuses the request id.
-        mine = json.loads((roots / "jobs" / (req["request_id"] + ".json")).read_text())
+        # Read our record now, then drop it: QuantUI's prepare() below gets
+        # the same request, and a taken id would be replaced by a fresh one.
+        our_record = roots / "jobs" / (req["request_id"] + ".json")
+        mine = json.loads(our_record.read_text())
+        our_record.unlink()
 
         backend = SlurmBackend(
             registry=JobRegistry(), apptainer_image=launcher.TEST_IMAGE
@@ -1366,6 +1377,89 @@ class TestChainedJobs:
             and "FAILED" in r.stderr
         )
 
+    # audit HPC-7: the chained job keeps the source's solvent, and an
+    # unconverged optimization is not a starting point.
+    def _solvated_opt(self, cluster):
+        src = self._opt_job_with(cluster, "--solvent", "Water")
+        _finish(
+            src,
+            "attempt-01_job1001",
+            {"calc_type": "geometry_opt", "converged": True},
+            _OPT_TRAJ,
+        )
+        return src
+
+    def _opt_job_with(self, cluster, *extra, name="opt"):
+        r = cluster.run(
+            "submit",
+            "water.xyz",
+            "--calc",
+            "geometry_opt",
+            "--method",
+            "RHF",
+            "--basis",
+            "STO-3G",
+            "--job-name",
+            name,
+            *extra,
+        )
+        assert r.returncode == 0, r.stderr
+        return cluster.staging / name
+
+    def test_from_inherits_the_source_solvent(self, cluster):
+        self._solvated_opt(cluster)
+        r = cluster.run(
+            "submit", "--from", "opt", "--calc", "frequency", "--job-name", "f"
+        )
+        assert r.returncode == 0, r.stderr
+        assert _request_of(cluster.staging / "f")["solvent"] == "Water"
+        assert "solvent Water taken from opt" in r.stderr
+
+    def test_no_solvent_runs_gas_phase(self, cluster):
+        self._solvated_opt(cluster)
+        r = cluster.run(
+            "submit",
+            "--from",
+            "opt",
+            "--calc",
+            "frequency",
+            "--no-solvent",
+            "--job-name",
+            "f",
+        )
+        assert r.returncode == 0, r.stderr
+        assert _request_of(cluster.staging / "f")["solvent"] is None
+
+    def test_inherited_solvent_on_a_gas_phase_only_calc_needs_a_choice(self, cluster):
+        self._solvated_opt(cluster)
+        r = cluster.run("submit", "--from", "opt", "--calc", "nmr")
+        assert r.returncode == 1 and "--no-solvent" in r.stderr
+        r = cluster.run("submit", "--from", "opt", "--calc", "nmr", "--no-solvent")
+        assert r.returncode == 0, r.stderr
+
+    def test_solvent_and_no_solvent_conflict(self, cluster):
+        r = cluster.run(
+            "submit",
+            "water.xyz",
+            "--calc",
+            "single_point",
+            "--solvent",
+            "Water",
+            "--no-solvent",
+        )
+        assert r.returncode == 2
+
+    def test_from_refuses_an_unconverged_optimization(self, cluster):
+        src = self._opt_job(cluster)
+        _finish(
+            src,
+            "attempt-01_job1001",
+            {"calc_type": "geometry_opt", "converged": False},
+            _OPT_TRAJ,
+        )
+        r = cluster.run("submit", "--from", "opt", "--calc", "frequency")
+        assert r.returncode == 1 and "did not converge" in r.stderr
+
     def test_from_with_files_is_a_usage_error(self, cluster):
         r = cluster.run("submit", "water.xyz", "--from", "opt", "--calc", "frequency")
         assert r.returncode == 2
@@ -1431,6 +1525,18 @@ class TestFinalGeometry:
             final_geometry(job)
         _finish(job, "attempt-01_job1", {}, _OPT_TRAJ, name="preopt_trajectory.json")
         assert final_geometry(job)["coords"] == _OPT_TRAJ["steps"][-1]["coords"]
+
+    def test_unconverged_optimization_is_refused_at_run_time(self, tmp_path):
+        # audit HPC-7: afterok lets the chained job start after an
+        # unconverged optimization (the worker exits 0); the worker refuses.
+        from quantui.backends.batch_chain import final_geometry
+
+        job = self._job(tmp_path, "geometry_opt")
+        _finish(job, "attempt-01_job1", {"converged": False}, _OPT_TRAJ)
+        with pytest.raises(ValueError, match="did not converge"):
+            final_geometry(job)
+        _finish(job, "attempt-02_job2", {"converged": True}, _OPT_TRAJ)
+        assert final_geometry(job)["source"] == "job/attempt-02_job2"
 
     def test_no_finished_attempt(self, tmp_path):
         from quantui.backends.batch_chain import final_geometry
@@ -1797,3 +1903,25 @@ class TestStartupIngest:
         monkeypatch.setenv("QUANTUI_JOBS_DIR", str(jobs))
         assert ingest_finished_jobs_on_startup(object()) == []
         assert not jobs.exists()
+
+
+class TestLauncherRequestIdReuse:
+    """audit HPC-4: a reused request id must not overwrite a job's record."""
+
+    def test_same_request_twice_gets_two_records(self, launcher, roots, water):
+        argv = [str(water), "--calc", "single_point"]
+        req, _ = launcher.build_request(water, _args(launcher, argv), {})
+        res = launcher.resolve_resources(req, _args(launcher, argv))
+        first_id = req["request_id"]
+        launcher.prepare_job(dict(req), res, "jobA", None, launcher.TEST_IMAGE)
+        again = json.loads(json.dumps(req))
+        script = launcher.prepare_job(again, res, "jobA", None, launcher.TEST_IMAGE)
+
+        assert again["request_id"] != first_id
+        assert again["request_id"].startswith(first_id + "-")
+        assert again["run_context"]["source_request_id"] == first_id
+        records = sorted(p.name for p in (roots / "jobs").glob("*.json"))
+        assert records == sorted([first_id + ".json", again["request_id"] + ".json"])
+        first = json.loads((roots / "jobs" / (first_id + ".json")).read_text())
+        assert first["job_dir"] != str(script.parent)
+        assert _request_of(script.parent)["request_id"] == again["request_id"]

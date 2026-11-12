@@ -91,19 +91,16 @@ def summary_from_job_metadata(metadata, *, label: str = "") -> CalcSummary:
             calc.converged = bool(data["converged"])
             if "mo_energy" in data:
                 mo_e = data["mo_energy"]
-                if mo_e.ndim == 2:
-                    mo_e = mo_e[0]
                 mo_occ = data.get("mo_occ")
-                if mo_occ is not None:
-                    if mo_occ.ndim == 2:
-                        mo_occ = mo_occ[0]
-                    n_occ = int((mo_occ > 0).sum())
-                else:
-                    n_occ = int((mo_e < 0).sum())
-                if 0 < n_occ < len(mo_e):
-                    calc.homo_lumo_gap_ev = float(
-                        (mo_e[n_occ] - mo_e[n_occ - 1]) * HARTREE_TO_EV
-                    )
+                if mo_occ is None:
+                    # No occupations saved: guess from the sign of the energies.
+                    mo_occ = (mo_e < 0).astype(float)
+                from .session_calc import homo_lumo_gap_hartree
+
+                # UHF/UKS (2, n_mo): the gap spans both spin channels.
+                gap_ha = homo_lumo_gap_hartree(mo_e, mo_occ)
+                if gap_ha is not None:
+                    calc.homo_lumo_gap_ev = float(gap_ha * HARTREE_TO_EV)
         except Exception as exc:
             logger.warning("Could not load results for %s: %s", calc.label, exc)
 

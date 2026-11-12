@@ -129,6 +129,43 @@ class TestGfnffRelaxation:
         assert [list(c) for c in m.coordinates] == before
 
 
+class TestChargeAndSpin:
+    """Audit GEOM-6: xtb-python's ASE calculator has no ``charge`` keyword —
+    it reads the total charge from the atoms' initial charges and the
+    unpaired electrons from their initial magnetic moments."""
+
+    @xtb_only
+    @pytest.mark.parametrize(
+        "entry_id, charge, unpaired",
+        [("inorganic-hexaaquaironii", 2, 4), ("inorganic-permanganate", -1, 0)],
+    )
+    def test_gfnff_sees_molecular_charge_and_spin(
+        self, monkeypatch, entry_id, charge, unpaired
+    ):
+        import xtb.ase.calculator as xtb_calc
+
+        seen = []
+
+        class _Recording(xtb_calc.XTB):
+            def calculate(self, atoms=None, properties=None, system_changes=None):
+                a = atoms if atoms is not None else self.atoms
+                seen.append(
+                    (
+                        round(float(a.get_initial_charges().sum()), 6),
+                        int(round(float(a.get_initial_magnetic_moments().sum()))),
+                    )
+                )
+                if system_changes is None:
+                    return super().calculate(atoms, properties)
+                return super().calculate(atoms, properties, system_changes)
+
+        monkeypatch.setattr(xtb_calc, "XTB", _Recording)
+        m = _metal(entry_id)
+        assert (m.charge, m.multiplicity - 1) == (charge, unpaired)
+        preopt_mod._xtb_gfnff_relax(m, 2)
+        assert seen and set(seen) == {(charge, unpaired)}
+
+
 class TestSideEffectContainment:
     @xtb_only
     def test_no_scratch_files_leak_into_cwd(self, tmp_path, monkeypatch):

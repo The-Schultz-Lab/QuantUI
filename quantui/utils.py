@@ -7,6 +7,8 @@ parsing, walltime formatting, job directory management) have been removed.
 """
 
 import logging
+import math
+import numbers
 import os
 import re
 from datetime import datetime
@@ -102,7 +104,10 @@ def validate_atom_symbol(symbol: str) -> bool:
 
 def validate_coordinates(coords: List[float]) -> bool:
     """
-    Validate that coordinates are a list of 3 numbers.
+    Validate that coordinates are a row of 3 finite numbers.
+
+    Any non-string sequence of length 3 is accepted (a list, a tuple, or a
+    numpy row); NaN and infinite values are rejected.
 
     Args:
         coords: List of coordinate values
@@ -110,13 +115,12 @@ def validate_coordinates(coords: List[float]) -> bool:
     Returns:
         bool: True if valid, False otherwise
     """
-    if not isinstance(coords, (list, tuple)):
-        return False
-    if len(coords) != 3:
+    if isinstance(coords, (str, bytes)):
         return False
     try:
-        [float(x) for x in coords]
-        return True
+        if len(coords) != 3:
+            return False
+        return all(math.isfinite(float(x)) for x in coords)
     except (ValueError, TypeError):
         return False
 
@@ -131,9 +135,10 @@ def validate_charge(charge: int) -> bool:
     Returns:
         bool: True if valid (reasonable range), False otherwise
     """
-    if not isinstance(charge, int):
+    # numbers.Integral also admits numpy integers (np.int64 from an array).
+    if not isinstance(charge, numbers.Integral):
         return False
-    return -10 <= charge <= 10
+    return bool(-10 <= charge <= 10)
 
 
 def validate_multiplicity(multiplicity: int) -> bool:

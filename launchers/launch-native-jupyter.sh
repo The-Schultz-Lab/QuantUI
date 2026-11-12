@@ -74,10 +74,17 @@ fi
 rm -rf quantui/__pycache__
 export PYTHONDONTWRITEBYTECODE=1
 
+# A login token, never an empty one: an open JupyterLab lets any local user
+# or process run code as you. JupyterLab reads JUPYTER_TOKEN from the
+# environment, so the token stays off the command line. launch-native-
+# jupyter.bat passes its own (QUANTUI_APP_TOKEN) so it can open the URL.
+JUPYTER_TOKEN="${QUANTUI_APP_TOKEN:-${JUPYTER_TOKEN:-$(python -c 'import secrets; print(secrets.token_urlsafe(24))')}}"
+export JUPYTER_TOKEN
+echo "QuantUI JupyterLab: http://127.0.0.1:8868/lab/tree/notebooks/molecule_computations.ipynb?token=${JUPYTER_TOKEN}"
+
 exec jupyter lab notebooks/molecule_computations.ipynb \
     --no-browser \
+    --ip=127.0.0.1 \
     --port=8868 \
     --ServerApp.port_retries=0 \
-    --ServerApp.root_dir="$(pwd)" \
-    --IdentityProvider.token='' \
-    --ServerApp.password=''
+    --ServerApp.root_dir="$(pwd)"

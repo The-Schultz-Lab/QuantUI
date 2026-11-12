@@ -45,8 +45,27 @@ class TestPerturbAlongMode:
         expected_scale = 0.75 * VIB_MODE_DISPLAY_AMPLITUDE_ANGSTROM
         base = np.array(mol.coordinates, dtype=float)
         disp = np.array(disps[0], dtype=float)
-        expected = base + expected_scale * disp
+        # The mode is normalised first (audit SCF-10): the step has length
+        # fraction * amplitude, not fraction * amplitude * |mode|.
+        expected = base + expected_scale * disp / np.linalg.norm(disp)
         assert np.allclose(out.coordinates, expected, atol=1e-9)
+
+    @pytest.mark.parametrize("mode_norm", [0.38, 0.97, 2.5])
+    def test_step_length_is_independent_of_mode_norm(self, mode_norm):
+        # PySCF norm_mode has length 1/sqrt(mu_red): 0.38 for N2, ~0.97 for a
+        # water mode. The applied step must be the recorded 0.3 Å regardless.
+        mol = _water_mol()
+        disp = np.array(_stretch_mode_displacements()[0], dtype=float)
+        disp *= mode_norm / np.linalg.norm(disp)
+        out = perturb_along_mode(mol, [disp.tolist()], 0)
+        step = np.array(out.coordinates) - np.array(mol.coordinates)
+        assert np.linalg.norm(step) == pytest.approx(
+            DEFAULT_MODE_PERTURBATION_FRACTION * VIB_MODE_DISPLAY_AMPLITUDE_ANGSTROM
+        )
+
+    def test_rejects_zero_mode(self):
+        with pytest.raises(ValueError, match="zero"):
+            perturb_along_mode(_water_mol(), [[[0.0] * 3] * 3], 0)
 
     def test_sign_flips_direction(self):
         mol = _water_mol()

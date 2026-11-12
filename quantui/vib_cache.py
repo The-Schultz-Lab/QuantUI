@@ -31,9 +31,11 @@ Layout
 
 Cache key
 ---------
-``(result_dir, mode_number, n_frames, amplitude, renderer)``. If any render
-parameter changes between save and read (e.g. user customises amplitude
-later), the cache is treated as stale and a miss is returned.
+``(result_dir, mode_number, n_frames, amplitude, renderer, fps, bgcolor)``.
+If any render parameter changes between save and read (e.g. user customises
+amplitude later, or toggles the Light/Dark theme, which changes the scene
+background baked into the HTML), the cache is treated as stale and a miss is
+returned.
 
 Trust
 -----
@@ -155,6 +157,7 @@ def has_cached(
     amplitude: float,
     renderer: str,
     fps: int,
+    bgcolor: str | None = None,
 ) -> bool:
     """Return True if a cached HTML exists matching all render parameters."""
     idx = load_index(result_dir)
@@ -167,6 +170,8 @@ def has_cached(
     if idx.get("renderer") != renderer:
         return False
     if idx.get("fps") != fps:
+        return False
+    if idx.get("bgcolor") != bgcolor:
         return False
     modes = idx.get("modes", {})
     entry = modes.get(str(mode_number))
@@ -186,6 +191,7 @@ def get_cached_html(
     amplitude: float,
     renderer: str,
     fps: int,
+    bgcolor: str | None = None,
 ) -> str | None:
     """Return the cached HTML string for a mode, or None on any miss."""
     if not has_cached(
@@ -195,6 +201,7 @@ def get_cached_html(
         amplitude=amplitude,
         renderer=renderer,
         fps=fps,
+        bgcolor=bgcolor,
     ):
         return None
     idx = load_index(result_dir)
@@ -229,6 +236,7 @@ def save_cached_html(
     amplitude: float,
     renderer: str,
     fps: int,
+    bgcolor: str | None = None,
 ) -> None:
     """Save HTML to the cache and update the manifest. Non-fatal on failure.
 
@@ -255,6 +263,7 @@ def save_cached_html(
         or not _amplitude_matches(idx.get("amplitude"), amplitude)
         or idx.get("renderer") != renderer
         or idx.get("fps") != fps
+        or idx.get("bgcolor") != bgcolor
     ):
         idx = {
             "_schema_version": _SCHEMA_VERSION,
@@ -262,6 +271,7 @@ def save_cached_html(
             "amplitude": amplitude,
             "renderer": renderer,
             "fps": fps,
+            "bgcolor": bgcolor,
             "modes": {},
         }
 

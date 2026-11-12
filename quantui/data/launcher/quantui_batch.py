@@ -71,6 +71,7 @@ quantui-batch: run QuantUI calculations as Slurm batch jobs.
         --method NAME      e.g. B3LYP          --basis NAME   e.g. def2-SVP
         --charge N         default 0           --mult N       default 1
         --solvent NAME     e.g. Water          --preopt       optimize first
+        --no-solvent       gas phase, even if the file or --from job has one
         --option KEY=VALUE extra option, repeatable (e.g. --option nstates=10)
         --job-name NAME    folder and job name (repeats get _2, _3, ...)
         --cores N  --memory-gb N  --walltime HH:MM:SS   override the estimate
@@ -82,6 +83,8 @@ quantui-batch: run QuantUI calculations as Slurm batch jobs.
       or frequency job, or one run with --preopt). If JOB is still running,
       the new job waits for it to succeed. An IRC usually starts this way:
       submit --from MY-TS-JOB --calc irc
+      The new job keeps JOB's solvent unless you give --solvent or
+      --no-solvent. An optimization that did not converge is refused.
   quantui-batch estimate FILE... [options]
       Print the cores, memory and time a job would get. Submits nothing.
   quantui-batch status [-n N | --all]
@@ -291,6 +294,11 @@ def parse_xyz(text):
 def charge_mult_problem(atoms, charge, mult):
     """Why charge/multiplicity cannot fit this molecule, or None."""
     n_electrons = sum(SITE["atomic_numbers"].get(a, 0) for a in atoms) - charge
+    if n_electrons < 1:
+        return (
+            f"charge {charge:+d} leaves {n_electrons} electrons; the charge "
+            "removes more electrons than the atoms have"
+        )
     if mult < 1:
         return f"multiplicity must be at least 1 (got {mult})"
     unpaired = mult - 1
@@ -413,6 +421,8 @@ def build_request(path, args, extra_options):
         request["multiplicity"] = request["molecule"]["multiplicity"] = args.mult
     if args.solvent is not None:
         request["solvent"] = args.solvent
+    if args.no_solvent:
+        request["solvent"] = None
     request["options"].update(extra_options)
     if args.preopt and request["calc_type"] in SITE["preopt_calc_types"]:
         request["options"]["preopt_before_run"] = True
@@ -650,9 +660,26 @@ def utc_now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def unique_request(request):
+    """Give *request* a fresh id when a job record already uses its id.
+
+    Port of SlurmBackend._create_job / registry.fresh_request_id: the same
+    request .json submitted twice must not overwrite the record of a job
+    that may still be running. The original id is kept in run_context.
+    """
+    jobs = jobs_root()
+    original = request["request_id"]
+    if (jobs / (original + ".json")).exists():
+        request["request_id"] = f"{original[:40]}-{uuid.uuid4().hex[:8]}"
+        request["run_context"] = dict(
+            request.get("run_context") or {}, source_request_id=original
+        )
+
+
 def prepare_job(request, resources, job_name, email, image_path):
     """Write the job folder and its record, as SlurmBackend.prepare() does."""
     site_directives()  # a bad site setting fails before the job folder exists
+    unique_request(request)
     root = staging_root()
     name = sanitize_job_name(job_name or "") or default_job_name(request)
     job_dir = new_job_dir(root, name)
@@ -677,6 +704,8 @@ def prepare_job(request, resources, job_name, email, image_path):
         "job_dir": str(job_dir),
         "attempts": [],
         "ingested_attempts": [],
+        "unknown_since": None,
+        "unknown_polls": 0,
     }
     jobs = jobs_root()
     jobs.mkdir(parents=True, exist_ok=True)
@@ -1032,13 +1061,35 @@ def chain_source(name, q):
     last = ids[-1] if ids else None
     if last and last in q and q[last][0] in ACTIVE_STATES:
         return job_dir, source, last
-    if finished_attempts(job_dir):
+    finished = finished_attempts(job_dir)
+    if finished:
+        check_source_converged(job_dir, calc, finished[0])
         return job_dir, source, None
     state = accounting(last)[0] if last else "PREPARED"
     die(
         f"{job_dir.name} has no finished result to start from ({state}). "
         f"Check it with: quantui-batch status"
     )
+
+
+def check_source_converged(job_dir, calc, attempt):
+    """Refuse to chain from an optimization that did not converge.
+
+    Its last geometry is not a stationary point, so frequencies or an IRC
+    from it are wrong (spurious imaginary modes, meaningless thermo). The
+    worker makes the same check at run time (batch_chain.final_geometry)
+    for a source that was still running at submit time.
+    """
+    if calc not in ("geometry_opt", "transition_state"):
+        return
+    result = read_json(attempt / "result.json") or {}
+    if result.get("converged") is False:
+        die(
+            f"{job_dir.name}/{attempt.name} ({calc}) did not converge, so its "
+            "final geometry is not a stationary point. Run the optimization "
+            "again (e.g. with --option max_steps=400), or start from an .xyz "
+            "file."
+        )
 
 
 def chained_request(source_dir, source, args, extra_options):
@@ -1062,6 +1113,19 @@ def chained_request(source_dir, source, args, extra_options):
     warnings = []
     if args.preopt:
         warnings.append("--preopt ignored: the geometry is already optimized")
+    # The geometry is a stationary point of the source's model, solvent
+    # included: run the new job in the same solvent unless told otherwise.
+    solvent = args.solvent
+    source_solvent = source.get("solvent") or None
+    if solvent is None and not args.no_solvent and source_solvent:
+        solvent = source_solvent
+        if calc not in SITE["solvent_calc_types"]:
+            raise InputError(
+                f"{source_dir.name} ran in {source_solvent}, but a solvent works "
+                f"only with {', '.join(SITE['solvent_calc_types'])} in batch jobs; "
+                f"add --no-solvent to run this {calc} in the gas phase"
+            )
+        warnings.append(f"solvent {source_solvent} taken from {source_dir.name}")
     label = str(mol.get("label") or source_dir.name)
     mol.update(charge=charge, multiplicity=mult, label=label)
     request = {
@@ -1073,7 +1137,7 @@ def chained_request(source_dir, source, args, extra_options):
         "multiplicity": mult,
         "molecule": mol,
         "options": options,
-        "solvent": args.solvent,
+        "solvent": solvent,
         "run_context": {
             "geometry_from": str(source_dir),
             "source_job": source_dir.name,
@@ -1149,6 +1213,7 @@ def submit_parser(prog):
     p.add_argument("--charge", type=int)
     p.add_argument("--mult", type=int)
     p.add_argument("--solvent")
+    p.add_argument("--no-solvent", dest="no_solvent", action="store_true")
     p.add_argument("--preopt", action="store_true")
     p.add_argument("--no-preopt", dest="no_preopt", action="store_true")
     p.add_argument("--option", action="append")
@@ -1178,9 +1243,13 @@ def parse_submit_args(argv, prog):
         extra = parse_option_pairs(args.option)
     except InputError as exc:
         die(str(exc), 2)
+    if args.no_solvent and args.solvent:
+        die("give either --solvent or --no-solvent, not both", 2)
     extra = apply_preset(args, extra)
     if args.no_preopt:
         args.preopt = False
+    if args.no_solvent:
+        args.solvent = None  # also over a preset's solvent
     return args, extra
 
 

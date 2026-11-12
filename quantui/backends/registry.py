@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,9 +36,21 @@ from .cluster_security import safe_join
 logger = logging.getLogger(__name__)
 
 _ACTIVE_STATUSES = frozenset({"queued", "pending", "running", "submitted"})
+# load(): how often to try a record that does not parse, and the pause between.
+_LOAD_ATTEMPTS = 3
+_LOAD_RETRY_DELAY_S = 0.05
 
 
 _ATTEMPT_DIR_RE = re.compile(r"^attempt-(\d+)_job(.+)$")
+
+
+def fresh_request_id(original: str) -> str:
+    """A new request id for a request whose id is already taken.
+
+    Keeps a readable prefix of *original*. The quantui-batch launcher mints
+    ids the same way (``unique_request``); keep the two in step.
+    """
+    return f"{original[:40]}-{uuid.uuid4().hex[:8]}"
 
 
 def _utc_now() -> str:
@@ -74,6 +88,11 @@ class JobRecord:
     # Names of attempt dirs (or, for legacy records, the staging dir) already
     # saved to History, so a result is never ingested twice.
     ingested_attempts: List[str] = field(default_factory=list)
+    # When the tracked SLURM job first read UNKNOWN (in neither squeue nor
+    # sacct) in the current streak, and how many polls have seen it since;
+    # cleared when Slurm reports the job again or a new attempt starts.
+    unknown_since: Optional[str] = None
+    unknown_polls: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -96,6 +115,8 @@ class JobRecord:
             job_dir=data.get("job_dir"),
             attempts=list(data.get("attempts") or []),
             ingested_attempts=list(data.get("ingested_attempts") or []),
+            unknown_since=data.get("unknown_since"),
+            unknown_polls=int(data.get("unknown_polls") or 0),
         )
 
     @property
@@ -119,10 +140,15 @@ class JobRecord:
         return [path for _n, _name, path in sorted(found)]
 
     def attempt_dir_for(self, slurm_job_id: Optional[str]) -> Optional[Path]:
-        """The attempt dir created by SLURM job *slurm_job_id*, if it exists yet."""
+        """The attempt dir created by SLURM job *slurm_job_id*, if it exists yet.
+
+        A requeued job (node failure, preemption) reruns ``submit.slurm``
+        under the same job id, which makes a new attempt dir with the same
+        ``_job<id>`` suffix; the newest one is the live run.
+        """
         if not slurm_job_id:
             return None
-        for path in self.attempt_dirs():
+        for path in reversed(self.attempt_dirs()):
             parsed = parse_attempt_dir_name(path.name)
             if parsed is not None and parsed[1] == str(slurm_job_id):
                 return path
@@ -202,6 +228,12 @@ class JobRegistry:
         With *job_name* the record gets a job dir (job-dir layout); without
         it, a legacy ``staging_root/<request_id>/`` dir.
         """
+        if self.exists(request.request_id):
+            # Saving over it would orphan the job it tracks (still running,
+            # never ingested, not cancellable). Callers mint a fresh id first.
+            raise FileExistsError(
+                f"Request id {request.request_id!r} is already in the job registry."
+            )
         if job_name:
             staging = self.new_job_dir(job_name)
             job_dir: Optional[str] = str(staging)
@@ -224,20 +256,50 @@ class JobRegistry:
         self.save(record)
         return record
 
+    def exists(self, request_id: str) -> bool:
+        """True when a record (readable or not) is stored under *request_id*."""
+        return self._record_path(request_id).exists()
+
     def save(self, record: JobRecord) -> None:
+        """Write *record* atomically (temp file + ``os.replace``).
+
+        The app's main thread, its monitor thread and the worker on the
+        compute node all write records; a truncate-and-write let a
+        concurrent reader see an empty or half-written file.
+        """
         record.updated_at = _utc_now()
         path = self._record_path(record.request_id)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(record.to_dict(), fh, indent=2)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(record.to_dict(), fh, indent=2)
+            os.replace(tmp, path)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
         logger.debug("Saved job record %s", record.request_id)
 
     def load(self, request_id: str) -> Optional[JobRecord]:
+        """The record for *request_id*, or None when missing or unreadable.
+
+        A record that cannot be parsed (e.g. written by an older,
+        non-atomic writer while we read it) is retried briefly, then
+        treated as unreadable instead of raising into a polling thread.
+        """
         path = self._record_path(request_id)
-        if not path.exists():
-            return None
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-        return JobRecord.from_dict(data)
+        for attempt in range(_LOAD_ATTEMPTS):
+            if not path.exists():
+                return None
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    data = json.load(fh)
+                return JobRecord.from_dict(data)
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                if attempt + 1 < _LOAD_ATTEMPTS:
+                    time.sleep(_LOAD_RETRY_DELAY_S)
+                    continue
+                logger.warning("Could not read job record %s: %s", path, exc)
+        return None
 
     def delete(self, request_id: str) -> bool:
         path = self._record_path(request_id)
@@ -252,8 +314,8 @@ class JobRegistry:
             try:
                 with open(path, encoding="utf-8") as fh:
                     records.append(JobRecord.from_dict(json.load(fh)))
-            except (json.JSONDecodeError, KeyError) as exc:
-                logger.warning("Skipping corrupt job record %s: %s", path, exc)
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                logger.warning("Skipping unreadable job record %s: %s", path, exc)
         records.sort(key=lambda r: r.created_at, reverse=True)
         return records
 
@@ -297,6 +359,8 @@ class JobRegistry:
         record.status = "submitted"
         record.slurm_job_id = slurm_job_id
         record.error = None
+        record.unknown_since = None
+        record.unknown_polls = 0
         record.attempts.append(
             {
                 "slurm_job_id": slurm_job_id,

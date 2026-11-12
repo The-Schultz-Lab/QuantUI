@@ -830,12 +830,18 @@ def main():
                 print(f"  CCSD correlation   : {{ccsd_correlation:.8f}} Ha")
                 if ccsd_t_correction is not None:
                     print(f"  (T) triples        : {{ccsd_t_correction:.8f}} Ha")
-            mo_e = mf.mo_energy if not isinstance(mf.mo_energy, list) else mf.mo_energy[0]
-            mo_o = mf.mo_occ   if not isinstance(mf.mo_occ,    list) else mf.mo_occ[0]
+            # UHF/UKS: mo_energy / mo_occ are (2, n_mo) arrays, not lists;
+            # report the alpha-channel gap, as the app does.
+            mo_e = np.asarray(mf.mo_energy)
+            mo_o = np.asarray(mf.mo_occ)
+            _gap_label = "HOMO-LUMO gap"
+            if mo_e.ndim == 2:
+                mo_e, mo_o = mo_e[0], mo_o[0]
+                _gap_label = "HOMO-LUMO gap (alpha)"
             n_occ = int((mo_o > 0).sum())
             if 0 < n_occ < len(mo_e):
-                gap = (mo_e[n_occ] - mo_e[n_occ - 1]) * 27.211386
-                print(f"HOMO-LUMO gap: {{gap:.4f}} eV")
+                gap = float(mo_e[n_occ] - mo_e[n_occ - 1]) * 27.211386
+                print(f"{{_gap_label}}: {{gap:.4f}} eV")
             print()
 {post_scf_block}
             # Save results next to the script so the path is predictable.

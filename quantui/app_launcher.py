@@ -312,8 +312,14 @@ def run_voila_app(
     notebook = ensure_app_notebook(force=force_notebook_refresh)
     argv = build_voila_argv(notebook, port=port, no_browser=True)
     argv[0] = voila
+    # As for ``quantui view``: loopback only, and a per-run token so another
+    # local user or process cannot drive the session (read History, submit
+    # SLURM jobs). Standalone Voila reads no token from the environment, so
+    # it goes on the command line.
+    token = app_token()
+    argv += ["--Voila.ip=127.0.0.1", f"--Voila.token={token}"]
 
-    url = f"http://localhost:{port}"
+    url = f"http://127.0.0.1:{port}/?token={token}"
     print(f"Starting QuantUI at {url}")
     print(f"Notebook: {notebook}")
 
@@ -351,6 +357,15 @@ def viewer_token() -> str:
     import secrets
 
     return secrets.token_urlsafe(24)
+
+
+def app_token() -> str:
+    """The token for a ``quantui run app`` run.
+
+    ``QUANTUI_APP_TOKEN`` when set (a launcher that opens the browser
+    itself chooses the token), else a fresh random one.
+    """
+    return os.environ.get("QUANTUI_APP_TOKEN", "").strip() or viewer_token()
 
 
 def _wait_for_port(port: int, proc: subprocess.Popen, timeout_s: float) -> bool:

@@ -6,6 +6,8 @@ Provides classes and functions for representing molecular systems.
 """
 
 import logging
+import math
+import numbers
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import config, utils
@@ -51,14 +53,32 @@ class Molecule:
         Raises:
             ValueError: If molecule data is invalid
         """
-        self.atoms = atoms
-        self.coordinates = coordinates
+        # Own copies: aliasing the caller's lists let a later edit of theirs
+        # silently change this molecule (and vice versa). Rows are copied
+        # with list(), so numpy rows are accepted; anything that is not a
+        # row is left for _validate() to reject with its usual message.
+        self.atoms = list(atoms)
+        self.coordinates = [
+            (
+                list(row)
+                if isinstance(row, (list, tuple)) or hasattr(row, "tolist")
+                else row
+            )
+            for row in coordinates
+        ]
         self.charge = charge
         self.multiplicity = multiplicity
         self._validate_spin = validate_spin
 
         # Validate molecule
         self._validate()
+
+        # Normalise numpy scalars (np.int64 charge, np.float64 coordinates)
+        # to plain Python numbers so JSON export and comparisons behave.
+        self.coordinates = [[float(v) for v in row] for row in self.coordinates]
+        self.charge = int(self.charge)
+        if isinstance(self.multiplicity, numbers.Integral):
+            self.multiplicity = int(self.multiplicity)
 
         logger.info(
             f"Created molecule: {self.get_formula()} (charge={charge}, mult={multiplicity})"
@@ -95,7 +115,7 @@ class Molecule:
             if not utils.validate_coordinates(coord):
                 raise ValueError(
                     f"Invalid coordinates at position {i+1}. "
-                    f"Must be a list of 3 numbers: [x, y, z]"
+                    f"Must be a list of 3 finite numbers: [x, y, z]"
                 )
 
         # Validate charge
@@ -118,6 +138,21 @@ class Molecule:
             return
 
         num_electrons = self.get_electron_count()
+        if num_electrons < 1:
+            raise ValueError(
+                f"❌ Charge Error: charge {self.charge:+d} leaves "
+                f"{num_electrons} electrons — the atoms only have "
+                f"{num_electrons + self.charge}. Lower the charge."
+            )
+        # Same bound as inorganic_guards.check_charge_multiplicity: the
+        # multiplicity - 1 unpaired electrons cannot exceed the electron count
+        # (H2 has 2 electrons, so multiplicity 5 is impossible).
+        if self.multiplicity - 1 > num_electrons:
+            raise ValueError(
+                f"❌ Multiplicity Error: Multiplicity {self.multiplicity} needs "
+                f"{self.multiplicity - 1} unpaired electrons, but this molecule "
+                f"has only {num_electrons}. Lower the multiplicity."
+            )
         if (num_electrons + self.multiplicity) % 2 != 1:
             # Generate list of valid multiplicities (up to 5 options)
             valid_mults = []
@@ -557,6 +592,14 @@ def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
                 f"Error details: {e}"
             ) from e
 
+        if not all(math.isfinite(v) for v in (x, y, z)):
+            raise ValueError(
+                f"❌ Line {orig_line_num}: Coordinates must be finite numbers.\n\n"
+                f"Got: {line}\n\n"
+                f"💡 'nan' and 'inf' are not positions — re-export the "
+                f"structure or fix this line."
+            )
+
         atoms.append(atom_symbol)
         coordinates.append([x, y, z])
 
@@ -567,11 +610,15 @@ def parse_xyz_input(xyz_text: str) -> Tuple[List[str], List[List[float]]]:
             "Please check your coordinate format."
         )
 
-    # Verify expected count if XYZ file format
+    # Verify expected count if XYZ file format. A mismatch means a truncated
+    # or mis-pasted file; loading the partial structure silently would run a
+    # calculation on the wrong molecule.
     if expected_atoms is not None and len(atoms) != expected_atoms:
-        logger.warning(
-            f"XYZ file header specified {expected_atoms} atoms, "
-            f"but found {len(atoms)} atoms"
+        raise ValueError(
+            f"❌ Atom count mismatch: the XYZ header says {expected_atoms} "
+            f"atoms, but {len(atoms)} atom line(s) were found.\n\n"
+            "💡 The paste may be truncated. Paste the complete structure, or "
+            "fix (or delete) the count line at the top."
         )
 
     logger.info(f"Successfully parsed {len(atoms)} atoms from XYZ input")

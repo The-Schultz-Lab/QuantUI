@@ -101,8 +101,10 @@ That line **is** the cloud/local boundary:
 - **All UI logic lives in the package** — `QuantUIApp` in `quantui/app.py` plus
   its `quantui/app_*.py` companion modules; the notebook is a 3-cell launcher
   only (DEC-002).
-- **Plotly embedding is `include_plotlyjs="require"` in the app (inline for
-  standalone exports), never `"cdn"`** (DEC-010, guarded by
+- **In-app Plotly figures go through `quantui.plotly_embed.figure_html`
+  (plotly.js loaded once per page from the installed package,
+  `include_plotlyjs=False`); standalone exports inline it; never `"cdn"` or
+  `"require"`** (DEC-010 as amended 2026-11-12, guarded by
   `tests/test_code_quality.py`).
 - **Analysis panels are always visible; content is swapped, not containers
   shown/hidden** (DEC-009).

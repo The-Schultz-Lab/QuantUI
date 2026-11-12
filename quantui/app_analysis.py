@@ -10,9 +10,10 @@ from typing import Any, Optional
 import ipywidgets as widgets
 
 from . import theme as _theme
+from .plotly_embed import figure_html as _plotly_figure_html
 
 _PANEL_UNAVAILABLE_STYLE = (
-    "padding:12px 16px;color:#6b7280;font-size:13px;font-style:italic"
+    f"padding:12px 16px;color:{_theme.css.TEXT_MUTED};font-size:13px;font-style:italic"
 )
 
 _MULLIKEN_DIPOLE_TOOLTIP = "Green arrow along μ through the molecular centre of mass"
@@ -251,6 +252,12 @@ def deactivate_all_ana_panels(app: Any) -> None:
 def apply_analysis_context(app: Any, ctx: Any) -> None:
     """Populate Analysis panels from context and activate panels with data."""
     app._deactivate_all_ana_panels()
+    # The level of theory of the result now on display (live run or History),
+    # for export provenance; the setup dropdowns may describe a different one.
+    app._displayed_level = (
+        str(getattr(ctx, "method", "") or ""),
+        str(getattr(ctx, "basis", "") or ""),
+    )
     _reset_unavailable_messages_for_context(app, ctx)
     app._pending_traj_result = None
     # Safety-net cache so on_traj_expand can recover if the initial render's
@@ -1436,7 +1443,6 @@ def update_mulliken_figure(app: Any) -> None:
     if not symbols or not charges:
         return
     try:
-        import plotly.io as _pio
 
         from quantui.mulliken_plot import plot_mulliken_charges
 
@@ -1449,9 +1455,8 @@ def update_mulliken_figure(app: Any) -> None:
         app._last_mulliken_fig = fig
         app._set_html_output(
             app._mulliken_fig,
-            _pio.to_html(
+            _plotly_figure_html(
                 fig,
-                include_plotlyjs="require",
                 full_html=False,
                 config={"responsive": True},
             ),

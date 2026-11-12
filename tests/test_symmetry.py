@@ -170,6 +170,59 @@ class TestOrbitalLabels:
         # Occupied: 1a1 (N 1s), 2a1, 1e (degenerate pair), 3a1 (lone pair).
         assert ir.labels[:5] == ["1a1", "2a1", "1e", "1e", "3a1"]
 
+    def test_noisy_ammonia_pairs_split_e_levels(self):
+        """NH3 off C3v by ~0.0006 Å (still detected as C3v within 0.01 Å):
+        the e pairs split by ~0.4 mHa. They were labelled a1 + a2 (an
+        occupied "1a2", no 1e) with the old 1e-4 Ha pairing tolerance
+        (audit GEOM-5)."""
+        from quantui.symmetry import label_mo_irreps
+
+        noisy = (
+            NH3[0],
+            [
+                [0.00016, -0.00028, 0.09945],
+                [0.93712, 0.00038, -0.2695],
+                [-0.46877, 0.81238, -0.26995],
+                [-0.46838, -0.81172, -0.2706],
+            ],
+        )
+        mol_atom, mf = self._scf(noisy, "6-31g")
+        ir = label_mo_irreps(mol_atom, "6-31g", mf.mo_coeff, mo_energy=mf.mo_energy)
+        assert ir.group == "C3v"
+        # The occupied labels are the defect (an occupied "1a2" instead of
+        # 1e). Higher virtuals on this deliberately distorted geometry
+        # include a pair split by ~0.8 mHa whose eigenvectors are an
+        # arbitrary, LAPACK-dependent mixture; asserting on those failed on
+        # one CI platform only (py3.9 runner) while passing on 3.9/3.11
+        # locally, so they are not pinned here.
+        assert ir.labels[:5] == ["1a1", "2a1", "1e", "1e", "3a1"]
+        assert not any("a2" in lab for lab in ir.labels[:5])
+
+    def test_genuine_a2_keeps_c3v_labels(self):
+        """CH3CF3 (staggered, C3v) has an occupied a2 F lone-pair combination
+        with no A' level near it: labelled 1a2, not dropped to Cs."""
+        from quantui.symmetry import label_mo_irreps
+
+        geom = (
+            ["C", "C", "F", "F", "F", "H", "H", "H"],
+            [
+                [0, 0, 0],
+                [0, 0, 1.53],
+                [1.26033, 0.0, 2.0138],
+                [-0.63017, 1.09148, 2.0138],
+                [-0.63017, -1.09148, 2.0138],
+                [0.51213, 0.88704, -0.3728],
+                [-1.02426, 0.0, -0.3728],
+                [0.51213, -0.88704, -0.3728],
+            ],
+        )
+        mol_atom, mf = self._scf(geom)
+        ir = label_mo_irreps(mol_atom, "sto-3g", mf.mo_coeff, mo_energy=mf.mo_energy)
+        assert ir.group == "C3v"
+        n_occ = int((mf.mo_occ > 0).sum())
+        assert "1a2" in ir.labels[:n_occ]
+        assert ir.labels.count("1a2") == 1
+
     def test_ammonia_without_energies_keeps_subgroup_labels(self):
         from quantui.symmetry import label_mo_irreps
 
@@ -247,3 +300,44 @@ class TestDiagramAndCards:
         html = _result_extra_rows(lambda k, d=None: getattr(r, k, d))
         assert "Point group" in html
         assert "C<sub>2v</sub>" in html
+
+
+class TestC3vFromCs:
+    """Cs → C3v relabelling by pairing A'/A'' levels (audit GEOM-5)."""
+
+    def test_split_pair_within_tolerance_is_e(self):
+        from quantui.symmetry import _c3v_from_cs
+
+        raw = ["A'", "A'", 'A"', "A'"]
+        assert _c3v_from_cs(raw, [-15.5, -1.1, -0.6272, -0.6268]) == [
+            "1a1",
+            "2a1",
+            "1e",
+            "1e",
+        ]
+
+    def test_two_a_prime_never_pair(self):
+        from quantui.symmetry import _c3v_from_cs
+
+        assert _c3v_from_cs(["A'", "A'"], [-1.0, -1.0]) == ["1a1", "2a1"]
+
+    def test_closer_partner_wins(self):
+        from quantui.symmetry import _c3v_from_cs
+
+        # 9a' 1.2373 | 4a" 1.2438 / 10a' 1.2446: the e pair is the last two.
+        labels = _c3v_from_cs(["A'", 'A"', "A'"], [1.2373, 1.2438, 1.2446])
+        assert labels == ["1a1", "1e", "1e"]
+
+    def test_isolated_a_double_prime_is_a2(self):
+        from quantui.symmetry import _c3v_from_cs
+
+        # No A' within the 5 mHa window of the A'': a genuine a2.
+        assert _c3v_from_cs(["A'", 'A"'], [-0.64, -0.62]) == ["1a1", "1a2"]
+
+    def test_ambiguous_a_double_prime_falls_back(self):
+        from quantui.symmetry import _c3v_from_cs
+
+        # The first A'' has an A' 3 mHa away, but that A' pairs more
+        # closely with the next A'': maybe a split e pair → keep Cs labels.
+        raw = ['A"', "A'", 'A"']
+        assert _c3v_from_cs(raw, [-0.630, -0.627, -0.6268]) is None

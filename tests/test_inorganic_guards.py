@@ -61,6 +61,17 @@ class TestChargeMultiplicity:
     def test_multiplicity_below_one(self):
         assert check_charge_multiplicity(10, 0) is not None
 
+    @pytest.mark.parametrize("n_electrons", [0, -1, -2])
+    def test_no_electrons_left_is_refused(self, n_electrons):
+        # H+ has 0 electrons; H2 at +4 has -2 (which parity alone let through).
+        for mult in (1, 2):
+            msg = check_charge_multiplicity(n_electrons, mult)
+            assert msg is not None
+            assert "lower the charge" in msg
+
+    def test_single_electron_still_fine(self):
+        assert check_charge_multiplicity(1, 2) is None  # H atom, H2+
+
     def test_more_unpaired_than_electrons(self):
         msg = check_charge_multiplicity(1, 4)  # 3 unpaired > 1 electron
         assert msg is not None

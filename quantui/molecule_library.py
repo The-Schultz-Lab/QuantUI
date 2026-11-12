@@ -305,6 +305,37 @@ def get_preset_dict() -> Dict[str, Dict[str, Any]]:
     return out
 
 
+@lru_cache(maxsize=1)
+def named_entries() -> Tuple[Dict[str, Any], ...]:
+    """Every curated/preset entry in full (incl. ``name`` and ``synonyms``).
+
+    The same entries as :func:`get_preset_dict`, in the same order, but with
+    the fields a name lookup needs (the legacy view drops them). Used by the
+    offline-first search (``structure_providers``) to answer "water" or
+    "aspirin" from the bundled library before any network call. Prefers the
+    SQLite store; falls back to the JSON manifest.
+    """
+    con = _connect_ro()
+    if con is not None:
+        try:
+            placeholders = ",".join("?" * len(_BULK_CATEGORIES))
+            rows = con.execute(
+                f"SELECT * FROM molecule WHERE category NOT IN ({placeholders}) "
+                "ORDER BY rowid",
+                tuple(_BULK_CATEGORIES),
+            ).fetchall()
+            return tuple(_row_to_entry(row) for row in rows)
+        except Exception as exc:  # pragma: no cover - corrupt store
+            logger.warning(f"Library store unreadable, using manifest: {exc}")
+        finally:
+            con.close()
+    return tuple(
+        e
+        for e in (_normalize_entry(raw) for raw in _manifest_entries())
+        if e["category"] not in _BULK_CATEGORIES
+    )
+
+
 def _legacy_view(entry: Dict[str, Any]) -> Dict[str, Any]:
     """Project a full entry down to the legacy MOLECULE_LIBRARY value shape."""
     return {

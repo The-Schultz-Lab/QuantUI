@@ -77,11 +77,27 @@ class TestValidatePesScanInputs:
         problems = validate_pes_scan_inputs(_water(), "bond", [1, 9], 0.8, 2.0, 5)
         assert any("out of range" in p for p in problems)
 
-    def test_allows_negative_angle_start(self):
-        problems = validate_pes_scan_inputs(
-            _water(), "angle", [1, 2, 3], -30.0, 150.0, 5
+    def test_allows_negative_dihedral_start(self):
+        mol = Molecule(
+            ["H", "O", "O", "H"],
+            [[0.9, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 1.4], [0.0, 0.9, 1.4]],
         )
+        problems = validate_pes_scan_inputs(mol, "dihedral", [1, 2, 3, 4], -30, 150, 5)
         assert problems == []
+
+    @pytest.mark.parametrize(
+        "start, stop", [(-30.0, 150.0), (160.0, 180.0), (170.0, 190.0), (0.0, 90.0)]
+    )
+    def test_rejects_angle_outside_0_180(self, start, stop):
+        """A bond angle lives in (0, 180) — 180 is linear (the constraint is
+        singular) and 190 is just 170 again (audit GEOM-3)."""
+        problems = validate_pes_scan_inputs(
+            _water(), "angle", [2, 1, 3], start, stop, 5
+        )
+        assert any("between 0° and 180°" in p for p in problems)
+
+    def test_accepts_angle_inside_0_180(self):
+        assert validate_pes_scan_inputs(_water(), "angle", [2, 1, 3], 90, 179, 5) == []
 
     def test_rejects_non_positive_bond_length(self):
         problems = validate_pes_scan_inputs(_water(), "bond", [1, 2], 0.0, 2.0, 5)
@@ -167,6 +183,33 @@ class TestScanRangeAroundCurrent:
         val, _ = cur
         assert start == pytest.approx(val - 30.0)
         assert stop == pytest.approx(val + 30.0)
+
+
+def _hcn() -> Molecule:
+    """Linear H–C≡N (atoms 1 H, 2 C, 3 N): the H–C–N angle is 180°."""
+    return Molecule(["H", "C", "N"], [[0, 0, -1.066], [0, 0, 0], [0, 0, 1.156]])
+
+
+class TestAngleRangeClamped:
+    """Suggested angle ranges never leave (0°, 180°) (audit GEOM-3)."""
+
+    def test_suggest_for_linear_molecule(self):
+        start, stop = suggest_scan_range(_hcn(), "angle", [1, 2, 3])
+        assert start == pytest.approx(160.0)
+        assert stop == pytest.approx(179.0)
+        assert (
+            validate_pes_scan_inputs(_hcn(), "angle", [1, 2, 3], start, stop, 5) == []
+        )
+
+    def test_around_current_for_linear_molecule(self):
+        start, stop = scan_range_around_current(_hcn(), "angle", [1, 2, 3])
+        assert (start, stop) == (pytest.approx(160.0), pytest.approx(179.0))
+
+    def test_around_current_small_angle(self):
+        start, _stop = scan_range_around_current(
+            _water(), "angle", [2, 1, 3], margin=200.0
+        )
+        assert start == pytest.approx(1.0)
 
 
 class TestAroundMarginDefaults:

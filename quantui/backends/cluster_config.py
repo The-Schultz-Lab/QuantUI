@@ -50,6 +50,12 @@ ESTIMATE_MAX_MEMORY_GB = min(
 MAX_CONCURRENT_JOBS = 2
 SUBMIT_COOLDOWN_SECONDS = 30
 STALE_NO_SLURM_ID_SECONDS = 600
+# A tracked job that neither squeue nor sacct knows any more (purged from
+# accounting, or accounting not visible to users) is given up on after it
+# has read UNKNOWN on at least STALE_UNKNOWN_POLLS polls spanning at least
+# this long. The time margin rides out a short slurmctld outage.
+STALE_UNKNOWN_SECONDS = 900
+STALE_UNKNOWN_POLLS = 3
 
 
 def max_concurrent_jobs() -> int:
@@ -95,6 +101,21 @@ def stale_no_slurm_id_seconds() -> int:
                 STALE_NO_SLURM_ID_SECONDS,
             )
     return STALE_NO_SLURM_ID_SECONDS
+
+
+def stale_unknown_seconds() -> int:
+    """Give up on a job Slurm no longer knows after this many seconds."""
+    override = os.environ.get("QUANTUI_SLURM_STALE_UNKNOWN_S")
+    if override:
+        try:
+            return max(60, int(override))
+        except ValueError:
+            logger.warning(
+                "Invalid QUANTUI_SLURM_STALE_UNKNOWN_S=%r; using default %s",
+                override,
+                STALE_UNKNOWN_SECONDS,
+            )
+    return STALE_UNKNOWN_SECONDS
 
 
 WALLTIME_OPTIONS = [
@@ -206,7 +227,8 @@ def default_staging_root() -> Path:
     """Root for SLURM job folders.
 
     Precedence: ``QUANTUI_STAGING_DIR`` > the ``compute.slurm_job_root``
-    user setting > ``~/.quantui/staging``.
+    user setting > ``<QuantUI home>/staging`` (``$QUANTUI_HOME`` if set,
+    else ``~/.quantui``).
     """
     override = os.environ.get("QUANTUI_STAGING_DIR")
     if override:
@@ -219,6 +241,9 @@ def default_staging_root() -> Path:
         configured = ""
     if configured:
         return Path(configured).expanduser()
+    home = os.environ.get("QUANTUI_HOME")
+    if home:
+        return Path(home).expanduser() / "staging"
     return DEFAULT_STAGING_ROOT.expanduser()
 
 

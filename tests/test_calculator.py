@@ -379,6 +379,53 @@ class TestScriptGeneration:
             if method == "CCSD(T)":
                 assert float(npz["ccsd_t_correction_hartree"]) < 0
 
+    @staticmethod
+    def _run_script(tmp_path, molecule, method):
+        import subprocess
+        import sys
+
+        calc = PySCFCalculation(molecule, method=method, basis="STO-3G")
+        script_path = tmp_path / "run.py"
+        calc.generate_calculation_script(script_path)
+        return subprocess.run(
+            [sys.executable, str(script_path)],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+    @pytest.mark.slow
+    def test_exported_one_electron_uhf_script_does_not_crash(self, tmp_path):
+        """Audit SCF-6: H atom UHF converged, then the gap print raised
+        "unsupported format string passed to numpy.ndarray.__format__"
+        (the (2, n) UHF mo_energy was indexed as if restricted) — exit 1,
+        no results.npz."""
+        pytest.importorskip("pyscf")
+        h_atom = Molecule(["H"], [[0.0, 0.0, 0.0]], multiplicity=2)
+        proc = self._run_script(tmp_path, h_atom, "UHF")
+        assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr
+        assert (tmp_path / "results.npz").exists()
+
+    @pytest.mark.slow
+    @pytest.mark.parametrize("method", ["UHF", "PBE"])
+    def test_exported_open_shell_script_prints_alpha_gap(self, tmp_path, method):
+        """Audit SCF-6 / UI-11: UHF/UKS printed no HOMO-LUMO gap at all
+        (``isinstance(mo_energy, list)`` is false for PySCF's array)."""
+        import re
+
+        pytest.importorskip("pyscf")
+        oh = Molecule(["O", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 0.97]], multiplicity=2)
+        proc = self._run_script(tmp_path, oh, method)
+        assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr
+        # PySCF's verbose log echoes the script source, so anchor on a
+        # printed number, not on the f-string text.
+        m = re.search(
+            r"^HOMO-LUMO gap \(alpha\): (-?\d+\.\d+) eV$", proc.stdout, re.MULTILINE
+        )
+        assert m, proc.stdout[-2000:]
+        assert float(m.group(1)) > 0
+
     def test_script_creates_parent_directories(self, tmp_path):
         """Test that script creation makes parent directories."""
         script_path = tmp_path / "nested" / "dir" / "calc.py"

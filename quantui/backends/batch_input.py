@@ -139,8 +139,9 @@ def request_from_xyz(
         raise BatchInputError(f"{path}: could not read XYZ — {exc}") from exc
     declared = xyz_header_atom_count(text)
     if declared is not None and declared != len(mol.atoms):
-        # Interactively the app only warns, but an unattended job
-        # would run a truncated or padded file without anyone seeing it.
+        # parse_xyz_input already rejects a header/atom-count mismatch;
+        # kept as a backstop, since an unattended job would run a
+        # truncated or padded file without anyone seeing it.
         # Checked before the spin check: a cut-off file is the real cause
         # of the odd electron count it usually also has.
         raise BatchInputError(

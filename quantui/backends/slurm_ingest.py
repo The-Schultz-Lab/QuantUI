@@ -128,6 +128,15 @@ def _basic_result(payload: dict[str, Any], record: JobRecord) -> SimpleNamespace
     )
 
 
+def _molecule_or_none(data: Any):
+    if not isinstance(data, dict) or not data.get("atoms"):
+        return None
+    try:
+        return molecule_from_dict(data)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _copy_trajectory(staging: Path, saved_dir: Path, payload: dict[str, Any]) -> None:
     traj_name = payload.get("trajectory_file", "trajectory.json")
     traj_src = staging / traj_name
@@ -282,12 +291,17 @@ def ingest_staging_success(
 
     result = _basic_result(payload, record)
     spectra = payload.get("spectra")
+    final = payload.get("final_molecule")
     saved_dir = save_result(
         result,
         pyscf_log=log_text,
         calc_type=calc_type,
         spectra=spectra if spectra is not None else {},
         extras=extras,
+        # The geometry the worker ran at; without it an NMR result (which
+        # has no trajectory or orbitals to recover one from) opened with no
+        # structure, and no ingested result recorded its multiplicity.
+        molecule=_molecule_or_none(final),
     )
 
     return _ingest_with_sidecars(staging, saved_dir, payload)

@@ -190,9 +190,10 @@ _MEASURE_CLICK_JS = """
     vw.render();
     return true;
   };
-  // Last-loaded viewer owns the unqualified name (same convention as
-  // __quantuiIsoUpdate) so the kernel-side bridge never has to track uids.
-  window.__quantuiMeasureHighlight = window["__quantuiMeasureHighlight_"+UID];
+  // The last viewer loaded for THIS slot (Measure, Edit Structure, PES
+  // pick) owns the slot's hook. A single shared global let whichever viewer
+  // rendered last receive every feature's highlights (audit UI-6).
+  window[__HOOK_KEY__] = window["__quantuiMeasureHighlight_"+UID];
 
   function onClick(atom){
     var box=document.querySelector(".__INBOX_CLASS__ textarea");
@@ -220,6 +221,17 @@ _HIGHLIGHT_OPACITY = "0.80"
 _MEAS_LINE_COLOR = "#06b6d4"
 
 
+def highlight_hook_name(slot: str) -> str:
+    """``window`` property holding the highlight function for *slot*.
+
+    One hook per viewer slot (the inbox class identifies the feature: Measure,
+    Edit Structure, PES pick). Each injected viewer registers under its own
+    slot, so :func:`push_highlight` reaches the viewer its feature owns rather
+    than whichever viewer rendered last.
+    """
+    return "__quantuiMeasureHighlight@" + re.sub(r"[^A-Za-z0-9_-]", "_", slot)
+
+
 def inject_click_js(html: str, *, inbox_class: str) -> str:
     """Append the click-to-measure wiring to already-rendered py3Dmol HTML.
 
@@ -242,6 +254,7 @@ def inject_click_js(html: str, *, inbox_class: str) -> str:
         .replace("__HL_COLOR__", _HIGHLIGHT_COLOR)
         .replace("__HL_OPACITY__", _HIGHLIGHT_OPACITY)
         .replace("__MEAS_LINE_COLOR__", _MEAS_LINE_COLOR)
+        .replace("__HOOK_KEY__", json.dumps(highlight_hook_name(inbox_class)))
     )
     return f"{html}<script>{js}</script>"
 
@@ -251,7 +264,9 @@ def inject_click_js(html: str, *, inbox_class: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def push_highlight(app: Any, indices: Sequence[int]) -> None:
+def push_highlight(
+    app: Any, indices: Sequence[int], *, slot: str = MEASURE_INBOX_CLASS
+) -> None:
     """Restyle the LIVE viewer's picked-atom highlights — no Python re-render.
 
     Same shape as ``app_visualization.iso_bridge_update``: re-rendering would
@@ -264,10 +279,12 @@ def push_highlight(app: Any, indices: Sequence[int]) -> None:
     from IPython.display import Javascript, display
 
     payload = json.dumps(list(indices))
+    hook = json.dumps(highlight_hook_name(slot))
     js = (
         "(function(){var n=0;function go(){n++;"  # noqa: UP031 — JS is brace-dense
-        "if(window.__quantuiMeasureHighlight){window.__quantuiMeasureHighlight(%s);}"
-        "else if(n<40){setTimeout(go,50);}}go();})();" % payload
+        "var f=window[%s];"
+        "if(f){f(%s);}"
+        "else if(n<40){setTimeout(go,50);}}go();})();" % (hook, payload)
     )
     try:
         bridge.clear_output(wait=True)

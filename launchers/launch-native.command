@@ -95,7 +95,11 @@ export PYTHONDONTWRITEBYTECODE=1
 
 # Port 8867 mirrors the Windows native launcher.
 PORT=8867
-URL="http://localhost:${PORT}"
+# Per-run token (QUANTUI_APP_TOKEN when the caller sets one): without it any
+# other local user or process could drive this session. Standalone Voila
+# reads no token from the environment, so it is passed as an option.
+TOKEN="${QUANTUI_APP_TOKEN:-$(python -c 'import secrets; print(secrets.token_urlsafe(24))')}"
+URL="http://localhost:${PORT}/?token=${TOKEN}"
 
 echo "Starting Voilà on ${URL}..."
 echo
@@ -105,6 +109,8 @@ echo
 voila notebooks/molecule_computations.ipynb \
     --no-browser \
     --port="${PORT}" \
+    --Voila.ip=127.0.0.1 \
+    "--Voila.token=${TOKEN}" \
     --ServerApp.disable_check_xsrf=True &
 VOILA_PID=$!
 

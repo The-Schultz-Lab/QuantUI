@@ -3,12 +3,15 @@
 Resolution order (first hit wins):
 
 1. **Local RDKit** for SMILES / InChI input — offline, no network.
-2. **Bundled library** exact hit (formula key) — offline, instant.
+2. **Bundled library** exact hit (entry id/formula key, name, or synonym,
+   case-insensitive) — offline, instant, so "water" never waits on PubChem.
 3. **PubChem** (hardened client).
 4. **NCI CACTUS** resolver.
-5. **Bundled-library fuzzy fallback** (name/description substring) — the
-   last-resort offline answer so the search box is never a dead end, even with
-   no network.
+5. **Bundled-library fuzzy fallback** (whole-word match in a name or synonym,
+   only when exactly one molecule matches) — the last-resort answer so the
+   search box is never a dead end. Labelled ``library-offline-fallback`` when
+   the network was unreachable/disabled, ``library-no-online-match`` when a
+   resolver was reached but genuinely had no match.
 
 Every resolver returns a normalized :class:`ResolvedStructure` so callers
 (and the disambiguation UI) treat all sources uniformly. The
@@ -22,6 +25,7 @@ unaffected by how it is stored.
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -45,7 +49,7 @@ class ResolvedStructure:
     """A structure resolved by the provider chain, normalized across sources."""
 
     xyz: str
-    source: str  # "rdkit-smiles" | "rdkit-inchi" | "library" | "pubchem" | "cactus" | "library-offline-fallback"
+    source: str  # "rdkit-smiles" | "rdkit-inchi" | "library" | "pubchem" | "cactus" | "library-offline-fallback" | "library-no-online-match"
     formula: str = "?"
     num_atoms: int = 0
     num_heavy_atoms: int = 0
@@ -60,6 +64,7 @@ class ResolvedStructure:
         return self.source in (
             "library",
             "library-offline-fallback",
+            "library-no-online-match",
         ) or self.source.startswith("rdkit-")
 
 
@@ -96,13 +101,13 @@ def _entry_to_xyz(name: str, entry: Dict[str, Any]) -> str:
 
 
 def _entry_to_resolved(
-    name: str, entry: Dict[str, Any], *, source: str
+    name: str, entry: Dict[str, Any], *, source: str, formula: Optional[str] = None
 ) -> ResolvedStructure:
     atoms = entry["atoms"]
     return ResolvedStructure(
         xyz=_entry_to_xyz(name, entry),
         source=source,
-        formula=name,
+        formula=formula or name,
         num_atoms=len(atoms),
         num_heavy_atoms=sum(1 for a in atoms if a != _HYDROGEN),
         charge=int(entry.get("charge", 0)),
@@ -112,31 +117,80 @@ def _entry_to_resolved(
     )
 
 
+def _library_named_entries() -> tuple:
+    """Full curated/preset entries (with name + synonyms); ``()`` on failure."""
+    try:
+        from .molecule_library import named_entries
+
+        return named_entries()
+    except Exception as exc:  # noqa: BLE001 — the chain must never break here
+        logger.debug(f"bundled-library name index unavailable: {exc}")
+        return ()
+
+
+def _entry_names(entry: Dict[str, Any]) -> List[str]:
+    """An entry's name plus its ``;``-separated synonyms, lower-cased."""
+    names = [str(entry.get("name") or "")]
+    names += str(entry.get("synonyms") or "").split(";")
+    return [n.strip().lower() for n in names if n.strip()]
+
+
+def _named_to_resolved(entry: Dict[str, Any], *, source: str) -> ResolvedStructure:
+    key = entry["id"]
+    legacy = config.MOLECULE_LIBRARY.get(key, entry)
+    return _entry_to_resolved(
+        key, legacy, source=source, formula=entry.get("formula") or key
+    )
+
+
 def _library_exact(query: str) -> Optional[ResolvedStructure]:
-    """Exact (case-insensitive) match on a bundled-library formula key."""
-    q = query.strip().lower()
-    for key, entry in config.MOLECULE_LIBRARY.items():
-        if q == key.lower():
-            logger.info(f"Resolved '{query}' from bundled library (exact key '{key}')")
-            return _entry_to_resolved(key, entry, source="library")
-    return None
+    """Exact (case-insensitive) bundled-library hit: entry id, name or synonym.
 
-
-def _library_fuzzy(query: str) -> Optional[ResolvedStructure]:
-    """Loose offline fallback: substring match over keys + descriptions.
-
-    Used only when the network resolvers are unreachable or all miss, so a
-    looser match is acceptable (and clearly labelled as a fallback to the user).
+    Checked before any network resolver (offline-first): "water", "H2O",
+    "dihydrogen monoxide" and "aspirin" are all answered from the bundled
+    library instantly, with no PubChem/CACTUS round trip.
     """
     q = query.strip().lower()
     if not q:
         return None
     for key, entry in config.MOLECULE_LIBRARY.items():
-        haystack = f"{key} {entry.get('description', '')}".lower()
-        if q == key.lower() or q in haystack:
-            logger.info(f"Offline fallback matched '{query}' to library entry '{key}'")
-            return _entry_to_resolved(key, entry, source="library-offline-fallback")
+        if q == key.lower():
+            logger.info(f"Resolved '{query}' from bundled library (exact key '{key}')")
+            return _entry_to_resolved(key, entry, source="library")
+    for entry in _library_named_entries():
+        if q in _entry_names(entry):
+            logger.info(
+                f"Resolved '{query}' from bundled library (name of '{entry['id']}')"
+            )
+            return _named_to_resolved(entry, source="library")
     return None
+
+
+def _library_fuzzy(
+    query: str, *, source: str = "library-offline-fallback"
+) -> Optional[ResolvedStructure]:
+    """Last-resort fallback: whole-word match in a library name or synonym.
+
+    ``"acetic"`` finds "acetic acid", but ``"ion"`` no longer finds
+    methionine, nor ``"a"`` dioxygen: the query must be a whole word (or
+    run of words) of a name/synonym, and it must pick out exactly one
+    molecule — several matches would mean returning an arbitrary one.
+    """
+    q = query.strip().lower()
+    if not q:
+        return None
+    pattern = re.compile(r"(?<![a-z0-9])" + re.escape(q) + r"(?![a-z0-9])")
+    matches: Dict[Tuple[str, int], Dict[str, Any]] = {}
+    for entry in _library_named_entries():
+        if any(pattern.search(n) for n in _entry_names(entry)):
+            # Same molecule listed as both preset and curated counts once.
+            ident = (str(entry.get("name", "")).lower(), len(entry["atoms"]))
+            matches.setdefault(ident, entry)
+    if len(matches) != 1:
+        return None
+    (entry,) = matches.values()
+    logger.info(f"Library fallback matched '{query}' to entry '{entry['id']}'")
+    return _named_to_resolved(entry, source=source)
 
 
 def resolve_structure(
@@ -159,7 +213,7 @@ def resolve_structure(
         xyz, meta = fetch_structure(query, conformer_3d=conformer_3d)
         return _from_metadata(xyz, meta, source=meta["source"])
 
-    # 2. Exact bundled-library hit (offline, instant) — e.g. "H2O", "C6H6".
+    # 2. Exact bundled-library hit (offline, instant) — e.g. "H2O", "water".
     hit = _library_exact(query)
     if hit is not None:
         return hit
@@ -183,8 +237,13 @@ def resolve_structure(
             logger.info(f"CACTUS did not resolve '{query}': {exc}")
             errors.append(("cactus", exc))
 
-    # 5. Offline fuzzy fallback against the bundled library.
-    hit = _library_fuzzy(query)
+    # 5. Fuzzy fallback against the bundled library. "Offline" only when no
+    # resolver was actually reached; a genuine online miss is labelled as such.
+    reached = any(isinstance(exc, MoleculeNotFoundError) for _, exc in errors)
+    hit = _library_fuzzy(
+        query,
+        source="library-no-online-match" if reached else "library-offline-fallback",
+    )
     if hit is not None:
         return hit
 
@@ -199,10 +258,13 @@ def search_candidates(query: str) -> List[Dict[str, Any]]:
 
     Only name/formula queries can be ambiguous (SMILES/InChI/CID resolve to a
     single structure, and the local library is exact). Returns ``[]`` for those
-    types, and ``[]`` on any network failure so the caller falls back to the
-    full single-result chain (PubChem → CACTUS → offline library).
+    types, for a query the bundled library answers exactly (offline-first: no
+    PubChem candidate lookup for "water"), and on any network failure, so the
+    caller falls back to the full single-result chain.
     """
     if classify_query(query) not in ("name", "formula"):
+        return []
+    if _library_exact(query) is not None:
         return []
     try:
         return search_pubchem_candidates(query)
@@ -246,6 +308,8 @@ def _resolved_message(query: str, result: ResolvedStructure) -> str:
         "library": "the bundled library (offline)",
         "library-offline-fallback": "the bundled library (offline fallback — "
         "network resolvers were unavailable)",
+        "library-no-online-match": "the bundled library (closest match — "
+        "no exact match was found online)",
         "pubchem": "PubChem",
         "cactus": "NCI CACTUS",
     }.get(result.source, result.source)
@@ -298,7 +362,8 @@ def resolve_structure_with_message(
 
     Returns ``(xyz_or_None, message, source_or_None, is_offline)``. ``source``
     is the raw provider key (``"pubchem"`` / ``"cactus"`` / ``"library"`` /
-    ``"library-offline-fallback"`` / ``"rdkit-smiles"`` / ``"rdkit-inchi"``) so
+    ``"library-offline-fallback"`` / ``"library-no-online-match"`` /
+    ``"rdkit-smiles"`` / ``"rdkit-inchi"``) so
     the UI can label the loaded molecule by where it *actually* came from
     rather than always saying "PubChem". ``is_offline`` is True when the
     structure was produced without a network call (local RDKit or the bundled

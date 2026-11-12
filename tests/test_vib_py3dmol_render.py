@@ -302,6 +302,7 @@ class TestFpsParameter:
             amplitude=0.4,
             renderer="py3dmol",
             fps=10,
+            bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
         )
         assert not has_cached(
             tmp_path,
@@ -310,6 +311,7 @@ class TestFpsParameter:
             amplitude=0.4,
             renderer="py3dmol",
             fps=30,
+            bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
         )
 
     def test_fps_falls_back_to_user_settings_when_not_passed(
@@ -337,6 +339,7 @@ class TestFpsParameter:
             amplitude=0.4,
             renderer="py3dmol",
             fps=45,
+            bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
         )
         # Wrong-fps query should miss
         assert not has_cached(
@@ -346,6 +349,7 @@ class TestFpsParameter:
             amplitude=0.4,
             renderer="py3dmol",
             fps=10,
+            bgcolor=app._plotly_theme_colors()["scene_bgcolor"],
         )
 
 

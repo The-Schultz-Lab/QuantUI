@@ -45,6 +45,10 @@ def make_staging_record(
         jobs_root=tmp_path / "jobs",
         staging_root=tmp_path / "staging",
     )
+    # Some tests register the request first (the worker updates that
+    # record); start from a fresh record, as registry.create refuses a
+    # taken id.
+    registry.delete(request_id)
     record = registry.create(request, "cluster_slurm", status="submitted")
     record.staging_dir = str(staging)
     return record, staging

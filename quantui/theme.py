@@ -31,8 +31,10 @@ TEXT_LABEL = "#444"
 TEXT_SECONDARY = "#555"
 TEXT_MUTED = "#666"
 TEXT_MUTED_LIGHT = "#777"
-TEXT_FAINT = "#888"
-TEXT_SUBTLE = "#94a3b8"
+# Faint/subtle text clears WCAG AA 4.5:1 on BG_PANEL (audit UI-7; was
+# #888 at 3.4:1 and #94a3b8 at 2.5:1).
+TEXT_FAINT = "#707070"
+TEXT_SUBTLE = "#64748b"
 TEXT_BODY = "#334155"
 TEXT_STRONG = "#1e293b"
 TEXT_SLATE = "#64748b"
@@ -355,25 +357,25 @@ def _widget_chrome_css() -> str:
         'div[id^="3dmolviewer_"] { max-width: 100% !important; }\n'
         ".lm-TabBar, .p-TabBar, .lm-TabBar-content, .p-TabBar-content "
         f"{{ background: {surface} !important; "
-        "border-color: var(--q-border) !important; }}\n"
+        "border-color: var(--q-border) !important; }\n"
         ".lm-TabBar-tab, .p-TabBar-tab "
         f"{{ background: {surface} !important; "
         "color: var(--q-text-body) !important; "
-        "border-color: var(--q-border) !important; }}\n"
+        "border-color: var(--q-border) !important; }\n"
         ".lm-TabBar-tab.lm-mod-current, .p-TabBar-tab.p-mod-current "
         f"{{ background: {surface} !important; "
         "color: var(--q-text-strong) !important; "
-        "border-bottom: 2px solid var(--q-accent-info) !important; }}\n"
+        "border-bottom: 2px solid var(--q-accent-info) !important; }\n"
         ".lm-AccordionPanel-title, .lm-AccordionPanel-child, "
         ".p-Collapse-header, .p-Collapse-contents "
         f"{{ background: {surface} !important; "
         "color: var(--q-text-body) !important; "
-        "border-color: var(--q-border) !important; }}\n"
+        "border-color: var(--q-border) !important; }\n"
         ".jupyter-widgets select, .jupyter-widgets input, "
         ".jupyter-widgets textarea "
         f"{{ background-color: {surface} !important; "
         "color: var(--q-text-body) !important; "
-        "border-color: var(--q-border) !important; }}\n"
+        "border-color: var(--q-border) !important; }\n"
         f"{_neutral_button_css()}"
         f"{_accent_button_css()}"
         f"{slider_chrome_css()}"
@@ -382,7 +384,7 @@ def _widget_chrome_css() -> str:
         "color: var(--q-text-body) !important; "
         "border: 1px solid var(--q-border) !important; "
         "border-left: 4px solid var(--q-accent-info) !important; "
-        "padding: 10px; border-radius: 5px; margin-bottom: 10px; }}\n"
+        "padding: 10px; border-radius: 5px; margin-bottom: 10px; }\n"
         ".quantui-info-box small "
         "{ color: var(--q-text-muted) !important; }\n"
     )
@@ -444,8 +446,9 @@ def _dark_palette() -> ThemePalette:
         text_secondary="#cbd5e1",
         text_muted="#94a3b8",
         text_muted_light="#94a3b8",
-        text_faint="#64748b",
-        text_subtle="#64748b",
+        # >= 4.5:1 on bg_panel #1e293b (audit UI-7; #64748b was 3.1:1).
+        text_faint="#8794aa",
+        text_subtle="#8794aa",
         text_body="#e2e8f0",
         text_strong="#f1f5f9",
         text_slate="#94a3b8",

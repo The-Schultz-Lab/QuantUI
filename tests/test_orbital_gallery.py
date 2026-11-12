@@ -48,8 +48,9 @@ class TestCaptions:
     def test_two_lines(self):
         title, detail = gallery_caption("HOMO−1", 3, -0.5612, "3a1")
         assert title == "HOMO−1 · 3a₁"
-        assert detail == "−0.561 Eh (−15.27 eV) · MO 3"
-        assert gallery_caption("LUMO", 5, None) == ("LUMO", "MO 5")
+        # 0-based index 3 is the 4th MO: captions are 1-based (audit VIZ-5).
+        assert detail == "−0.561 Eh (−15.27 eV) · MO 4"
+        assert gallery_caption("LUMO", 5, None) == ("LUMO", "MO 6")
 
 
 def _cube(tmp_path):

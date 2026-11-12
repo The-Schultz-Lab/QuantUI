@@ -87,4 +87,4 @@ def offer_download(app: object, path: Union[str, Path]) -> None:
     try:
         slot.value = download_link_html(path)
     except Exception as exc:  # noqa: BLE001 — a link must never break an export
-        slot.value = f'<span style="color:#b22">Download link failed: {exc}</span>'
+        slot.value = f'<span style="color:#b22">Download link failed: {html.escape(str(exc))}</span>'
