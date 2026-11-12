@@ -2012,6 +2012,12 @@ class QuantUIApp:
         # ── Instance state ────────────────────────────────────────────────
         self._molecule: Optional[Molecule] = None
         self._last_result: Any = None
+        # The loaded molecule ``_last_result`` was computed for, and the
+        # folder that run was saved in. ``_last_result_dir`` follows the last
+        # result *viewed* (History included); structure exports must follow
+        # the run instead (audit APP-8 / UI-5).
+        self._last_result_molecule: Any = None
+        self._last_result_run_dir: Optional[Path] = None
         self._last_calc_type: Optional[str] = None  # e.g. "frequency", "single_point"
         self._results: List = []
         self._pending_traj_result: Any = None
@@ -6682,6 +6688,10 @@ class QuantUIApp:
         # charge/multiplicity the Charge/Multiplicity fields write into)
         # stay live: a later read would mix two levels of theory in one
         # saved result (audit APP-2).
+        # The loaded molecule this run was started from: structure exports
+        # use the run's result only while this is still the active molecule
+        # (audit APP-8 / UI-5).
+        _run_source_mol = self._molecule
         mol = copy.deepcopy(self._molecule)
         _run_method = self.method_dd.value
         _run_basis = self.basis_dd.value
@@ -7661,6 +7671,8 @@ class QuantUIApp:
             _elapsed = time.perf_counter() - _run_wall_t
             _elapsed_cpu = time.process_time() - _run_cpu_t
             self._last_result = result
+            self._last_result_molecule = _run_source_mol
+            self._last_result_run_dir = None
             self._last_calc_type = save_type
             self.accumulate_btn.disabled = False
 
@@ -7808,6 +7820,7 @@ class QuantUIApp:
             if _saved_dir is not None:
                 _run_saved = True
                 self._last_result_dir = _saved_dir
+                self._last_result_run_dir = _saved_dir
                 _ana_ctx.result_dir = _saved_dir
                 # Result folder is now on disk —
                 # the "Export bundle (.zip)" button has something to zip.

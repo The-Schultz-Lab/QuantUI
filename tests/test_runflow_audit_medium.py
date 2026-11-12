@@ -262,3 +262,61 @@ def test_calibration_is_refused_while_a_run_is_in_flight(app):
     assert not app._cal_running
     assert "calculation is running" in app._cal_step_label.value
     app._end_run_lock()
+
+
+# ── APP-8 / UI-5 ──────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def optimized_h2(app, tmp_path):
+    """A Geometry Opt on H2 (RHF/STO-3G) saved to ``tmp_path/run``."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    app.calc_type_dd.value = "Geometry Opt"
+    with (
+        patch("quantui.save_result", return_value=run_dir),
+        patch("quantui.load_result", return_value={"timestamp": "t"}),
+    ):
+        _run(app)
+    assert app._last_result_dir == run_dir, app.run_status.value
+    return run_dir
+
+
+def test_structure_export_follows_the_run_not_a_history_view(
+    app, optimized_h2, tmp_path
+):
+    viewed = tmp_path / "history_view"
+    viewed.mkdir()
+    app._last_result_dir = viewed  # a History view of another result
+    app._on_export_xyz(None)
+    files = list(optimized_h2.glob("H2_*.xyz"))
+    assert len(files) == 1, app.struct_export_status.value
+    assert not list(viewed.glob("*.xyz"))
+    # The optimized geometry, not the input (0.74 Å).
+    z = float(files[0].read_text().splitlines()[3].split()[3])
+    assert z != pytest.approx(0.74, abs=1e-4)
+
+
+def test_structure_export_after_loading_another_molecule(
+    app, optimized_h2, tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    app._set_molecule(
+        Molecule(
+            ["N", "H", "H", "H"],
+            [
+                [0, 0, 0.1],
+                [0.94, 0, -0.27],
+                [-0.47, 0.81, -0.27],
+                [-0.47, -0.81, -0.27],
+            ],
+        )
+    )
+    app.method_dd.value = "B3LYP"
+    app._on_export_xyz(None)
+    assert not list(optimized_h2.glob("H3N*.xyz"))  # not the old run's folder
+    files = list(tmp_path.glob("*.xyz"))
+    assert [f.name for f in files] == ["H3N_B3LYP_STO-3G.xyz"]
+    text = files[0].read_text()
+    assert text.splitlines()[0] == "4"
+    assert "B3LYP" in text.splitlines()[1]

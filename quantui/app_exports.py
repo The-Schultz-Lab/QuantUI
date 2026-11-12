@@ -168,7 +168,7 @@ def on_export_xyz(app: Any, btn: Any) -> None:
             f"{method}/{basis}"
         )
         full_xyz = f"{len(mol.atoms)}\n{comment}\n{xyz_body}\n"
-        dest = (app._last_result_dir / fname) if app._last_result_dir else Path(fname)
+        dest = _structure_export_dest(app, fname)
         dest.write_text(full_xyz, encoding="utf-8")
         app.struct_export_status.value = f"Saved: {dest}"
         offer_download(app, dest)
@@ -191,7 +191,7 @@ def on_export_mol(app: Any, btn: Any) -> None:
             app.struct_export_status.value = "RDKit could not parse the structure."
             return
         mol_block = Chem.MolToMolBlock(rdmol)
-        dest = (app._last_result_dir / fname) if app._last_result_dir else Path(fname)
+        dest = _structure_export_dest(app, fname)
         dest.write_text(mol_block, encoding="utf-8")
         app.struct_export_status.value = f"Saved: {dest}"
         offer_download(app, dest)
@@ -214,7 +214,7 @@ def on_export_pdb(app: Any, btn: Any) -> None:
             app.struct_export_status.value = "RDKit could not parse the structure."
             return
         pdb_block = Chem.MolToPDBBlock(rdmol)
-        dest = (app._last_result_dir / fname) if app._last_result_dir else Path(fname)
+        dest = _structure_export_dest(app, fname)
         dest.write_text(pdb_block, encoding="utf-8")
         app.struct_export_status.value = f"Saved: {dest}"
         offer_download(app, dest)
@@ -288,15 +288,47 @@ def on_export_reorg_geometries(app: Any, btn: Any) -> None:
     _set_status(f"Saved {len(saved)} file(s): " + ", ".join(saved))
 
 
+def _current_run_result(app: Any) -> Any:
+    """The last run's result, if it was computed for the active molecule.
+
+    ``_last_result`` outlives a molecule load: optimise A, load B, and an
+    export used to write A's geometry (or B's geometry under A's method and
+    basis). The run records which loaded molecule it started from; any load
+    or structure edit replaces that object (audit APP-8 / UI-5).
+    """
+    result = getattr(app, "_last_result", None)
+    if result is None:
+        return None
+    if getattr(app, "_last_result_molecule", None) is not app._molecule:
+        return None
+    return result
+
+
+def _structure_export_dest(app: Any, fname: str) -> Path:
+    """Where a structure export goes: the folder of the run that produced
+    the exported result, else the working directory.
+
+    Not ``_last_result_dir``: that follows the last result *viewed*, so a
+    History view used to send the export into an unrelated result's folder
+    (and its bundle zip).
+    """
+    run_dir = getattr(app, "_last_result_run_dir", None)
+    if _current_run_result(app) is not None and isinstance(run_dir, Path):
+        return run_dir / fname
+    return Path(fname)
+
+
 def export_molecule_and_label(app: Any) -> tuple[Any, str, str]:
     """Return (molecule, method, basis) for structure export.
 
     For geometry optimization results, returns the final optimized geometry.
     Falls back to the currently loaded molecule for all other calculation types.
+    The last run's result is used only while its molecule is still the loaded
+    one; otherwise method/basis come from the current setup.
     """
     from quantui.optimizer import OptimizationResult
 
-    result = app._last_result
+    result = _current_run_result(app)
     if isinstance(result, OptimizationResult):
         mol = result.molecule
     else:

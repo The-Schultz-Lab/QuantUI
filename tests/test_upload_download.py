@@ -293,7 +293,10 @@ class TestAppWiring:
         app._set_molecule(
             Molecule(atoms=["H", "H"], coordinates=[[0, 0, 0], [0, 0, 0.74]]), "test"
         )
-        app._last_result_dir = tmp_path
+        # A saved run on this molecule: structure exports go to its folder.
+        app._last_result = object()
+        app._last_result_molecule = app._molecule
+        app._last_result_run_dir = app._last_result_dir = tmp_path
         app._on_export_xyz(None)
         assert (tmp_path / "H2_RHF_STO-3G.xyz").exists() or list(tmp_path.glob("*.xyz"))
         assert 'download="' in app._download_html.value
