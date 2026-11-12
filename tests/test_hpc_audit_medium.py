@@ -354,3 +354,44 @@ class TestRequestIdReuse:
             json.loads((Path(b.job_dir) / "request.json").read_text())["request_id"]
             == second
         )
+
+
+# ---------------------------------------------------------------------------
+# HPC-5: SLURM ingest keeps the geometry (NMR had none)
+# ---------------------------------------------------------------------------
+
+
+class TestIngestKeepsGeometry:
+    @pytest.mark.parametrize("calc_type", ["nmr", "single_point"])
+    def test_worker_result_ingests_with_structure(
+        self, tmp_path, monkeypatch, calc_type
+    ):
+        from quantui.backends.slurm_ingest import ingest_attempt
+        from quantui.backends.worker import run_worker_request
+        from quantui.results_storage import load_result
+
+        monkeypatch.setenv("QUANTUI_JOBS_DIR", str(tmp_path / "jobs"))
+        monkeypatch.setenv("QUANTUI_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.delenv("SLURM_JOB_ID", raising=False)
+        monkeypatch.setattr(
+            "quantui.results_storage._default_results_dir",
+            lambda: tmp_path / "results",
+        )
+        req = _request("geo-" + calc_type, calc_type)
+        reg = JobRegistry()
+        rec = reg.create(req, "cluster_slurm", job_name="h2")
+        (rec.job_path / "request.json").write_text(json.dumps(req.to_dict()))
+        attempt = rec.job_path / "attempt-01_job1"
+        attempt.mkdir()
+        reg.start_attempt(req.request_id, "1")
+
+        outcome = run_worker_request(rec.job_path / "request.json", attempt)
+        assert outcome.status == "success"
+        payload = json.loads((attempt / "result.json").read_text())
+        assert payload["final_molecule"]["atoms"] == ["H", "H"]
+
+        saved = ingest_attempt(reg, reg.load(req.request_id), attempt)
+        geometry = load_result(saved)["geometry"]
+        assert geometry["atoms"] == ["H", "H"]
+        assert geometry["coordinates"][1] == pytest.approx([0.0, 0.0, 0.74])
+        assert geometry["multiplicity"] == 1

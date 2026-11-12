@@ -408,6 +408,21 @@ def _error_result(
     )
 
 
+def _ran_at(result: Any, molecule: Any) -> Any:
+    """Record on *result* the geometry it was computed at (after any preopt).
+
+    Single point, TD-DFT, NMR and PES scan results do not carry their
+    molecule; worker_payload.final_molecule_field reads this so the
+    ingested History entry has a structure.
+    """
+    if getattr(result, "molecule", None) is None:
+        try:
+            result.calc_molecule = molecule
+        except (AttributeError, TypeError):
+            pass
+    return result
+
+
 def _run_single_point(
     request: CalculationRequest, staging_dir: Path, log_stream
 ) -> Any:
@@ -427,7 +442,7 @@ def _run_single_point(
     options = request.options or {}
     scf_rescue = bool(options.get("scf_rescue", True))
     _write_progress(staging_dir, "running", "Running single-point SCF", 20.0)
-    return run_in_session(
+    result = run_in_session(
         molecule=molecule,
         method=request.method,
         basis=request.basis,
@@ -435,6 +450,7 @@ def _run_single_point(
         solvent=request.solvent,
         scf_rescue=scf_rescue,
     )
+    return _ran_at(result, molecule)
 
 
 def _run_geometry_opt(
@@ -782,7 +798,7 @@ def _run_tddft(request: CalculationRequest, staging_dir: Path, log_stream) -> An
     nstates = int(options.get("nstates", 10))
     scf_rescue = bool(options.get("scf_rescue", True))
     _write_progress(staging_dir, "running", "Running TD-DFT excited states", 15.0)
-    return run_tddft_calc(
+    result = run_tddft_calc(
         molecule=molecule,
         method=request.method,
         basis=request.basis,
@@ -791,6 +807,7 @@ def _run_tddft(request: CalculationRequest, staging_dir: Path, log_stream) -> An
         scf_rescue=scf_rescue,
         solvent=request.solvent,
     )
+    return _ran_at(result, molecule)
 
 
 def _run_nmr(request: CalculationRequest, staging_dir: Path, log_stream) -> Any:
@@ -809,13 +826,14 @@ def _run_nmr(request: CalculationRequest, staging_dir: Path, log_stream) -> Any:
     options = request.options or {}
     scf_rescue = bool(options.get("scf_rescue", True))
     _write_progress(staging_dir, "running", "Running NMR shielding (GIAO)", 15.0)
-    return run_nmr_calc(
+    result = run_nmr_calc(
         molecule=molecule,
         method=request.method,
         basis=request.basis,
         progress_stream=log_stream,
         scf_rescue=scf_rescue,
     )
+    return _ran_at(result, molecule)
 
 
 def _run_pes_scan(request: CalculationRequest, staging_dir: Path, log_stream) -> Any:
@@ -860,7 +878,7 @@ def _run_pes_scan(request: CalculationRequest, staging_dir: Path, log_stream) ->
             f"checkpoint ({n_points} point(s) already computed).",
         )
 
-    return run_pes_scan(
+    result = run_pes_scan(
         molecule=molecule,
         method=request.method,
         basis=request.basis,
@@ -877,6 +895,7 @@ def _run_pes_scan(request: CalculationRequest, staging_dir: Path, log_stream) ->
         checkpoint=ckpt,
         resume=resumable,
     )
+    return _ran_at(result, molecule)
 
 
 def _run_reorganization_energy(
