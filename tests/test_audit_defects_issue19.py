@@ -137,10 +137,14 @@ class TestPreoptOnSlurm:
 
         req = CalculationRequest.from_dict(data)
         runner = _run_single_point if calc_type == "single_point" else _run_nmr
+        # The worker's required single point after the pre-opt (audit
+        # HPC-14) also goes through run_in_session: stub it for both calc
+        # types so the test stays PySCF-free.
         with patch("quantui.optimizer.optimize_geometry", return_value=opt) as m_opt:
-            with patch(target, side_effect=_fake_calc):
-                with open(staging / "live.log", "w") as log:
-                    runner(req, staging, log)
+            with patch("quantui.session_calc.run_in_session", side_effect=_fake_calc):
+                with patch(target, side_effect=_fake_calc):
+                    with open(staging / "live.log", "w") as log:
+                        runner(req, staging, log)
         m_opt.assert_called_once()
         assert seen["z"] == pytest.approx(0.71)
         # B2.5 tightens only the frequency pre-opt.

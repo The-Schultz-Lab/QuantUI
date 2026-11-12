@@ -52,6 +52,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import time
 import uuid
@@ -121,7 +122,9 @@ def _coords_digest(coords: Optional[Sequence[Sequence[float]]]) -> str:
     """
     if not coords:
         return ""
-    rounded = [[round(float(v), 6) for v in row] for row in coords]
+    # ``+ 0.0`` folds -0.0 (and values that round to it) into 0.0, so a
+    # sign-of-zero difference cannot change the resume key (audit DATA-15).
+    rounded = [[round(float(v), 6) + 0.0 for v in row] for row in coords]
     return hashlib.sha256(
         json.dumps(rounded, separators=(",", ":")).encode("utf-8")
     ).hexdigest()[:16]
@@ -883,4 +886,34 @@ def prune(
     for state in survivors[max_checkpoints:]:
         shutil.rmtree(state["dir"], ignore_errors=True)
         removed += 1
+
+    # Checkpoint dirs load_all() skipped (meta.json missing, corrupt, or an
+    # old schema) used to be kept forever (audit DATA-15). Age them out by
+    # their newest file mtime instead. Only names shaped like a resume key
+    # are touched, so a checkpoint root pointed at a shared directory never
+    # loses anything that is not a checkpoint.
+    readable = {str(state["dir"]) for state in states}
+    for path in _iter_checkpoint_dirs(root):
+        if str(path) in readable or not _RESUME_KEY_RE.match(path.name):
+            continue
+        if _newest_mtime(path) < cutoff:
+            shutil.rmtree(path, ignore_errors=True)
+            removed += 1
     return removed
+
+
+_RESUME_KEY_RE = re.compile(r"^[0-9a-f]{16}$")
+
+
+def _newest_mtime(path: Path) -> float:
+    """Newest mtime of *path* and its direct children (0.0 if unreadable)."""
+    try:
+        newest = path.stat().st_mtime
+        for child in path.iterdir():
+            try:
+                newest = max(newest, child.stat().st_mtime)
+            except OSError:
+                continue
+    except OSError:
+        return 0.0
+    return newest

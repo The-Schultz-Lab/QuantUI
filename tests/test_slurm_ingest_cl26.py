@@ -291,7 +291,13 @@ class TestCL26WorkerIngestRoundtrip:
         data["calc_type"] = "geometry_opt"
         (staging_dir / "request.json").write_text(json.dumps(data))
 
-        outcome = run_worker_request(staging_dir / "request.json")
+        # The worker's required final single point (audit HPC-14) needs
+        # PySCF; stub it so this round trip also runs on Windows CI.
+        with patch(
+            "quantui.session_calc.run_in_session",
+            return_value=SimpleNamespace(converged=True, energy_hartree=-1.12),
+        ):
+            outcome = run_worker_request(staging_dir / "request.json")
         assert outcome.status == "success"
         assert (staging_dir / "trajectory.json").exists()
 

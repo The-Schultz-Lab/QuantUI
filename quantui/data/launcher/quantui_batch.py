@@ -34,6 +34,7 @@ Commands (``quantui-batch help`` for the full text):
 import argparse
 import getpass
 import json
+import math
 import os
 import re
 import shlex
@@ -55,8 +56,19 @@ SITE = json.loads("@QUANTUI_SITE@")
 JOB_LOG = ".quantui-batch-jobs"
 ATTEMPT_RE = re.compile(r"^attempt-(\d+)_job(\w+)$")
 ACTIVE_STATES = ("PENDING", "RUNNING", "CONFIGURING", "COMPLETING", "SUSPENDED")
-FAILED_STATES = ("FAILED", "OUT_OF_MEMORY", "TIMEOUT", "CANCELLED", "NODE_FAIL")
+FAILED_STATES = (
+    "FAILED",
+    "OUT_OF_MEMORY",
+    "TIMEOUT",
+    "CANCELLED",
+    "NODE_FAIL",
+    "PREEMPTED",
+    "BOOT_FAIL",
+    "DEADLINE",
+)
 BACKEND_ID = "cluster_slurm"
+# Port of registry.JOB_DIR_MODE: folders QuantUI creates are owner-only.
+JOB_DIR_MODE = 0o700
 
 HELP = """\
 quantui-batch: run QuantUI calculations as Slurm batch jobs.
@@ -128,10 +140,6 @@ def image():
     return os.environ.get("QUANTUI_BATCH_IMAGE") or DEFAULT_IMAGE
 
 
-def partition():
-    return os.environ.get("QUANTUI_SLURM_PARTITION") or SITE["default_partition"]
-
-
 # Port of cluster_config.SITE_DIRECTIVE_ENV / site_directives() /
 # gpu_requested(): optional account/QOS/GRES lines, read per job.
 SITE_DIRECTIVE_ENV = (
@@ -155,6 +163,19 @@ def site_directives():
             )
         lines.append(f"#SBATCH --{flag}={value}")
     return lines
+
+
+def partition():
+    """Port of cluster_config.validate_partition(): it is pasted into the script."""
+    value = (
+        os.environ.get("QUANTUI_SLURM_PARTITION") or SITE["default_partition"]
+    ).strip()
+    if not _SITE_DIRECTIVE_VALUE_RE.match(value):
+        raise InputError(
+            f"SLURM partition {value!r} has characters not allowed in an "
+            "#SBATCH value (use letters, digits and _ . : , = + -)"
+        )
+    return value
 
 
 def gpu_requested():
@@ -331,7 +352,113 @@ def parse_option_pairs(pairs):
 
 
 def file_label(path):
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", path.stem).strip("_.-") or "molecule"
+    label = re.sub(r"[^A-Za-z0-9_.-]+", "_", path.stem)
+    return re.sub(r"\.{2,}", ".", label).strip("_.-") or "molecule"
+
+
+# Port of batch_input.REQUEST_ID_RE: the id names the job record file.
+REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$")
+
+
+def _valid_atom(atom):
+    return isinstance(atom, str) and atom.strip() in SITE["atomic_numbers"]
+
+
+def _valid_coords(row):
+    """Port of utils.validate_coordinates."""
+    if isinstance(row, (str, bytes)):
+        return False
+    try:
+        if len(row) != 3:
+            return False
+        return all(math.isfinite(float(x)) for x in row)
+    except (ValueError, TypeError):
+        return False
+
+
+def check_json_request(request):
+    """Port of batch_input.check_json_request."""
+    rid = request["request_id"]
+    if not isinstance(rid, str) or not REQUEST_ID_RE.match(rid):
+        raise InputError(
+            f"request_id {rid!r} may only use letters, digits and _ . - "
+            "(at most 64 characters)."
+        )
+    if ".." in rid:
+        raise InputError(f"request_id {rid!r} may not contain '..'.")
+    if request["calc_type"] not in SITE["calc_types"]:
+        raise InputError(
+            f"unknown calc_type {request['calc_type']!r}; choose one of "
+            f"{', '.join(SITE['calc_types'])}."
+        )
+    mol = request["molecule"]
+    atoms = mol.get("atoms")
+    coords = mol.get("coords") or mol.get("coordinates")
+    if not isinstance(atoms, list) or not atoms:
+        raise InputError("molecule.atoms must be a non-empty list.")
+    if not isinstance(coords, list) or len(coords) != len(atoms):
+        raise InputError(
+            "molecule.coords must list one [x, y, z] per atom " f"({len(atoms)} atoms)."
+        )
+    for i, (atom, row) in enumerate(zip(atoms, coords)):
+        if not _valid_atom(atom):
+            raise InputError(f"molecule.atoms[{i}]: unknown element {atom!r}.")
+        if not _valid_coords(row):
+            raise InputError(
+                f"molecule.coords[{i}] must be three finite numbers, got {row!r}."
+            )
+    charge = int(mol.get("charge", request["charge"]))
+    mult = int(mol.get("multiplicity", request["multiplicity"]))
+    problem = charge_mult_problem([a.strip() for a in atoms], charge, mult)
+    if problem:
+        raise InputError(
+            f"charge {charge} and multiplicity {mult} do not fit this "
+            f"molecule: {problem}"
+        )
+
+
+def check_options(request):
+    """Port of batch_input.check_options: bool options, warn on ignored keys."""
+    options = request["options"]
+    for key in SITE["boolean_option_keys"]:
+        if key not in options:
+            continue
+        value = options[key]
+        if isinstance(value, bool):
+            continue
+        word = str(value).strip().lower()
+        if word in ("true", "yes", "on", "1"):
+            options[key] = True
+        elif word in ("false", "no", "off", "0"):
+            options[key] = False
+        else:
+            raise InputError(
+                f"option {key}={value!r} must be true or false (yes/no also work)."
+            )
+    allowed = SITE["calc_option_keys"].get(request["calc_type"], ["scf_rescue"])
+    unknown = sorted(k for k in options if k not in allowed)
+    if not unknown:
+        return []
+    return [
+        f"option(s) {', '.join(unknown)} are ignored by a {request['calc_type']} "
+        f"job (it reads: {', '.join(allowed)})."
+    ]
+
+
+def check_basis(request):
+    """Port of batch_input.check_basis: normalise spelling, warn if unlisted."""
+    names = {b.lower(): b for b in SITE["known_basis_sets"]}
+    given = str(request.get("basis") or "").strip()
+    canonical = names.get(given.lower())
+    if canonical is not None:
+        request["basis"] = canonical
+        return []
+    if not given:
+        raise InputError("the request has no basis set; give --basis.")
+    return [
+        f"basis {given!r} is not one of QuantUI's basis sets; the job fails "
+        "if PySCF does not know it (check the spelling)."
+    ]
 
 
 def build_request(path, args, extra_options):
@@ -426,6 +553,9 @@ def build_request(path, args, extra_options):
     request["options"].update(extra_options)
     if args.preopt and request["calc_type"] in SITE["preopt_calc_types"]:
         request["options"]["preopt_before_run"] = True
+    if not request["request_id"]:
+        request["request_id"] = uuid.uuid4().hex[:12]
+    check_json_request(request)
     return request, warnings
 
 
@@ -546,8 +676,8 @@ def estimate(request):
 
 def resolve_resources(request, args):
     est = estimate(request)
-    cores = args.cores or est["cores"]
-    memory_gb = args.memory_gb or est["memory_gb"]
+    cores = est["cores"] if args.cores is None else args.cores
+    memory_gb = est["memory_gb"] if args.memory_gb is None else args.memory_gb
     walltime = args.walltime or est["walltime"]
     errors = []
     if not SITE["min_cores"] <= cores <= SITE["max_cores"]:
@@ -601,11 +731,13 @@ def default_job_name(request):
 
 
 def new_job_dir(root, name):
+    # The root first: parents=True would create it with the default mode.
+    root.mkdir(mode=JOB_DIR_MODE, parents=True, exist_ok=True)
     n = 1
     while True:
         candidate = root / (name if n == 1 else f"{name}_{n}")
         try:
-            candidate.mkdir(parents=True, exist_ok=False)
+            candidate.mkdir(mode=JOB_DIR_MODE, parents=True, exist_ok=False)
         except FileExistsError:
             n += 1
             continue
@@ -660,6 +792,18 @@ def utc_now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def record_path(request_id):
+    """The job record file for *request_id*, which must stay in jobs_root().
+
+    Port of registry._record_path / safe_join: a "/" or ".." in the id
+    would write the record somewhere else.
+    """
+    rid = str(request_id or "")
+    if not REQUEST_ID_RE.match(rid) or ".." in rid:
+        raise InputError(f"request_id {rid!r} cannot name a job record file")
+    return jobs_root() / (rid + ".json")
+
+
 def unique_request(request):
     """Give *request* a fresh id when a job record already uses its id.
 
@@ -667,9 +811,8 @@ def unique_request(request):
     request .json submitted twice must not overwrite the record of a job
     that may still be running. The original id is kept in run_context.
     """
-    jobs = jobs_root()
     original = request["request_id"]
-    if (jobs / (original + ".json")).exists():
+    if record_path(original).exists():
         request["request_id"] = f"{original[:40]}-{uuid.uuid4().hex[:8]}"
         request["run_context"] = dict(
             request.get("run_context") or {}, source_request_id=original
@@ -679,6 +822,7 @@ def unique_request(request):
 def prepare_job(request, resources, job_name, email, image_path):
     """Write the job folder and its record, as SlurmBackend.prepare() does."""
     site_directives()  # a bad site setting fails before the job folder exists
+    partition()
     unique_request(request)
     root = staging_root()
     name = sanitize_job_name(job_name or "") or default_job_name(request)
@@ -707,9 +851,9 @@ def prepare_job(request, resources, job_name, email, image_path):
         "unknown_since": None,
         "unknown_polls": 0,
     }
-    jobs = jobs_root()
-    jobs.mkdir(parents=True, exist_ok=True)
-    with open(str(jobs / (request["request_id"] + ".json")), "w") as fh:
+    path = record_path(request["request_id"])
+    path.parent.mkdir(mode=JOB_DIR_MODE, parents=True, exist_ok=True)
+    with open(str(path), "w") as fh:
         json.dump(record, fh, indent=2)
     return script
 
@@ -799,6 +943,25 @@ def job_log(job_dir):
 
 def job_ids(job_dir):
     return [jid for jid, _opts in job_log(job_dir)]
+
+
+def all_job_ids(job_dir, q):
+    """Every Slurm id known for *job_dir*, oldest first.
+
+    JOB_LOG holds only what quantui-batch submitted; a job the app (or a
+    bare sbatch) queued shows up as an attempt folder once it starts, and
+    in the queue, with this folder's submit.slurm, before that.
+    """
+    ids = job_ids(job_dir)
+    ids += [jid for _n, jid, _p in attempts(job_dir) if jid.isdigit()]
+    script = job_dir / "submit.slurm"
+    for jid, (_state, path, _reason) in q.items():
+        try:
+            if path and Path(path).resolve() == script.resolve():
+                ids.append(jid)
+        except OSError:
+            continue
+    return list(dict.fromkeys(ids))  # unique, first-seen order
 
 
 def record_job(job_dir, job_id, options=()):
@@ -1274,6 +1437,7 @@ def requests_from_args(args, extra, q):
             request, warnings = chained_request(source_dir, source, args, extra)
             check_solvent(request)
             check_method(request)
+            warnings = warnings + check_basis(request) + check_options(request)
             out.append((f"--from {source_dir.name}", request, warnings, dep))
         except InputError as exc:
             sys.stderr.write(f"--from {source_dir.name}: {exc}\n")
@@ -1284,6 +1448,7 @@ def requests_from_args(args, extra, q):
             request, warnings = build_request(Path(name), args, extra)
             check_solvent(request)
             check_method(request)
+            warnings = warnings + check_basis(request) + check_options(request)
             out.append((name, request, warnings, None))
         except InputError as exc:
             sys.stderr.write(f"{name}: {exc}\n")
@@ -1332,7 +1497,14 @@ def cmd_submit(argv):
             # `limit` of them ever run at once.
             waits_for = slots.pop(0)
             deps.append(f"afterany:{waits_for}")
-        script = prepare_job(request, resources, args.job_name, args.email, image_path)
+        try:
+            script = prepare_job(
+                request, resources, args.job_name, args.email, image_path
+            )
+        except InputError as exc:  # a bad site setting or record id
+            sys.stderr.write(f"{label}: {exc}\n")
+            code = 1
+            continue
         job_dir = script.parent
         options = []
         if deps:
@@ -1486,17 +1658,30 @@ def more_memory(job_dir, last_options, last_id):
     candidates = [g for g in (current and current * 2, used and used * 1.5) if g]
     if not candidates:
         die(f"could not tell how much memory {job_dir.name} had; pass --mem=<GB>G")
-    return f"--mem={int(-(-max(candidates) // 1))}G"
+    # Clamped to the same per-job limit a submission is checked against.
+    limit = SITE["max_memory_gb"]
+    wanted = min(int(-(-max(candidates) // 1)), limit)
+    if current and wanted <= current:
+        die(
+            f"{job_dir.name} already had {current:g} GB; QuantUI's limit is "
+            f"{limit} GB per job (QUANTUI_SLURM_MAX_MEMORY_GB)."
+        )
+    return f"--mem={wanted}G"
 
 
 def more_time(job_dir, last_options):
     current = _option_value(last_options, "--time") or _script_value(job_dir, "--time")
     if not current:
         die(f"could not tell {job_dir.name}'s time limit; pass --time=HH:MM:SS")
-    options = SITE["walltime_options"]
-    if current in options and options.index(current) + 1 < len(options):
-        return "--time=" + options[options.index(current) + 1]
-    return f"--time={int(_hours(current) * 2)}:00:00"
+    # The next longer of the time limits a submission may use, never past
+    # the longest one.
+    longer = [w for w in SITE["walltime_options"] if _hours(w) > _hours(current)]
+    if not longer:
+        die(
+            f"{job_dir.name} already had {current}, the longest time limit "
+            f"QuantUI uses ({SITE['walltime_options'][-1]})."
+        )
+    return "--time=" + longer[0]
 
 
 def cmd_rerun(argv):
@@ -1509,7 +1694,7 @@ def cmd_rerun(argv):
     rest = argv[1:]
     q = queue()
     log = job_log(job_dir)
-    for jid, _opts in log:
+    for jid in all_job_ids(job_dir, q):
         if jid in q and q[jid][0] in ACTIVE_STATES:
             die(
                 f"{job_dir.name} is still {q[jid][0].lower()} (job {jid}); "
@@ -1521,7 +1706,11 @@ def cmd_rerun(argv):
             f"you already have {active} QuantUI job(s) queued or running "
             f"(limit {max_jobs()})."
         )
-    last_id, last_options = log[-1] if log else (None, [])
+    if log:
+        last_id, last_options = log[-1]
+    else:  # queued by the app or a bare sbatch: its attempt folders say which
+        tried = [jid for _n, jid, _p in attempts(job_dir) if jid.isdigit()]
+        last_id, last_options = (tried[-1] if tried else None), []
     # Carry the previous attempt's resource overrides forward, then apply new ones.
     options = [
         o for o in last_options if o.startswith("--mem") or o.startswith("--time")
@@ -1560,7 +1749,7 @@ def cmd_cancel(argv):
         die("usage: quantui-batch cancel JOB", 2)
     job_dir = resolve_job(argv[0])
     q = queue()
-    live = [jid for jid in job_ids(job_dir) if jid in q]
+    live = [jid for jid in all_job_ids(job_dir, q) if jid in q]
     if not live:
         print(f"{job_dir.name} has no queued or running job.")
         return 0
@@ -1768,7 +1957,7 @@ def cmd_check(argv):
         )
     root = staging_root()
     try:
-        root.mkdir(parents=True, exist_ok=True)
+        root.mkdir(mode=JOB_DIR_MODE, parents=True, exist_ok=True)
         writable = os.access(str(root), os.W_OK)
     except OSError:
         writable = False
@@ -1785,7 +1974,7 @@ def cmd_check(argv):
             ),
         )
     try:
-        jobs_root().mkdir(parents=True, exist_ok=True)
+        jobs_root().mkdir(mode=JOB_DIR_MODE, parents=True, exist_ok=True)
         report(os.access(str(jobs_root()), os.W_OK), f"job records: {jobs_root()}")
     except OSError:
         report(False, f"job records: {jobs_root()}", "the folder must be writable")

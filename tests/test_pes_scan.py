@@ -858,3 +858,64 @@ class TestRunPesScanAngleDihedral:
         )
         assert result.converged_all is True
         assert all(e == e for e in result.energies_hartree)  # no NaN
+
+
+def test_scan_calculator_gets_the_progress_stream(monkeypatch):
+    """Audit GEOM-11: D3-missing and SCF-rescue notices come from the shared
+    calculator, which used to be built without the scan's stream."""
+    pytest.importorskip("ase")
+    pytest.importorskip("pyscf")  # run_pes_scan checks for PySCF first
+    import io
+
+    import quantui.pes_scan as pes_scan
+
+    seen = {}
+
+    class _Stop(Exception):
+        pass
+
+    class _Calc:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+            raise _Stop
+
+    monkeypatch.setattr(pes_scan, "_QuantUIPySCFCalc", _Calc)
+    stream = io.StringIO()
+    with pytest.raises(_Stop):
+        pes_scan.run_pes_scan(
+            _h2(),
+            scan_type="bond",
+            atom_indices=[0, 1],
+            start=0.7,
+            stop=0.8,
+            steps=2,
+            progress_stream=stream,
+        )
+    assert seen["progress_stream"] is stream
+
+
+def test_descending_log_scan_runs_in_the_requested_direction():
+    """Audit GEOM-11: the log grid was silently reversed for start > stop;
+    the summary calls max − min an energy range, not a barrier."""
+    pytest.importorskip("pyscf")
+    pytest.importorskip("ase")
+    import io
+
+    from quantui.pes_scan import run_pes_scan
+
+    r = run_pes_scan(
+        _h2(),
+        method="RHF",
+        basis="STO-3G",
+        scan_type="bond",
+        atom_indices=[0, 1],
+        start=1.0,
+        stop=0.7,
+        steps=3,
+        grid="log",
+        progress_stream=io.StringIO(),
+    )
+    vals = list(r.scan_parameter_values)
+    assert vals[0] == pytest.approx(1.0) and vals[-1] == pytest.approx(0.7)
+    assert vals == sorted(vals, reverse=True)
+    assert "Energy range" in r.summary() and "Barrier" not in r.summary()

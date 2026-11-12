@@ -117,6 +117,10 @@ class TestAtomEdits:
             se.parse_atom_list("0")
         with pytest.raises(ValueError):
             se.parse_atom_list("4", n_atoms=3)
+        # Audit UI-14: a typo gave int()'s raw "invalid literal" message.
+        for bad in ("x", "1-", "2-y"):
+            with pytest.raises(ValueError, match="not an atom number or range"):
+                se.parse_atom_list(bad)
 
 
 class TestFrozenOptimization:
@@ -151,6 +155,9 @@ class TestFrozenOptimization:
             optimize_geometry(WATER, "RHF", "STO-3G", frozen_atoms=[7])
         with pytest.raises(ValueError, match="nothing to optimize"):
             optimize_geometry(WATER, "RHF", "STO-3G", frozen_atoms=[0, 1, 2])
+        # Audit GEOM-11: a negative index names itself, not the last atom.
+        with pytest.raises(ValueError, match="Frozen atom 0 does not exist"):
+            optimize_geometry(WATER, "RHF", "STO-3G", frozen_atoms=[-1, 1])
 
 
 class TestEditPanel:

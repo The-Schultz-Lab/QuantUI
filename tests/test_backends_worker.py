@@ -14,6 +14,19 @@ from quantui.backends.registry import JobRegistry
 from quantui.backends.worker import run_worker_request
 
 
+@pytest.fixture(autouse=True)
+def _stub_required_single_point():
+    """The worker now runs the app's required single point after every
+    geometry optimization / pre-opt (audit HPC-14). Stub it so tests that
+    mock only the optimizer stay PySCF-free; tests that patch
+    ``run_in_session`` themselves override this."""
+    with patch(
+        "quantui.session_calc.run_in_session",
+        return_value=SimpleNamespace(converged=True, energy_hartree=-1.12),
+    ):
+        yield
+
+
 @pytest.fixture
 def staging(tmp_path):
     staging_dir = tmp_path / "staging" / "job1"
@@ -877,3 +890,151 @@ class TestCheckpointsOutliveAttempts:
         assert resumable2
         assert (job / ".checkpoint").is_dir()
         assert not (a1 / ".checkpoint").exists()
+
+
+class TestInteractiveParity:
+    """Batch worker vs interactive run (audit HPC-14)."""
+
+    @staticmethod
+    def _h2():
+        from quantui.molecule import Molecule
+
+        return Molecule(
+            atoms=["H", "H"],
+            coordinates=[[0, 0, 0], [0, 0, 0.74]],
+            charge=0,
+            multiplicity=1,
+        )
+
+    def _opt(self, energy=-1.10):
+        mol = self._h2()
+        return SimpleNamespace(
+            molecule=mol,
+            trajectory=[mol],
+            energies_hartree=[energy],
+            converged=True,
+            n_steps=3,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2",
+        )
+
+    @staticmethod
+    def _set(staging, **fields):
+        data = json.loads((staging / "request.json").read_text())
+        data.update(fields)
+        (staging / "request.json").write_text(json.dumps(data))
+
+    @patch("quantui.session_calc.run_in_session")
+    @patch("quantui.optimizer.optimize_geometry")
+    def test_gas_phase_geometry_opt_runs_required_final_single_point(
+        self, mock_opt, mock_run, staging
+    ):
+        mock_opt.return_value = self._opt()
+        mock_run.return_value = SimpleNamespace(
+            converged=True,
+            energy_hartree=-1.13,
+            atom_symbols=["H", "H"],
+            mulliken_charges=[0.0, 0.0],
+            npa_charges=[0.01, -0.01],
+            bond_orders=[{"i": 0, "j": 1, "order": 1.0}],
+            dipole_moment_debye=0.0,
+            dipole_vector_debye=[0.0, 0.0, 0.0],
+        )
+        self._set(staging, calc_type="geometry_opt", options={"fmax": 0.05})
+
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "success"
+        mock_run.assert_called_once()
+        assert mock_run.call_args.kwargs["solvent"] is None
+        payload = json.loads((staging / "result.json").read_text())
+        assert payload["energy_hartree"] == -1.13
+        assert payload["npa_charges"] == [0.01, -0.01]
+        assert payload["bond_orders"] == [{"i": 0, "j": 1, "order": 1.0}]
+        assert "Required single-point (after geometry optimisation)" in (
+            staging / "live.log"
+        ).read_text(encoding="utf-8")
+
+    @patch("quantui.session_calc.run_in_session")
+    @patch("quantui.optimizer.optimize_geometry")
+    def test_gas_phase_geometry_opt_unconverged_final_sp_fails(
+        self, mock_opt, mock_run, staging
+    ):
+        mock_opt.return_value = self._opt()
+        mock_run.return_value = SimpleNamespace(converged=False, energy_hartree=-1.0)
+        self._set(staging, calc_type="geometry_opt")
+        assert run_worker_request(staging / "request.json").status == "error"
+
+    @patch("quantui.tddft_calc.run_tddft_calc")
+    @patch("quantui.session_calc.run_in_session")
+    @patch("quantui.optimizer.optimize_geometry")
+    def test_preopt_required_sp_failure_falls_back_to_input_geometry(
+        self, mock_opt, mock_run, mock_tddft, staging
+    ):
+        moved = self._opt()
+        moved.molecule = type(moved.molecule)(
+            atoms=["H", "H"],
+            coordinates=[[0, 0, 0], [0, 0, 0.80]],
+            charge=0,
+            multiplicity=1,
+        )
+        mock_opt.return_value = moved
+        mock_run.return_value = SimpleNamespace(converged=False, energy_hartree=-1.0)
+        mock_tddft.side_effect = RuntimeError("stop here")
+        self._set(staging, calc_type="tddft", options={"preopt_before_run": True})
+
+        run_worker_request(staging / "request.json")
+        mock_run.assert_called_once()  # the required SP after the pre-opt
+        # Like the app: the pre-opt is abandoned, the calc gets the input
+        # geometry, and nothing is cached for a resubmission to reuse.
+        used = mock_tddft.call_args.kwargs["molecule"]
+        assert [list(map(float, c)) for c in used.coordinates][1] == [0, 0, 0.74]
+        assert not list(staging.glob("**/preopt_geometry_*.json"))
+        log = (staging / "live.log").read_text(encoding="utf-8")
+        assert "Geometry optimization failed" in log
+
+    @patch("quantui.session_calc.run_in_session")
+    @patch("quantui.optimizer.optimize_geometry")
+    def test_single_point_preopt_has_no_extra_single_point(
+        self, mock_opt, mock_run, staging
+    ):
+        mock_opt.return_value = self._opt()
+        mock_run.return_value = SimpleNamespace(
+            energy_hartree=-1.12,
+            homo_lumo_gap_ev=10.0,
+            converged=True,
+            n_iterations=5,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2",
+        )
+        self._set(staging, options={"preopt_before_run": True})
+        assert run_worker_request(staging / "request.json").status == "success"
+        mock_run.assert_called_once()  # the single point itself
+
+    @patch("quantui.session_calc.run_in_session")
+    def test_failure_writes_traceback_to_live_log(self, mock_run, staging):
+        mock_run.side_effect = ValueError("boom in the SCF")
+        outcome = run_worker_request(staging / "request.json")
+        assert outcome.status == "error"
+        log = (staging / "live.log").read_text(encoding="utf-8")
+        assert "Traceback (most recent call last)" in log
+        assert "ValueError: boom in the SCF" in log
+
+    @patch("quantui.session_calc.run_in_session")
+    def test_result_json_keeps_elapsed_and_warnings(self, mock_run, staging):
+        mock_run.return_value = SimpleNamespace(
+            energy_hartree=-1.12,
+            homo_lumo_gap_ev=10.0,
+            converged=False,
+            n_iterations=50,
+            method="RHF",
+            basis="STO-3G",
+            formula="H2",
+        )
+        outcome = run_worker_request(staging / "request.json")
+        payload = json.loads((staging / "result.json").read_text())
+        assert payload["elapsed_s"] == outcome.metrics["elapsed_s"]
+        assert isinstance(payload["elapsed_s"], float)
+        assert payload["warnings"] == ["Calculation did not fully converge"]
+        assert outcome.warnings == payload["warnings"]

@@ -561,9 +561,11 @@ switch to def2-SVP before the calculation starts.
 ## Running tests
 
 ```bash
-pip install -e ".[dev]"
+# Same extras as CI. With only ".[dev]" there is no PySCF/ASE/xtb/Sella, and
+# the numerical suite skips silently instead of running.
+pip install -e ".[pyscf,ase,dev,xtb,ts]"
 
-# All tests (Linux/macOS — PySCF available)
+# All tests (Linux/macOS — needs the extras above)
 pytest -m "not network"
 
 # Skip PySCF-dependent tests (Windows without container)
@@ -627,7 +629,7 @@ quantui/                  Main package
 notebooks/
   molecule_computations.ipynb   Main user-facing interface (3-cell launcher)
   tutorials/                    Step-by-step guided notebooks (01–05)
-tests/                    pytest test suite (~4,100 tests; run in parallel via pytest-xdist)
+tests/                    pytest test suite (~4,700 tests; run in parallel via pytest-xdist)
 apptainer/                Container definition for reproducible deployment
 local-setup/              Conda environment definition
 pyproject.toml            Package metadata and tool config

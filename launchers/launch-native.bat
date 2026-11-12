@@ -20,6 +20,16 @@ if not defined QUANTUI_APP_TOKEN (
 )
 if defined WSLENV (set "WSLENV=%WSLENV%:QUANTUI_APP_TOKEN") else (set "WSLENV=QUANTUI_APP_TOKEN")
 
+REM Something already serving on 8867 (an earlier run, another app) would be
+REM opened in the browser instead of this one, so refuse to start.
+powershell -NoProfile -Command "$c = New-Object Net.Sockets.TcpClient; try { $c.Connect('127.0.0.1', 8867); $c.Close(); exit 0 } catch { exit 1 }" > nul 2>&1
+if not errorlevel 1 (
+    echo ERROR: port 8867 is already in use - is QuantUI already running?
+    echo Close that window or program first, then run this again.
+    pause
+    exit /b 1
+)
+
 REM Runs Voila directly from the quantui conda env inside WSL.
 REM pip install -e . is skipped when pyproject.toml has not changed since the
 REM last install (.dev_install_stamp). quantui/*.py changes are always live in
@@ -39,10 +49,14 @@ REM make EVERY subsequent offline launch retry (and re-delay on) pip — the
 REM reinstall is attempted once, then skipped. quantui/*.py + package-data are
 REM live in editable mode, so a skipped reinstall is harmless offline; re-run
 REM `pip install -e .` manually when online if you add a real dependency.
-start "QuantUI [native]" wsl -d Ubuntu -- bash -c "cd '%WSLPATH%' && for c in ~/miniforge3 ~/miniconda3 ~/anaconda3 /opt/conda; do [ -f $c/etc/profile.d/conda.sh ] && . $c/etc/profile.d/conda.sh && break; done && conda activate quantui && if [ pyproject.toml -nt .dev_install_stamp ] || ! python -c 'import quantui' 2>/dev/null; then pip install -e . -q --timeout=5 --retries=0 && touch .dev_install_stamp || { echo '[QuantUI] editable reinstall skipped (offline?) - using live source'; touch .dev_install_stamp; }; fi; rm -rf quantui/__pycache__ && PYTHONDONTWRITEBYTECODE=1 voila notebooks/molecule_computations.ipynb --no-browser --port=8867 --Voila.ip=127.0.0.1 --Voila.token=$QUANTUI_APP_TOKEN --ServerApp.disable_check_xsrf=True"
+start "QuantUI [native]" wsl -d Ubuntu --cd "%WSLPATH%" -- bash -c "for c in ~/miniforge3 ~/miniconda3 ~/anaconda3 /opt/conda; do [ -f $c/etc/profile.d/conda.sh ] && . $c/etc/profile.d/conda.sh && break; done && conda activate quantui && if [ pyproject.toml -nt .dev_install_stamp ] || ! python -c 'import quantui' 2>/dev/null; then pip install -e . -q --timeout=5 --retries=0 && touch .dev_install_stamp || { echo '[QuantUI] editable reinstall skipped (offline?) - using live source'; touch .dev_install_stamp; }; fi; rm -rf quantui/__pycache__ && PYTHONDONTWRITEBYTECODE=1 voila notebooks/molecule_computations.ipynb --no-browser --port=8867 --Voila.ip=127.0.0.1 --Voila.token=$QUANTUI_APP_TOKEN --ServerApp.disable_check_xsrf=True"
 
+REM The WSL window starts Voila with --cd rather than a "cd '...'" inside bash -c,
+REM which broke on an apostrophe in the folder path. Wait (up to 90 s) for it
+REM to answer on the port, then open the browser.
 echo Waiting for Voila to start...
-timeout /t 6 /nobreak > nul
+powershell -NoProfile -Command "for ($i = 0; $i -lt 90; $i++) { $c = New-Object Net.Sockets.TcpClient; try { $c.Connect('127.0.0.1', 8867); $c.Close(); exit 0 } catch { Start-Sleep -Seconds 1 } }; exit 1" > nul 2>&1
+if errorlevel 1 echo Voila did not answer within 90 s - check the QuantUI [native] WSL window.
 start http://localhost:8867/?token=%QUANTUI_APP_TOKEN%
 
 echo.

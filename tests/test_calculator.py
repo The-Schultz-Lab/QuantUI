@@ -306,7 +306,7 @@ class TestScriptGeneration:
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
 
-        npz = np.load(tmp_path / "results.npz", allow_pickle=True)
+        npz = np.load(tmp_path / "results.npz", allow_pickle=False)
         assert "mol_atom" in npz.files
         assert "mol_basis" in npz.files
         assert "mo_occ" in npz.files
@@ -367,7 +367,7 @@ class TestScriptGeneration:
 
         import numpy as np
 
-        npz = np.load(tmp_path / "results.npz", allow_pickle=True)
+        npz = np.load(tmp_path / "results.npz", allow_pickle=False)
         # RHF/STO-3G water energy is ~-74.963; any real correlation energy
         # must make the total more negative than that.
         assert float(npz["energy"]) < -74.97

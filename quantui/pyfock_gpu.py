@@ -13,7 +13,6 @@ honours QuantUI's persistent GPU preference and process-wide opt-out.
 from __future__ import annotations
 
 import logging
-import os
 from functools import lru_cache
 from typing import Any, Optional
 
@@ -54,7 +53,9 @@ def _device_name(cupy_module: Any) -> str:
 @lru_cache(maxsize=1)
 def _probe_pyfock_gpu() -> tuple[bool, Optional[str], str]:
     """Return ``(available, device_name, reason)`` for the PyFock GPU path."""
-    if os.environ.get("QUANTUI_DISABLE_GPU", "").strip() in ("1", "true", "True"):
+    from .gpu_offload import env_gpu_disabled
+
+    if env_gpu_disabled():
         return False, None, _REASON_ENV_DISABLED
     if not _gpu_enabled_in_settings():
         return False, None, _REASON_SETTINGS_DISABLED

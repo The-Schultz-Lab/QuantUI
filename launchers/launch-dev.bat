@@ -32,12 +32,26 @@ if not defined QUANTUI_APP_TOKEN (
 )
 if defined WSLENV (set "WSLENV=%WSLENV%:QUANTUI_APP_TOKEN") else (set "WSLENV=QUANTUI_APP_TOKEN")
 
+REM Something already serving on 8866 (an earlier run, another app) would be
+REM opened in the browser instead of this one, so refuse to start.
+powershell -NoProfile -Command "$c = New-Object Net.Sockets.TcpClient; try { $c.Connect('127.0.0.1', 8866); $c.Close(); exit 0 } catch { exit 1 }" > nul 2>&1
+if not errorlevel 1 (
+    echo ERROR: port 8866 is already in use - is QuantUI already running?
+    echo Close that window or program first, then run this again.
+    pause
+    exit /b 1
+)
+
 REM Uses the local notebook on disk instead of the baked-in copy.
 REM Edits to notebooks/ take effect immediately — no container rebuild needed.
-start "QuantUI [dev]" wsl -d Ubuntu -- bash -c "cd '%WSLPATH%' && apptainer exec --cleanenv quantui.sif voila notebooks/molecule_computations.ipynb --no-browser --port=8866 --Voila.ip=127.0.0.1 --Voila.token=$QUANTUI_APP_TOKEN --ServerApp.disable_check_xsrf=True"
+start "QuantUI [dev]" wsl -d Ubuntu --cd "%WSLPATH%" -- bash -c "apptainer exec --cleanenv quantui.sif voila notebooks/molecule_computations.ipynb --no-browser --port=8866 --Voila.ip=127.0.0.1 --Voila.token=$QUANTUI_APP_TOKEN --ServerApp.disable_check_xsrf=True"
 
+REM The WSL window starts Voila with --cd rather than a "cd '...'" inside bash -c,
+REM which broke on an apostrophe in the folder path. Wait (up to 90 s) for it
+REM to answer on the port, then open the browser.
 echo Waiting for Voila to start...
-timeout /t 6 /nobreak > nul
+powershell -NoProfile -Command "for ($i = 0; $i -lt 90; $i++) { $c = New-Object Net.Sockets.TcpClient; try { $c.Connect('127.0.0.1', 8866); $c.Close(); exit 0 } catch { Start-Sleep -Seconds 1 } }; exit 1" > nul 2>&1
+if errorlevel 1 echo Voila did not answer within 90 s - check the QuantUI [dev] WSL window.
 start http://localhost:8866/?token=%QUANTUI_APP_TOKEN%
 
 echo.

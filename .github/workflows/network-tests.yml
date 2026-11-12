@@ -1,0 +1,39 @@
+name: Network tests
+
+# The `network`-marked tests (live PubChem lookups, installing the built wheel
+# from PyPI into a fresh venv) are deselected by every job in ci.yml, so
+# without this workflow they ran nowhere (audit INFRA-12). They depend on
+# outside services, so they run on a weekly schedule (and on demand) instead of
+# gating pull requests: a red run here means "PubChem/PyPI changed or broke",
+# not "this PR broke something".
+
+on:
+  schedule:
+    # Mondays 06:41 UTC (off the hour to dodge the scheduler's top-of-hour rush).
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-network:
+    name: Network tests (ubuntu-24.04, Python 3.11)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package and dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[pyscf,ase,dev]"
+
+      - name: Run network tests
+        run: pytest -m network --no-header -q -n0

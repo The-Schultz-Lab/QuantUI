@@ -23,7 +23,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from .molecule import Molecule
+from .molecule import (
+    _FORTRAN_EXP,
+    _ISOTOPE_LABELS,
+    ISOTOPE_NOTE,
+    Molecule,
+    _is_atom_row,
+    normalize_xyz_text,
+    parse_xyz_input,
+)
 
 SUPPORTED_SUFFIXES = (
     ".xyz",
@@ -53,9 +61,111 @@ class UploadedStructure:
     notes: List[str]
 
 
+#: Longest stem kept from an uploaded filename (the temp file is named after
+#: it; an over-long name used to raise a raw OSError — audit DATA-16).
+_MAX_STEM_CHARS = 100
+
+
 def _safe_filename(name: str) -> str:
     stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", Path(str(name)).name).strip("._")
-    return stem or "upload"
+    if not stem:
+        return "upload"
+    suffix = Path(stem).suffix[:16]
+    base = stem[: len(stem) - len(Path(stem).suffix)] if Path(stem).suffix else stem
+    return (base[:_MAX_STEM_CHARS] or "upload") + suffix
+
+
+def _decode_upload_text(content: bytes) -> str:
+    """Decode an uploaded text file: UTF-16 (BOM) or UTF-8, normalised.
+
+    Every supported format is text. UTF-16 files (some Windows exports) used
+    to fail with a raw decode error and a UTF-8 BOM broke the XYZ count line
+    (audit DATA-16); line endings and the Unicode minus are normalised too.
+    """
+    if content.startswith((b"\xff\xfe", b"\xfe\xff")):
+        text = content.decode("utf-16", errors="replace")
+    else:
+        text = content.decode("utf-8", errors="replace")
+    return normalize_xyz_text(text)
+
+
+def _prepare_xyz(text: str, notes: List[str]) -> str:
+    """Map D/T labels to H and Fortran D exponents to E on XYZ atom rows."""
+    out: List[str] = []
+    mapped = False
+    for line in text.split("\n"):
+        if _is_atom_row(line):
+            m = re.match(r"(\s*)(\S+)(.*)", line)
+            assert m is not None  # an atom row has a symbol
+            lead, symbol, rest = m.groups()
+            if symbol in _ISOTOPE_LABELS:
+                symbol, mapped = "H", True
+            line = lead + symbol + _FORTRAN_EXP.sub("e", rest)
+        out.append(line)
+    if mapped:
+        notes.append(ISOTOPE_NOTE)
+    return "\n".join(out)
+
+
+def _xyz_is_headerless(text: str) -> bool:
+    """True when the first content line is not an XYZ atom-count line."""
+    for line in text.split("\n"):
+        if line.strip():
+            try:
+                int(line.strip())
+            except ValueError:
+                return True
+            return False
+    return False
+
+
+def _last_xyz_comment(text: str) -> Optional[str]:
+    """Comment line of the LAST frame of a (multi-frame) XYZ file."""
+    lines = text.split("\n")
+    idx, comment = 0, None
+    while idx < len(lines):
+        stripped = lines[idx].strip()
+        if not stripped:
+            idx += 1
+            continue
+        try:
+            n = int(stripped)
+        except ValueError:
+            break
+        if idx + 1 < len(lines):
+            comment = lines[idx + 1]
+        idx += n + 2
+    return comment
+
+
+def _drop_pdb_altlocs(text: str, notes: List[str]) -> str:
+    """Keep one alternate location per atom (``A``, else the first seen).
+
+    ASE loads every altLoc record, so a water with two conformers of O came
+    out as H2O2 (audit DATA-16).
+    """
+    lines = text.split("\n")
+    alts = [
+        ln[16]
+        for ln in lines
+        if ln.startswith(("ATOM", "HETATM")) and len(ln) > 16 and ln[16] != " "
+    ]
+    if not alts:
+        return text
+    keep = "A" if "A" in alts else alts[0]
+    kept = [
+        ln
+        for ln in lines
+        if not (
+            ln.startswith(("ATOM", "HETATM"))
+            and len(ln) > 16
+            and ln[16] not in (" ", keep)
+        )
+    ]
+    notes.append(
+        f"The PDB file has alternate atom locations; loaded altLoc '{keep}' only."
+    )
+    return "\n".join(kept)
 
 
 def _gaussian_input_charge_mult(text: str) -> Optional[Tuple[int, int]]:
@@ -168,9 +278,11 @@ def _from_ase(
             from_file = True
         notes.append("Loaded the last geometry in the Gaussian output.")
     elif suffix == ".xyz":
-        lines = text.splitlines()
-        if len(lines) > 1:
-            m = _CHARGE_MULT_COMMENT.search(lines[1])
+        # The geometry comes from the LAST frame, so its comment line is the
+        # one that describes it (was: always frame 1's — audit DATA-16).
+        comment = _last_xyz_comment(text)
+        if comment is not None:
+            m = _CHARGE_MULT_COMMENT.search(comment)
             if m:
                 charge, multiplicity = int(m.group(1)), int(m.group(2))
                 from_file = True
@@ -217,11 +329,29 @@ def read_uploaded_structure(
     if len(content) > MAX_UPLOAD_BYTES:
         raise ValueError("File is too large for a structure upload (limit 20 MB).")
     notes: List[str] = []
+    text = _decode_upload_text(content)
+    if suffix == ".xyz":
+        text = _prepare_xyz(text, notes)
+    elif suffix == ".pdb":
+        text = _drop_pdb_altlocs(text, notes)
     with tempfile.TemporaryDirectory(prefix="quantui-upload-") as tmp:
         path = Path(tmp) / safe
-        path.write_bytes(content)
         try:
-            if suffix in (".mol", ".sdf", ".mol2"):
+            path.write_text(text, encoding="utf-8")
+            if suffix == ".xyz" and _xyz_is_headerless(text):
+                # Bare "SYMBOL X Y Z" rows, as the paste box accepts.
+                atoms, coords = parse_xyz_input(text)
+                mol, from_file = (
+                    Molecule(
+                        atoms,
+                        coords,
+                        charge=int(charge),
+                        multiplicity=int(multiplicity),
+                        validate_spin=False,
+                    ),
+                    False,
+                )
+            elif suffix in (".mol", ".sdf", ".mol2"):
                 mol, from_file = _from_rdkit(path, suffix, charge, multiplicity, notes)
             else:
                 mol, from_file = _from_ase(path, suffix, charge, multiplicity, notes)

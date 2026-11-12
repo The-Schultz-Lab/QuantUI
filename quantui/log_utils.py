@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import socket
 import subprocess
 import uuid
@@ -417,16 +418,22 @@ def _extract_warnings(
         if not stripped:
             continue
         lower = stripped.lower()
-        if any(
-            kw in lower
-            for kw in ("warn", "error", "failed", "not converge", "imaginary")
-        ):
+        if _DIGEST_KEYWORDS.search(lower):
             if drop_degeneracy and _is_homo_lumo_degeneracy_warning(lower):
                 continue
             if stripped not in seen:
                 seen.add(stripped)
                 found.append(stripped)
     return found
+
+
+# Whole-word keywords for the warnings digest. A bare substring test also
+# flagged identifiers that merely contain the letters ("error_tol",
+# "terror", "unfailed") — audit DATA-17. "warn" stays a prefix so "warning",
+# "warnings.warn" and "UserWarning" still match.
+_DIGEST_KEYWORDS = re.compile(
+    r"warn|\berrors?\b|\bfailed\b|\bnot converge|\bimaginary\b"
+)
 
 
 def format_log_footer(

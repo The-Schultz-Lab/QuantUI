@@ -131,14 +131,21 @@ _LAZY_ATTRS = {
             "search_pubchem_candidates",
             "smiles_to_xyz",
             "student_friendly_fetch",
-            "student_friendly_resolve",
             "student_friendly_smiles_to_xyz",
             "validate_smiles",
         )
     },
     **{
         name: (".structure_providers", name)
-        for name in ("ResolvedStructure", "resolve_structure", "search_candidates")
+        # student_friendly_resolve: the chain-backed resolver the UI uses
+        # (bundled library first, then PubChem/CACTUS), not pubchem.py's
+        # PubChem-only one of the same name (audit DATA-17).
+        for name in (
+            "ResolvedStructure",
+            "resolve_structure",
+            "search_candidates",
+            "student_friendly_resolve",
+        )
     },
     **{
         name: (".visualization_py3dmol", name)
@@ -277,6 +284,9 @@ __all__ = [
     # Reorganization energy — Marcus 4-point (optional — Linux/WSL)
     "ReorganizationEnergyResult",
     "run_reorganization_energy",
+    # Relaxed PES scan (optional — Linux/WSL)
+    "PESScanResult",
+    "run_pes_scan",
     # PubChem (optional)
     "fetch_molecule",
     "fetch_structure",

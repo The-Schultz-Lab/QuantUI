@@ -239,8 +239,10 @@ class SlurmBackend:
             }
 
         estimates = estimate_slurm_resources(request)
-        cores = cores or estimates["cores"]
-        memory_gb = memory_gb or estimates["memory_gb"]
+        # ``is None``: an explicit 0 is refused by validate_resources, not
+        # silently replaced by the estimate.
+        cores = estimates["cores"] if cores is None else cores
+        memory_gb = estimates["memory_gb"] if memory_gb is None else memory_gb
         walltime = walltime or estimates["walltime"]
         resources = validate_resources(cores, memory_gb, walltime)
 
@@ -249,6 +251,7 @@ class SlurmBackend:
         # nothing behind.
         try:
             site_lines = cfg.site_directives()
+            self.partition = cfg.validate_partition(self.partition)
         except ValueError as exc:
             raise SecurityError(str(exc)) from exc
         email = validate_email(email)

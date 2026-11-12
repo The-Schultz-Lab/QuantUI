@@ -61,9 +61,13 @@ if [ -z "$CONDA_SH" ]; then
     exit 1
 fi
 
+# conda's activation scripts read unset variables, which `set -u` turns
+# into a fatal error, so nounset is off for these two lines only.
+set +u
 # shellcheck disable=SC1090
 source "$CONDA_SH"
 conda activate quantui
+set -u
 
 # pip install -e . is skipped when pyproject.toml has not changed since the
 # last install (.dev_install_stamp). quantui/*.py changes are always live in
@@ -101,6 +105,22 @@ PORT=8867
 TOKEN="${QUANTUI_APP_TOKEN:-$(python -c 'import secrets; print(secrets.token_urlsafe(24))')}"
 URL="http://localhost:${PORT}/?token=${TOKEN}"
 
+# True when something answers on 127.0.0.1:$1 (python is the conda env's).
+port_open() {
+    python -c 'import socket, sys
+s = socket.socket()
+s.settimeout(0.5)
+sys.exit(0 if s.connect_ex(("127.0.0.1", int(sys.argv[1]))) == 0 else 1)' "$1"
+}
+
+# A server already on the port (an earlier run, another app) would be opened
+# in the browser instead of this one.
+if port_open "${PORT}"; then
+    echo "ERROR: port ${PORT} is already in use - is QuantUI already running?"
+    echo "       Stop that server first, then run this again."
+    exit 1
+fi
+
 echo "Starting Voilà on ${URL}..."
 echo
 
@@ -114,10 +134,24 @@ voila notebooks/molecule_computations.ipynb \
     --ServerApp.disable_check_xsrf=True &
 VOILA_PID=$!
 
-# Give Voilà a moment to bind to the port before opening the browser. Try the
-# common openers in order; under WSL, wslview/cmd.exe hand off to the Windows
-# browser. All are non-fatal — the URL is printed regardless.
-sleep 4
+# Wait (up to 60 s) until Voilà answers on the port, rather than a fixed
+# sleep; stop early if it exited (e.g. a startup error).
+waited=0
+until port_open "${PORT}"; do
+    if ! kill -0 "${VOILA_PID}" 2>/dev/null; then
+        echo "ERROR: Voilà exited during startup - see the messages above."
+        wait "${VOILA_PID}" || true
+        exit 1
+    fi
+    if [ "${waited}" -ge 60 ]; then
+        echo "Voilà has not answered on port ${PORT} after 60 s; opening anyway."
+        break
+    fi
+    sleep 1
+    waited=$((waited + 1))
+done
+# Try the common openers in order; under WSL, wslview/cmd.exe hand off to the
+# Windows browser. All are non-fatal — the URL is printed regardless.
 if command -v wslview >/dev/null 2>&1; then
     wslview "${URL}" >/dev/null 2>&1 || true
 elif command -v xdg-open >/dev/null 2>&1; then

@@ -131,6 +131,7 @@ class TestPyfockAdapter:
         assert result.native_result.engine_id == "pyfock"
         assert result.native_result.density_fit is True
         assert result.native_result.scf_variant == "RKS"
+        assert result.native_result.multiplicity == 1  # audit SCF-12
         assert result.native_result.mo_energy_hartree.tolist() == [-0.8, -0.4, 0.1]
         assert result.native_result.mo_coeff.shape == (3, 3)
         assert result.native_result.mulliken_charges == pytest.approx([6.0, 0.0, 0.0])
@@ -161,6 +162,23 @@ class TestPyfockAdapter:
         with pytest.raises(UnsupportedCapabilityError) as exc:
             PyfockEngine().run(_request(**{field: value}))
         assert message in exc.value.user_message
+
+    def test_elements_needing_an_ecp_are_rejected(self):
+        """Audit SCF-12: def2 puts an ECP on Z > 36; PyFock applies none."""
+        mol = {
+            "atoms": ["H", "I"],
+            "coordinates": [[0.0, 0.0, 0.0], [0.0, 0.0, 1.61]],
+        }
+        with pytest.raises(UnsupportedCapabilityError) as exc:
+            PyfockEngine().run(_request(molecule=mol))
+        assert "I" in str(exc.value)
+        assert "effective core potential" in exc.value.user_message
+
+    def test_krypton_and_lighter_are_not_ecp_rejected(self):
+        from quantui.engines.pyfock_engine import _ecp_elements
+
+        assert _ecp_elements(["H", "Br", "Kr", "C"]) == []
+        assert _ecp_elements(["Rb", "I", "Xe", "I"]) == ["I", "Rb", "Xe"]
 
     def test_third_party_failure_becomes_error_result(self):
         class FailingDFT(_FakeDFT):

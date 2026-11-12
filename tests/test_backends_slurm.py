@@ -317,6 +317,38 @@ class TestSlurmBackendResourceLines:
         assert "#SBATCH --cpus-per-task=8\n" in text
         assert 'OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"' in text
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="runs bash")
+    def test_pyscf_max_memory_follows_the_allocation(self, tmp_path):
+        """PySCF's memory cap is 80% of the job's memory (audit HPC-15)."""
+        import re
+        import shutil
+
+        if shutil.which("bash") is None:
+            pytest.skip("bash not available")
+        text = self._prepare(tmp_path)
+        gb = int(re.search(r"#SBATCH --mem=(\d+)G", text).group(1))
+        script = tmp_path / "submit.slurm"
+        script.write_text(text)
+        assert subprocess.run(["bash", "-n", str(script)]).returncode == 0
+
+        lines = text.splitlines()
+        start = next(i for i, ln in enumerate(lines) if "_quantui_mem_mb=" in ln)
+        end = next(i for i, ln in enumerate(lines) if "PYSCF_MAX_MEMORY=" in ln)
+        block = "\n".join(lines[start : end + 1]) + '\necho "$PYSCF_MAX_MEMORY"\n'
+
+        def run(env_mem):
+            env = {"PATH": "/usr/bin:/bin"}
+            if env_mem is not None:
+                env["SLURM_MEM_PER_NODE"] = env_mem
+            out = subprocess.run(
+                ["bash", "-c", block], env=env, capture_output=True, text=True
+            )
+            return int(out.stdout.strip())
+
+        assert run("10240") == 8192  # Slurm's value wins (e.g. --more-memory)
+        assert run(None) == gb * 1024 * 4 // 5  # the #SBATCH --mem fallback
+        assert run("16G") == gb * 1024 * 4 // 5  # not plain MB → fallback
+
     def test_cpu_job_has_no_nv_and_no_gpu_lines(self, tmp_path):
         text = self._prepare(tmp_path)
         assert "apptainer exec --bind" in text

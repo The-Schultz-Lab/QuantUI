@@ -11,6 +11,8 @@ from __future__ import annotations
 import sys
 from unittest.mock import patch
 
+import pytest
+
 from quantui.gpu_offload import (
     _GPU_UNSUPPORTED_METHODS,
     is_gpu_available,
@@ -57,6 +59,22 @@ class TestIsGpuAvailable:
         _clear_cache()
         available, _name = is_gpu_available()
         assert available is False
+
+    @pytest.mark.parametrize("value", ["1", "TRUE", "yes", "On", " true "])
+    def test_env_gpu_disabled_matches_quantui_truthy(self, monkeypatch, value):
+        """Audit SCF-13: same accepted values as freq_ir_workers._truthy."""
+        from quantui.freq_ir_workers import _truthy
+        from quantui.gpu_offload import env_gpu_disabled
+
+        monkeypatch.setenv("QUANTUI_DISABLE_GPU", value)
+        assert env_gpu_disabled() is True is _truthy(value)
+
+    @pytest.mark.parametrize("value", ["", "0", "false", "no", "off"])
+    def test_env_gpu_disabled_false_values(self, monkeypatch, value):
+        from quantui.gpu_offload import env_gpu_disabled
+
+        monkeypatch.setenv("QUANTUI_DISABLE_GPU", value)
+        assert env_gpu_disabled() is False
 
     def test_missing_env_var_does_not_force_cpu(self, monkeypatch):
         monkeypatch.delenv("QUANTUI_DISABLE_GPU", raising=False)

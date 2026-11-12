@@ -6,10 +6,13 @@ Reference scripts for operator-driven NCShare / Apptainer batch jobs.
 
 | File | Purpose |
 |------|---------|
-| `quantui-batch.sbatch` | Reference `sbatch` template (partition must be set) |
 | `quantui-gpu-test.sbatch` | GPU smoke test (operator use) |
 
-QuantUI generates per-job scripts automatically when students submit from the UI.
+QuantUI generates a per-job `submit.slurm` in each job folder when a job is
+submitted from the UI or with `quantui-batch`; that generated script is the
+reference for what a QuantUI batch job runs. (The hand-edited
+`quantui-batch.sbatch` template that used to live here had drifted from it and
+was removed.)
 
 ## Submitting from a terminal (`quantui-batch`)
 
@@ -19,7 +22,6 @@ the image there and never imports QuantUI: it is a standard-library Python
 3.6+ script that writes the same job folder `SlurmBackend.prepare()` writes
 (`request.json`, `submit.slurm`, and the job record the app reads), then
 calls `sbatch`. The calculation runs inside the image on a compute node.
-(`quantui-batch.sbatch` above is an unrelated hand-edited reference template.)
 
 The values the launcher has to agree with QuantUI on (element table, method
 list, limits, estimate factors, the batch-script template, the image's own

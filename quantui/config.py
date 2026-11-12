@@ -146,7 +146,8 @@ METHOD_INFO = {
         "type": "dft",
         "label": "PBE-D3 — PBE + D3 Dispersion Correction",
         "description": (
-            "PBE GGA functional with Grimme's D3BJ empirical dispersion correction. "
+            "PBE GGA functional with Grimme's D3 empirical dispersion correction "
+            "(zero damping, as Gaussian's EmpiricalDispersion=GD3). "
             "Dramatically improves non-covalent interaction energies over plain PBE "
             "at negligible extra cost."
         ),
@@ -167,9 +168,9 @@ METHOD_INFO = {
         "label": "CCSD — Coupled Cluster with Singles and Doubles",
         "description": (
             "Post-HF coupled-cluster method that includes all single and double "
-            "excitations from the HF reference. Often called the gold standard for "
-            "single-reference systems — significantly more accurate than MP2 — but "
-            "scales as O(N⁶). Memory and runtime both grow steeply with basis size; "
+            "excitations from the HF reference. Usually more accurate than MP2 for "
+            "single-reference systems, but without the perturbative triples that "
+            "make CCSD(T) the 'gold standard'. Scales as O(N⁶). Memory and runtime both grow steeply with basis size; "
             "expect very small molecules (~10 heavy atoms or fewer) only."
         ),
         "use_for": "High-accuracy benchmarks for small closed-shell molecules.",

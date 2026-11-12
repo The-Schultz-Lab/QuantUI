@@ -38,12 +38,7 @@ def push_scan_highlight(app: Any, indices: Sequence[int]) -> None:
     bridge = getattr(app, "_scan_pick_bridge", None)
     if bridge is None:
         return
-    orig = getattr(app, "_measure_js_bridge", None)
-    try:
-        app._measure_js_bridge = bridge
-        push_highlight(app, indices, slot=PES_PICK_INBOX_CLASS)
-    finally:
-        app._measure_js_bridge = orig
+    push_highlight(app, indices, slot=PES_PICK_INBOX_CLASS, bridge=bridge)
 
 
 def finalize_pes_calc_html(app: Any, html: str, backend: Any) -> str:

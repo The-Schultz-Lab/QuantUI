@@ -7,8 +7,26 @@ import argparse
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
+
+# Real squeue lists only jobs that have not finished.
+TERMINAL_STATES = frozenset(
+    {
+        "COMPLETED",
+        "CANCELLED",
+        "FAILED",
+        "TIMEOUT",
+        "OUT_OF_MEMORY",
+        "NODE_FAIL",
+        "PREEMPTED",
+        "BOOT_FAIL",
+        "DEADLINE",
+        "REVOKED",
+    }
+)
 
 
 def _state_dir() -> Path:
@@ -49,7 +67,7 @@ def cmd_squeue(argv: list[str]) -> int:
     state_dir = _state_dir()
     for job_id, data, _path in _iter_jobs(state_dir, ids):
         status = data.get("status", "PENDING")
-        if status == "COMPLETED":
+        if str(status).upper() in TERMINAL_STATES:
             continue
         if "%i" in fmt and "%T" in fmt:
             print(f"{job_id} {status}")
@@ -88,7 +106,13 @@ def cmd_scancel(argv: list[str]) -> int:
     job_id = argv[0]
     path = _state_dir() / f"{job_id}.json"
     if not path.exists():
-        return 0
+        # Real scancel fails for a job id it does not know.
+        print(
+            f"scancel: error: Kill job error on job id {job_id}: "
+            "Invalid job id specified",
+            file=sys.stderr,
+        )
+        return 1
     data = json.loads(path.read_text(encoding="utf-8"))
     data["status"] = "CANCELLED"
     path.write_text(json.dumps(data), encoding="utf-8")
@@ -109,18 +133,36 @@ def cmd_sbatch(argv: list[str]) -> int:
         return 1
 
     job_id = str(10000 + len(list(state_dir.glob("*.json"))))
+    # A script bash cannot parse would fail on the compute node; catch it here.
+    bash = shutil.which("bash")
+    if bash:
+        check = subprocess.run(
+            [bash, "-n", script_path], capture_output=True, text=True, timeout=30
+        )
+        if check.returncode != 0:
+            print(
+                f"sbatch: error: batch script is not valid bash:\n{check.stderr}",
+                file=sys.stderr,
+            )
+            return 1
+
     content = Path(script_path).read_text(encoding="utf-8")
-    cores = memory = walltime = None
+    ntasks = cpus_per_task = memory = None
     for line in content.splitlines():
         m = re.search(r"#SBATCH\s+--ntasks=(\d+)", line)
         if m:
-            cores = int(m.group(1))
+            ntasks = int(m.group(1))
+        m = re.search(r"#SBATCH\s+--cpus-per-task=(\d+)", line)
+        if m:
+            cpus_per_task = int(m.group(1))
         m = re.search(r"#SBATCH\s+--mem=(\d+)G", line)
         if m:
             memory = int(m.group(1))
-        m = re.search(r"#SBATCH\s+--time=(\S+)", line)
-        if m:
-            walltime = m.group(1)
+
+    # Cores the job asks for: tasks x CPUs per task (QuantUI uses 1 x N).
+    cores = None
+    if ntasks is not None or cpus_per_task is not None:
+        cores = (ntasks or 1) * (cpus_per_task or 1)
 
     limits_path = state_dir / "config.json"
     max_cores = 32

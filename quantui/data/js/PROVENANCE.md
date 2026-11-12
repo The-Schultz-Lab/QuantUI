@@ -18,4 +18,8 @@
 To update: download the matching `3dmol@<version>/build/3Dmol-min.js`, bump
 `THREEDMOL_VERSION` in `viz_assets.py`, and confirm the version still matches
 py3Dmol's `view()` constructor default `js=` URL (so the generated viewer
-calls stay API-compatible).
+calls stay API-compatible). Patch-level skew is tolerated (py3Dmol 2.5.5
+targets 3Dmol.js 2.5.5 while 2.5.4 is vendored); `pyproject.toml` caps py3Dmol
+below the next minor, and `tests/test_viz_assets_version.py` fails when the
+installed py3Dmol targets a different major.minor than the vendored bundle —
+re-vendor and raise that cap together.

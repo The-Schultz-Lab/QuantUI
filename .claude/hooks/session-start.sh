@@ -16,15 +16,50 @@ fi
 
 cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}"
 
+# QuantUI supports Python 3.9-3.11 only; on 3.12+ the install fails
+# (pyscf-properties does not build). The cloud image's default `python` can be
+# newer (3.13 at the time of audit INFRA-11), which left sessions with nothing
+# installed. In that case build a 3.11 venv in .venv (uv preferred, else a
+# system python3.11) and install there instead.
+PY="python"
+_supported() {
+  "$1" -c 'import sys; sys.exit(0 if (3, 9) <= sys.version_info[:2] <= (3, 11) else 1)' \
+    >/dev/null 2>&1
+}
+if ! _supported "$PY"; then
+  if [ -x .venv/bin/python ] && _supported .venv/bin/python; then
+    echo "Reusing existing .venv ($(.venv/bin/python --version 2>&1))." >&2
+  elif command -v uv >/dev/null 2>&1; then
+    echo "Default python is outside 3.9-3.11; creating .venv with uv (3.11)." >&2
+    # --seed puts pip into the venv so the `-m pip` calls below work unchanged.
+    uv venv --seed -p python3.11 .venv
+  elif command -v python3.11 >/dev/null 2>&1; then
+    echo "Default python is outside 3.9-3.11; creating .venv with python3.11." >&2
+    python3.11 -m venv .venv
+  else
+    echo "WARNING: default python is outside 3.9-3.11 and neither uv nor python3.11 is available; the install below will probably fail." >&2
+  fi
+  if [ -x .venv/bin/python ] && _supported .venv/bin/python; then
+    PY="$PWD/.venv/bin/python"
+    # Make the venv the session's interpreter for every later Bash call.
+    if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+      {
+        echo "export VIRTUAL_ENV=\"$PWD/.venv\""
+        echo "export PATH=\"$PWD/.venv/bin:\$PATH\""
+      } >> "$CLAUDE_ENV_FILE"
+    fi
+  fi
+fi
+
 # Best-effort: a newer pip resolves faster, but some base images ship a
 # distro-managed pip that can't self-upgrade — don't let that abort setup.
-python -m pip install --upgrade pip || true
+"$PY" -m pip install --upgrade pip || true
 
 # Ensure a modern setuptools/wheel. Some base images ship a distro-patched
 # setuptools that breaks source builds of pyscf-properties with
 # "AttributeError: install_layout". --ignore-installed sidesteps the
 # distro-managed copy (which has no RECORD and so can't be uninstalled).
-python -m pip install --upgrade --ignore-installed setuptools wheel || true
+"$PY" -m pip install --upgrade --ignore-installed setuptools wheel || true
 
 # Editable install with the same extras CI uses. Editable + plain `install`
 # (not `ci`-style clean installs) so the resolved deps are cached in the
@@ -34,8 +69,9 @@ python -m pip install --upgrade --ignore-installed setuptools wheel || true
 # (the distro Python) while `python` is /usr/local/bin/python. The setuptools
 # upgrade above targets `python`, so a bare `pip` install used the distro
 # setuptools and failed to build pyscf-properties, which left the session
-# with nothing installed.
-python -m pip install -e ".[pyscf,ase,dev,xtb,ts]"
+# with nothing installed. ($PY is the venv interpreter when one was created
+# above.)
+"$PY" -m pip install -e ".[pyscf,ase,dev,xtb,ts]"
 
 echo "QuantUI cloud env ready: package + [pyscf,ase,dev,xtb,ts] installed." >&2
 

@@ -26,4 +26,4 @@ class TestPlotNMRSpectrum:
             nucleus_label="¹³C",
         )
         xr = list(fig.layout.xaxis.range)
-        assert xr[1] >= 180.0
+        assert max(xr) >= 180.0

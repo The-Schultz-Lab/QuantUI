@@ -84,9 +84,11 @@ def _reset_unavailable_messages_for_context(app: Any, ctx: Any) -> None:
             if panel_name == "Trajectory" and calc_label == "Frequency":
                 # Not an error: a Frequency run has a trajectory only when it
                 # optimized first.
+                # Plain text: the message is HTML-escaped on display, so
+                # markup here showed up as literal "<b>" tags (audit UI-12).
                 text = (
-                    "No optimization steps in this run. Tick <b>Geometry "
-                    "optimization before calculation</b> to record a trajectory."
+                    "No optimization steps in this run. Tick “Geometry "
+                    "optimization before calculation” to record a trajectory."
                 )
             elif panel_name == "ECD":
                 text = (
@@ -429,6 +431,10 @@ def pop_energies(app: Any, ctx: Any) -> bool:
 
             orb = load_orbitals(ctx.result_dir)
             orb.formula = ctx.formula
+            # The cube provenance line names the method; the saved orbitals
+            # do not carry it, the history context does (audit VIZ-14).
+            if not getattr(orb, "method", ""):
+                orb.method = getattr(ctx, "method", "") or ""
             result = orb
         except Exception:
             return False
@@ -855,8 +861,26 @@ def pop_raman_spectrum(app: Any, ctx: Any) -> bool:
     return bool(app._show_raman_spectrum(freq_stub))
 
 
+def _tddft_state_prefix(ctx: Any) -> str:
+    """``"S"`` for a singlet manifold, ``""`` for an open-shell reference."""
+    from types import SimpleNamespace
+
+    from quantui.app_formatters import tddft_state_prefix
+
+    if ctx.live_result is not None:
+        return tddft_state_prefix(ctx.live_result)
+    try:
+        from quantui.results_storage import load_result
+
+        data = load_result(ctx.result_dir) if ctx.result_dir is not None else {}
+    except Exception:  # noqa: BLE001 — a label must never block the panel
+        data = {}
+    return tddft_state_prefix(SimpleNamespace(**(data or {})))
+
+
 def pop_uv_vis(app: Any, ctx: Any) -> bool:
     """Populate UV-Vis panel from live or history TDDFT data."""
+    app._tddft_state_prefix = _tddft_state_prefix(ctx)
     if ctx.live_result is not None:
         energies_ev = list(getattr(ctx.live_result, "excitation_energies_ev", []))
         osc = list(getattr(ctx.live_result, "oscillator_strengths", []))
@@ -881,6 +905,7 @@ def pop_ecd(app: Any, ctx: Any) -> bool:
     failed TD solve, or a result saved before ECD support) — the panel then
     keeps its "no data" placeholder.
     """
+    app._tddft_state_prefix = _tddft_state_prefix(ctx)
     if ctx.live_result is not None:
         energies_ev = list(getattr(ctx.live_result, "excitation_energies_ev", []))
         r_vel = list(getattr(ctx.live_result, "rotatory_strengths_velocity", []) or [])
@@ -1478,11 +1503,18 @@ def pop_pes_plot(app: Any, ctx: Any) -> bool:
         scan = ctx.spectra_data.get("pes_scan", {})
         if not scan or not scan.get("energies_hartree"):
             return False
-        energies_ha = scan["energies_hartree"]
+        # Failed scan points are saved as NaN (or null): a NaN first element
+        # would make plain min() return NaN and blank the whole profile.
+        energies_ha = [
+            float("nan") if e is None else float(e) for e in scan["energies_hartree"]
+        ]
+        finite = [e for e in energies_ha if e == e]
+        if not finite:
+            return False
         atom_indices = scan.get("atom_indices", [])
         scan_type = scan.get("scan_type", "bond")
         x_vals = scan.get("scan_parameter_values", [])
-        e_min = min(energies_ha)
+        e_min = min(finite)
         hartree_to_kcal = 627.5094740631
         e_rel = [(e - e_min) * hartree_to_kcal for e in energies_ha]
         idx = [i + 1 for i in atom_indices]
@@ -1520,9 +1552,13 @@ def pop_irc_profile(app: Any, ctx: Any) -> bool:
         block = ctx.live_result.to_spectra()
     if block is None:
         block = (ctx.spectra_data or {}).get("irc") or {}
-    energies = list(block.get("energies_hartree") or [])
+    energies = [
+        float("nan") if e is None else float(e)
+        for e in (block.get("energies_hartree") or [])
+    ]
     s_vals = list(block.get("reaction_coordinate") or [])
-    if len(energies) < 2 or len(s_vals) != len(energies):
+    finite = [e for e in energies if e == e]
+    if len(energies) < 2 or len(s_vals) != len(energies) or not finite:
         _set_panel_unavailable_message(
             app, "PES Scan", "Not available: this IRC result has no path data."
         )
@@ -1539,7 +1575,7 @@ def pop_irc_profile(app: Any, ctx: Any) -> bool:
         except Exception:  # noqa: BLE001 — the plot does not need them
             frames = []
     hartree_to_kcal = 627.5094740631
-    e_min = min(energies)
+    e_min = min(finite)  # NaN-safe: a NaN first point no longer poisons min()
     result = _types_mod.SimpleNamespace(
         scan_type="irc",
         atom_indices=[],

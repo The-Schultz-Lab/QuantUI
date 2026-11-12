@@ -366,9 +366,37 @@ def _prediction_log_path() -> Path:
     return _log_dir() / "prediction_log.jsonl"
 
 
+def _json_default(obj: object) -> object:
+    """``json.dumps`` fallback: numpy scalars/arrays -> plain data, else str.
+
+    A numpy int/bool or a ``Path`` in a record used to raise TypeError out
+    of the logger (audit DATA-13).
+    """
+    tolist = getattr(obj, "tolist", None)
+    if callable(tolist):
+        try:
+            return tolist()
+        except Exception:  # noqa: BLE001 — fall back to str below
+            pass
+    return str(obj)
+
+
+def _dumps_record(record: dict) -> str:
+    return json.dumps(record, ensure_ascii=False, default=_json_default)
+
+
+def _parse_jsonl_line(raw: str) -> Optional[dict]:
+    """Parse one JSONL line; ``None`` for malformed or non-object lines."""
+    try:
+        rec = json.loads(raw)
+    except (ValueError, RecursionError):
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
 def _append(path: Path, record: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(record, ensure_ascii=False) + "\n"
+    line = _dumps_record(record) + "\n"
     with _LOCK:
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(line)
@@ -399,23 +427,26 @@ def _read_all(path: Path) -> list[dict]:
             and cached[0] == stat.st_mtime
             and cached[1] == stat.st_size
         ):
-            return list(cached[2])
+            # Copy each record, not just the list: a caller that mutates a
+            # returned dict must not poison the cache (audit DATA-13).
+            return [dict(r) for r in cached[2]]
         records: list[dict] = []
         # errors="replace": a concurrent/interrupted append can leave a partial
         # multibyte UTF-8 sequence at EOF; strict decoding would raise
         # UnicodeDecodeError and abort the whole read. Replacing the bad bytes
         # lets that one line fail json.loads and be skipped, matching the
         # deliberate malformed-entry tolerance below (and under pytest -n=auto).
+        # Non-object lines (e.g. a stray ``42``) are skipped too: callers
+        # index every record as a dict (audit DATA-13).
         with open(path, encoding="utf-8", errors="replace") as fh:
             for raw in fh:
                 raw = raw.strip()
                 if raw:
-                    try:
-                        records.append(json.loads(raw))
-                    except json.JSONDecodeError:
-                        pass
+                    rec = _parse_jsonl_line(raw)
+                    if rec is not None:
+                        records.append(rec)
         _READ_ALL_CACHE[key] = (stat.st_mtime, stat.st_size, records)
-        return list(records)
+        return [dict(r) for r in records]
 
 
 # ---------------------------------------------------------------------------
@@ -551,6 +582,7 @@ def log_calculation(
     import_s: Optional[float] = None,
     stages: Optional[dict] = None,
     density_fit: Optional[bool] = None,
+    n_threads: Optional[int] = None,
 ) -> None:
     """Append one performance record to ``perf_log.jsonl``.
 
@@ -585,6 +617,13 @@ def log_calculation(
     partitioned in :func:`estimate_time` exactly as ``gpu_used`` is — mixing
     fitted and unfitted runs of the same chemistry under one key would give the
     estimator a bimodal distribution it cannot see.
+
+    ``n_threads`` (audit DATA-14) is the BLAS/OpenMP thread count the
+    calculation actually ran with (:func:`current_thread_count`). It is
+    provenance only — the estimator does not read it. ``n_cores`` is the
+    estimator's normalisation input; callers used to hard-code it to 1, so
+    they now leave it unset (read back as 1, same estimate) rather than
+    record a value that was never measured.
     """
     record: dict = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -609,6 +648,8 @@ def log_calculation(
         record["gpu_name"] = gpu_name
     if density_fit is not None:
         record["density_fit"] = bool(density_fit)
+    if n_threads is not None:
+        record["n_threads"] = int(n_threads)
     # Outer-loop step count (geom-opt BFGS steps / PES scan points). Enables
     # a history-based "step k / ~N" prior for the live progress fraction.
     if n_steps is not None:
@@ -622,6 +663,16 @@ def log_calculation(
     if stages:
         record["stages"] = {str(k): round(float(v), 3) for k, v in stages.items()}
     _append(_perf_path(), record)
+
+
+def current_thread_count() -> Optional[int]:
+    """BLAS/OpenMP threads PySCF will use in this process, or ``None``."""
+    try:
+        from pyscf import lib as _pyscf_lib
+
+        return int(_pyscf_lib.num_threads())
+    except Exception:  # noqa: BLE001 — provenance only; never fail a log
+        return None
 
 
 #: Hessian-cost multipliers used by the frequency cost model.
@@ -639,6 +690,12 @@ _POST_HF_METHODS: frozenset = frozenset({"MP2", "CCSD", "CCSD(T)"})
 # Minimum tagged frequency records carrying ``stages`` before learned stage
 # ratios replace the fixed Hessian / IR multipliers.
 _MIN_FREQ_STAGE_SAMPLES: int = 2
+# Records faster than this are kept out of the n_basis^β power-law fit
+# (strategies 1 and 3 of estimate_time_from_records): sub-second runs are
+# dominated by fixed per-calc overhead, so extrapolating them by n_basis^β
+# grossly over-predicts larger systems. They still feed the electron-count
+# strategies, which scale far more gently.
+_MIN_POWER_LAW_ELAPSED_S: float = 1.0
 
 
 def _bucket_freq_stages(stages: dict[str, float]) -> dict[str, float]:
@@ -734,6 +791,7 @@ def _estimate_frequency_cost(
     n_cores: Optional[int] = None,
     gpu_used: Optional[bool] = None,
     source: Optional[str] = None,
+    density_fit: Optional[bool] = None,
 ) -> Optional[dict]:
     """Structured frequency-time estimate from an SP anchor.
 
@@ -784,6 +842,7 @@ def _estimate_frequency_cost(
         calc_type="single_point",
         gpu_used=gpu_used,
         source=source,
+        density_fit=density_fit,
     )
     if sp_est is None:
         return None
@@ -1061,14 +1120,24 @@ def estimate_time_from_records(
     n_cores_current = n_cores if n_cores is not None else 1
 
     def _eff(r: dict) -> Optional[float]:
-        """Normalised efficiency: elapsed_s × n_cores / n_basis^β."""
+        """Normalised efficiency: elapsed_s × n_cores / n_basis^β.
+
+        ``None`` (record left out of the power-law fit) for records under
+        :data:`_MIN_POWER_LAW_ELAPSED_S`: their wall time is mostly fixed
+        overhead, not the n_basis^β work, so scaling them up by n_basis^β
+        wildly over-predicts large systems (audit DATA-14: four sub-0.1 s
+        STO-3G runs predicted 51 min for n_basis = 200). When too few
+        records survive, the electron-count strategies below take over.
+        """
         nb: float = float(r.get("n_basis") or 0)
         if not nb:
+            return None
+        elapsed: float = float(r["elapsed_s"])
+        if elapsed < _MIN_POWER_LAW_ELAPSED_S:
             return None
         rc: float = float(r.get("n_cores") or 1)
         r_method: str = str(r.get("method") or method)
         beta: float = _METHOD_SCALE_EXP.get(r_method, 3.5)
-        elapsed: float = float(r["elapsed_s"])
         return float(elapsed * rc / (nb**beta))
 
     # ── Strategy 1: exact method + basis, basis-function efficiency ──────────
@@ -1179,6 +1248,7 @@ def estimate_time_from_records(
             n_cores=n_cores,
             gpu_used=gpu_used,
             source=source,
+            density_fit=density_fit,
         )
         if cost_est is not None:
             return cost_est
@@ -1428,35 +1498,49 @@ def prune_events(days: int = 7) -> None:
     with _LOCK:
         if not path.exists():
             return
-        records: list[dict] = []
         # errors="replace" for the same reason as _read_all: tolerate a partial
         # multibyte sequence from a concurrent/interrupted append rather than
         # abort the prune.
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            for raw in fh:
-                raw = raw.strip()
-                if raw:
-                    try:
-                        records.append(json.loads(raw))
-                    except json.JSONDecodeError:
-                        pass
+        with open(path, "rb") as fh:
+            data = fh.read()
+        read_size = len(data)
 
-        kept: list[dict] = []
-        for r in records:
+        kept: list[str] = []
+        for raw in data.decode("utf-8", errors="replace").splitlines():
+            raw = raw.strip()
+            if not raw:
+                continue
+            r = _parse_jsonl_line(raw)
+            if r is None:
+                continue  # junk line / non-object JSON (e.g. ``123``)
             try:
                 ts = datetime.fromisoformat(r["timestamp"])
                 # fromisoformat on Python < 3.11 doesn't handle 'Z' suffix
                 if ts.tzinfo is None:
                     ts = ts.replace(tzinfo=timezone.utc)
                 if ts >= cutoff:
-                    kept.append(r)
-            except (KeyError, ValueError):
-                kept.append(r)  # keep malformed entries rather than silently drop
+                    kept.append(raw)
+            except (KeyError, ValueError, TypeError):
+                kept.append(raw)  # keep malformed entries rather than silently drop
 
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            for r in kept:
-                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        # _LOCK is per-process: another kernel / worker process may have
+        # appended since the read. Carry those bytes over, then swap the
+        # file in atomically, so the window in which a foreign append can be
+        # lost shrinks from "the whole prune" to the final rename.
+        tmp = path.with_name(path.name + ".tmp")
+        try:
+            with open(path, "rb") as fh:
+                fh.seek(read_size)
+                tail = fh.read()
+            with open(tmp, "wb") as out:
+                out.write("".join(line + "\n" for line in kept).encode("utf-8"))
+                out.write(tail)
+            os.replace(tmp, path)
+        except OSError:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
 
 def get_recent_events(n: int = 100) -> list[dict]:

@@ -107,9 +107,10 @@ jobs:
 
       - name: Run non-PySCF tests
         # PySCF tests are skipped automatically via skipif guards when pyscf
-        # is not installed. network tests also skipped.
+        # is not installed (no --ignore needed: every test file must skip
+        # cleanly without PySCF). network tests also skipped.
         # Single line: PowerShell does not support backslash line continuation.
-        run: pytest -m "not network" --ignore=tests/test_session_calc.py --ignore=tests/test_optimizer.py --ignore=tests/test_preopt.py --no-cov --no-header -q
+        run: pytest -m "not network" --no-cov --no-header -q
 
   # ── Windows: real PyFock calculation ───────────────────────────────────────
   test-windows-pyfock:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html as _html
 import os
 import sys
 from typing import Any
@@ -192,13 +193,13 @@ def build_status_panel(
 
     env_badge = (
         f'&nbsp;&nbsp;<code style="font-size:12px;background:{_theme.css.SURFACE_MUTED_BG};'
-        f'padding:1px 5px;border-radius:3px;color:{_theme.css.TEXT_BODY}">{env}</code>'
+        f'padding:1px 5px;border-radius:3px;color:{_theme.css.TEXT_BODY}">{_html.escape(env)}</code>'
         if env and env not in ("base", "")
         else ""
     )
     cal_line = (
         f'<div style="margin-top:6px;font-size:12px;color:{_theme.css.TEXT_SUBTLE}">'
-        f"Timing calibration: {cal_label}</div>"
+        f"Timing calibration: {_html.escape(cal_label)}</div>"
         if cal_label
         else f'<div style="margin-top:6px;font-size:12px;color:{_theme.css.TEXT_SUBTLE}">'
         "Timing calibration: not yet run &mdash; use <b>Calibrate time estimates</b> below</div>"
@@ -220,7 +221,7 @@ def build_status_panel(
         avail, name = gpu_state[0], gpu_state[1]
         reason = gpu_state[2] if len(gpu_state) > 2 else ""
         if avail:
-            cell = _ok(True, f"&mdash; <code>{name}</code>")
+            cell = _ok(True, f"&mdash; <code>{_html.escape(str(name))}</code>")
             from quantui.gpu_offload import is_low_fp64_device
 
             if is_low_fp64_device(name):
@@ -236,7 +237,10 @@ def build_status_panel(
                 )
             return cell
         detail = reason if reason else "not installed or no CUDA device"
-        return _ok(False, f'&mdash; <span style="font-size:12px">{detail}</span>')
+        return _ok(
+            False,
+            f'&mdash; <span style="font-size:12px">{_html.escape(str(detail))}</span>',
+        )
 
     def _render_status(gpu_state: Any) -> str:
         items = [
@@ -393,8 +397,8 @@ def build_status_panel(
         f'<div style="font-size:12px;color:{_theme.css.TEXT_SLATE_DARK};margin-top:12px;'
         'margin-bottom:0px">Density fitting (RI) '
         f'<span style="color:{_theme.css.TEXT_SUBTLE};font-size:12px">'
-        "(faster TD-DFT / large systems, "
-        "~0.008 kcal/mol accuracy cost)</span></div>"
+        "(faster TD-DFT / large systems; a small integral approximation "
+        "— see Help → Density fitting)</span></div>"
     )
     app.density_fit_enabled_cb = widgets.Checkbox(
         value=density_fit_enabled,
@@ -887,7 +891,7 @@ def build_history_section(
         )
         app._history_recent_box.children = tuple([head] + rows) if rows else ()
 
-    app.past_dd.observe(_sync_recent, names="options")
+    app.past_dd.observe(app._safe_cb(_sync_recent), names="options")
 
     # The History tab is now purely the result-browser. Performance stats
     # + Calibrate accordions moved to the System Settings tab — see below —
@@ -1787,7 +1791,7 @@ def build_shared_widgets(
     def _cancel_style(change: Any) -> None:
         app.cancel_btn.button_style = "" if change["new"] else "danger"
 
-    app.cancel_btn.observe(_cancel_style, names="disabled")
+    app.cancel_btn.observe(app._safe_cb(_cancel_style), names="disabled")
 
     # One-click fix shown only when a metal's basis blocks the run.
     # Hidden until the pre-run guard reveals it; sets the basis to def2-SVP.

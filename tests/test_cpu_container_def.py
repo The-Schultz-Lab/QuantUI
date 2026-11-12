@@ -89,3 +89,35 @@ class TestCpuImagePySCFExtras:
         text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
         extra = text.split("\npyscf = [", 1)[1].split("]", 1)[0]
         assert '"pyscf-properties"' in extra and "pyscf-dispersion" in extra
+
+
+class TestCpuImageHygiene:
+    """Audit HPC-16 — text checks only; nothing here builds or runs the image."""
+
+    def test_pythonpath_has_no_empty_entry(self, cpu_def_text):
+        # "/opt/quantui:${PYTHONPATH}" with PYTHONPATH unset ends in ":", an
+        # empty entry = the current directory on sys.path (a student's
+        # json.py would shadow the standard library).
+        env = _section(cpu_def_text, "%environment")
+        lines = [ln.strip() for ln in env.splitlines() if "PYTHONPATH=" in ln]
+        assert lines == [
+            'export PYTHONPATH="/opt/quantui${PYTHONPATH:+:${PYTHONPATH}}"'
+        ]
+
+    def test_voila_comes_from_the_app_extra_with_its_bounds(self, cpu_def_text):
+        post = _section(cpu_def_text, "%post")
+        assert re.search(r'pip install[^\n]*-e\s+"\.\[[^\]]*\bapp\b[^\]]*\]"', post)
+        # No unpinned voila install alongside it (continuation lines included).
+        unpinned = re.findall(
+            r"pip install --no-cache-dir \\\n((?:\s+\S+ \\\n)*\s+\S+)", post
+        )
+        assert unpinned and all("voila" not in block for block in unpinned)
+
+    def test_build_records_a_freeze(self, cpu_def_text):
+        post = _section(cpu_def_text, "%post")
+        assert "pip freeze > /opt/build-info/pip-freeze.txt" in post
+
+    def test_stale_reference_sbatch_is_gone(self):
+        # It had drifted from the generated submit.slurm (no attempt dir,
+        # --nv forced); the generated script is the reference now.
+        assert not (REPO / "apptainer" / "slurm" / "quantui-batch.sbatch").exists()

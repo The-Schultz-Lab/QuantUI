@@ -630,6 +630,29 @@ def test_format_tddft_result_labels_uks():
     assert "(UKS)" in html
 
 
+def test_format_tddft_states_are_not_called_singlets_for_open_shell():
+    # Audit UI-13: states from a UKS/UHF reference were labelled S1, S2, ...
+    from quantui.app_formatters import tddft_state_prefix
+
+    kw = dict(
+        converged=True,
+        energy_hartree=-1600.0,
+        excitation_energies_ev=[3.0, 3.5],
+        oscillator_strengths=[0.1, 0.0],
+        formula="Co(H2O)6",
+        method="B3LYP",
+        basis="def2-SVP",
+    )
+    html = format_tddft_result(_TDDFTStub(scf_variant="UKS", **kw))
+    assert "S1" not in html and "S2" not in html
+    assert ">1</td>" in html
+    assert "S1" in format_tddft_result(_TDDFTStub(scf_variant="RKS", **kw))
+    assert tddft_state_prefix(_TDDFTStub(scf_variant="ROHF", **kw)) == ""
+    # Older saved results: no scf_variant; <S^2> is saved only when open shell.
+    assert tddft_state_prefix(_TDDFTStub(spin_square=0.76, **kw)) == ""
+    assert tddft_state_prefix(_TDDFTStub(**kw)) == "S"
+
+
 def test_format_nmr_result_labels_uks():
     result = _NMRStub(
         converged=True,

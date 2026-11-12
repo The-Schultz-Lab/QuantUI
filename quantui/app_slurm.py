@@ -213,7 +213,7 @@ def startup_slurm_check(app: Any) -> None:
     record = active[0]
     _show_slurm_banner(
         app,
-        f"SLURM job still active (status: {record.status}). "
+        f"SLURM job still active (status: {html.escape(record.status)}). "
         f"Click <b>View progress</b> to reconnect.",
         request_id=record.request_id,
     )
@@ -491,16 +491,16 @@ def refresh_slurm_jobs_tab(app: Any) -> None:
         exit_code = acct.exit_code if acct and acct.exit_code else "—"
         rows.append(
             "<tr>"
-            f"<td style='padding:4px 8px'>{record.status}</td>"
-            f"<td style='padding:4px 8px'>{slurm_id}</td>"
+            f"<td style='padding:4px 8px'>{html.escape(record.status)}</td>"
+            f"<td style='padding:4px 8px'>{html.escape(str(slurm_id))}</td>"
             f"<td style='padding:4px 8px'>{html.escape(slurm_state)}</td>"
             f"<td style='padding:4px 8px'>{html.escape(elapsed)}</td>"
             f"<td style='padding:4px 8px'>{html.escape(exit_code)}</td>"
-            f"<td style='padding:4px 8px'>{req.method}/{req.basis}</td>"
-            f"<td style='padding:4px 8px'>{record.calc_type}</td>"
-            f"<td style='padding:4px 8px'>{created}</td>"
+            f"<td style='padding:4px 8px'>{html.escape(f'{req.method}/{req.basis}')}</td>"
+            f"<td style='padding:4px 8px'>{html.escape(record.calc_type)}</td>"
+            f"<td style='padding:4px 8px'>{html.escape(created)}</td>"
             f"<td style='padding:4px 8px'>{_slurm_job_error_cell(record)}</td>"
-            f"<td style='padding:4px 8px'><code>{record.request_id}</code></td>"
+            f"<td style='padding:4px 8px'><code>{html.escape(record.request_id)}</code></td>"
             "</tr>"
         )
 
@@ -719,6 +719,36 @@ def _monitor_slurm_loop(app: Any, request_id: str) -> None:
         time.sleep(_POLL_INTERVAL_S)
 
 
+def _read_new_log_text(path: Path, offset: int) -> tuple[str, int]:
+    """Text appended to *path* since byte *offset*, and the new offset.
+
+    Reads only the new bytes: the monitor used to re-read the whole
+    live.log every poll. A file shorter than *offset* (a new attempt's
+    log) is read from the start. An incomplete UTF-8 character at the end
+    is left for the next poll rather than decoded as garbage.
+    """
+    size = path.stat().st_size
+    if size < offset:
+        offset = 0
+    if size == offset:
+        return "", offset
+    with open(path, "rb") as fh:
+        fh.seek(offset)
+        data = fh.read(size - offset)
+    cut = len(data)
+    for back in range(1, min(4, len(data)) + 1):
+        byte = data[-back]
+        if byte & 0xC0 == 0x80:  # continuation byte: keep looking for the lead
+            continue
+        if byte >= 0xC0:  # lead byte of a multi-byte character
+            needed = 2 if byte < 0xE0 else 3 if byte < 0xF0 else 4
+            if needed > back:
+                cut = len(data) - back
+        break
+    data = data[:cut]
+    return data.decode("utf-8", errors="replace"), offset + len(data)
+
+
 def _monitor_slurm_poll(
     app: Any, backend: Any, request_id: str, last_log_size: int
 ) -> tuple[bool, int]:
@@ -731,13 +761,11 @@ def _monitor_slurm_poll(
     log_path = record.live_log_path
     if log_path.exists():
         try:
-            text = log_path.read_text(encoding="utf-8", errors="replace")
-            if len(text) > last_log_size:
-                chunk = text[last_log_size:]
-                last_log_size = len(text)
-                app._queue_main_thread_callback(_append_run_stdout, app, chunk)
+            chunk, last_log_size = _read_new_log_text(log_path, last_log_size)
         except OSError:
-            pass
+            chunk = ""
+        if chunk:
+            app._queue_main_thread_callback(_append_run_stdout, app, chunk)
 
     progress_path = record.progress_path
     if progress_path.exists():

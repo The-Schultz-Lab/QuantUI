@@ -32,6 +32,38 @@ class TestVerdict:
         n, _, verdict = classify_stationary_point([-1246.0, -12.0, 2000.0])
         assert n == 1 and "numerical noise" in verdict
 
+    def test_only_a_small_imaginary_is_inconclusive_not_a_minimum(self):
+        # Audit GEOM-9: a soft torsional TS (20-50i) must not read as a minimum.
+        n, imag, verdict = classify_stationary_point([-35.0, 300.0, 2000.0])
+        assert n == 0 and imag == []
+        assert verdict.startswith("Inconclusive") and "35i" in verdict
+        assert "minimum" not in verdict
+
+    def test_empty_frequencies_are_not_reported_as_skipped(self, monkeypatch):
+        # Audit GEOM-9: the check ran, so "Frequency check skipped." is wrong.
+        from types import SimpleNamespace
+
+        import quantui.freq_calc as freq_calc
+        from quantui.ts_search import apply_frequency_check
+
+        freq = SimpleNamespace(frequencies_cm1=[], energy_hartree=-1.0, converged=False)
+        monkeypatch.setattr(freq_calc, "run_freq_calc", lambda *a, **k: freq)
+        r = TSResult(
+            formula="CHN",
+            method="RHF",
+            basis="STO-3G",
+            molecule=HCN_GUESS,
+            energy_hartree=-91.0,
+            converged=True,
+            search_converged=True,
+            n_steps=4,
+            verdict="Frequency check skipped.",
+        )
+        apply_frequency_check(r, progress_stream=io.StringIO())
+        assert "skipped" not in r.verdict
+        assert "no vibrational frequencies" in r.verdict
+        assert r.n_imaginary is None and not r.converged
+
 
 class TestResultObject:
     def test_spectra_block_and_frequency_delegation(self):

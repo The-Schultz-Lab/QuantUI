@@ -62,16 +62,11 @@ _FakeCupyArray.__module__ = "cupy._core.core"
 
 
 def _extract_to_numpy(arr):
-    """Re-implementation of the closure to keep the test independent of
-    session_calc's import side effects. Mirrors the production helper:
-    detect CuPy by ``.get()`` callable + module prefix, otherwise pass
-    through ``np.asarray``."""
-    if arr is None:
-        return None
-    get = getattr(arr, "get", None)
-    if callable(get) and type(arr).__module__.startswith("cupy"):
-        return np.asarray(get())
-    return np.asarray(arr)
+    """The production helper (audit SCF-13: the old run_in_session closure
+    ``_to_numpy_array`` was a duplicate of ``session_calc._host_array``)."""
+    from quantui.session_calc import _host_array
+
+    return _host_array(arr)
 
 
 class TestBugA_CupyAwareConversion:
@@ -97,15 +92,14 @@ class TestBugA_CupyAwareConversion:
         with pytest.raises(TypeError):
             np.array(fake)
 
-    def test_production_helper_uses_to_numpy_array(self):
-        # Confirm the actual session_calc body contains the
-        # ``_to_numpy_array`` helper (so a future refactor that drops it
-        # breaks this test loudly).
+    def test_production_helper_uses_host_array(self):
+        # The SCF gap extraction must go through the CuPy-aware helper
+        # (so a future refactor that drops it breaks this test loudly).
         from quantui import session_calc
 
-        src = inspect.getsource(session_calc)
-        assert "_to_numpy_array" in src
-        assert "cupy" in src.lower()
+        src = inspect.getsource(session_calc._run_session_calc_body)
+        assert "_host_array(mf.mo_energy)" in src
+        assert "_to_numpy_array" not in inspect.getsource(session_calc)
 
 
 # =====================================================================

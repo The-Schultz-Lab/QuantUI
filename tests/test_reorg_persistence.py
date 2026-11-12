@@ -414,16 +414,21 @@ class TestTheAnalysisTabIsWiredUp:
             )
         assert rendered, "no accordions rendered at all"
 
-    def test_live_and_history_read_the_same_payload(self):
-        # The original bug was two paths reading different things. This one
-        # must never grow a second reader.
-        import inspect
+    def test_live_and_history_read_the_same_payload(self, result, saved):
+        # The original bug was two paths reading different things. Run both
+        # on the same calculation — live object vs saved-and-reloaded — and
+        # require identical payloads (audit INFRA-19: this was a source-text
+        # check that a dead copy of either call would also have passed).
+        from types import SimpleNamespace
 
         from quantui.app_analysis import _reorg_payload
 
-        src = inspect.getsource(_reorg_payload)
-        assert "_reorg_channels_payload" in src  # live path builds the saved shape
-        assert 'data.get("reorg_channels")' in src  # history path reads it
+        d, _data = saved
+        live = _reorg_payload(None, SimpleNamespace(live_result=result))
+        history = _reorg_payload(None, SimpleNamespace(live_result=None, result_dir=d))
+        assert live[0], "live path produced no channels"
+        assert live[1], "live path produced no neutral geometry"
+        assert history == live
 
 
 class TestLambdaComparisonAcrossHistory:
