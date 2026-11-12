@@ -370,3 +370,89 @@ class TestSlurmHtmlEscaping:
         assert "<b>STO-3G" not in table.value and "<i>running" not in table.value
         assert "&lt;b&gt;STO-3G" in table.value
         assert "&lt;i&gt;running" in table.value
+
+
+# ---------------------------------------------------------------------------
+# HPC-17: the mock Slurm behaves like Slurm where QuantUI depends on it
+# ---------------------------------------------------------------------------
+
+MOCK_DIR = Path(__file__).resolve().parents[1] / "testing" / "mock-slurm"
+
+
+def _mock(state, *args):
+    import os
+    import subprocess
+
+    env = dict(os.environ, MOCK_SLURM_STATE=str(state))
+    env.pop("MOCK_SLURM_AUTO_COMPLETE", None)
+    return subprocess.run(
+        [sys.executable, str(MOCK_DIR / "mock_slurm_cli.py"), *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
+
+
+_GOOD_SCRIPT = "#!/bin/bash\n#SBATCH --ntasks=1\n#SBATCH --cpus-per-task={n}\necho hi\n"
+
+
+class TestMockSlurm:
+    def test_squeue_hides_finished_jobs(self, tmp_path):
+        import json
+
+        for jid, state in [
+            ("1", "RUNNING"),
+            ("2", "CANCELLED"),
+            ("3", "FAILED"),
+            ("4", "COMPLETED"),
+            ("5", "TIMEOUT"),
+            ("6", "PENDING"),
+        ]:
+            (tmp_path / f"{jid}.json").write_text(
+                json.dumps({"job_id": jid, "status": state})
+            )
+        out = _mock(tmp_path, "squeue", "-h", "-o", "%i %T").stdout.split("\n")
+        assert [line for line in out if line] == ["1 RUNNING", "6 PENDING"]
+
+    def test_scancel_unknown_job_fails(self, tmp_path):
+        r = _mock(tmp_path, "scancel", "424242")
+        assert r.returncode != 0
+        assert "Invalid job id" in r.stderr
+
+    def test_sbatch_checks_cpus_per_task(self, tmp_path):
+        import json
+
+        (tmp_path / "config.json").write_text(json.dumps({"max_cores": 8}))
+        script = tmp_path / "job.slurm"
+        script.write_text(_GOOD_SCRIPT.format(n=16))
+        r = _mock(tmp_path, "sbatch", str(script))
+        assert r.returncode == 1 and "CPU count 16" in r.stderr
+        script.write_text(_GOOD_SCRIPT.format(n=4))
+        assert _mock(tmp_path, "sbatch", str(script)).returncode == 0
+
+    @pytest.mark.skipif(__import__("shutil").which("bash") is None, reason="needs bash")
+    def test_sbatch_rejects_a_script_bash_cannot_parse(self, tmp_path):
+        script = tmp_path / "job.slurm"
+        script.write_text(_GOOD_SCRIPT.format(n=1) + 'if [ "$x" ; then\n')
+        r = _mock(tmp_path, "sbatch", str(script))
+        assert r.returncode == 1 and "not valid bash" in r.stderr
+        assert not list(tmp_path.glob("1*.json"))
+
+    @pytest.mark.skipif(
+        sys.platform == "win32" or __import__("shutil").which("bash") is None,
+        reason="POSIX shims",
+    )
+    def test_sh_shims_use_the_python_mock(self, tmp_path):
+        import os
+        import subprocess
+
+        env = dict(os.environ, MOCK_SLURM_STATE=str(tmp_path))
+        r = subprocess.run(
+            ["bash", str(MOCK_DIR / "scancel.sh"), "99"],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+        )
+        assert r.returncode != 0 and "Invalid job id" in r.stderr
