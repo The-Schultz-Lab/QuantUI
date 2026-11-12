@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import threading
 import time
 from pathlib import Path
@@ -324,7 +325,7 @@ def on_spin_suggest(app: Any, btn: Any = None) -> None:
         )
     except ValueError as exc:
         app.spin_helper_output.value = _spin_small(
-            f"⚠ {exc}", _theme.css.ACCENT_WARNING
+            f"⚠ {html.escape(str(exc))}", _theme.css.ACCENT_WARNING
         )
         return
 
@@ -387,7 +388,7 @@ def on_charge_mult_suggest(app: Any, btn: Any = None) -> None:
         suggestion = suggest_charge_multiplicity_from_atoms(atoms, assume_charge=0)
     except Exception as exc:
         app.charge_mult_suggest_output.value = _spin_small(
-            f"⚠ {exc}", _theme.css.ACCENT_WARNING
+            f"⚠ {html.escape(str(exc))}", _theme.css.ACCENT_WARNING
         )
         return
 
@@ -1818,7 +1819,8 @@ def _preopt_preview_done(app: Any, relaxed: Any, rmsd: float, frames: Any) -> No
             display(
                 HTML(
                     _preopt_small(
-                        f"Preview render failed: {exc}", _theme.css.ACCENT_ERROR
+                        f"Preview render failed: {html.escape(str(exc))}",
+                        _theme.css.ACCENT_ERROR,
                     )
                 )
             )
@@ -1924,7 +1926,10 @@ def on_compare(app: Any, btn: Any, *, layout_fn: Any) -> None:
         except Exception as exc:
             with app.compare_output:
                 display(
-                    HTML(f'<p style="color:#ef4444">Error loading result: {exc}</p>')
+                    HTML(
+                        '<p style="color:#ef4444">Error loading result: '
+                        f"{html.escape(str(exc))}</p>"
+                    )
                 )
     if not summaries:
         return
@@ -2125,7 +2130,7 @@ def on_issue_submit(app: Any, *, issue_tracker_mod: Any) -> None:
         )
         app._issue_overlay.layout.display = "none"
     except Exception as exc:
-        app._issue_status_html.value = f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">Save failed: {exc}</span>'
+        app._issue_status_html.value = f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">Save failed: {html.escape(str(exc))}</span>'
     finally:
         app._issue_submit_btn.disabled = False
 

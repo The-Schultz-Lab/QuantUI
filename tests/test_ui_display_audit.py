@@ -172,3 +172,72 @@ class TestPastResultEscaping:
         out = format_past_result(self._data(basis="6-31G*", solvent="water"))
         assert "RHF/6-31G*" in out
         assert "water" in out
+
+
+# ── APP-12 / DATA-9 ───────────────────────────────────────────────────────────
+
+
+def _h2():
+    from quantui.molecule import Molecule
+
+    return Molecule(["H", "H"], [[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]])
+
+
+class TestWidgetHtmlEscaping:
+    def test_molecule_label_is_escaped(self):
+        app = QuantUIApp()
+        app._set_molecule(_h2(), _XSS)
+        assert _XSS not in app.mol_info_html.value
+        assert _XSS not in app.mol_summary_compact.value
+        assert "&lt;img" in app.mol_info_html.value
+
+    def test_event_log_panel_is_escaped(self):
+        app = QuantUIApp()
+        events = [{"timestamp": "2026-11-10T10:00:00", "event": _XSS, "message": _XSS}]
+        with patch("quantui.calc_log.get_recent_events", return_value=events):
+            out = app._build_events_html()
+        assert _XSS not in out
+        assert "&lt;img" in out
+
+    def test_upload_error_text_is_escaped(self):
+        from types import SimpleNamespace
+
+        from quantui.app_xyz_input import on_structure_upload
+
+        bad = f"2\ncomment\nH 0 0 0\nH 0 0 {_XSS}\n".encode()
+        app = SimpleNamespace(
+            structure_upload=SimpleNamespace(
+                value=({"name": "bad.xyz", "content": bad},)
+            ),
+            upload_msg=SimpleNamespace(value=""),
+            charge_si=SimpleNamespace(value=0),
+            mult_si=SimpleNamespace(value=1),
+        )
+        on_structure_upload(app)
+        assert "⚠" in app.upload_msg.value
+        assert "<img" not in app.upload_msg.value
+
+    def test_files_tab_structure_preview_cannot_close_its_script(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("QUANTUI_RESULTS_DIR", str(tmp_path))
+        app = QuantUIApp()
+        benign = tmp_path / "ok.xyz"
+        benign.write_text("2\nplain\nH 0 0 0\nH 0 0 0.74\n", encoding="utf-8")
+        evil = tmp_path / "evil.xyz"
+        evil.write_text(
+            f"2\n</script>{_XSS}<script>\nH 0 0 0\nH 0 0 0.74\n", encoding="utf-8"
+        )
+        shown = []
+
+        def _capture(obj, *a, **k):
+            shown.append(getattr(obj, "data", obj))
+
+        monkeypatch.setattr("quantui.app.display", _capture)
+        app._preview_file_path(benign)
+        app._preview_file_path(evil)
+        assert len(shown) == 2
+        ok_html, evil_html = shown
+        assert evil_html.lower().count("</script") == ok_html.lower().count("</script")
+        assert _XSS not in evil_html
+        assert "3D structure preview" in app._files_status_html.value

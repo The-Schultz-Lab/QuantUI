@@ -3763,6 +3763,19 @@ class QuantUIApp:
                     viewer.setBackgroundColor("white")
                     viewer.zoomTo()
                     html_str = viewer._make_html()
+                    # py3Dmol embeds the file text as a JSON string inside an
+                    # inline <script>; a "</script>" in the file would end
+                    # that script early (audit APP-12). Escape every "<" in
+                    # the payload as \u003c (same string to JSON and JS).
+                    import json as _json_payload
+
+                    payload = _json_payload.dumps(raw_text)
+                    if "<" in raw_text:
+                        if payload not in html_str:
+                            raise ValueError("cannot locate model payload")
+                        html_str = html_str.replace(
+                            payload, payload.replace("<", "\\u003c")
+                        )
                     with self._files_preview_output:
                         display(HTML(html_str))
                     self._set_files_status(
@@ -5354,7 +5367,7 @@ class QuantUIApp:
         except Exception as exc:
             status.value = (
                 f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
-                f"Export failed: {exc}</span>"
+                f"Export failed: {_html.escape(str(exc))}</span>"
             )
             try:
                 _calc_log.log_event(
@@ -5382,7 +5395,7 @@ class QuantUIApp:
         except Exception as exc:
             status.value = (
                 f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
-                f"Write failed: {exc}</span>"
+                f"Write failed: {_html.escape(str(exc))}</span>"
             )
             return
 
@@ -5481,7 +5494,7 @@ class QuantUIApp:
             if status is not None:
                 status.value = (
                     f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
-                    f"Export failed: {exc}</span>"
+                    f"Export failed: {_html.escape(str(exc))}</span>"
                 )
 
     def _export_plot_figure(
@@ -5641,7 +5654,7 @@ class QuantUIApp:
         except Exception as exc:
             status_widget.value = (
                 f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:12px">'
-                f"Write failed: {exc}</span>"
+                f"Write failed: {_html.escape(str(exc))}</span>"
             )
             return
 
@@ -5998,7 +6011,7 @@ class QuantUIApp:
             e_str = ""
 
         _lbl = (
-            f'<br><small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{label}</small>'
+            f'<br><small style="color:{_theme.css.TEXT_MUTED_LIGHT}">{_html.escape(label)}</small>'
             if label
             else ""
         )
@@ -7784,7 +7797,7 @@ class QuantUIApp:
                 '<div style="background:#fef2f2;border:1px solid #fca5a5;'
                 'border-radius:8px;padding:16px;margin:8px 0">'
                 f'<b style="color:{_theme.css.ACCENT_ERROR}">&#9888; Dependency Not Available</b><br>'
-                f'<span style="color:#7f1d1d">{_err_detail}</span><br><br>'
+                f'<span style="color:#7f1d1d">{_html.escape(_err_detail)}</span><br><br>'
                 '<small style="color:#991b1b">On Windows, use the Apptainer container: '
                 "<code>apptainer run quantui.sif</code>. "
                 "Full details are in the <b>Output</b> tab.</small>"
@@ -7882,7 +7895,7 @@ class QuantUIApp:
                 '<div style="background:#fef2f2;border:1px solid #fca5a5;'
                 'border-radius:8px;padding:16px;margin:8px 0">'
                 f'<b style="color:{_theme.css.ACCENT_ERROR}">&#9888; Calculation Failed</b><br>'
-                f'<code style="color:#7f1d1d">{exc}</code><br><br>'
+                f'<code style="color:#7f1d1d">{_html.escape(str(exc))}</code><br><br>'
                 '<small style="color:#991b1b">'
                 "Tips: try a smaller basis set (STO-3G), use a geometry-optimized "
                 "structure first, or check for unusually long/short bonds in your "
@@ -8439,9 +8452,9 @@ class QuantUIApp:
             )
         rows = ""
         for e in reversed(events):
-            ts = e.get("timestamp", "")[:19].replace("T", " ")
-            evt = e.get("event", "")
-            msg = e.get("message", "")
+            ts = _html.escape(str(e.get("timestamp", ""))[:19].replace("T", " "))
+            evt = _html.escape(str(e.get("event", "")))
+            msg = _html.escape(str(e.get("message", "")))
             rows += (
                 "<tr>"
                 f'<td style="padding:1px 10px 1px 0;color:{_theme.css.TEXT_SUBTLE};font-size:12px;white-space:nowrap">{ts}</td>'
