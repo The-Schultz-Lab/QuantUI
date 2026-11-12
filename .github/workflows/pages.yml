@@ -20,10 +20,12 @@ on:
     types: [published]
   workflow_dispatch:
 
+# Least privilege: the default is read-only. Only the deploy job, which does
+# nothing but publish the uploaded artifact, gets the Pages-write and OIDC
+# permissions; the build job (which runs third-party build tooling) does not
+# (audit INFRA-12).
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # Only one deployment at a time; don't cancel in-progress runs.
 concurrency:
@@ -72,6 +74,9 @@ jobs:
 
   deploy:
     name: Deploy to GitHub Pages
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

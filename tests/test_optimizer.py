@@ -628,6 +628,10 @@ class TestPyscfOnlyGateNotObsolete:
     both genuinely installed and working — 16 tests, per the audit.
     """
 
+    @pytest.mark.skipif(
+        not (ASE_AVAILABLE and _PYSCF_AVAILABLE),
+        reason="needs real ASE + PySCF (the gate is closed without them)",
+    )
     def test_gate_does_not_require_ase_calculators_pyscf(self):
         import importlib.util
 

@@ -9,6 +9,16 @@ import tempfile
 
 import pytest
 
+# Cap BLAS/OpenMP threads per xdist worker (audit INFRA-12). ``-n=auto`` (see
+# ``addopts``) starts one worker per core, and every worker's NumPy/PySCF
+# would otherwise start one OpenMP thread per core as well: N x N threads on
+# N cores, which thrashes and makes timing-sensitive tests flaky. xdist sets
+# ``PYTEST_XDIST_WORKER`` before the worker loads this conftest, and nothing
+# here has imported NumPy yet, so the cap takes effect. An explicit
+# ``OMP_NUM_THREADS`` from the caller still wins; ``-n0`` runs are untouched.
+if os.environ.get("PYTEST_XDIST_WORKER"):
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 
 @pytest.fixture(autouse=True, scope="session")
 def _isolate_results_dir():
