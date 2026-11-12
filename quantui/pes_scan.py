@@ -259,6 +259,41 @@ def _reuse_scan_point(
     return energy_ha, point_molecule
 
 
+def _set_bond_angle(
+    atoms: Any, i1: int, i2: int, i3: int, target: float, moving: Sequence[int]
+) -> None:
+    """Rotate the *moving* atoms about vertex *i2* so angle i1–i2–i3 = *target*.
+
+    Same rotation as ``ase.Atoms.set_angle`` with a mask, except that a
+    linear (or fully folded) starting angle — where the plane of the angle,
+    and so ASE's rotation axis, is undefined ("Cannot rotate: norm(v) ==
+    0") — is bent within an arbitrary plane containing the i2–i1 bond.
+    """
+    import numpy as np
+
+    pos = atoms.get_positions()
+    v1 = pos[i1] - pos[i2]
+    v3 = pos[i3] - pos[i2]
+    v1 = v1 / np.linalg.norm(v1)
+    v3 = v3 / np.linalg.norm(v3)
+    axis = np.cross(v1, v3)
+    if np.linalg.norm(axis) < 1e-6:
+        # Linear: any axis perpendicular to the bond defines a valid plane.
+        trial = np.eye(3)[int(np.argmin(np.abs(v1)))]
+        axis = np.cross(v1, trial)
+    axis = axis / np.linalg.norm(axis)
+    current = math.degrees(math.acos(float(np.clip(np.dot(v1, v3), -1.0, 1.0))))
+    theta = math.radians(float(target) - current)
+    # Rodrigues rotation about *axis* through the vertex.
+    k = np.array(
+        [[0.0, -axis[2], axis[1]], [axis[2], 0.0, -axis[0]], [-axis[1], axis[0], 0.0]]
+    )
+    rot = np.eye(3) + math.sin(theta) * k + (1.0 - math.cos(theta)) * (k @ k)
+    idx = list(moving)
+    pos[idx] = (pos[idx] - pos[i2]) @ rot.T + pos[i2]
+    atoms.set_positions(pos)
+
+
 def run_pes_scan(
     molecule: Molecule,
     method: str = "RHF",
@@ -382,6 +417,14 @@ def run_pes_scan(
 
     if steps < 2:
         raise ValueError("steps must be >= 2.")
+
+    if scan_type == "angle" and not (0.0 < start < 180.0 and 0.0 < stop < 180.0):
+        # 180° is linear (the angle constraint's gradient is undefined there)
+        # and a bond angle never exceeds 180°: "190°" is just 170° again.
+        raise ValueError(
+            "Angle scan Start and Stop must lie between 0° and 180° "
+            f"(exclusive), got {start}° to {stop}°."
+        )
 
     # --- Set up ASE atoms + PySCF calculator ---
     atoms = molecule_to_atoms(molecule)
@@ -512,7 +555,7 @@ def run_pes_scan(
                 if scan_type == "bond":
                     constraint = FixInternals(bonds=[[val, [i1, i2]]])
                 elif scan_type == "angle":
-                    atoms.set_angle(i1, i2, i3, val)
+                    _set_bond_angle(atoms, i1, i2, i3, val, [i3])
                     # (2026-07-14): ASE's radian-based `angles=`
                     # kwarg is not just deprecated, it's flat-out broken with
                     # the currently-targeted ASE (>=3.22, verified against

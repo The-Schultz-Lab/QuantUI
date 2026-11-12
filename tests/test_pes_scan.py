@@ -231,6 +231,47 @@ class TestRunPesScanValidation:
             run_pes_scan(_h2(), method=method, scan_type="bond", atom_indices=[0, 1])
 
 
+class TestAngleScanRange:
+    """Audit GEOM-3: angle targets stay in (0°, 180°) and a linear start bends."""
+
+    @pytest.mark.parametrize("start, stop", [(160.0, 180.0), (170.0, 190.0), (-10, 90)])
+    def test_angle_outside_0_180_raises(self, start, stop):
+        from quantui.pes_scan import run_pes_scan
+
+        with pytest.raises(ValueError, match="between 0° and 180°"):
+            run_pes_scan(
+                _water(),
+                scan_type="angle",
+                atom_indices=[1, 0, 2],
+                start=start,
+                stop=stop,
+                steps=3,
+            )
+
+    def test_linear_start_is_bent_to_target(self):
+        pytest.importorskip("ase")
+        from ase import Atoms
+
+        from quantui.pes_scan import _set_bond_angle
+
+        # Linear H–C≡N: ASE's set_angle raises "Cannot rotate: norm(v) == 0".
+        atoms = Atoms("HCN", positions=[[0, 0, -1.066], [0, 0, 0], [0, 0, 1.156]])
+        _set_bond_angle(atoms, 0, 1, 2, 160.0, [2])
+        assert atoms.get_angle(0, 1, 2) == pytest.approx(160.0, abs=1e-6)
+        assert atoms.get_distance(1, 2) == pytest.approx(1.156, abs=1e-9)
+        assert atoms.positions[0] == pytest.approx([0, 0, -1.066])
+
+    @pytest.mark.parametrize("target", [60.0, 104.5, 150.0, 179.0])
+    def test_bent_start_reaches_target(self, target):
+        pytest.importorskip("ase")
+        from quantui.ase_bridge import molecule_to_atoms
+        from quantui.pes_scan import _set_bond_angle
+
+        atoms = molecule_to_atoms(_water())
+        _set_bond_angle(atoms, 1, 0, 2, target, [2])
+        assert atoms.get_angle(1, 0, 2) == pytest.approx(target, abs=1e-6)
+
+
 # ── App widget integration ────────────────────────────────────────────────────
 
 
