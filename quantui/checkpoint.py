@@ -539,33 +539,13 @@ class Checkpoint:
         return state
 
     def has_progress(self) -> bool:
-        """True when some finished work is stored, not merely a directory."""
-        if self.completed_points():
-            return True
-        traj = self.trajectory_path
-        try:
-            if traj.is_file() and traj.stat().st_size > 0:
-                return True
-        except OSError:
-            pass
-        if self._has_item_set_progress():
-            return True
-        return self._has_leg_progress()
+        """True when some finished work is stored, not merely a directory.
 
-    def _has_leg_progress(self) -> bool:
-        """True when any nested leg checkpoint (see :meth:`sub`) has progress.
-
-        A multi-stage run like Reorganization Energy writes nothing directly
-        into its own checkpoint — all the real optimizer state lives in its
-        legs. Without this, the top-level checkpoint would always look empty
-        and the run would never be offered as resumable, no matter how much
-        of a leg had actually completed.
+        Delegates to :func:`_has_progress_in`, the one definition shared with
+        :func:`resumable_checkpoints` (scan points, an optimizer trajectory,
+        named item sets such as frequency displacements, or nested legs).
         """
-        try:
-            entries = list((self.dir / "legs").iterdir())
-        except OSError:
-            return False
-        return any(entry.is_dir() and _has_progress_in(entry) for entry in entries)
+        return _has_progress_in(self.dir)
 
     # ── Multi-stage runs ────────────────────────────────────────────────────
 
@@ -707,17 +687,6 @@ class Checkpoint:
         """
         return set(self.completed_items(name).keys())
 
-    def _has_item_set_progress(self) -> bool:
-        """True when any named item set (see above) has a completed item."""
-        try:
-            names = list((self.dir / "items").iterdir())
-        except OSError:
-            return False
-        for name_dir in names:
-            if name_dir.is_dir() and self.completed_items(name_dir.name):
-                return True
-        return False
-
 
 # ---------------------------------------------------------------------------
 # Discovery + retention
@@ -776,14 +745,35 @@ def _points_in(path: Path) -> int:
 
 
 def _has_progress_in(path: Path) -> bool:
-    """True when *path* holds finished work, not merely a directory."""
+    """True when the checkpoint at *path* holds finished work, not merely a dir.
+
+    Finished work is any of: a complete scan point (``points.jsonl``), a
+    non-empty optimizer trajectory (``opt.traj``), a completed item in any
+    named item set under ``items/`` (e.g. a Frequency run's
+    ``freq_displacements-<digest>`` displacements), or — recursively — a
+    nested leg checkpoint under ``legs/`` with progress. A multi-stage run
+    like Reorganization Energy writes nothing directly into its own
+    checkpoint; all its real optimizer state lives in its legs.
+    """
     if _points_in(path):
         return True
     try:
         traj = path / "opt.traj"
-        return traj.is_file() and traj.stat().st_size > 0
+        if traj.is_file() and traj.stat().st_size > 0:
+            return True
+    except OSError:
+        pass
+    try:
+        item_sets = list((path / "items").iterdir())
+    except OSError:
+        item_sets = []
+    if any(d.is_dir() and completed_items_at(d) for d in item_sets):
+        return True
+    try:
+        legs = list((path / "legs").iterdir())
     except OSError:
         return False
+    return any(leg.is_dir() and _has_progress_in(leg) for leg in legs)
 
 
 def resumable_checkpoints(root: Optional[Path] = None) -> list[dict]:
