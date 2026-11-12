@@ -31,8 +31,10 @@ TEXT_LABEL = "#444"
 TEXT_SECONDARY = "#555"
 TEXT_MUTED = "#666"
 TEXT_MUTED_LIGHT = "#777"
-TEXT_FAINT = "#888"
-TEXT_SUBTLE = "#94a3b8"
+# Faint/subtle text clears WCAG AA 4.5:1 on BG_PANEL (audit UI-7; was
+# #888 at 3.4:1 and #94a3b8 at 2.5:1).
+TEXT_FAINT = "#707070"
+TEXT_SUBTLE = "#64748b"
 TEXT_BODY = "#334155"
 TEXT_STRONG = "#1e293b"
 TEXT_SLATE = "#64748b"
@@ -444,8 +446,9 @@ def _dark_palette() -> ThemePalette:
         text_secondary="#cbd5e1",
         text_muted="#94a3b8",
         text_muted_light="#94a3b8",
-        text_faint="#64748b",
-        text_subtle="#64748b",
+        # >= 4.5:1 on bg_panel #1e293b (audit UI-7; #64748b was 3.1:1).
+        text_faint="#8794aa",
+        text_subtle="#8794aa",
         text_body="#e2e8f0",
         text_strong="#f1f5f9",
         text_slate="#94a3b8",

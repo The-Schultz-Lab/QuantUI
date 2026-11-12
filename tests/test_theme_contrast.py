@@ -340,6 +340,48 @@ class TestRetiredValues:
         ]
         assert offenders == [], f"retired border greys still used in: {offenders}"
 
+    # Light-theme text colours that fail contrast on the default Dark palette
+    # (audit UI-7): #166534/#92400e ~2.1:1, #0369a1 2.5:1, #b22/#b91c1c/
+    # #dc2626 ~2.3:1, #6b7280 3.0:1 on Dark bg_panel. The audited chrome
+    # modules must use theme tokens instead.
+    UI7_FILES = (
+        "app_formatters.py",
+        "app_analysis.py",
+        "app_exports.py",
+        "app_xyz_input.py",
+        "app_builders.py",
+        "help_content.py",
+    )
+
+    def test_light_only_text_colours_are_gone_from_audited_chrome(self):
+        import pathlib
+        import re
+
+        pkg = pathlib.Path(theme.__file__).parent
+        retired = re.compile(
+            r"(?:color|background)\s*:\s*"
+            r"#(166534|92400e|0369a1|b22|b91c1c|dc2626|6b7280|f8f9fa)"
+            r"(?![0-9a-fA-F])",
+            re.IGNORECASE,
+        )
+        offenders = [
+            f"{name}: {m.group(0)}"
+            for name in self.UI7_FILES
+            for m in retired.finditer((pkg / name).read_text(encoding="utf-8"))
+        ]
+        assert offenders == [], f"light-only colours still used: {offenders}"
+
+
+class TestFaintTextMeetsAA:
+    """text_faint / text_subtle are text, so WCAG AA 4.5:1 (audit UI-7)."""
+
+    @pytest.mark.parametrize("palette_id", ["Light", "Dark"])
+    @pytest.mark.parametrize("token", ["text_faint", "text_subtle"])
+    def test_faint_tokens_clear_4_5_on_panel(self, palette_id, token):
+        p = theme.get_palette(palette_id)
+        ratio = _contrast(_hex_rgb(getattr(p, token)), _hex_rgb(p.bg_panel))
+        assert ratio >= 4.5, f"{palette_id}.{token} {ratio:.2f}:1"
+
 
 class TestNoRawHexReintroducedInMigratedChrome:
     """M-THEME Execution Sequence step 1: migrated chrome must keep using tokens."""

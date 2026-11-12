@@ -651,7 +651,7 @@ def build_history_section(
         layout=layout_fn(width="230px"),
     )
     app._reset_confirm_html = widgets.HTML(
-        '<span style="color:#dc2626;font-size:13px">'
+        f'<span style="color:{_theme.css.ACCENT_ERROR};font-size:13px">'
         "<b>Warning:</b> This will permanently delete all performance records. "
         "Time estimates will reset to &ldquo;no data&rdquo;.</span>"
     )

@@ -270,7 +270,7 @@ def _result_extra_rows(get: Any) -> str:
     if bool(get("density_fit", False)):
         rows += (
             f'<tr><td style="padding:3px 18px 3px 0;color:{_theme.css.TEXT_LABEL}">Density fitting</td>'
-            '<td><span style="color:#0369a1">⚡ RI</span> '
+            f'<td><span style="color:{_theme.css.ACCENT_INFO}">⚡ RI</span> '
             f'<span style="color:{_theme.css.TEXT_MUTED_LIGHT};font-size:12px">'
             "(approximate 2-electron integrals)</span></td></tr>"
         )
@@ -1261,7 +1261,8 @@ def reorg_comparison_html(entries: list[tuple[str, dict]]) -> str:
             rows.append(
                 f'<tr><td style="{td}">{_esc(label)}</td>'
                 f'<td style="{td}" colspan="{len(kinds) + 2}">'
-                '<span style="color:#92400e">λ not saved — re-run to compare'
+                f'<span style="color:{_theme.css.ACCENT_WARNING}">'
+                "λ not saved — re-run to compare"
                 "</span></td></tr>"
             )
             continue
@@ -1363,7 +1364,7 @@ def reorg_channels_html(channels: list[dict]) -> str:
         )
         blocks.append(
             f'<div style="margin-top:8px">'
-            f'<b style="font-size:13px;color:#166534">{_label(ch.get("kind", ""))}</b>'
+            f'<b style="font-size:13px;color:{_theme.css.ACCENT_SUCCESS}">{_label(ch.get("kind", ""))}</b>'
             f'<table style="margin-top:2px;font-size:13px;border-collapse:collapse">'
             f"{body}</table></div>"
         )

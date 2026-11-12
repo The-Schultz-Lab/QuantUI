@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from . import theme as _theme
 from .downloads import offer_download, saved_with_download_html
 from .results_storage import _safe_name
 
@@ -403,7 +404,9 @@ def on_orb_png_captured(app: Any, change: dict) -> None:
         return
 
     def _fail(msg: str) -> None:
-        app._iso_export_status.value = f'<span style="color:#b22">{msg}</span>'
+        app._iso_export_status.value = (
+            f'<span style="color:{_theme.css.ACCENT_ERROR}">{msg}</span>'
+        )
         # Clear even on failure, or a retry of the identical capture is silent.
         _clear_inbox(app)
 
@@ -506,7 +509,7 @@ def on_reorg_png_captured(app: Any, change: dict) -> None:
 
     def _fail(msg: str) -> None:
         if status is not None:
-            status.value = f'<span style="color:#b22">{msg}</span>'
+            status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">{msg}</span>'
         _clear_inbox(app)
 
     def _clear_inbox(a: Any) -> None:
@@ -582,7 +585,7 @@ def on_vib_png_captured(app: Any, change: dict) -> None:
 
     def _fail(msg: str) -> None:
         if status is not None:
-            status.value = f'<span style="color:#b22">{msg}</span>'
+            status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">{msg}</span>'
         _clear_inbox(app)
 
     def _clear_inbox(a: Any) -> None:
@@ -691,7 +694,7 @@ def _on_mol_png_captured(
 
     def _fail(msg: str) -> None:
         if status is not None:
-            status.value = f'<span style="color:#b22">{msg}</span>'
+            status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">{msg}</span>'
         _clear_inbox(app)
 
     def _clear_inbox(a: Any) -> None:
@@ -826,7 +829,7 @@ def on_traj_png_captured(
 
     def _fail(msg: str) -> None:
         if status is not None:
-            status.value = f'<span style="color:#b22">{msg}</span>'
+            status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">{msg}</span>'
         _clear_inbox()
 
     def _clear_inbox() -> None:
@@ -897,20 +900,14 @@ def on_iso_export_cube(app: Any, btn: Any) -> None:
     label = getattr(app, "_last_cube_orbital", None) or "orbital"
     result_dir = getattr(app, "_last_result_dir", None)
     if src is None or not isinstance(src, Path) or not src.exists():
-        app._iso_export_status.value = (
-            '<span style="color:#b22">Generate an isosurface first.</span>'
-        )
+        app._iso_export_status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">Generate an isosurface first.</span>'
         return
     if result_dir is None or not isinstance(result_dir, Path):
-        app._iso_export_status.value = (
-            '<span style="color:#b22">No result folder available.</span>'
-        )
+        app._iso_export_status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">No result folder available.</span>'
         return
     dest = export_cube(src, result_dir, orbital_label=label)
     if dest is None:
-        app._iso_export_status.value = (
-            '<span style="color:#b22">Cube export failed (see log).</span>'
-        )
+        app._iso_export_status.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">Cube export failed (see log).</span>'
         return
     saved = [dest.name]
     # An ESP map is two cubes: the density surface and the potential.

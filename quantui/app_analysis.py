@@ -13,7 +13,7 @@ from . import theme as _theme
 from .plotly_embed import figure_html as _plotly_figure_html
 
 _PANEL_UNAVAILABLE_STYLE = (
-    "padding:12px 16px;color:#6b7280;font-size:13px;font-style:italic"
+    f"padding:12px 16px;color:{_theme.css.TEXT_MUTED};font-size:13px;font-style:italic"
 )
 
 _MULLIKEN_DIPOLE_TOOLTIP = "Green arrow along μ through the molecular centre of mass"

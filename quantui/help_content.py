@@ -1338,8 +1338,9 @@ VALID_TOPICS = frozenset(HELP_TOPICS.keys())
 # ---------------------------------------------------------------------------
 
 _PANEL_CSS = (
-    "border: 1px solid #ddd; border-radius: 6px; padding: 8px 12px; "
-    "margin: 4px 0 8px 0; background: #f8f9fa; max-width: 620px;"
+    f"border: 1px solid {_theme.css.BORDER}; border-radius: 6px; padding: 8px 12px; "
+    f"margin: 4px 0 8px 0; background: {_theme.css.BG_PANEL}; "
+    f"color: {_theme.css.TEXT_BODY}; max-width: 620px;"
 )
 
 

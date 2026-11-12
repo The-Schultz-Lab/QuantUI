@@ -316,9 +316,7 @@ def on_structure_upload(app: Any, change: Any = None) -> None:
     try:
         app.upload_msg.value = load_structure_bytes(app, name, content)
     except ValueError as exc:
-        app.upload_msg.value = (
-            f'<span style="color:#b91c1c">⚠ {html.escape(str(exc))}</span>'
-        )
+        app.upload_msg.value = f'<span style="color:{_theme.css.ACCENT_ERROR}">⚠ {html.escape(str(exc))}</span>'
     finally:
         # Clear so choosing the same file again fires the observer again.
         try:
