@@ -593,3 +593,52 @@ class TestPollingCost:
         )
         second = slurm_backend_for_app(app)
         assert second is not first and second.registry is app._job_registry
+
+
+# ---------------------------------------------------------------------------
+# HPC-22: job folders QuantUI creates are owner-only
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
+class TestJobDirMode:
+    @staticmethod
+    def _mode(path):
+        return path.stat().st_mode & 0o777
+
+    def test_registry_roots_and_job_dirs(self, tmp_path):
+        import os
+
+        old = os.umask(0o022)
+        try:
+            reg = JobRegistry(
+                jobs_root=tmp_path / "j" / "jobs", staging_root=tmp_path / "s" / "st"
+            )
+            job = reg.new_job_dir("water_sp")
+            legacy = reg.staging_dir_for("abc123")
+        finally:
+            os.umask(old)
+        for path in (reg.jobs_root, reg.staging_root, job, legacy):
+            assert self._mode(path) == 0o700, path
+
+    def test_existing_root_keeps_its_mode(self, tmp_path):
+        root = tmp_path / "shared"
+        root.mkdir()
+        root.chmod(0o755)
+        JobRegistry(jobs_root=tmp_path / "jobs", staging_root=root)
+        assert self._mode(root) == 0o755
+
+    def test_launcher_job_dir_and_record(self, launcher, roots, water):
+        import os
+
+        args = _launcher_args(launcher, [str(water), "--calc", "single_point"])
+        req, _ = launcher.build_request(water, args, {})
+        res = launcher.resolve_resources(req, args)
+        old = os.umask(0o022)
+        try:
+            script = launcher.prepare_job(req, res, None, None, launcher.TEST_IMAGE)
+        finally:
+            os.umask(old)
+        assert self._mode(script.parent) == 0o700
+        assert self._mode(script.parent.parent) == 0o700  # the staging root
+        assert self._mode(launcher.jobs_root()) == 0o700

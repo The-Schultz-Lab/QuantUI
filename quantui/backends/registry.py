@@ -177,6 +177,10 @@ class JobRecord:
         return self.staging_path / "progress.json"
 
 
+# Mode for the job/staging roots and job folders QuantUI creates.
+JOB_DIR_MODE = 0o700
+
+
 class JobRegistry:
     """JSON-backed registry of submitted backend jobs."""
 
@@ -187,15 +191,18 @@ class JobRegistry:
     ) -> None:
         self.jobs_root = (jobs_root or cfg.default_jobs_root()).expanduser()
         self.staging_root = (staging_root or cfg.default_staging_root()).expanduser()
-        self.jobs_root.mkdir(parents=True, exist_ok=True)
-        self.staging_root.mkdir(parents=True, exist_ok=True)
+        # Owner-only (0o700) when QuantUI creates them: on shared scratch
+        # with umask 022 other users could otherwise read graded work. An
+        # existing folder keeps its mode (a course may share one on purpose).
+        self.jobs_root.mkdir(mode=JOB_DIR_MODE, parents=True, exist_ok=True)
+        self.staging_root.mkdir(mode=JOB_DIR_MODE, parents=True, exist_ok=True)
 
     def _record_path(self, request_id: str) -> Path:
         return safe_join(self.jobs_root, f"{request_id}.json")
 
     def staging_dir_for(self, request_id: str) -> Path:
         path = safe_join(self.staging_root, request_id)
-        path.mkdir(parents=True, exist_ok=True)
+        path.mkdir(mode=JOB_DIR_MODE, parents=True, exist_ok=True)
         return path
 
     def new_job_dir(self, name: str) -> Path:
@@ -208,7 +215,7 @@ class JobRegistry:
             candidate = name if n == 1 else f"{name}_{n}"
             path = safe_join(self.staging_root, candidate)
             try:
-                path.mkdir(parents=True, exist_ok=False)
+                path.mkdir(mode=JOB_DIR_MODE, parents=True, exist_ok=False)
             except FileExistsError:
                 n += 1
                 continue

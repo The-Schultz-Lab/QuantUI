@@ -67,6 +67,8 @@ FAILED_STATES = (
     "DEADLINE",
 )
 BACKEND_ID = "cluster_slurm"
+# Port of registry.JOB_DIR_MODE: folders QuantUI creates are owner-only.
+JOB_DIR_MODE = 0o700
 
 HELP = """\
 quantui-batch: run QuantUI calculations as Slurm batch jobs.
@@ -729,11 +731,13 @@ def default_job_name(request):
 
 
 def new_job_dir(root, name):
+    # The root first: parents=True would create it with the default mode.
+    root.mkdir(mode=JOB_DIR_MODE, parents=True, exist_ok=True)
     n = 1
     while True:
         candidate = root / (name if n == 1 else f"{name}_{n}")
         try:
-            candidate.mkdir(parents=True, exist_ok=False)
+            candidate.mkdir(mode=JOB_DIR_MODE, parents=True, exist_ok=False)
         except FileExistsError:
             n += 1
             continue
@@ -848,7 +852,7 @@ def prepare_job(request, resources, job_name, email, image_path):
         "unknown_polls": 0,
     }
     path = record_path(request["request_id"])
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=JOB_DIR_MODE, parents=True, exist_ok=True)
     with open(str(path), "w") as fh:
         json.dump(record, fh, indent=2)
     return script
@@ -1954,7 +1958,7 @@ def cmd_check(argv):
         )
     root = staging_root()
     try:
-        root.mkdir(parents=True, exist_ok=True)
+        root.mkdir(mode=JOB_DIR_MODE, parents=True, exist_ok=True)
         writable = os.access(str(root), os.W_OK)
     except OSError:
         writable = False
@@ -1971,7 +1975,7 @@ def cmd_check(argv):
             ),
         )
     try:
-        jobs_root().mkdir(parents=True, exist_ok=True)
+        jobs_root().mkdir(mode=JOB_DIR_MODE, parents=True, exist_ok=True)
         report(os.access(str(jobs_root()), os.W_OK), f"job records: {jobs_root()}")
     except OSError:
         report(False, f"job records: {jobs_root()}", "the folder must be writable")
