@@ -274,18 +274,24 @@ SOLVENT_OPTICAL_EPS: Dict[str, float] = {
 
 # TMS isotropic shielding reference constants for NMR chemical shift computation.
 # Key: "method/basis" → {element: σ_TMS (ppm)}.  δ = σ_TMS − σ_molecule.
-# Source: Cheeseman et al., J. Chem. Phys. 104 (1996) 5497; CCCBDB.
+# Computed with QuantUI itself (run_nmr_calc, PySCF GIAO) on TMS optimized at
+# the same level (optimize_geometry, fmax 0.01 eV/Å; Td), so TMS comes out at
+# δ = 0 and the table is consistent with the shieldings it is subtracted from.
+# The previous literature-style values did not match this GIAO code: TMS gave
+# δ(13C) = −7.7 ppm at B3LYP/6-31G* and −52 ppm at RHF/STO-3G (audit SCF-1).
+# Recompute every row if the NMR code, PySCF or pyscf-properties changes the
+# shieldings (tests/test_nmr_tms_reference.py checks the RHF/STO-3G row).
 NMR_REFERENCE_SHIELDINGS: Dict[str, Dict[str, float]] = {
-    "B3LYP/6-31G*": {"H": 31.72, "C": 183.71},
-    "B3LYP/6-311G**": {"H": 31.60, "C": 188.94},
-    "B3LYP/cc-pVDZ": {"H": 31.54, "C": 186.12},
-    "B3LYP/def2-SVP": {"H": 31.65, "C": 184.20},
-    "RHF/6-31G*": {"H": 32.00, "C": 196.00},
-    "RHF/STO-3G": {"H": 30.50, "C": 195.00},
-    "PBE0/6-31G*": {"H": 31.60, "C": 184.50},
-    "PBE/6-31G*": {"H": 31.50, "C": 185.00},
+    "B3LYP/6-31G*": {"H": 32.19, "C": 190.22},
+    "B3LYP/6-311G**": {"H": 32.01, "C": 184.49},
+    "B3LYP/cc-pVDZ": {"H": 31.31, "C": 192.19},
+    "B3LYP/def2-SVP": {"H": 31.37, "C": 189.07},
+    "RHF/6-31G*": {"H": 32.93, "C": 202.04},
+    "RHF/STO-3G": {"H": 33.75, "C": 249.43},
+    "PBE0/6-31G*": {"H": 32.12, "C": 195.06},
+    "PBE/6-31G*": {"H": 31.75, "C": 189.09},
 }
-NMR_DEFAULT_REFERENCE: Dict[str, float] = {"H": 31.72, "C": 183.71}  # B3LYP/6-31G*
+NMR_DEFAULT_REFERENCE: Dict[str, float] = dict(NMR_REFERENCE_SHIELDINGS["B3LYP/6-31G*"])
 
 # Default calculation settings
 DEFAULT_METHOD = "RHF"
