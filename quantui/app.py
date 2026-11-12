@@ -8361,7 +8361,7 @@ class QuantUIApp:
             + "</div>"
         )
         self._log_source_lbl.value = (
-            f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE}">Source: {source_label}</span>'
+            f'<span style="font-size:12px;color:{_theme.css.TEXT_SLATE}">Source: {_html_mod.escape(source_label)}</span>'
             if source_label
             else ""
         )

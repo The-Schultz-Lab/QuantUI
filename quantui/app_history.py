@@ -605,7 +605,7 @@ def history_load_analysis(
                 else "(No pyscf.log found for this result.)"
             )
         with timer.stage("update_log_panel"):
-            app._update_log_panel(result_dir.name if log_path.exists() else "", text)
+            app._update_log_panel(text, result_dir.name if log_path.exists() else "")
             app._show_result_log(result_dir, text)
 
         with timer.stage("build_context"):
