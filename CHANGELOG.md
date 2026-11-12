@@ -44,6 +44,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- **MO symmetry labels no longer depend on the LAPACK build.** On a
+  geometry symmetric only to within the detection tolerance, a split
+  degenerate pair (e.g. an NH3 e level) could be labelled "a2" on one
+  platform and "e" on another, because PySCF's `symmetrize_space` rebuilt
+  each irrep from an arbitrary basis. Each near-degenerate cluster of
+  orbitals (within 5 mHa) is now rotated onto symmetry-pure combinations
+  before labelling, and C3v labels are refused (Cs labels kept) if they
+  would contain more a1, a2 or e levels than the AO basis has SALCs of that
+  irrep. The 90% symmetry-purity check on orbitals now actually applies.
 - **Results Viewer (pre-release audit, VA.1–VA.12)** — the History + Analysis
   viewer (desktop installer and browser build, neither of which has PySCF):
   - Frequency results show their saved thermochemistry instead of a red
