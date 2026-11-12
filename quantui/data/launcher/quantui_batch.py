@@ -655,9 +655,26 @@ def utc_now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def unique_request(request):
+    """Give *request* a fresh id when a job record already uses its id.
+
+    Port of SlurmBackend._create_job / registry.fresh_request_id: the same
+    request .json submitted twice must not overwrite the record of a job
+    that may still be running. The original id is kept in run_context.
+    """
+    jobs = jobs_root()
+    original = request["request_id"]
+    if (jobs / (original + ".json")).exists():
+        request["request_id"] = f"{original[:40]}-{uuid.uuid4().hex[:8]}"
+        request["run_context"] = dict(
+            request.get("run_context") or {}, source_request_id=original
+        )
+
+
 def prepare_job(request, resources, job_name, email, image_path):
     """Write the job folder and its record, as SlurmBackend.prepare() does."""
     site_directives()  # a bad site setting fails before the job folder exists
+    unique_request(request)
     root = staging_root()
     name = sanitize_job_name(job_name or "") or default_job_name(request)
     job_dir = new_job_dir(root, name)

@@ -31,7 +31,7 @@ from .cluster_security import (
     validate_mail_events,
     validate_resources,
 )
-from .registry import JobRecord, JobRegistry
+from .registry import JobRecord, JobRegistry, fresh_request_id
 from .slurm_errors import format_error_for_student
 from .slurm_utils import (
     SLURM_JOB_NAME_MAX_LEN,
@@ -227,6 +227,16 @@ class SlurmBackend:
         """Validate, register, and write the job dir (shared by dispatch/prepare)."""
         if not request.request_id:
             request.request_id = uuid.uuid4().hex[:12]
+        elif self.registry.exists(request.request_id):
+            # The same request file submitted twice, or files templated from
+            # one: give this job its own id rather than overwrite the
+            # record of a job that may still be running.
+            original = request.request_id
+            request.request_id = fresh_request_id(original)
+            request.run_context = {
+                **(request.run_context or {}),
+                "source_request_id": original,
+            }
 
         estimates = estimate_slurm_resources(request)
         cores = cores or estimates["cores"]

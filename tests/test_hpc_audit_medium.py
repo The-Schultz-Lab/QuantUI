@@ -317,3 +317,40 @@ class TestJobSlurmNoLongerKnows:
         record = registry.load("hpc001")
         assert (record.unknown_since, record.unknown_polls) == (None, 0)
         assert record.status == "running"
+
+
+# ---------------------------------------------------------------------------
+# HPC-4: reusing a request id must not overwrite a live job's record
+# ---------------------------------------------------------------------------
+
+
+class TestRequestIdReuse:
+    def test_registry_create_refuses_a_taken_id(self, registry):
+        registry.create(_request(), "cluster_slurm", status="running")
+        with pytest.raises(FileExistsError):
+            registry.create(_request(), "cluster_slurm")
+        assert registry.load("hpc001").status == "running"
+
+    def test_dispatching_the_same_request_twice_keeps_both_jobs(
+        self, registry, mock_slurm, monkeypatch
+    ):
+        from quantui.backends.slurm import SlurmBackend
+
+        monkeypatch.setenv("QUANTUI_SLURM_SUBMIT_COOLDOWN_S", "0")
+        backend = SlurmBackend(registry=registry, use_apptainer=False)
+        with patch(
+            "quantui.backends.slurm.check_submit_cooldown", lambda *_a, **_k: None
+        ):
+            first = backend.dispatch(_request())
+            second = backend.dispatch(_request())
+
+        assert first == "hpc001"
+        assert second != first and second.startswith("hpc001-")
+        a, b = registry.load(first), registry.load(second)
+        assert a.slurm_job_id and b.slurm_job_id and a.slurm_job_id != b.slurm_job_id
+        assert a.job_dir != b.job_dir
+        assert b.request["run_context"]["source_request_id"] == "hpc001"
+        assert (
+            json.loads((Path(b.job_dir) / "request.json").read_text())["request_id"]
+            == second
+        )

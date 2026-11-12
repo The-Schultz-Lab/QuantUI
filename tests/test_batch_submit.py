@@ -745,8 +745,11 @@ class TestLauncherMatchesQuantUI:
         )
         res = launcher.resolve_resources(req, _args(launcher, [str(water)]))
         ours = launcher.prepare_job(req, res, "jobA", email, launcher.TEST_IMAGE)
-        # Read our record now: QuantUI's prepare() below reuses the request id.
-        mine = json.loads((roots / "jobs" / (req["request_id"] + ".json")).read_text())
+        # Read our record now, then drop it: QuantUI's prepare() below gets
+        # the same request, and a taken id would be replaced by a fresh one.
+        our_record = roots / "jobs" / (req["request_id"] + ".json")
+        mine = json.loads(our_record.read_text())
+        our_record.unlink()
 
         backend = SlurmBackend(
             registry=JobRegistry(), apptainer_image=launcher.TEST_IMAGE
@@ -1805,3 +1808,25 @@ class TestStartupIngest:
         monkeypatch.setenv("QUANTUI_JOBS_DIR", str(jobs))
         assert ingest_finished_jobs_on_startup(object()) == []
         assert not jobs.exists()
+
+
+class TestLauncherRequestIdReuse:
+    """audit HPC-4: a reused request id must not overwrite a job's record."""
+
+    def test_same_request_twice_gets_two_records(self, launcher, roots, water):
+        argv = [str(water), "--calc", "single_point"]
+        req, _ = launcher.build_request(water, _args(launcher, argv), {})
+        res = launcher.resolve_resources(req, _args(launcher, argv))
+        first_id = req["request_id"]
+        launcher.prepare_job(dict(req), res, "jobA", None, launcher.TEST_IMAGE)
+        again = json.loads(json.dumps(req))
+        script = launcher.prepare_job(again, res, "jobA", None, launcher.TEST_IMAGE)
+
+        assert again["request_id"] != first_id
+        assert again["request_id"].startswith(first_id + "-")
+        assert again["run_context"]["source_request_id"] == first_id
+        records = sorted(p.name for p in (roots / "jobs").glob("*.json"))
+        assert records == sorted([first_id + ".json", again["request_id"] + ".json"])
+        first = json.loads((roots / "jobs" / (first_id + ".json")).read_text())
+        assert first["job_dir"] != str(script.parent)
+        assert _request_of(script.parent)["request_id"] == again["request_id"]

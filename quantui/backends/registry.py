@@ -44,6 +44,15 @@ _LOAD_RETRY_DELAY_S = 0.05
 _ATTEMPT_DIR_RE = re.compile(r"^attempt-(\d+)_job(.+)$")
 
 
+def fresh_request_id(original: str) -> str:
+    """A new request id for a request whose id is already taken.
+
+    Keeps a readable prefix of *original*. The quantui-batch launcher mints
+    ids the same way (``unique_request``); keep the two in step.
+    """
+    return f"{original[:40]}-{uuid.uuid4().hex[:8]}"
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -219,6 +228,12 @@ class JobRegistry:
         With *job_name* the record gets a job dir (job-dir layout); without
         it, a legacy ``staging_root/<request_id>/`` dir.
         """
+        if self.exists(request.request_id):
+            # Saving over it would orphan the job it tracks (still running,
+            # never ingested, not cancellable). Callers mint a fresh id first.
+            raise FileExistsError(
+                f"Request id {request.request_id!r} is already in the job registry."
+            )
         if job_name:
             staging = self.new_job_dir(job_name)
             job_dir: Optional[str] = str(staging)
@@ -240,6 +255,10 @@ class JobRegistry:
         )
         self.save(record)
         return record
+
+    def exists(self, request_id: str) -> bool:
+        """True when a record (readable or not) is stored under *request_id*."""
+        return self._record_path(request_id).exists()
 
     def save(self, record: JobRecord) -> None:
         """Write *record* atomically (temp file + ``os.replace``).
