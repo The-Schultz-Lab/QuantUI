@@ -126,6 +126,12 @@ def _set_run_output(app: Any, outputs: tuple) -> None:
 
 def on_run_clicked(app: Any, btn: Any) -> None:
     """Reset result panes and start the background run thread."""
+    # One run at a time. The button is disabled while a run is in flight,
+    # but a double-click (or a click queued before the disable reached the
+    # browser) still lands here; two runs would share the cancel flag, the
+    # live log and the checkpoint directory (audit APP-4).
+    if getattr(app, "_calc_running", False):
+        return
     # Pre-run guard: catch a basis with no parameters for an
     # element (e.g. 6-31G on Pt) or a charge/multiplicity inconsistent with the
     # electron count, and explain it here — on the main thread, before anything
@@ -220,7 +226,10 @@ def on_run_clicked(app: Any, btn: Any) -> None:
         submit_slurm_run(app)
         return
 
-    threading.Thread(target=app._do_run, daemon=True).start()
+    # Claim the run on this (main) thread, before the worker starts: the
+    # worker used to set the flag itself, leaving a window for a second run.
+    app._begin_run_lock()
+    threading.Thread(target=app._run_in_thread, daemon=True).start()
 
 
 _FREQ_PREOPT_DESC_DEFAULT = "Geometry optimization before calculation (QM, slower)"
@@ -1134,8 +1143,29 @@ def _update_freq_perturb_seed_ui(app: Any, path_str: str) -> None:
         box.layout.display = "none"
 
 
+def seed_with_run_charge(seed_mol: Any, base_mol: Any) -> Any:
+    """*seed_mol*'s geometry with *base_mol*'s charge and multiplicity.
+
+    A seed is a saved result's geometry, and its ``trajectory.json`` carries
+    the charge and multiplicity of *that* run. The run being set up decides
+    the electronic state: the classic "cation at the neutral's optimized
+    geometry" must not silently recompute the neutral (audit APP-3).
+    """
+    from quantui.molecule import Molecule
+
+    return Molecule(
+        list(seed_mol.atoms),
+        [list(map(float, c)) for c in seed_mol.coordinates],
+        charge=int(base_mol.charge),
+        multiplicity=int(base_mol.multiplicity),
+    )
+
+
 def resolve_seed_geometry(app: Any, base_mol: Any, *, log: Any | None = None) -> Any:
-    """Apply seed geometry (geo-opt final frame or freq mode perturbation)."""
+    """Apply seed geometry (geo-opt final frame or freq mode perturbation).
+
+    The returned molecule keeps *base_mol*'s charge and multiplicity.
+    """
     from quantui.backends.dispatch import load_seed_molecule, seed_path_from_app
     from quantui.freq_calc import (
         VIB_MODE_DISPLAY_AMPLITUDE_ANGSTROM,
@@ -1157,6 +1187,7 @@ def resolve_seed_geometry(app: Any, base_mol: Any, *, log: Any | None = None) ->
             mode_number,
             fraction=fraction,
         )
+        mol = seed_with_run_charge(mol, base_mol)
         if log is not None:
             freq_raw = meta.get("frequency_cm1")
             freq_val = float(freq_raw) if isinstance(freq_raw, (int, float)) else None
@@ -1170,7 +1201,7 @@ def resolve_seed_geometry(app: Any, base_mol: Any, *, log: Any | None = None) ->
             )
         return mol
 
-    mol = load_seed_molecule(seed_path)
+    mol = seed_with_run_charge(load_seed_molecule(seed_path), base_mol)
     if log is not None:
         log.write(
             f"\nSeed geometry loaded from: {Path(seed_path).name}\n"
