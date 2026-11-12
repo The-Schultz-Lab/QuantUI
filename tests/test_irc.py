@@ -69,6 +69,30 @@ class TestResult:
         r.forward.trajectory[-1] = r.reverse.trajectory[-1]
         assert r.verdict.startswith("Both directions ended at the same minimum")
 
+    def test_mirror_image_ends_are_two_minima(self):
+        """NH3 umbrella inversion: the two ends have identical interatomic
+        distances but are mirror images (labelled), so they are different
+        minima, not "the same minimum" (audit GEOM-2)."""
+        from quantui.irc import _same_structure
+
+        hs = [[0.94, 0.0], [-0.47, 0.814], [-0.47, -0.814]]
+        up = Molecule(
+            ["N", "H", "H", "H"],
+            [[0, 0, 0]] + [[x, y, -0.38] for x, y in hs],
+        )
+        down = Molecule(
+            ["N", "H", "H", "H"],
+            [[0, 0, 0]] + [[x, y, 0.38] for x, y in hs],
+        )
+        assert not _same_structure(up, down)
+        # A rigidly rotated + translated copy is still the same structure.
+        import numpy as np
+
+        c, s = np.cos(0.7), np.sin(0.7)
+        rot = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
+        moved = np.asarray(up.coordinates) @ rot.T + [1.0, 2.0, 3.0]
+        assert _same_structure(up, Molecule(up.atoms, moved.tolist()))
+
     def test_post_hf_is_refused(self):
         from quantui.irc import run_irc
 
