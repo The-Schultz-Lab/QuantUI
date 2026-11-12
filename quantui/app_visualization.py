@@ -1073,14 +1073,20 @@ def uv_excitation_table_html(
     strengths: List[float],
     energies_ev: List[float],
     x_range: Optional[tuple[float, float]] = None,
+    state_prefix: str = "S",
 ) -> str:
-    """Excited states by energy: state, E (eV), λ (nm), f."""
+    """Excited states by energy: state, E (eV), λ (nm), f.
+
+    *state_prefix* is ``"S"`` only for a singlet manifold (closed-shell
+    restricted reference); open-shell states are numbered without it (see
+    ``app_formatters.tddft_state_prefix``).
+    """
     rows = sorted(zip(energies_ev, wavelengths_nm, strengths))
     if not rows:
         return ""
     cell = "padding:2px 12px;text-align:right"
     body = "".join(
-        f"<tr><td style='{cell}'>S{i}</td><td style='{cell}'>{e:.3f}</td>"
+        f"<tr><td style='{cell}'>{state_prefix}{i}</td><td style='{cell}'>{e:.3f}</td>"
         f"<td style='{cell}'>{w:.1f}</td><td style='{cell}'>{f:.4f}</td></tr>"
         for i, (e, w, f) in enumerate(rows, start=1)
     )
@@ -1231,6 +1237,7 @@ def update_uv_vis_figure(app: Any, mode: str, fwhm: float) -> None:
             list(getattr(app, "_last_uv_energies_ev", []) or [])
             or [1239.84198 / w for w in wl],
             (x_min, x_max),
+            state_prefix=getattr(app, "_tddft_state_prefix", "S"),
         )
         app._set_html_output(
             app._tddft_fig,
@@ -1322,8 +1329,12 @@ def ecd_state_table_html(
     energies_ev: List[float],
     rot_velocity: List[float],
     rot_length: List[Optional[float]],
+    state_prefix: str = "S",
 ) -> str:
-    """Excited states by energy: state, E (eV), λ (nm), R_vel, R_len."""
+    """Excited states by energy: state, E (eV), λ (nm), R_vel, R_len.
+
+    *state_prefix* as in :func:`uv_excitation_table_html`.
+    """
     if not energies_ev:
         return ""
     cell = "padding:2px 12px;text-align:right"
@@ -1333,7 +1344,7 @@ def ecd_state_table_html(
     ):
         rl_txt = f"{rl:.3f}" if rl is not None else "—"
         body += (
-            f"<tr><td style='{cell}'>S{i}</td><td style='{cell}'>{e:.3f}</td>"
+            f"<tr><td style='{cell}'>{state_prefix}{i}</td><td style='{cell}'>{e:.3f}</td>"
             f"<td style='{cell}'>{1239.84193 / e:.1f}</td>"
             f"<td style='{cell}'>{rv:.3f}</td><td style='{cell}'>{rl_txt}</td></tr>"
         )
@@ -1400,6 +1411,7 @@ def update_ecd_figure(app: Any, mode: str, sigma_ev: float) -> None:
                 energies,
                 rot,
                 list(getattr(app, "_last_ecd_rot_length", []) or [None] * len(rot)),
+                state_prefix=getattr(app, "_tddft_state_prefix", "S"),
             ),
         )
     except Exception as exc:

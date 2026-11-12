@@ -499,3 +499,34 @@ class TestVizNits:
         assert app_analysis.pop_energies(app, ctx)
         shown = app._show_orbital_diagram.call_args.args[0]
         assert shown.method == "B3LYP"
+
+
+class TestTddftTableStateLabels:
+    """UV-Vis and ECD tables call states S1… only for a singlet manifold
+    (audit UI-13 follow-up; same rule as the TD-DFT result card)."""
+
+    def test_uv_table_prefix(self):
+        from quantui.app_visualization import uv_excitation_table_html
+
+        closed = uv_excitation_table_html([200.0], [0.1], [6.2])
+        open_ = uv_excitation_table_html([200.0], [0.1], [6.2], state_prefix="")
+        assert ">S1<" in closed
+        assert ">S1<" not in open_ and ">1<" in open_
+
+    def test_ecd_table_prefix(self):
+        from quantui.app_visualization import ecd_state_table_html
+
+        assert ">S1<" in ecd_state_table_html([6.2], [1.0], [None])
+        assert ">S1<" not in ecd_state_table_html([6.2], [1.0], [None], state_prefix="")
+
+    def test_history_prefix_from_saved_result(self, tmp_path):
+        import json
+        from types import SimpleNamespace
+
+        from quantui.app_analysis import _tddft_state_prefix
+
+        (tmp_path / "result.json").write_text(json.dumps({"scf_variant": "UKS"}))
+        ctx = SimpleNamespace(live_result=None, result_dir=tmp_path)
+        assert _tddft_state_prefix(ctx) == ""
+        (tmp_path / "result.json").write_text(json.dumps({"scf_variant": "RKS"}))
+        assert _tddft_state_prefix(ctx) == "S"
