@@ -779,6 +779,7 @@ _STRUCT_SOURCE_PREFIX = {
     "rdkit-inchi": "InChI",
     "library": "Library",
     "library-offline-fallback": "Library (offline)",
+    "library-no-online-match": "Library (closest match)",
 }
 
 _PYSCF_AVAILABLE = _is_pyscf_available()
@@ -4810,6 +4811,11 @@ class QuantUIApp:
                 msg = (
                     "⚠ No network detected — resolved offline from the bundled "
                     f"library (not PubChem). {msg}"
+                )
+            elif source == "library-no-online-match":
+                msg = (
+                    "⚠ No exact match found online — loaded the closest "
+                    f"bundled-library match. Check it is what you meant. {msg}"
                 )
             # A fetched name can resolve to a disconnected ionic salt
             # (cisplatin → 2 NH₃ + 2 HCl + Pt²⁺) rather than the coordinated

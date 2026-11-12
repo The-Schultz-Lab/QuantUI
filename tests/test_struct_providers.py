@@ -13,6 +13,7 @@ from quantui.pubchem import RDKIT_AVAILABLE, MoleculeNotFoundError, PubChemAPIEr
 from quantui.structure_providers import (
     ResolvedStructure,
     resolve_structure,
+    search_candidates,
     student_friendly_resolve,
 )
 
@@ -142,7 +143,7 @@ class TestProviderChain:
     @patch("quantui.structure_providers.fetch_structure")
     def test_name_resolves_via_pubchem(self, mock_fetch):
         mock_fetch.return_value = (_WATER_XYZ, dict(_WATER_META))
-        result = resolve_structure("dihydrogen monoxide")
+        result = resolve_structure("tetrodotoxin")  # not in the bundled library
         assert result.source == "pubchem"
         mock_fetch.assert_called_once()
 
@@ -161,10 +162,10 @@ class TestProviderChain:
     def test_network_down_uses_offline_fuzzy_fallback(self, mock_fetch, mock_cactus):
         mock_fetch.side_effect = PubChemAPIError("network down")
         mock_cactus.side_effect = PubChemAPIError("network down")
-        # "water" isn't an exact key but appears in the H2O entry description.
-        result = resolve_structure("water")
+        # "glycol" is a whole word of exactly one library name (ethylene glycol).
+        result = resolve_structure("glycol")
         assert result.source == "library-offline-fallback"
-        assert result.formula == "H2O"
+        assert result.identifiers["library_key"] == "ethylene-glycol"
 
     @patch("quantui.structure_providers.cactus.fetch_from_cactus")
     @patch("quantui.structure_providers.fetch_structure")
@@ -177,7 +178,7 @@ class TestProviderChain:
     @patch("quantui.structure_providers.fetch_structure")
     def test_allow_network_false_skips_resolvers(self, mock_fetch):
         mock_fetch.side_effect = AssertionError("network disabled")
-        result = resolve_structure("water", allow_network=False)
+        result = resolve_structure("glycol", allow_network=False)
         assert result.source == "library-offline-fallback"
         mock_fetch.assert_not_called()
 
@@ -199,7 +200,7 @@ class TestFriendlyResolve:
     def test_offline_fallback_message(self, mock_fetch, mock_cactus):
         mock_fetch.side_effect = PubChemAPIError("down")
         mock_cactus.side_effect = PubChemAPIError("down")
-        xyz, msg = student_friendly_resolve("water")
+        xyz, msg = student_friendly_resolve("glycol")
         assert xyz is not None
         assert "offline fallback" in msg
 
@@ -211,3 +212,57 @@ class TestFriendlyResolve:
         xyz, msg = student_friendly_resolve("zzqxnotreal")
         assert xyz is None
         assert "Could not resolve" in msg
+
+
+# ============================================================================
+# audit DATA-7 — offline-first library lookup; whole-word fuzzy fallback
+# ============================================================================
+
+
+class TestOfflineFirstLibrary:
+    @pytest.mark.parametrize(
+        "query, key",
+        [
+            ("water", "H2O"),
+            ("Water", "H2O"),
+            ("dihydrogen monoxide", "H2O"),  # synonym
+            ("aspirin", "aspirin"),
+            ("acetylsalicylic acid", "aspirin"),  # synonym
+        ],
+    )
+    @patch("quantui.structure_providers.cactus.fetch_from_cactus")
+    @patch("quantui.structure_providers.fetch_structure")
+    def test_library_name_or_synonym_answers_before_network(
+        self, mock_fetch, mock_cactus, query, key
+    ):
+        mock_fetch.side_effect = AssertionError("library hit must not hit PubChem")
+        mock_cactus.side_effect = AssertionError("library hit must not hit CACTUS")
+        result = resolve_structure(query)
+        assert result.source == "library"
+        assert result.identifiers["library_key"] == key
+        assert result.is_offline
+
+    @patch("quantui.structure_providers.search_pubchem_candidates")
+    def test_library_hit_skips_pubchem_candidates(self, mock_cands):
+        mock_cands.side_effect = AssertionError("must not query PubChem")
+        assert search_candidates("water") == []
+        mock_cands.assert_not_called()
+
+    @pytest.mark.parametrize("query", ["ion", "ol", "ne", "acid"])
+    def test_fuzzy_needs_a_whole_word_naming_one_molecule(self, query):
+        # Raw substrings used to return methionine / H2 / CO2 / glycine.
+        with pytest.raises(MoleculeNotFoundError):
+            resolve_structure(query, allow_network=False)
+
+    @patch("quantui.structure_providers.cactus.fetch_from_cactus")
+    @patch("quantui.structure_providers.fetch_structure")
+    def test_online_miss_is_not_labelled_offline(self, mock_fetch, mock_cactus):
+        mock_fetch.side_effect = MoleculeNotFoundError("pubchem miss")
+        mock_cactus.side_effect = MoleculeNotFoundError("cactus miss")
+        result = resolve_structure("glycol")
+        assert result.source == "library-no-online-match"
+        assert result.is_offline
+        xyz, msg = student_friendly_resolve("glycol")
+        assert xyz is not None
+        assert "no exact match was found online" in msg
+        assert "unavailable" not in msg
