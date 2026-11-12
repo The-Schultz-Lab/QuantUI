@@ -209,6 +209,60 @@ class TestDispatch:
         assert actual is expected
         mocked_run.assert_called_once_with(request)
 
+    @pytest.mark.parametrize(
+        ("engine_cls", "requested", "expected"),
+        [
+            (PyfockEngine, "def2-svp", "def2-SVP"),
+            (PyfockEngine, "DEF2-TZVP", "def2-TZVP"),
+            (PyscfEngine, "sto-3g", "STO-3G"),
+            (PyscfEngine, "6-31G(d)", "6-31G*"),
+            (PyscfEngine, "6-31g(d,p)", "6-31G**"),
+            (PyscfEngine, "6-31+G(d)", "6-31+G*"),
+        ],
+    )
+    def test_run_calc_basis_match_ignores_case_and_pople_notation(
+        self, engine_cls, requested, expected
+    ):
+        """Audit SCF-12: basis names are matched like methods (case-insensitive)
+        and either Pople notation is accepted; the engine gets its own spelling."""
+        engine = engine_cls()
+        request = EngineRequest(
+            request_id="req-b",
+            calc_type="single_point",
+            method="PBE",
+            basis=requested,
+            charge=0,
+            multiplicity=1,
+            molecule={"atoms": ["He"], "coordinates": [[0.0, 0.0, 0.0]]},
+        )
+        with (
+            patch("quantui.engines.resolve_engine", return_value=engine),
+            patch.object(engine, "run", return_value="ok") as mocked_run,
+        ):
+            assert run_calc(request) == "ok"
+        assert mocked_run.call_args.args[0].basis == expected
+
+    def test_run_calc_rejects_unknown_basis(self):
+        from quantui.engines import UnsupportedCapabilityError
+
+        engine = PyfockEngine()
+        request = EngineRequest(
+            request_id="req-x",
+            calc_type="single_point",
+            method="PBE",
+            basis="6-31G(d)",
+            charge=0,
+            multiplicity=1,
+            molecule={"atoms": ["He"], "coordinates": [[0.0, 0.0, 0.0]]},
+        )
+        with (
+            patch("quantui.engines.resolve_engine", return_value=engine),
+            patch.object(engine, "run") as mocked_run,
+            pytest.raises(UnsupportedCapabilityError),
+        ):
+            run_calc(request)
+        mocked_run.assert_not_called()
+
     def test_request_portable_dict_excludes_runtime_objects(self):
         stream = object()
         checkpoint = object()

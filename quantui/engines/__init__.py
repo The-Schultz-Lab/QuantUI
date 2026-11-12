@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import dataclasses
 import sys
-from typing import Literal
+from typing import Iterable, Literal, Optional
 
 from .base import (
     CALC_TYPES,
@@ -89,6 +90,23 @@ def resolve_engine(preferred: EnginePreference | None = None) -> QuantumEngine:
     return by_id[choice]
 
 
+def _match_basis(requested: str, supported: Iterable[str]) -> Optional[str]:
+    """Return the engine's own spelling of ``requested``, or ``None``.
+
+    Basis names are case-insensitive (``sto-3g`` is ``STO-3G``) and the two
+    Pople notations name the same set (``6-31G(d)`` is ``6-31G*``), so the
+    match ignores case and accepts either notation. The engine's listed
+    spelling is returned so adapters that compare exactly still accept it.
+    """
+    from quantui.config import pople_notation_alias
+
+    wanted = str(requested).strip().upper()
+    for name in supported:
+        if wanted in (name.upper(), pople_notation_alias(name).upper()):
+            return name
+    return None
+
+
 def run_calc(
     request: EngineRequest,
     preferred: EnginePreference | None = None,
@@ -112,17 +130,18 @@ def run_calc(
                 "Choose one of the methods shown in the engine-gated menu."
             ),
         )
-    if (
-        caps.supported_basis_sets is not None
-        and request.basis not in caps.supported_basis_sets
-    ):
-        raise UnsupportedCapabilityError(
-            f"{caps.display_name} does not support basis {request.basis!r}.",
-            user_message=(
-                f"{request.basis} is not available with {caps.display_name}. "
-                "Choose one of the basis sets shown in the engine-gated menu."
-            ),
-        )
+    if caps.supported_basis_sets is not None:
+        basis = _match_basis(request.basis, caps.supported_basis_sets)
+        if basis is None:
+            raise UnsupportedCapabilityError(
+                f"{caps.display_name} does not support basis {request.basis!r}.",
+                user_message=(
+                    f"{request.basis} is not available with {caps.display_name}. "
+                    "Choose one of the basis sets shown in the engine-gated menu."
+                ),
+            )
+        if basis != request.basis:
+            request = dataclasses.replace(request, basis=basis)
     return engine.run(request)
 
 
