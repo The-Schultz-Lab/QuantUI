@@ -478,11 +478,13 @@ Source of truth: `_PANEL_META` / `_PANEL_REGISTRY` in `app.py`.
    (`_show_orbital_diagram`, `_show_vib_animation`, `_show_ir_spectrum`,
    `_show_pes_scan_result`) return `bool` and must not call `_activate_ana_panel()`.
 
-8. **Never use `include_plotlyjs="cdn"` in widget HTML.** CDN requests fail
-   silently in offline classroom deployments — the figure div stays blank with no
-   error anywhere. Use `include_plotlyjs="require"` (Voilà/RequireJS path) or
-   `include_plotlyjs=True` (inline bundle, works everywhere). This rule is enforced
-   by `tests/test_code_quality.py::test_no_cdn_plotlyjs`.
+8. **Render in-app Plotly figures with `quantui.plotly_embed.figure_html`.**
+   It loads the installed package's plotly.js once per page and embeds each
+   figure with `include_plotlyjs=False`. Never use `"cdn"` (fails silently
+   offline) or `"require"` (plotly ≥ 6 has no such mode: it inlines the full
+   ~4.8 MB bundle per figure). Standalone exported HTML files keep
+   `include_plotlyjs=True` so they work on their own. Enforced by
+   `tests/test_code_quality.py`.
 
 9. **All `.observe()` callbacks must be wrapped with `_safe_cb`.** Exceptions in
    raw `.observe()` handlers disappear into the kernel console — invisible in Voilà.
