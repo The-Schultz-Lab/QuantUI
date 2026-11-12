@@ -2623,6 +2623,7 @@ def _try_vib_cache_hit_sync(
             amplitude=0.4,
             renderer="py3dmol",
             fps=fps,
+            bgcolor=_theme.plotly_colors(app.theme_btn.value)["scene_bgcolor"],
         )
     except Exception:
         return False
@@ -2705,9 +2706,10 @@ def _render_vib_mode_py3dmol(
             _vib_err(app, "No frequency result cached for vibrational animation.")
         return
 
-    # Cache hit short-circuit. The cache key now includes ``fps``
-    # so a user who changes the framerate will rebuild rather than play back
-    # a mismatched-interval HTML blob.
+    # Cache hit short-circuit. The cache key includes ``fps`` and the scene
+    # background, so a framerate change or a Light/Dark toggle rebuilds rather
+    # than playing back HTML baked with the old interval/background.
+    bg = _theme.plotly_colors(app.theme_btn.value)["scene_bgcolor"]
     result_dir = getattr(app, "_last_result_dir", None)
     if result_dir is not None:
         try:
@@ -2720,6 +2722,7 @@ def _render_vib_mode_py3dmol(
                 amplitude=amplitude,
                 renderer="py3dmol",
                 fps=fps,
+                bgcolor=bg,
             )
         except Exception:
             cached_html = None
@@ -2789,7 +2792,6 @@ def _render_vib_mode_py3dmol(
         view = make_view(width=vib_width, height=420)
         view.addModelsAsFrames(xyz_string, "xyz")
         view.setStyle({"stick": {}, "sphere": {"scale": 0.3}})
-        bg = _theme.plotly_colors(app.theme_btn.value)["scene_bgcolor"]
         view.setBackgroundColor(bg)
         view.zoomTo()  # not oriented: the camera hook below may restore a view
         view.animate({"loop": "forward", "interval": interval_ms, "reps": 0})
@@ -2832,6 +2834,7 @@ def _render_vib_mode_py3dmol(
                 amplitude=amplitude,
                 renderer="py3dmol",
                 fps=fps,
+                bgcolor=bg,
             )
         except Exception as exc:
             try:
@@ -3280,6 +3283,24 @@ def rerender_3d_scenes_for_theme(app: Any) -> None:
     freq_result = getattr(app, "_last_vib_freq_result", None)
     mode_dd = getattr(app, "vib_mode_dd", None)
     if molecule is not None and freq_result is not None and mode_dd is not None:
+        # The persistent single viewer must be rebuilt as a single viewer:
+        # the mode/amplitude/fps observers keep calling its JS bridge while
+        # ``_vib_single_viewer_active`` is True, and the legacy one-mode HTML
+        # does not define it. On build failure the flag drops to False and
+        # the legacy renderer below takes over consistently.
+        if getattr(app, "_vib_single_viewer_active", False):
+            try:
+                if _render_vib_single_viewer(
+                    app,
+                    freq_result,
+                    molecule,
+                    int(mode_dd.value),
+                    [m for _, m in mode_dd.options],
+                ):
+                    return
+            except Exception as exc:  # noqa: BLE001 — same
+                logger.warning("vib single-viewer theme re-render failed: %s", exc)
+                app._vib_single_viewer_active = False
         try:
             render_vib_mode(
                 app,
