@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import html
-import html as _html
 import logging
 import threading
 import time
@@ -2590,7 +2589,7 @@ def do_calibration(app: Any, *, pyscf_available: bool) -> None:
         logger.exception("Calibration failed")
         app._cal_step_label.value = (
             '<span style="font-size:12px;color:#dc2626"><b>Calibration failed:</b> '
-            f"{_html.escape(f'{type(exc).__name__}: {exc}')}</span>"
+            f"{html.escape(f'{type(exc).__name__}: {exc}')}</span>"
             '<br><span style="font-size:12px;color:transparent">.</span>'
         )
     finally:
