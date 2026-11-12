@@ -377,6 +377,10 @@ def _run_tddft_calc_body(
     build_mole(mol)
 
     # ── SCF ──────────────────────────────────────────────────────────────────
+    # Open-shell + RHF would run ROHF, which has no TDHF (audit GEOM-10).
+    from .reorganization_energy import promote_open_shell_hf
+
+    method = promote_open_shell_hf(method, molecule.multiplicity, stream)
     method_upper = method.upper()
     using_hf = method_upper in ("RHF", "UHF")
 

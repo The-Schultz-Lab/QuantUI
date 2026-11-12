@@ -412,6 +412,27 @@ def _promote_method(method: str, multiplicity: int) -> str:
     return method
 
 
+def promote_open_shell_hf(
+    method: str, multiplicity: int, stream: Optional[IO[str]] = None
+) -> str:
+    """:func:`_promote_method`, with a note on *stream* when it promotes.
+
+    For callers that take a user-chosen method (TD-DFT, TS search, IRC):
+    ``scf.RHF`` on an open-shell molecule silently becomes ROHF, which has no
+    TDHF, analytic Hessian or IRC support in PySCF and fails cryptically.
+    """
+    promoted = _promote_method(method, multiplicity)
+    if promoted != method and stream is not None:
+        try:
+            stream.write(
+                f"\nNote: {method} cannot treat an open-shell molecule "
+                f"(multiplicity {multiplicity}); running {promoted} instead.\n"
+            )
+        except Exception:  # noqa: BLE001 — best-effort note
+            pass
+    return promoted
+
+
 def _ion_multiplicity(molecule: Molecule, ion_charge: int) -> int:
     """Low-spin multiplicity for an ion at ``ion_charge``.
 
