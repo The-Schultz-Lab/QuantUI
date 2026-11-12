@@ -323,3 +323,50 @@ class TestBatchInputChecks:
         snippet = text[start : start + 300]
         for calc in PREOPT_CALC_TYPES:
             assert calc in snippet
+
+
+# ---------------------------------------------------------------------------
+# HPC-13: SLURM text is escaped in the app's HTML
+# ---------------------------------------------------------------------------
+
+
+class TestSlurmHtmlEscaping:
+    def test_format_error_html_escapes_untranslated_text(self):
+        from quantui.backends.slurm_errors import format_error_html
+
+        out = format_error_html("sbatch: error: <img src=x onerror=alert(1)> & co")
+        assert "<img" not in out
+        assert "&lt;img src=x onerror=alert(1)&gt; &amp; co" in out
+
+    def test_format_error_html_escapes_translated_excerpt(self):
+        from quantui.backends.slurm_errors import format_error_html
+
+        out = format_error_html(
+            "sbatch: error: QOSMaxSubmitJobPerUserLimit <script>x</script>"
+        )
+        assert "<script>" not in out
+        assert "&lt;script&gt;" in out
+
+    def test_jobs_table_escapes_record_text(self, registry, monkeypatch):
+        from types import SimpleNamespace
+
+        from quantui import app_slurm
+
+        monkeypatch.setattr(app_slurm, "is_slurm_available", lambda: False)
+        request = _request("esc001")
+        request.basis = "<b>STO-3G</b>"
+        registry.create(request, "cluster_slurm")
+        record = registry.load("esc001")
+        record.status = "<i>running</i>"
+        registry.save(record)
+        table = SimpleNamespace(value="")
+        app = SimpleNamespace(
+            _job_registry=registry,
+            _slurm_jobs_summary_html=SimpleNamespace(value=""),
+            _slurm_jobs_table_html=table,
+            _slurm_jobs_select=SimpleNamespace(options=[], value="", disabled=False),
+        )
+        app_slurm.refresh_slurm_jobs_tab(app)
+        assert "<b>STO-3G" not in table.value and "<i>running" not in table.value
+        assert "&lt;b&gt;STO-3G" in table.value
+        assert "&lt;i&gt;running" in table.value

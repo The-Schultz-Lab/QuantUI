@@ -6,6 +6,7 @@ Salvaged from the legacy QuantUI archive (``quantui/slurm_errors.py``).
 
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -179,18 +180,22 @@ def format_error_html(stderr: str) -> str:
     if not stderr or not stderr.strip():
         return ""
 
+    # Every value is plain text (Slurm stderr, exception messages); escape
+    # it, or a "<" in a path or job name breaks the panel.
+    esc = html.escape
     translation = translate_slurm_error(stderr)
     if translation is not None:
         return (
             '<div style="border:1px solid #d32f2f; border-radius:6px; '
             'padding:10px 14px; margin:6px 0; background:#fff5f5; max-width:620px;">'
             f'<div style="font-weight:bold; color:#d32f2f; font-size:14px;">'
-            f"❌ {translation.category}: {translation.summary}</div>"
+            f"❌ {esc(translation.category)}: {esc(translation.summary)}</div>"
             f'<div style="margin-top:8px; font-size:13px;">'
-            f"<b>💡 What to do:</b> {translation.advice}</div>"
+            f"<b>💡 What to do:</b> {esc(translation.advice)}</div>"
             f'<details style="margin-top:8px; font-size:12px; color:#666;">'
             f"<summary>Technical details</summary>"
-            f"<pre style='white-space:pre-wrap; margin:4px 0;'>{translation.raw_excerpt}</pre>"
+            f"<pre style='white-space:pre-wrap; margin:4px 0;'>"
+            f"{esc(translation.raw_excerpt)}</pre>"
             f"</details></div>"
         )
 
@@ -201,5 +206,5 @@ def format_error_html(stderr: str) -> str:
         '<div style="font-weight:bold; color:#d32f2f; font-size:14px;">'
         "❌ Error encountered</div>"
         f'<pre style="white-space:pre-wrap; margin:6px 0; font-size:12px;">'
-        f"{truncated}</pre></div>"
+        f"{esc(truncated)}</pre></div>"
     )

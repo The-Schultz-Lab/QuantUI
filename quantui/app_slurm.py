@@ -213,7 +213,7 @@ def startup_slurm_check(app: Any) -> None:
     record = active[0]
     _show_slurm_banner(
         app,
-        f"SLURM job still active (status: {record.status}). "
+        f"SLURM job still active (status: {html.escape(record.status)}). "
         f"Click <b>View progress</b> to reconnect.",
         request_id=record.request_id,
     )
@@ -491,16 +491,16 @@ def refresh_slurm_jobs_tab(app: Any) -> None:
         exit_code = acct.exit_code if acct and acct.exit_code else "—"
         rows.append(
             "<tr>"
-            f"<td style='padding:4px 8px'>{record.status}</td>"
-            f"<td style='padding:4px 8px'>{slurm_id}</td>"
+            f"<td style='padding:4px 8px'>{html.escape(record.status)}</td>"
+            f"<td style='padding:4px 8px'>{html.escape(str(slurm_id))}</td>"
             f"<td style='padding:4px 8px'>{html.escape(slurm_state)}</td>"
             f"<td style='padding:4px 8px'>{html.escape(elapsed)}</td>"
             f"<td style='padding:4px 8px'>{html.escape(exit_code)}</td>"
-            f"<td style='padding:4px 8px'>{req.method}/{req.basis}</td>"
-            f"<td style='padding:4px 8px'>{record.calc_type}</td>"
-            f"<td style='padding:4px 8px'>{created}</td>"
+            f"<td style='padding:4px 8px'>{html.escape(f'{req.method}/{req.basis}')}</td>"
+            f"<td style='padding:4px 8px'>{html.escape(record.calc_type)}</td>"
+            f"<td style='padding:4px 8px'>{html.escape(created)}</td>"
             f"<td style='padding:4px 8px'>{_slurm_job_error_cell(record)}</td>"
-            f"<td style='padding:4px 8px'><code>{record.request_id}</code></td>"
+            f"<td style='padding:4px 8px'><code>{html.escape(record.request_id)}</code></td>"
             "</tr>"
         )
 
