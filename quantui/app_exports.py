@@ -109,11 +109,11 @@ def on_export(app: Any, btn: Any) -> None:
             f"{_safe_name(app._molecule.get_formula())}"
             f"_{_safe_name(app.method_dd.value)}_{_safe_name(app.basis_dd.value)}.py"
         )
-        # Next to the result files when there is a result folder (it used
-        # to go to the server's working directory, where a remote user
-        # could never find it).
-        result_dir = getattr(app, "_last_result_dir", None)
-        dest = (result_dir / fname) if isinstance(result_dir, Path) else Path(fname)
+        # Next to the result files of the run on this molecule; otherwise the
+        # working directory. Not ``_last_result_dir``, which follows the last
+        # result viewed (History included) and so could put this molecule's
+        # script into an unrelated result's folder (audit UI-5).
+        dest = _structure_export_dest(app, fname)
         # Follow the calc type, solvent and density fitting the
         # app would use, instead of always a gas-phase single point.
         from quantui.app_runflow import _CALC_TYPE_KEYS

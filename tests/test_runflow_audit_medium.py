@@ -424,3 +424,25 @@ def test_export_level_falls_back_to_the_setup_before_any_result(app):
 
     app._displayed_level = None
     assert displayed_level(app) == ("RHF", "STO-3G")
+
+
+def test_script_export_follows_the_run_not_a_history_view(
+    app, optimized_h2, tmp_path, monkeypatch
+):
+    # Same rule as the structure exports (audit UI-5): the run's own folder
+    # while its molecule is loaded, else the working directory — never the
+    # last-viewed History folder.
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    viewed = tmp_path / "history_view"
+    viewed.mkdir()
+    app._last_result_dir = viewed
+    app._on_export(None)
+    assert len(list(optimized_h2.glob("H2_*.py"))) == 1, app.export_status.value
+    assert not list(viewed.glob("*.py"))
+    app._set_molecule(_water(), "library")
+    app._on_export(None)
+    assert [f.name for f in cwd.glob("*.py")] == ["H2O_RHF_STO-3G.py"]
+    assert not list(viewed.glob("*.py"))
+    assert not list(optimized_h2.glob("H2O*.py"))

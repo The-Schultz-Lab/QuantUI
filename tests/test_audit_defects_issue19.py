@@ -461,12 +461,14 @@ class TestExportScriptFollowsTheCalculation:
         src = self._script(tmp_path, "geometry_opt")
         assert "QuantUI ran a Geometry Opt calculation" in src
 
-    def test_app_export_passes_the_settings(self, tmp_path):
+    def test_app_export_passes_the_settings(self, tmp_path, monkeypatch):
         from quantui.app import QuantUIApp
 
+        # No run on this molecule: the script goes to the working directory
+        # (audit UI-5), not to whatever _last_result_dir holds.
+        monkeypatch.chdir(tmp_path)
         app = QuantUIApp()
         app._set_molecule(WATER, "test")
-        app._last_result_dir = tmp_path
         app.calc_type_dd.value = "Geometry Opt"
         app.solvent_cb.value = True
         app.solvent_dd.value = "Water"
